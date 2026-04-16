@@ -3,6 +3,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { criarAutorizacao } from '@/services/autorizacoes.service'
+import toast from 'react-hot-toast'
 
 export default function SolicitarPage() {
   const hoje = new Date().toISOString().split('T')[0]
@@ -98,7 +99,7 @@ export default function SolicitarPage() {
       .eq('status', 'pendente')
 
     if (error) {
-      alert('Esse paciente já foi pego por outro atendente')
+      toast.error("Paciente já está sendo atendido por outro usuário")
       return
     }
 
@@ -211,7 +212,8 @@ export default function SolicitarPage() {
   }
 
   const hojeFormatado = new Date().toLocaleDateString('pt-BR')
-
+  const [filtro, setFiltro] = useState('')
+  
   // =========================
   // 🎨 UI
   // =========================
@@ -231,81 +233,145 @@ export default function SolicitarPage() {
   <div className="grid grid-cols-4 gap-5">
 
     {/* ========================= */}
-    {/* CARD PRINCIPAL */}
-    {/* ========================= */}
-    <div className="col-span-3 bg-white/80 backdrop-blur-sm border border-slate-200/70 rounded-2xl shadow-sm p-6">
+{/* CARD PRINCIPAL */}
+{/* ========================= */}
+<div className="col-span-3 bg-white/80 backdrop-blur-sm border border-slate-200/70 rounded-2xl shadow-sm p-6">
 
-      <h2 className="text-lg font-semibold mb-4 text-slate-600 flex items-center gap-2">
-        Agenda do Dia
-        <span className="text-sm font-semibold text-slate-600">
+  {/* HEADER COM FILTRO */}
+  <div className="flex items-center justify-between mb-4">
+
+    {/* ESQUERDA */}
+    <h2 className="text-lg font-semibold text-slate-600 flex items-center gap-2">
+      Agenda do Dia
+      <span className="text-sm font-normal text-slate-400">
         · {hojeFormatado}
-        </span>
-      </h2>
+      </span>
+    </h2>
 
-      {loadingLista ? (
-        <p className="text-sm text-slate-400">Carregando...</p>
-      ) : listaDia.length === 0 ? (
+    {/* DIREITA */}
+    <input
+      type="text"
+      placeholder="Buscar paciente..."
+      value={filtro}
+      onChange={(e) => setFiltro(e.target.value)}
+      className="w-56 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#3A8FB7]/40"
+    />
+
+  </div>
+
+  {loadingLista ? (
+    <p className="text-sm text-slate-400">Carregando...</p>
+  ) : (() => {
+    
+    const listaFiltrada = listaDia.filter((p) =>
+      (p.paciente_nome || '').toLowerCase().includes(filtro.toLowerCase())
+    )
+
+    if (listaDia.length === 0) {
+      return (
         <p className="text-sm text-slate-400">
           Nenhum paciente pendente 🎉
         </p>
-      ) : (
-        <div className="space-y-3">
+      )
+    }
 
-          {listaDia.map((p) => {
-            const ativo = podeSolicitar(p.ultima_autorizacao)
+    if (listaFiltrada.length === 0) {
+      return (
+        <p className="text-sm text-slate-400">
+          Nenhum resultado encontrado 🔍
+        </p>
+      )
+    }
+    
+    const listaOrdenada = [...listaFiltrada].sort((a, b) => {
+  // 1. horário da terapia
+  if (a.horario !== b.horario) {
+    return a.horario.localeCompare(b.horario)
+  }
 
-            return (
-              <div
-                key={p.id}
-                className="p-4 rounded-xl border border-slate-200 bg-white transition shadow-sm hover:shadow-md flex justify-between items-center"
-              >
+  // 2. última autorização
+  const ultimaA = a.ultima_autorizacao
+    ? new Date(a.ultima_autorizacao).getTime()
+    : 0
 
-                {/* INFO */}
-                <div className="space-y-1">
-                  <div className="text-sm font-semibold text-[#3A8FB7]">
-                    {p.horario}
-                  </div>
+  const ultimaB = b.ultima_autorizacao
+    ? new Date(b.ultima_autorizacao).getTime()
+    : 0
 
-                  <div className="font-semibold text-slate-800">
-                    {p.paciente_nome}
-                  </div>
+  if (ultimaA !== ultimaB) {
+    return ultimaA - ultimaB
+  }
 
-                  <div className="text-xs text-slate-400">
-                    Última: {p.ultima_autorizacao || '--'}
-                  </div>
+  // 3. nome do paciente
+  return (a.paciente_nome || '').localeCompare(b.paciente_nome || '')
+  })
+
+    return (
+      <div className="space-y-3">
+
+        {listaOrdenada.map((p) => {
+          const ativo = podeSolicitar(p.ultima_autorizacao)
+
+          return (
+            <div
+              key={p.id}
+              className="p-4 rounded-xl border border-slate-200 bg-white transition shadow-sm hover:shadow-md flex justify-between items-center"
+            >
+
+              {/* INFO */}
+              <div className="flex items-center gap-4">
+                <div className="text-sm font-semibold text-[#3A8FB7]">
+                  {p.horario}
                 </div>
 
-                {/* AÇÕES */}
-                <div className="flex gap-2">
-
-                  <button
-                    disabled={!ativo}
-                    onClick={() => handleSolicitarLista(p)}
-                    className={`text-xs px-3 py-1.5 rounded-lg transition ${
-                      ativo
-                        ? 'bg-[#3A8FB7] text-white hover:opacity-90'
-                        : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-                    }`}
-                  >
-                    Autorização
-                  </button>
-
-                  <button
-                    onClick={() => handleFalta(p.id)}
-                    className="text-xs px-3 py-1.5 rounded-lg bg-red-500 text-white hover:opacity-90 transition"
-                  >
-                    Falta
-                  </button>
-
+                <div className="font-semibold text-slate-800">
+                  {p.paciente_nome}
                 </div>
+
+                <div className="text-xs text-slate-400">
+                  Última Autorização: {p.ultima_autorizacao
+                ? new Date(p.ultima_autorizacao).toLocaleTimeString('pt-BR', {
+                    timeZone: 'America/Sao_Paulo',
+                    hour: '2-digit',
+                    minute: '2-digit'
+                  })
+                : '--'}
+                </div>
+              </div>
+
+              {/* AÇÕES */}
+              <div className="flex gap-2">
+
+                <button
+                  disabled={!ativo}
+                  onClick={() => handleSolicitarLista(p)}
+                  className={`text-xs px-3 py-1.5 rounded-lg transition ${
+                    ativo
+                      ? 'bg-[#3A8FB7] text-white hover:opacity-90'
+                      : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+                  }`}
+                >
+                  Autorização
+                </button>
+
+                <button
+                  onClick={() => handleFalta(p.id)}
+                  className="text-xs px-3 py-1.5 rounded-lg bg-red-500 text-white hover:opacity-90 transition"
+                >
+                  Falta
+                </button>
 
               </div>
-            )
-          })}
 
-        </div>
-      )}
-    </div>
+            </div>
+          )
+        })}
+
+      </div>
+    )
+  })()}
+
+</div>
 
     {/* ========================= */}
     {/* CARD LATERAL CENTRALIZADO */}
@@ -317,7 +383,7 @@ export default function SolicitarPage() {
         <div className="space-y-4">
 
           <h2 className="text-base font-semibold text-slate-600 text-center">
-            Autorização Retroativa
+            Solicitar Autorização Retroativa
           </h2>
 
           {/* PACIENTE */}
