@@ -1,22 +1,22 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
+import type { NextRequest } from 'next/server'
 
-export async function middleware(req: any) {
-  const res = NextResponse.next()
+export async function proxy(req: NextRequest) {
+  let res = NextResponse.next()
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
       cookies: {
-        get(name) {
-          return req.cookies.get(name)?.value
+        getAll() {
+          return req.cookies.getAll()
         },
-        set(name, value, options) {
-          res.cookies.set(name, value, options)
-        },
-        remove(name, options) {
-          res.cookies.set(name, '', options)
+        setAll(cookiesToSet) {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            res.cookies.set(name, value, options)
+          })
         },
       },
     }
@@ -28,9 +28,10 @@ export async function middleware(req: any) {
 
   const isAuthPage = req.nextUrl.pathname.startsWith('/login')
 
-  //if (!user && !isAuthPage) {
-  //  return NextResponse.redirect(new URL('/login', req.url))
-  //}
+  // 🔐 proteção de rota (opcional)
+  // if (!user && !isAuthPage) {
+  //   return NextResponse.redirect(new URL('/login', req.url))
+  // }
 
   if (user && isAuthPage) {
     return NextResponse.redirect(new URL('/autorizacoes', req.url))
