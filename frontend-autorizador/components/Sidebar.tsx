@@ -2,11 +2,12 @@
 
 import { FileText, PlusCircle, LogOut } from "lucide-react"
 import { usePathname, useRouter } from "next/navigation"
-import { supabase } from "@/lib/supabase/client"
+import { getSupabaseClient } from "@/lib/supabase/client"
 
 export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
+  const supabase = getSupabaseClient()
 
   function isActive(path: string) {
     return pathname === path
@@ -14,7 +15,7 @@ export default function Sidebar() {
 
   async function handleLogout() {
     await supabase.auth.signOut()
-    router.push("/login")
+    window.location.href = "/login" // 🔥 mais confiável que router.push
   }
 
   return (

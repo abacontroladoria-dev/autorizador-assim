@@ -1,16 +1,16 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { getSupabaseClient } from '@/lib/supabase/client'
 import { criarAutorizacao } from '@/services/autorizacoes.service'
 import toast from 'react-hot-toast'
 
 export default function SolicitarPage() {
   const hoje = new Date().toISOString().split('T')[0]
-
+  const [filaStatus, setFilaStatus] = useState<any[]>([])
   const [listaDia, setListaDia] = useState<any[]>([])
   const [loadingLista, setLoadingLista] = useState(true)
-
+  const supabase = getSupabaseClient()
   // =========================
   // 🔎 FORM RETROATIVO
   // =========================
@@ -37,27 +37,47 @@ export default function SolicitarPage() {
     return diffMin >= 30
   }
 
-  // =========================
-  // 📥 CARREGAR LISTA
-  // =========================
-  async function carregarLista() {
-    setLoadingLista(true)
+	// =========================
+	// 📥 CARREGAR LISTA
+	// =========================
+	
+		async function carregarLista() {
+		  setLoadingLista(true)
 
-    const { data, error } = await supabase
-      .from('autorizacoes')
-      .select('*')
-      .eq('data_atendimento', hoje)
-      .eq('status', 'pendente')
-      .order('horario_atendimento', { ascending: true })
+		  const { data, error } = await supabase
+			.from('agenda_terapias')
+			.select('*')
+			.eq('data_atendimento', hoje)
+			.order('horario', { ascending: true }) // ✅ corrigido
 
-    if (!error && data) setListaDia(data)
+			console.log('DADOS SEM FILTRO:', data)
+			
+		  if (error) {
+			console.error('Erro ao carregar agenda:', error)
+		  }
 
-    setLoadingLista(false)
-  }
+		  if (data) {
+			console.log('DADOS AGENDA:', data) // 🔥 DEBUG
+			setListaDia(data)
+		  }
 
-  useEffect(() => {
-    carregarLista()
-  }, [])
+		  setLoadingLista(false)
+		}
+
+	// =========================
+	//  CARREGAR FILA
+	// =========================
+		async function carregarFila() {
+		  const { data, error } = await supabase
+			.from('fila_autorizacoes')
+			.select('*')
+			.eq('data_atendimento', hoje)
+
+		  if (!error) {
+			setFilaStatus(data || [])
+		  }
+		}
+
 
   // =========================
   // 🔴 REALTIME
@@ -83,49 +103,116 @@ export default function SolicitarPage() {
 	  }
 	}, [])
 
+	// =========================
+	// CARREGAR LISTA e FILA
+	// =========================
+	
+	
+	useEffect(() => {
+	  carregarLista()
+	  carregarFila()
+	}, [])
+	// =========================
+	// Testar usuario
+	// =========================
+useEffect(() => {
+  async function verificarUsuario() {
+    const { data, error } = await supabase.auth.getUser()
+
+    console.log('USER:', data)
+    console.log('ERROR:', error)
+  }
+
+  verificarUsuario()
+}, [])
+
   // =========================
   // 🚀 SOLICITAR (COM TRAVA)
   // =========================
-  async function handleSolicitarLista(p: any) {
+async function handleSolicitarLista(p: any) {
+  try {
     if (!podeSolicitar(p.ultima_autorizacao)) {
-      alert('Aguarde 30 minutos desde a última autorização')
+      toast.error('Aguarde 30 minutos desde a última autorização')
+      return
+    }
+
+    const { data: existente, error: erroBusca } = await supabase
+      .from('fila_autorizacoes')
+      .select('id, status')
+      .eq('paciente_id', p.paciente_id)
+      .eq('data_atendimento', hoje)
+      .eq('horario', p.horario)
+      .in('status', ['pendente', 'processando'])
+      .maybeSingle()
+
+    if (erroBusca) {
+      toast.error('Erro ao verificar fila')
+      return
+    }
+
+    if (existente) {
+      toast.error('Paciente já está sendo atendido')
       return
     }
 
     const { error } = await supabase
-      .from('agenda_terapias')
-      .update({ status: 'executando' })
-      .eq('id', p.id)
-      .eq('status', 'pendente')
+      .from('fila_autorizacoes')
+      .insert([
+        {
+          paciente_id: p.paciente_id,
+          paciente_nome: p.paciente_nome,
+          data_atendimento: hoje,
+          horario: p.horario,
+          status: 'pendente'
+        }
+      ])
 
     if (error) {
-      toast.error("Paciente já está sendo atendido por outro usuário")
+      toast.error('Erro ao enviar para o robô')
       return
     }
 
-    await criarAutorizacao({
-      paciente_nome: p.paciente_nome,
-      matricula: p.matricula,
-      data: hoje,
-      horario: p.horario,
-      status: 'executando',
-    })
+    toast.success('Autorização iniciada 🚀')
+    await carregarFila()
 
-    setListaDia((prev) => prev.filter((item) => item.id !== p.id))
+  } catch (err) {
+    console.error(err)
+    toast.error('Erro inesperado')
   }
+}
 
-  // =========================
-  // ❌ FALTA
-  // =========================
-  async function handleFalta(id: string) {
-    await supabase
-      .from('agenda_terapias')
-      .update({ status: 'falta' })
-      .eq('id', id)
 
-    setListaDia((prev) => prev.filter((item) => item.id !== id))
-  }
+		// =========================
+		// ❌ FALTA
+		// =========================
+				
+		async function handleFalta(p: any) {
+		  try {
+			const { error } = await supabase
+			  .from('fila_autorizacoes')
+			  .insert({
+				paciente_id: p.paciente_id,
+				paciente_nome: p.paciente_nome,
+				data_atendimento: hoje,
+				horario: p.horario,
+				status: 'falta'
+			  })
 
+			if (error) {
+			  toast.error('Erro ao registrar falta')
+			  return
+			}
+
+			// remove da tela
+			setListaDia((prev) => prev.filter((item) => item.id !== p.id))
+
+			toast.success('Falta registrada com sucesso')
+
+		  } catch (err) {
+			console.error(err)
+			toast.error('Erro inesperado')
+		  }
+		}
   // =========================
   // 🔎 AUTOCOMPLETE
   // =========================
@@ -139,7 +226,7 @@ export default function SolicitarPage() {
       setLoading(true)
 
       const { data, error } = await supabase
-        .from('autorizacoes')
+        .from('agenda_terapias')
         .select('paciente_nome')
         .ilike('paciente_nome', `%${busca}%`)
         .limit(10)
@@ -191,25 +278,33 @@ export default function SolicitarPage() {
   // =========================
   // 📤 FORM RETROATIVO
   // =========================
-  async function handleSolicitar() {
-    if (!pacienteSelecionado || !data || !horario) {
-      alert('Preencha todos os campos')
-      return
+    async function handleSolicitar() {
+      if (!pacienteSelecionado || !data || !horario) {
+        toast.error('Preencha todos os campos')
+        return
+      }
+
+      const { error } = await supabase
+        .from('fila_autorizacoes')
+        .insert({
+          paciente_id: pacienteSelecionado.id || null,
+          paciente_nome: pacienteSelecionado.paciente_nome,
+          data_atendimento: data,
+          horario,
+          status: 'pendente'
+        })
+
+      if (error) {
+        toast.error("Erro ao solicitar")
+        return
+      }
+
+      toast.success('Autorização enviada 🚀')
+
+      setBusca('')
+      setPacienteSelecionado(null)
+      setHorario('')
     }
-
-    await criarAutorizacao({
-      paciente_nome: pacienteSelecionado.paciente_nome,
-      data,
-      horario,
-      status: 'executando',
-    })
-
-    alert('Autorização enviada 🚀')
-
-    setBusca('')
-    setPacienteSelecionado(null)
-    setHorario('')
-  }
 
   const hojeFormatado = new Date().toLocaleDateString('pt-BR')
   const [filtro, setFiltro] = useState('')
@@ -259,9 +354,9 @@ export default function SolicitarPage() {
 
   </div>
 
-  {loadingLista ? (
-    <p className="text-sm text-slate-400">Carregando...</p>
-  ) : (() => {
+    {loadingLista ? (
+      <p className="text-sm text-slate-400">Carregando...</p>
+    ) : (() => {
     
     const listaFiltrada = listaDia.filter((p) =>
       (p.paciente_nome || '').toLowerCase().includes(filtro.toLowerCase())
@@ -284,29 +379,29 @@ export default function SolicitarPage() {
     }
     
     const listaOrdenada = [...listaFiltrada].sort((a, b) => {
-  // 1. horário da terapia
-  if (a.horario !== b.horario) {
-    return a.horario.localeCompare(b.horario)
-  }
+      // 1. horário da terapia
+      if (a.horario !== b.horario) {
+      return a.horario.localeCompare(b.horario)
+      }
 
-  // 2. última autorização
-  const ultimaA = a.ultima_autorizacao
-    ? new Date(a.ultima_autorizacao).getTime()
-    : 0
+      // 2. última autorização
+      const ultimaA = a.ultima_autorizacao
+      ? new Date(a.ultima_autorizacao).getTime()
+      : 0
 
-  const ultimaB = b.ultima_autorizacao
-    ? new Date(b.ultima_autorizacao).getTime()
-    : 0
+      const ultimaB = b.ultima_autorizacao
+        ? new Date(b.ultima_autorizacao).getTime()
+        : 0
 
-  if (ultimaA !== ultimaB) {
-    return ultimaA - ultimaB
-  }
+      if (ultimaA !== ultimaB) {
+        return ultimaA - ultimaB
+      }
 
-  // 3. nome do paciente
-  return (a.paciente_nome || '').localeCompare(b.paciente_nome || '')
-  })
+      // 3. nome do paciente
+      return (a.paciente_nome || '').localeCompare(b.paciente_nome || '')
+    })
 
-    return (
+return (
       <div className="space-y-3">
 
         {listaOrdenada.map((p) => {
@@ -355,7 +450,7 @@ export default function SolicitarPage() {
                 </button>
 
                 <button
-                  onClick={() => handleFalta(p.id)}
+                  onClick={() => handleFalta(p)}
                   className="text-xs px-3 py-1.5 rounded-lg bg-red-500 text-white hover:opacity-90 transition"
                 >
                   Falta

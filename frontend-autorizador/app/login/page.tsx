@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react"
-import { supabase } from "@/lib/supabase/client";
+import { createClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
@@ -13,7 +13,8 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState("");
   const router = useRouter();
-
+  const supabase = createClient();
+  
   async function handleLogin(e: any) {
     e.preventDefault();
     setErro("");
@@ -29,8 +30,10 @@ export default function Login() {
       setLoading(false);
       return;
     }
+	  const { data } = await supabase.auth.getSession()
+	  console.log("SESSION:", data)
 
-    router.push("/autorizacoes");
+    router.replace("/fila_autorizacoes")
   }
 
 	useEffect(() => {
@@ -40,12 +43,12 @@ export default function Login() {
 		} = await supabase.auth.getUser()
 
 		if (user) {
-		  router.push("/autorizacoes")
+		  window.location.href = "/fila_autorizacoes"
 		}
 	  }
 
 	  checkUser()
-	}, [])
+	}, [router])
 
 
   return (

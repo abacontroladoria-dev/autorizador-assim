@@ -1,13 +1,15 @@
-import { supabase } from "@/lib/supabase/client"
+import { getSupabaseClient } from "@/lib/supabase/client"
 
 export async function criarAutorizacao(payload: any) {
+const supabase = getSupabaseClient()
+
   const { data, error } = await supabase
     .from('autorizacoes')
     .insert({
       paciente_nome: payload.paciente_nome,
       matricula: payload.matricula,
-	  data_horario: new Date().toISOString(),
-	  data_atendimento: payload.data,
+      data_horario: new Date().toISOString(),
+      data_atendimento: payload.data,
       horario: payload.horario,
       status: payload.status || 'executando',
 
@@ -27,7 +29,6 @@ export async function criarAutorizacao(payload: any) {
   if (error) {
     console.log('ERRO:', error)
 
-    // 💥 TRATAMENTO DE DUPLICIDADE (IMPORTANTE)
     if (error.message.includes('unique_agendamento')) {
       alert('Já existe autorização para esse paciente nesse horário')
     }
@@ -40,6 +41,8 @@ export async function criarAutorizacao(payload: any) {
 }
 
 export async function listarAutorizacoes() {
+const supabase = getSupabaseClient()
+
   const { data, error } = await supabase
     .from('autorizacoes')
     .select('*')

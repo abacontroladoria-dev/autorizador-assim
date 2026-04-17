@@ -38,7 +38,7 @@ export default function AutorizacoesPage() {
 
   async function executarRobo(id: string) {
     await supabase
-      .from('autorizacoes')
+      .from('fila_autorizacoes')
       .update({ status: 'pendente' })
       .eq('id', id)
 
