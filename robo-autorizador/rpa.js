@@ -28,33 +28,50 @@ async function humanType(page, selector, texto) {
       console.log("👤 Erro humano simulado + correção");
     }
   }
-  
-  await page.keyboard.press('Tab');
   console.log(`✅ Digitado humano: ${texto}`);
 }
 
-async function aguardarTelaLivre(page, maxTentativas = 900) {  // ~15min
-  console.log("⏳ RPA PAUSADO: Aguardando modais/QR/loader GIF ASSIM...");
+async function aguardarTelaLivre(page) {
+  console.log("⏳ AGUARDANDO INTERAÇÃO DO USUÁRIO (SEM TIMEOUT)");
+
   let tentativas = 0;
-  
-  while (tentativas < maxTentativas) {
-    const modalPrincipal = await page.locator('.jconfirm-box:visible, .jconfirm-type-green:visible, .jconfirm-box-container:visible, [role="dialog"]:visible, .modal:visible').count();
-    const loaderAssim = await page.locator('img[src="./images/Load_Assim_150.gif"]:visible, img[src*="Load_Assim"]:visible, img[src*="assim"]:visible, .loading:visible, .spinner:visible, .jconfirm-holder:visible, div[style*="animation"]:visible, div[class*="logo"]:visible, div[class*="assim"]:visible, .overlay:visible, [class*="loader"]:visible').count();
-    const modalSecundario = await page.locator('text=Confirme os dados abaixo, text=Identificação:visible').count();
-    const qrCode = await page.locator('button:has-text("QR Code"):visible, canvas[aria-label*="QR"]:visible, .qr-scanner:visible').count();
-    
-    console.log(`PAUSA ${tentativas}: Modal=${modalPrincipal} | Loader GIF=${loaderAssim} | Sec=${modalSecundario} | QR=${qrCode}`);
-    
-    if (modalPrincipal === 0 && loaderAssim === 0 && modalSecundario === 0 && qrCode === 0) {
-      console.log("✅ TELA 100% LIVRE - RPA LIBERADO");
+
+  while (true) {
+    const modal = await page.locator(`
+      .jconfirm-box:visible,
+      .modal:visible,
+      [role="dialog"]:visible
+    `).count();
+
+    const loader = await page.locator(`
+      img[src*="Load_Assim"]:visible,
+      .loading:visible,
+      .spinner:visible,
+      .overlay:visible,
+      [class*="loader"]:visible
+    `).count();
+
+    const qr = await page.locator(`
+      button:has-text("QR Code"):visible,
+      canvas[aria-label*="QR"]:visible
+    `).count();
+
+    console.log(`⏳ Esperando... Modal:${modal} | Loader:${loader} | QR:${qr}`);
+
+    if (modal === 0 && loader === 0 && qr === 0) {
+      console.log("✅ TELA LIVRE — USUÁRIO FINALIZOU");
       return;
     }
-    
+
     tentativas++;
+
+    // 👇 log a cada 10s pra não poluir
+    if (tentativas % 10 === 0) {
+      console.log("⌛ Ainda aguardando usuário...");
+    }
+
     await page.waitForTimeout(1000);
   }
-  
-  throw new Error(`⏰ TIMEOUT 15min: Loader GIF ASSIM/modal persistiu. Resolva manual (CONFIRMO/QR).`);
 }
 
 // =========================
@@ -72,10 +89,14 @@ const TIPO_SAIDA = process.env.ASSIM_TIPO_SAIDA;
 // =========================
 // FUNÇÃO PRINCIPAL
 // =========================
-async function executarRpa(tarefa) {
+async function executarRpa(tarefa, verificarCancelamento) {
+
+  if (!verificarCancelamento) {
+    console.log("⚠️ verificarCancelamento não enviado — ignorando validação");
+    verificarCancelamento = async () => false;
+  }
   console.log("🚀 Iniciando RPA...");
   console.log("Paciente:", tarefa.paciente_nome);
-  console.log("Terapia (controle):", tarefa.terapia);
 
   const browser = await chromium.launch({
     headless: false,
@@ -91,12 +112,6 @@ async function executarRpa(tarefa) {
     await delay(1000);
     console.log("🌐 Página carregada");
 
-	// VERIFICA CANCELAMENTO
-	if (await verificarCancelamento(tarefa.id)) {
-	console.log('⛔ Execução cancelada após carregar página');
-	return;
-	}
-
     // 1-3. CABEÇALHO
     await page.selectOption('select[name="operacao"]', { label: TIPO_OPERACAO });
     await page.selectOption('select[name="natureza"]', { label: NATUREZA });
@@ -110,16 +125,32 @@ async function executarRpa(tarefa) {
 	return;
 	}
 	
-    // 4-6. ASSOCIADOS (PAUSA DEP)
-	console.log('VALOR DO CAMPO:', tarefa.paciente_nome)
-	console.log('TIPO:', typeof tarefa.paciente_nome)
-    await page.fill('input[name="associado1"]', tarefa.matricula);
-    await page.press('input[name="associado1"]', 'Tab');
-    await page.fill('input[name="associado2"]', tarefa.matricula);
-    await page.press('input[name="associado2"]', 'Tab');
-    await page.fill('input[name="associado3"]', tarefa.dep);
-    await page.locator('input[name="associado3"]').blur();
-    await aguardarTelaLivre(page);
+	// 4-6. ASSOCIADOS (CORRIGIDO)
+	if (!tarefa.empresa) throw new Error("Empresa não informada");
+	if (!tarefa.matricula) throw new Error("Matrícula não informada");
+	if (!tarefa.dep) throw new Error("Dependente não informado");
+
+	console.log("🏢 Empresa:", tarefa.empresa);
+	console.log("🧾 Matrícula:", tarefa.matricula);
+	console.log("👶 Dep:", tarefa.dep);
+
+	// EMPRESA (associado1)
+	await humanType(page, 'input[name="associado1"]', tarefa.empresa);
+
+	// MATRÍCULA (associado2)
+	await humanType(page, 'input[name="associado2"]', tarefa.matricula);
+
+	// DEP (associado3)
+	await humanType(page, 'input[name="associado3"]', tarefa.dep);
+
+
+	// TAB (sair do campo)
+	await page.press('input[name="associado3"]', 'Tab');
+
+	// aguarda sistema reagir (ESSENCIAL)
+	await aguardarTelaLivre(page);
+
+		await delay(1000)
 
 	// VERIFICA CANCELAMENTO
 	if (await verificarCancelamento(tarefa.id)) {
@@ -201,9 +232,9 @@ async function executarRpa(tarefa) {
     error.tarefaId = tarefa.id;
     throw error;
   } finally {
-    await browser.close();
-    console.log("🧹 Navegador fechado");
-  }
+		console.log("🧪 DEBUG MODE - navegador aberto");
+		// await browser.close();
+	}
 }
 
 module.exports = executarRpa;
