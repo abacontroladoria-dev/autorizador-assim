@@ -21,6 +21,7 @@ export default function SolicitarPage() {
   const [data, setData] = useState(hoje)
   const [horario, setHorario] = useState('')
   const [loading, setLoading] = useState(false)
+  const [indexSelecionado, setIndexSelecionado] = useState<number>(-1)
 
   // =========================
   // ⏱️ REGRA 30 MINUTOS
@@ -45,20 +46,34 @@ export default function SolicitarPage() {
 		  setLoadingLista(true)
 
 		  const { data, error } = await supabase
-			.from('agenda_terapias')
+			.from('agenda_orbita')
 			.select('*')
 			.eq('data_atendimento', hoje)
-			.order('horario', { ascending: true }) // ✅ corrigido
+			.not('matricula', 'is', null)
+			.not('empresa', 'is', null)
+			.not('dep', 'is', null)
+			.not('tuss', 'is', null)
+			.not('crm', 'is', null)
+			.not('nome_medico', 'is', null)
+			.not('terapia', 'in', '("Coordenador","Aplicador Suporte","Aplicador Suporte (MT)","Aplicador ABA Casa","Aplicador ABA Escola")')
+			.order('horario', { ascending: true })
 
-			console.log('DADOS SEM FILTRO:', data)
-			
 		  if (error) {
 			console.error('Erro ao carregar agenda:', error)
 		  }
 
 		  if (data) {
-			console.log('DADOS AGENDA:', data) // 🔥 DEBUG
-			setListaDia(data)
+			// 🔥 segurança extra contra EMPTY string
+			const filtrado = data.filter((p) =>
+			  p.matricula &&
+			  p.empresa &&
+			  p.dep &&
+			  p.tuss &&
+			  p.crm &&
+			  p.nome_medico
+			)
+
+			setListaDia(filtrado)
 		  }
 
 		  setLoadingLista(false)
@@ -158,14 +173,20 @@ async function handleSolicitarLista(p: any) {
     const { error } = await supabase
       .from('fila_autorizacoes')
       .insert([
-        {
-          paciente_id: p.paciente_id,
-          paciente_nome: p.paciente_nome,
-          data_atendimento: hoje,
-          horario: p.horario,
-          status: 'pendente'
-        }
-      ])
+		  {
+			paciente_id: p.paciente_id,
+			paciente_nome: p.paciente_nome,
+			empresa: p.empresa,
+			matricula: p.matricula,
+			dep: p.dep,
+			crm: p.crm,
+			nome_medico: p.nome_medico,
+			tuss: p.tuss,
+			data_atendimento: hoje,
+			horario: p.horario,
+			status: 'pendente'
+		  }
+		])
 
     if (error) {
       toast.error('Erro ao enviar para o robô')
@@ -216,34 +237,27 @@ async function handleSolicitarLista(p: any) {
   // =========================
   // 🔎 AUTOCOMPLETE
   // =========================
-  useEffect(() => {
-    if (!busca) {
-      setPacientes([])
-      return
-    }
+		useEffect(() => {
+		  if (!busca || pacienteSelecionado) return
 
-    const delay = setTimeout(async () => {
-      setLoading(true)
+		  const buscar = async () => {
+			const { data } = await supabase
+			  .from('agenda_orbita')
+			  .select('paciente_nome')
+			  .ilike('paciente_nome', `%${busca}%`)
+			  .limit(50)
 
-      const { data, error } = await supabase
-        .from('agenda_terapias')
-        .select('paciente_nome')
-        .ilike('paciente_nome', `%${busca}%`)
-        .limit(10)
+			if (data) {
+			  const unicos = Array.from(
+				new Map(data.map(p => [p.paciente_nome, p])).values()
+			  )
 
-      if (!error && data) {
-        const nomesUnicos = Array.from(
-          new Set(data.map((p: any) => p.paciente_nome))
-        ).map((nome) => ({ paciente_nome: nome }))
+			  setPacientes(unicos)
+			}
+		  }
 
-        setPacientes(nomesUnicos)
-      }
-
-      setLoading(false)
-    }, 400)
-
-    return () => clearTimeout(delay)
-  }, [busca])
+		  buscar()
+		}, [busca])
 
   // =========================
   // ⏰ HORÁRIOS
@@ -279,32 +293,55 @@ async function handleSolicitarLista(p: any) {
   // 📤 FORM RETROATIVO
   // =========================
     async function handleSolicitar() {
-      if (!pacienteSelecionado || !data || !horario) {
-        toast.error('Preencha todos os campos')
-        return
+  if (!pacienteSelecionado || !data || !horario) {
+    toast.error('Preencha todos os campos')
+    return
+  }
+
+  // 🔥 BUSCAR DADOS COMPLETOS NA AGENDA
+  const { data: agenda, error: erroBusca } = await supabase
+    .from('agenda_orbita')
+    .select('*')
+    .eq('paciente_nome', pacienteSelecionado.paciente_nome)
+    .eq('data_atendimento', data)
+    .eq('horario', horario)
+    .single()
+
+  if (erroBusca || !agenda) {
+    toast.error('Não foi possível localizar o agendamento')
+    return
+  }
+
+  // 🚀 INSERIR NA FILA COM DADOS COMPLETOS
+  const { error } = await supabase
+    .from('fila_autorizacoes')
+    .insert([
+      {
+        paciente_id: agenda.paciente_id,
+        paciente_nome: agenda.paciente_nome,
+        empresa: agenda.empresa,
+        matricula: agenda.matricula,
+        dep: agenda.dep,
+        crm: agenda.crm,
+        nome_medico: agenda.nome_medico,
+        tuss: agenda.tuss,
+        data_atendimento: agenda.data_atendimento,
+        horario: agenda.horario,
+        status: 'pendente'
       }
+    ])
 
-      const { error } = await supabase
-        .from('fila_autorizacoes')
-        .insert({
-          paciente_id: pacienteSelecionado.id || null,
-          paciente_nome: pacienteSelecionado.paciente_nome,
-          data_atendimento: data,
-          horario,
-          status: 'pendente'
-        })
+  if (error) {
+    toast.error("Erro ao solicitar")
+    return
+  }
 
-      if (error) {
-        toast.error("Erro ao solicitar")
-        return
-      }
+  toast.success('Autorização enviada 🚀')
 
-      toast.success('Autorização enviada 🚀')
-
-      setBusca('')
-      setPacienteSelecionado(null)
-      setHorario('')
-    }
+  setBusca('')
+  setPacienteSelecionado(null)
+  setHorario('')
+}
 
   const hojeFormatado = new Date().toLocaleDateString('pt-BR')
   const [filtro, setFiltro] = useState('')
@@ -416,7 +453,7 @@ return (
               {/* INFO */}
               <div className="flex items-center gap-4">
                 <div className="text-sm font-semibold text-[#3A8FB7]">
-                  {p.horario}
+                  {p.horario?.slice(0, 5)}
                 </div>
 
                 <div className="font-semibold text-slate-800">
@@ -481,16 +518,76 @@ return (
             Solicitar Autorização Retroativa
           </h2>
 
-          {/* PACIENTE */}
-          <input
-            value={busca}
-            onChange={(e) => {
-              setBusca(e.target.value)
-              setPacienteSelecionado(null)
-            }}
-            placeholder="Paciente..."
-            className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#3A8FB7]/40"
-          />
+			{/* PACIENTE */}
+			<div className="relative">
+			  <input
+				value={busca}
+				onChange={(e) => {
+				  setBusca(e.target.value)
+				  setPacienteSelecionado(null)
+				  setIndexSelecionado(-1)
+				}}
+				onKeyDown={(e) => {
+				  if (!pacientes.length) return
+
+				  if (e.key === 'ArrowDown') {
+					e.preventDefault()
+					setIndexSelecionado((prev) =>
+					  prev < pacientes.length - 1 ? prev + 1 : prev
+					)
+				  }
+
+				  if (e.key === 'ArrowUp') {
+					e.preventDefault()
+					setIndexSelecionado((prev) =>
+					  prev > 0 ? prev - 1 : 0
+					)
+				  }
+
+				  if (e.key === 'Enter') {
+					e.preventDefault()
+
+					if (indexSelecionado >= 0) {
+					  const p = pacientes[indexSelecionado]
+					  setBusca(p.paciente_nome)
+					  setPacienteSelecionado(p)
+					  setPacientes([])
+					  setIndexSelecionado(-1)
+					}
+				  }
+
+				  if (e.key === 'Escape') {
+					setPacientes([])
+					setIndexSelecionado(-1)
+				  }
+				}}
+				placeholder="Paciente..."
+				className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm"
+			  />
+
+			  {pacientes.length > 0 && (
+				<div className="absolute z-10 bg-white border rounded-lg mt-1 w-full max-h-40 overflow-auto shadow">
+				  {pacientes.map((p, i) => (
+					<div
+					  key={i}
+					  onClick={() => {
+						setBusca(p.paciente_nome)
+						setPacienteSelecionado(p)
+						setPacientes([])
+						setIndexSelecionado(-1)
+					  }}
+					  className={`px-3 py-2 text-sm cursor-pointer ${
+						i === indexSelecionado
+						  ? 'bg-blue-100'
+						  : 'hover:bg-slate-100'
+					  }`}
+					>
+					  {p.paciente_nome}
+					</div>
+				  ))}
+				</div>
+			  )}
+			</div>
 
           {/* DATA */}
           <input

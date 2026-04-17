@@ -16,19 +16,24 @@ function delay(ms) {
 
 async function humanType(page, selector, texto) {
   await page.focus(selector);
-  await page.waitForTimeout(200 + Math.random() * 300);
-  
+
+  await page.waitForTimeout(100 + Math.random() * 100); // antes 200~500
+
   for (let i = 0; i < texto.length; i++) {
     await page.keyboard.type(texto[i]);
-    await page.waitForTimeout(50 + Math.random() * 100);
-    
-    if (Math.random() < 0.01 && i > 0) {
+
+    // ⚡ mais rápido (antes era 50~150)
+    await page.waitForTimeout(20 + Math.random() * 40);
+
+    // erro humano mais raro
+    if (Math.random() < 0.005 && i > 0) {
       await page.keyboard.press('Backspace');
       await page.keyboard.type(texto[i]);
-      console.log("👤 Erro humano simulado + correção");
+      console.log("👤 Correção simulada");
     }
   }
-  console.log(`✅ Digitado humano: ${texto}`);
+
+  console.log(`⚡ Digitado rápido: ${texto}`);
 }
 
 async function aguardarTelaLivre(page) {
@@ -199,7 +204,6 @@ async function executarRpa(tarefa, verificarCancelamento) {
     // 10. NOME MÉDICO
     if (!tarefa.nome_medico) throw new Error("Nome do médico não informado");
     await page.fill('input[name="findsolic"]', tarefa.nome_medico);
-    await page.press('input[name="findsolic"]', 'Tab');
 
 	// VERIFICA CANCELAMENTO
 	if (await verificarCancelamento(tarefa.id)) {
@@ -208,10 +212,9 @@ async function executarRpa(tarefa, verificarCancelamento) {
 	}
 	
     // 11. TUSS1
-    if (!tarefa.tuss1) throw new Error("TUSS não informado");
-    await page.fill('input[name="ttuss1"]', tarefa.tuss1);
-    await page.press('input[name="ttuss1"]', 'Tab');
-    console.log("✅ TUSS preenchido");
+	if (!tarefa.tuss) throw new Error("TUSS não informado");
+	await humanType(page, 'input[name="ttuss1"]', tarefa.tuss);
+	console.log("✅ TUSS preenchido");
 
 	// VERIFICA CANCELAMENTO
 	if (await verificarCancelamento(tarefa.id)) {
