@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect } from "react"
-import { createClient } from "@/lib/supabase/client";
+import { getSupabaseClient } from "@/lib/supabase/client";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
@@ -13,7 +13,7 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState("");
   const router = useRouter();
-  const supabase = createClient();
+  const supabase = getSupabaseClient()  
   
   async function handleLogin(e: any) {
     e.preventDefault();

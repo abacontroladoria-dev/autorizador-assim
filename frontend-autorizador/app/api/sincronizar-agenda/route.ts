@@ -1,7 +1,7 @@
 import { createClient } from '@/lib/supabase/server'
 import { cookies } from 'next/headers'
 
-export async function GET() {
+export async function GET(req: Request) {
   try {
     const cookieStore = cookies()
     const supabase = await createClient(cookieStore)
@@ -10,7 +10,39 @@ export async function GET() {
 
     console.log("📅 Buscando agenda do dia:", hoje)
 
+    // =========================
+    // 🔥 CONTROLE DE ATUALIZAÇÃO (4h + FORCE)
+    // =========================
+    const { searchParams } = new URL(req.url)
+    const force = searchParams.get('force') === 'true'
+
+    if (!force) {
+      const { data: ultima } = await supabase
+        .from('agenda_orbita')
+        .select('created_at')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single()
+
+      if (ultima?.created_at) {
+        const ultimaAtualizacao = new Date(ultima.created_at)
+        const agora = new Date()
+
+        const diff = agora.getTime() - ultimaAtualizacao.getTime()
+
+        if (diff < 4 * 60 * 60 * 1000) {
+          console.log("⏱ Já atualizado nas últimas 4h")
+
+          return Response.json({
+            message: 'Atualização recente, ignorada'
+          })
+        }
+      }
+    }
+
+    // =========================
     // 1️⃣ buscar pacientes
+    // =========================
     const resPacientes = await fetch(
       'https://cronogramauniversoaba.com.br/api_api_automacao/?endpoint=pacientes'
     )
@@ -19,7 +51,9 @@ export async function GET() {
 
     console.log(`👥 Total pacientes: ${pacientes.length}`)
 
+    // =========================
     // 2️⃣ buscar agenda de todos (em paralelo)
+    // =========================
     const resultados = await Promise.all(
       pacientes.map(async (p: any) => {
         try {
@@ -51,7 +85,9 @@ export async function GET() {
       })
     )
 
+    // =========================
     // 3️⃣ achatar array
+    // =========================
     const registros = resultados.flat()
 
     console.log(`📦 Registros encontrados: ${registros.length}`)
@@ -60,7 +96,26 @@ export async function GET() {
       return Response.json({ message: 'Sem agenda hoje' })
     }
 
+    // =========================
+    // 🧹 LIMPAR DADOS ANTIGOS
+    // =========================
+    const hojeDate = new Date()
+    const inicioSemana = new Date(hojeDate)
+
+    inicioSemana.setDate(hojeDate.getDate() - hojeDate.getDay())
+
+    const dataLimite = inicioSemana.toISOString().split('T')[0]
+
+    console.log("🧹 Limpando dados anteriores a:", dataLimite)
+
+    await supabase
+      .from('agenda_orbita')
+      .delete()
+      .lt('data_atendimento', dataLimite)
+
+    // =========================
     // 4️⃣ remover duplicados (🔥 ESSENCIAL)
+    // =========================
     const registrosUnicos = Array.from(
       new Map(
         registros.map(r => [
@@ -72,7 +127,9 @@ export async function GET() {
 
     console.log(`🧹 Após remover duplicados: ${registrosUnicos.length}`)
 
+    // =========================
     // 5️⃣ salvar no banco
+    // =========================
     const { error } = await supabase
       .from('agenda_orbita')
       .upsert(registrosUnicos, {
