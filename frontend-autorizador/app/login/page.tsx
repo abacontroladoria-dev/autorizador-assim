@@ -33,7 +33,7 @@ export default function Login() {
 	  const { data } = await supabase.auth.getSession()
 	  console.log("SESSION:", data)
 
-    router.replace("/fila_autorizacoes")
+    router.replace("/home")
   }
 
 	useEffect(() => {
@@ -43,7 +43,7 @@ export default function Login() {
 		} = await supabase.auth.getUser()
 
 		if (user) {
-		  window.location.href = "/fila_autorizacoes"
+		  window.location.href = "/home"
 		}
 	  }
 

@@ -4,25 +4,25 @@ export async function criarAutorizacao(payload: any) {
 const supabase = getSupabaseClient()
 
   const { data, error } = await supabase
-    .from('autorizacoes')
-    .insert({
-      paciente_nome: payload.paciente_nome,
-      matricula: payload.matricula,
-      data_horario: new Date().toISOString(),
-      data_atendimento: payload.data,
-      horario: payload.horario,
-      status: payload.status || 'executando',
+    .from('fila_autorizacoes')
+	.insert({
+	  agenda_id: payload.agenda_id, // 🔥 ESSENCIAL
+	  paciente_nome: payload.paciente_nome,
+	  matricula: payload.matricula,
+	  data_horario: new Date().toISOString(),
+	  data_atendimento: payload.data,
+	  horario: payload.horario,
+	  status: payload.status || 'executando',
 
-      empresa: payload.empresa || null,
-      dep: payload.dep || null,
-      crm: payload.crm || null,
-      nome_medico: payload.nome_medico || null,
-      terapia: payload.terapia || null,
-      tuss1: payload.tuss1 || null,
+	  empresa: payload.empresa || null,
+	  dep: payload.dep || null,
+	  crm: payload.crm || null,
+	  nome_medico: payload.nome_medico || null,
+	  tuss1: payload.tuss1 || null,
 
-      usuario_id: payload.usuario_id || null,
-      machine_id: payload.machine_id || null,
-    })
+	  usuario_id: payload.usuario_id || null,
+	  machine_id: payload.machine_id || null,
+	})
     .select()
     .single()
 
@@ -44,8 +44,13 @@ export async function listarAutorizacoes() {
 const supabase = getSupabaseClient()
 
   const { data, error } = await supabase
-    .from('autorizacoes')
-    .select('*')
+    .from('fila_autorizacoes')
+	 .select(`
+	  *,
+	  agenda_orbita (
+		terapia
+	  )
+	`)
     .order('created_at', { ascending: false })
 
   if (error) {

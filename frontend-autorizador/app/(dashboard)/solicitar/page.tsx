@@ -47,7 +47,10 @@ export default function SolicitarPage() {
 
   const [filtroHorario, setFiltroHorario] = useState('')
   
+  const [modalFalta, setModalFalta] = useState(false)
   
+  const [pacienteFalta, setPacienteFalta] = useState<any>(null)
+
   // =====================================
   // BOTAO DE CHECK SOLICITACAO RETROATIVA
   // =====================================
@@ -118,37 +121,6 @@ export default function SolicitarPage() {
 
 
   // =========================
-  // 📥 CARREGAR LISTA SILENCIOSO
-  // =========================
-
-async function carregarListaSilencioso() {
-  const { data, error } = await supabase
-    .from('agenda_orbita')
-    .select('*')
-    .eq('data_atendimento', hoje)
-    .not('matricula', 'is', null)
-    .not('empresa', 'is', null)
-    .not('dep', 'is', null)
-    .not('tuss', 'is', null)
-    .not('crm', 'is', null)
-    .not('nome_medico', 'is', null)
-    .not('terapia', 'in', '("Coordenador","Aplicador Suporte","Aplicador Suporte (MT)","Aplicador ABA Casa","Aplicador ABA Escola")')
-    .order('horario', { ascending: true })
-
-  if (data) {
-    const filtrado = data.filter((p) =>
-      p.matricula &&
-      p.empresa &&
-      p.dep &&
-      p.tuss &&
-      p.crm &&
-      p.nome_medico
-    )
-    setListaDia(filtrado)
-  }
-}
-
-  // =========================
   // 📥 CARREGAR LISTA
   // =========================
 
@@ -202,95 +174,183 @@ async function carregarListaSilencioso() {
   // 🚀 SOLICITAR (COM TRAVA)
   // =========================
 
-  async function handleSolicitarLista(p: any) {
-    try {
+async function handleSolicitarLista(p: any) {
+  try {
+    const statusItem = getStatusPaciente(p)
+
+    if (!podeSolicitar(p.ultima_autorizacao, statusItem?.status)) {
+      toast.error('Aguarde 30 minutos desde a última autorização')
+      return
+    }
+
+    // 🔍 VERIFICAR SE JÁ EXISTE NA FILA
+    const { data: existente } = await supabase
+      .from('fila_autorizacoes')
+      .select('id, status')
+      .eq('paciente_id', p.paciente_id)
+      .eq('data_atendimento', hoje)
+      .eq('horario', p.horario)
+      .maybeSingle()
+
+    if (existente) {
+      // 🚫 já em processamento
+      if (['pendente', 'processando'].includes(existente.status)) {
+        toast.error('Paciente já está sendo atendido')
+        return
+      }
+
+      // 🔁 erro → reaproveita
+      if (existente.status === 'erro') {
+        const { error } = await supabase
+          .from('fila_autorizacoes')
+          .update({ status: 'pendente' })
+          .eq('id', existente.id)
+
+        if (error) {
+          console.error(error)
+          toast.error('Erro ao reprocessar')
+          return
+        }
+
+        toast.success('Reprocessando autorização 🔁')
+        await carregarFila()
+        return
+      }
+
+      // ⏱️ regra de tempo
       if (!podeSolicitar(p.ultima_autorizacao)) {
         toast.error('Aguarde 30 minutos desde a última autorização')
         return
       }
-      const { data: existente, error: erroBusca } = await supabase
-        .from('fila_autorizacoes')
-        .select('id, status')
-        .eq('paciente_id', p.paciente_id)
-        .eq('data_atendimento', hoje)
-        .eq('horario', p.horario)
-        .in('status', ['pendente', 'processando'])
-        .maybeSingle()
-      if (erroBusca) {
-        toast.error('Erro ao verificar fila')
-        return
-      }
-      if (existente) {
-        toast.error('Paciente já está sendo atendido')
-        return
-      }
-      const { error } = await supabase
-        .from('fila_autorizacoes')
-        .insert([
-          {
-            paciente_id: p.paciente_id,
-            paciente_nome: p.paciente_nome,
-            empresa: p.empresa,
-            matricula: p.matricula,
-            dep: p.dep,
-            crm: p.crm,
-            nome_medico: p.nome_medico,
-            tuss: p.tuss,
-            data_atendimento: hoje,
-            horario: p.horario,
-            status: 'pendente'
-          }
-        ])
-      if (error) {
-        toast.error('Erro ao enviar para o robô')
-        return
-      }
-      toast.success('Autorização iniciada 🚀')
-      await carregarFila()
-    } catch (err) {
-      console.error(err)
-      toast.error('Erro inesperado')
     }
+
+    // 🔥 BUSCAR AGENDA CORRETA (ESSENCIAL)
+    const { data: agenda, error: erroAgenda } = await supabase
+      .from('agenda_orbita')
+      .select('id')
+      .eq('paciente_id', p.paciente_id)
+      .eq('data_atendimento', hoje)
+      .eq('horario', p.horario)
+      .single()
+
+    if (erroAgenda || !agenda) {
+      console.error(erroAgenda)
+      toast.error('Agendamento não encontrado')
+      return
+    }
+
+    // 🚀 INSERIR NA FILA COM agenda_id
+    const { error } = await supabase
+      .from('fila_autorizacoes')
+      .insert([
+        {
+          agenda_id: agenda.id, // 🔥 chave do relacionamento
+          paciente_id: p.paciente_id,
+          paciente_nome: p.paciente_nome,
+          empresa: p.empresa,
+          matricula: p.matricula,
+          dep: p.dep,
+          crm: p.crm,
+          nome_medico: p.nome_medico,
+          tuss: p.tuss,
+          data_atendimento: hoje,
+          horario: p.horario,
+          status: 'pendente'
+        }
+      ])
+
+    if (error) {
+      console.error(error)
+      toast.error(error.message)
+      return
+    }
+
+    toast.success('Autorização iniciada 🚀')
+    await carregarFila()
+
+  } catch (err) {
+    console.error(err)
+    toast.error('Erro inesperado')
   }
+}
 
   // =========================
   // ❌ FALTA
   // =========================
 
-  async function handleFalta(p: any) {
-    try {
+async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
+  try {
+    const { data: existente } = await supabase
+      .from('fila_autorizacoes')
+      .select('id, status')
+      .eq('paciente_id', p.paciente_id)
+      .eq('data_atendimento', hoje)
+      .eq('horario', p.horario)
+      .maybeSingle()
+
+    // 🔁 SE JÁ EXISTE (inclusive erro)
+    if (existente) {
       const { error } = await supabase
         .from('fila_autorizacoes')
-        .insert({
-          paciente_id: p.paciente_id,
-          paciente_nome: p.paciente_nome,
-          data_atendimento: hoje,
-          horario: p.horario,
-          status: 'falta'
+        .update({ 
+          status: 'falta',
+          tipo_falta: tipo,
+          terapia_falta: p.terapia || null
         })
+        .eq('id', existente.id)
+
       if (error) {
-        toast.error('Erro ao registrar falta')
+        console.error(error)
+        toast.error('Erro ao atualizar falta')
         return
       }
-      // remove da tela
+
+      toast.success('Falta registrada (atualizado)')
       setListaDia((prev) => prev.filter((item) => item.id !== p.id))
-      toast.success('Falta registrada com sucesso')
-    } catch (err) {
-      console.error(err)
-      toast.error('Erro inesperado')
+      await carregarFila()
+      return
     }
+
+    // 🚀 SE NÃO EXISTE → INSERT NORMAL
+    const { error } = await supabase
+      .from('fila_autorizacoes')
+      .insert({
+        paciente_id: p.paciente_id,
+        paciente_nome: p.paciente_nome,
+        data_atendimento: hoje,
+        horario: p.horario,
+        status: 'falta',
+        tipo_falta: tipo,
+        terapia_falta: p.terapia || null
+      })
+
+    if (error) {
+      console.error(error)
+      toast.error('Erro ao registrar falta')
+      return
+    }
+
+    setListaDia((prev) => prev.filter((item) => item.id !== p.id))
+    toast.success('Falta registrada com sucesso')
+
+  } catch (err) {
+    console.error(err)
+    toast.error('Erro inesperado')
   }
+}
 
   // =========================
   // 📤 FORM RETROATIVO
   // =========================
 
-  async function handleSolicitar() {
-    if (!pacienteSelecionado || !data || !horario) {
-      toast.error('Preencha todos os campos')
-      return
-    }
-    // 🔥 BUSCAR DADOS COMPLETOS NA AGENDA
+ async function handleSolicitar() {
+  if (!pacienteSelecionado || !data || !horario) {
+    toast.error('Preencha todos os campos')
+    return
+  }
+
+  try {
+    // 🔥 BUSCAR AGENDAMENTO CORRETO
     const { data: agenda, error: erroBusca } = await supabase
       .from('agenda_orbita')
       .select('*')
@@ -298,37 +358,51 @@ async function carregarListaSilencioso() {
       .eq('data_atendimento', data)
       .eq('horario', horario)
       .single()
+
     if (erroBusca || !agenda) {
+      console.error(erroBusca)
       toast.error('Não foi possível localizar o agendamento')
       return
     }
-    // 🚀 INSERIR NA FILA COM DADOS COMPLETOS
+
+    // 🚀 INSERIR NA FILA (COM agenda_id CORRETO)
     const { error } = await supabase
       .from('fila_autorizacoes')
       .insert([
-      {
-        paciente_id: agenda.paciente_id,
-        paciente_nome: agenda.paciente_nome,
-        empresa: agenda.empresa,
-        matricula: agenda.matricula,
-        dep: agenda.dep,
-        crm: agenda.crm,
-        nome_medico: agenda.nome_medico,
-        tuss: agenda.tuss,
-        data_atendimento: agenda.data_atendimento,
-        horario: agenda.horario,
-        status: 'pendente'
-      }
-    ])
+        {
+          agenda_id: agenda.id, // 🔥 SEM ? (obrigatório)
+          paciente_id: agenda.paciente_id,
+          paciente_nome: agenda.paciente_nome,
+          empresa: agenda.empresa,
+          matricula: agenda.matricula,
+          dep: agenda.dep,
+          crm: agenda.crm,
+          nome_medico: agenda.nome_medico,
+          tuss: agenda.tuss,
+          data_atendimento: agenda.data_atendimento,
+          horario: agenda.horario,
+          status: 'pendente'
+        }
+      ])
+
     if (error) {
+      console.error(error)
       toast.error('Erro ao solicitar')
       return
     }
+
     toast.success('Autorização enviada 🚀')
+
+    // 🔄 RESET FORM
     setBusca('')
     setPacienteSelecionado(null)
     setHorario('')
+
+  } catch (err) {
+    console.error(err)
+    toast.error('Erro inesperado')
   }
+}
 
   const hojeFormatado = new Date().toLocaleDateString('pt-BR')
 
@@ -338,14 +412,19 @@ async function carregarListaSilencioso() {
   // ⏱️ REGRA 30 MINUTOS
   // =========================
 
-  function podeSolicitar(ultima: string | null) {
-    if (!ultima) return true
-    const agora = new Date()
-    const ultimaData = new Date(ultima + 'Z')
-    const diffMs = agora.getTime() - ultimaData.getTime()
-    const diffMin = diffMs / 1000 / 60
-    return diffMin >= 30
-  }
+	function podeSolicitar(ultima: string | null, status?: string) {
+	  // 🔥 ERRO SEMPRE LIBERA
+	  if (status === 'erro') return true
+
+	  if (!ultima) return true
+
+	  const agora = new Date()
+	  const ultimaData = new Date(ultima + 'Z')
+	  const diffMs = agora.getTime() - ultimaData.getTime()
+	  const diffMin = diffMs / 1000 / 60
+
+	  return diffMin >= 30
+	}
 
   // =========================
   // ULTIMA AUTORIZACAO
@@ -405,7 +484,7 @@ async function carregarListaSilencioso() {
       .channel('agenda')
       .on(
         'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'agenda_terapias' },
+        { event: 'UPDATE', schema: 'public', table: 'agenda_orbita' },
         (payload) => {
           const updated = payload.new
           setListaDia((prev) =>
@@ -567,6 +646,19 @@ async function carregarListaSilencioso() {
             <p className="text-sm text-slate-400">Carregando...</p>
           ) : (() => {
             const listaFiltrada = listaDia.filter((p) => {
+
+			  const statusItem = filaStatus.find(
+				(f) =>
+				  f.paciente_id === p.paciente_id &&
+				  f.horario === p.horario &&
+				  f.data_atendimento === hoje
+			  )
+
+			  // 🚫 ESCONDER FALTA E CONCLUÍDO
+			  if (['falta', 'concluido'].includes(statusItem?.status)) {
+				return false
+			  }
+
 			  const matchNome =
 				!filtro ||
 				(p.paciente_nome || '').toLowerCase().includes(filtro.toLowerCase())
@@ -580,22 +672,14 @@ async function carregarListaSilencioso() {
             if (listaFiltrada.length === 0) {
               return (
                 <p className="text-sm text-slate-400">
-                  Nenhum paciente pendente 🎉
-                </p>
-              )
-            }
-            if (listaFiltrada.length === 0) {
-              return (
-                <p className="text-sm text-slate-400">
                   Nenhum resultado encontrado 🔍
                 </p>
               )
             }
 			const listaOrdenada = [...listaFiltrada].sort((a, b) => {
-			  // 1️⃣ horário da terapia
 			  if (a.horario !== b.horario) {
 				return a.horario.localeCompare(b.horario)
-			  }
+			  }	
 
 			  // 2️⃣ última autorização (mais antigo primeiro 🔥)
 			  const ultA = getUltimaAutorizacaoConcluida(a)
@@ -611,111 +695,114 @@ async function carregarListaSilencioso() {
 			  // 3️⃣ nome
 			  return (a.paciente_nome || '').localeCompare(b.paciente_nome || '')
 			})
-return (
-  <div className="space-y-3">
-    {listaOrdenada.map((p) => {
-      const ativo = podeSolicitar(p.ultima_autorizacao)
-      const statusItem = getStatusPaciente(p)
-      const ultimaConcluida = getUltimaAutorizacaoConcluida(p)
+			return (
+			  <div className="space-y-3">
+				{listaOrdenada.map((p) => {
+				  const statusItem = getStatusPaciente(p)
+				  const ativo = podeSolicitar(p.ultima_autorizacao,statusItem?.status)
+				  const ultimaConcluida = getUltimaAutorizacaoConcluida(p)
 
-      if (statusItem?.status === 'concluido') return null
+				  if (statusItem?.status === 'concluido') return null
 
-      return (
-<div
-  key={p.id}
-  className="flex rounded-2xl border border-white/60 bg-white/90 border-slate-200/60 backdrop-blur-md shadow-[0_8px_30px_rgba(0,0,0,0.06)] hover:shadow-[0_10px_40px_rgba(0,0,0,0.10)] hover:-translate-y-[1px] transition-all duration-200 overflow-hidden"
->
-  {/* ⏰ HORÁRIO */}
-<div className="bg-gradient-to-b from-[#3A8FB7]/15 to-[#3A8FB7]/5 px-6 flex items-center justify-center min-w-[130px] border-r border-slate-200/60">
-  <span className="text-2xl font-bold text-[#3A8FB7] tracking-tight">
-    {p.horario?.slice(0, 5)}
-  </span>
-</div>
+				  return (
+			<div
+			  key={p.id}
+			  className="flex rounded-2xl border border-white/60 bg-white/90 border-slate-200/60 backdrop-blur-md shadow-[0_8px_30px_rgba(0,0,0,0.06)] hover:shadow-[0_10px_40px_rgba(0,0,0,0.10)] hover:-translate-y-[1px] transition-all duration-200 overflow-hidden"
+			>
+			  {/* ⏰ HORÁRIO */}
+			<div className="bg-gradient-to-b from-[#3A8FB7]/15 to-[#3A8FB7]/5 px-6 flex items-center justify-center min-w-[130px] border-r border-slate-200/60">
+			  <span className="text-2xl font-bold text-[#3A8FB7] tracking-tight">
+				{p.horario?.slice(0, 5)}
+			  </span>
+			</div>
 
-  {/* CONTEÚDO */}
-  <div className="flex flex-1 justify-between p-3 items-center">
-    
-    {/* INFO */}
-    <div className="flex flex-col gap-1 min-w-0">
-      
-      <span className="text-lg font-semibold text-slate-800 leading-tight truncate">
-        {p.paciente_nome}
-      </span>
+			  {/* CONTEÚDO */}
+			  <div className="flex flex-1 justify-between p-3 items-center">
+				
+				{/* INFO */}
+				<div className="flex flex-col gap-1 min-w-0">
+				  
+				  <span className="text-lg font-semibold text-slate-800 leading-tight truncate">
+					{p.paciente_nome}
+				  </span>
 
-      <div className="flex items-center gap-2 flex-wrap">
-        
-        <span className="text-[11px] px-2 py-0.5 rounded-md bg-slate-100/70 text-slate-600 border border-slate-200">
-          {p.terapia || 'Sem terapia'}
-        </span>
+				  <div className="flex items-center gap-2 flex-wrap">
+					
+					<span className="text-[11px] px-2 py-0.5 rounded-md bg-slate-100/70 text-slate-600 border border-slate-200">
+					  {p.terapia || 'Sem terapia'}
+					</span>
 
-        {/* PENDENTE */}
-{statusItem?.status === 'pendente' && (
-  <span className="flex items-center gap-1 text-xs font-semibold text-yellow-800 bg-yellow-100 px-2 py-0.5 rounded-md">
-    <span className="w-1.5 h-1.5 bg-yellow-500 rounded-full"></span>
-    Pendente
-  </span>
-)}
+					{/* PENDENTE */}
+			{statusItem?.status === 'pendente' && (
+			  <span className="flex items-center gap-1 text-xs font-semibold text-yellow-800 bg-yellow-100 px-2 py-0.5 rounded-md">
+				<span className="w-1.5 h-1.5 bg-yellow-500 rounded-full"></span>
+				Pendente
+			  </span>
+			)}
 
-          {/* PROCESSANDO */}
-        {(statusItem?.status === 'processando' || statusItem?.status === 'executando') && (
-<span className="flex items-center gap-1 text-xs font-semibold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-md">
-            <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></span>
-            Processando
-          </span>
-        )}
+					  {/* PROCESSANDO */}
+					{(statusItem?.status === 'processando' || statusItem?.status === 'executando') && (
+			<span className="flex items-center gap-1 text-xs font-semibold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-md">
+						<span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></span>
+						Processando
+					  </span>
+					)}
 
-          {/* ERRO */}
-        {statusItem?.status === 'erro' && (
-<span className="flex items-center gap-1 text-xs font-semibold text-red-800 bg-red-100 px-2 py-0.5 rounded-md">
-            <span className="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
-            Erro
-          </span>
-        )}
-      </div>
+					  {/* ERRO */}
+					{statusItem?.status === 'erro' && (
+			<span className="flex items-center gap-1 text-xs font-semibold text-red-800 bg-red-100 px-2 py-0.5 rounded-md">
+						<span className="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
+						Erro
+					  </span>
+					)}
+				  </div>
 
-      <span className="text-xs text-slate-400">
-        Última Autorização:{' '}
-        {ultimaConcluida
-          ? new Date(ultimaConcluida.updated_at + 'Z').toLocaleTimeString('pt-BR', {
-              timeZone: 'America/Sao_Paulo',
-              hour: '2-digit',
-              minute: '2-digit'
-            })
-          : '-'}
-      </span>
-    </div>
+				  <span className="text-xs text-slate-400">
+					Última Autorização:{' '}
+					{ultimaConcluida
+					  ? new Date(ultimaConcluida.updated_at + 'Z').toLocaleTimeString('pt-BR', {
+						  timeZone: 'America/Sao_Paulo',
+						  hour: '2-digit',
+						  minute: '2-digit'
+						})
+					  : '-'}
+				  </span>
+				</div>
 
-    {/* AÇÕES */}
-    <div className="flex flex-col gap-2 ml-4">
-      
-      <button
-        disabled={!ativo || statusItem?.status === 'processando'}
-        onClick={() => handleSolicitarLista(p)}
-className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition ${
-  ativo
-    ? 'bg-[#3A8FB7] text-white shadow-md hover:brightness-110 hover:shadow-lg active:scale-[0.97]'
-    : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-}`}
-      >
-        <LogIn size={14} />
-        Autorização
-      </button>
+				{/* AÇÕES */}
+				<div className="flex flex-col gap-2 ml-4">
+				  
+				  <button
+					disabled={!ativo || statusItem?.status === 'processando'}
+					onClick={() => handleSolicitarLista(p)}
+			className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition ${
+			  ativo
+				? 'bg-[#3A8FB7] text-white shadow-md hover:brightness-110 hover:shadow-lg active:scale-[0.97]'
+				: 'bg-slate-200 text-slate-400 cursor-not-allowed'
+			}`}
+				  >
+					<LogIn size={14} />
+					Autorização
+				  </button>
 
-      <button
-        onClick={() => handleFalta(p)}
-        className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium bg-red-100 text-red-700 hover:bg-red-200 active:scale-[0.97] transition"
-      >
-        <CalendarX size={14} />
-        Falta
-      </button>
+				  <button
+					onClick={() => {
+					  setPacienteFalta(p)
+					  setModalFalta(true)
+					}}
+					className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium bg-red-100 text-red-700 hover:bg-red-200 active:scale-[0.97] transition"
+				  >
+					<CalendarX size={14} />
+					Falta
+				  </button>
 
-    </div>
-  </div>
-</div>
-      )
-    })}
-  </div>
-)
+				</div>
+			  </div>
+			</div>
+				  )
+				})}
+			  </div>
+			)
           })()}
         </div>
         {/* ========================= */}
@@ -727,7 +814,8 @@ className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium
               <h2 className="text-lg font-semibold text-slate-600 text-center">
                 Solicitar Autorização Retroativa
               </h2>
-              {/* PACIENTE */}
+              
+			  {/* PACIENTE */}
               <div className="relative">
                 <input
                   value={busca}
@@ -759,8 +847,8 @@ className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium
                         const p = sugestoes[indexSelecionado]
                         setBusca(p.paciente_nome)
                         setPacienteSelecionado(p)
-                        setSugestoes([]) // 🔥 limpa lista
-                        setMostrarSugestoes(false) // 🔥 fecha dropdown
+                        setSugestoes([])
+                        setMostrarSugestoes(false)
                         setIndexSelecionado(-1)
                       }
                     }
@@ -797,14 +885,16 @@ className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium
                   </div>
                 )}
               </div>
-              {/* DATA */}
+              
+			  {/* DATA */}
               <input
                 type="date"
                 value={data}
                 onChange={(e) => setData(e.target.value)}
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#3A8FB7]/40"
               />
-              {/* HORÁRIO */}
+              
+			  {/* HORÁRIO */}
               <select
                 value={horario}
                 onChange={(e) => setHorario(e.target.value)}
@@ -821,7 +911,8 @@ className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium
                   {terapiaSelecionada || 'Sem Terapia Selecionada'}
                 </div>
               </div>
-              {/* BOTÃO */}
+              
+			  {/* BOTÃO */}
               <button
                 onClick={handleSolicitar}
                 className="w-full bg-[#3A8FB7] text-white py-2 rounded-lg text-sm font-medium hover:opacity-90 transition"
@@ -832,6 +923,62 @@ className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium
           </div>
         </div>
       </div>
+
+
+{/* 🔥 MODAL FALTA */}
+{modalFalta && (
+  <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
+    
+    <div className="bg-white rounded-2xl shadow-2xl p-6 w-[340px] border border-slate-200 transition-all scale-100 animate-in fade-in zoom-in-95">
+      
+      {/* TÍTULO */}
+      <h2 className="text-lg font-semibold text-slate-800 text-center">
+        Tipo de Falta
+      </h2>
+
+      {/* NOME */}
+      <p className="text-slate-600 font-medium text-center mt-2 mb-6">
+        {pacienteFalta?.paciente_nome}
+      </p>
+
+      {/* BOTÕES */}
+      <div className="flex flex-col gap-3">
+        
+        <button
+          onClick={async () => {
+            if (!pacienteFalta) return
+            await handleFalta(pacienteFalta, 'paciente')
+            setModalFalta(false)
+          }}
+          className="w-full py-2.5 rounded-lg text-sm font-semibold bg-red-500 text-white shadow-md hover:bg-red-600 active:scale-[0.97] transition-all"
+        >
+          Falta do Paciente
+        </button>
+
+        <button
+          onClick={async () => {
+            if (!pacienteFalta) return
+            await handleFalta(pacienteFalta, 'terapeuta')
+            setModalFalta(false)
+          }}
+          className="w-full py-2.5 rounded-lg text-sm font-semibold bg-orange-400 text-white shadow-md hover:bg-orange-500 active:scale-[0.97] transition-all"
+        >
+          Falta do Terapeuta
+        </button>
+
+        {/* CANCELAR */}
+        <button
+          onClick={() => setModalFalta(false)}
+          className="text-sm text-slate-500 hover:text-slate-700 transition mt-2"
+        >
+          Cancelar
+        </button>
+
+      </div>
+    </div>
+  </div>
+)}
+
     </div>
   )
 }
