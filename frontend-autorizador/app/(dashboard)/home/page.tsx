@@ -9,116 +9,96 @@ export default function Home() {
   const router = useRouter();
 
   const [nome, setNome] = useState("Usuário");
+  const [dados, setDados] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  const hoje = new Date().toISOString().split("T")[0];
 
   useEffect(() => {
     async function loadUser() {
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
+      const { data: { user } } = await supabase.auth.getUser();
 
       if (!user) {
         router.replace("/");
         return;
       }
 
-      // pega nome do email (provisório)
-      const email = user.email || "";
-      const nomeFormatado = email.split("@")[0];
-      setNome(nomeFormatado);
-
-      setLoading(false);
+      setNome((user.email || "").split("@")[0]);
     }
 
     loadUser();
   }, []);
 
-  const dataAtual = new Date().toLocaleDateString("pt-BR", {
-    day: "2-digit",
-    month: "long",
-  });
+  async function carregarDados() {
+    const { data } = await supabase
+      .from("fila_autorizacoes")
+      .select("*")
+      .eq("data_atendimento", hoje);
+
+    if (data) setDados(data);
+    setLoading(false);
+  }
+
+  useEffect(() => {
+    carregarDados();
+    const interval = setInterval(carregarDados, 5000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const erro = dados.filter(d => d.status === "erro").length;
+  const pendentes = dados.filter(d => d.status === "pendente").length;
 
   if (loading) return null;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-100 to-gray-200 p-6">
-      
-      {/* HEADER */}
-      <div className="max-w-6xl mx-auto mb-6 flex justify-between items-center">
-        <div>
-          <h1 className="text-2xl font-semibold text-gray-800">
-            👋 Bem-vindo, {nome}
-          </h1>
-          <p className="text-sm text-gray-500">
-            Central de Autorizações • ASSIM Saúde
-          </p>
-        </div>
+    <div className="min-h-screen bg-gray-100 flex flex-col items-center justify-start p-6">
 
-        <div className="text-sm text-gray-500">
-          {dataAtual}
-        </div>
-      </div>
+      {/* LOGO */}
+      <img
+        src="/logo-universo-aba.png"
+        alt="Logo"
+        className="w-40 mb-4"
+      />
 
-      {/* DASHBOARD */}
-      <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-        
-        <div className="bg-white p-4 rounded-xl shadow">
-          <p className="text-xs text-gray-500">Pendentes</p>
-          <h2 className="text-2xl font-bold text-yellow-600">12</h2>
-        </div>
+      {/* SAUDAÇÃO */}
+      <h1 className="text-xl font-semibold text-gray-800 mb-1">
+        Olá, {nome}
+      </h1>
 
-        <div className="bg-white p-4 rounded-xl shadow">
-          <p className="text-xs text-gray-500">Aprovadas hoje</p>
-          <h2 className="text-2xl font-bold text-green-600">5</h2>
-        </div>
+      <p className="text-sm text-gray-500 mb-6">
+        Central de Autorizações
+      </p>
 
-        <div className="bg-white p-4 rounded-xl shadow">
-          <p className="text-xs text-gray-500">Recusadas</p>
-          <h2 className="text-2xl font-bold text-red-600">2</h2>
-        </div>
-
-      </div>
-
-      {/* AÇÕES */}
-      <div className="max-w-6xl mx-auto grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
-        
-        <button
-          onClick={() => router.push("/solicitar")}
-          className="bg-[#3A8FB7] hover:bg-[#2f7aa0] text-white p-6 rounded-xl shadow text-left transition"
+      {/* ALERTA */}
+      {erro > 0 && (
+        <div
+          onClick={() => router.push("/autorizacoes?status=erro")}
+          className="w-full max-w-md bg-red-100 border border-red-300 text-red-800 p-4 rounded-xl mb-6 text-center cursor-pointer hover:brightness-95"
         >
-          <h3 className="text-lg font-semibold mb-1">
-            + Nova Solicitação
-          </h3>
-          <p className="text-sm opacity-90">
-            Criar uma nova solicitação de autorização
-          </p>
-        </button>
+          🚨 {erro} autorização(ões) com erro  
+          <div className="text-xs mt-1">Clique para resolver</div>
+        </div>
+      )}
 
-        <button
-          onClick={() => router.push("/fila_autorizacoes")}
-          className="bg-white hover:bg-gray-50 p-6 rounded-xl shadow text-left transition border"
-        >
-          <h3 className="text-lg font-semibold mb-1 text-gray-800">
-            Ver Fila de Autorizações
-          </h3>
-          <p className="text-sm text-gray-500">
-            Acompanhar solicitações pendentes
-          </p>
-        </button>
+      {/* BOTÃO PRINCIPAL */}
+      <button
+        onClick={() => router.push("/solicitar")}
+        className="w-full max-w-md bg-[#3A8FB7] text-white py-4 rounded-xl font-semibold mb-4 hover:brightness-110 transition"
+      >
+        🚀 Iniciar Atendimentos
+      </button>
 
-      </div>
+      {/* BOTÃO SECUNDÁRIO */}
+      <button
+        onClick={() => router.push("/autorizacoes")}
+        className="w-full max-w-md border border-gray-300 py-3 rounded-xl text-gray-700 hover:bg-gray-50 transition"
+      >
+        📋 Ver fila completa
+      </button>
 
-      {/* ATIVIDADE RECENTE */}
-      <div className="max-w-6xl mx-auto bg-white p-4 rounded-xl shadow">
-        <h3 className="text-sm font-semibold text-gray-700 mb-2">
-          Atividade recente
-        </h3>
-
-        <ul className="text-sm text-gray-600 space-y-1">
-          <li>• Você criou uma solicitação há 2h</li>
-          <li>• 3 autorizações aguardando análise</li>
-          <li>• Última aprovação: hoje às 10:32</li>
-        </ul>
+      {/* STATUS */}
+      <div className="mt-6 text-xs text-gray-500">
+        🟢 Sistema ativo • {pendentes} em processamento • {erro} erro(s)
       </div>
 
     </div>

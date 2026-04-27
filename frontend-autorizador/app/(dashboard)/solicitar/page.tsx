@@ -1,3 +1,5 @@
+//solicitar//
+
 'use client'
 
 import { useEffect, useState } from 'react'
@@ -50,6 +52,35 @@ export default function SolicitarPage() {
   const [modalFalta, setModalFalta] = useState(false)
   
   const [pacienteFalta, setPacienteFalta] = useState<any>(null)
+  
+  const [confirmarFaltaDia, setConfirmarFaltaDia] = useState(false)
+  
+  const [pacienteFaltaDia, setPacienteFaltaDia] = useState<any>(null)
+
+  const chamarResponsavel = async (paciente: any) => {
+    try {
+      const { error } = await supabase
+        .from('chamada_paciente')
+        .insert([
+          {
+            nome: paciente.paciente_nome,
+            sala: paciente.sala || 'Recepção 1',
+			agenda_id: paciente.id
+          }
+        ])
+  
+      if (error) {
+        console.error(error)
+        alert('Erro ao chamar paciente')
+        return
+      }
+  
+      console.log('✅ CHAMADA INSERIDA')
+  
+    } catch (err) {
+      console.error(err)
+    }
+  }
 
   // =====================================
   // BOTAO DE CHECK SOLICITACAO RETROATIVA
@@ -224,27 +255,12 @@ async function handleSolicitarLista(p: any) {
       }
     }
 
-    // 🔥 BUSCAR AGENDA CORRETA (ESSENCIAL)
-    const { data: agenda, error: erroAgenda } = await supabase
-      .from('agenda_orbita')
-      .select('id')
-      .eq('paciente_id', p.paciente_id)
-      .eq('data_atendimento', hoje)
-      .eq('horario', p.horario)
-      .single()
-
-    if (erroAgenda || !agenda) {
-      console.error(erroAgenda)
-      toast.error('Agendamento não encontrado')
-      return
-    }
-
     // 🚀 INSERIR NA FILA COM agenda_id
     const { error } = await supabase
       .from('fila_autorizacoes')
       .insert([
         {
-          agenda_id: agenda.id, // 🔥 chave do relacionamento
+          agenda_id: p.id,
           paciente_id: p.paciente_id,
           paciente_nome: p.paciente_nome,
           empresa: p.empresa,
@@ -339,6 +355,61 @@ async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
   }
 }
 
+  // ===========================
+  // ❌ FALTA DIA DE ATENDIMENTO
+  // ===========================
+async function handleFaltaDia(paciente: any) {
+  const dataAtendimento = paciente.data_atendimento
+
+  // 🔥 USAR A LISTA DA TELA (fonte confiável)
+  const atendimentos = listaDia.filter(
+    (p) =>
+      p.paciente_id === paciente.paciente_id &&
+      p.data_atendimento === dataAtendimento
+  )
+
+  for (const p of atendimentos) {
+    const { data: existente } = await supabase
+      .from('fila_autorizacoes')
+      .select('id')
+      .eq('paciente_id', p.paciente_id)
+      .eq('data_atendimento', dataAtendimento)
+      .eq('horario', p.horario)
+      .maybeSingle()
+
+    if (existente) {
+      await supabase
+        .from('fila_autorizacoes')
+        .update({
+          status: 'falta',
+          tipo_falta: 'paciente',
+          terapia_falta: p.terapia || null
+        })
+        .eq('id', existente.id)
+    } else {
+      await supabase
+        .from('fila_autorizacoes')
+        .insert({
+          paciente_id: p.paciente_id,
+          paciente_nome: p.paciente_nome,
+          data_atendimento: dataAtendimento,
+          horario: p.horario,
+          status: 'falta',
+          tipo_falta: 'paciente',
+          terapia_falta: p.terapia || null
+        })
+    }
+  }
+
+  toast.success('Faltas aplicadas para o dia todo')
+
+  // 🔥 remove da tela imediatamente
+  setListaDia(prev =>
+    prev.filter(p => p.paciente_id !== paciente.paciente_id)
+  )
+
+  await carregarFila()
+}
   // =========================
   // 📤 FORM RETROATIVO
   // =========================
@@ -370,7 +441,7 @@ async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
       .from('fila_autorizacoes')
       .insert([
         {
-          agenda_id: agenda.id, // 🔥 SEM ? (obrigatório)
+          agenda_id: p.id,
           paciente_id: agenda.paciente_id,
           paciente_nome: agenda.paciente_nome,
           empresa: agenda.empresa,
@@ -717,7 +788,7 @@ async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
 			</div>
 
 			  {/* CONTEÚDO */}
-			  <div className="flex flex-1 justify-between p-3 items-center">
+			  <div className="flex flex-1 justify-between p-2 items-center">
 				
 				{/* INFO */}
 				<div className="flex flex-col gap-1 min-w-0">
@@ -770,19 +841,28 @@ async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
 				</div>
 
 				{/* AÇÕES */}
-				<div className="flex flex-col gap-2 ml-4">
+				<div className="flex flex-col gap-1 ml-4">
 				  
 				  <button
 					disabled={!ativo || statusItem?.status === 'processando'}
 					onClick={() => handleSolicitarLista(p)}
-			className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium transition ${
-			  ativo
-				? 'bg-[#3A8FB7] text-white shadow-md hover:brightness-110 hover:shadow-lg active:scale-[0.97]'
-				: 'bg-slate-200 text-slate-400 cursor-not-allowed'
-			}`}
+					className={`flex items-center gap-1.5 text-xs px-3 py-1 rounded-lg font-medium transition ${
+					  ativo
+						? 'bg-[#3A8FB7] text-white shadow-md hover:brightness-110 hover:shadow-lg active:scale-[0.97]'
+						: 'bg-slate-200 text-slate-400 cursor-not-allowed'
+					}`}
 				  >
 					<LogIn size={14} />
 					Autorização
+				  </button>
+
+				  {/* BOTÃO CHAMAR RESPONSAVEL*/}
+				  <button
+					onClick={() => chamarResponsavel(p)}
+					className="flex items-center gap-1.5 text-xs px-3 py-1 rounded-lg font-medium bg-emerald-600 text-white shadow-md hover:brightness-110 hover:shadow-lg active:scale-[0.97] transition"
+				  >
+					📢
+					Chamar
 				  </button>
 
 				  <button
@@ -790,7 +870,7 @@ async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
 					  setPacienteFalta(p)
 					  setModalFalta(true)
 					}}
-					className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium bg-red-100 text-red-700 hover:bg-red-200 active:scale-[0.97] transition"
+					className="flex items-center gap-1.5 text-xs px-3 py-1 rounded-lg font-medium bg-red-100 text-red-700 hover:bg-red-200 active:scale-[0.97] transition"
 				  >
 					<CalendarX size={14} />
 					Falta
@@ -925,60 +1005,128 @@ async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
       </div>
 
 
-{/* 🔥 MODAL FALTA */}
+{/* MODAL FALTA */}
 {modalFalta && (
-  <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
-    
-    <div className="bg-white rounded-2xl shadow-2xl p-6 w-[340px] border border-slate-200 transition-all scale-100 animate-in fade-in zoom-in-95">
-      
+  <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50">
+
+    <div className="relative bg-white rounded-2xl shadow-xl p-6 w-[360px] border border-slate-200">
+
+      {/* FECHAR (X) */}
+      <button
+        onClick={() => setModalFalta(false)}
+        className="absolute top-3 right-3 text-slate-400 hover:text-slate-600 text-lg"
+      >
+        ✕
+      </button>
+
       {/* TÍTULO */}
       <h2 className="text-lg font-semibold text-slate-800 text-center">
-        Tipo de Falta
+        Como deseja registrar a falta?
       </h2>
 
-      {/* NOME */}
-      <p className="text-slate-600 font-medium text-center mt-2 mb-6">
+      {/* PACIENTE */}
+      <p className="text-sm text-slate-600 text-center mt-2">
         {pacienteFalta?.paciente_nome}
       </p>
 
-      {/* BOTÕES */}
-      <div className="flex flex-col gap-3">
-        
-        <button
-          onClick={async () => {
-            if (!pacienteFalta) return
-            await handleFalta(pacienteFalta, 'paciente')
-            setModalFalta(false)
-          }}
-          className="w-full py-2.5 rounded-lg text-sm font-semibold bg-red-500 text-white shadow-md hover:bg-red-600 active:scale-[0.97] transition-all"
-        >
-          Falta do Paciente
-        </button>
+      {/* ESPAÇAMENTO */}
+		<div className="mt-6 flex flex-col gap-3">
 
-        <button
-          onClick={async () => {
-            if (!pacienteFalta) return
-            await handleFalta(pacienteFalta, 'terapeuta')
-            setModalFalta(false)
-          }}
-          className="w-full py-2.5 rounded-lg text-sm font-semibold bg-orange-400 text-white shadow-md hover:bg-orange-500 active:scale-[0.97] transition-all"
-        >
-          Falta do Terapeuta
-        </button>
+		  {/* PACIENTE */}
+		  <button
+			onClick={() => {
+			  if (!pacienteFalta) return
+			  setPacienteFaltaDia(pacienteFalta)
+			  setConfirmarFaltaDia(true)
+			  setModalFalta(false)
+			}}
+			className="w-full py-2.5 rounded-lg border border-slate-300 text-slate-700 bg-white transition font-medium hover:bg-blue-50 hover:border-blue-300"
+		  >
+			Falta do Paciente
+		  </button>
 
-        {/* CANCELAR */}
-        <button
-          onClick={() => setModalFalta(false)}
-          className="text-sm text-slate-500 hover:text-slate-700 transition mt-2"
-        >
-          Cancelar
-        </button>
+		  {/* TERAPEUTA */}
+		  <button
+			onClick={async () => {
+			  if (!pacienteFalta) return
+			  await handleFalta(pacienteFalta, 'terapeuta')
+			  setModalFalta(false)
+			}}
+			className="w-full py-2.5 rounded-lg border border-slate-300 text-slate-700 bg-white transition font-medium hover:bg-orange-50 hover:border-orange-300"
+		  >
+			Falta do Terapeuta
+		  </button>
 
-      </div>
+		</div>
+
     </div>
   </div>
 )}
 
+
+{/* MODAL FALTA CONFIRMACAO */}
+{confirmarFaltaDia && (
+  <div className="fixed inset-0 bg-black/30 backdrop-blur-sm flex items-center justify-center z-50">
+
+    <div className="relative bg-white rounded-2xl shadow-xl p-6 w-[360px] border border-slate-200">
+
+      {/* BOTÃO FECHAR (X) */}
+      <button
+        onClick={() => setConfirmarFaltaDia(false)}
+        className="absolute top-3 right-3 text-slate-400 hover:text-slate-600 text-lg"
+      >
+        ✕
+      </button>
+
+      {/* TÍTULO */}
+      <h2 className="text-lg font-semibold text-slate-800 text-center">
+        Como deseja registrar a falta?
+      </h2>
+
+      {/* PACIENTE */}
+      <p className="text-sm text-slate-600 text-center mt-2">
+        {pacienteFaltaDia?.paciente_nome}
+      </p>
+
+      {/* ESPAÇO */}
+      <div className="mt-6 flex flex-col gap-3">
+
+        {/* SÓ ESTE */}
+        <button
+          onClick={async () => {
+            if (!pacienteFaltaDia) return
+            await handleFalta(pacienteFaltaDia, 'paciente')
+            setConfirmarFaltaDia(false)
+          }}
+          className="w-full py-2.5 rounded-lg bg-blue-500 text-white font-semibold hover:bg-blue-600 transition"
+        >
+          Só este atendimento
+        </button>
+
+        {/* DIA TODO */}
+        <button
+          onClick={async () => {
+            if (!pacienteFaltaDia) return
+			setConfirmarFaltaDia(false)
+			setPacienteFaltaDia(null)
+
+			await handleFaltaDia(pacienteFaltaDia)
+          }}
+          className="w-full py-2.5 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition"
+        >
+          Todos os atendimentos do dia
+        </button>
+
+      </div>
+
+      {/* AVISO */}
+      <p className="text-xs text-slate-400 text-center mt-5 leading-relaxed">
+        Essa ação não pode ser desfeita facilmente.
+      </p>
+
     </div>
+  </div>
+)}
+	</div>
   )
 }

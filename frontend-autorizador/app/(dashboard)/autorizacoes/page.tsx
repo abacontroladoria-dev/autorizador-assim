@@ -1,7 +1,9 @@
+//AUTORIZACOES//
+
 'use client'
 
 import { StatusBadge } from '@/components/StatusBadge'
-import { getSupabase } from '@/lib/supabase'
+import { getSupabaseClient } from '@/lib/supabase/client'
 import { useEffect, useState } from 'react'
 import { listarAutorizacoes } from '@/services/autorizacoes.service'
 import { useRouter } from 'next/navigation'
@@ -17,13 +19,37 @@ export default function AutorizacoesPage() {
   const [dataFim, setDataFim] = useState(hoje)
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
-  const supabase = getSupabase()
-
+  const supabase = getSupabaseClient()
+  
+  
   async function carregar() {
     setLoading(true)
     const res = await listarAutorizacoes()
     setDados(res)
     setLoading(false)
+  }
+
+  async function chamarResponsavel(paciente: any) {
+    try {
+      const { error } = await supabase
+        .from('chamada_paciente')
+        .insert([
+          {
+            nome: paciente.paciente_nome,
+            sala: paciente.sala || 'Recepção 1',
+            agenda_id: paciente.id,
+          },
+        ])
+  
+      if (error) {
+          alert('Erro ao chamar paciente')
+        return
+      }
+  
+      console.log('✅ CHAMADA INSERIDA')
+    } catch (err) {
+      console.error(err)
+    }
   }
 
   async function cancelarExecucao(id: string) {
@@ -111,7 +137,7 @@ export default function AutorizacoesPage() {
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold text-slate-800">
-            Fila de Autorizações
+            Histórico de Autorizações
           </h1>
           <p className="text-sm text-slate-500">
             Gerencie solicitações e acompanhe execuções
@@ -223,7 +249,7 @@ export default function AutorizacoesPage() {
   onClick={() => router.push(`/autorizacoes/${a.id}`)}
   className={`w-full p-4 rounded-xl bg-white border border-slate-200 shadow-sm hover:shadow-md hover:bg-slate-50 transition cursor-pointer border-l-4 ${statusColor}
   
-  grid grid-cols-[120px_90px_1fr_220px_140px] items-center gap-4`}
+  grid grid-cols-[120px_90px_1fr_220px_140px_120px] items-center gap-4`}
 >
 
   {/* DATA */}
@@ -245,23 +271,40 @@ export default function AutorizacoesPage() {
 
   {/* TERAPIA */}
   <div className="text-sm text-slate-500 truncate">
-    {a.agenda_orbita?.terapia || 'Sem terapia'}
+    {a.terapia_falta || a.agenda_orbita?.terapia || 'Sem terapia'}
   </div>
 
-  {/* STATUS */}
-  <div className="flex justify-center">
-    <span className={`text-xs px-3 py-1 rounded-full font-medium
-      ${a.status === 'concluido' && 'bg-green-100 text-green-700'}
-      ${a.status === 'pendente' && 'bg-yellow-100 text-yellow-700'}
-      ${a.status === 'executando' && 'bg-blue-100 text-blue-700'}
-      ${a.status === 'erro' && 'bg-red-100 text-red-700'}
-      ${a.status === 'falta' && 'bg-orange-100 text-orange-700'}
-    `}>
-      {a.status}
-    </span>
-  </div>
+	  {/* STATUS */}
+	  <div className="flex justify-center">
+		<span className={`text-xs px-3 py-1 rounded-full font-medium
+		  ${a.status === 'concluido' && 'bg-green-100 text-green-700'}
+		  ${a.status === 'pendente' && 'bg-yellow-100 text-yellow-700'}
+		  ${a.status === 'executando' && 'bg-blue-100 text-blue-700'}
+		  ${a.status === 'erro' && 'bg-red-100 text-red-700'}
+		  ${a.status === 'falta' && 'bg-orange-100 text-orange-700'}
+		`}>
+		  {a.status === 'falta'
+			  ? a.tipo_falta === 'paciente'
+				? 'falta paciente'
+				: 'falta terapeuta'
+			: a.status}
+		</span>
+	  </div>
 
-</div>
+		{/* BOTÃO CHAMAR */}
+		<div className="flex justify-center">
+		  <button
+			onClick={(e) => {
+			  e.stopPropagation()
+			  chamarResponsavel(a)
+			}}
+			className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium bg-emerald-600 text-white shadow-md hover:brightness-110 hover:shadow-lg active:scale-[0.97] transition"
+		  >
+			📢 Chamar
+		  </button>
+		</div>
+
+		</div>
             )
           })}
 

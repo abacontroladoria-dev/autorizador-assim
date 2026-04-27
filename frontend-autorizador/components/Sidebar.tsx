@@ -40,14 +40,14 @@ export default function Sidebar() {
         onClick={() => router.push(path)}
         className={`relative w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all
         ${
-          active
-            ? "text-[#3A8FB7] bg-blue-50"
-            : "text-slate-600 hover:bg-slate-100"
+			active
+			  ? "text-white bg-[#3A8FB7] shadow-sm"
+			  : "text-slate-600 hover:bg-slate-100"
         }`}
       >
         {/* 🔥 INDICADOR LATERAL */}
         <span
-          className={`absolute left-0 top-1/2 -translate-y-1/2 h-6 w-1 rounded-r-full bg-[#3A8FB7] transition-all duration-300
+          className={`absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1.5 rounded-r-full bg-[#3A8FB7] transition-all duration-300
           ${active ? "opacity-100" : "opacity-0"}`}
         />
 
@@ -62,7 +62,7 @@ export default function Sidebar() {
 
       {/* LOGO */}
       <div className="h-20 flex items-center justify-center border-b border-slate-100 px-6">
-        <img src="/logo-universo-aba.png" className="h-12 object-contain" />
+        <img src="/logo-universo-aba.png" className="h-20 object-contain" />
       </div>
 
       {/* MENU */}
@@ -81,7 +81,7 @@ export default function Sidebar() {
         />
 
         <MenuItem
-          label="Fila de Autorizações"
+          label="Autorizações Passadas"
           icon={ClipboardList}
           path="/autorizacoes"
         />
