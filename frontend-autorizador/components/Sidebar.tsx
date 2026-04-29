@@ -5,23 +5,27 @@ import {
   ClipboardList,
   PlusCircle,
   LogOut,
+  Users,
 } from "lucide-react"
 
 import { usePathname, useRouter } from "next/navigation"
 import { getSupabaseClient } from "@/lib/supabase/client"
+import { useState } from "react"
 
 export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
   const supabase = getSupabaseClient()
-
+  const [loadingLogout, setLoadingLogout] = useState(false)
+  
   function isActive(path: string) {
     return pathname.startsWith(path)
   }
 
   async function handleLogout() {
+    setLoadingLogout(true)
     await supabase.auth.signOut()
-    window.location.href = "/login"
+    router.replace("/login")
   }
 
   function MenuItem({
@@ -85,18 +89,25 @@ export default function Sidebar() {
           icon={ClipboardList}
           path="/autorizacoes"
         />
+		
+		<MenuItem
+		  label="Outros Convênios"
+		  icon={Users}
+		  path="/outros-convenios"
+		/>
 
       </nav>
 
       {/* FOOTER */}
       <div className="p-4 border-t border-slate-100">
-        <button
-          onClick={handleLogout}
-          className="w-full flex items-center gap-2 px-4 py-2 rounded-lg text-sm text-slate-500 hover:bg-red-50 hover:text-red-600 transition"
-        >
-          <LogOut size={16} />
-          Sair
-        </button>
+		<button
+		  onClick={handleLogout}
+		  disabled={loadingLogout}
+		  className="w-full flex items-center gap-2 px-4 py-2 rounded-lg text-sm text-slate-500 hover:bg-red-50 hover:text-red-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
+		>
+		  <LogOut size={16} />
+		  {loadingLogout ? "Saindo..." : "Sair"}
+		</button>
       </div>
 
     </aside>

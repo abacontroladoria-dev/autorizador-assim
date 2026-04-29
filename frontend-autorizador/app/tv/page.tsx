@@ -11,7 +11,7 @@ export default function TVPage() {
   const [atual, setAtual] = useState<any>(null)
   const [historico, setHistorico] = useState<any[]>([])
   const [hora, setHora] = useState('')
-  const [temperatura, setTemperatura] = useState('--')
+  const [temperatura, setTemperatura] = useState<number | null>(null)
   const [iconeClima, setIconeClima] = useState('☀️')
   const [animando, setAnimando] = useState(false)
   const filaAudio = useRef<any[]>([])
@@ -172,7 +172,7 @@ useEffect(() => {
         schema: 'public',
         table: 'chamada_paciente'
       },
-      (payload) => {
+      (payload: any) => {
         const c = payload.new
 
         console.log('🔥 CHEGOU NA TV:', c) // 👈 DEBUG
@@ -206,7 +206,7 @@ useEffect(() => {
 				schema: 'public',
 				table: 'fila_autorizacoes'
 			  },
-			  (payload) => {
+			  (payload: any) => {
 				const atualizado = payload.new
 
 				console.log('🔄 UPDATE FILA:', atualizado)
@@ -220,7 +220,7 @@ useEffect(() => {
 				  )
 
 				  // remove do card principal
-				  setAtual((prev) =>
+				  setAtual((prev: any) =>
 					prev?.agenda_id === atualizado.id ? null : prev
 				  )
 				}
@@ -403,8 +403,12 @@ return (
       </div>
 
       <div className="flex items-center gap-6 text-sm text-white/80">
-        <span>{hora}</span>
-        <span>{temperatura}°C {iconeClima}</span>
+        <span>
+			{hora}
+		</span>
+        <span>
+			{temperatura !== null ? `${temperatura}°C` : '--'} {iconeClima}
+		</span>
       </div>
 
     </div>

@@ -16,6 +16,7 @@ const supabase = createClient(
 )
 
 const MACHINE_ID = process.env.MACHINE_ID
+
 const INTERVALO = 3000
 
 console.log('Worker iniciado na máquina:', MACHINE_ID)
@@ -27,7 +28,8 @@ async function buscarTarefa() {
   const { data, error } = await supabase
     .from('fila_autorizacoes')
     .select('*')
-    .eq('status', 'pendente') // ✅ CORRETO
+    .eq('status', 'pendente')
+	.eq('machine_id', MACHINE_ID)
     .order('id', { ascending: true }) // ✅ seguro
     .limit(1)
 
@@ -57,12 +59,12 @@ async function atualizarStatus(id, status) {
   }
 }
 
-		// =========================
-		// ⛔ CANCELAMENTO
-		// =========================
-		async function verificarCancelamento(id) {
+// =========================
+// ⛔ CANCELAMENTO
+// =========================
+async function verificarCancelamento(id) {
 		  const { data, error } = await supabase
-			.from('fila_autorizacoes') // ✅ tabela correta
+			.from('fila_autorizacoes')
 			.select('status')
 			.eq('id', id)
 			.single()
@@ -75,6 +77,111 @@ async function atualizarStatus(id, status) {
 		  // só continua se ainda estiver ativa
 		  return !['processando', 'executando'].includes(data?.status)
 		}
+
+	// =========================
+	// 🔄 SINCRONIZAÇÃO DE AGENDA
+	// =========================
+	async function verificarSync() {
+	  try {
+
+		const { data, error } = await supabase
+		  .from('sync_controle')
+		  .select('*')
+		  .eq('id', 1)
+		  .single()
+
+		if (error || !data) return
+
+		// 🔥 AQUI (logo após buscar os dados)
+		const tempoMaximo = 15 * 60 * 1000 // 15 min
+
+		if (data.status === 'running') {
+		  const ultima = new Date(data.updated_at).getTime()
+
+		  if (Date.now() - ultima > tempoMaximo) {
+			console.log(`⚠️ RESET SYNC - máquina anterior: ${data.machine_id}`)
+
+			await supabase
+			  .from('sync_controle')
+			  .update({ status: 'idle' })
+			  .match({ id: 1, status: 'running' })
+
+			return
+		  }
+		}
+
+		const agora = Date.now()
+		const ultimaExecucao = data.last_run
+		  ? new Date(data.last_run).getTime()
+		  : 0
+
+		const passou4h = agora - ultimaExecucao > 4 * 60 * 60 * 1000
+
+		// ✅ VALIDAÇÃO ANTES DO LOCK
+		if (data.status !== 'pendente') return
+		if (!passou4h && !data.force) return
+
+		// 🔐 LOCK ATÔMICO
+		const { data: lockData, error: lockError } = await supabase
+		  .from('sync_controle')
+		  .update({
+			status: 'running',
+			machine_id: MACHINE_ID,
+			updated_at: new Date().toISOString()
+		  })
+		  .match({
+			id: 1,
+			status: 'pendente'
+		  })
+		  .select()
+
+		if (lockError) {
+		  console.error("Erro ao travar sync:", lockError.message)
+		  return
+		}
+
+		if (!lockData || lockData.length === 0) {
+		  console.log("⚠️ Outro worker já iniciou a sync")
+		  return
+		}
+
+		console.log("🔐 LOCK DE SYNC OK")
+		console.log("🔄 INICIANDO SINCRONIZAÇÃO...")
+
+		// 🚀 EXECUTA
+		await executarSincronizacao(supabase)
+
+		await supabase
+		  .from('sync_controle')
+		  .update({
+			status: 'idle',
+			force: false,
+			last_run: new Date().toISOString(),
+			updated_at: new Date().toISOString()
+		  })
+		    .match({
+			id: 1,
+			status: 'running'
+		  })
+
+		console.log("✅ SINCRONIZAÇÃO FINALIZADA")
+
+	  } catch (err) {
+		console.error("❌ ERRO NA SYNC:", err.message)
+
+		await supabase
+		  .from('sync_controle')
+		  .update({
+			status: 'idle',
+			force: false,
+			updated_at: new Date().toISOString()
+		  })
+		  .match({
+		  id: 1,
+		  status: 'running'
+		})
+	  }
+	}
 
 // =========================
 // 📝 LOG
@@ -104,19 +211,34 @@ async function iniciarWorker() {
   console.log("💻 Máquina:", MACHINE_ID)
   console.log("=================================")
 
-  while (true) {
-    try {
+	while (true) {
+	  try {
 
-      console.log("🔎 Buscando tarefas...")
+		const { data: sync } = await supabase
+		  .from('sync_controle')
+		  .select('status')
+		  .eq('id', 1)
+		  .single()
 
-      const tarefa = await buscarTarefa()
+		if (sync?.status === 'running') {
+		  console.log("⏳ Sincronização em andamento...")
+		  await new Promise(r => setTimeout(r, INTERVALO))
+		  continue
+		}
 
-      if (!tarefa) {
-        await new Promise(r => setTimeout(r, INTERVALO))
-        continue
-      }
+		// 🔥 aqui permanece
+		await verificarSync()
 
-      console.log("📌 Tarefa encontrada:", tarefa.id)
+		console.log("🔎 Buscando tarefas...")
+
+		const tarefa = await buscarTarefa()
+
+		if (!tarefa) {
+		  await new Promise(r => setTimeout(r, 500))
+		  continue
+		}
+
+		console.log("📌 Tarefa encontrada:", tarefa.id)
 
       // =========================
       // 🔒 LOCK (CRÍTICO)
@@ -157,15 +279,19 @@ async function iniciarWorker() {
         }
 
         // 🚀 EXECUTANDO
-        await atualizarStatus(tarefa.id, 'executando')
+        const resultado = await executarRpa(tarefa, verificarCancelamento);
 
-		await executarRpa(tarefa, verificarCancelamento);
+		if (resultado === 'sucesso') {
+		  await atualizarStatus(tarefa.id, 'concluido');
+		  await registrarLog(tarefa.id, 'Execução concluída');
+		  console.log("✅ Concluído:", tarefa.id);
+		} else {
+		  await atualizarStatus(tarefa.id, 'erro');
+		  await registrarLog(tarefa.id, 'Falha na execução');
+		  console.log("❌ Falha:", tarefa.id);
+		}
         
-		await atualizarStatus(tarefa.id, 'concluido')
-
-        await registrarLog(tarefa.id, 'Execução concluída')
-
-        console.log("✅ Concluído:", tarefa.id)
+		await new Promise(r => setTimeout(r, 200))
 
       } catch (erroExecucao) {
 
@@ -174,16 +300,25 @@ async function iniciarWorker() {
         await atualizarStatus(tarefa.id, 'erro')
 
         await registrarLog(tarefa.id, erroExecucao.message)
+		
+		await new Promise(r => setTimeout(r, 1000))
+		
       }
 
     } catch (erroGeral) {
 
       console.error("❌ Erro geral:", erroGeral.message)
 
-      await new Promise(r => setTimeout(r, INTERVALO))
+      await new Promise(r => setTimeout(r, 1000))
     }
   }
 }
+
+
+// =====================================
+// EXECUTAR A SINCRONIZAÇÃO COM O ORBITA
+// =====================================
+const executarSincronizacao = require('./sync')
 
 // =========================
 // ▶ EXECUÇÃO

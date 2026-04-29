@@ -14,42 +14,79 @@ export default function Login() {
   const [erro, setErro] = useState("");
   const router = useRouter();
   const supabase = getSupabaseClient()  
+  const [checking, setChecking] = useState(true)
   
-  async function handleLogin(e: any) {
-    e.preventDefault();
-    setErro("");
-    setLoading(true);
+async function handleLogin(e: React.FormEvent) {
+  e.preventDefault();
+  setErro("");
+  setLoading(true);
 
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password: senha,
-    });
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email,
+    password: senha,
+  });
 
-    if (error) {
-      setErro("Login ou senha inválidos");
-      setLoading(false);
-      return;
-    }
-	  const { data } = await supabase.auth.getSession()
-	  console.log("SESSION:", data)
-
-    router.replace("/home")
+  if (error) {
+    setErro("Login ou senha inválidos");
+    setLoading(false);
+    return;
   }
 
+  const user = data.user;
+
+  // 🔥 (Opcional mas recomendado) validar se o usuário tem máquina vinculada
+  const { data: maquina, error: erroMaquina } = await supabase
+    .from('maquinas')
+    .select('id')
+    .eq('user_id', user.id)
+    .single();
+
+  if (erroMaquina || !maquina) {
+    console.error('Usuário sem máquina vinculada', erroMaquina);
+    setErro("Usuário não vinculado a uma máquina. Fale com o administrador.");
+	setLoading(false);
+	router.replace("/home");
+  }
+
+  // 🔥 (Opcional) atualizar last_seen
+	const { error: erroUpdate } = await supabase
+	  .from('maquinas')
+	  .update({
+		last_seen: new Date().toISOString()
+	  })
+	  .eq('id', maquina.id);
+
+	if (erroUpdate) {
+	  console.error('Erro ao atualizar last_seen', erroUpdate);
+	}
+
+  router.replace("/home");
+}
+
+
 	useEffect(() => {
+	  let mounted = true
+
 	  async function checkUser() {
-		const {
-		  data: { user },
-		} = await supabase.auth.getUser()
+		const { data: { user } } = await supabase.auth.getUser()
+
+		if (!mounted) return
 
 		if (user) {
-		  window.location.href = "/home"
+		  router.replace("/home")
+		} else {
+		  setChecking(false)
 		}
 	  }
 
 	  checkUser()
-	}, [router])
 
+	  return () => {
+		mounted = false
+	  }
+	}, [])
+
+	if (checking) return null
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-100 to-gray-200">

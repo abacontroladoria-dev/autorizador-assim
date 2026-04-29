@@ -11,7 +11,7 @@ import { useRouter } from 'next/navigation'
 export default function AutorizacoesPage() {
   const router = useRouter()
   const hoje = new Date().toISOString().split('T')[0]
-
+  const [filtroHorario, setFiltroHorario] = useState('')
   const [dados, setDados] = useState<any[]>([])
   const [filtro, setFiltro] = useState('')
   const [busca, setBusca] = useState('')
@@ -20,14 +20,17 @@ export default function AutorizacoesPage() {
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
   const supabase = getSupabaseClient()
+  const [firstLoad, setFirstLoad] = useState(true)
   
-  
-  async function carregar() {
-    setLoading(true)
-    const res = await listarAutorizacoes()
-    setDados(res)
-    setLoading(false)
-  }
+	async function carregar() {
+	  if (firstLoad) setLoading(true)
+
+	  const res = await listarAutorizacoes()
+	  setDados(res)
+
+	  setLoading(false)
+	  setFirstLoad(false)
+	}
 
   async function chamarResponsavel(paciente: any) {
     try {
@@ -53,13 +56,16 @@ export default function AutorizacoesPage() {
   }
 
   async function cancelarExecucao(id: string) {
-    await fetch('/api/cancelar', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ id }),
-    })
+    const { error } = await supabase
+      .from('fila_autorizacoes')
+      .update({
+        status: 'cancelado',
+        erro: 'Cancelado pelo usuário',
+        updated_at: new Date().toISOString()
+      })
+      .eq('id', id)
 
-    setMsg('Execução cancelada')
+        setMsg('Execução cancelada')
   }
 
   async function executarRobo(id: string) {
@@ -89,8 +95,11 @@ export default function AutorizacoesPage() {
     })
     .filter(a => (filtro ? a.status === filtro : true))
     .filter(a =>
-      a.paciente_nome?.toLowerCase().includes(busca.toLowerCase())
-    )
+	  a.paciente_nome?.toLowerCase().includes(busca.toLowerCase())
+	)
+	.filter(a =>
+	  !filtroHorario || a.horario?.slice(0, 5) === filtroHorario
+	)
 
   function aplicarFiltroRapido(tipo: string) {
     const hoje = new Date()
@@ -121,6 +130,7 @@ export default function AutorizacoesPage() {
     setDataFim(hoje)
     setBusca('')
     setFiltro('')
+	setFiltroHorario('')
   }
 
   const ordenados = [...filtrados].sort((a, b) => {
@@ -156,13 +166,13 @@ export default function AutorizacoesPage() {
       <div className="bg-white p-4 rounded-xl shadow-sm border border-slate-200 flex flex-wrap gap-3 items-center">
 
         <div className="flex gap-2">
-          <button onClick={() => aplicarFiltroRapido('hoje')} className="px-3 py-1.5 text-xs rounded-lg bg-slate-100 hover:bg-slate-200">
+          <button onClick={() => aplicarFiltroRapido('hoje')} className="flex gap-2 px-3 py-1.5 text-xs rounded-lg bg-slate-100 hover:bg-slate-200">
             Hoje
           </button>
-          <button onClick={() => aplicarFiltroRapido('semana')} className="px-3 py-1.5 text-xs rounded-lg bg-slate-100 hover:bg-slate-200">
+          <button onClick={() => aplicarFiltroRapido('semana')} className="flex gap-2 px-3 py-1.5 text-xs rounded-lg bg-slate-100 hover:bg-slate-200">
             Semana
           </button>
-          <button onClick={() => aplicarFiltroRapido('mes')} className="px-3 py-1.5 text-xs rounded-lg bg-slate-100 hover:bg-slate-200">
+          <button onClick={() => aplicarFiltroRapido('mes')} className="flex gap-2 px-3 py-1.5 text-xs rounded-lg bg-slate-100 hover:bg-slate-200">
             Mês
           </button>
         </div>
@@ -171,14 +181,14 @@ export default function AutorizacoesPage() {
           type="date"
           value={dataInicio}
           onChange={(e) => setDataInicio(e.target.value)}
-          className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
+          className="flex gap-2 border border-slate-200 rounded-lg px-3 py-2 text-sm"
         />
 
         <input
           type="date"
           value={dataFim}
           onChange={(e) => setDataFim(e.target.value)}
-          className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
+          className="flex gap-2 border border-slate-200 rounded-lg px-3 py-2 text-sm"
         />
 
         <input
@@ -186,13 +196,35 @@ export default function AutorizacoesPage() {
           placeholder="Buscar paciente..."
           value={busca}
           onChange={(e) => setBusca(e.target.value)}
-          className="border border-slate-200 rounded-lg px-3 py-2 text-sm w-60"
+          className="flex-1 min-w-[250px] border border-slate-200 rounded-lg px-3 py-2 text-sm w-60"
         />
+
+		<select
+		  value={filtroHorario}
+		  onChange={(e) => setFiltroHorario(e.target.value)}
+		  className="flex gap-2 border border-slate-200 rounded-lg px-3 py-2 text-sm"
+		>
+		  <option value="">Horário</option>
+
+		  {/* você pode ajustar os horários depois */}
+		  <option value="08:00">08:00</option>
+		  <option value="08:40">08:40</option>
+		  <option value="09:20">09:20</option>
+		  <option value="10:00">10:00</option>
+		  <option value="10:40">10:40</option>
+		  <option value="13:00">13:00</option>
+		  <option value="13:40">13:40</option>
+		  <option value="14:20">14:20</option>
+		  <option value="15:00">15:00</option>
+		  <option value="15:40">15:40</option>
+		  <option value="16:20">16:20</option>
+		  <option value="17:00">17:00</option>
+		</select>
 
         <select
           value={filtro}
           onChange={(e) => setFiltro(e.target.value)}
-          className="border border-slate-200 rounded-lg px-3 py-2 text-sm"
+          className="flex gap-2 border border-slate-200 rounded-lg px-3 py-2 text-sm"
         >
           <option value="">Todos</option>
           <option value="concluido">Concluídos</option>
@@ -274,22 +306,32 @@ export default function AutorizacoesPage() {
     {a.terapia_falta || a.agenda_orbita?.terapia || 'Sem terapia'}
   </div>
 
-	  {/* STATUS */}
-	  <div className="flex justify-center">
-		<span className={`text-xs px-3 py-1 rounded-full font-medium
-		  ${a.status === 'concluido' && 'bg-green-100 text-green-700'}
-		  ${a.status === 'pendente' && 'bg-yellow-100 text-yellow-700'}
-		  ${a.status === 'executando' && 'bg-blue-100 text-blue-700'}
-		  ${a.status === 'erro' && 'bg-red-100 text-red-700'}
-		  ${a.status === 'falta' && 'bg-orange-100 text-orange-700'}
-		`}>
-		  {a.status === 'falta'
+{/* STATUS + TIPO */}
+<div className="flex justify-center gap-2">
+
+		  {/* STATUS */}
+		  <span className={`text-xs px-3 py-1 rounded-full font-medium
+			${a.status === 'concluido' && 'bg-green-100 text-green-700'}
+			${a.status === 'pendente' && 'bg-yellow-100 text-yellow-700'}
+			${a.status === 'executando' && 'bg-blue-100 text-blue-700'}
+			${a.status === 'erro' && 'bg-red-100 text-red-700'}
+			${a.status === 'falta' && 'bg-orange-100 text-orange-700'}
+		  `}>
+			{a.status === 'falta'
 			  ? a.tipo_falta === 'paciente'
 				? 'falta paciente'
 				: 'falta terapeuta'
-			: a.status}
-		</span>
-	  </div>
+			  : a.status}
+		  </span>
+
+		  {/* MANUAL */}
+		  {a.completion_type === 'manual' && (
+			<span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
+			  Manual
+			</span>
+		  )}
+
+		</div>
 
 		{/* BOTÃO CHAMAR */}
 		<div className="flex justify-center">

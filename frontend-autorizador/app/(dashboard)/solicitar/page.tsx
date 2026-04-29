@@ -2,7 +2,7 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 
 import { getSupabaseClient } from '@/lib/supabase/client'
 
@@ -33,8 +33,6 @@ export default function SolicitarPage() {
 
   const [horario, setHorario] = useState('')
 
-  const [loading, setLoading] = useState(false)
-
   const [indexSelecionado, setIndexSelecionado] = useState<number>(-1)
 
   const [atualizando, setAtualizando] = useState(false)
@@ -57,6 +55,10 @@ export default function SolicitarPage() {
   
   const [pacienteFaltaDia, setPacienteFaltaDia] = useState<any>(null)
 
+  const [machineId, setMachineId] = useState<string | null>(null)
+
+  const [classificacoes, setClassificacoes] = useState<any[]>([])
+  
   const chamarResponsavel = async (paciente: any) => {
     try {
       const { error } = await supabase
@@ -102,6 +104,21 @@ export default function SolicitarPage() {
     }
     setTerapiaSelecionada(resultado?.terapia || null)
   }
+  
+  
+  // =====================================
+  // CARREGAMENTO DAS CLASSIFICACOES
+  // =====================================
+  
+async function carregarClassificacoes() {
+  const { data, error } = await supabase
+    .from('paciente_classificacao')
+    .select('*')
+
+  if (!error) {
+    setClassificacoes(data || [])
+  }
+}
 
   // ==================================
   // ATUALIZAÇÃO DA TABELA DE PACIENTES
@@ -121,35 +138,51 @@ export default function SolicitarPage() {
 
   // BOTÃO MANUAL
 
-	async function atualizarAgendaManual() {
-	  setAtualizando(true)
+async function atualizarAgendaManual() {
+  setAtualizando(true)
 
-	  await fetch('/api/sincronizar-agenda?force=true')
+  // 🔥 pede sincronização (FORÇADA)
+  const { error } = await supabase
+    .from('sync_controle')
+    .update({
+      status: 'pendente',
+      force: true,
+      updated_at: new Date().toISOString()
+    })
+    .eq('id', 1)
 
-	  let status = 'running'
-	  let tentativas = 0
+  if (error) {
+    console.error(error)
+    setAtualizando(false)
+    return
+  }
 
-	  while (status === 'running' && tentativas < 20) {
-		await new Promise(r => setTimeout(r, 1500))
+  let status = 'pendente'
+  let tentativas = 0
 
-		const res = await fetch('/api/status-sync')
-		const data = await res.json()
+  // 🔄 acompanha status pelo banco (não precisa mais function)
+  while (status === 'running' && tentativas < 20) {
+    await new Promise(r => setTimeout(r, 1500))
 
-		status = data.status
+    const { data } = await supabase
+      .from('sync_controle')
+      .select('status')
+      .eq('id', 1)
+      .single()
 
-		console.log('STATUS:', status)
+    status = data?.status || 'idle'
 
-		tentativas++
-	  }
+    console.log('STATUS:', status)
 
-	  // 🔥 ESSA LINHA RESOLVE SEU PROBLEMA
-	  await new Promise(r => setTimeout(r, 1000))
+    tentativas++
+  }
 
-	  await carregarLista()
+  await new Promise(r => setTimeout(r, 1000))
 
-	  setAtualizando(false)
-	}
+  await carregarLista()
 
+  setAtualizando(false)
+}
 
   // =========================
   // 📥 CARREGAR LISTA
@@ -174,7 +207,7 @@ export default function SolicitarPage() {
     }
     if (data) {
       // 🔥 segurança extra contra EMPTY string
-      const filtrado = data.filter((p) =>
+      const filtrado = data.filter((p: any) =>
         p.matricula &&
         p.empresa &&
         p.dep &&
@@ -206,8 +239,12 @@ export default function SolicitarPage() {
   // =========================
 
 async function handleSolicitarLista(p: any) {
-  try {
-    const statusItem = getStatusPaciente(p)
+	  if (!machineId) {
+	  toast.error('Máquina não identificada')
+	  return
+	}
+	try {
+    const statusItem = statusMap[`${p.paciente_id}_${p.horario}`]
 
     if (!podeSolicitar(p.ultima_autorizacao, statusItem?.status)) {
       toast.error('Aguarde 30 minutos desde a última autorização')
@@ -219,7 +256,7 @@ async function handleSolicitarLista(p: any) {
       .from('fila_autorizacoes')
       .select('id, status')
       .eq('paciente_id', p.paciente_id)
-      .eq('data_atendimento', hoje)
+      .eq('data_atendimento', p.data_atendimento)
       .eq('horario', p.horario)
       .maybeSingle()
 
@@ -234,7 +271,7 @@ async function handleSolicitarLista(p: any) {
       if (existente.status === 'erro') {
         const { error } = await supabase
           .from('fila_autorizacoes')
-          .update({ status: 'pendente' })
+          .update({ status: 'pendente', machine_id: machineId })
           .eq('id', existente.id)
 
         if (error) {
@@ -271,7 +308,8 @@ async function handleSolicitarLista(p: any) {
           tuss: p.tuss,
           data_atendimento: hoje,
           horario: p.horario,
-          status: 'pendente'
+          status: 'pendente',
+		  machine_id: machineId
         }
       ])
 
@@ -290,17 +328,91 @@ async function handleSolicitarLista(p: any) {
   }
 }
 
+  // ==========================
+  // IDENTIFICAR PACIENTE ASSIM
+  // ==========================
+
+async function marcarAssim(p: any) {
+  const { error } = await supabase
+    .from('paciente_classificacao')
+    .upsert([
+      {
+        paciente_id: p.paciente_id,
+        paciente_nome: p.paciente_nome,
+        convenio_tipo: 'ASSIM'
+      }
+    ], { onConflict: 'paciente_id' })
+
+  if (error) {
+    console.error(error)
+    toast.error('Erro ao marcar ASSIM')
+    return
+  }
+  
+  toast.success(`✔ ${p.paciente_nome} classificado`)
+  
+  setClassificacoes(prev => [
+    ...prev.filter(c => c.paciente_id !== p.paciente_id),
+    {
+      paciente_id: p.paciente_id,
+      paciente_nome: p.paciente_nome,
+      convenio_tipo: 'ASSIM'
+    }
+  ])
+}
+
+
+  // ======================================
+  // IDENTIFICAR PACIENTE DE OUTRO CONVENIO
+  // ======================================
+  
+async function marcarOutro(p: any) {
+  const { error } = await supabase
+    .from('paciente_classificacao')
+    .upsert([
+      {
+        paciente_id: p.paciente_id,
+        paciente_nome: p.paciente_nome,
+        convenio_tipo: 'OUTRO_CONVENIO'
+      }
+    ], { onConflict: 'paciente_id' })
+
+  if (error) {
+    console.error(error)
+    toast.error('Erro ao classificar')
+    return
+  }
+
+  toast.success(`✔ ${p.paciente_nome} classificado`)
+
+  setListaDia(prev =>
+    prev.filter(item => item.paciente_id !== p.paciente_id)
+  )  
+  setClassificacoes(prev => [
+    ...prev.filter(c => c.paciente_id !== p.paciente_id),
+    {
+      paciente_id: p.paciente_id,
+      paciente_nome: p.paciente_nome,
+      convenio_tipo: 'OUTRO_CONVENIO'
+    }
+  ])
+}
+
   // =========================
   // ❌ FALTA
   // =========================
 
 async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
-  try {
+	if (!machineId) {
+	  toast.error('Máquina não identificada')
+	  return
+	}
+	try {
     const { data: existente } = await supabase
       .from('fila_autorizacoes')
       .select('id, status')
       .eq('paciente_id', p.paciente_id)
-      .eq('data_atendimento', hoje)
+      .eq('data_atendimento', p.data_atendimento)
       .eq('horario', p.horario)
       .maybeSingle()
 
@@ -311,6 +423,7 @@ async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
         .update({ 
           status: 'falta',
           tipo_falta: tipo,
+		  machine_id: machineId,
           terapia_falta: p.terapia || null
         })
         .eq('id', existente.id)
@@ -330,15 +443,18 @@ async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
     // 🚀 SE NÃO EXISTE → INSERT NORMAL
     const { error } = await supabase
       .from('fila_autorizacoes')
-      .insert({
+      .insert([
+	  {
         paciente_id: p.paciente_id,
         paciente_nome: p.paciente_nome,
         data_atendimento: hoje,
         horario: p.horario,
         status: 'falta',
         tipo_falta: tipo,
+		machine_id: machineId,
         terapia_falta: p.terapia || null
-      })
+      }
+	  ])
 
     if (error) {
       console.error(error)
@@ -359,6 +475,10 @@ async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
   // ❌ FALTA DIA DE ATENDIMENTO
   // ===========================
 async function handleFaltaDia(paciente: any) {
+	if (!machineId) {
+	  toast.error('Máquina não identificada')
+	  return
+	}
   const dataAtendimento = paciente.data_atendimento
 
   // 🔥 USAR A LISTA DA TELA (fonte confiável)
@@ -383,21 +503,25 @@ async function handleFaltaDia(paciente: any) {
         .update({
           status: 'falta',
           tipo_falta: 'paciente',
+		  machine_id: machineId,
           terapia_falta: p.terapia || null
         })
         .eq('id', existente.id)
     } else {
       await supabase
         .from('fila_autorizacoes')
-        .insert({
+        .insert([
+		{
           paciente_id: p.paciente_id,
           paciente_nome: p.paciente_nome,
           data_atendimento: dataAtendimento,
           horario: p.horario,
           status: 'falta',
           tipo_falta: 'paciente',
+		  machine_id: machineId,
           terapia_falta: p.terapia || null
-        })
+        }
+		])
     }
   }
 
@@ -410,11 +534,16 @@ async function handleFaltaDia(paciente: any) {
 
   await carregarFila()
 }
+ 
   // =========================
   // 📤 FORM RETROATIVO
   // =========================
 
  async function handleSolicitar() {
+	if (!machineId) {
+	  toast.error('Máquina não identificada')
+	  return
+	}
   if (!pacienteSelecionado || !data || !horario) {
     toast.error('Preencha todos os campos')
     return
@@ -441,7 +570,7 @@ async function handleFaltaDia(paciente: any) {
       .from('fila_autorizacoes')
       .insert([
         {
-          agenda_id: p.id,
+          agenda_id: agenda.id,
           paciente_id: agenda.paciente_id,
           paciente_nome: agenda.paciente_nome,
           empresa: agenda.empresa,
@@ -452,7 +581,8 @@ async function handleFaltaDia(paciente: any) {
           tuss: agenda.tuss,
           data_atendimento: agenda.data_atendimento,
           horario: agenda.horario,
-          status: 'pendente'
+          status: 'pendente',
+		  machine_id: machineId
         }
       ])
 
@@ -480,6 +610,92 @@ async function handleFaltaDia(paciente: any) {
   const [filtro, setFiltro] = useState('')
 
   // =========================
+  // CONCLUSAO MANUAL
+  // =========================
+  
+async function handleManualLista(p: any) {
+  if (!machineId) {
+    toast.error('Máquina não identificada')
+    return
+  }
+
+  try {
+    // 🔍 VERIFICA SE JÁ EXISTE NA FILA
+    const { data: existente } = await supabase
+      .from('fila_autorizacoes')
+      .select('id, status')
+      .eq('paciente_id', p.paciente_id)
+	  .eq('data_atendimento', p.data_atendimento)
+      .eq('horario', p.horario)
+      .maybeSingle()
+
+    // 🔁 SE JÁ EXISTE → ATUALIZA
+    if (existente) {
+      const { error } = await supabase
+        .from('fila_autorizacoes')
+        .update({
+          status: 'concluido',
+          completion_type: 'manual',
+          numero_autorizacao: 'MANUAL',
+          completed_at: new Date().toISOString(),
+          machine_id: machineId
+        })
+        .eq('id', existente.id)
+
+      if (error) {
+        console.log('ERRO COMPLETO:', JSON.stringify(error, null, 2))
+        toast.error('Erro ao atualizar manual')
+        return
+      }
+
+      toast.success('Atualizado como manual 📝')
+
+    } else {
+      // 🚀 SE NÃO EXISTE → INSERT
+      const { error } = await supabase
+        .from('fila_autorizacoes')
+        .insert([
+          {
+            agenda_id: p.id,
+            paciente_id: p.paciente_id,
+            paciente_nome: p.paciente_nome,
+            empresa: p.empresa,
+            matricula: p.matricula,
+            dep: p.dep,
+            crm: p.crm,
+            nome_medico: p.nome_medico,
+            tuss: p.tuss,
+            data_atendimento: p.data_atendimento,
+            horario: p.horario,
+
+            status: 'concluido',
+            completion_type: 'manual',
+            numero_autorizacao: 'MANUAL',
+            machine_id: machineId,
+            completed_at: new Date().toISOString()
+          }
+        ])
+
+      if (error) {
+        console.error(error)
+        toast.error('Erro ao registrar manual')
+        return
+      }
+
+      toast.success('Autorização manual registrada 📝')
+    }
+
+    // 🔥 REMOVE DA LISTA (igual falta)
+    setListaDia(prev => prev.filter(item => item.id !== p.id))
+
+    await carregarFila()
+
+  } catch (err) {
+    console.error(err)
+    toast.error('Erro inesperado')
+  }
+}
+  // =========================
   // ⏱️ REGRA 30 MINUTOS
   // =========================
 
@@ -495,6 +711,14 @@ async function handleFaltaDia(paciente: any) {
 	  const diffMin = diffMs / 1000 / 60
 
 	  return diffMin >= 30
+	}
+
+  // =================================
+  // PEGAR A CLASSIFICACAO DE CONVENIO
+  // =================================
+  
+	function getClassificacao(p: any) {
+	  return classificacaoMap[p.paciente_id]
 	}
 
   // =========================
@@ -542,6 +766,10 @@ async function handleFaltaDia(paciente: any) {
     return horarios
   }
 
+  // =========================
+  // CARREGAR AGENDA
+  // =========================
+  
   useEffect(() => {
      carregarAgenda()
   }, [])
@@ -556,7 +784,7 @@ async function handleFaltaDia(paciente: any) {
       .on(
         'postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'agenda_orbita' },
-        (payload) => {
+        (payload: any) => {
           const updated = payload.new
           setListaDia((prev) =>
             prev.filter((item) => item.id !== updated.id)
@@ -576,6 +804,7 @@ async function handleFaltaDia(paciente: any) {
 	useEffect(() => {
 	  carregarLista()
 	  carregarFila()
+	  carregarClassificacoes()
 
 	  const interval = setInterval(() => {
 		carregarFila()
@@ -611,7 +840,7 @@ async function handleFaltaDia(paciente: any) {
         .limit(50)
       if (data) {
         const unicos = Array.from(
-          new Map(data.map(p => [p.paciente_nome, p])).values()
+          new Map(data.map((p: any) => [p.paciente_nome, p])).values()
         )
         setSugestoes(unicos)
       }
@@ -628,16 +857,56 @@ async function handleFaltaDia(paciente: any) {
   }, [pacienteSelecionado, data, horario])
 
   // =========================
+  // BUSCAR MAQUINA
+  // =========================
+	useEffect(() => {
+	  async function carregarMachineId() {
+		const { data: userData } = await supabase.auth.getUser()
+
+		const user = userData?.user
+		if (!user) return
+
+		const { data, error } = await supabase
+		  .from('maquinas')
+		  .select('id')
+		  .eq('user_id', user.id)
+		  .single()
+
+		if (error) {
+		  console.error('Erro ao buscar machine_id:', error)
+		  return
+		}
+
+		setMachineId(data?.id || null)
+	  }
+
+	  carregarMachineId()
+	}, [])
+
+
+  // =========================
   // BUSCAR STATUS DO PACIENTE
   // =========================
-	function getStatusPaciente(p: any) {
-	  return filaStatus.find(
-		(f) =>
-		  f.paciente_id === p.paciente_id &&
-		  f.horario === p.horario &&
-		  f.data_atendimento === hoje
-	  )
-	}
+	const classificacaoMap = useMemo(() => {
+	  const map: any = {}
+
+	  classificacoes.forEach(c => {
+		map[c.paciente_id] = c
+	  })
+
+	  return map
+	}, [classificacoes])
+
+	const statusMap = useMemo(() => {
+	  const map: any = {}
+
+	  filaStatus.forEach(f => {
+		const key = `${f.paciente_id}_${f.horario}`
+		map[key] = f
+	  })
+
+	  return map
+	}, [filaStatus])
 
   // =========================
   // 🎨 UI
@@ -717,14 +986,15 @@ async function handleFaltaDia(paciente: any) {
             <p className="text-sm text-slate-400">Carregando...</p>
           ) : (() => {
             const listaFiltrada = listaDia.filter((p) => {
+			    
+				const classificacao = classificacaoMap[p.paciente_id]
+				const statusItem = statusMap[`${p.paciente_id}_${p.horario}`]
 
-			  const statusItem = filaStatus.find(
-				(f) =>
-				  f.paciente_id === p.paciente_id &&
-				  f.horario === p.horario &&
-				  f.data_atendimento === hoje
-			  )
-
+				// 🚫 REMOVE OUTROS CONVÊNIOS
+				if (classificacao?.convenio_tipo === 'OUTRO_CONVENIO') {
+				  return false
+				}
+			  
 			  // 🚫 ESCONDER FALTA E CONCLUÍDO
 			  if (['falta', 'concluido'].includes(statusItem?.status)) {
 				return false
@@ -769,7 +1039,8 @@ async function handleFaltaDia(paciente: any) {
 			return (
 			  <div className="space-y-3">
 				{listaOrdenada.map((p) => {
-				  const statusItem = getStatusPaciente(p)
+				  const statusItem = statusMap[`${p.paciente_id}_${p.horario}`]
+				  const classificacao = getClassificacao(p)
 				  const ativo = podeSolicitar(p.ultima_autorizacao,statusItem?.status)
 				  const ultimaConcluida = getUltimaAutorizacaoConcluida(p)
 
@@ -787,97 +1058,134 @@ async function handleFaltaDia(paciente: any) {
 			  </span>
 			</div>
 
-			  {/* CONTEÚDO */}
-			  <div className="flex flex-1 justify-between p-2 items-center">
-				
-				{/* INFO */}
-				<div className="flex flex-col gap-1 min-w-0">
-				  
-				  <span className="text-lg font-semibold text-slate-800 leading-tight truncate">
-					{p.paciente_nome}
-				  </span>
+{/* CONTEÚDO */}
+<div className="flex flex-1 justify-between p-2 items-center gap-4">
 
-				  <div className="flex items-center gap-2 flex-wrap">
-					
-					<span className="text-[11px] px-2 py-0.5 rounded-md bg-slate-100/70 text-slate-600 border border-slate-200">
-					  {p.terapia || 'Sem terapia'}
-					</span>
+  <div className="flex flex-col gap-2 min-w-0">
 
-					{/* PENDENTE */}
-			{statusItem?.status === 'pendente' && (
-			  <span className="flex items-center gap-1 text-xs font-semibold text-yellow-800 bg-yellow-100 px-2 py-0.5 rounded-md">
-				<span className="w-1.5 h-1.5 bg-yellow-500 rounded-full"></span>
-				Pendente
-			  </span>
-			)}
+    {/* NOME */}
+    <span className="text-lg font-semibold text-slate-800 leading-tight truncate">
+      {p.paciente_nome}
+    </span>
 
-					  {/* PROCESSANDO */}
-					{(statusItem?.status === 'processando' || statusItem?.status === 'executando') && (
-			<span className="flex items-center gap-1 text-xs font-semibold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-md">
-						<span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></span>
-						Processando
-					  </span>
-					)}
+    {/* TRIAGEM (AÇÃO) */}
+    {!classificacao && (
+      <div className="flex gap-2 mt-1">
+        <button
+          onClick={() => marcarAssim(p)}
+          className="text-[11px] px-2 py-1 rounded bg-green-100 text-green-700 hover:bg-green-200"
+        >
+          ✅ ASSIM
+        </button>
 
-					  {/* ERRO */}
-					{statusItem?.status === 'erro' && (
-			<span className="flex items-center gap-1 text-xs font-semibold text-red-800 bg-red-100 px-2 py-0.5 rounded-md">
-						<span className="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
-						Erro
-					  </span>
-					)}
-				  </div>
+        <button
+          onClick={() => marcarOutro(p)}
+          className="text-[11px] px-2 py-1 rounded bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
+        >
+          🟡 Outro
+        </button>
+      </div>
+    )}
 
-				  <span className="text-xs text-slate-400">
-					Última Autorização:{' '}
-					{ultimaConcluida
-					  ? new Date(ultimaConcluida.updated_at + 'Z').toLocaleTimeString('pt-BR', {
-						  timeZone: 'America/Sao_Paulo',
-						  hour: '2-digit',
-						  minute: '2-digit'
-						})
-					  : '-'}
-				  </span>
-				</div>
+    {/* BADGES (INFORMAÇÃO) */}
+    <div className="flex items-center gap-2 flex-wrap">
 
-				{/* AÇÕES */}
-				<div className="flex flex-col gap-1 ml-4">
-				  
-				  <button
-					disabled={!ativo || statusItem?.status === 'processando'}
-					onClick={() => handleSolicitarLista(p)}
-					className={`flex items-center gap-1.5 text-xs px-3 py-1 rounded-lg font-medium transition ${
-					  ativo
-						? 'bg-[#3A8FB7] text-white shadow-md hover:brightness-110 hover:shadow-lg active:scale-[0.97]'
-						: 'bg-slate-200 text-slate-400 cursor-not-allowed'
-					}`}
-				  >
-					<LogIn size={14} />
-					Autorização
-				  </button>
+      {/* TERAPIA */}
+      <span className="text-[11px] px-2 py-0.5 rounded-md bg-slate-100/70 text-slate-600 border border-slate-200">
+        {p.terapia || 'Sem terapia'}
+      </span>
 
-				  {/* BOTÃO CHAMAR RESPONSAVEL*/}
-				  <button
-					onClick={() => chamarResponsavel(p)}
-					className="flex items-center gap-1.5 text-xs px-3 py-1 rounded-lg font-medium bg-emerald-600 text-white shadow-md hover:brightness-110 hover:shadow-lg active:scale-[0.97] transition"
-				  >
-					📢
-					Chamar
-				  </button>
+      {/* CLASSIFICAÇÃO */}
+      {classificacao?.convenio_tipo === 'ASSIM' && (
+        <span className="text-[11px] px-2 py-0.5 rounded-md bg-green-100 text-green-700 border border-green-200 font-medium">
+          ✔ ASSIM
+        </span>
+      )}
 
-				  <button
-					onClick={() => {
-					  setPacienteFalta(p)
-					  setModalFalta(true)
-					}}
-					className="flex items-center gap-1.5 text-xs px-3 py-1 rounded-lg font-medium bg-red-100 text-red-700 hover:bg-red-200 active:scale-[0.97] transition"
-				  >
-					<CalendarX size={14} />
-					Falta
-				  </button>
+      {/* STATUS */}
+      {statusItem?.status === 'pendente' && (
+        <span className="flex items-center gap-1 text-xs font-semibold text-yellow-800 bg-yellow-100 px-2 py-0.5 rounded-md">
+          <span className="w-1.5 h-1.5 bg-yellow-500 rounded-full"></span>
+          Pendente
+        </span>
+      )}
 
-				</div>
-			  </div>
+      {(statusItem?.status === 'processando' || statusItem?.status === 'executando') && (
+        <span className="flex items-center gap-1 text-xs font-semibold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-md">
+          <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></span>
+          Processando
+        </span>
+      )}
+
+      {statusItem?.status === 'erro' && (
+        <span className="flex items-center gap-1 text-xs font-semibold text-red-800 bg-red-100 px-2 py-0.5 rounded-md">
+          <span className="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
+          Erro
+        </span>
+      )}
+    </div>
+
+    {/* ÚLTIMA AUTORIZAÇÃO */}
+    <span className="text-xs text-slate-400">
+      Última Autorização:{' '}
+      {ultimaConcluida
+        ? new Date(ultimaConcluida.updated_at + 'Z').toLocaleTimeString('pt-BR', {
+            timeZone: 'America/Sao_Paulo',
+            hour: '2-digit',
+            minute: '2-digit'
+          })
+        : '-'}
+    </span>
+
+  </div>
+
+  {/* AÇÕES */}
+  <div className="flex flex-col gap-2 ml-4 w-[220px]">
+
+    {/* LINHA 1 */}
+    <div className="flex gap-2">
+      <button
+        disabled={!ativo || statusItem?.status === 'processando'}
+        onClick={() => handleSolicitarLista(p)}
+        className={`flex-1 flex items-center justify-center gap-1 text-xs px-2 py-1.5 rounded-lg font-medium transition ${
+          ativo
+            ? 'bg-[#3A8FB7] text-white shadow-md hover:brightness-110'
+            : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+        }`}
+      >
+        🔐 Autorização
+      </button>
+
+      <button
+        onClick={() => chamarResponsavel(p)}
+        className="flex-1 flex items-center justify-center gap-1 text-xs px-2 py-1.5 rounded-lg font-medium bg-emerald-600 text-white hover:brightness-110 transition"
+      >
+        📢 Chamar
+      </button>
+    </div>
+
+    {/* LINHA 2 */}
+    <div className="flex gap-2">
+      <button
+        onClick={() => handleManualLista(p)}
+        className="flex-1 flex items-center justify-center gap-1 text-xs px-2 py-1.5 rounded-lg font-medium bg-slate-500 text-white hover:bg-slate-600 transition"
+      >
+        📝 Manual
+      </button>
+
+      <button
+        onClick={() => {
+          setPacienteFalta(p)
+          setModalFalta(true)
+        }}
+        className="flex-1 flex items-center justify-center gap-1 text-xs px-2 py-1.5 rounded-lg font-medium bg-red-100 text-red-700 hover:bg-red-200 transition"
+      >
+        🚫 Falta
+      </button>
+    </div>
+
+  </div>
+</div>
 			</div>
 				  )
 				})}

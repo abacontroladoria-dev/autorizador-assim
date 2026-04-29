@@ -1,4 +1,12 @@
-node_modules
+node_modules/
 .env
 .next
 dist
+LICENSE.md
+README.md
+LICENSE
+instalador/
+node/
+robo-autorizador/
+package-lock.json
+package.json

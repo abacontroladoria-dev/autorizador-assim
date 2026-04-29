@@ -1,7 +1,7 @@
-import { createClient } from '@/lib/supabase/client'
+import { getSupabaseClient } from '@/lib/supabase/client'
 import { Log } from '@/types/log'
 
-const supabase = createClient()
+const supabase = getSupabaseClient()
 
 export async function buscarLogs(autorizacaoId: string): Promise<Log[]> {
   const { data, error } = await supabase
