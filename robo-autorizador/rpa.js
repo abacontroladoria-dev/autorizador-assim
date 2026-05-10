@@ -1,11 +1,13 @@
 /**
  * =========================
- * RPA - AUTORIZAÇÃO ASSIM (VERSÃO CORRIGIDA)
+ * RPA - AUTORIZAÇÃO ASSIM (COM TOKEN + PDF)
  * =========================
  */
 
 require('dotenv').config();
 const { chromium } = require('playwright');
+const fs = require('fs');
+const path = require('path');
 
 // =========================
 // Funções Auxiliares
@@ -64,6 +66,39 @@ function normalizarTexto(texto) {
 }
 
 // =========================
+// NOME DO ARQUIVO
+// =========================
+function nomeArquivoSeguro(texto) {
+  return texto
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9]/g, "");
+}
+
+function mesAbreviado(mes) {
+  const meses = [
+    "JAN","FEV","MAR","ABR","MAI","JUN",
+    "JUL","AGO","SET","OUT","NOV","DEZ"
+  ];
+  return meses[mes];
+}
+
+function gerarNomeArquivo(dataISO, nomePaciente) {
+  const d = new Date(dataISO);
+
+  const dia = String(d.getDate()).padStart(2, '0');
+  const mes = mesAbreviado(d.getMonth());
+  const ano = d.getFullYear();
+
+  const hora = String(d.getHours()).padStart(2, '0');
+  const min = String(d.getMinutes()).padStart(2, '0');
+
+  const nome = nomeArquivoSeguro(nomePaciente);
+
+  return `${dia}${mes}${ano}_${nome}_${hora}-${min}.pdf`;
+}
+
+// =========================
 // CONFIG
 // =========================
 const URL = process.env.ASSIM_URL;
@@ -113,6 +148,10 @@ async function executarRpa(tarefa, verificarCancelamento) {
   const page = await context.newPage();
 
   let sucessoExecucao = false;
+
+  // 📁 pasta fixa
+  const pastaFilipetas = path.join(__dirname, 'filipetas');
+  fs.mkdirSync(pastaFilipetas, { recursive: true });
 
   try {
     console.log("🚀 Iniciando RPA...");
@@ -168,12 +207,41 @@ async function executarRpa(tarefa, verificarCancelamento) {
     const resultado = await aguardarResultadoEnvio(page);
 
     if (resultado === 'sucesso') {
+
+      console.log("🔎 Verificando fluxo de token...");
+
+      const fluxoToken = await page.locator('text=Token enviado para').isVisible().catch(() => false);
+
+      if (fluxoToken) {
+        console.log("🔐 Token detectado");
+
+        console.log("⌛ Aguardando confirmação do usuário...");
+        await page.waitForSelector('text=Token enviado para', { state: 'detached', timeout: 120000 });
+
+        console.log("📄 Aguardando tela final...");
+        await page.waitForLoadState('networkidle');
+        await delay(2000);
+
+        // 📄 gerar nome do arquivo
+        const nomeArquivo = gerarNomeArquivo(
+          tarefa.data_sessao || new Date(),
+          tarefa.paciente_nome
+        );
+
+        console.log("🖨️ Salvando PDF:", nomeArquivo);
+
+        await page.pdf({
+          path: path.join(pastaFilipetas, nomeArquivo),
+          format: 'A4'
+        });
+
+        // 🖨️ abrir janela de impressão
+        console.log("🖨️ Abrindo janela de impressão...");
+        await page.keyboard.press('Control+P');
+      }
+
       sucessoExecucao = true;
       return 'sucesso';
-    }
-
-    if (resultado === 'erro') {
-      throw new Error("Erro após envio");
     }
 
     if (resultado === 'timeout') {

@@ -10,6 +10,10 @@ const executarRpa = require('./rpa')
 
 const { createClient } = require('@supabase/supabase-js')
 
+const express = require('express')
+
+const cors = require('cors')
+
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_KEY
@@ -17,9 +21,38 @@ const supabase = createClient(
 
 const MACHINE_ID = process.env.MACHINE_ID
 
+const app = express()
+
+app.use(cors({
+
+  origin(origin, callback) {
+
+    const allowed = [
+
+      'http://localhost:3000',
+
+      'https://orbitaautomacao.com.br'
+    ]
+
+    // requests locais sem origin
+    if (!origin) {
+      return callback(null, true)
+    }
+
+    if (allowed.includes(origin)) {
+      return callback(null, true)
+    }
+
+    return callback(
+      new Error('Not allowed by CORS')
+    )
+  }
+}))
+
 const INTERVALO = 3000
 
 console.log('Worker iniciado na máquina:', MACHINE_ID)
+
 
 // =========================
 // 🔎 BUSCAR TAREFA (PENDENTE)
@@ -130,8 +163,9 @@ async function verificarCancelamento(id) {
 			updated_at: new Date().toISOString()
 		  })
 		  .match({
-			id: 1,
-			status: 'pendente'
+		    id: 1,
+		    status: 'pendente',
+		    machine_id: 'admin'
 		  })
 		  .select()
 
@@ -319,6 +353,47 @@ async function iniciarWorker() {
 // EXECUTAR A SINCRONIZAÇÃO COM O ORBITA
 // =====================================
 const executarSincronizacao = require('./sync')
+
+
+
+
+app.get('/health', (req, res) => {
+
+  res.json({
+
+  ok: true,
+
+  worker: 'online',
+
+  machine_id: MACHINE_ID,
+
+  uptime: process.uptime(),
+
+  timestamp: new Date().toISOString()
+})
+})
+
+app.get('/machine-id', (req, res) => {
+
+  res.json({
+    machine_id: MACHINE_ID
+  })
+})
+
+const LOCAL_API_PORT =
+  process.env.LOCAL_API_PORT || 3010
+
+app.listen(
+  LOCAL_API_PORT,
+  '127.0.0.1',
+  () => {
+
+    console.log(
+      `🌐 API local ativa em http://127.0.0.1:${LOCAL_API_PORT}`
+    )
+  }
+)
+
 
 // =========================
 // ▶ EXECUÇÃO

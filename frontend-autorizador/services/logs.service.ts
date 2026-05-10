@@ -1,19 +1,27 @@
 import { getSupabaseClient } from '@/lib/supabase/client'
-import { Log } from '@/types/log'
 
 const supabase = getSupabaseClient()
 
-export async function buscarLogs(autorizacaoId: string): Promise<Log[]> {
+export async function buscarLogsFila(
+  filaId: string
+) {
+
   const { data, error } = await supabase
-    .from('logs')
+
+    .from('fila_autorizacoes_logs')
+
     .select('*')
-    .eq('autorizacao_id', autorizacaoId)
-    .order('created_at', { ascending: false })
+
+    .eq('fila_id', filaId)
+
+    .order('created_at', {
+      ascending: true
+    })
 
   if (error) {
     console.error(error)
     return []
   }
 
-  return data as Log[]
+  return data || []
 }

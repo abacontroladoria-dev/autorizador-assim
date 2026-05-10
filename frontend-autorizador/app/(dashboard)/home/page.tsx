@@ -15,16 +15,28 @@ export default function Home() {
   const hoje = new Date().toISOString().split("T")[0];
 
   useEffect(() => {
-    async function loadUser() {
-      const { data: { user } } = await supabase.auth.getUser();
+async function loadUser() {
+  const { data: { user } } = await supabase.auth.getUser();
 
-      if (!user) {
-        router.replace("/");
-        return;
-      }
+  if (!user) {
+    router.replace("/");
+    return;
+  }
 
-      setNome((user.email || "").split("@")[0]);
-    }
+  // 🔥 busca o nome na tabela maquinas
+  const { data, error } = await supabase
+    .from("maquinas")
+    .select("name")
+    .eq("user_id", user.id)
+    .limit(1);
+
+  if (data && data.name) {
+    setNome(data.name);
+  } else {
+    console.log("Erro ao buscar nome:", error);
+    setNome("Usuário");
+  }
+}
 
     loadUser();
   }, []);

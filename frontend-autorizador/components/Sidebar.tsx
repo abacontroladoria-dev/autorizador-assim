@@ -6,6 +6,7 @@ import {
   PlusCircle,
   LogOut,
   Users,
+  Activity,
 } from "lucide-react"
 
 import { usePathname, useRouter } from "next/navigation"
@@ -91,9 +92,9 @@ export default function Sidebar() {
         />
 		
 		<MenuItem
-		  label="Outros Convênios"
-		  icon={Users}
-		  path="/outros-convenios"
+		  label="Controle de Pacientes"
+		  icon={Activity}
+		  path="/central-pacientes"
 		/>
 
       </nav>

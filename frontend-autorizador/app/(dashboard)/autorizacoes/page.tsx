@@ -7,6 +7,96 @@ import { getSupabaseClient } from '@/lib/supabase/client'
 import { useEffect, useState } from 'react'
 import { listarAutorizacoes } from '@/services/autorizacoes.service'
 import { useRouter } from 'next/navigation'
+import React from 'react'
+import { useMemo } from 'react'
+import { getStatusConfig } from '@/utils/statusAutorizacao'
+
+
+const ItemAutorizacao = React.memo(
+  ({ a, router, setSelecionado }: any) => {
+	
+	const status = getStatusConfig(a)
+	
+    const statusColor =
+	  a.is_manual
+		? "border-l-blue-400"
+		: a.status_assim === 'autorizado'
+		? "border-l-green-500"
+		: a.status_assim === 'pendencia_adm'
+		? "border-l-red-500"
+		: a.status === "erro"
+		? "border-l-red-500"
+		: a.status === "executando"
+		? "border-l-blue-500"
+		: a.status === "concluido"
+		? "border-l-yellow-400"
+		: a.status === "falta"
+		? "border-l-orange-400"
+		: "border-l-yellow-400"
+
+    return (
+      <div
+        onClick={() => setSelecionado(a)}
+        className={`w-full p-4 rounded-xl bg-white border border-slate-200 shadow-sm hover:shadow-md hover:bg-slate-50 transition cursor-pointer border-l-4 ${statusColor}
+        grid grid-cols-[120px_90px_1fr_220px_140px_120px] items-center gap-4`}
+      >
+
+        <div className="text-sm text-slate-600 font-medium">
+          {a.data_atendimento
+            ? a.data_atendimento.split('-').reverse().join('/')
+            : '--/--/----'}
+        </div>
+
+        <div className="font-semibold text-[#3A8FB7]">
+          {a.horario ? a.horario.slice(0, 5) : '--:--'}
+        </div>
+
+        <div className="font-semibold text-slate-900 truncate">
+          {a.paciente_nome}
+        </div>
+
+        <div className="text-sm text-slate-500 truncate">
+			{
+			  a.classificacao_terapia ||
+			  a.terapia_falta ||
+			  a.agenda_orbita?.terapia ||
+			  'Sem terapia'
+			}
+        </div>
+
+<div className="flex items-center justify-center">
+  <span
+    className={`
+      min-w-[140px]
+      text-center text-xs
+      px-3 py-1.5 rounded-full
+      font-medium leading-tight
+      ${status.className}
+    `}
+  >
+    {status.label}
+  </span>
+</div>
+
+<div className="flex items-center justify-center">
+<span
+  className={`
+    text-xs text-center leading-tight
+    px-3 py-1.5 rounded-lg font-medium
+    ${a.is_manual
+      ? 'bg-blue-100 text-blue-700'
+      : 'bg-green-100 text-green-700'}
+  `}
+>
+  Solicitação<br />
+  {a.is_manual ? 'manual' : 'via sistema'}
+</span>
+</div>
+
+      </div>
+    )
+  }
+)
 
 export default function AutorizacoesPage() {
   const router = useRouter()
@@ -21,12 +111,104 @@ export default function AutorizacoesPage() {
   const [msg, setMsg] = useState('')
   const supabase = getSupabaseClient()
   const [firstLoad, setFirstLoad] = useState(true)
-  
+  const [selecionado, setSelecionado] = useState<any>(null)
+  const statusColor =
+  selecionado?.status_assim === 'autorizado'
+    ? 'bg-green-100 text-green-700'
+    : selecionado?.status_assim === 'pendencia_adm'
+    ? 'bg-red-100 text-red-700'
+    : selecionado?.status_assim === 'estornado'
+    ? 'bg-gray-200 text-gray-700'
+    : 'bg-yellow-100 text-yellow-700'
+
+  const statusLabel =
+  selecionado?.status_assim === 'autorizado'
+    ? 'Autorizado'
+    : selecionado?.status_assim === 'pendencia_adm'
+    ? 'Glosa'
+    : selecionado?.status_assim === 'estornado'
+    ? 'Estornado'
+    : 'Em análise'
+
+	function aplicarFiltroRapido(tipo: string) {
+	  const hoje = new Date()
+
+	  let inicio = new Date()
+	  let fim = new Date()
+
+	  if (tipo === 'semana') {
+		const dia = hoje.getDay() || 7
+		inicio.setDate(hoje.getDate() - dia + 1)
+	  }
+
+	  if (tipo === 'mes') {
+		inicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1)
+	  }
+
+	  const formatar = (data: Date) =>
+		data.toISOString().split('T')[0]
+
+	  setDataInicio(formatar(inicio))
+	  setDataFim(formatar(fim))
+	}
+
+	function limparFiltros() {
+	  const hoje = new Date().toISOString().split('T')[0]
+
+	  setDataInicio(hoje)
+	  setDataFim(hoje)
+	  setBusca('')
+	  setFiltro('')
+	  setFiltroHorario('')
+	}
+
+	const filtrados = useMemo(() => {
+	  return dados
+		.filter(a => {
+		  if (!a.data_atendimento) return false
+
+		  return (
+			a.data_atendimento >= dataInicio &&
+			a.data_atendimento <= dataFim
+		  )
+		})
+		.filter(a => (filtro ? (a.status_assim || a.status) === filtro : true))
+		.filter(a =>
+		  a.paciente_nome?.toLowerCase().includes(busca.toLowerCase())
+		)
+		.filter(a =>
+		  !filtroHorario || a.horario?.slice(0, 5) === filtroHorario
+		)
+	}, [dados, dataInicio, dataFim, filtro, busca, filtroHorario])
+
+
+	const ordenados = useMemo(() => {
+	  return [...filtrados].sort((a, b) => {
+		const hA = a.horario || ''
+		const hB = b.horario || ''
+		return hA.localeCompare(hB)
+	  })
+	}, [filtrados])
+
+
 	async function carregar() {
-	  if (firstLoad) setLoading(true)
+	  if (firstLoad && dados.length === 0) setLoading(true)
 
 	  const res = await listarAutorizacoes()
-	  setDados(res)
+
+		setDados(prev => {
+		  if (prev.length !== res.length) return res
+
+		  const prevMap = new Map(prev.map(p => [p.id, p.updated_at]))
+
+		  for (const item of res) {
+			if (prevMap.get(item.id) !== item.updated_at) {
+			  return res
+			}
+		  }
+
+		  return prev
+		})
 
 	  setLoading(false)
 	  setFirstLoad(false)
@@ -77,70 +259,23 @@ export default function AutorizacoesPage() {
     setMsg('Robô colocado na fila 🚀')
   }
 
-  useEffect(() => {
+useEffect(() => {
+  document.body.style.overflow = selecionado ? 'hidden' : 'auto'
+}, [selecionado])
+
+useEffect(() => {
+  carregar()
+
+  const interval = setInterval(() => {
+    console.log('🔄 sync...')
     carregar()
-    const interval = setInterval(carregar, 15000)
-    return () => clearInterval(interval)
-  }, [])
+  }, 15000)
 
-  // FILTROS
-  const filtrados = dados
-    .filter(a => {
-      if (!a.data_atendimento) return false
-
-      return (
-        a.data_atendimento >= dataInicio &&
-        a.data_atendimento <= dataFim
-      )
-    })
-    .filter(a => (filtro ? a.status === filtro : true))
-    .filter(a =>
-	  a.paciente_nome?.toLowerCase().includes(busca.toLowerCase())
-	)
-	.filter(a =>
-	  !filtroHorario || a.horario?.slice(0, 5) === filtroHorario
-	)
-
-  function aplicarFiltroRapido(tipo: string) {
-    const hoje = new Date()
-
-    let inicio = new Date()
-    let fim = new Date()
-
-    if (tipo === 'semana') {
-      const dia = hoje.getDay() || 7
-      inicio.setDate(hoje.getDate() - dia + 1)
-    }
-
-    if (tipo === 'mes') {
-      inicio = new Date(hoje.getFullYear(), hoje.getMonth(), 1)
-    }
-
-    const formatar = (data: Date) =>
-      data.toISOString().split('T')[0]
-
-    setDataInicio(formatar(inicio))
-    setDataFim(formatar(fim))
-  }
-
-  function limparFiltros() {
-    const hoje = new Date().toISOString().split('T')[0]
-
-    setDataInicio(hoje)
-    setDataFim(hoje)
-    setBusca('')
-    setFiltro('')
-	setFiltroHorario('')
-  }
-
-  const ordenados = [...filtrados].sort((a, b) => {
-    const hA = a.horario || ''
-    const hB = b.horario || ''
-
-    return hA.localeCompare(hB)
-  })
+  return () => clearInterval(interval)
+}, [])
 
   return (
+	<>
     <div className="p-6 space-y-6">
 
       {/* HEADER */}
@@ -227,11 +362,9 @@ export default function AutorizacoesPage() {
           className="flex gap-2 border border-slate-200 rounded-lg px-3 py-2 text-sm"
         >
           <option value="">Todos</option>
-          <option value="concluido">Concluídos</option>
-          <option value="executando">Executando</option>
-          <option value="falta">Faltas</option>
-          <option value="pendente">Pendentes</option>
-          <option value="erro">Erro</option>
+          <option value="autorizado">Autorizados</option>
+		  <option value="pendencia_adm">Glosa</option>
+		  <option value="estornado">Estornados</option>
         </select>
 
         <button
@@ -262,97 +395,150 @@ export default function AutorizacoesPage() {
       ) : (
         <div className="flex flex-col gap-3">
 
-          {ordenados.map((a) => {
-
-            const statusColor =
-              a.status === "erro"
-                ? "border-l-red-500"
-                : a.status === "executando"
-                ? "border-l-blue-500"
-                : a.status === "concluido"
-                ? "border-l-green-500"
-                : a.status === "falta"
-                ? "border-l-orange-400"
-                : "border-l-yellow-400"
-
-            return (
-<div
-  key={a.id}
-  onClick={() => router.push(`/autorizacoes/${a.id}`)}
-  className={`w-full p-4 rounded-xl bg-white border border-slate-200 shadow-sm hover:shadow-md hover:bg-slate-50 transition cursor-pointer border-l-4 ${statusColor}
-  
-  grid grid-cols-[120px_90px_1fr_220px_140px_120px] items-center gap-4`}
->
-
-  {/* DATA */}
-  <div className="text-sm text-slate-600 font-medium">
-    {a.data_atendimento
-      ? a.data_atendimento.split('-').reverse().join('/')
-      : '--/--/----'}
-  </div>
-
-  {/* HORA */}
-  <div className="font-semibold text-[#3A8FB7]">
-    {a.horario ? a.horario.slice(0, 5) : '--:--'}
-  </div>
-
-  {/* PACIENTE */}
-  <div className="font-semibold text-slate-900 truncate">
-    {a.paciente_nome}
-  </div>
-
-  {/* TERAPIA */}
-  <div className="text-sm text-slate-500 truncate">
-    {a.terapia_falta || a.agenda_orbita?.terapia || 'Sem terapia'}
-  </div>
-
-{/* STATUS + TIPO */}
-<div className="flex justify-center gap-2">
-
-		  {/* STATUS */}
-		  <span className={`text-xs px-3 py-1 rounded-full font-medium
-			${a.status === 'concluido' && 'bg-green-100 text-green-700'}
-			${a.status === 'pendente' && 'bg-yellow-100 text-yellow-700'}
-			${a.status === 'executando' && 'bg-blue-100 text-blue-700'}
-			${a.status === 'erro' && 'bg-red-100 text-red-700'}
-			${a.status === 'falta' && 'bg-orange-100 text-orange-700'}
-		  `}>
-			{a.status === 'falta'
-			  ? a.tipo_falta === 'paciente'
-				? 'falta paciente'
-				: 'falta terapeuta'
-			  : a.status}
-		  </span>
-
-		  {/* MANUAL */}
-		  {a.completion_type === 'manual' && (
-			<span className="text-xs px-2 py-1 rounded-full bg-slate-100 text-slate-600 border border-slate-200">
-			  Manual
-			</span>
-		  )}
-
-		</div>
-
-		{/* BOTÃO CHAMAR */}
-		<div className="flex justify-center">
-		  <button
-			onClick={(e) => {
-			  e.stopPropagation()
-			  chamarResponsavel(a)
-			}}
-			className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg font-medium bg-emerald-600 text-white shadow-md hover:brightness-110 hover:shadow-lg active:scale-[0.97] transition"
-		  >
-			📢 Chamar
-		  </button>
-		</div>
-
-		</div>
-            )
-          })}
-
+		{ordenados.map((a) => (
+		  <ItemAutorizacao
+			key={a.id}
+			a={a}
+			setSelecionado={setSelecionado}
+		  />
+		))}
         </div>
       )}
+	</div>
+{selecionado && (
+  <div
+    className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50"
+    onClick={() => setSelecionado(null)}
+  >
+
+    <div
+      className="bg-white w-[720px] max-w-[95%] p-6 rounded-2xl shadow-xl space-y-6"
+      onClick={(e) => e.stopPropagation()}
+    >
+
+      {/* HEADER */}
+      <div className="flex justify-between items-start">
+        <div>
+		<h2 className="text-xl font-semibold text-slate-800">
+		  {selecionado.paciente_nome}
+		</h2>
+
+          <p className="text-sm text-slate-500">
+            Matrícula: {selecionado.matricula || '—'}
+          </p>
+        </div>
+
+        <button
+          onClick={() => setSelecionado(null)}
+          className="text-slate-400 hover:text-slate-700 text-lg"
+        >
+          ✕
+        </button>
+      </div>
+
+      {/* STATUS + ORIGEM */}
+      <div className="flex items-center gap-3">
+        <span
+		  className={`px-3 py-1.5 rounded-full text-xs font-medium ${statusColor}`}
+		>
+		  {statusLabel}
+		</span>
+
+        <span
+          className={`
+            px-3 py-1.5 rounded-lg text-xs font-medium
+            ${selecionado.is_manual
+              ? 'bg-blue-100 text-blue-700'
+              : 'bg-green-100 text-green-700'}
+          `}
+        >
+          Solicitação<br />
+          {selecionado.is_manual ? 'manual' : 'via sistema'}
+        </span>
+      </div>
+
+      {/* GRID */}
+      <div className="grid grid-cols-2 gap-6">
+
+        <div className="space-y-3">
+          <p className="text-xs font-semibold text-slate-400 uppercase">
+            Atendimento
+          </p>
+
+          <div>
+            <p className="text-xs text-slate-400">Data</p>
+            <p className="font-medium">
+              {new Date(selecionado.data_atendimento).toLocaleDateString('pt-BR')}
+            </p>
+          </div>
+
+          <div>
+            <p className="text-xs text-slate-400">Horário do Agendamento</p>
+            <p className="font-medium">
+              {selecionado.horario?.slice(0, 5)}
+            </p>
+          </div>
+
+          <div>
+            <p className="text-xs text-slate-400">Terapia</p>
+            <p className="font-medium">
+              {selecionado.classificacao_terapia || 'Não informada'}
+            </p>
+          </div>
+
+          <div>
+            <p className="text-xs text-slate-400">TUSS</p>
+            <p className="font-medium">
+              {selecionado.tuss || '—'}
+            </p>
+          </div>
+        </div>
+        <div className="space-y-3">
+          <p className="text-xs font-semibold text-slate-400 uppercase">
+            Autorização
+          </p>
+
+          <div>
+            <p className="text-xs text-slate-400">Status</p>
+            <p className="font-medium">
+              {selecionado.status_assim || '—'}
+            </p>
+          </div>
+
+          <div>
+            <p className="text-xs text-slate-400">Número</p>
+            <p className="font-medium">
+              {selecionado.numero_autorizacao || '—'}
+            </p>
+          </div>
+        </div>
+
+      </div>
+
+      {/* FOOTER */}
+		<div className="flex items-center justify-between pt-4 border-t">
+
+		  {/* ESQUERDA */}
+		  <div className="text-sm text-slate-500 flex items-center gap-2">
+			Solicitado por:{" "}
+			<span className="font-medium text-slate-700">
+			  {selecionado?.atendente_nome || '—'}
+			</span>
+		  </div>
+
+		  {/* DIREITA */}
+		  <button
+			onClick={() => setSelecionado(null)}
+			className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 text-sm"
+		  >
+			Fechar
+		  </button>
+
+		</div>
 
     </div>
+  </div>
+)}
+</>
   )
 }

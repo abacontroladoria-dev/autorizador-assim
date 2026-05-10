@@ -23,7 +23,6 @@ export default function NovaAutorizacaoForm() {
     const nova = await criarAutorizacao({
       paciente_nome: paciente.nome,
       matricula: paciente.matricula,
-      dataHora: new Date().toISOString(),
       status: 'AUTORIZADO'
     })
 

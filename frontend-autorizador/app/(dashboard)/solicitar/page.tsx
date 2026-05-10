@@ -2,7 +2,7 @@
 
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState } from 'react'
 
 import { getSupabaseClient } from '@/lib/supabase/client'
 
@@ -10,12 +10,27 @@ import { criarAutorizacao } from '@/services/autorizacoes.service'
 
 import toast from 'react-hot-toast'
 
-import { RefreshCcw, LogIn, CalendarX } from 'lucide-react'
+import { Lock, CheckCircle, Megaphone, XCircle } from 'lucide-react'
+
+import { getMachineId } from '@/lib/machine'
 
 export default function SolicitarPage() {
-  const hoje = new Date().toLocaleDateString('sv-SE')
+  const hoje = (() => {
+	  const d = new Date()
 
-  const [filaStatus, setFilaStatus] = useState<any[]>([])
+	  const ano = d.getFullYear()
+	  const mes = String(
+		d.getMonth() + 1
+	  ).padStart(2, '0')
+
+	  const dia = String(
+		d.getDate()
+	  ).padStart(2, '0')
+
+	  return `${ano}-${mes}-${dia}`
+	})()
+
+  const [dataSelecionada, setDataSelecionada] = useState(hoje)
 
   const [listaDia, setListaDia] = useState<any[]>([])
 
@@ -23,29 +38,41 @@ export default function SolicitarPage() {
 
   const supabase = getSupabaseClient()
 
-  const [busca, setBusca] = useState('')
-
-  const [sugestoes, setSugestoes] = useState<any[]>([])
-
-  const [pacienteSelecionado, setPacienteSelecionado] = useState<any>(null)
-
-  const [data, setData] = useState(hoje)
-
-  const [horario, setHorario] = useState('')
-
-  const [indexSelecionado, setIndexSelecionado] = useState<number>(-1)
-
-  const [atualizando, setAtualizando] = useState(false)
-
-  const [pacientes, setPacientes] = useState<any[]>([])
-
-  const [terapiaSelecionada, setTerapiaSelecionada] = useState<string | null>(null)
-
   const horarios = gerarHorarios()
 
-  const [mostrarSugestoes, setMostrarSugestoes] = useState(false)
+  const unidades = [
+
+	  ...new Set(
+
+		(listaDia || [])
+		  .map(p =>
+			p.sala_nome
+			  ?.replace('Unid. ', '')
+			  ?.split(' - ')[0]
+		  )
+		  .filter(Boolean)
+
+	  )
+
+	].sort()
+
+  const convenios = [
+
+	  ...new Set(
+
+		(listaDia || [])
+		  .map(p => p.convenio_nome)
+		  .filter(Boolean)
+
+	  )
+
+	].sort()
 
   const [filtroHorario, setFiltroHorario] = useState('')
+  
+  const [filtroUnidade, setFiltroUnidade] = useState('')
+  
+  const [filtroConvenio, setFiltroConvenio] = useState('')
   
   const [modalFalta, setModalFalta] = useState(false)
   
@@ -55,9 +82,11 @@ export default function SolicitarPage() {
   
   const [pacienteFaltaDia, setPacienteFaltaDia] = useState<any>(null)
 
-  const [machineId, setMachineId] = useState<string | null>(null)
-
-  const [classificacoes, setClassificacoes] = useState<any[]>([])
+  const [filtro, setFiltro] = useState('')
+  
+  const [MACHINE_ID, setMachineId] = useState<string | null>(null)
+  
+  const [workerOnline, setWorkerOnline] = useState(false)
   
   const chamarResponsavel = async (paciente: any) => {
     try {
@@ -66,8 +95,8 @@ export default function SolicitarPage() {
         .insert([
           {
             nome: paciente.paciente_nome,
-            sala: paciente.sala || 'Recepção 1',
-			agenda_id: paciente.id
+            sala:  'Recepção 1',
+			agenda_id: paciente.agendamentos?.[0]
           }
         ])
   
@@ -77,325 +106,363 @@ export default function SolicitarPage() {
         return
       }
   
-      console.log('✅ CHAMADA INSERIDA')
-  
-    } catch (err) {
+      } catch (err) {
       console.error(err)
     }
   }
 
-  // =====================================
-  // BOTAO DE CHECK SOLICITACAO RETROATIVA
-  // =====================================
+// =========================
+// AJUSTE DE NOME
+// =========================
+function formatarNome(nome?: string) {
 
-  async function buscarTerapia() {
-    if (!pacienteSelecionado || !data || !horario) return
-    const { data: resultado, error } = await supabase
-      .from('agenda_orbita')
-      .select('terapia')
-      .eq('paciente_nome', pacienteSelecionado.paciente_nome)
-      .eq('data_atendimento', data)
-      .eq('horario', horario)
-      .single()
-    if (error) {
-      console.log('Erro ao buscar terapia:', error.message)
-      setTerapiaSelecionada(null)
-      return
-    }
-    setTerapiaSelecionada(resultado?.terapia || null)
-  }
-  
-  
-  // =====================================
-  // CARREGAMENTO DAS CLASSIFICACOES
-  // =====================================
-  
-async function carregarClassificacoes() {
-  const { data, error } = await supabase
-    .from('paciente_classificacao')
-    .select('*')
+  if (!nome) return ''
 
-  if (!error) {
-    setClassificacoes(data || [])
-  }
+  return nome
+    .toLowerCase()
+    .split(' ')
+    .map(p =>
+      p.charAt(0).toUpperCase() +
+      p.slice(1)
+    )
+    .join(' ')
 }
 
-  // ==================================
-  // ATUALIZAÇÃO DA TABELA DE PACIENTES
-  // ==================================
-  async function carregarAgenda() {
-    const hoje = new Date().toLocaleDateString('sv-SE')
-    const { data, error } = await supabase
-      .from('agenda_orbita')
-      .select('*')
-      .eq('data_atendimento', hoje)
-    if (error) {
-      console.error('Erro ao carregar agenda:', error)
-      return
-    }
-    setPacientes(data || [])
+
+// =========================
+// CARREGAR ID MAQUINA
+// =========================
+
+useEffect(() => {
+
+  async function carregarMachine() {
+
+    const id =
+      await getMachineId()
+
+    setMachineId(id)
+
+	setWorkerOnline(!!id)
   }
 
-  // BOTÃO MANUAL
+  carregarMachine()
 
-async function atualizarAgendaManual() {
-  setAtualizando(true)
+}, [])
 
-  // 🔥 pede sincronização (FORÇADA)
-  const { error } = await supabase
-    .from('sync_controle')
-    .update({
-      status: 'pendente',
-      force: true,
-      updated_at: new Date().toISOString()
-    })
-    .eq('id', 1)
+// =========================
+// PODE SOLICITAR
+// =========================
 
-  if (error) {
-    console.error(error)
-    setAtualizando(false)
-    return
+function podeSolicitar(
+  ultima: string | null,
+  status?: string
+) {
+
+  if (status === 'erro') {
+    return true
   }
 
-  let status = 'pendente'
-  let tentativas = 0
-
-  // 🔄 acompanha status pelo banco (não precisa mais function)
-  while (status === 'running' && tentativas < 20) {
-    await new Promise(r => setTimeout(r, 1500))
-
-    const { data } = await supabase
-      .from('sync_controle')
-      .select('status')
-      .eq('id', 1)
-      .single()
-
-    status = data?.status || 'idle'
-
-    console.log('STATUS:', status)
-
-    tentativas++
+  if (!ultima) {
+    return true
   }
 
-  await new Promise(r => setTimeout(r, 1000))
+  const agora = new Date()
 
-  await carregarLista()
+  const ultimaData =
+    new Date(ultima)
 
-  setAtualizando(false)
+  const diffMs =
+    agora.getTime() -
+    ultimaData.getTime()
+
+  const diffMin =
+    diffMs / 1000 / 60
+
+  return diffMin >= 30
 }
 
   // =========================
   // 📥 CARREGAR LISTA
   // =========================
 
-  async function carregarLista() {
-    setLoadingLista(true)
-    const { data, error } = await supabase
-      .from('agenda_orbita')
-      .select('*')
-      .eq('data_atendimento', hoje)
-      .not('matricula', 'is', null)
-      .not('empresa', 'is', null)
-      .not('dep', 'is', null)
-      .not('tuss', 'is', null)
-      .not('crm', 'is', null)
-      .not('nome_medico', 'is', null)
-      .not('terapia', 'in', '("Coordenador","Aplicador Suporte","Aplicador Suporte (MT)","Aplicador ABA Casa","Aplicador ABA Escola")')
-      .order('horario', { ascending: true })
-    if (error) {
-      console.error('Erro ao carregar agenda:', error)
+async function carregarLista() {
+
+  setLoadingLista(true)
+
+	const dataFiltro = dataSelecionada
+
+  console.log('DATA FILTRO:', dataFiltro)
+
+const { data, error } = await supabase
+  .from('vw_central_autorizacoes')
+  .select(`
+    paciente_id,
+    paciente_nome,
+    horario,
+    data_atendimento,
+
+    codigos_tuss,
+
+    convenio_nome,
+    convenio_id,
+
+    sala_nome,
+
+    empresa,
+    matricula,
+    dep,
+
+    crm,
+    nome_medico,
+
+    status_final,
+    mostrar_na_tela,
+    tipo_fluxo,
+
+    terapias,
+    profissionais,
+    agendamentos,
+
+    horario_autorizacao,
+	ultima_autorizacao_anterior
+  `)
+  .eq('data_atendimento', dataFiltro)
+  .order('horario', { ascending: true })
+
+if (error) {
+  console.error(error)
+  toast.error('Erro ao carregar lista')
+  setLoadingLista(false)
+  return
+}
+
+  console.log(
+    (data || []).map((p: any) => ({
+      paciente: p.paciente_nome,
+      status: p.status_final,
+    }))
+  )
+
+  setListaDia(data || [])
+  
+  setLoadingLista(false)
+}
+
+// =========================
+// SOLICITAR LISTA
+// =========================
+
+async function handleSolicitarLista(
+  p: any
+) {
+
+  if (!MACHINE_ID) {
+
+    toast.error(
+      'Máquina não identificada'
+    )
+
+    return
+  }
+
+  try {
+
+    const statusAtual = p.status_final
+    // evita clique duplo
+    if (
+      p.status_final === 'processando'
+    ) {
+      return
     }
-    if (data) {
-      // 🔥 segurança extra contra EMPTY string
-      const filtrado = data.filter((p: any) =>
-        p.matricula &&
-        p.empresa &&
-        p.dep &&
-        p.tuss &&
-        p.crm &&
-        p.nome_medico
+
+    // regra 30 min
+    if (
+      !podeSolicitar(
+        p.ultima_autorizacao_anterior,
+        statusAtual
       )
-      setListaDia(filtrado)
-    }
-    setLoadingLista(false)
-  }
+    ) {
 
-  // =========================
-  //  CARREGAR FILA
-  // =========================
+      toast.error(
+        'Aguarde 30 minutos desde a última autorização'
+      )
 
-  async function carregarFila() {
-    const { data, error } = await supabase
-      .from('fila_autorizacoes')
-      .select('*')
-      .eq('data_atendimento', hoje)
-    if (!error) {
-      setFilaStatus(data || [])
-    }
-  }
-
-  // =========================
-  // 🚀 SOLICITAR (COM TRAVA)
-  // =========================
-
-async function handleSolicitarLista(p: any) {
-	  if (!machineId) {
-	  toast.error('Máquina não identificada')
-	  return
-	}
-	try {
-    const statusItem = statusMap[`${p.paciente_id}_${p.horario}`]
-
-    if (!podeSolicitar(p.ultima_autorizacao, statusItem?.status)) {
-      toast.error('Aguarde 30 minutos desde a última autorização')
       return
     }
 
-    // 🔍 VERIFICAR SE JÁ EXISTE NA FILA
-    const { data: existente } = await supabase
-      .from('fila_autorizacoes')
-      .select('id, status')
-      .eq('paciente_id', p.paciente_id)
-      .eq('data_atendimento', p.data_atendimento)
-      .eq('horario', p.horario)
-      .maybeSingle()
-
+    // busca existente
+    const { data: existente } =
+      await supabase
+        .from('fila_autorizacoes')
+        .select('*')
+		.eq('paciente_id', p.paciente_id)
+		.eq('data_atendimento', p.data_atendimento)
+		.eq('horario', p.horario)
+		.eq(
+		  'tuss',
+		  p.codigos_tuss?.[0]
+		)
+		.order('created_at', { ascending: false })
+		.limit(1)
+		.maybeSingle()
+		
+    // reaproveita
     if (existente) {
-      // 🚫 já em processamento
-      if (['pendente', 'processando'].includes(existente.status)) {
-        toast.error('Paciente já está sendo atendido')
+
+      if (
+        existente.status === 'erro'
+      ) {
+
+		await supabase
+		  .from('fila_autorizacoes')
+				.update({
+				  status: 'pendente',
+				  error_message: null,
+				  machine_id: MACHINE_ID,
+				  updated_at: new Date().toISOString()
+				})
+		  .eq('id', existente.id)
+
+        toast.success(
+          'Reprocessando 🔄'
+        )
+		setListaDia(prev =>
+		  prev.map(item =>
+			buildCardKey(item) === buildCardKey(p)
+			  ? {
+				  ...item,
+				  status_final: 'pendente'
+				}
+			  : item
+		  )
+		)
+		
         return
       }
 
-      // 🔁 erro → reaproveita
-      if (existente.status === 'erro') {
-        const { error } = await supabase
-          .from('fila_autorizacoes')
-          .update({ status: 'pendente', machine_id: machineId })
-          .eq('id', existente.id)
+      if (
+        existente.status === 'processando'
+      ) {
 
-        if (error) {
-          console.error(error)
-          toast.error('Erro ao reprocessar')
-          return
-        }
+        toast.error(
+          'Já está em execução'
+        )
 
-        toast.success('Reprocessando autorização 🔁')
-        await carregarFila()
         return
       }
 
-      // ⏱️ regra de tempo
-      if (!podeSolicitar(p.ultima_autorizacao)) {
-        toast.error('Aguarde 30 minutos desde a última autorização')
+      if (
+        existente.status === 'concluido'
+      ) {
+
+        toast.error(
+          'Já autorizado'
+        )
+
         return
       }
-    }
 
-    // 🚀 INSERIR NA FILA COM agenda_id
-    const { error } = await supabase
-      .from('fila_autorizacoes')
-      .insert([
-        {
-          agenda_id: p.id,
-          paciente_id: p.paciente_id,
-          paciente_nome: p.paciente_nome,
-          empresa: p.empresa,
-          matricula: p.matricula,
-          dep: p.dep,
-          crm: p.crm,
-          nome_medico: p.nome_medico,
-          tuss: p.tuss,
-          data_atendimento: hoje,
-          horario: p.horario,
-          status: 'pendente',
-		  machine_id: machineId
-        }
-      ])
+      toast(
+        'Já existe registro'
+      )
 
-    if (error) {
-      console.error(error)
-      toast.error(error.message)
       return
     }
 
-    toast.success('Autorização iniciada 🚀')
-    await carregarFila()
+    // validação
+    if (
+      !p.matricula ||
+      !p.codigos_tuss?.length
+    ) {
+
+      toast.error(
+        'Dados incompletos'
+      )
+
+      return
+    }
+
+    // insert
+    const inserted =
+      await criarAutorizacao({
+
+        agenda_id: p.agendamentos?.[0],
+
+        paciente_nome:
+          p.paciente_nome,
+
+        matricula:
+          p.matricula,
+
+        paciente_id:
+          p.paciente_id,
+
+        data:
+          p.data_atendimento,
+
+        horario:
+          p.horario,
+		
+		terapia_exibicao_id:
+		  p.terapia_exibicao_id,
+
+        tuss1:
+          p.codigos_tuss?.[0] || null,
+
+        status:
+          'pendente',
+
+        empresa:
+          p.empresa,
+
+        dep:
+          p.dep,
+
+        crm:
+          p.crm,
+
+        nome_medico:
+          p.nome_medico,
+
+        terapia_nome:
+          p.terapias?.join(' + '),
+
+        machine_id:
+          MACHINE_ID
+      })
+
+    if (!inserted) {
+
+      toast.error(
+        'Erro ao solicitar'
+      )
+
+      return
+    }
+
+    toast.success(
+      'Autorização enviada 🚀'
+    )
+
+	setListaDia(prev =>
+	  prev.map(item =>
+		buildCardKey(item) === buildCardKey(p)
+		  ? {
+			  ...item,
+			  status_final: 'pendente'
+			}
+		  : item
+	  )
+	)
 
   } catch (err) {
+
     console.error(err)
-    toast.error('Erro inesperado')
+
+    toast.error(
+      'Erro inesperado'
+    )
   }
-}
-
-  // ==========================
-  // IDENTIFICAR PACIENTE ASSIM
-  // ==========================
-
-async function marcarAssim(p: any) {
-  const { error } = await supabase
-    .from('paciente_classificacao')
-    .upsert([
-      {
-        paciente_id: p.paciente_id,
-        paciente_nome: p.paciente_nome,
-        convenio_tipo: 'ASSIM'
-      }
-    ], { onConflict: 'paciente_id' })
-
-  if (error) {
-    console.error(error)
-    toast.error('Erro ao marcar ASSIM')
-    return
-  }
-  
-  toast.success(`✔ ${p.paciente_nome} classificado`)
-  
-  setClassificacoes(prev => [
-    ...prev.filter(c => c.paciente_id !== p.paciente_id),
-    {
-      paciente_id: p.paciente_id,
-      paciente_nome: p.paciente_nome,
-      convenio_tipo: 'ASSIM'
-    }
-  ])
-}
-
-
-  // ======================================
-  // IDENTIFICAR PACIENTE DE OUTRO CONVENIO
-  // ======================================
-  
-async function marcarOutro(p: any) {
-  const { error } = await supabase
-    .from('paciente_classificacao')
-    .upsert([
-      {
-        paciente_id: p.paciente_id,
-        paciente_nome: p.paciente_nome,
-        convenio_tipo: 'OUTRO_CONVENIO'
-      }
-    ], { onConflict: 'paciente_id' })
-
-  if (error) {
-    console.error(error)
-    toast.error('Erro ao classificar')
-    return
-  }
-
-  toast.success(`✔ ${p.paciente_nome} classificado`)
-
-  setListaDia(prev =>
-    prev.filter(item => item.paciente_id !== p.paciente_id)
-  )  
-  setClassificacoes(prev => [
-    ...prev.filter(c => c.paciente_id !== p.paciente_id),
-    {
-      paciente_id: p.paciente_id,
-      paciente_nome: p.paciente_nome,
-      convenio_tipo: 'OUTRO_CONVENIO'
-    }
-  ])
 }
 
   // =========================
@@ -403,28 +470,35 @@ async function marcarOutro(p: any) {
   // =========================
 
 async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
-	if (!machineId) {
+
+    if (!MACHINE_ID) {
 	  toast.error('Máquina não identificada')
 	  return
 	}
-	try {
+	
+  try {
     const { data: existente } = await supabase
       .from('fila_autorizacoes')
       .select('id, status')
-      .eq('paciente_id', p.paciente_id)
-      .eq('data_atendimento', p.data_atendimento)
-      .eq('horario', p.horario)
-      .maybeSingle()
+		.eq('paciente_id', p.paciente_id)
+		.eq('data_atendimento', p.data_atendimento)
+		.eq('horario', p.horario)
+		.eq(
+  'tuss',
+  p.codigos_tuss?.[0]
+)
+		.order('created_at', { ascending: false })
+		.limit(1)
+		.maybeSingle()
 
-    // 🔁 SE JÁ EXISTE (inclusive erro)
+    // 🔁 SE JÁ EXISTE → ATUALIZA
     if (existente) {
       const { error } = await supabase
         .from('fila_autorizacoes')
-        .update({ 
+        .update({
           status: 'falta',
           tipo_falta: tipo,
-		  machine_id: machineId,
-          terapia_falta: p.terapia || null
+          terapia_falta: p.terapias?.join(' + ') || null
         })
         .eq('id', existente.id)
 
@@ -434,212 +508,215 @@ async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
         return
       }
 
+
       toast.success('Falta registrada (atualizado)')
-      setListaDia((prev) => prev.filter((item) => item.id !== p.id))
-      await carregarFila()
+		setListaDia(prev =>
+		  prev.filter(
+			item =>
+			  buildCardKey(item) !== buildCardKey(p)
+		  )
+		)
       return
     }
 
-    // 🚀 SE NÃO EXISTE → INSERT NORMAL
-    const { error } = await supabase
-      .from('fila_autorizacoes')
-      .insert([
-	  {
-        paciente_id: p.paciente_id,
-        paciente_nome: p.paciente_nome,
-        data_atendimento: hoje,
-        horario: p.horario,
-        status: 'falta',
-        tipo_falta: tipo,
-		machine_id: machineId,
-        terapia_falta: p.terapia || null
-      }
-	  ])
+    // 🚀 SE NÃO EXISTE → CRIA PADRONIZADO
+    const inserted = await criarAutorizacao({
+      agenda_id: p.agendamentos?.[0],
+      paciente_nome: p.paciente_nome,
+      matricula: p.matricula || null,
+      data: p.data_atendimento, // ⚠️ corrigido (antes usava "hoje")
+      horario: p.horario,
+	  paciente_id: p.paciente_id,
+	  terapia_nome: p.terapias?.join(' + '),
+	  terapia_exibicao_id: p.terapia_exibicao_id,
+      tuss1: p.codigos_tuss?.[0] || null,
+      status: 'falta',
+      empresa: p.empresa || null,
+      dep: p.dep || null,
+      crm: p.crm || null,
+      nome_medico: p.nome_medico || null,
+      machine_id: tipo === 'paciente' ? 'falta_paciente' : 'falta_terapeuta'
+    })
 
-    if (error) {
-      console.error(error)
+    if (!inserted) {
       toast.error('Erro ao registrar falta')
       return
     }
 
-    setListaDia((prev) => prev.filter((item) => item.id !== p.id))
+    // 🔥 COMPLEMENTA CAMPOS DE FALTA
+    await supabase
+      .from('fila_autorizacoes')
+      .update({
+        tipo_falta: tipo,
+        terapia_falta: p.terapias?.join(' + ') || null
+      })
+      .eq('id', inserted.id)
+
     toast.success('Falta registrada com sucesso')
+	
+	setListaDia(prev =>
+	  prev.filter(
+		item =>
+		  buildCardKey(item) !== buildCardKey(p)
+	  )
+	)
 
   } catch (err) {
     console.error(err)
     toast.error('Erro inesperado')
   }
 }
-
   // ===========================
   // ❌ FALTA DIA DE ATENDIMENTO
   // ===========================
+  
 async function handleFaltaDia(paciente: any) {
-	if (!machineId) {
+
+    if (!MACHINE_ID) {
 	  toast.error('Máquina não identificada')
 	  return
 	}
+	
   const dataAtendimento = paciente.data_atendimento
 
-  // 🔥 USAR A LISTA DA TELA (fonte confiável)
-  const atendimentos = listaDia.filter(
-    (p) =>
-      p.paciente_id === paciente.paciente_id &&
-      p.data_atendimento === dataAtendimento
-  )
+const atendimentos = Object.values(
 
-  for (const p of atendimentos) {
+  listaDia
+    .filter(
+      (p) =>
+        p.paciente_id === paciente.paciente_id &&
+        p.data_atendimento === dataAtendimento
+    )
+
+    .reduce((acc: any, p: any) => {
+
+      const key = buildCardKey(p)
+
+      if (!acc[key]) {
+        acc[key] = p
+      }
+
+      return acc
+
+    }, {})
+
+)
+
+  for (const p of atendimentos as any[]) {
+
     const { data: existente } = await supabase
       .from('fila_autorizacoes')
       .select('id')
-      .eq('paciente_id', p.paciente_id)
-      .eq('data_atendimento', dataAtendimento)
-      .eq('horario', p.horario)
-      .maybeSingle()
+		.eq('paciente_id', p.paciente_id)
+		.eq('data_atendimento', p.data_atendimento)
+		.eq('horario', p.horario)
+		.eq(
+		  'tuss',
+		  p.codigos_tuss?.[0]
+		)
+		.order('created_at', { ascending: false })
+		.limit(1)
+		.maybeSingle()
 
     if (existente) {
+      // 🔄 ATUALIZA
       await supabase
         .from('fila_autorizacoes')
         .update({
           status: 'falta',
           tipo_falta: 'paciente',
-		  machine_id: machineId,
-          terapia_falta: p.terapia || null
+          terapia_falta: p.terapias?.join(' + ') || null
         })
         .eq('id', existente.id)
+
     } else {
+      // 🚀 CRIA PADRONIZADO
+      const inserted = await criarAutorizacao({
+        agenda_id: p.agendamentos?.[0],
+        paciente_nome: p.paciente_nome,
+        matricula: p.matricula || null,
+        data: dataAtendimento,
+		paciente_id: p.paciente_id,
+        horario: p.horario,
+		terapia_nome: p.terapias?.join(' + '),
+		terapia_exibicao_id: p.terapia_exibicao_id,
+        tuss1: p.codigos_tuss?.[0] || null,
+        status: 'falta',
+        empresa: p.empresa || null,
+        dep: p.dep || null,
+        crm: p.crm || null,
+        nome_medico: p.nome_medico || null,
+        machine_id: 'falta_dia'
+      })
+
+      if (!inserted) {
+        console.log('Erro ao criar falta:', p.paciente_nome)
+        continue
+      }
+
+	
+      // 🔥 GARANTE CAMPOS ESPECÍFICOS DE FALTA
       await supabase
         .from('fila_autorizacoes')
-        .insert([
-		{
-          paciente_id: p.paciente_id,
-          paciente_nome: p.paciente_nome,
-          data_atendimento: dataAtendimento,
-          horario: p.horario,
-          status: 'falta',
+        .update({
           tipo_falta: 'paciente',
-		  machine_id: machineId,
-          terapia_falta: p.terapia || null
-        }
-		])
+          terapia_falta: p.terapias?.join(' + ') || null
+        })
+        .eq('id', inserted.id)
     }
   }
 
   toast.success('Faltas aplicadas para o dia todo')
 
-  // 🔥 remove da tela imediatamente
-  setListaDia(prev =>
-    prev.filter(p => p.paciente_id !== paciente.paciente_id)
-  )
+  // 🔥 remove da tela
+	setListaDia(prev =>
+	  prev.filter(
+		item =>
+		  item.paciente_id !== paciente.paciente_id ||
+		  item.data_atendimento !== paciente.data_atendimento
+	  )
+	)
 
-  await carregarFila()
-}
- 
-  // =========================
-  // 📤 FORM RETROATIVO
-  // =========================
-
- async function handleSolicitar() {
-	if (!machineId) {
-	  toast.error('Máquina não identificada')
-	  return
-	}
-  if (!pacienteSelecionado || !data || !horario) {
-    toast.error('Preencha todos os campos')
-    return
-  }
-
-  try {
-    // 🔥 BUSCAR AGENDAMENTO CORRETO
-    const { data: agenda, error: erroBusca } = await supabase
-      .from('agenda_orbita')
-      .select('*')
-      .eq('paciente_nome', pacienteSelecionado.paciente_nome)
-      .eq('data_atendimento', data)
-      .eq('horario', horario)
-      .single()
-
-    if (erroBusca || !agenda) {
-      console.error(erroBusca)
-      toast.error('Não foi possível localizar o agendamento')
-      return
-    }
-
-    // 🚀 INSERIR NA FILA (COM agenda_id CORRETO)
-    const { error } = await supabase
-      .from('fila_autorizacoes')
-      .insert([
-        {
-          agenda_id: agenda.id,
-          paciente_id: agenda.paciente_id,
-          paciente_nome: agenda.paciente_nome,
-          empresa: agenda.empresa,
-          matricula: agenda.matricula,
-          dep: agenda.dep,
-          crm: agenda.crm,
-          nome_medico: agenda.nome_medico,
-          tuss: agenda.tuss,
-          data_atendimento: agenda.data_atendimento,
-          horario: agenda.horario,
-          status: 'pendente',
-		  machine_id: machineId
-        }
-      ])
-
-    if (error) {
-      console.error(error)
-      toast.error('Erro ao solicitar')
-      return
-    }
-
-    toast.success('Autorização enviada 🚀')
-
-    // 🔄 RESET FORM
-    setBusca('')
-    setPacienteSelecionado(null)
-    setHorario('')
-
-  } catch (err) {
-    console.error(err)
-    toast.error('Erro inesperado')
-  }
-}
-
-  const hojeFormatado = new Date().toLocaleDateString('pt-BR')
-
-  const [filtro, setFiltro] = useState('')
+} 
+  
 
   // =========================
   // CONCLUSAO MANUAL
   // =========================
   
 async function handleManualLista(p: any) {
-  if (!machineId) {
-    toast.error('Máquina não identificada')
-    return
-  }
-
+	    if (!MACHINE_ID) {
+	  toast.error('Máquina não identificada')
+	  return
+	}
+	
   try {
     // 🔍 VERIFICA SE JÁ EXISTE NA FILA
     const { data: existente } = await supabase
       .from('fila_autorizacoes')
       .select('id, status')
-      .eq('paciente_id', p.paciente_id)
-	  .eq('data_atendimento', p.data_atendimento)
-      .eq('horario', p.horario)
-      .maybeSingle()
+		.eq('paciente_id', p.paciente_id)
+		.eq('data_atendimento', p.data_atendimento)
+		.eq('horario', p.horario)
+		.eq(
+		  'tuss',
+		  p.codigos_tuss?.[0]
+		)
+		.order('created_at', { ascending: false })
+		.limit(1)
+		.maybeSingle()
 
     // 🔁 SE JÁ EXISTE → ATUALIZA
     if (existente) {
       const { error } = await supabase
         .from('fila_autorizacoes')
-        .update({
-          status: 'concluido',
-          completion_type: 'manual',
-          numero_autorizacao: 'MANUAL',
-          completed_at: new Date().toISOString(),
-          machine_id: machineId
-        })
+		.update({
+		  status: 'concluido',
+		  completion_type: 'manual',
+		  numero_autorizacao: 'MANUAL',
+		  horario_autorizacao: new Date().toISOString(),
+		  completed_at: new Date().toISOString(),
+		})
         .eq('id', existente.id)
 
       if (error) {
@@ -648,99 +725,77 @@ async function handleManualLista(p: any) {
         return
       }
 
+	
       toast.success('Atualizado como manual 📝')
 
     } else {
-      // 🚀 SE NÃO EXISTE → INSERT
-      const { error } = await supabase
-        .from('fila_autorizacoes')
-        .insert([
-          {
-            agenda_id: p.id,
-            paciente_id: p.paciente_id,
-            paciente_nome: p.paciente_nome,
-            empresa: p.empresa,
-            matricula: p.matricula,
-            dep: p.dep,
-            crm: p.crm,
-            nome_medico: p.nome_medico,
-            tuss: p.tuss,
-            data_atendimento: p.data_atendimento,
-            horario: p.horario,
+      // 🚀 SE NÃO EXISTE → INSERT PADRONIZADO
+      const inserted = await criarAutorizacao({
+        agenda_id: p.agendamentos?.[0],
+        paciente_nome: p.paciente_nome,
+        matricula: p.matricula,
+        data: p.data_atendimento,
+		paciente_id: p.paciente_id,
+        horario: p.horario,
+        tuss1: p.codigos_tuss?.[0] || null,
+        status: 'concluido',
+		horario_autorizacao: new Date().toISOString(),
+        empresa: p.empresa,
+		terapia_nome: p.terapias?.join(' + '),
+		terapia_exibicao_id: p.terapia_exibicao_id,
+        dep: p.dep,
+        crm: p.crm,
+        nome_medico: p.nome_medico,
+        machine_id: MACHINE_ID
+      })
 
-            status: 'concluido',
-            completion_type: 'manual',
-            numero_autorizacao: 'MANUAL',
-            machine_id: machineId,
-            completed_at: new Date().toISOString()
-          }
-        ])
-
-      if (error) {
-        console.error(error)
+      if (!inserted) {
         toast.error('Erro ao registrar manual')
         return
       }
+
+      // 🔥 GARANTE QUE FIQUE COMO MANUAL (extra segurança)
+      await supabase
+        .from('fila_autorizacoes')
+		.update({
+		  completion_type: 'manual',
+		  numero_autorizacao: 'MANUAL',
+		  horario_autorizacao: new Date().toISOString(),
+		  completed_at: new Date().toISOString(),
+		})
+        .eq('id', inserted.id)
 
       toast.success('Autorização manual registrada 📝')
     }
 
     // 🔥 REMOVE DA LISTA (igual falta)
-    setListaDia(prev => prev.filter(item => item.id !== p.id))
-
-    await carregarFila()
+    setListaDia(prev =>
+	  prev.filter(
+		item =>
+		  buildCardKey(item) !== buildCardKey(p)
+	  )
+	)
 
   } catch (err) {
     console.error(err)
     toast.error('Erro inesperado')
   }
+}  
+
+
+// =========================
+// BUILD CARD KEY
+// =========================
+
+function buildCardKey(p: any) {
+  return [
+    String(p.paciente_id),
+    String(p.data_atendimento),
+    String(p.horario),
+  ].join('_')
 }
-  // =========================
-  // ⏱️ REGRA 30 MINUTOS
-  // =========================
 
-	function podeSolicitar(ultima: string | null, status?: string) {
-	  // 🔥 ERRO SEMPRE LIBERA
-	  if (status === 'erro') return true
-
-	  if (!ultima) return true
-
-	  const agora = new Date()
-	  const ultimaData = new Date(ultima + 'Z')
-	  const diffMs = agora.getTime() - ultimaData.getTime()
-	  const diffMin = diffMs / 1000 / 60
-
-	  return diffMin >= 30
-	}
-
-  // =================================
-  // PEGAR A CLASSIFICACAO DE CONVENIO
-  // =================================
   
-	function getClassificacao(p: any) {
-	  return classificacaoMap[p.paciente_id]
-	}
-
-  // =========================
-  // ULTIMA AUTORIZACAO
-  // =========================
-  
-	function getUltimaAutorizacaoConcluida(p: any) {
-	  const itens = filaStatus
-		.filter(
-		  (f) =>
-			f.paciente_id === p.paciente_id &&
-			f.status?.toLowerCase() === 'concluido'
-		)
-		.sort(
-		  (a, b) =>
-			new Date(b.updated_at).getTime() -
-			new Date(a.updated_at).getTime()
-		)
-
-	  return itens[0] || null
-	}
-
   // =========================
   // ⏰ HORÁRIOS
   // =========================
@@ -766,147 +821,16 @@ async function handleManualLista(p: any) {
     return horarios
   }
 
-  // =========================
-  // CARREGAR AGENDA
-  // =========================
-  
-  useEffect(() => {
-     carregarAgenda()
-  }, [])
+// =========================
+// DATA DA AUTORIZACAO
+// =========================
 
-  // =========================
-  // 🔴 REALTIME
-  // =========================
+useEffect(() => {
 
-  useEffect(() => {
-    const channel = supabase
-      .channel('agenda')
-      .on(
-        'postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'agenda_orbita' },
-        (payload: any) => {
-          const updated = payload.new
-          setListaDia((prev) =>
-            prev.filter((item) => item.id !== updated.id)
-          )
-        }
-      )
-      .subscribe()
-    return () => {
-      supabase.removeChannel(channel)
-    }
-  }, [])
+  carregarLista()
 
-  // =========================
-  // CARREGAR LISTA e FILA
-  // =========================
+}, [dataSelecionada])
 
-	useEffect(() => {
-	  carregarLista()
-	  carregarFila()
-	  carregarClassificacoes()
-
-	  const interval = setInterval(() => {
-		carregarFila()
-	  }, 3000) // 🔥 atualiza a cada 3s
-
-	  return () => clearInterval(interval)
-	}, [])
-
-  // =========================
-  // Testar usuario
-  // =========================
-
-  useEffect(() => {
-    async function verificarUsuario() {
-      const { data, error } = await supabase.auth.getUser()
-      console.log('USER:', data)
-      console.log('ERROR:', error)
-    }
-    verificarUsuario()
-  }, [])
-
-  // =========================
-  // 🔎 AUTOCOMPLETE
-  // =========================
-
-  useEffect(() => {
-    if (!busca || pacienteSelecionado) return
-    const buscar = async () => {
-      const { data } = await supabase
-        .from('agenda_orbita')
-        .select('*')
-        .ilike('paciente_nome', `%${busca}%`)
-        .limit(50)
-      if (data) {
-        const unicos = Array.from(
-          new Map(data.map((p: any) => [p.paciente_nome, p])).values()
-        )
-        setSugestoes(unicos)
-      }
-    }
-    buscar()
-  }, [busca])
-
-  // =========================
-  // BUSCAR TERAPIA
-  // =========================
-
-  useEffect(() => {
-    buscarTerapia()
-  }, [pacienteSelecionado, data, horario])
-
-  // =========================
-  // BUSCAR MAQUINA
-  // =========================
-	useEffect(() => {
-	  async function carregarMachineId() {
-		const { data: userData } = await supabase.auth.getUser()
-
-		const user = userData?.user
-		if (!user) return
-
-		const { data, error } = await supabase
-		  .from('maquinas')
-		  .select('id')
-		  .eq('user_id', user.id)
-		  .single()
-
-		if (error) {
-		  console.error('Erro ao buscar machine_id:', error)
-		  return
-		}
-
-		setMachineId(data?.id || null)
-	  }
-
-	  carregarMachineId()
-	}, [])
-
-
-  // =========================
-  // BUSCAR STATUS DO PACIENTE
-  // =========================
-	const classificacaoMap = useMemo(() => {
-	  const map: any = {}
-
-	  classificacoes.forEach(c => {
-		map[c.paciente_id] = c
-	  })
-
-	  return map
-	}, [classificacoes])
-
-	const statusMap = useMemo(() => {
-	  const map: any = {}
-
-	  filaStatus.forEach(f => {
-		const key = `${f.paciente_id}_${f.horario}`
-		map[key] = f
-	  })
-
-	  return map
-	}, [filaStatus])
 
   // =========================
   // 🎨 UI
@@ -915,91 +839,195 @@ async function handleManualLista(p: any) {
   return (
     <div className="p-6 min-h-[calc(100vh-80px)] bg-gradient-to-br from-slate-50 via-white to-slate-100">
       {/* HEADER */}
-      <div className="mb-6 px-5 py-3 bg-white/70 backdrop-blur-md backdrop-blur-sm border border-slate-200/70 rounded-2xl shadow-sm">
+      <div className="mb-6 px-5 py-3 bg-white/70 backdrop-blur-sm border border-slate-200/70 rounded-2xl shadow-sm">
         <h1 className="text-2xl font-semibold text-slate-600">
-          Solicitar Autorização
+          Central de Atendimentos
         </h1>
         <p className="text-sm text-slate-500 mt-1">
-          Controle diário de atendimentos
+          Gestão diária de presenças, faltas e autorizações
         </p>
       </div>
-      <div className="grid grid-cols-4 gap-5">
+      <div className="grid grid-cols-1 gap-5">
         {/* ========================= */}
         {/* CARD PRINCIPAL */}
         {/* ========================= */}
-        <div className="col-span-3 bg-white/70 backdrop-blur-md backdrop-blur-sm border border-slate-200/70 rounded-2xl shadow-sm p-6">
-          {/* HEADER COM FILTRO */}
-          <div className="flex items-center justify-between mb-4">
-            {/* ESQUERDA */}
-            <h2 className="text-base font-semibold text-slate-600 flex items-center gap-2">
-              Agenda do Dia
-              <span className="text-sm font-normal text-slate-400">
-                · {hojeFormatado}
-              </span>
-            </h2>
-           
-		   {/* DIREITA (AGRUPADO) */}
-            <div className="flex items-center gap-2">
+        <div className="bg-white/70 backdrop-blur-md border border-slate-200/70 rounded-2xl shadow-sm p-6">
+	
+{/* HEADER COM FILTRO */}
+<div className="grid grid-cols-12 gap-3 mb-5">
 
-			  {/* 🔥 FILTRO HORÁRIO BONITO */}
-			  <div className="relative">
-				<select
-				  value={filtroHorario}
-				  onChange={(e) => setFiltroHorario(e.target.value)}
-				  className="appearance-none bg-white border border-slate-200 rounded-lg px-3 py-1.5 pr-8 text-sm text-slate-600 shadow-sm focus:outline-none focus:ring-2 focus:ring-[#3A8FB7]/40"
-				>
-				  <option value="">Horário</option>
-				  {horarios.map((h) => (
-					<option key={h} value={h}>{h}</option>
-				  ))}
-				</select>
+  {/* 🔎 BUSCA */}
+  <input
+    type="text"
+    placeholder="Buscar paciente..."
+    value={filtro}
+    onChange={(e) => setFiltro(e.target.value)}
+    className="
+      col-span-3
+      border border-slate-200
+      rounded-lg
+      px-3 py-1.5
+      text-sm
+      bg-white
+      text-slate-600
+      shadow-sm
+      focus:outline-none
+      focus:ring-2
+      focus:ring-[#3A8FB7]/40
+    "
+  />
 
-				{/* Ícone */}
-				<div className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
-				  ▼
-				</div>
-			  </div>
+  {/* 📅 DATA */}
+  <input
+    type="date"
+    value={dataSelecionada}
+    onChange={(e) =>
+      setDataSelecionada(e.target.value)
+    }
+    className="
+      col-span-2
+      border border-slate-200
+      rounded-lg
+      px-3 py-1.5
+      text-sm
+      bg-white
+      text-slate-600
+      shadow-sm
+      focus:outline-none
+      focus:ring-2
+      focus:ring-[#3A8FB7]/40
+    "
+  />
 
-			  {/* 🔎 FILTRO NOME */}
-			  <input
-				type="text"
-				placeholder="Buscar paciente..."
-				value={filtro}
-				onChange={(e) => setFiltro(e.target.value)}
-				className="w-56 border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-[#3A8FB7]/40"
-			  />
+  {/* ⏰ HORÁRIO */}
+  <div className="relative col-span-2">
+    <select
+      value={filtroHorario}
+      onChange={(e) =>
+        setFiltroHorario(e.target.value)
+      }
+      className="
+        w-full
+        appearance-none
+        bg-white
+        border border-slate-200
+        rounded-lg
+        px-3 py-1.5 pr-8
+        text-sm
+        text-slate-600
+        shadow-sm
+        focus:outline-none
+        focus:ring-2
+        focus:ring-[#3A8FB7]/40
+      "
+    >
+      <option value="">Horário</option>
 
-			  {/* 🔄 BOTÃO */}
-				<button
-				  onClick={atualizarAgendaManual}
-				  disabled={atualizando}
-				  className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg text-sm hover:brightness-110 active:scale-[0.98] transition disabled:opacity-50 whitespace-nowrap"
-				>
-				  <RefreshCcw size={16} className={atualizando ? 'animate-spin' : ''} />
-				  {atualizando ? 'Atualizando...' : 'Atualizar'}
-				</button>
+      {horarios.map((h) => (
+        <option key={h} value={h}>
+          {h}
+        </option>
+      ))}
+    </select>
 
-			</div>
-			
-          </div>
+    <div className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+      ▼
+    </div>
+  </div>
+
+  {/* 🏥 CONVÊNIO */}
+  <div className="relative col-span-3">
+    <select
+      value={filtroConvenio}
+      onChange={(e) =>
+        setFiltroConvenio(e.target.value)
+      }
+      className="
+        w-full
+        appearance-none
+        bg-white
+        border border-slate-200
+        rounded-lg
+        px-3 py-1.5 pr-8
+        text-sm
+        text-slate-600
+        shadow-sm
+        focus:outline-none
+        focus:ring-2
+        focus:ring-[#3A8FB7]/40
+      "
+    >
+      <option value="">Convênio</option>
+
+      {convenios.map((c) => (
+        <option key={c} value={c}>
+          {c}
+        </option>
+      ))}
+    </select>
+
+    <div className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+      ▼
+    </div>
+  </div>
+
+  {/* 🏢 UNIDADE */}
+  <div className="relative col-span-2">
+    <select
+      value={filtroUnidade}
+      onChange={(e) =>
+        setFiltroUnidade(e.target.value)
+      }
+      className="
+        w-full
+        appearance-none
+        bg-white
+        border border-slate-200
+        rounded-lg
+        px-3 py-1.5 pr-8
+        text-sm
+        text-slate-600
+        shadow-sm
+        focus:outline-none
+        focus:ring-2
+        focus:ring-[#3A8FB7]/40
+      "
+    >
+      <option value="">Unidade</option>
+
+      {unidades.map((u) => (
+        <option key={u} value={u}>
+          {u}
+        </option>
+      ))}
+    </select>
+
+    <div className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none">
+      ▼
+    </div>
+  </div>
+
+</div>
           {loadingLista ? (
             <p className="text-sm text-slate-400">Carregando...</p>
           ) : (() => {
-            const listaFiltrada = listaDia.filter((p) => {
-			    
-				const classificacao = classificacaoMap[p.paciente_id]
-				const statusItem = statusMap[`${p.paciente_id}_${p.horario}`]
+				const listaFiltrada = (
+				  listaDia || []
+				)
+				.filter(
+				  (p) => p.mostrar_na_tela
+				)
+				.filter((p) => {
+				
+				const unidade =
+				  p.sala_nome
+					?.replace('Unid. ', '')
+					?.split(' - ')[0]
 
-				// 🚫 REMOVE OUTROS CONVÊNIOS
-				if (classificacao?.convenio_tipo === 'OUTRO_CONVENIO') {
-				  return false
-				}
-			  
-			  // 🚫 ESCONDER FALTA E CONCLUÍDO
-			  if (['falta', 'concluido'].includes(statusItem?.status)) {
-				return false
-			  }
-
+				const matchUnidade =
+				  !filtroUnidade ||
+				  unidade === filtroUnidade
+  
 			  const matchNome =
 				!filtro ||
 				(p.paciente_nome || '').toLowerCase().includes(filtro.toLowerCase())
@@ -1008,8 +1036,19 @@ async function handleManualLista(p: any) {
 				!filtroHorario ||
 				p.horario?.slice(0, 5) === filtroHorario
 
-			  return matchNome && matchHorario
+			  const matchConvenio =
+			    !filtroConvenio ||
+			    p.convenio_nome === filtroConvenio
+  
+			  return (
+					  matchNome &&
+					  matchHorario &&
+					  matchUnidade &&
+					  matchConvenio
+					)
 			})
+			
+				
             if (listaFiltrada.length === 0) {
               return (
                 <p className="text-sm text-slate-400">
@@ -1017,38 +1056,30 @@ async function handleManualLista(p: any) {
                 </p>
               )
             }
-			const listaOrdenada = [...listaFiltrada].sort((a, b) => {
-			  if (a.horario !== b.horario) {
-				return a.horario.localeCompare(b.horario)
-			  }	
+			const listaOrdenada = [...listaFiltrada].sort((a: any, b: any) => {
 
-			  // 2️⃣ última autorização (mais antigo primeiro 🔥)
-			  const ultA = getUltimaAutorizacaoConcluida(a)
-			  const ultB = getUltimaAutorizacaoConcluida(b)
+			  // horário
+				if (a.horario !== b.horario) {
+				  return a.horario.localeCompare(b.horario)
+				}
 
-			  const dataA = ultA ? new Date(ultA.updated_at + 'Z').getTime() : Infinity
-			  const dataB = ultB ? new Date(ultB.updated_at + 'Z').getTime() : Infinity
+			  // nome
+			  return (a.paciente_nome || '')
+				.localeCompare(b.paciente_nome || '')
 
-			  if (dataA !== dataB) {
-				return dataA - dataB // 🔥 MAIS ANTIGO PRIMEIRO
-			  }
-
-			  // 3️⃣ nome
-			  return (a.paciente_nome || '').localeCompare(b.paciente_nome || '')
 			})
 			return (
 			  <div className="space-y-3">
-				{listaOrdenada.map((p) => {
-				  const statusItem = statusMap[`${p.paciente_id}_${p.horario}`]
-				  const classificacao = getClassificacao(p)
-				  const ativo = podeSolicitar(p.ultima_autorizacao,statusItem?.status)
-				  const ultimaConcluida = getUltimaAutorizacaoConcluida(p)
-
-				  if (statusItem?.status === 'concluido') return null
+				{(listaOrdenada as any[]).map((p) => {
+				const ativo =
+				  ![
+					'processando',
+					'pendente'
+				  ].includes(p.status_final)
 
 				  return (
 			<div
-			  key={p.id}
+			  key={buildCardKey(p)}
 			  className="flex rounded-2xl border border-white/60 bg-white/90 border-slate-200/60 backdrop-blur-md shadow-[0_8px_30px_rgba(0,0,0,0.06)] hover:shadow-[0_10px_40px_rgba(0,0,0,0.10)] hover:-translate-y-[1px] transition-all duration-200 overflow-hidden"
 			>
 			  {/* ⏰ HORÁRIO */}
@@ -1065,59 +1096,39 @@ async function handleManualLista(p: any) {
 
     {/* NOME */}
     <span className="text-lg font-semibold text-slate-800 leading-tight truncate">
-      {p.paciente_nome}
+      {formatarNome(p.paciente_nome)}
     </span>
-
-    {/* TRIAGEM (AÇÃO) */}
-    {!classificacao && (
-      <div className="flex gap-2 mt-1">
-        <button
-          onClick={() => marcarAssim(p)}
-          className="text-[11px] px-2 py-1 rounded bg-green-100 text-green-700 hover:bg-green-200"
-        >
-          ✅ ASSIM
-        </button>
-
-        <button
-          onClick={() => marcarOutro(p)}
-          className="text-[11px] px-2 py-1 rounded bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
-        >
-          🟡 Outro
-        </button>
-      </div>
-    )}
 
     {/* BADGES (INFORMAÇÃO) */}
     <div className="flex items-center gap-2 flex-wrap">
 
-      {/* TERAPIA */}
-      <span className="text-[11px] px-2 py-0.5 rounded-md bg-slate-100/70 text-slate-600 border border-slate-200">
-        {p.terapia || 'Sem terapia'}
-      </span>
+		  {/* TERAPIA */}
+		  <span className="text-[11px] px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-100">
+		  	{p.terapias?.join(' + ') || 'Sem terapia'}
+		  </span>
 
-      {/* CLASSIFICAÇÃO */}
-      {classificacao?.convenio_tipo === 'ASSIM' && (
-        <span className="text-[11px] px-2 py-0.5 rounded-md bg-green-100 text-green-700 border border-green-200 font-medium">
-          ✔ ASSIM
-        </span>
-      )}
+		{/* CONVENIO */}
+		<span className="text-[11px] px-2 py-0.5 rounded-md bg-slate-100/70 text-slate-600 border border-slate-200">
+		  {p.convenio_nome || 'Sem convênio'}
+		</span>
 
       {/* STATUS */}
-      {statusItem?.status === 'pendente' && (
-        <span className="flex items-center gap-1 text-xs font-semibold text-yellow-800 bg-yellow-100 px-2 py-0.5 rounded-md">
-          <span className="w-1.5 h-1.5 bg-yellow-500 rounded-full"></span>
-          Pendente
-        </span>
-      )}
-
-      {(statusItem?.status === 'processando' || statusItem?.status === 'executando') && (
+      {(p.status_final === 'processando') &&
+	  (
         <span className="flex items-center gap-1 text-xs font-semibold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-md">
           <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></span>
           Processando
         </span>
       )}
 
-      {statusItem?.status === 'erro' && (
+		{p.status_final === 'pendente' && (
+		  <span className="flex items-center gap-1 text-xs font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-md">
+			<span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse"></span>
+			Na fila
+		  </span>
+		)}
+
+      {p.status_final === 'erro' && (
         <span className="flex items-center gap-1 text-xs font-semibold text-red-800 bg-red-100 px-2 py-0.5 rounded-md">
           <span className="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
           Erro
@@ -1125,191 +1136,102 @@ async function handleManualLista(p: any) {
       )}
     </div>
 
-    {/* ÚLTIMA AUTORIZAÇÃO */}
-    <span className="text-xs text-slate-400">
-      Última Autorização:{' '}
-      {ultimaConcluida
-        ? new Date(ultimaConcluida.updated_at + 'Z').toLocaleTimeString('pt-BR', {
-            timeZone: 'America/Sao_Paulo',
-            hour: '2-digit',
-            minute: '2-digit'
-          })
-        : '-'}
-    </span>
+{/* ÚLTIMA AUTORIZAÇÃO */}
+{p.tipo_fluxo === 'autorizacao' && (
+  <span className="text-xs text-slate-400">
+    Última autorização:{' '}
+    {p.ultima_autorizacao_anterior
+      ? new Date(
+          p.ultima_autorizacao_anterior
+        ).toLocaleTimeString('pt-BR', {
+          hour: '2-digit',
+          minute: '2-digit'
+        })
+      : '-'}
+  </span>
+)}
+
 
   </div>
 
-  {/* AÇÕES */}
-  <div className="flex flex-col gap-2 ml-4 w-[220px]">
+<div className="flex flex-col gap-1 ml-4 w-[135px]">
 
-    {/* LINHA 1 */}
-    <div className="flex gap-2">
-      <button
-        disabled={!ativo || statusItem?.status === 'processando'}
-        onClick={() => handleSolicitarLista(p)}
-        className={`flex-1 flex items-center justify-center gap-1 text-xs px-2 py-1.5 rounded-lg font-medium transition ${
-          ativo
-            ? 'bg-[#3A8FB7] text-white shadow-md hover:brightness-110'
-            : 'bg-slate-200 text-slate-400 cursor-not-allowed'
-        }`}
-      >
-        🔐 Autorização
-      </button>
+{p.tipo_fluxo === 'autorizacao' ? (
 
-      <button
-        onClick={() => chamarResponsavel(p)}
-        className="flex-1 flex items-center justify-center gap-1 text-xs px-2 py-1.5 rounded-lg font-medium bg-emerald-600 text-white hover:brightness-110 transition"
-      >
-        📢 Chamar
-      </button>
-    </div>
+  <button
+    disabled={
+      !workerOnline ||
+      !ativo ||
+      p.status_final === 'processando'
+    }
+    onClick={() => handleSolicitarLista(p)}
+    className={`w-full flex items-start justify-center gap-1.5 text-[12px] px-3 py-1.5 rounded-lg font-medium leading-none tracking-tight ${
+      !workerOnline
+        ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
+        : ativo
+          ? 'bg-[#3A8FB7] text-white shadow-md hover:brightness-110'
+          : 'bg-slate-200 text-slate-400 cursor-not-allowed'
+    }`}
+  >
+    <Lock size={14} className="relative -top-[1px]" />
 
-    {/* LINHA 2 */}
-    <div className="flex gap-2">
-      <button
-        onClick={() => handleManualLista(p)}
-        className="flex-1 flex items-center justify-center gap-1 text-xs px-2 py-1.5 rounded-lg font-medium bg-slate-500 text-white hover:bg-slate-600 transition"
-      >
-        📝 Manual
-      </button>
+    {
+      !workerOnline
+        ? 'Sistema Offline'
+        : 'Autorizar'
+    }
+  </button>
 
-      <button
-        onClick={() => {
-          setPacienteFalta(p)
-          setModalFalta(true)
-        }}
-        className="flex-1 flex items-center justify-center gap-1 text-xs px-2 py-1.5 rounded-lg font-medium bg-red-100 text-red-700 hover:bg-red-200 transition"
-      >
-        🚫 Falta
-      </button>
-    </div>
+) : (
 
-  </div>
+  <button
+    disabled={!ativo}
+    onClick={() => handleManualLista(p)}
+    className={`w-full flex items-start justify-center gap-1.5 text-[12px] px-3 py-1.5 rounded-lg font-medium leading-none tracking-tight ${
+		  ativo
+			? 'bg-emerald-600 text-white shadow-md hover:bg-emerald-700'
+			: 'bg-slate-200 text-slate-400 cursor-not-allowed'
+	  }`}
+  >
+  <CheckCircle
+    size={14}
+    className="relative -top-[1px]"
+  />
+
+  Presença
+</button>
+
+)}
+
+<button
+  onClick={() => chamarResponsavel(p)}
+  className="w-full flex items-start justify-center gap-1.5 text-[12px] px-2 py-1.5 rounded-lg font-medium bg-emerald-100 text-emerald-700 hover:bg-emerald-200 tracking-tight leading-none"
+>
+  <Megaphone size={14} className="relative -top-[1px]" />
+  Chamar
+</button>
+
+<button
+  onClick={() => {
+    setPacienteFalta(p)
+    setModalFalta(true)
+  }}
+  className="w-full flex items-start justify-center gap-1.5 text-[12px] px-2 py-1.5 rounded-lg font-medium bg-red-100 text-red-600 hover:bg-red-200 tracking-tight leading-none"
+>
+  <XCircle size={14} className="relative -top-[1px]" />
+  Falta
+</button>
+
 </div>
-			</div>
+</div>
+</div>
 				  )
 				})}
 			  </div>
 			)
           })()}
         </div>
-        {/* ========================= */}
-        {/* CARD LATERAL CENTRALIZADO */}
-        {/* ========================= */}
-        <div className="col-span-1 flex justify-center">
-          <div className="w-full max-w-[280px] bg-white/70 backdrop-blur-md backdrop-blur-sm border border-slate-200/70 rounded-2xl shadow-sm p-5">
-            <div className="space-y-4">
-              <h2 className="text-lg font-semibold text-slate-600 text-center">
-                Solicitar Autorização Retroativa
-              </h2>
-              
-			  {/* PACIENTE */}
-              <div className="relative">
-                <input
-                  value={busca}
-                  onChange={(e) => {
-                    setBusca(e.target.value)
-                    setPacienteSelecionado(null)
-                    setIndexSelecionado(-1)
-                    setMostrarSugestoes(true)
-                  }}
-                  onFocus={() => setMostrarSugestoes(true)}
-                  onBlur={() => setTimeout(() => setMostrarSugestoes(false), 150)}
-                  onKeyDown={(e) => {
-                    if (!sugestoes.length) return
-                    if (e.key === 'ArrowDown') {
-                      e.preventDefault()
-                      setIndexSelecionado((prev) =>
-                        prev < sugestoes.length - 1 ? prev + 1 : prev
-                      )
-                    }
-                    if (e.key === 'ArrowUp') {
-                      e.preventDefault()
-                      setIndexSelecionado((prev) =>
-                        prev > 0 ? prev - 1 : 0
-                      )
-                    }
-                    if (e.key === 'Enter') {
-                      e.preventDefault()
-                      if (indexSelecionado >= 0) {
-                        const p = sugestoes[indexSelecionado]
-                        setBusca(p.paciente_nome)
-                        setPacienteSelecionado(p)
-                        setSugestoes([])
-                        setMostrarSugestoes(false)
-                        setIndexSelecionado(-1)
-                      }
-                    }
-                    if (e.key === 'Escape') {
-                      setSugestoes([])
-                      setMostrarSugestoes(false)
-                      setIndexSelecionado(-1)
-                    }
-                  }}
-                  placeholder="Paciente..."
-                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#3A8FB7]"
-                />
-                {sugestoes.length > 0 && (
-                  <div className="absolute z-10 bg-white border border-slate-200 rounded-lg mt-1 w-full max-h-40 overflow-auto shadow-lg">
-                    {sugestoes.map((p, i) => (
-                      <div
-                        key={i}
-                        onClick={() => {
-                          setBusca(p.paciente_nome)
-                          setPacienteSelecionado(p)
-                          setSugestoes([])
-                          setMostrarSugestoes(false)
-                          setIndexSelecionado(-1)
-                        }}
-                        className={`px-3 py-2 text-sm cursor-pointer ${
-                          i === indexSelecionado
-                            ? 'bg-blue-100'
-                            : 'hover:bg-slate-100'
-                        }`}
-                      >
-                        {p.paciente_nome}
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              
-			  {/* DATA */}
-              <input
-                type="date"
-                value={data}
-                onChange={(e) => setData(e.target.value)}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#3A8FB7]/40"
-              />
-              
-			  {/* HORÁRIO */}
-              <select
-                value={horario}
-                onChange={(e) => setHorario(e.target.value)}
-                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#3A8FB7]/40"
-              >
-                <option value="">Horário</option>
-                {horarios.map((h) => (
-                  <option key={h}>{h}</option>
-                ))}
-              </select>
-              <div>
-                <label className="text-xs text-slate-500">Terapia</label>
-                <div className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-600 text-center">
-                  {terapiaSelecionada || 'Sem Terapia Selecionada'}
-                </div>
-              </div>
-              
-			  {/* BOTÃO */}
-              <button
-                onClick={handleSolicitar}
-                className="w-full bg-[#3A8FB7] text-white py-2 rounded-lg text-sm font-medium hover:opacity-90 transition"
-              >
-                Solicitar
-              </button>
-            </div>
-          </div>
-        </div>
+
       </div>
 
 
