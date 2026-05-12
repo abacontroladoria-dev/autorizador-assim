@@ -14,6 +14,76 @@ import { Lock, CheckCircle, Megaphone, XCircle } from 'lucide-react'
 
 import { getMachineId } from '@/lib/machine'
 
+
+const CAMPOS_CENTRAL_AUTORIZACOES = `
+    paciente_id,
+    paciente_nome,
+    cpf,
+    data_nascimento,
+
+    horario,
+    data_atendimento,
+
+    codigos_tuss,
+
+    convenio_nome,
+    convenio_id,
+
+    sala_nome,
+
+    empresa,
+    matricula,
+    dep,
+
+    crm,
+    nome_medico,
+
+    status_final,
+    mostrar_na_tela,
+    tipo_fluxo,
+
+    terapias,
+    profissionais,
+    agendamentos,
+
+    horario_autorizacao,
+    ultima_autorizacao_anterior
+`
+
+const CAMPOS_CENTRAL_AUTORIZACOES_LEGADO = `
+    paciente_id,
+    paciente_nome,
+
+    horario,
+    data_atendimento,
+
+    codigos_tuss,
+
+    convenio_nome,
+    convenio_id,
+
+    sala_nome,
+
+    empresa,
+    matricula,
+    dep,
+
+    crm,
+    nome_medico,
+
+    status_final,
+    mostrar_na_tela,
+    tipo_fluxo,
+
+    terapias,
+    profissionais,
+    agendamentos,
+
+    horario_autorizacao,
+    ultima_autorizacao_anterior
+`
+
+
 export default function SolicitarPage() {
   const hoje = (() => {
 	  const d = new Date()
@@ -40,21 +110,22 @@ export default function SolicitarPage() {
 
   const horarios = gerarHorarios()
 
-  const unidades = [
+const unidades = [
 
-	  ...new Set(
+  ...new Set(
 
-		(listaDia || [])
-		  .map(p =>
-			p.sala_nome
-			  ?.replace('Unid. ', '')
-			  ?.split(' - ')[0]
-		  )
-		  .filter(Boolean)
+    (listaDia || [])
+      .flatMap(p => p.sala_nome || [])
+      .map((s: string) =>
+        s
+          ?.replace('Unid. ', '')
+          ?.split(' - ')[0]
+      )
+      .filter(Boolean)
 
-	  )
+  )
 
-	].sort()
+].sort()
 
   const convenios = [
 
@@ -102,7 +173,7 @@ export default function SolicitarPage() {
   
       if (error) {
         console.error(error)
-        alert('Erro ao chamar paciente')
+        toast.error('Erro ao chamar paciente')
         return
       }
   
@@ -189,65 +260,40 @@ async function carregarLista() {
 
   setLoadingLista(true)
 
-	const dataFiltro = dataSelecionada
+  const dataFiltro = dataSelecionada
 
-  console.log('DATA FILTRO:', dataFiltro)
+  let { data, error } = await supabase
+    .from('vw_central_autorizacoes')
+    .select(CAMPOS_CENTRAL_AUTORIZACOES)
+    .eq('data_atendimento', dataFiltro)
+    .order('horario', { ascending: true })
 
-const { data, error } = await supabase
-  .from('vw_central_autorizacoes')
-  .select(`
-    paciente_id,
-    paciente_nome,
-    horario,
-    data_atendimento,
+  if (
+    error &&
+    erroColunaPacienteComplementar(error)
+  ) {
 
-    codigos_tuss,
+    const retry = await supabase
+      .from('vw_central_autorizacoes')
+      .select(CAMPOS_CENTRAL_AUTORIZACOES_LEGADO)
+      .eq('data_atendimento', dataFiltro)
+      .order('horario', { ascending: true })
 
-    convenio_nome,
-    convenio_id,
+    data = retry.data
+    error = retry.error
+  }
 
-    sala_nome,
-
-    empresa,
-    matricula,
-    dep,
-
-    crm,
-    nome_medico,
-
-    status_final,
-    mostrar_na_tela,
-    tipo_fluxo,
-
-    terapias,
-    profissionais,
-    agendamentos,
-
-    horario_autorizacao,
-	ultima_autorizacao_anterior
-  `)
-  .eq('data_atendimento', dataFiltro)
-  .order('horario', { ascending: true })
-
-if (error) {
-  console.error(error)
-  toast.error('Erro ao carregar lista')
-  setLoadingLista(false)
-  return
-}
-
-  console.log(
-    (data || []).map((p: any) => ({
-      paciente: p.paciente_nome,
-      status: p.status_final,
-    }))
-  )
+  if (error) {
+    console.error(error)
+    toast.error('Erro ao carregar lista')
+    setLoadingLista(false)
+    return
+  }
 
   setListaDia(data || [])
-  
+
   setLoadingLista(false)
 }
-
 // =========================
 // SOLICITAR LISTA
 // =========================
@@ -390,6 +436,12 @@ async function handleSolicitarLista(
 
         paciente_nome:
           p.paciente_nome,
+		
+		cpf:
+		  p.cpf,
+
+		data_nascimento:
+		  p.data_nascimento,
 
         matricula:
           p.matricula,
@@ -523,6 +575,8 @@ async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
     const inserted = await criarAutorizacao({
       agenda_id: p.agendamentos?.[0],
       paciente_nome: p.paciente_nome,
+	  cpf: p.cpf,
+	  data_nascimento: p.data_nascimento,
       matricula: p.matricula || null,
       data: p.data_atendimento, // ⚠️ corrigido (antes usava "hoje")
       horario: p.horario,
@@ -634,6 +688,8 @@ const atendimentos = Object.values(
       const inserted = await criarAutorizacao({
         agenda_id: p.agendamentos?.[0],
         paciente_nome: p.paciente_nome,
+		cpf: p.cpf,
+		data_nascimento: p.data_nascimento,
         matricula: p.matricula || null,
         data: dataAtendimento,
 		paciente_id: p.paciente_id,
@@ -733,6 +789,8 @@ async function handleManualLista(p: any) {
       const inserted = await criarAutorizacao({
         agenda_id: p.agendamentos?.[0],
         paciente_nome: p.paciente_nome,
+		cpf: p.cpf,
+		data_nascimento: p.data_nascimento,
         matricula: p.matricula,
         data: p.data_atendimento,
 		paciente_id: p.paciente_id,
@@ -792,6 +850,7 @@ function buildCardKey(p: any) {
     String(p.paciente_id),
     String(p.data_atendimento),
     String(p.horario),
+    String(p.terapias?.[0] || '')
   ].join('_')
 }
 
@@ -830,6 +889,103 @@ useEffect(() => {
   carregarLista()
 
 }, [dataSelecionada])
+
+// =========================
+// REALTIME STATUS CARD
+// =========================
+
+// =========================
+// REALTIME STATUS CARD
+// =========================
+
+useEffect(() => {
+
+  const channel = supabase
+    .channel('realtime-status-card')
+
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'fila_autorizacoes'
+      },
+
+      (payload: any) => {
+
+        console.log('REALTIME:', payload)
+
+        const novo = payload.new as any
+
+        if (!novo) return
+
+        setListaDia(prev => {
+
+          return prev
+            .map(item => {
+
+              const mesmoItem =
+
+                String(item.paciente_id)
+
+                ===
+
+                String(novo.paciente_id)
+
+                &&
+
+                String(item.data_atendimento)
+
+                ===
+
+                String(novo.data_atendimento)
+
+                &&
+
+                String(item.horario)
+                  .slice(0, 5)
+
+                ===
+
+                String(novo.horario)
+                  .slice(0, 5)
+
+                &&
+
+                String(item.codigos_tuss?.[0])
+
+                ===
+
+                String(novo.tuss)
+
+              if (!mesmoItem) {
+                return item
+              }
+
+              // REMOVE DA TELA
+              if (novo.status === 'concluido') {
+                return null
+              }
+
+              // ATUALIZA STATUS
+              return {
+                ...item,
+                status_final: novo.status
+              }
+            })
+
+            .filter(Boolean)
+        })
+      }
+    )
+
+    .subscribe()
+
+  return () => {
+    supabase.removeChannel(channel)
+  }
+
+}, [])
 
 
   // =========================
@@ -1019,14 +1175,16 @@ useEffect(() => {
 				)
 				.filter((p) => {
 				
-				const unidade =
-				  p.sala_nome
-					?.replace('Unid. ', '')
-					?.split(' - ')[0]
+				const unidadesPaciente =
+				  (p.sala_nome || []).map((s: string) =>
+					s
+					  ?.replace('Unid. ', '')
+					  ?.split(' - ')[0]
+				  )
 
 				const matchUnidade =
 				  !filtroUnidade ||
-				  unidade === filtroUnidade
+				  unidadesPaciente.includes(filtroUnidade)
   
 			  const matchNome =
 				!filtro ||
@@ -1071,11 +1229,20 @@ useEffect(() => {
 			return (
 			  <div className="space-y-3">
 				{(listaOrdenada as any[]).map((p) => {
-				const ativo =
-				  ![
-					'processando',
-					'pendente'
-				  ].includes(p.status_final)
+
+			  const ativo =
+				![
+				  'processando',
+				  'pendente'
+				].includes(p.status_final)
+
+			  const cpfFormatado =
+				formatarCpf(p.cpf)
+
+			  const dataNascimentoFormatada =
+				formatarDataNascimento(
+				  p.data_nascimento
+				)
 
 				  return (
 			<div
@@ -1090,7 +1257,7 @@ useEffect(() => {
 			</div>
 
 {/* CONTEÚDO */}
-<div className="flex flex-1 justify-between p-2 items-center gap-4">
+<div className="flex flex-1 justify-between p-2 items-start gap-4">
 
   <div className="flex flex-col gap-2 min-w-0">
 
@@ -1099,6 +1266,22 @@ useEffect(() => {
       {formatarNome(p.paciente_nome)}
     </span>
 
+		{(cpfFormatado || dataNascimentoFormatada) && (
+		  <span className="text-xs text-slate-500 leading-tight">
+			{[
+			  cpfFormatado
+				? `CPF: ${cpfFormatado}`
+				: null,
+
+			  dataNascimentoFormatada
+				? `Nascimento: ${dataNascimentoFormatada}`
+				: null
+			]
+			  .filter(Boolean)
+			  .join(' | ')}
+		  </span>
+		)}
+		
     {/* BADGES (INFORMAÇÃO) */}
     <div className="flex items-center gap-2 flex-wrap">
 
@@ -1111,6 +1294,7 @@ useEffect(() => {
 		<span className="text-[11px] px-2 py-0.5 rounded-md bg-slate-100/70 text-slate-600 border border-slate-200">
 		  {p.convenio_nome || 'Sem convênio'}
 		</span>
+		
 
       {/* STATUS */}
       {(p.status_final === 'processando') &&
@@ -1358,5 +1542,51 @@ useEffect(() => {
   </div>
 )}
 	</div>
+  )
+}
+function formatarCpf(
+  cpf?: string | number | null
+) {
+
+  if (cpf == null) return ''
+
+  return String(cpf)
+    .replace(/\D/g, '')
+}
+
+function formatarDataNascimento(
+  data?: string | null
+) {
+
+  if (!data) return ''
+
+  const texto = String(data).trim()
+
+  const iso =
+    texto.match(/^(\d{4})-(\d{2})-(\d{2})/)
+
+  if (iso) {
+    return `${iso[3]}/${iso[2]}/${iso[1]}`
+  }
+
+  return texto
+}
+
+function erroColunaPacienteComplementar(
+  error: any
+) {
+
+  const mensagem = [
+    error?.message,
+    error?.details,
+    error?.hint,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+
+  return (
+    mensagem.includes('cpf') ||
+    mensagem.includes('data_nascimento')
   )
 }

@@ -2,7 +2,6 @@
 
 import {
   LayoutDashboard,
-  ClipboardList,
   PlusCircle,
   LogOut,
   Users,
@@ -84,17 +83,17 @@ export default function Sidebar() {
           icon={PlusCircle}
           path="/solicitar"
         />
-
-        <MenuItem
-          label="Autorizações Passadas"
-          icon={ClipboardList}
-          path="/autorizacoes"
-        />
 		
 		<MenuItem
 		  label="Controle de Pacientes"
 		  icon={Activity}
 		  path="/central-pacientes"
+		/>
+
+		<MenuItem
+		  label="Controle de Terapeutas"
+		  icon={Users}
+		  path="/central-terapeutas"
 		/>
 
       </nav>

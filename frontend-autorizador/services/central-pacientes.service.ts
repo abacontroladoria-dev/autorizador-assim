@@ -26,7 +26,10 @@ export async function listarCentralPacientes(
 
   if (error) {
 
-    console.error(error)
+	console.error(
+	  'ERRO CENTRAL:',
+	  JSON.stringify(error, null, 2)
+	)
 
     return []
   }

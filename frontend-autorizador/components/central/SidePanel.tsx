@@ -241,20 +241,37 @@ export default function SidePanel({
     gap-4
   ">
 
-    <Info
-      label="Número autorização"
-      value={
-        atendimento.numero_autorizacao
-      }
-    />
+<Info
+  label="Número autorização"
+  value={
+    atendimento.numero_autorizacao
+  }
+/>
 
-	<Info
-	  label="Atendido por"
-	  value={
-		atendimento.usuario_nome ||
-		'Não identificado'
-	  }
-	/>
+<Info
+  label="Horário autorização"
+  value={
+    atendimento.horario_autorizacao
+      ? new Date(
+          atendimento.horario_autorizacao
+        ).toLocaleTimeString(
+          'pt-BR',
+          {
+            hour: '2-digit',
+            minute: '2-digit',
+          }
+        )
+      : '—'
+  }
+/>
+
+<Info
+  label="Atendido por"
+  value={
+    atendimento.usuario_nome ||
+    'Não identificado'
+  }
+/>
 
     <Info
       label="Status"

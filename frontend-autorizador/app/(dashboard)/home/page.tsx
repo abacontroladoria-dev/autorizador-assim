@@ -26,7 +26,7 @@ async function loadUser() {
   // 🔥 busca o nome na tabela maquinas
   const { data, error } = await supabase
     .from("maquinas")
-    .select("name")
+    .select("nome")
     .eq("user_id", user.id)
     .limit(1);
 

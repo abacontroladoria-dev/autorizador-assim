@@ -243,7 +243,7 @@ useEffect(() => {
   return (
 
 	<div className="bg-[#f7f9fc] rounded-2xl">
-      <div className="flex flex-col gap-4 min-h-screen">
+      <div className="flex flex-col gap-4 overflow-hidden">
 
         <KpiCards
           indicadores={indicadores}
@@ -269,19 +269,25 @@ useEffect(() => {
           setData={setData}
         />
 
-        <div className="
-          grid
-          grid-cols-[1fr_360px]
-          gap-5
-          items-start
-        ">
+		<div
+		  className="
+			grid
+			grid-cols-[1fr_360px]
+			gap-5
+			flex-1
+			overflow-hidden
+			min-h-0
+		  "
+		>
 
-			<AttendanceList
-			  dados={filtrados}
-			  selecionado={selecionadoId}
-			  setSelecionado={setSelecionadoId}
-			  loading={loading}
-			/>
+			<div className="overflow-y-auto min-h-0">
+			  <AttendanceList
+				dados={filtrados}
+				selecionado={selecionadoId}
+				setSelecionado={setSelecionadoId}
+				loading={loading}
+			  />
+			</div>
 
 			<div className="self-start">
 			  <SidePanel

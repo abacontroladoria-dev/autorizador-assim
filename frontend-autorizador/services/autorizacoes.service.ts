@@ -9,6 +9,10 @@ type CriarAutorizacaoPayload = {
 
   paciente_nome?: string
 
+  cpf?: string | null
+
+  data_nascimento?: string | null
+
   matricula?: string
 
   data?: string
@@ -34,7 +38,25 @@ type CriarAutorizacaoPayload = {
   usuario_id?: string
 
   machine_id?: string
+
+  horario_autorizacao?: string
    
+}
+
+function semDadosPacienteComplementares(error: any) {
+  const mensagem = [
+    error?.message,
+    error?.details,
+    error?.hint,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase()
+
+  return (
+    mensagem.includes('cpf') ||
+    mensagem.includes('data_nascimento')
+  )
 }
 
 	
@@ -59,6 +81,12 @@ export async function criarAutorizacao(
 
     paciente_nome:
       payload.paciente_nome || null,
+
+    cpf:
+      payload.cpf || null,
+
+    data_nascimento:
+      payload.data_nascimento || null,
 
     matricula:
       payload.matricula || null,
@@ -131,18 +159,35 @@ export async function criarAutorizacao(
     insertPayload
   )
 
-  const {
+  let {
     data,
     error
   } = await supabase
-
     .from('fila_autorizacoes')
-
     .insert([insertPayload])
-
     .select()
-
     .single()
+
+  if (
+    error &&
+    semDadosPacienteComplementares(error)
+  ) {
+    const legacyPayload: Partial<typeof insertPayload> = {
+      ...insertPayload
+    }
+
+    delete legacyPayload.cpf
+    delete legacyPayload.data_nascimento
+
+    const retry = await supabase
+      .from('fila_autorizacoes')
+      .insert([legacyPayload])
+      .select()
+      .single()
+
+    data = retry.data
+    error = retry.error
+  }
 
 	if (error) {
 
