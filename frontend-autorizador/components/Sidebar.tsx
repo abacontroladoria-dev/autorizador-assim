@@ -6,10 +6,13 @@ import {
   LogOut,
   Users,
   Activity,
+  FileText,
+  ShieldCheck,
 } from "lucide-react"
-
+import { useEffect } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { getSupabaseClient } from "@/lib/supabase/client"
+import { getFunctionHeaders, getFunctionUrl } from "@/lib/supabase/functions"
 import { useState } from "react"
 
 export default function Sidebar() {
@@ -17,17 +20,86 @@ export default function Sidebar() {
   const router = useRouter()
   const supabase = getSupabaseClient()
   const [loadingLogout, setLoadingLogout] = useState(false)
+  const [role, setRole] = useState<string | null>(null)
+  const [loadingRole, setLoadingRole] = useState(true)
   
-  function isActive(path: string) {
-    return pathname.startsWith(path)
-  }
+	function isActive(path: string) {
+	  if (path === "/") {
+		return pathname === "/"
+	  }
+
+	  return pathname.startsWith(path)
+	}
 
   async function handleLogout() {
     setLoadingLogout(true)
     await supabase.auth.signOut()
     router.replace("/login")
   }
+	const permissions = {
+	  admin: [
+		"/",
+		"/solicitar",
+		"/central-pacientes",
+		"/central-terapeutas",
+		"/guias-digitais",
+		"/financeiro",
+		"/admin",
+	  ],
 
+	  diretoria: [
+		"/",
+		"/solicitar",
+		"/central-pacientes",
+		"/central-terapeutas",
+		"/guias-digitais",
+		"/financeiro",
+	  ],
+
+	  recepcao: [
+		"/",
+		"/solicitar",
+		"/central-pacientes",
+	  ],
+
+	  terapeutico: [
+		"/",
+		"/central-terapeutas",
+	  ],
+
+	  faturamento: [
+		"/",
+		"/guias-digitais",
+	  ],
+	}
+
+	const allowedPaths =
+	  permissions[role as keyof typeof permissions] || []
+
+	function canAccess(path: string) {
+	  return allowedPaths.includes(path)
+	}
+	
+	useEffect(() => {
+	  async function loadRole() {
+		const response = await fetch(getFunctionUrl('verify-perfil'), {
+		  method: 'POST',
+		  headers: await getFunctionHeaders(),
+		})
+
+		if (!response.ok) {
+		  setRole(null)
+		  setLoadingRole(false)
+		  return
+		}
+
+		const json = await response.json()
+		setRole(json.data?.role || null)
+		setLoadingRole(false)
+	  }
+	  loadRole()
+	}, [])
+	
   function MenuItem({
     label,
     icon: Icon,
@@ -37,7 +109,8 @@ export default function Sidebar() {
     icon: any
     path: string
   }) {
-    const active = isActive(path)
+ 
+	const active = isActive(path)
 
     return (
       <button
@@ -72,29 +145,53 @@ export default function Sidebar() {
       {/* MENU */}
       <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
 
-        <MenuItem
-          label="Home"
-          icon={LayoutDashboard}
-          path="/home"
-        />
+{canAccess("/") && (
+  <MenuItem
+    label="Home"
+    icon={LayoutDashboard}
+    path="/"
+  />
+)}
 
-        <MenuItem
-          label="Nova Solicitação"
-          icon={PlusCircle}
-          path="/solicitar"
-        />
-		
+{canAccess("/solicitar") && (
+  <MenuItem
+    label="Nova Solicitação"
+    icon={PlusCircle}
+    path="/solicitar"
+  />
+)}
+
+{canAccess("/central-pacientes") && (		
 		<MenuItem
 		  label="Controle de Pacientes"
 		  icon={Activity}
 		  path="/central-pacientes"
 		/>
+)}
 
+{canAccess("/central-terapeutas") && (
 		<MenuItem
 		  label="Controle de Terapeutas"
 		  icon={Users}
 		  path="/central-terapeutas"
 		/>
+)}
+
+{canAccess("/guias-digitais") && (
+        <MenuItem
+          label="Guias Digitais"
+          icon={FileText}
+          path="/guias-digitais"
+        />
+)}
+
+{canAccess("/admin") && (
+        <MenuItem
+          label="Admin"
+          icon={ShieldCheck}
+          path="/admin"
+        />
+)}
 
       </nav>
 

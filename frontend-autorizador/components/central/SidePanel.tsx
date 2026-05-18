@@ -240,6 +240,13 @@ export default function SidePanel({
     grid grid-cols-1
     gap-4
   ">
+    
+<Info
+  label="Retorno ASSIM"
+  value={
+    atendimento.status_assim || '—'
+  }
+/>
 
 <Info
   label="Número autorização"

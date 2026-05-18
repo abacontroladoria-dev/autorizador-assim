@@ -162,7 +162,7 @@ export default function Timeline({
 
                   {log.status === 'concluido' &&
                    log.horario_autorizacao
-                    ? `ASSIM • ${new Date(
+                    ? `GESTAO_CLINICA • ${new Date(
                         dataExibicao
                       ).toLocaleTimeString(
                         'pt-BR',

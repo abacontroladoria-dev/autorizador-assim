@@ -2,13 +2,14 @@
 
 import { useEffect } from "react"
 import { getSupabaseClient } from "@/lib/supabase/client";
+import { getFunctionHeaders, getFunctionUrl } from "@/lib/supabase/functions";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Eye, EyeOff } from "lucide-react";
 
 export default function Login() {
   const [showPassword, setShowPassword] = useState(false);
-  const [email, setEmail] = useState("");
+  const [login, setLogin] = useState("");
   const [senha, setSenha] = useState("");
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState("");
@@ -18,13 +19,36 @@ export default function Login() {
   
 async function handleLogin(e: React.FormEvent) {
   e.preventDefault();
+
   setErro("");
   setLoading(true);
 
-  const { data, error } = await supabase.auth.signInWithPassword({
-    email,
-    password: senha,
-  });
+  let emailToUse = login;
+
+  // Se não for email, buscar pelo username
+  if (!login.includes("@")) {
+
+    const { data: usuario, error: erroUsuario } = await supabase
+      .from("usuarios")
+      .select("email")
+      .eq("username", login.toLowerCase())
+      .maybeSingle();
+
+    if (erroUsuario || !usuario) {
+      setErro("Usuário não encontrado");
+      setLoading(false);
+      return;
+    }
+
+    emailToUse = usuario.email;
+  }
+
+  // Login Supabase
+  const { data, error } =
+    await supabase.auth.signInWithPassword({
+      email: emailToUse,
+      password: senha,
+    });
 
   if (error) {
     setErro("Login ou senha inválidos");
@@ -32,37 +56,102 @@ async function handleLogin(e: React.FormEvent) {
     return;
   }
 
-  const user = data.user;
+	const user = data?.user;
 
-  // 🔥 (Opcional mas recomendado) validar se o usuário tem máquina vinculada
-  const { data: maquina, error: erroMaquina } = await supabase
-    .from('maquinas')
-    .select('id')
-    .eq('user_id', user.id)
+	if (!user) {
+	  setErro("Usuário inválido");
+	  setLoading(false);
+	  return;
+	}
+
+  // Verifica perfil
+  const perfilResponse = await fetch(
+    getFunctionUrl("verify-perfil"),
+    {
+      method: "POST",
+      headers: await getFunctionHeaders(),
+    }
+  );
+
+  const perfilJson = await perfilResponse.json();
+
+  if (!perfilResponse.ok) {
+
+    if (perfilJson?.error === "user_inactive") {
+
+      setErro("Usuário desativado");
+
+    } else if (
+      perfilJson?.error === "profile_not_found"
+    ) {
+
+      setErro(
+        "Perfil de usuário não encontrado. Contate o administrador."
+      );
+
+    } else {
+
+      setErro("Erro ao buscar perfil de usuário");
+
+    }
+
+    setLoading(false);
+    return;
+  }
+
+	// Verifica primeiro acesso
+	if (perfilJson?.primeiro_acesso) {
+
+	  router.replace("/auth/primeiro-acesso");
+
+	  setLoading(false);
+
+	  return;
+	}
+
+  // Verifica máquina vinculada
+  const {
+    data: maquina,
+    error: erroMaquina,
+  } = await supabase
+    .from("maquinas")
+    .select("id")
+    .eq("user_id", user.id)
     .single();
 
   if (erroMaquina || !maquina) {
-    console.error('Usuário sem máquina vinculada', erroMaquina);
-    setErro("Usuário não vinculado a uma máquina. Fale com o administrador.");
-	setLoading(false);
-	router.replace("/home");
+
+    console.error(
+      "Usuário sem máquina vinculada",
+      erroMaquina
+    );
+
+    setErro(
+      "Usuário não vinculado a uma máquina. Fale com o administrador."
+    );
+
+    setLoading(false);
+
+    return;
   }
 
-  // 🔥 (Opcional) atualizar last_seen
-	const { error: erroUpdate } = await supabase
-	  .from('maquinas')
-	  .update({
-		last_seen: new Date().toISOString()
-	  })
-	  .eq('id', maquina.id);
+  // Atualiza last_seen
+  const { error: erroUpdate } = await supabase
+    .from("maquinas")
+    .update({
+      last_seen: new Date().toISOString(),
+    })
+    .eq("id", maquina.id);
 
-	if (erroUpdate) {
-	  console.error('Erro ao atualizar last_seen', erroUpdate);
-	}
+  if (erroUpdate) {
+    console.error(
+      "Erro ao atualizar last_seen",
+      erroUpdate
+    );
+  }
 
-  router.replace("/home");
+  router.replace("/");
 }
-
 
 	useEffect(() => {
 	  let mounted = true
@@ -73,10 +162,28 @@ async function handleLogin(e: React.FormEvent) {
 		if (!mounted) return
 
 		if (user) {
-		  router.replace("/home")
+
+		  const perfilResponse = await fetch(
+			getFunctionUrl("verify-perfil"),
+			{
+			  method: "POST",
+			  headers: await getFunctionHeaders(),
+			}
+		  )
+		  const perfilJson = await perfilResponse.json()
+
+		  if (perfilJson?.primeiro_acesso) {
+
+			router.replace("/auth/primeiro-acesso")
+
+		  } else {
+
+			router.replace("/")
+
+		  }
+
 		} else {
-		  setChecking(false)
-		}
+		setChecking(false) }
 	  }
 
 	  checkUser()
@@ -89,8 +196,7 @@ async function handleLogin(e: React.FormEvent) {
 	if (checking) return null
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-gray-100 to-gray-200">
-      
+    <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-gray-100 to-gray-200">
       <div className="w-full max-w-md bg-white p-8 rounded-2xl shadow-2xl">
         
         {/* LOGO */}
@@ -108,7 +214,7 @@ async function handleLogin(e: React.FormEvent) {
             Central de Autorizações
           </h1>
           <p className="text-sm text-gray-500">
-            ASSIM Saúde • Sistema interno
+            GESTAO_CLINICA • Sistema interno
           </p>
         </div>
 
@@ -123,20 +229,21 @@ async function handleLogin(e: React.FormEvent) {
           )}
 
           {/* USUÁRIO */}
-          <div>
-            <label className="text-xs font-semibold text-gray-500 uppercase">
-              Login
-            </label>
-            <input
-              type="email"
-              placeholder="Usuário"
-              value={email}
-              onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
-                setEmail(e.target.value)
-              }
-              className="mt-1 w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#3A8FB7]"
-            />
-          </div>
+			<div>
+			  <label className="text-xs font-semibold text-gray-500 uppercase">
+				Login
+			  </label>
+
+			  <input
+				type="text"
+				placeholder="E-mail ou usuário"
+				value={login}
+				onChange={(e: React.ChangeEvent<HTMLInputElement>) =>
+				  setLogin(e.target.value.toLowerCase())
+				}
+				className="mt-1 w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#3A8FB7]"
+			  />
+			</div>
 
           {/* SENHA */}
           <div>

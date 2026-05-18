@@ -6,6 +6,8 @@ export type ControleTerapeuticoStatus =
   | 'pendente'
   | 'presente'
   | 'faltou'
+  | 'disponivel'
+  | 'indisponivel'
   | 'cobertura_planejada'
   | 'cobertura_confirmada'
 
@@ -43,7 +45,34 @@ export type AtendimentoTerapeutico = {
 export async function listarCentralTerapeutica(data: string) {
   const { data: response, error } = await supabase
     .from('vw_central_terapeutica')
-    .select('*')
+.select(`
+  tita_agendamento_id,
+
+  data_atendimento,
+
+  paciente_nome,
+
+  profissional_id,
+  profissional_nome,
+
+  terapia_id,
+  terapia_nome,
+
+  hora_inicial,
+  hora_final,
+
+  sala_nome,
+  sala_operacional,
+
+  unidade,
+
+  status,
+
+  profissional_substituto_id,
+  profissional_substituto_nome,
+
+  observacao
+`)
     .eq('data_atendimento', data)
     .order('hora_inicial', {
       ascending: true,

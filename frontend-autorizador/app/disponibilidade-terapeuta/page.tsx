@@ -1,6 +1,15 @@
 'use client'
 
+import StatusActionButtons from '@/components/controle-disponibilidade/StatusActionButtons'
+
+import StatusModal from '@/components/controle-disponibilidade/StatusModal'
+
 import { useEffect, useMemo, useState } from 'react'
+
+import {
+  useControleDisponibilidade
+} from '@/hooks/useControleDisponibilidade'
+
 import {
   Check,
   ChevronDown,
@@ -26,6 +35,32 @@ import type {
 } from '@/components/central-terapeutas/types'
 
 import { listarCentralTerapeutica } from '@/services/central-terapeutas.service'
+import { atualizarStatusAtendimentosEmLote } from '@/services/controle-terapeutico.service'
+import { getSupabaseClient } from '@/lib/supabase/client'
+
+const supabase = getSupabaseClient()
+
+const statusStyles = {
+  pendente:
+    'bg-amber-100 text-amber-700',
+
+  disponivel:
+    'bg-green-100 text-green-700',
+
+  indisponivel:
+    'bg-red-100 text-red-700',
+}
+
+const statusLabels = {
+  pendente:
+    'Aguardando status',
+
+  disponivel:
+    'Disponível',
+
+  indisponivel:
+    'Indisponível',
+}
 
 function getHojeLocal() {
   const hoje = new Date()
@@ -35,6 +70,16 @@ function getHojeLocal() {
   const dia = String(hoje.getDate()).padStart(2, '0')
 
   return `${ano}-${mes}-${dia}`
+}
+
+function normalizarStatusDisponibilidade(
+  status?: string | null
+): StatusDisponibilidade {
+  if (status === 'disponivel' || status === 'indisponivel') {
+    return status
+  }
+
+  return 'pendente'
 }
 
 type Ordenacao =
@@ -60,11 +105,22 @@ type GrupoTerapeuta = {
   substituto?: string
 }
 
+type HorarioEdicao = {
+  id: number
+  horario: string
+  paciente: string
+  statusAtual?: string | null
+  selecionado: boolean
+}
+
 export default function RegistroDisponibilidadePage() {
   const hoje = getHojeLocal()
-
+  const [modalStatus, setModalStatus] =  useState<GrupoTerapeuta | null>(null)
+  const [horariosEdicao, setHorariosEdicao] = useState<HorarioEdicao[]>([])
   const [dados, setDados] = useState<ControleTerapeuticoItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [novoStatusModal, setNovoStatusModal] = useState<StatusDisponibilidade>('indisponivel')
+  const [salvandoStatus, setSalvandoStatus] = useState<Record<string, boolean>>({})
 
   const [ordenacao, setOrdenacao] =
     useState<Ordenacao>('alfabetica')
@@ -85,10 +141,10 @@ export default function RegistroDisponibilidadePage() {
     Record<string, string>
   >({})
 
-const [statusProfissionais, setStatusProfissionais] =
-  useState<
-    Record<string, StatusDisponibilidade>
-  >({})
+  const [statusProfissionais, setStatusProfissionais] =
+    useState<
+      Record<string, StatusDisponibilidade>
+    >({})
 
   const [filters, setFilters] =
     useState<ControleFilters>({
@@ -98,25 +154,114 @@ const [statusProfissionais, setStatusProfissionais] =
       terapeuta: '',
       paciente: '',
     })
+	
+	function abrirModalStatus(
+	  grupo: GrupoTerapeuta
+	) {
+
+	  setModalStatus(grupo)
+
+	  if (grupo.status === 'disponivel') {
+		setNovoStatusModal('indisponivel')
+	  } else {
+		setNovoStatusModal('disponivel')
+	  }
+	}
+
+function toggleHorario(
+  id: number,
+  checked: boolean
+) {
+
+  setHorariosEdicao((prev) =>
+    prev.map((item) =>
+      item.id === id
+        ? {
+            ...item,
+            selecionado: checked,
+          }
+        : item
+    )
+  )
+}
+
+	function toggleCard(terapeuta: string) {
+
+	  setCardsAbertos((prev) => ({
+		...prev,
+		[terapeuta]: !prev[terapeuta],
+	  }))
+	}
+
+  const [cardsAbertos, setCardsAbertos] =
+    useState<Record<string, boolean>>({})
+  
+  async function carregarDados() {
+    try {
+      setLoading(true)
+
+      const response =
+        await listarCentralTerapeutica(filters.data)
+
+      setDados(response || [])
+    } catch (error) {
+      console.error(error)
+      setDados([])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+	useEffect(() => {
+	  if (!modalStatus) return
+
+	  const agora = new Date()
+
+	  const lista =
+		modalStatus.atendimentos.map((item) => {
+
+		  const dataHora = new Date(
+			`${item.data_atendimento}T${item.hora_inicial}`
+		  )
+
+		  const futuro = dataHora >= agora
+
+		  return {
+			id: item.tita_agendamento_id,
+			horario: item.hora_inicial,
+			paciente: getPaciente(item),
+			statusAtual: item.status,
+
+			// futuros já vêm marcados
+			selecionado: futuro,
+		  }
+		})
+
+	  setHorariosEdicao(lista)
+
+	}, [modalStatus])
 
   useEffect(() => {
-    async function carregar() {
-      try {
-        setLoading(true)
+    carregarDados()
 
-        const response =
-          await listarCentralTerapeutica(filters.data)
+    const channel = supabase
+      .channel(`controle-terapeutico-disponibilidade-${filters.data}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'controle_terapeutico',
+        },
+        () => {
+          carregarDados()
+        }
+      )
+      .subscribe()
 
-        setDados(response || [])
-      } catch (error) {
-        console.error(error)
-        setDados([])
-      } finally {
-        setLoading(false)
-      }
+    return () => {
+      supabase.removeChannel(channel)
     }
-
-    carregar()
   }, [filters.data])
 
   const grupos = useMemo(() => {
@@ -167,10 +312,15 @@ const [statusProfissionais, setStatusProfissionais] =
 
 			status:
 			  statusProfissionais[terapeuta] ||
-			  'pendente',
+			  normalizarStatusDisponibilidade(
+			    item.status_operacional ||
+			    item.status
+			  ),
 
 			substituto:
-			  substituicoes[terapeuta],
+			  substituicoes[terapeuta] ||
+			  item.profissional_substituto_nome ||
+			  undefined,
 		  }
 		}
         acc[terapeuta].atendimentos.push(item)
@@ -234,26 +384,141 @@ const [statusProfissionais, setStatusProfissionais] =
 	filtroStatus,
   ])
 
-	function atualizarStatus(
-	  terapeuta: string,
-	  status: StatusDisponibilidade
-	) {
-	  setStatusProfissionais((prev) => ({
-		...prev,
-		[terapeuta]: status,
-	  }))
-	}
+async function atualizarStatusDireto(
+  grupo: GrupoTerapeuta,
+  status: StatusDisponibilidade
+) {
 
-  function salvarSubstituto(
-    terapeuta: string,
+  const ids =
+    grupo.atendimentos
+      .map((item) => item.tita_agendamento_id)
+      .filter(Boolean)
+
+  if (ids.length === 0) {
+    return
+  }
+
+  setSalvandoStatus((prev) => ({
+    ...prev,
+    [grupo.terapeuta]: true,
+  }))
+
+  try {
+
+    const resultado =
+      await atualizarStatusAtendimentosEmLote({
+        tita_agendamento_ids: ids,
+        status,
+      })
+
+    if (!resultado) {
+      return
+    }
+
+    setStatusProfissionais((prev) => ({
+      ...prev,
+      [grupo.terapeuta]: status,
+    }))
+
+    await carregarDados()
+
+  } finally {
+
+    setSalvandoStatus((prev) => ({
+      ...prev,
+      [grupo.terapeuta]: false,
+    }))
+  }
+}
+
+async function atualizarStatus(
+  grupo: GrupoTerapeuta,
+  status: StatusDisponibilidade
+) {
+
+  const idsSelecionados =
+    horariosEdicao
+      .filter((h) => h.selecionado)
+      .map((h) => h.id)
+
+  if (idsSelecionados.length === 0) {
+    console.error(
+      'Nenhum horário selecionado para atualizar status'
+    )
+    return
+  }
+
+  setSalvandoStatus((prev) => ({
+    ...prev,
+    [grupo.terapeuta]: true,
+  }))
+
+  try {
+
+    const resultado =
+      await atualizarStatusAtendimentosEmLote({
+        tita_agendamento_ids: idsSelecionados,
+        status,
+      })
+
+    if (!resultado) {
+      return
+    }
+
+    setStatusProfissionais((prev) => ({
+      ...prev,
+      [grupo.terapeuta]: status,
+    }))
+
+    setModalStatus(null)
+
+    await carregarDados()
+
+  } finally {
+
+    setSalvandoStatus((prev) => ({
+      ...prev,
+      [grupo.terapeuta]: false,
+    }))
+  }
+}
+
+  async function salvarSubstituto(
+    grupo: GrupoTerapeuta,
     substituto: string
   ) {
+    const ids = grupo.atendimentos
+      .map((item) => item.tita_agendamento_id)
+      .filter(Boolean)
+
+    if (ids.length === 0) {
+      console.error('Nenhum tita_agendamento_id encontrado para salvar substituto')
+      return
+    }
+
+    const resultado =
+      await atualizarStatusAtendimentosEmLote({
+        tita_agendamento_ids: ids,
+        status: 'indisponivel',
+        profissional_substituto_nome: substituto,
+      })
+
+    if (!resultado) {
+      return
+    }
+
     setSubstituicoes((prev) => ({
       ...prev,
-      [terapeuta]: substituto,
+      [grupo.terapeuta]: substituto,
+    }))
+
+    setStatusProfissionais((prev) => ({
+      ...prev,
+      [grupo.terapeuta]: 'indisponivel',
     }))
 
     setModalSubstituicao(null)
+    await carregarDados()
   }
 
 const substitutosDisponiveis = useMemo(() => {
@@ -404,6 +669,24 @@ const substitutosDisponiveis = useMemo(() => {
 			  <ChevronDown className="absolute right-4 top-3.5 h-4 w-4 text-slate-400" />
 			</div>
 
+			<div className="relative">
+
+			  <Search className="absolute left-3 top-3.5 h-4 w-4 text-slate-400" />
+
+			  <input
+				value={filters.terapeuta}
+				onChange={(e) =>
+				  setFilters((prev) => ({
+					...prev,
+					terapeuta: e.target.value,
+				  }))
+				}
+				placeholder="Buscar terapeuta..."
+				className="w-full border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm"
+			  />
+
+			</div>
+
         </div>
 
         {loading && (
@@ -419,6 +702,9 @@ const substitutosDisponiveis = useMemo(() => {
                 grupo.atendimentos[0]
               )
 
+			const aberto =
+			  cardsAbertos[grupo.terapeuta]
+  
 			const pendente =
 			  grupo.status === 'pendente'
 
@@ -428,66 +714,87 @@ const substitutosDisponiveis = useMemo(() => {
 			const disponivel =
 			  grupo.status === 'disponivel'
 
-            return (
-              <div
-                key={grupo.terapeuta}
-                className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden"
-              >
-                <div className="p-4 border-b border-slate-100">
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <h2 className="text-base font-bold text-slate-800">
-                        {grupo.terapeuta}
-                      </h2>
-					  <p className="text-sm text-[#3A8FB7] font-medium mt-0.5">
-					    {grupo.terapia}
-					  </p>
+			return (
+			  <div
+				key={grupo.terapeuta}
+				className="bg-white rounded-3xl border border-slate-200 shadow-sm overflow-hidden"
+			  >
+
+				<button
+				  onClick={() =>
+					toggleCard(grupo.terapeuta)
+				  }
+				  className="w-full text-left"
+				>
+
+				  <div className="p-4 border-b border-slate-100">
+					<div className="flex items-start justify-between gap-3">
+
+					  <div>
+
+						<h2 className="text-base font-bold text-slate-800">
+						  {grupo.terapeuta}
+						</h2>
+
+						<p className="text-sm text-[#3A8FB7] font-medium mt-0.5">
+						  {grupo.terapia}
+						</p>
 
 						<div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-slate-500">
+
+						  <span>
+							{grupo.atendimentos?.[0]?.horario}
+						  </span>
+
 						  <span>
 							{grupo.unidade}
 						  </span>
+
 						  <span>
 							{grupo.sala}
-						  </span>						  
+						  </span>
+
 						</div>
-                    </div>
 
-					<div
-					  className={`min-w-[140px] text-center px-3 py-1 rounded-full text-xs font-semibold ${
-						pendente
-						  ? 'bg-amber-100 text-amber-700'
-						  : indisponivel
-						  ? 'bg-red-100 text-red-700'
-						  : 'bg-green-100 text-green-700'
-					  }`}
-					>
-					  {pendente
-						? 'Aguardando status'
-						: indisponivel
-						? 'Indisponível'
-						: 'Disponível'}
+					  </div>
+
+					  <div className="flex flex-col items-end gap-2">
+
+						<span
+						  className={`min-w-[140px] text-center whitespace-nowrap px-3 py-1 rounded-full text-xs font-semibold ${
+							  statusStyles[
+								grupo.status
+							  ]
+							}`}
+						>
+						  {
+							statusLabels[
+							  grupo.status
+							]
+						  }
+						</span>
+
+						<span className="text-[11px] text-slate-400">
+						  {
+							aberto
+							  ? 'Ocultar'
+							  : 'Expandir'
+						  }
+						</span>
+
+					  </div>
+
 					</div>
-					
-                  </div>
+				  </div>
+				</button>
 
-                  {grupo.substituto && (
-                    <div className="mt-2 text-xs text-[#3A8FB7] font-medium">
-                      Substituto:{' '}
-                      {grupo.substituto}
-                    </div>
-                  )}
-                </div>
-
+			{aberto && (
+			  <>				
                 <div className="divide-y divide-slate-100">
                   {grupo.atendimentos.map(
                     (item) => (
                       <div
-                        key={`${grupo.terapeuta}_${getPaciente(
-                          item
-                        )}_${getHorarioInicial(
-                          item
-                        )}`}
+                        key={item.tita_agendamento_id}
                         className="px-4 py-3 flex items-center justify-between gap-3"
                       >
                         <div className="flex items-center gap-3 min-w-0">
@@ -514,79 +821,49 @@ const substitutosDisponiveis = useMemo(() => {
                   )}
                 </div>
 
-				<div className="p-3 bg-slate-50 flex gap-2">
-
-				  {pendente && (
-					<>
-					  <button
-						onClick={() =>
-						  atualizarStatus(
-							grupo.terapeuta,
-							'disponivel'
-						  )
-						}
-						className="flex-1 h-11 rounded-xl bg-green-600 text-white text-sm font-semibold"
-					  >
-						Disponível
-					  </button>
-
-					  <button
-						onClick={() =>
-						  atualizarStatus(
-							grupo.terapeuta,
-							'indisponivel'
-						  )
-						}
-						className="flex-1 h-11 rounded-xl bg-red-600 text-white text-sm font-semibold"
-					  >
-						Indisponível
-					  </button>
-					</>
-				  )}
-
-				  {disponivel && (
-					<button
-					  onClick={() =>
-						atualizarStatus(
-						  grupo.terapeuta,
-						  'indisponivel'
-						)
-					  }
-					  className="flex-1 h-11 rounded-xl bg-red-600 text-white text-sm font-semibold"
-					>
-					  Encerrar disponibilidade
-					</button>
-				  )}
-
-				  {indisponivel && (
-					<>
-					  <button
-						onClick={() =>
-						  atualizarStatus(
-							grupo.terapeuta,
-							'disponivel'
-						  )
-						}
-						className="flex-1 h-11 rounded-xl bg-green-600 text-white text-sm font-semibold"
-					  >
-						Disponível agora
-					  </button>
-
-					  <button
-						onClick={() =>
-						  setModalSubstituicao(grupo)
-						}
-						className="px-4 rounded-xl border border-[#3A8FB7] text-[#3A8FB7] text-sm font-semibold"
-					  >
-						Substituição
-					  </button>
-					</>
-				  )}
-				</div>
+				<StatusActionButtons
+				  grupo={grupo}
+				  salvandoStatus={
+					salvandoStatus[
+					  grupo.terapeuta
+					]
+				  }
+				  abrirModalStatus={
+					abrirModalStatus
+				  }
+				  atualizarStatusDireto={
+					atualizarStatusDireto
+				  }
+				  onSubstituicao={() =>
+					setModalSubstituicao(grupo)
+				  }
+				/>
+				</>
+			  )}
               </div>
             )
-          })}
+		})}
       </section>
+
+		<StatusModal
+		  data={filters.data}
+		  modalStatus={modalStatus}
+		  horariosEdicao={horariosEdicao}
+		  novoStatusModal={novoStatusModal}
+		  salvandoStatus={
+			modalStatus
+			  ? salvandoStatus[
+				  modalStatus.terapeuta
+				]
+			  : false
+		  }
+		  toggleHorario={toggleHorario}
+		  atualizarStatusSelecionado={
+			atualizarStatus
+		  }
+		  setModalStatus={setModalStatus}
+		/>
+
 
       {modalSubstituicao && (
         <div className="fixed inset-0 z-50 bg-black/40 flex items-end">
@@ -627,7 +904,7 @@ const substitutosDisponiveis = useMemo(() => {
                     key={grupo.terapeuta}
                     onClick={() =>
                       salvarSubstituto(
-                        modalSubstituicao.terapeuta,
+                        modalSubstituicao,
                         grupo.terapeuta
                       )
                     }

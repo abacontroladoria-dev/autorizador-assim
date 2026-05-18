@@ -40,7 +40,7 @@ export default function OutrosConveniosPage() {
           Outros Convênios
         </h1>
         <p className="text-sm text-slate-500">
-          Pacientes que não são ASSIM Saúde
+          Pacientes que não são GESTAO_CLINICA
         </p>
       </div>
 

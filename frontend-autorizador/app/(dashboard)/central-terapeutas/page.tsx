@@ -1,18 +1,25 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import { RefreshCw } from 'lucide-react'
+import toast from 'react-hot-toast'
 import { useHeader } from '@/contexts/HeaderContext'
 import ControleFiltersBar from '@/components/central-terapeutas/ControleFiltersBar'
 import ControleKpiCards from '@/components/central-terapeutas/ControleKpiCards'
-import ControleMobileCard from '@/components/central-terapeutas/ControleMobileCard'
-import ControleSidePanel from '@/components/central-terapeutas/ControleSidePanel'
-import ControleTable from '@/components/central-terapeutas/ControleTable'
+import ControleTerapeutaMobileCard from '@/components/central-terapeutas/ControleTerapeutaMobileCard'
 import {
-  getAtendimentoId,
+  useControleDisponibilidade
+} from '@/hooks/useControleDisponibilidade'
+
+import StatusModal from '@/components/controle-disponibilidade/StatusModal'
+import {
   getHorarioInicial,
   getPaciente,
+  getTerapia,
   getTerapeuta,
   getUnidade,
+  getStatus,
+  normalizarStatus,
   terapiaDeveAparecer,
 } from '@/components/central-terapeutas/helpers'
 import type {
@@ -20,6 +27,32 @@ import type {
   ControleTerapeuticoItem,
 } from '@/components/central-terapeutas/types'
 import { listarCentralTerapeutica } from '@/services/central-terapeutas.service'
+import { sincronizarDados as sincronizar } from '@/services/controle-terapeutico.service'
+import { getSupabaseClient } from '@/lib/supabase/client'
+
+const supabase = getSupabaseClient()
+
+type GrupoTerapeutaMobile = {
+  terapeuta: string
+  terapia: string
+
+  terapiaExibicao?: string
+
+  unidade: string
+
+  sala: string
+
+  primeiroHorario: string
+
+  status:
+    | 'pendente'
+    | 'disponivel'
+    | 'indisponivel'
+
+  substituto?: string
+
+  atendimentos: ControleTerapeuticoItem[]
+}
 
 function getHojeLocal() {
   const hoje = new Date()
@@ -35,8 +68,8 @@ export default function ControleTerapeuticoPage() {
   const hoje = getHojeLocal()
 
   const [dados, setDados] = useState<ControleTerapeuticoItem[]>([])
-  const [selecionadoId, setSelecionadoId] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
+  const [sincronizando, setSincronizando] = useState(false)
 
   const [filters, setFilters] = useState<ControleFilters>({
     data: hoje,
@@ -53,24 +86,91 @@ export default function ControleTerapeuticoPage() {
     )
   }, [setHeader])
 
+  async function carregarDados() {
+    setLoading(true)
+
+    const response = await listarCentralTerapeutica(filters.data)
+
+    setDados(response || [])
+    setLoading(false)
+  }
+
+  const {
+	  modalStatus,
+	  setModalStatus,
+
+	  horariosEdicao,
+
+	  novoStatusModal,
+
+	  salvandoStatus,
+
+	  abrirModalStatus:
+			abrirModalStatusOriginal,
+
+	  atualizarStatusDireto,
+
+	  atualizarStatusSelecionado,
+
+	  toggleHorario,
+
+	} = useControleDisponibilidade({
+	  getPaciente,
+	  onSuccess: carregarDados,
+	})
+
+	const abrirModalStatus = (
+	  grupo: GrupoTerapeutaMobile,
+	  status:
+		| 'disponivel'
+		| 'indisponivel'
+	) => {
+
+	  abrirModalStatusOriginal(
+		grupo,
+		status
+	  )
+	}
+
   useEffect(() => {
-    async function carregar() {
-      setLoading(true)
+    carregarDados()
 
-      const response = await listarCentralTerapeutica(filters.data)
+    const channel = supabase
+      .channel(`controle-terapeutico-central-${filters.data}`)
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'public',
+          table: 'controle_terapeutico',
+        },
+        () => {
+          carregarDados()
+        }
+      )
+      .subscribe()
 
-      setDados(response || [])
-
-      setSelecionadoId((atual) => {
-        if (atual || !response?.length) return atual
-        return getAtendimentoId(response[0])
-      })
-
-      setLoading(false)
+    return () => {
+      supabase.removeChannel(channel)
     }
-
-    carregar()
   }, [filters.data])
+
+  const handleSincronizar = async () => {
+    setSincronizando(true)
+    try {
+      const resultado = await sincronizar()
+      toast.success('✓ Sincronização concluída com sucesso')
+      
+      // Recarregar dados após sincronização
+      const response = await listarCentralTerapeutica(filters.data)
+      setDados(response || [])
+    } catch (err) {
+      console.error('Erro ao sincronizar:', err)
+      toast.error('Erro ao sincronizar dados operacionais')
+    } finally {
+      setSincronizando(false)
+    }
+  }
 
   const horarios = useMemo(() => {
     return Array.from(
@@ -113,7 +213,7 @@ export default function ControleTerapeuticoPage() {
 
         if (horario !== 0) return horario
 
-        return getAtendimentoId(a).localeCompare(getAtendimentoId(b))
+        return getPaciente(a).localeCompare(getPaciente(b))
       })
   }, [
     dados,
@@ -122,79 +222,270 @@ export default function ControleTerapeuticoPage() {
     filters.terapeuta,
     filters.paciente,
   ])
+  
+function obterTodosAtendimentosDoTerapeuta(
+  terapeuta: string
+) {
 
-  const selecionado = useMemo(() => {
-    return filtrados.find((item) => getAtendimentoId(item) === selecionadoId)
-  }, [filtrados, selecionadoId])
+  return dados.filter(
+    (item) =>
+      getTerapeuta(item) === terapeuta
+  )
+}
 
-  function selecionarAtendimento(item: ControleTerapeuticoItem) {
-    setSelecionadoId(getAtendimentoId(item))
+function calcularStatusAtual(
+  atendimentos: ControleTerapeuticoItem[]
+) {
+
+  const agora = new Date()
+
+  const ordenados =
+    [...atendimentos].sort(
+      (a, b) =>
+        String(a.hora_inicial)
+          .localeCompare(
+            String(b.hora_inicial)
+          )
+    )
+
+  const atual =
+    ordenados.find((item) => {
+
+      const inicio =
+        new Date(
+          `${item.data_atendimento}T${item.hora_inicial}`
+        )
+
+      const fim =
+        new Date(
+          `${item.data_atendimento}T${item.hora_final}`
+        )
+
+      return (
+        agora >= inicio &&
+        agora <= fim
+      )
+    })
+
+  if (atual?.status) {
+    return normalizarStatus(
+      atual.status
+    )
   }
 
-  return (
-    <div className="bg-[#f7f9fc] rounded-2xl">
-		<div className="flex flex-col gap-4 overflow-hidden">
-			<ControleKpiCards
-			  dados={filtrados}
-			  loading={loading}
-			/>
+  const proximo =
+    ordenados.find((item) => {
 
-			<ControleFiltersBar
-			  filters={filters}
-			  horarios={horarios}
-			  onChange={setFilters}
-			/>
+      const inicio =
+        new Date(
+          `${item.data_atendimento}T${item.hora_inicial}`
+        )
 
-			<div className="lg:hidden space-y-3">
-				{loading && (
-					<div className="bg-white rounded-2xl p-10 text-center text-slate-400">
-					  Carregando atendimentos...
-					</div>
-				)}
+      return inicio >= agora
+    })
 
-				{!loading && filtrados.length === 0 && (
-					<div className="bg-white rounded-2xl p-10 text-center text-slate-400">
-					  Nenhum atendimento encontrado
-					</div>
-				)}
+  if (proximo?.status) {
+    return normalizarStatus(
+      proximo.status
+    )
+  }
 
-				{!loading &&
-				filtrados.map((item) => (
-				  <ControleMobileCard
-					key={getAtendimentoId(item)}
-					item={item}
-					onSelect={() => selecionarAtendimento(item)}
-				  />
-				))}
-			</div>
+  return normalizarStatus(
+    ordenados[
+      ordenados.length - 1
+    ]?.status
+  ) || 'pendente'
+}
 
-				<div
-				  className="
-					hidden
-					lg:grid
-					lg:grid-cols-[1fr_360px]
-					gap-5
-					flex-1
-					overflow-hidden
-					min-h-0
-				  "
-				>
-		
-				<div className="overflow-y-auto min-h-0">
-				  <ControleTable
-					dados={filtrados}
-					selecionadoId={selecionadoId}
-					loading={loading}
-					onSelect={selecionarAtendimento}
-				  />
-				</div>
+  const gruposPorTerapeuta = useMemo(() => {
+    const grupos: Record<string, GrupoTerapeutaMobile> = {}
 
-				<div className="h-full overflow-y-auto">
-				  <ControleSidePanel atendimento={selecionado} />
-				</div>
-				
-			</div>
-		</div>
+    filtrados.forEach((item) => {
+      const terapeuta = getTerapeuta(item)
+
+      if (!grupos[terapeuta]) {
+        grupos[terapeuta] = {
+		  terapeuta,
+
+		  terapia:
+			item.terapia_exibicao ||
+			item.terapia_exibicao_nome ||
+			getTerapia(item),
+
+		  terapiaExibicao:
+			item.terapia_exibicao ||
+			item.terapia_exibicao_nome ||
+			'',
+
+		  unidade: getUnidade(item),
+
+		  sala:
+			item.sala ||
+			item.numero_sala ||
+			'',
+
+		  atendimentos: [],
+
+		  primeiroHorario:
+			getHorarioInicial(item),
+
+		  status: 'pendente',
+
+		  substituto:
+			item.profissional_substituto_nome ||
+			undefined,
+		}
+      }
+
+      grupos[terapeuta].atendimentos.push(item)
+	  
+	  	
+    })
+
+Object.values(grupos).forEach(
+  (grupo) => {
+
+    grupo.status =
+      calcularStatusAtual(
+        grupo.atendimentos
+      ) as
+        | 'pendente'
+        | 'disponivel'
+        | 'indisponivel'
+  }
+)
+
+    return Object.values(grupos).sort((a, b) =>
+	  a.terapeuta.localeCompare(b.terapeuta, 'pt-BR')
+	)
+  }, [filtrados])
+
+return (
+  <div className="bg-[#f7f9fc] rounded-2xl">
+
+    <div className="flex flex-col gap-4 overflow-hidden">
+
+      <div className="flex items-center justify-between">
+
+        <ControleKpiCards
+          dados={filtrados}
+          loading={loading}
+        />
+
+        <button
+          type="button"
+          onClick={handleSincronizar}
+          disabled={sincronizando || loading}
+          title="Sincronizar dados operacionais"
+          className="
+            flex-shrink-0
+            h-12
+            w-12
+            rounded-xl
+            bg-white
+            border border-slate-200
+            text-slate-600
+            flex items-center justify-center
+            hover:bg-slate-50
+            disabled:opacity-50
+            disabled:cursor-not-allowed
+            transition
+          "
+        >
+
+          <RefreshCw
+            size={20}
+            className={
+              sincronizando
+                ? 'animate-spin'
+                : ''
+            }
+          />
+
+        </button>
+
+      </div>
+
+      <ControleFiltersBar
+        filters={filters}
+        horarios={horarios}
+        onChange={setFilters}
+      />
+
+      <div className="space-y-3">
+
+        {loading && (
+          <div className="bg-white rounded-2xl p-10 text-center text-slate-400">
+            Carregando atendimentos...
+          </div>
+        )}
+
+        {!loading &&
+          filtrados.length === 0 && (
+            <div className="bg-white rounded-2xl p-10 text-center text-slate-400">
+              Nenhum atendimento encontrado
+            </div>
+          )}
+
+        {!loading &&
+          gruposPorTerapeuta.map((grupo) => (
+
+			  <ControleTerapeutaMobileCard
+				key={grupo.terapeuta}
+
+				grupo={grupo}
+				gruposDisponiveis={gruposPorTerapeuta}
+				onStatusChanged={carregarDados}
+
+				abrirModalStatus={(
+				  grupo,
+				  status
+				) => {
+
+				  const grupoCompleto = {
+					...grupo,
+
+					atendimentos:
+					  obterTodosAtendimentosDoTerapeuta(
+						grupo.terapeuta
+					  ),
+				  }
+
+				  abrirModalStatus(
+					grupoCompleto,
+					status
+				  )
+				}}
+
+				atualizarStatusDireto={
+				  atualizarStatusDireto
+				}
+
+				salvandoStatus={
+				  salvandoStatus
+				}
+			  />
+
+			))}
+
+      </div>
+
     </div>
-  )
+
+	<StatusModal
+	  data={filters.data}
+	  modalStatus={modalStatus}
+	  horariosEdicao={horariosEdicao}
+	  novoStatusModal={novoStatusModal}
+	  salvandoStatus={salvandoStatus}
+	  toggleHorario={toggleHorario}
+	  atualizarStatusSelecionado={
+		atualizarStatusSelecionado
+	  }
+	  setModalStatus={setModalStatus}
+	/>
+
+  </div>
+)
+
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from 'react'
 import { listarAutorizacoes } from '@/services/autorizacoes.service'
+import { getFunctionHeaders, getFunctionUrl } from '@/lib/supabase/functions'
 
 export default function PreAuditoriaPage() {
   const [dados, setDados] = useState<any[]>([])
@@ -21,7 +22,15 @@ export default function PreAuditoriaPage() {
     setMsg('Sincronizando...')
 
     try {
-      await fetch('/api/sync', { method: 'POST' })
+      const response = await fetch(getFunctionUrl('sync'), {
+        method: 'POST',
+        headers: await getFunctionHeaders(),
+      })
+
+      if (!response.ok) {
+        const json = await response.json().catch(() => null)
+        throw new Error(json?.message || 'Falha ao acionar o robô')
+      }
 
       setMsg('Robô acionado 🚀')
 

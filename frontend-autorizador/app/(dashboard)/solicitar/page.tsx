@@ -364,7 +364,7 @@ async function handleSolicitarLista(
 				.update({
 				  status: 'pendente',
 				  error_message: null,
-				  machine_id: MACHINE_ID,
+				  machine_id: MACHINE_ID || 'WEB',
 				  updated_at: new Date().toISOString()
 				})
 		  .eq('id', existente.id)
@@ -523,11 +523,6 @@ async function handleSolicitarLista(
 
 async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
 
-    if (!MACHINE_ID) {
-	  toast.error('Máquina não identificada')
-	  return
-	}
-	
   try {
     const { data: existente } = await supabase
       .from('fila_autorizacoes')
@@ -589,7 +584,7 @@ async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
       dep: p.dep || null,
       crm: p.crm || null,
       nome_medico: p.nome_medico || null,
-      machine_id: tipo === 'paciente' ? 'falta_paciente' : 'falta_terapeuta'
+      machine_id: MACHINE_ID || 'WEB'
     })
 
     if (!inserted) {
@@ -626,11 +621,6 @@ async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
   
 async function handleFaltaDia(paciente: any) {
 
-    if (!MACHINE_ID) {
-	  toast.error('Máquina não identificada')
-	  return
-	}
-	
   const dataAtendimento = paciente.data_atendimento
 
 const atendimentos = Object.values(
@@ -702,7 +692,7 @@ const atendimentos = Object.values(
         dep: p.dep || null,
         crm: p.crm || null,
         nome_medico: p.nome_medico || null,
-        machine_id: 'falta_dia'
+        machine_id: MACHINE_ID || 'WEB'
       })
 
       if (!inserted) {
@@ -741,10 +731,6 @@ const atendimentos = Object.values(
   // =========================
   
 async function handleManualLista(p: any) {
-	    if (!MACHINE_ID) {
-	  toast.error('Máquina não identificada')
-	  return
-	}
 	
   try {
     // 🔍 VERIFICA SE JÁ EXISTE NA FILA
@@ -804,7 +790,7 @@ async function handleManualLista(p: any) {
         dep: p.dep,
         crm: p.crm,
         nome_medico: p.nome_medico,
-        machine_id: MACHINE_ID
+        machine_id: MACHINE_ID || 'WEB'
       })
 
       if (!inserted) {
@@ -918,6 +904,14 @@ useEffect(() => {
         const novo = payload.new as any
 
         if (!novo) return
+		
+		if (
+		  String(novo.data_atendimento).slice(0, 10)
+		  !==
+		  String(dataSelecionada).slice(0, 10)
+		) {
+		  return
+		}
 
         setListaDia(prev => {
 
@@ -1002,6 +996,27 @@ useEffect(() => {
         <p className="text-sm text-slate-500 mt-1">
           Gestão diária de presenças, faltas e autorizações
         </p>
+        {!workerOnline && (
+          <div className="
+            mt-4
+            rounded-xl
+            border border-amber-200
+            bg-amber-50
+            px-4
+            py-3
+            text-sm
+            text-amber-800
+            flex
+            items-center
+            gap-2
+          ">
+            <span className="text-base">⚠</span>
+
+            <span>
+              Worker offline — autorizações automáticas indisponíveis.
+            </span>
+          </div>
+        )}
       </div>
       <div className="grid grid-cols-1 gap-5">
         {/* ========================= */}

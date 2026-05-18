@@ -18,10 +18,10 @@ export default function Home() {
 async function loadUser() {
   const { data: { user } } = await supabase.auth.getUser();
 
-  if (!user) {
-    router.replace("/");
-    return;
-  }
+if (!user) {
+  router.replace("/login");
+  return;
+}
 
   // 🔥 busca o nome na tabela maquinas
   const { data, error } = await supabase
@@ -30,12 +30,12 @@ async function loadUser() {
     .eq("user_id", user.id)
     .limit(1);
 
-  if (data && data.name) {
-    setNome(data.name);
-  } else {
-    console.log("Erro ao buscar nome:", error);
-    setNome("Usuário");
-  }
+	if (data && data.length > 0) {
+	  setNome(data[0].nome);
+	} else {
+	  console.log("Erro ao buscar nome:", error);
+	  setNome("Usuário");
+	}
 }
 
     loadUser();
@@ -81,31 +81,12 @@ async function loadUser() {
         Central de Autorizações
       </p>
 
-      {/* ALERTA */}
-      {erro > 0 && (
-        <div
-          onClick={() => router.push("/autorizacoes?status=erro")}
-          className="w-full max-w-md bg-red-100 border border-red-300 text-red-800 p-4 rounded-xl mb-6 text-center cursor-pointer hover:brightness-95"
-        >
-          🚨 {erro} autorização(ões) com erro  
-          <div className="text-xs mt-1">Clique para resolver</div>
-        </div>
-      )}
-
       {/* BOTÃO PRINCIPAL */}
       <button
         onClick={() => router.push("/solicitar")}
         className="w-full max-w-md bg-[#3A8FB7] text-white py-4 rounded-xl font-semibold mb-4 hover:brightness-110 transition"
       >
         🚀 Iniciar Atendimentos
-      </button>
-
-      {/* BOTÃO SECUNDÁRIO */}
-      <button
-        onClick={() => router.push("/autorizacoes")}
-        className="w-full max-w-md border border-gray-300 py-3 rounded-xl text-gray-700 hover:bg-gray-50 transition"
-      >
-        📋 Ver fila completa
       </button>
 
       {/* STATUS */}
