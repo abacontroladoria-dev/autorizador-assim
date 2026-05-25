@@ -42,9 +42,9 @@
     "eslint-config-next": "16.2.3",
     "install": "^0.13.0",
     "npm": "^11.15.0",
-    "postcss": "^8.5.9",
+    "postcss": "^8.5.15",
     "supabase": "^2.98.2",
-    "tailwindcss": "^4.2.2",
+    "tailwindcss": "^4.3.0",
     "typescript": "^5"
   }
 }
