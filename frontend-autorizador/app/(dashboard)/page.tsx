@@ -19,7 +19,6 @@ import KpiCard from "@/components/home/KpiCard"
 import QuickActionCard from "@/components/home/QuickActionCard"
 import FluxoOperacionalCard from "@/components/home/FluxoOperacional"
 import { buildSlotData, FluxoSlotPoint } from "@/components/home/FluxoOperacional/data"
-import RecentRecords, { RecentRecord } from "@/components/home/RecentRecords"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -104,8 +103,6 @@ export default function Home() {
   })
   const [slotData, setSlotData] = useState<FluxoSlotPoint[]>([])
   const [loadingKpi, setLoadingKpi] = useState(true)
-  const [recentRecords, setRecentRecords] = useState<RecentRecord[]>([])
-  const [loadingRecords, setLoadingRecords] = useState(true)
   const [countProcessando, setCountProcessando] = useState(0)
   const [lastUpdate, setLastUpdate] = useState('')
   const [authChecked, setAuthChecked] = useState(false)
@@ -209,29 +206,15 @@ export default function Home() {
     load()
   }, [hoje])
 
-  // Recent records + chart + fila count
+  // Fila count
   useEffect(() => {
     async function load() {
-      setLoadingRecords(true)
+      const { count: cp } = await supabase
+        .from("fila_autorizacoes")
+        .select("*", { count: "exact", head: true })
+        .eq("status", "processando")
 
-      const [{ data }, { count: cp }] = await Promise.all([
-        supabase
-          .from("fila_autorizacoes")
-          .select("id, paciente_nome, status, created_at, unidade")
-          .eq("data_atendimento", hoje)
-          .order("created_at", { ascending: false })
-          .limit(50),
-        supabase
-          .from("fila_autorizacoes")
-          .select("*", { count: "exact", head: true })
-          .eq("status", "processando"),
-      ])
-
-      if (data) {
-        setRecentRecords(data.slice(0, 4) as RecentRecord[])
-      }
       setCountProcessando(cp ?? 0)
-      setLoadingRecords(false)
     }
     load()
   }, [hoje])
@@ -328,34 +311,13 @@ export default function Home() {
         </div>
       </div>
 
-      {/* ── 4 + 5. Gráfico + Últimos registros ───────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-
-        {/* Fluxo Operacional do Dia */}
-        <div className="lg:col-span-2">
-          <FluxoOperacionalCard
-            slotData={slotData}
-            atendimentos={atendimentos}
-            terapeutas={terapeutas}
-            loading={loadingKpi}
-          />
-        </div>
-
-        {/* Últimos registros */}
-        <div className="bg-white rounded-2xl border border-slate-100 shadow-sm p-6">
-          <div className="flex items-center justify-between mb-4">
-            <p className="text-sm font-semibold text-slate-800">Últimos registros</p>
-            <button
-              onClick={() => router.push("/autorizacoes")}
-              className="text-xs text-[#3A8FB7] hover:underline"
-            >
-              Ver todos
-            </button>
-          </div>
-          <RecentRecords records={recentRecords} loading={loadingRecords} />
-        </div>
-
-      </div>
+      {/* ── 4. Fluxo Operacional do Dia ──────────────────────────────────── */}
+      <FluxoOperacionalCard
+        slotData={slotData}
+        atendimentos={atendimentos}
+        terapeutas={terapeutas}
+        loading={loadingKpi}
+      />
 
       {/* ── 6. Barra de status inferior ──────────────────────────────────── */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
