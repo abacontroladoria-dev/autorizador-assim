@@ -10,6 +10,7 @@ type StatusDisponibilidade =
   | 'pendente'
   | 'disponivel'
   | 'indisponivel'
+  | 'substituido'
 
 type HorarioEdicao = {
   id: number
@@ -21,6 +22,8 @@ type HorarioEdicao = {
 
 type Grupo = {
   terapeuta: string
+  status: StatusDisponibilidade
+  atendimentos: any[]
 }
 
 type Props = {
@@ -33,6 +36,8 @@ type Props = {
   novoStatusModal: StatusDisponibilidade
 
   salvandoStatus: boolean
+
+  erroStatus: string | null
 
   toggleHorario: (
     id: number,
@@ -55,6 +60,7 @@ export default function StatusModal({
   horariosEdicao,
   novoStatusModal,
   salvandoStatus,
+  erroStatus,
   toggleHorario,
   atualizarStatusSelecionado,
   setModalStatus,
@@ -143,11 +149,32 @@ useEffect(() => {
 
         </div>
 
+        {horariosEdicao.length > 0 && (
+          <div className="mt-4 flex justify-end">
+            <button
+              type="button"
+              onClick={() => {
+                const todosM = horariosEdicao.every((h) => h.selecionado)
+                horariosEdicao.forEach((h) => toggleHorario(h.id, !todosM))
+              }}
+              className="text-xs text-[#3A8FB7] font-semibold hover:underline"
+            >
+              {horariosEdicao.every((h) => h.selecionado) ? 'Desmarcar todos' : 'Marcar todos'}
+            </button>
+          </div>
+        )}
+
         <HorarioCheckboxList
           data={data}
           horariosEdicao={horariosEdicao}
           toggleHorario={toggleHorario}
         />
+
+        {erroStatus && (
+          <p className="mt-3 text-sm text-red-600 text-center">
+            {erroStatus}
+          </p>
+        )}
 
         <button
           disabled={salvandoStatus}

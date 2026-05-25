@@ -65,7 +65,9 @@ export async function POST(request: NextRequest) {
   const body = await request.json()
   const { userId, role } = body as { userId: string; role: string }
 
-  if (!userId || !role) {
+  const ROLES_VALIDAS = ['admin', 'recepcao', 'diretoria', 'terapeutico', 'faturamento', 'autorizacao']
+
+  if (!userId || !role || !ROLES_VALIDAS.includes(role)) {
     return NextResponse.json(
       { error: 'invalid_payload' },
       { status: 400 }

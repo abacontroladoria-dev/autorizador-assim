@@ -107,7 +107,7 @@ export async function listarProfissionaisDisponiveis(
   horaFinal?: string,
 
   unidadeId?: number
-) {
+): Promise<Record<string, any>[]> {
   try {
     let query = supabase
 	  .from('vw_profissionais_disponiveis')
@@ -115,13 +115,8 @@ export async function listarProfissionaisDisponiveis(
 
 	  .eq('data', dataAtendimento)
 
-	  .eq(
-		  'status_agendamento',
-		  'Livre'
-		)
-
 		.or(
-		  `terapia_exibicao.eq."${terapiaNome}",nome_terapia.eq."${terapiaNome}"`
+		  `terapia_exibicao.eq.${terapiaNome.replace(/[",]/g, '').trim()},nome_terapia.eq.${terapiaNome.replace(/[",]/g, '').trim()}`
 		)
 
 	if (
@@ -177,15 +172,6 @@ export async function listarProfissionaisDisponiveis(
 export async function sincronizarDados() {
   try {
 	  
-	  console.log(
-  'Payload enviado:',
-  JSON.stringify(
-    items,
-    null,
-    2
-  )
-)
-
     const response = await fetch(getFunctionUrl('sync'), {
       method: 'POST',
       headers: await getFunctionHeaders(),
@@ -213,7 +199,7 @@ export async function sincronizarDados() {
 export async function buscarGradeCobertura(
   dataAtendimento: string,
   idUnidade: number = 280
-) {
+): Promise<Record<string, any>[]> {
   try {
     const { data, error } = await supabase
       .from('grade_profissionais_tita')
@@ -240,7 +226,7 @@ export async function buscarGradeCobertura(
 export async function buscarItensAgenda(
   dataAtendimento: string,
   idUnidade: number = 280
-) {
+): Promise<Record<string, any>[]> {
   try {
     const { data, error } = await supabase
       .from('agenda_tita')
@@ -257,6 +243,78 @@ export async function buscarItensAgenda(
     return data || []
   } catch (err) {
     console.error('Erro ao buscar agenda:', err)
+    return []
+  }
+}
+
+export type SlotModalSubstituicao = {
+  profissional_id: number
+  profissional_nome: string
+  terapia_exibicao_nome: string
+  unidade: string
+  hora: string
+  status_slot: string
+  paciente_nome: string | null
+  sala_nome: string | null
+}
+
+/**
+ * Busca profissionais para o modal de substituição.
+ * Combina os slots do dia (vw_modal_substituicao_terapeutas) com todos os terapeutas
+ * que possuem a mesma terapia na semana (vw_terapeutas_semana), para que profissionais
+ * que não trabalham hoje mas podem ter acordado uma troca também apareçam.
+ */
+export async function listarModalSubstituicao(params: {
+  terapiaExibicaoNome: string
+  unidade: string
+}): Promise<SlotModalSubstituicao[]> {
+  try {
+    const [{ data: slotsHoje, error: erroHoje }, { data: semana, error: erroSemana }] =
+      await Promise.all([
+        supabase
+          .from('vw_modal_substituicao_terapeutas')
+          .select('profissional_id, profissional_nome, terapia_exibicao_nome, unidade, hora, status_slot, paciente_nome, sala_nome')
+          .eq('terapia_exibicao_nome', params.terapiaExibicaoNome)
+          .eq('unidade', params.unidade)
+          .order('profissional_nome', { ascending: true })
+          .order('hora', { ascending: true }),
+        supabase
+          .from('vw_terapeutas_semana')
+          .select('profissional_id, profissional_nome, terapia_exibicao_nome, unidade')
+          .eq('terapia_exibicao_nome', params.terapiaExibicaoNome)
+          .eq('unidade', params.unidade),
+      ])
+
+    if (erroHoje) console.error('Erro ao listar slots do dia:', erroHoje)
+    if (erroSemana) console.error('Erro ao listar terapeutas da semana:', erroSemana)
+
+    const slots = (slotsHoje as SlotModalSubstituicao[]) || []
+
+    const idsHoje = new Set(slots.map((s) => s.profissional_id))
+
+    const slotsAdicionais: SlotModalSubstituicao[] = []
+    const idsAdicionados = new Set<number>()
+
+    for (const t of semana ?? []) {
+      if (idsHoje.has(t.profissional_id) || idsAdicionados.has(t.profissional_id)) continue
+      idsAdicionados.add(t.profissional_id)
+      slotsAdicionais.push({
+        profissional_id: t.profissional_id,
+        profissional_nome: t.profissional_nome,
+        terapia_exibicao_nome: t.terapia_exibicao_nome,
+        unidade: t.unidade,
+        hora: '',
+        status_slot: 'sem_agenda_hoje',
+        paciente_nome: null,
+        sala_nome: null,
+      })
+    }
+
+    return [...slots, ...slotsAdicionais].sort((a, b) =>
+      a.profissional_nome.localeCompare(b.profissional_nome, 'pt-BR')
+    )
+  } catch (err) {
+    console.error('Erro ao listar modal substituição:', err)
     return []
   }
 }

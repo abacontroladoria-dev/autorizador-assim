@@ -207,7 +207,7 @@ export async function criarAutorizacao(
 	  return data
 	}
 
-export async function listarAutorizacoes() {
+export async function listarAutorizacoes(): Promise<Record<string, any>[]> {
 
   const supabase =
     getSupabaseClient()

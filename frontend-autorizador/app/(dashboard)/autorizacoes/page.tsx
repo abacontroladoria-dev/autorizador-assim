@@ -100,7 +100,7 @@ const ItemAutorizacao = React.memo(
 
 export default function AutorizacoesPage() {
   const router = useRouter()
-  const hoje = new Date().toISOString().split('T')[0]
+  const hoje = new Date().toLocaleDateString('en-CA')
   const [filtroHorario, setFiltroHorario] = useState('')
   const [dados, setDados] = useState<any[]>([])
   const [filtro, setFiltro] = useState('')
@@ -153,7 +153,7 @@ export default function AutorizacoesPage() {
 	}
 
 	function limparFiltros() {
-	  const hoje = new Date().toISOString().split('T')[0]
+	  const hoje = new Date().toLocaleDateString('en-CA')
 
 	  setDataInicio(hoje)
 	  setDataFim(hoje)

@@ -10,6 +10,7 @@ export type ControleTerapeuticoStatus =
   | 'indisponivel'
   | 'cobertura_planejada'
   | 'cobertura_confirmada'
+  | 'substituido'
 
 export type AtendimentoTerapeutico = {
   tita_agendamento_id: string | number
@@ -27,6 +28,7 @@ export type AtendimentoTerapeutico = {
   hora_final?: string | null
   horario?: string | null
   sala?: string | null
+  numero_sala?: string | null
   sala_nome?: string | null
   sala_operacional?: string | null
   unidade?: string | null
@@ -37,12 +39,13 @@ export type AtendimentoTerapeutico = {
   profissional_substituto_id?: string | number | null
   profissional_substituto_nome?: string | null
   observacao?: string | null
+  confirmado_em?: string | null
   terapia_exibicao?: string
   terapia_exibicao_nome?: string
   terapia_exibicao_id?: number
 }
 
-export async function listarCentralTerapeutica(data: string) {
+export async function listarCentralTerapeutica(data: string): Promise<AtendimentoTerapeutico[]> {
   const { data: response, error } = await supabase
     .from('vw_central_terapeutica')
 .select(`
@@ -71,7 +74,9 @@ export async function listarCentralTerapeutica(data: string) {
   profissional_substituto_id,
   profissional_substituto_nome,
 
-  observacao
+  observacao,
+
+  confirmado_em
 `)
     .eq('data_atendimento', data)
     .order('hora_inicial', {

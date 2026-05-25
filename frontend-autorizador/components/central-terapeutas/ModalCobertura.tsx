@@ -26,20 +26,6 @@ type Props = {
   onConfirm: () => void
 }
 
-type ProfissionalDisponivel = {
-  id: string | number
-  profissional_id?: string | number | null
-  profissional_nome?: string
-  nome_profissional?: string
-  nome_terapia?: string
-  terapia_nome?: string
-  terapia_exibicao?: string
-  numero_telefone?: string
-  telefone?: string
-  whatsapp?: string
-  status?: string
-  observacao?: string
-}
 
 export default function ModalCobertura({
   atendimento,
@@ -47,10 +33,10 @@ export default function ModalCobertura({
   onClose,
   onConfirm,
 }: Props) {
-  const [profissionaisDisponiveis, setProfissionaisDisponiveis] = useState<ProfissionalDisponivel[]>([])
+  const [profissionaisDisponiveis, setProfissionaisDisponiveis] = useState<Record<string, any>[]>([])
   const [loading, setLoading] = useState(false)
   const [buscando, setBuscando] = useState(false)
-  const [profissionalSelecionado, setProfissionalSelecionado] = useState<ProfissionalDisponivel | null>(null)
+  const [profissionalSelecionado, setProfissionalSelecionado] = useState<Record<string, any> | null>(null)
   const [observacao, setObservacao] = useState('')
 
   // Buscar profissionais quando abrir modal
@@ -65,13 +51,15 @@ export default function ModalCobertura({
 
     setBuscando(true)
     try {
-      const data = atendimento.data || atendimento.data_atendimento || new Date().toISOString().split('T')[0]
+      const data = atendimento.data || atendimento.data_atendimento || new Date().toLocaleDateString('en-CA')
       const terapia = atendimento.nome_terapia || atendimento.terapia_nome || ''
       const unidade = atendimento.id_unidade ? Number(atendimento.id_unidade) : 280
 
       const profissionais = await listarProfissionaisDisponiveis(
         data,
         terapia,
+        undefined,
+        undefined,
         unidade
       )
 

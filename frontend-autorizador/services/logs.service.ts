@@ -4,7 +4,7 @@ const supabase = getSupabaseClient()
 
 export async function buscarLogsFila(
   filaId: string
-) {
+): Promise<Record<string, any>[]> {
 
   const { data, error } = await supabase
 

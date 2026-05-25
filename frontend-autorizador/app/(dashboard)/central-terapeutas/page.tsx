@@ -1,5 +1,6 @@
 'use client'
 
+import type { StatusDisponibilidade } from '@/hooks/useControleDisponibilidade'
 import { useEffect, useMemo, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -44,10 +45,7 @@ type GrupoTerapeutaMobile = {
 
   primeiroHorario: string
 
-  status:
-    | 'pendente'
-    | 'disponivel'
-    | 'indisponivel'
+  status: StatusDisponibilidade
 
   substituto?: string
 
@@ -104,6 +102,8 @@ export default function ControleTerapeuticoPage() {
 	  novoStatusModal,
 
 	  salvandoStatus,
+
+	  erroStatus,
 
 	  abrirModalStatus:
 			abrirModalStatusOriginal,
@@ -338,8 +338,10 @@ function calcularStatusAtual(
       }
 
       grupos[terapeuta].atendimentos.push(item)
-	  
-	  	
+
+      if (!grupos[terapeuta].substituto && item.profissional_substituto_nome) {
+        grupos[terapeuta].substituto = item.profissional_substituto_nome
+      }
     })
 
 Object.values(grupos).forEach(
@@ -352,6 +354,7 @@ Object.values(grupos).forEach(
         | 'pendente'
         | 'disponivel'
         | 'indisponivel'
+        | 'substituido'
   }
 )
 
@@ -434,7 +437,6 @@ return (
 				key={grupo.terapeuta}
 
 				grupo={grupo}
-				gruposDisponiveis={gruposPorTerapeuta}
 				onStatusChanged={carregarDados}
 
 				abrirModalStatus={(
@@ -443,23 +445,39 @@ return (
 				) => {
 
 				  const grupoCompleto = {
-					...grupo,
+					  ...grupo,
 
-					atendimentos:
-					  obterTodosAtendimentosDoTerapeuta(
-						grupo.terapeuta
-					  ),
-				  }
+					  status: grupo.status as
+						| 'pendente'
+						| 'disponivel'
+						| 'indisponivel',
 
-				  abrirModalStatus(
-					grupoCompleto,
+					  atendimentos:
+						obterTodosAtendimentosDoTerapeuta(
+						  grupo.terapeuta
+						),
+					} as GrupoTerapeutaMobile
+
+				  if (
+					  status === 'disponivel' ||
+					  status === 'indisponivel'
+					) {
+					  abrirModalStatus(
+						grupoCompleto,
+						status
+					  )
+					}
+				}}
+
+				atualizarStatusDireto={(
+				  grupo,
+				  status
+				) => {
+				  void atualizarStatusDireto(
+					grupo as any,
 					status
 				  )
 				}}
-
-				atualizarStatusDireto={
-				  atualizarStatusDireto
-				}
 
 				salvandoStatus={
 				  salvandoStatus
@@ -478,6 +496,7 @@ return (
 	  horariosEdicao={horariosEdicao}
 	  novoStatusModal={novoStatusModal}
 	  salvandoStatus={salvandoStatus}
+	  erroStatus={erroStatus}
 	  toggleHorario={toggleHorario}
 	  atualizarStatusSelecionado={
 		atualizarStatusSelecionado

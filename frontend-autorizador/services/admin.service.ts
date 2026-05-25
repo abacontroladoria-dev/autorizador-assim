@@ -5,6 +5,7 @@ export type AdminUser = {
   role?: string
   ativo?: boolean
   created_at?: string
+  username?: string | null
 }
 
 export type AdminMachine = {
@@ -17,11 +18,11 @@ export type AdminMachine = {
 import { getSupabaseClient } from '@/lib/supabase/client'
 import { getFunctionHeaders, getFunctionUrl } from '@/lib/supabase/functions'
 
-export async function getAdminUsers() {
+export async function getAdminUsers(): Promise<AdminUser[]> {
   const supabase = getSupabaseClient()
   const { data, error } = await supabase
     .from('usuarios')
-    .select('id, nome, email, role, ativo, created_at')
+    .select('id, nome, email, role, ativo, created_at, username')
     .order('nome', { ascending: true })
 
   if (error) {
@@ -32,11 +33,11 @@ export async function getAdminUsers() {
   return data || []
 }
 
-export async function getAdminMachines() {
+export async function getAdminMachines(): Promise<AdminMachine[]> {
   const supabase = getSupabaseClient()
   const { data, error } = await supabase
     .from('maquinas')
-    .select('id, nome, status, user_id')
+    .select('id, nome, ativa, last_seen, hostname, sistema_operacional, ip, user_id')
     .order('nome', { ascending: true })
 
   if (error) {
@@ -67,12 +68,24 @@ export async function changeUserRole(userId: string, role: string) {
   return response.ok
 }
 
-export async function updateMachineStatus(machineId: string, status: string) {
+export async function updateMachineStatus(machineId: string, ativa: boolean) {
   const response = await fetch(getFunctionUrl('admin-update-machine'), {
     method: 'POST',
     headers: await getFunctionHeaders(),
-    body: JSON.stringify({ machineId, status }),
+    body: JSON.stringify({ machineId, ativa }),
   })
 
   return response.ok
+}
+
+export async function deleteUser(userId: string): Promise<{ ok: boolean; error?: string }> {
+  const response = await fetch('/api/admin/user/delete', {
+    method: 'POST',
+    headers: await getFunctionHeaders(),
+    body: JSON.stringify({ userId }),
+  })
+
+  const json = await response.json()
+  if (!response.ok) return { ok: false, error: json.error }
+  return { ok: true }
 }

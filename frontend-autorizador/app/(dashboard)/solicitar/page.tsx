@@ -167,7 +167,7 @@ const unidades = [
           {
             nome: paciente.paciente_nome,
             sala:  'Recepção 1',
-			agenda_id: paciente.agendamentos?.[0]
+			agenda_id: null
           }
         ])
   
@@ -279,7 +279,7 @@ async function carregarLista() {
       .eq('data_atendimento', dataFiltro)
       .order('horario', { ascending: true })
 
-    data = retry.data
+    data = retry.data as typeof data
     error = retry.error
   }
 
@@ -826,6 +826,58 @@ async function handleManualLista(p: any) {
   }
 }  
 
+
+// =========================
+// ⛔ CANCELAR PROCESSAMENTO
+// =========================
+
+async function handleCancelarProcessamento(p: any) {
+  try {
+    const { data: existente } = await supabase
+      .from('fila_autorizacoes')
+      .select('id, status')
+      .eq('paciente_id', p.paciente_id)
+      .eq('data_atendimento', p.data_atendimento)
+      .eq('horario', p.horario)
+      .eq('tuss', p.codigos_tuss?.[0])
+      .eq('status', 'processando')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle()
+
+    if (!existente) {
+      toast.error('Nenhum item em processamento encontrado')
+      return
+    }
+
+    const { error } = await supabase
+      .from('fila_autorizacoes')
+      .update({
+        status: 'pendente',
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', existente.id)
+      .eq('status', 'processando')
+
+    if (error) {
+      toast.error('Erro ao cancelar processamento')
+      return
+    }
+
+    toast.success('Processamento cancelado — voltou para a fila')
+
+    setListaDia(prev =>
+      prev.map(item =>
+        buildCardKey(item) === buildCardKey(p)
+          ? { ...item, status_final: 'pendente' }
+          : item
+      )
+    )
+  } catch (err) {
+    console.error(err)
+    toast.error('Erro inesperado')
+  }
+}
 
 // =========================
 // BUILD CARD KEY
@@ -1400,6 +1452,16 @@ useEffect(() => {
   Presença
 </button>
 
+)}
+
+{p.status_final === 'processando' && (
+  <button
+    onClick={() => handleCancelarProcessamento(p)}
+    className="w-full flex items-start justify-center gap-1.5 text-[12px] px-2 py-1.5 rounded-lg font-medium bg-orange-100 text-orange-700 hover:bg-orange-200 tracking-tight leading-none"
+  >
+    <XCircle size={14} className="relative -top-[1px]" />
+    Cancelar
+  </button>
 )}
 
 <button

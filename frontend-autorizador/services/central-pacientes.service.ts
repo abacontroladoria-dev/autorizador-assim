@@ -6,7 +6,7 @@ const supabase =
 
 export async function listarCentralPacientes(
   data: string
-) {
+): Promise<Record<string, any>[]> {
 
   const { data: response, error } =
     await supabase

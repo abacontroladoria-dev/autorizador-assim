@@ -1,13 +1,12 @@
 /**
  * =========================
- * RPA - AUTORIZAÇÃO ASSIM (COM TOKEN + PDF)
+ * RPA - AUTORIZAÇÃO ASSIM
  * =========================
  */
 
 require('dotenv').config();
 const { chromium } = require('playwright');
-const fs = require('fs');
-const path = require('path');
+const { createClient } = require('@supabase/supabase-js');
 
 // =========================
 // Funções Auxiliares
@@ -36,8 +35,9 @@ async function humanType(page, selector, texto) {
   }
 }
 
-async function aguardarTelaLivre(page) {
-  while (true) {
+async function aguardarTelaLivre(page, timeoutMs = 60000) {
+  const fim = Date.now() + timeoutMs;
+  while (Date.now() < fim) {
     const modal = await page.locator(`
       .jconfirm-box:visible,
       .modal:visible,
@@ -56,6 +56,7 @@ async function aguardarTelaLivre(page) {
 
     await page.waitForTimeout(1000);
   }
+  throw new Error('Timeout: Assim não terminou de carregar (sistema travado)');
 }
 
 function normalizarTexto(texto) {
@@ -63,39 +64,6 @@ function normalizarTexto(texto) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-zA-Z0-9\s]/g, "");
-}
-
-// =========================
-// NOME DO ARQUIVO
-// =========================
-function nomeArquivoSeguro(texto) {
-  return texto
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-zA-Z0-9]/g, "");
-}
-
-function mesAbreviado(mes) {
-  const meses = [
-    "JAN","FEV","MAR","ABR","MAI","JUN",
-    "JUL","AGO","SET","OUT","NOV","DEZ"
-  ];
-  return meses[mes];
-}
-
-function gerarNomeArquivo(dataISO, nomePaciente) {
-  const d = new Date(dataISO);
-
-  const dia = String(d.getDate()).padStart(2, '0');
-  const mes = mesAbreviado(d.getMonth());
-  const ano = d.getFullYear();
-
-  const hora = String(d.getHours()).padStart(2, '0');
-  const min = String(d.getMinutes()).padStart(2, '0');
-
-  const nome = nomeArquivoSeguro(nomePaciente);
-
-  return `${dia}${mes}${ano}_${nome}_${hora}-${min}.pdf`;
 }
 
 // =========================
@@ -109,6 +77,11 @@ const EXECUTOR = process.env.ASSIM_EXECUTOR || '52345';
 const SOLICITANTE_FIXO = process.env.ASSIM_SOLICITANTE || '8888';
 const TIPO_CONSULTA = process.env.ASSIM_TIPO_CONSULTA;
 const TIPO_SAIDA = process.env.ASSIM_TIPO_SAIDA;
+const SISTEMA_URL = process.env.SISTEMA_URL;
+const supabase = createClient(
+  process.env.SUPABASE_URL,
+  process.env.SUPABASE_SERVICE_ROLE_KEY
+);
 
 // =========================
 // AGUARDAR ENVIO REAL
@@ -131,6 +104,93 @@ async function aguardarResultadoEnvio(page, timeoutMs = 120000) {
   }
 }
 
+async function selecionarFormaValidacao(page) {
+  return await page.evaluate(() => {
+    return new Promise(resolve => {
+
+      const opcoes = [
+        "Biometria",
+        "QR Code",
+        "Token",
+        "Erro no Reconhecimento Facial",
+        "Beneficiário recusou validação facial/QR Code",
+        "Beneficiário sem celular"
+      ];
+
+      const overlay = document.createElement('div');
+
+      overlay.style.position = 'fixed';
+      overlay.style.inset = '0';
+      overlay.style.background = 'rgba(0,0,0,0.45)';
+      overlay.style.zIndex = '2147483647';
+      overlay.style.display = 'flex';
+      overlay.style.alignItems = 'center';
+      overlay.style.justifyContent = 'center';
+      overlay.style.fontFamily = 'Arial';
+
+      const modal = document.createElement('div');
+
+      modal.style.width = '520px';
+      modal.style.maxWidth = 'calc(100% - 32px)';
+      modal.style.background = '#fff';
+      modal.style.borderRadius = '10px';
+      modal.style.padding = '24px';
+      modal.style.boxShadow = '0 20px 60px rgba(0,0,0,.25)';
+
+      const titulo = document.createElement('h2');
+
+      titulo.innerText = 'Selecione a forma da autorização';
+      titulo.style.marginTop = '0';
+      titulo.style.marginBottom = '20px';
+      titulo.style.fontSize = '20px';
+
+      modal.appendChild(titulo);
+
+      const lista = document.createElement('div');
+
+      lista.style.display = 'flex';
+      lista.style.flexDirection = 'column';
+      lista.style.gap = '10px';
+
+      opcoes.forEach(opcao => {
+
+        const botao = document.createElement('button');
+
+        botao.innerText = opcao;
+
+        botao.style.padding = '12px';
+        botao.style.border = '1px solid #d1d5db';
+        botao.style.borderRadius = '8px';
+        botao.style.background = '#fff';
+        botao.style.cursor = 'pointer';
+        botao.style.fontSize = '15px';
+        botao.style.textAlign = 'left';
+
+        botao.onmouseenter = () => {
+          botao.style.background = '#f3f4f6';
+        };
+
+        botao.onmouseleave = () => {
+          botao.style.background = '#fff';
+        };
+
+        botao.onclick = () => {
+          overlay.remove();
+          resolve(opcao);
+        };
+
+        lista.appendChild(botao);
+      });
+
+      modal.appendChild(lista);
+      overlay.appendChild(modal);
+
+      document.body.appendChild(overlay);
+    });
+  });
+}
+
+
 // =========================
 // FUNÇÃO PRINCIPAL
 // =========================
@@ -140,18 +200,16 @@ async function executarRpa(tarefa, verificarCancelamento) {
     verificarCancelamento = async () => false;
   }
 
-  const browser = await chromium.launch({
-    headless: false
-  });
+const browser = await chromium.connectOverCDP(
+  'http://127.0.0.1:9222'
+);
 
-  const context = await browser.newContext();
-  const page = await context.newPage();
+const context = browser.contexts()[0];
+
+const page = await context.newPage();
 
   let sucessoExecucao = false;
-
-  // 📁 pasta fixa
-  const pastaFilipetas = path.join(__dirname, 'filipetas');
-  fs.mkdirSync(pastaFilipetas, { recursive: true });
+  let formaValidacaoFinal = null;
 
   try {
     console.log("🚀 Iniciando RPA...");
@@ -208,58 +266,115 @@ async function executarRpa(tarefa, verificarCancelamento) {
 
     if (resultado === 'sucesso') {
 
-      console.log("🔎 Verificando fluxo de token...");
+		console.log("📄 Aguardando tela final...");
 
-      const fluxoToken = await page.locator('text=Token enviado para').isVisible().catch(() => false);
+		await delay(1000);
 
-      if (fluxoToken) {
-        console.log("🔐 Token detectado");
+		// Tenta capturar número de autorização gerado pelo ASSIM
+		let numeroAutorizacao = null;
+		try {
+		  const textoConfirmacao = await page.locator('body').innerText();
+		  const match =
+		    textoConfirmacao.match(/n[uú]mero.*?[:\s]+(\d{6,15})/i) ||
+		    textoConfirmacao.match(/autoriza[cç][aã]o.*?[:\s]+(\d{6,15})/i) ||
+		    textoConfirmacao.match(/senha.*?[:\s]+(\d{6,15})/i);
+		  if (match) {
+		    numeroAutorizacao = match[1];
+		    console.log("🔢 Número de autorização:", numeroAutorizacao);
+		  }
+		} catch (_) {}
 
-        console.log("⌛ Aguardando confirmação do usuário...");
-        await page.waitForSelector('text=Token enviado para', { state: 'detached', timeout: 120000 });
+		const formaValidacao =
+		  await selecionarFormaValidacao(page);
 
-        console.log("📄 Aguardando tela final...");
-        await page.waitForLoadState('networkidle');
-        await delay(2000);
+		formaValidacaoFinal = formaValidacao;
 
-        // 📄 gerar nome do arquivo
-        const nomeArquivo = gerarNomeArquivo(
-          tarefa.data_sessao || new Date(),
-          tarefa.paciente_nome
-        );
+		console.log(
+		  "✅ Forma de validação:",
+		  formaValidacao
+		);
 
-        console.log("🖨️ Salvando PDF:", nomeArquivo);
+		const updatePayload = {
+		  status: 'concluido',
+		  forma_autorizacao: formaValidacao,
+		  validacao_finalizada_em: new Date().toISOString()
+		};
+		if (numeroAutorizacao) {
+		  updatePayload.numero_autorizacao = numeroAutorizacao;
+		}
 
-        await page.pdf({
-          path: path.join(pastaFilipetas, nomeArquivo),
-          format: 'A4'
-        });
+		const { error } = await supabase
+		  .from('fila_autorizacoes')
+		  .update(updatePayload)
+		  .eq('id', tarefa.id);
 
-        // 🖨️ abrir janela de impressão
-        console.log("🖨️ Abrindo janela de impressão...");
-        await page.keyboard.press('Control+P');
-      }
+		if (error) {
+		  throw error;
+		}
 
-      sucessoExecucao = true;
-      return 'sucesso';
+		console.log("💾 Forma de autorização salva");
+
+		sucessoExecucao = true;
+
+		await delay(1000);
+
+		console.log("✅ RPA finalizado");
+
+		return 'sucesso';
     }
 
     if (resultado === 'timeout') {
       throw new Error("Usuário não clicou em enviar");
     }
 
-  } catch (erro) {
-    console.error("❌ Erro no RPA:", erro.message);
-    throw erro;
+	  } catch (erro) {
 
-  } finally {
-    if (sucessoExecucao) {
-      console.log("🧹 Fechando navegador");
-      await browser.close();
-    } else {
-      console.log("🧪 Navegador mantido aberto para debug");
-    }
-  }
+		console.error("❌ Erro completo:", erro);
+		const { data: atual } = await supabase
+		  .from('fila_autorizacoes')
+		  .select(`
+			status,
+			forma_autorizacao,
+			validacao_finalizada_em
+		  `)
+		  .eq('id', tarefa.id)
+		  .single();
+
+		const jaConcluido =
+		  atual?.status === 'concluido' ||
+		  atual?.forma_autorizacao ||
+		  atual?.validacao_finalizada_em;
+
+		if (!jaConcluido) {
+
+		  await supabase
+			.from('fila_autorizacoes')
+			.update({
+			  status: 'erro',
+			  erro_rpa: erro.message
+			})
+			.eq('id', tarefa.id);
+
+		}
+		throw erro;
+
+	  } finally {
+
+		if (sucessoExecucao) {
+
+		  if (formaValidacaoFinal === 'Token') {
+		    console.log("🖨️ Token selecionado — aba mantida aberta para impressão");
+		  } else {
+		    console.log("✅ Execução finalizada");
+		    try { await page.close(); } catch (_) {}
+		  }
+
+		} else {
+
+		  console.log("🧪 Aba mantida aberta para debug");
+
+		}
+
+	  }
 }
-
 module.exports = executarRpa;

@@ -14,7 +14,19 @@ export function getFunctionUrl(path: string) {
 
 export async function getFunctionHeaders(options?: { contentType?: string | null; additionalHeaders?: HeadersInit }) {
   const supabase = getSupabaseClient();
-  const { data } = await supabase.auth.getSession();
+  let { data } = await supabase.auth.getSession();
+
+  const session = data?.session;
+  const expiresAt = session?.expires_at;
+  const tokenExpiradoOuAusente =
+    !session?.access_token ||
+    (expiresAt != null && expiresAt * 1000 < Date.now() + 60_000);
+
+  if (tokenExpiradoOuAusente) {
+    const { data: refreshed } = await supabase.auth.refreshSession();
+    if (refreshed?.session) data = refreshed;
+  }
+
   const token = data?.session?.access_token;
 
   const headers = new Headers();

@@ -1,16 +1,20 @@
 'use client'
 
 import { useEffect, useMemo, useState } from 'react'
+import toast from 'react-hot-toast'
 import { useHeader } from '@/contexts/HeaderContext'
 import AdminSummaryCards from './AdminSummaryCards'
 import AdminUsersTable from './AdminUsersTable'
 import AdminMachinesTable from './AdminMachinesTable'
-import CreateUserModal from './CreateUserModal'
 import {
   changeUserRole,
+  deleteUser,
+  getAdminMachines,
+  getAdminUsers,
   toggleUserActive,
   updateMachineStatus,
 } from '@/services/admin.service'
+import { getFunctionHeaders, getFunctionUrl } from '@/lib/supabase/functions'
 
 export type AdminUser = {
   id: string
@@ -19,12 +23,17 @@ export type AdminUser = {
   role?: string
   ativo?: boolean
   created_at?: string
+  username?: string | null
 }
 
 export type AdminMachine = {
   id: string
   nome?: string
-  status?: string
+  ativa?: boolean | null
+  last_seen?: string | null
+  hostname?: string | null
+  sistema_operacional?: string | null
+  ip?: string | null
   user_id?: string
 }
 
@@ -52,11 +61,23 @@ export default function AdminPageShell({
     )
   }, [setHeader])
 
+  useEffect(() => {
+    async function load() {
+      const [loadedUsers, loadedMachines] = await Promise.all([
+        getAdminUsers(),
+        getAdminMachines(),
+      ])
+      setUsers(loadedUsers)
+      setMachines(loadedMachines)
+    }
+    load()
+  }, [])
+
   const totals = useMemo(() => {
     const activeUsers = users.filter((user) => user.ativo).length
     const inactiveUsers = users.length - activeUsers
     const onlineMachines = machines.filter(
-      (machine) => machine.status === 'online'
+      (machine) => machine.ativa === true
     ).length
     const offlineMachines = machines.length - onlineMachines
 
@@ -122,7 +143,7 @@ export default function AdminPageShell({
     const updated = await changeUserRole(userId, role)
 
     if (!updated) {
-      setErrorMessage('Não foi possível alterar a função do usuário.')
+      setErrorMessage('Não foi possível alterar o setor do usuário.')
       setBusyId(null)
       return
     }
@@ -135,11 +156,49 @@ export default function AdminPageShell({
     setBusyId(null)
   }
 
-  async function handleMachineStatus(machineId: string, status: string) {
+  async function handleResendInvite(userId: string, email: string, nome: string, role: string) {
+    setBusyId(userId)
+    setErrorMessage('')
+
+    const res = await fetch(getFunctionUrl('admin-resend-invite'), {
+      method: 'POST',
+      headers: await getFunctionHeaders(),
+      body: JSON.stringify({ email, nome, role }),
+    })
+
+    const json = await res.json()
+
+    if (!res.ok) {
+      setErrorMessage(json.error ?? 'Não foi possível reenviar o convite.')
+    } else {
+      toast.success(`Convite reenviado para ${email}`)
+    }
+
+    setBusyId(null)
+  }
+
+  async function handleDeleteUser(userId: string) {
+    setBusyId(userId)
+    setErrorMessage('')
+
+    const result = await deleteUser(userId)
+
+    if (!result.ok) {
+      setErrorMessage(result.error ?? 'Não foi possível excluir o usuário.')
+      setBusyId(null)
+      return
+    }
+
+    toast.success('Usuário excluído com sucesso')
+    setUsers((current) => current.filter((u) => u.id !== userId))
+    setBusyId(null)
+  }
+
+  async function handleMachineToggle(machineId: string, currentAtiva: boolean) {
     setBusyId(machineId)
     setErrorMessage('')
 
-    const updated = await updateMachineStatus(machineId, status)
+    const updated = await updateMachineStatus(machineId, !currentAtiva)
 
     if (!updated) {
       setErrorMessage('Não foi possível atualizar o status da máquina.')
@@ -149,7 +208,7 @@ export default function AdminPageShell({
 
     setMachines((current) =>
       current.map((machine) =>
-        machine.id === machineId ? { ...machine, status } : machine
+        machine.id === machineId ? { ...machine, ativa: !currentAtiva } : machine
       )
     )
     setBusyId(null)
@@ -172,12 +231,20 @@ export default function AdminPageShell({
               users={filteredUsers}
               onToggleActive={handleToggleActive}
               onChangeRole={handleRoleChange}
+              onResendInvite={handleResendInvite}
+              onDeleteUser={handleDeleteUser}
               loadingId={busyId}
+              searchUser={searchUser}
+              onSearchUserChange={setSearchUser}
+              roleFilter={roleFilter}
+              onRoleFilterChange={setRoleFilter}
+              searchMachine={searchMachine}
+              onSearchMachineChange={setSearchMachine}
             />
 
             <AdminMachinesTable
               machines={filteredMachines}
-              onUpdateStatus={handleMachineStatus}
+              onToggle={handleMachineToggle}
               loadingId={busyId}
             />
           </div>

@@ -1,4 +1,4 @@
-# Sistema de Autorização - Universo ABA
+# GESTAO_CLINICA
 
 ## Estrutura
 

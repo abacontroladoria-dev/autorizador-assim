@@ -51,8 +51,8 @@ export default function SidePanel({
 
     return (
 <div className="
-  sticky top-[170px]
-
+  sticky top-42.5
+  
   bg-white/90
   backdrop-blur-sm
   rounded-3xl
@@ -278,6 +278,11 @@ export default function SidePanel({
     atendimento.usuario_nome ||
     'Não identificado'
   }
+/>
+
+<Info
+  label="Forma de autorização"
+  value={atendimento.forma_autorizacao}
 />
 
     <Info

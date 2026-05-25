@@ -10,6 +10,7 @@ export type StatusDisponibilidade =
   | 'pendente'
   | 'disponivel'
   | 'indisponivel'
+  | 'substituido'
 
 export type HorarioEdicao = {
   id: number
@@ -59,6 +60,11 @@ export function useControleDisponibilidade({
     salvandoStatus,
     setSalvandoStatus,
   ] = useState(false)
+
+  const [
+    erroStatus,
+    setErroStatus,
+  ] = useState<string | null>(null)
 
   function abrirModalStatus(
 	  grupo: GrupoBase,
@@ -125,8 +131,11 @@ export function useControleDisponibilidade({
         })
 
       if (!resultado) {
+        setErroStatus('Erro ao salvar. Verifique sua conexão e tente novamente.')
         return
       }
+
+      setErroStatus(null)
 
       if (onSuccess) {
         await onSuccess()
@@ -167,9 +176,11 @@ export function useControleDisponibilidade({
         })
 
       if (!resultado) {
+        setErroStatus('Erro ao salvar. Verifique sua conexão e tente novamente.')
         return
       }
 
+      setErroStatus(null)
       setModalStatus(null)
 
       if (onSuccess) {
@@ -207,6 +218,9 @@ export function useControleDisponibilidade({
     novoStatusModal,
 
     salvandoStatus,
+
+    erroStatus,
+    setErroStatus,
 
     abrirModalStatus,
 

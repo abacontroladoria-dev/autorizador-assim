@@ -12,7 +12,7 @@ import {listarCentralPacientes} from '@/services/central-pacientes.service'
 
 export default function CentralTerapeuticaPage() {
   const { setHeader } = useHeader()
-  const hoje = new Date().toISOString().split('T')[0]
+  const hoje = new Date().toLocaleDateString('en-CA')
 
   const [dados, setDados] = useState<any[]>([])
   const [selecionadoId, setSelecionadoId] = useState<string | null>(null)
@@ -33,7 +33,7 @@ export default function CentralTerapeuticaPage() {
 
     setLoading(true)
 
-    const response =
+    const response: Record<string, any>[] =
       await listarCentralPacientes(data)
 
     setDados(response || [])

@@ -3,17 +3,23 @@
 import {
   LayoutDashboard,
   PlusCircle,
-  LogOut,
   Users,
   Activity,
   FileText,
   ShieldCheck,
+  ClipboardList,
+  CalendarDays,
+  UserRound,
+  Building2,
 } from "lucide-react"
-import { useEffect } from "react"
+import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { getFunctionHeaders, getFunctionUrl } from "@/lib/supabase/functions"
-import { useState } from "react"
+import toast from "react-hot-toast"
+import ModalPerfil from "@/components/perfil/ModalPerfil"
+import ModalAlterarSenha from "@/components/perfil/ModalAlterarSenha"
+import ModalErros from "@/components/perfil/ModalErros"
 
 export default function Sidebar() {
   const pathname = usePathname()
@@ -22,6 +28,22 @@ export default function Sidebar() {
   const [loadingLogout, setLoadingLogout] = useState(false)
   const [role, setRole] = useState<string | null>(null)
   const [loadingRole, setLoadingRole] = useState(true)
+  const [nome, setNome] = useState("Usuário")
+  const [open, setOpen] = useState(false)
+  const menuRef = useRef<HTMLDivElement>(null)
+  const [userId, setUserId] = useState<string | null>(null)
+  const [email, setEmail] = useState("")
+  const [machineId, setMachineId] = useState<string | null>(null)
+  const [automacaoAtiva, setAutomacaoAtiva] = useState(true)
+  const [countProcessando, setCountProcessando] = useState(0)
+  const [countErros, setCountErros] = useState(0)
+  const [loadingPausar, setLoadingPausar] = useState(false)
+  const [loadingRetomar, setLoadingRetomar] = useState(false)
+  const [loadingReiniciar, setLoadingReiniciar] = useState(false)
+  const [loadingLiberar, setLoadingLiberar] = useState(false)
+  const [modalPerfil, setModalPerfil] = useState(false)
+  const [modalSenha, setModalSenha] = useState(false)
+  const [modalErros, setModalErros] = useState(false)
   
 	function isActive(path: string) {
 	  if (path === "/") {
@@ -42,9 +64,13 @@ export default function Sidebar() {
 		"/solicitar",
 		"/central-pacientes",
 		"/central-terapeutas",
+		"/agenda/pacientes",
+		"/agenda/terapeutas",
+		"/agenda/salas",
 		"/guias-digitais",
 		"/financeiro",
 		"/admin",
+		"/auditoria-assim",
 	  ],
 
 	  diretoria: [
@@ -52,24 +78,43 @@ export default function Sidebar() {
 		"/solicitar",
 		"/central-pacientes",
 		"/central-terapeutas",
+		"/agenda/pacientes",
+		"/agenda/terapeutas",
+		"/agenda/salas",
 		"/guias-digitais",
 		"/financeiro",
+		"/auditoria-assim",
 	  ],
 
 	  recepcao: [
 		"/",
 		"/solicitar",
 		"/central-pacientes",
+		"/agenda/pacientes",
+		"/auditoria-assim",
+	  ],
+
+	  autorizacao: [
+		"/",
+		"/agenda/pacientes",
+		"/agenda/terapeutas",
+		"/agenda/salas",
+		"/auditoria-assim",
 	  ],
 
 	  terapeutico: [
 		"/",
 		"/central-terapeutas",
+		"/agenda/salas",
+		"/agenda/terapeutas",
 	  ],
 
 	  faturamento: [
 		"/",
 		"/guias-digitais",
+		"/agenda/pacientes",
+		"/agenda/terapeutas",
+		"/agenda/salas",
 	  ],
 	}
 
@@ -82,24 +127,145 @@ export default function Sidebar() {
 	
 	useEffect(() => {
 	  async function loadRole() {
-		const response = await fetch(getFunctionUrl('verify-perfil'), {
-		  method: 'POST',
-		  headers: await getFunctionHeaders(),
-		})
-
-		if (!response.ok) {
-		  setRole(null)
-		  setLoadingRole(false)
-		  return
-		}
-
-		const json = await response.json()
-		setRole(json.data?.role || null)
+		const { data: { user } } = await supabase.auth.getUser()
+		if (!user) { setLoadingRole(false); return }
+		const { data } = await supabase
+		  .from('usuarios')
+		  .select('role')
+		  .eq('id', user.id)
+		  .single()
+		setRole(data?.role || null)
 		setLoadingRole(false)
 	  }
 	  loadRole()
 	}, [])
+
+  useEffect(() => {
+    async function checkUser() {
+      const { data, error: userError } = await supabase.auth.getUser()
+      if (userError || !data.user) return
+      const uid = data.user.id
+      setUserId(uid)
+      setEmail(data.user.email ?? "")
+      const { data: maquina, error } = await supabase
+        .from("maquinas")
+        .select("id, nome, ativa, user_id")
+        .eq("user_id", uid)
+        .maybeSingle()
+      if (error) console.error("Erro ao carregar dados da máquina:", error.message)
+      if (maquina) {
+        setMachineId(maquina.id)
+        setAutomacaoAtiva(maquina.ativa ?? true)
+      }
+
+      const { data: perfil } = await supabase
+        .from("usuarios")
+        .select("nome")
+        .eq("id", uid)
+        .single()
+
+      if (perfil?.nome) {
+        setNome(perfil.nome.split(" ")[0])
+      } else {
+        setNome(data.user.email?.split("@")[0] || "Usuário")
+      }
+    }
+    checkUser()
+  }, [])
+
+  useEffect(() => {
+    async function fetchCounts() {
+      const [{ count: cp }, { count: ce }] = await Promise.all([
+        supabase.from("fila_autorizacoes").select("*", { count: "exact", head: true }).eq("status", "processando"),
+        supabase.from("fila_autorizacoes").select("*", { count: "exact", head: true }).eq("status", "erro"),
+      ])
+      setCountProcessando(cp ?? 0)
+      setCountErros(ce ?? 0)
+    }
+    fetchCounts()
+    const interval = setInterval(fetchCounts, 30000)
+    return () => clearInterval(interval)
+  }, [])
+
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (menuRef.current && !menuRef.current.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [])
 	
+  async function handlePausar() {
+    if (!machineId) { toast.error("Máquina não identificada"); return }
+    setLoadingPausar(true)
+    try {
+      const res = await fetch(getFunctionUrl("automation-pause"), {
+        method: "POST",
+        headers: await getFunctionHeaders(),
+        body: JSON.stringify({ machineId }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error)
+      setAutomacaoAtiva(false)
+      toast.success("Automação pausada")
+    } catch (err: any) { toast.error(err.message) }
+    setLoadingPausar(false)
+  }
+
+  async function handleRetomar() {
+    if (!machineId) { toast.error("Máquina não identificada"); return }
+    setLoadingRetomar(true)
+    try {
+      const res = await fetch(getFunctionUrl("automation-resume"), {
+        method: "POST",
+        headers: await getFunctionHeaders(),
+        body: JSON.stringify({ machineId }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error)
+      setAutomacaoAtiva(true)
+      toast.success("Automação retomada")
+    } catch (err: any) { toast.error(err.message) }
+    setLoadingRetomar(false)
+  }
+
+  async function handleReiniciar() {
+    if (!machineId) { toast.error("Máquina não identificada"); return }
+    setLoadingReiniciar(true)
+    try {
+      const res = await fetch(getFunctionUrl("automation-restart"), {
+        method: "POST",
+        headers: await getFunctionHeaders(),
+        body: JSON.stringify({ machineId }),
+      })
+      if (!res.ok) throw new Error((await res.json()).error)
+      toast.success("Worker reiniciado")
+    } catch (err: any) { toast.error("Falha ao reiniciar: " + err.message) }
+    setLoadingReiniciar(false)
+  }
+
+  async function handleLiberarTravados() {
+    setLoadingLiberar(true)
+    try {
+      const res = await fetch(getFunctionUrl("automation-release-stuck"), {
+        method: "POST",
+        headers: await getFunctionHeaders(),
+      })
+      const json = await res.json()
+      if (!res.ok) throw new Error(json.error)
+      toast.success(`${json.liberados} processo${json.liberados !== 1 ? "s" : ""} liberado${json.liberados !== 1 ? "s" : ""}`)
+    } catch (err: any) { toast.error(err.message) }
+    setLoadingLiberar(false)
+  }
+
+  function SectionLabel({ label }: { label: string }) {
+    return (
+      <p className="px-4 pt-4 pb-1 text-[10px] font-semibold tracking-widest text-slate-400 uppercase select-none">
+        {label}
+      </p>
+    )
+  }
+
   function MenuItem({
     label,
     icon: Icon,
@@ -109,32 +275,30 @@ export default function Sidebar() {
     icon: any
     path: string
   }) {
- 
-	const active = isActive(path)
+    const active = isActive(path)
 
     return (
       <button
         onClick={() => router.push(path)}
-        className={`relative w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all
+        className={`relative w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-150
         ${
-			active
-			  ? "text-white bg-[#3A8FB7] shadow-sm"
-			  : "text-slate-600 hover:bg-slate-100"
+          active
+            ? "text-white bg-[#3A8FB7] shadow-sm"
+            : "text-slate-600 hover:bg-blue-50/70 hover:text-slate-800 hover:translate-x-0.5"
         }`}
       >
-        {/* 🔥 INDICADOR LATERAL */}
         <span
-          className={`absolute left-0 top-1/2 -translate-y-1/2 h-8 w-1.5 rounded-r-full bg-[#3A8FB7] transition-all duration-300
+          className={`absolute left-0 top-1/2 -translate-y-1/2 h-7 w-1 rounded-r-full bg-[#3A8FB7] transition-all duration-200
           ${active ? "opacity-100" : "opacity-0"}`}
         />
-
-        <Icon size={18} />
+        <Icon size={17} className="shrink-0" />
         {label}
       </button>
     )
   }
 
   return (
+    <>
     <aside className="fixed top-0 left-0 w-64 h-screen bg-white border-r border-slate-200 flex flex-col z-50">
 
       {/* LOGO */}
@@ -143,70 +307,206 @@ export default function Sidebar() {
       </div>
 
       {/* MENU */}
-      <nav className="flex-1 px-4 py-6 space-y-1 overflow-y-auto">
+      <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-0.5">
 
-{canAccess("/") && (
-  <MenuItem
-    label="Home"
-    icon={LayoutDashboard}
-    path="/"
-  />
-)}
+        {canAccess("/") && (
+          <MenuItem label="Home" icon={LayoutDashboard} path="/" />
+        )}
 
-{canAccess("/solicitar") && (
-  <MenuItem
-    label="Nova Solicitação"
-    icon={PlusCircle}
-    path="/solicitar"
-  />
-)}
+        {/* ATENDIMENTO */}
+        {(canAccess("/solicitar") || canAccess("/central-pacientes") || canAccess("/central-terapeutas")) && (
+          <SectionLabel label="Atendimento" />
+        )}
 
-{canAccess("/central-pacientes") && (		
-		<MenuItem
-		  label="Controle de Pacientes"
-		  icon={Activity}
-		  path="/central-pacientes"
-		/>
-)}
+        {canAccess("/solicitar") && (
+          <MenuItem label="Nova Solicitação" icon={PlusCircle} path="/solicitar" />
+        )}
+        {canAccess("/central-pacientes") && (
+          <MenuItem label="Controle de Pacientes" icon={Activity} path="/central-pacientes" />
+        )}
+        {canAccess("/central-terapeutas") && (
+          <MenuItem label="Controle de Terapeutas" icon={Users} path="/central-terapeutas" />
+        )}
 
-{canAccess("/central-terapeutas") && (
-		<MenuItem
-		  label="Controle de Terapeutas"
-		  icon={Users}
-		  path="/central-terapeutas"
-		/>
-)}
+        {/* CENTRAL DE AGENDA */}
+        {(canAccess("/agenda/pacientes") || canAccess("/agenda/terapeutas") || canAccess("/agenda/salas")) && (
+          <SectionLabel label="Central de Agenda" />
+        )}
 
-{canAccess("/guias-digitais") && (
-        <MenuItem
-          label="Guias Digitais"
-          icon={FileText}
-          path="/guias-digitais"
-        />
-)}
+        {canAccess("/agenda/pacientes") && (
+          <MenuItem label="Pacientes" icon={UserRound} path="/agenda/pacientes" />
+        )}
+        {canAccess("/agenda/terapeutas") && (
+          <MenuItem label="Terapeutas" icon={CalendarDays} path="/agenda/terapeutas" />
+        )}
+        {canAccess("/agenda/salas") && (
+          <MenuItem label="Salas" icon={Building2} path="/agenda/salas" />
+        )}
 
-{canAccess("/admin") && (
-        <MenuItem
-          label="Admin"
-          icon={ShieldCheck}
-          path="/admin"
-        />
-)}
+        {/* PROCESSOS */}
+        {(canAccess("/guias-digitais") || canAccess("/auditoria-assim")) && (
+          <SectionLabel label="Processos" />
+        )}
+
+        {canAccess("/guias-digitais") && (
+          <MenuItem label="Guias Digitais" icon={FileText} path="/guias-digitais" />
+        )}
+        {canAccess("/auditoria-assim") && (
+          <MenuItem label="Auditoria ASSIM" icon={ClipboardList} path="/auditoria-assim" />
+        )}
+
+        {/* SISTEMA */}
+        {canAccess("/admin") && (
+          <>
+            <SectionLabel label="Sistema" />
+            <MenuItem label="Admin" icon={ShieldCheck} path="/admin" />
+          </>
+        )}
 
       </nav>
 
-      {/* FOOTER */}
-      <div className="p-4 border-t border-slate-100">
-		<button
-		  onClick={handleLogout}
-		  disabled={loadingLogout}
-		  className="w-full flex items-center gap-2 px-4 py-2 rounded-lg text-sm text-slate-500 hover:bg-red-50 hover:text-red-600 transition disabled:opacity-50 disabled:cursor-not-allowed"
-		>
-		  <LogOut size={16} />
-		  {loadingLogout ? "Saindo..." : "Sair"}
-		</button>
+      {/* FOOTER — PERFIL */}
+      <div className="p-4 border-t border-slate-100" ref={menuRef}>
+        <div className="relative">
+
+          <button
+            onClick={() => setOpen(!open)}
+            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 transition-colors duration-150 cursor-pointer"
+          >
+            <div className="w-9 h-9 rounded-full bg-[#3A8FB7] text-white flex items-center justify-center font-semibold text-sm shrink-0">
+              {nome?.charAt(0)?.toUpperCase() || "U"}
+            </div>
+            <div className="flex-1 text-left min-w-0">
+              <p className="text-sm font-semibold text-slate-700 truncate leading-tight">{nome}</p>
+              {role && (
+                <p className="text-xs text-slate-400 capitalize leading-tight">
+                  {{
+                    admin: "Administrador",
+                    diretoria: "Diretoria",
+                    recepcao: "Recepção",
+                    autorizacao: "Autorização",
+                    terapeutico: "Terapêutico",
+                    faturamento: "Faturamento",
+                  }[role] ?? role}
+                </p>
+              )}
+            </div>
+            <span className={`text-slate-400 text-xs transition-transform duration-200 shrink-0 ${open ? "rotate-180" : ""}`}>
+              ▼
+            </span>
+          </button>
+
+          {open && (
+            <div className="absolute bottom-full left-0 mb-2 w-72 rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.2)] p-3 text-sm z-999 bg-linear-to-br from-[#1f3f5b] to-[#2f6f95] text-white">
+
+              <div className="px-3 pb-3">
+                <div className="text-sm font-semibold">{nome}</div>
+                <div className="text-xs text-white/60">{email || "—"}</div>
+              </div>
+
+              <div className="border-t border-white/10 my-2" />
+
+              <div className="px-3 text-xs text-white/50 mb-1">Conta</div>
+
+              <button
+                onClick={() => { setOpen(false); setModalPerfil(true) }}
+                className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition"
+              >
+                Meu perfil
+              </button>
+
+              <button
+                onClick={() => { setOpen(false); setModalSenha(true) }}
+                className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition"
+              >
+                Alterar senha
+              </button>
+
+              <div className="border-t border-white/10 my-2" />
+
+              <div className="px-3 text-xs text-white/50 mb-1 flex justify-between items-center">
+                <span>Automação</span>
+                <span className={`flex items-center gap-2 font-medium ${automacaoAtiva ? "text-green-300" : "text-orange-300"}`}>
+                  <span className={`w-2 h-2 rounded-full ${automacaoAtiva ? "bg-green-400" : "bg-orange-400"}`} />
+                  {automacaoAtiva ? "Ativa" : "Pausada"}
+                </span>
+              </div>
+
+              {automacaoAtiva ? (
+                <button
+                  onClick={handlePausar}
+                  disabled={loadingPausar}
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition disabled:opacity-50"
+                >
+                  {loadingPausar ? "Pausando..." : "Pausar automação"}
+                </button>
+              ) : (
+                <button
+                  onClick={handleRetomar}
+                  disabled={loadingRetomar}
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition disabled:opacity-50"
+                >
+                  {loadingRetomar ? "Retomando..." : "Retomar automação"}
+                </button>
+              )}
+
+              <button
+                onClick={handleReiniciar}
+                disabled={loadingReiniciar}
+                className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition disabled:opacity-50"
+              >
+                {loadingReiniciar ? "Reiniciando..." : "Reiniciar worker"}
+              </button>
+
+              <button
+                onClick={handleLiberarTravados}
+                disabled={loadingLiberar}
+                className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition disabled:opacity-50"
+              >
+                {loadingLiberar ? "Liberando..." : "Liberar processos travados"}
+              </button>
+
+              <div className="border-t border-white/10 my-2" />
+
+              <div className="px-3 py-2 text-xs flex justify-between text-white/70">
+                <span>{countProcessando} em processamento</span>
+                {countErros > 0 ? (
+                  <button
+                    onClick={() => { setOpen(false); setModalErros(true) }}
+                    className="text-red-300 font-medium hover:text-red-200 transition"
+                  >
+                    {countErros} erro{countErros !== 1 ? "s" : ""}
+                  </button>
+                ) : (
+                  <span className="text-white/40">0 erros</span>
+                )}
+              </div>
+
+              <div className="border-t border-white/10 my-2" />
+
+              <button
+                onClick={handleLogout}
+                disabled={loadingLogout}
+                className="w-full text-left px-3 py-2 rounded-lg text-red-300 hover:bg-red-500/30 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+              >
+                {loadingLogout ? "Saindo..." : "Sair"}
+              </button>
+
+            </div>
+          )}
+
+        </div>
       </div>
 
     </aside>
+
+    {userId && (
+      <>
+        <ModalPerfil open={modalPerfil} onClose={() => setModalPerfil(false)} userId={userId} />
+        <ModalAlterarSenha open={modalSenha} onClose={() => setModalSenha(false)} email={email} />
+      </>
+    )}
+    <ModalErros open={modalErros} onClose={() => setModalErros(false)} />
+    </>
   )
 }

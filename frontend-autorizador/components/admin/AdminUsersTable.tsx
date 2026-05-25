@@ -1,5 +1,6 @@
 'use client'
 
+import { useState } from 'react'
 import { AdminUser } from './AdminPageShell'
 import CreateUserModal from './CreateUserModal'
 
@@ -10,19 +11,39 @@ const roleOptions = [
   { value: 'recepcao', label: 'Recepção' },
   { value: 'terapeutico', label: 'Terapêutico' },
   { value: 'faturamento', label: 'Faturamento' },
+  { value: 'autorizacao', label: 'Autorização' },
+  { value: 'disponibilidade_terapeuta', label: 'Disponib. Terapeuta' },
 ]
 
 export default function AdminUsersTable({
   users,
   onToggleActive,
   onChangeRole,
+  onResendInvite,
+  onDeleteUser,
   loadingId,
+  searchUser,
+  onSearchUserChange,
+  roleFilter,
+  onRoleFilterChange,
+  searchMachine,
+  onSearchMachineChange,
 }: {
   users: AdminUser[]
   onToggleActive: (userId: string, active: boolean) => Promise<void>
   onChangeRole: (userId: string, role: string) => Promise<void>
+  onResendInvite: (userId: string, email: string, nome: string, role: string) => Promise<void>
+  onDeleteUser: (userId: string) => Promise<void>
   loadingId: string | null
+  searchUser: string
+  onSearchUserChange: (value: string) => void
+  roleFilter: string
+  onRoleFilterChange: (value: string) => void
+  searchMachine: string
+  onSearchMachineChange: (value: string) => void
 }) {
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null)
+
   return (
 <div className="rounded-3xl border border-slate-200 bg-white p-5 shadow-sm">
 
@@ -46,17 +67,28 @@ export default function AdminUsersTable({
 <div className="mt-4 grid gap-3 md:grid-cols-3">
   <input
     placeholder="Buscar usuário..."
+    value={searchUser}
+    onChange={(e) => onSearchUserChange(e.target.value)}
     className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-sm outline-none transition focus:border-[#3A8FB7] focus:ring-4 focus:ring-[#3A8FB7]/10"
   />
 
   <select
+    value={roleFilter}
+    onChange={(e) => onRoleFilterChange(e.target.value)}
     className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-sm outline-none transition focus:border-[#3A8FB7] focus:ring-4 focus:ring-[#3A8FB7]/10"
   >
-    <option>Todas as funções</option>
+    <option value="">Todos os setores</option>
+    {roleOptions.map((option) => (
+      <option key={option.value} value={option.value}>
+        {option.label}
+      </option>
+    ))}
   </select>
 
   <input
     placeholder="Buscar máquina..."
+    value={searchMachine}
+    onChange={(e) => onSearchMachineChange(e.target.value)}
     className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-sm outline-none transition focus:border-[#3A8FB7] focus:ring-4 focus:ring-[#3A8FB7]/10"
   />
 </div>
@@ -66,19 +98,21 @@ export default function AdminUsersTable({
         <table className="min-w-full border-collapse text-left text-sm">
           <thead>
             <tr className="border-b border-slate-200 text-slate-500">
-				<th className="w-[28%] px-5 py-4">Nome</th>
+				<th className="w-[24%] px-5 py-4">Nome</th>
 
-				<th className="w-[18%] px-5 py-4 text-center">
-				  Função
+				<th className="w-[16%] px-5 py-4">Usuário</th>
+
+				<th className="w-[16%] px-5 py-4 text-center">
+				  Setor
 				</th>
 
-				<th className="w-[12%] px-5 py-4 text-center">
+				<th className="w-[10%] px-5 py-4 text-center">
 				  Status
 				</th>
 
-				<th className="w-[28%] px-5 py-4">Email</th>
+				<th className="w-[22%] px-5 py-4">Email</th>
 
-				<th className="w-[14%] px-5 py-4 text-center">
+				<th className="w-[12%] px-5 py-4 text-center">
 				  Ações
 				</th>
             </tr>
@@ -86,7 +120,7 @@ export default function AdminUsersTable({
           <tbody>
             {users.length === 0 ? (
               <tr>
-                <td colSpan={5} className="px-5 py-6 text-center text-slate-500">
+                <td colSpan={6} className="px-5 py-6 text-center text-slate-500">
                   Nenhum usuário encontrado.
                 </td>
               </tr>
@@ -112,7 +146,20 @@ export default function AdminUsersTable({
 					  </div>
 					</td>
 
-					{/* FUNÇÃO */}
+					{/* USUÁRIO */}
+					<td className="px-5 py-4">
+					  {user.username ? (
+						<span className="font-mono text-sm text-slate-700">
+						  @{user.username}
+						</span>
+					  ) : (
+						<span className="inline-flex items-center rounded-lg bg-amber-50 px-2.5 py-1 text-xs font-medium text-amber-700 ring-1 ring-amber-200">
+						  Convite pendente
+						</span>
+					  )}
+					</td>
+
+					{/* SETOR */}
 					<td className="px-5 py-4 text-center">
 					  <select
 						value={user.role || ''}
@@ -120,7 +167,7 @@ export default function AdminUsersTable({
 						  onChangeRole(user.id, event.target.value)
 						}
 						disabled={isLoading}
-						className="w-[180px] rounded-xl border border-slate-100 bg-white px-3 py-2 text-sm outline-none transition focus:border-[#3A8FB7] focus:ring-4 focus:ring-[#3A8FB7]/10"
+						className="w-45 rounded-xl border border-slate-100 bg-white px-3 py-2 text-sm outline-none transition focus:border-[#3A8FB7] focus:ring-4 focus:ring-[#3A8FB7]/10"
 					  >
 						{roleOptions.map((option) => (
 						  <option key={option.value} value={option.value}>
@@ -151,18 +198,58 @@ export default function AdminUsersTable({
 					</td>
 
 					{/* AÇÕES */}
-					<td className="px-5 py-4 text-center">
-					  <button
-						onClick={() => onToggleActive(user.id, !!user.ativo)}
-						disabled={isLoading}
-						className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
-					  >
-						{isLoading
-						  ? 'Atualizando...'
-						  : user.ativo
-						  ? 'Desativar'
-						  : 'Ativar'}
-					  </button>
+					<td className="px-5 py-4">
+					  <div className="flex items-center justify-center gap-2">
+						{!user.username ? (
+						  <button
+							onClick={() =>
+							  onResendInvite(
+								user.id,
+								user.email ?? '',
+								user.nome ?? '',
+								user.role ?? ''
+							  )
+							}
+							disabled={isLoading}
+							className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 transition hover:bg-amber-100 disabled:opacity-50"
+						  >
+							{isLoading ? 'Enviando...' : 'Reenviar convite'}
+						  </button>
+						) : (
+						  <button
+							onClick={() => onToggleActive(user.id, !!user.ativo)}
+							disabled={isLoading}
+							className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+						  >
+							{isLoading
+							  ? 'Atualizando...'
+							  : user.ativo
+							  ? 'Desativar'
+							  : 'Ativar'}
+						  </button>
+						)}
+
+						{confirmDeleteId === user.id ? (
+						  <button
+							onClick={async () => {
+							  setConfirmDeleteId(null)
+							  await onDeleteUser(user.id)
+							}}
+							disabled={isLoading}
+							className="rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-100 disabled:opacity-50"
+						  >
+							Confirmar?
+						  </button>
+						) : (
+						  <button
+							onClick={() => setConfirmDeleteId(user.id)}
+							disabled={isLoading}
+							className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-rose-600 transition hover:bg-rose-50 disabled:opacity-50"
+						  >
+							Excluir
+						  </button>
+						)}
+					  </div>
 					</td>
                   </tr>
                 )

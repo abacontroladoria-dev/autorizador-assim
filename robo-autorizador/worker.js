@@ -21,6 +21,29 @@ const supabase = createClient(
 
 const MACHINE_ID = process.env.MACHINE_ID
 
+if (!MACHINE_ID) {
+  console.error('❌ MACHINE_ID não definido no .env — encerrando.')
+  process.exit(1)
+}
+
+let tarefaAtual = null
+
+async function encerrarGraciosamente() {
+  console.log('\n⛔ Encerrando worker...')
+  if (tarefaAtual) {
+    console.log('🔄 Resetando tarefa em processamento:', tarefaAtual)
+    await supabase
+      .from('fila_autorizacoes')
+      .update({ status: 'pendente', updated_at: new Date().toISOString() })
+      .eq('id', tarefaAtual)
+      .eq('status', 'processando')
+  }
+  process.exit(0)
+}
+
+process.on('SIGTERM', encerrarGraciosamente)
+process.on('SIGINT', encerrarGraciosamente)
+
 const app = express()
 
 app.use(cors({
@@ -49,7 +72,7 @@ app.use(cors({
   }
 }))
 
-const INTERVALO = 3000
+const INTERVALO_SEM_TAREFA = 3000
 
 console.log('Worker iniciado na máquina:', MACHINE_ID)
 
@@ -77,13 +100,13 @@ async function buscarTarefa() {
 // =========================
 // 🔄 ATUALIZAR STATUS
 // =========================
-async function atualizarStatus(id, status) {
+async function atualizarStatus(id, status, extras = {}) {
   const { error } = await supabase
-    .from('fila_autorizacoes') // ✅ CORRIGIDO
+    .from('fila_autorizacoes')
     .update({
       status,
       updated_at: new Date().toISOString(),
-      machine_id: MACHINE_ID
+      ...extras
     })
     .eq('id', id)
 
@@ -111,111 +134,6 @@ async function verificarCancelamento(id) {
 		  return !['processando', 'executando'].includes(data?.status)
 		}
 
-	// =========================
-	// 🔄 SINCRONIZAÇÃO DE AGENDA
-	// =========================
-	async function verificarSync() {
-	  try {
-
-		const { data, error } = await supabase
-		  .from('sync_controle')
-		  .select('*')
-		  .eq('id', 1)
-		  .single()
-
-		if (error || !data) return
-
-		// 🔥 AQUI (logo após buscar os dados)
-		const tempoMaximo = 15 * 60 * 1000 // 15 min
-
-		if (data.status === 'running') {
-		  const ultima = new Date(data.updated_at).getTime()
-
-		  if (Date.now() - ultima > tempoMaximo) {
-			console.log(`⚠️ RESET SYNC - máquina anterior: ${data.machine_id}`)
-
-			await supabase
-			  .from('sync_controle')
-			  .update({ status: 'idle' })
-			  .match({ id: 1, status: 'running' })
-
-			return
-		  }
-		}
-
-		const agora = Date.now()
-		const ultimaExecucao = data.last_run
-		  ? new Date(data.last_run).getTime()
-		  : 0
-
-		const passou4h = agora - ultimaExecucao > 4 * 60 * 60 * 1000
-
-		// ✅ VALIDAÇÃO ANTES DO LOCK
-		if (data.status !== 'pendente') return
-		if (!passou4h && !data.force) return
-
-		// 🔐 LOCK ATÔMICO
-		const { data: lockData, error: lockError } = await supabase
-		  .from('sync_controle')
-		  .update({
-			status: 'running',
-			machine_id: MACHINE_ID,
-			updated_at: new Date().toISOString()
-		  })
-		  .match({
-		    id: 1,
-		    status: 'pendente',
-		    machine_id: 'admin'
-		  })
-		  .select()
-
-		if (lockError) {
-		  console.error("Erro ao travar sync:", lockError.message)
-		  return
-		}
-
-		if (!lockData || lockData.length === 0) {
-		  console.log("⚠️ Outro worker já iniciou a sync")
-		  return
-		}
-
-		console.log("🔐 LOCK DE SYNC OK")
-		console.log("🔄 INICIANDO SINCRONIZAÇÃO...")
-
-		// 🚀 EXECUTA
-		await executarSincronizacao(supabase)
-
-		await supabase
-		  .from('sync_controle')
-		  .update({
-			status: 'idle',
-			force: false,
-			last_run: new Date().toISOString(),
-			updated_at: new Date().toISOString()
-		  })
-		    .match({
-			id: 1,
-			status: 'running'
-		  })
-
-		console.log("✅ SINCRONIZAÇÃO FINALIZADA")
-
-	  } catch (err) {
-		console.error("❌ ERRO NA SYNC:", err.message)
-
-		await supabase
-		  .from('sync_controle')
-		  .update({
-			status: 'idle',
-			force: false,
-			updated_at: new Date().toISOString()
-		  })
-		  .match({
-		  id: 1,
-		  status: 'running'
-		})
-	  }
-	}
 
 // =========================
 // 📝 LOG
@@ -248,27 +166,31 @@ async function iniciarWorker() {
 	while (true) {
 	  try {
 
-		const { data: sync } = await supabase
-		  .from('sync_controle')
-		  .select('status')
-		  .eq('id', 1)
-		  .single()
+      // Verifica status da máquina (ativa e restart_solicitado)
+      const { data: maquinaStatus } = await supabase
+        .from('maquinas')
+        .select('ativa, restart_solicitado')
+        .eq('id', MACHINE_ID)
+        .maybeSingle()
 
-		if (sync?.status === 'running') {
-		  console.log("⏳ Sincronização em andamento...")
-		  await new Promise(r => setTimeout(r, INTERVALO))
-		  continue
-		}
+      if (maquinaStatus?.restart_solicitado) {
+        console.log('🔄 Reinício solicitado — encerrando processo...')
+        await supabase.from('maquinas').update({ restart_solicitado: false }).eq('id', MACHINE_ID)
+        setTimeout(() => process.exit(0), 500)
+        return
+      }
 
-		// 🔥 aqui permanece
-		await verificarSync()
+      if (maquinaStatus && maquinaStatus.ativa === false) {
+        await new Promise(r => setTimeout(r, 5000))
+        continue
+      }
 
 		console.log("🔎 Buscando tarefas...")
 
 		const tarefa = await buscarTarefa()
 
 		if (!tarefa) {
-		  await new Promise(r => setTimeout(r, 500))
+		  await new Promise(r => setTimeout(r, INTERVALO_SEM_TAREFA))
 		  continue
 		}
 
@@ -277,12 +199,14 @@ async function iniciarWorker() {
       // =========================
       // 🔒 LOCK (CRÍTICO)
       // =========================
+      const inicioExecucao = Date.now()
+
       const { data: lockData, error: lockError } = await supabase
         .from('fila_autorizacoes')
         .update({
           status: 'processando',
+          started_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
-          machine_id: MACHINE_ID
         })
         .match({
           id: tarefa.id,
@@ -301,6 +225,7 @@ async function iniciarWorker() {
       }
 
       console.log("🔐 LOCK OK:", tarefa.id)
+      tarefaAtual = tarefa.id
 
       await registrarLog(tarefa.id, 'Iniciando execução')
 
@@ -315,28 +240,52 @@ async function iniciarWorker() {
         // 🚀 EXECUTANDO
         const resultado = await executarRpa(tarefa, verificarCancelamento);
 
+		const agora = new Date().toISOString()
+		const execMs = Date.now() - inicioExecucao
+
 		if (resultado === 'sucesso') {
-		  await atualizarStatus(tarefa.id, 'concluido');
+		  await atualizarStatus(tarefa.id, 'concluido', {
+		    completed_at: agora,
+		    execution_time_ms: execMs
+		  });
 		  await registrarLog(tarefa.id, 'Execução concluída');
 		  console.log("✅ Concluído:", tarefa.id);
 		} else {
-		  await atualizarStatus(tarefa.id, 'erro');
+		  await atualizarStatus(tarefa.id, 'erro', {
+		    completed_at: agora,
+		    execution_time_ms: execMs
+		  });
 		  await registrarLog(tarefa.id, 'Falha na execução');
 		  console.log("❌ Falha:", tarefa.id);
 		}
-        
+
+		tarefaAtual = null
 		await new Promise(r => setTimeout(r, 200))
 
       } catch (erroExecucao) {
 
         console.error("❌ Erro:", erroExecucao.message)
 
-        await atualizarStatus(tarefa.id, 'erro')
+        // Não sobrescreve se rpa.js já gravou 'concluido' diretamente
+        const { data: statusAtual } = await supabase
+          .from('fila_autorizacoes')
+          .select('status')
+          .eq('id', tarefa.id)
+          .single()
+
+        if (statusAtual?.status !== 'concluido') {
+          await atualizarStatus(tarefa.id, 'erro', {
+            error_message: erroExecucao.message,
+            completed_at: new Date().toISOString(),
+            execution_time_ms: Date.now() - inicioExecucao
+          })
+        }
 
         await registrarLog(tarefa.id, erroExecucao.message)
-		
+
+        tarefaAtual = null
 		await new Promise(r => setTimeout(r, 1000))
-		
+
       }
 
     } catch (erroGeral) {
@@ -347,14 +296,6 @@ async function iniciarWorker() {
     }
   }
 }
-
-
-// =====================================
-// EXECUTAR A SINCRONIZAÇÃO COM O ORBITA
-// =====================================
-const executarSincronizacao = require('./sync')
-
-
 
 
 app.get('/health', (req, res) => {
@@ -378,6 +319,11 @@ app.get('/machine-id', (req, res) => {
   res.json({
     machine_id: MACHINE_ID
   })
+})
+
+app.post('/restart', (req, res) => {
+  res.json({ message: 'Reiniciando worker...' })
+  setTimeout(() => process.exit(0), 500)
 })
 
 const LOCAL_API_PORT =
