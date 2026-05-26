@@ -2,9 +2,8 @@
 
 import {
   CheckCircle2,
-  UserCheck,
   Clock3,
-  Loader2,
+  RefreshCw,
   AlertTriangle,
   XCircle,
 } from 'lucide-react'
@@ -12,7 +11,6 @@ import {
 interface Props {
   indicadores: {
     autorizados: number
-    presenca: number
     pendentes: number
     processando: number
     erros: number
@@ -31,17 +29,10 @@ export default function KpiCards({
       color: 'emerald',
     },
     {
-      title: 'Presença',
-      value: indicadores.presenca,
-      icon: UserCheck,
-      color: 'blue',
-    },
-    {
       title: 'Processando',
       value: indicadores.processando,
-      icon: Loader2,
+      icon: RefreshCw,
       color: 'amber',
-      spin: true,
     },
     {
       title: 'Pendentes',
@@ -64,7 +55,7 @@ export default function KpiCards({
   ]
 
   return (
-    <div className="grid grid-cols-6 gap-2 bg-white/90 backdrop-blur-sm">
+    <div className="grid grid-cols-5 gap-2 bg-white/90 backdrop-blur-sm">
       {cards.map((card) => {
         const colors = getColor(card.color)
 
@@ -104,7 +95,6 @@ export default function KpiCards({
                   className={`
                     w-5 h-5
                     ${colors.text}
-                    ${card.spin ? 'animate-spin' : ''}
                   `}
                 />
               </div>

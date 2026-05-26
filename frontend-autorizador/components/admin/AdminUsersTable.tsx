@@ -12,6 +12,7 @@ const roleOptions = [
   { value: 'terapeutico', label: 'Terapêutico' },
   { value: 'faturamento', label: 'Faturamento' },
   { value: 'autorizacao', label: 'Autorização' },
+  { value: 'rp', label: 'RP' },
   { value: 'disponibilidade_terapeuta', label: 'Disponib. Terapeuta' },
 ]
 

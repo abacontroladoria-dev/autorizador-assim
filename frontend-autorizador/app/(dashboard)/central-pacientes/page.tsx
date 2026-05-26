@@ -22,7 +22,6 @@ export default function CentralTerapeuticaPage() {
   const [busca, setBusca] = useState('')
   const [status, setStatus] = useState('')
   const [unidade, setUnidade] = useState('')
-  const [terapeuta, setTerapeuta] = useState('')
   const [convenio, setConvenio] = useState('')
 
   const [data, setData] = useState(hoje)
@@ -110,11 +109,12 @@ useEffect(() => {
 
         if (!busca) return true
 
+        const q = busca.toLowerCase()
+
         return (
-          a.paciente_nome || ''
+          (a.paciente_nome || '').toLowerCase().includes(q) ||
+          (a.profissional_nome || '').toLowerCase().includes(q)
         )
-          .toLowerCase()
-          .includes(busca.toLowerCase())
       })
 
        .filter(a => {
@@ -135,19 +135,6 @@ useEffect(() => {
           a.unidade ||
           a.sala_nome
         ) === unidade
-      })
-
-      .filter(a => {
-
-        if (!terapeuta) return true
-
-        return (
-          a.profissional_nome || ''
-        )
-          .toLowerCase()
-          .includes(
-            terapeuta.toLowerCase()
-          )
       })
 
       .filter(a => {
@@ -189,7 +176,6 @@ useEffect(() => {
     busca,
     status,
     unidade,
-    terapeuta,
     convenio,
     data
   ])
@@ -211,34 +197,38 @@ useEffect(() => {
 
     autorizados:
       filtrados.filter(
-        a => a.status_assim === 'autorizado'
-      ).length,
-
-    presenca:
-      filtrados.filter(
-        a => a.status === 'presenca_confirmada'
+        a => a.status_operacional === 'autorizado'
       ).length,
 
     pendentes:
       filtrados.filter(
-        a => a.status === 'pendente'
+        a => a.status_operacional === 'pendente'
       ).length,
 
     processando:
       filtrados.filter(
-        a => a.status === 'processando'
+        a => a.status_operacional === 'processando'
       ).length,
 
     erros:
       filtrados.filter(
-        a => a.status === 'erro'
+        a => a.status_operacional === 'erro'
       ).length,
 
     falta_terapeuta:
       filtrados.filter(
-        a => a.tipo_falta === 'terapeuta'
+        a => a.status_operacional === 'falta_terapeuta'
       ).length,
   }
+
+  const conveniOpcoes = useMemo(() => {
+    const set = new Set<string>()
+    for (const a of dados) {
+      const v = a.convenio || a.convenio_nome
+      if (v) set.add(v)
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'))
+  }, [dados])
 
   return (
 
@@ -259,11 +249,9 @@ useEffect(() => {
           unidade={unidade}
           setUnidade={setUnidade}
 
-          terapeuta={terapeuta}
-          setTerapeuta={setTerapeuta}
-
           convenio={convenio}
           setConvenio={setConvenio}
+          conveniOpcoes={conveniOpcoes}
 
           data={data}
           setData={setData}

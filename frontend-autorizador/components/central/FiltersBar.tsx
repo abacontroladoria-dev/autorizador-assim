@@ -15,11 +15,9 @@ interface Props {
   unidade: string
   setUnidade: (v: string) => void
 
-  terapeuta: string
-  setTerapeuta: (v: string) => void
-
   convenio: string
   setConvenio: (v: string) => void
+  conveniOpcoes: string[]
 
   data: string
   setData: (v: string) => void
@@ -39,7 +37,7 @@ export default function FiltersBar(props: Props) {
     >
       <div className="
   grid
-  grid-cols-[170px_1fr_170px_170px_170px_140px]
+  grid-cols-[170px_1fr_170px_170px_140px]
   gap-3
 ">
 
@@ -56,7 +54,7 @@ export default function FiltersBar(props: Props) {
           <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
 
           <input
-            placeholder="Buscar paciente..."
+            placeholder="Buscar paciente ou terapeuta..."
             value={props.busca}
             onChange={(e) => props.setBusca(e.target.value)}
             className={`${inputClass} pl-11 w-full`}
@@ -84,21 +82,17 @@ export default function FiltersBar(props: Props) {
           className={inputClass}
         />
 
-        {/* TERAPEUTA */}
-        <input
-          placeholder="Terapeuta"
-          value={props.terapeuta}
-          onChange={(e) => props.setTerapeuta(e.target.value)}
-          className={inputClass}
-        />
-
         {/* CONVÊNIO */}
-        <input
-          placeholder="Convênio"
+        <select
           value={props.convenio}
           onChange={(e) => props.setConvenio(e.target.value)}
           className={inputClass}
-        />
+        >
+          <option value="">Todos convênios</option>
+          {props.conveniOpcoes.map((op) => (
+            <option key={op} value={op}>{op}</option>
+          ))}
+        </select>
 
       </div>
     </div>

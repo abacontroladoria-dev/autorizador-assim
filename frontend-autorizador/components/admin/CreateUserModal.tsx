@@ -171,6 +171,7 @@ export default function CreateUserModal() {
               <option value="terapeutico">Terapêutico</option>
               <option value="faturamento">Faturamento</option>
               <option value="autorizacao">Autorização</option>
+              <option value="rp">RP</option>
               <option value="diretoria">Diretoria</option>
               <option value="admin">Admin</option>
               <option value="disponibilidade_terapeuta">Disponib. Terapeuta</option>
