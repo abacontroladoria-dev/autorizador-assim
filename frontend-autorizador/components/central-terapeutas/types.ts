@@ -2,10 +2,29 @@ import type { AtendimentoTerapeutico } from '@/services/central-terapeutas.servi
 
 export type ControleFilters = {
   data: string
+  busca: string
   horario: string
   unidade: string
-  terapeuta: string
-  paciente: string
+  terapia: string
 }
 
 export type ControleTerapeuticoItem = AtendimentoTerapeutico
+
+export type StatusDisponibilidadeGrupo =
+  | 'pendente'
+  | 'disponivel'
+  | 'indisponivel'
+  | 'parcial'
+  | 'substituido'
+
+export type GrupoTerapeutaMobile = {
+  terapeuta: string
+  terapia: string
+  terapiaExibicao?: string
+  unidade: string
+  sala: string
+  primeiroHorario: string
+  status: StatusDisponibilidadeGrupo
+  substituto?: string
+  atendimentos: ControleTerapeuticoItem[]
+}

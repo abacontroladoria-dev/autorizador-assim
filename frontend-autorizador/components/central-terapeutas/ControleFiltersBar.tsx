@@ -1,28 +1,27 @@
 'use client'
 
-import { CalendarDays, Clock3, MapPin, Search, User } from 'lucide-react'
+import { CalendarDays, Clock3, MapPin, Search, Stethoscope } from 'lucide-react'
 import { unidadesControle } from './helpers'
 import type { ControleFilters } from './types'
 
 type Props = {
   filters: ControleFilters
   horarios: string[]
+  terapias: string[]
   onChange: (filters: ControleFilters) => void
 }
 
 export default function ControleFiltersBar({
   filters,
   horarios,
+  terapias,
   onChange,
 }: Props) {
   function updateFilter<K extends keyof ControleFilters>(
     key: K,
     value: ControleFilters[K]
   ) {
-    onChange({
-      ...filters,
-      [key]: value,
-    })
+    onChange({ ...filters, [key]: value })
   }
 
   return (
@@ -41,27 +40,40 @@ export default function ControleFiltersBar({
           grid
           grid-cols-1
           gap-3
-          md:grid-cols-[180px_170px_200px_1fr_1fr]
+          md:grid-cols-[160px_1fr_140px_180px_180px]
         "
       >
+        {/* Data */}
         <label className="relative">
           <CalendarDays className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
           <input
             type="date"
             value={filters.data}
-            onChange={(event) => updateFilter('data', event.target.value)}
+            onChange={(e) => updateFilter('data', e.target.value)}
             className={`${inputClass} pl-11`}
           />
         </label>
 
+        {/* Busca unificada — terapeuta ou paciente */}
+        <label className="relative">
+          <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+          <input
+            placeholder="Buscar terapeuta ou paciente"
+            value={filters.busca}
+            onChange={(e) => updateFilter('busca', e.target.value)}
+            className={`${inputClass} pl-11`}
+          />
+        </label>
+
+        {/* Horário */}
         <label className="relative">
           <Clock3 className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
           <select
             value={filters.horario}
-            onChange={(event) => updateFilter('horario', event.target.value)}
+            onChange={(e) => updateFilter('horario', e.target.value)}
             className={`${inputClass} pl-11`}
           >
-            <option value="">Todos horários</option>
+            <option value="">Horários</option>
             {horarios.map((horario) => (
               <option key={horario} value={horario}>
                 {horario.slice(0, 5)}
@@ -70,14 +82,15 @@ export default function ControleFiltersBar({
           </select>
         </label>
 
+        {/* Unidade */}
         <label className="relative">
           <MapPin className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
           <select
             value={filters.unidade}
-            onChange={(event) => updateFilter('unidade', event.target.value)}
+            onChange={(e) => updateFilter('unidade', e.target.value)}
             className={`${inputClass} pl-11`}
           >
-            <option value="">Todas unidades</option>
+            <option value="">Unidades</option>
             {unidadesControle.map((unidade) => (
               <option key={unidade} value={unidade}>
                 {unidade}
@@ -86,24 +99,21 @@ export default function ControleFiltersBar({
           </select>
         </label>
 
+        {/* Terapia */}
         <label className="relative">
-          <User className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
-          <input
-            placeholder="Nome do terapeuta"
-            value={filters.terapeuta}
-            onChange={(event) => updateFilter('terapeuta', event.target.value)}
+          <Stethoscope className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
+          <select
+            value={filters.terapia}
+            onChange={(e) => updateFilter('terapia', e.target.value)}
             className={`${inputClass} pl-11`}
-          />
-        </label>
-
-        <label className="relative">
-          <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
-          <input
-            placeholder="Nome do paciente"
-            value={filters.paciente}
-            onChange={(event) => updateFilter('paciente', event.target.value)}
-            className={`${inputClass} pl-11`}
-          />
+          >
+            <option value="">Terapias</option>
+            {terapias.map((terapia) => (
+              <option key={terapia} value={terapia}>
+                {terapia}
+              </option>
+            ))}
+          </select>
         </label>
       </div>
     </div>

@@ -89,10 +89,10 @@ export default function RegistroDisponibilidadePage() {
 
   const [filters, setFilters] = useState<ControleFilters>({
     data: hoje,
+    busca: '',
     horario: '',
     unidade: '',
-    terapeuta: '',
-    paciente: '',
+    terapia: '',
   })
 
   const [ordenacao, setOrdenacao] = useState<Ordenacao>('alfabetica')
@@ -169,10 +169,10 @@ export default function RegistroDisponibilidadePage() {
     return dados
       .filter(terapiaDeveAparecer)
       .filter((item) => {
-        if (!filters.terapeuta) return true
-        return getTerapeuta(item).toLowerCase().includes(filters.terapeuta.toLowerCase())
+        if (!filters.busca) return true
+        return getTerapeuta(item).toLowerCase().includes(filters.busca.toLowerCase())
       })
-  }, [dados, filters.terapeuta])
+  }, [dados, filters.busca])
 
   const grupos = useMemo(() => {
     const gruposMap: Record<string, GrupoTerapeutaMobile> = {}
@@ -289,9 +289,9 @@ export default function RegistroDisponibilidadePage() {
           <div className="relative">
             <Search className="absolute left-3 top-3.5 h-4 w-4 text-slate-400" />
             <input
-              value={filters.terapeuta}
+              value={filters.busca}
               onChange={(e) =>
-                setFilters((prev) => ({ ...prev, terapeuta: e.target.value }))
+                setFilters((prev) => ({ ...prev, busca: e.target.value }))
               }
               placeholder="Buscar terapeuta..."
               className="w-full border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm"
@@ -329,7 +329,7 @@ export default function RegistroDisponibilidadePage() {
                 }
               }}
               atualizarStatusDireto={(g, status) => {
-                void atualizarStatusDireto(g as any, status)
+                void atualizarStatusDireto(g as any, status as any)
               }}
               salvandoStatus={salvandoStatus}
             />

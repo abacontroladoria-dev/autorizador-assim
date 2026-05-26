@@ -1,6 +1,6 @@
 'use client'
 
-import type { StatusDisponibilidade } from '@/hooks/useControleDisponibilidade'
+import type { GrupoTerapeutaMobile } from '@/components/central-terapeutas/types'
 import { useEffect, useMemo, useState } from 'react'
 import { RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -8,6 +8,7 @@ import { useHeader } from '@/contexts/HeaderContext'
 import ControleFiltersBar from '@/components/central-terapeutas/ControleFiltersBar'
 import ControleKpiCards from '@/components/central-terapeutas/ControleKpiCards'
 import ControleTerapeutaMobileCard from '@/components/central-terapeutas/ControleTerapeutaMobileCard'
+import CoberturaModal from '@/components/central-terapeutas/CoberturaModal'
 import {
   useControleDisponibilidade
 } from '@/hooks/useControleDisponibilidade'
@@ -33,24 +34,6 @@ import { getSupabaseClient } from '@/lib/supabase/client'
 
 const supabase = getSupabaseClient()
 
-type GrupoTerapeutaMobile = {
-  terapeuta: string
-  terapia: string
-
-  terapiaExibicao?: string
-
-  unidade: string
-
-  sala: string
-
-  primeiroHorario: string
-
-  status: StatusDisponibilidade
-
-  substituto?: string
-
-  atendimentos: ControleTerapeuticoItem[]
-}
 
 function getHojeLocal() {
   const hoje = new Date()
@@ -68,19 +51,20 @@ export default function ControleTerapeuticoPage() {
   const [dados, setDados] = useState<ControleTerapeuticoItem[]>([])
   const [loading, setLoading] = useState(true)
   const [sincronizando, setSincronizando] = useState(false)
+  const [grupoCobertura, setGrupoCobertura] = useState<GrupoTerapeutaMobile | null>(null)
 
   const [filters, setFilters] = useState<ControleFilters>({
     data: hoje,
+    busca: '',
     horario: '',
     unidade: '',
-    terapeuta: '',
-    paciente: '',
+    terapia: '',
   })
 
   useEffect(() => {
     setHeader(
-      'Controle Terapêutico',
-      'Presença, faltas e acompanhamento operacional'
+      'Operação Clínica',
+      'Gerencie disponibilidade, indisponibilidade e cobertura dos terapeutas.'
     )
   }, [setHeader])
 
@@ -125,11 +109,11 @@ export default function ControleTerapeuticoPage() {
 		| 'disponivel'
 		| 'indisponivel'
 	) => {
-
-	  abrirModalStatusOriginal(
-		grupo,
-		status
-	  )
+	  if (status === 'indisponivel') {
+	    setGrupoCobertura(grupo)
+	  } else {
+	    abrirModalStatusOriginal(grupo as any, status)
+	  }
 	}
 
   useEffect(() => {
@@ -183,9 +167,28 @@ export default function ControleTerapeuticoPage() {
     ).sort((a, b) => a.localeCompare(b))
   }, [dados])
 
+  const terapias = useMemo(() => {
+    return Array.from(
+      new Set(
+        dados
+          .filter(terapiaDeveAparecer)
+          .map((item) => item.terapia_exibicao || item.terapia_exibicao_nome || getTerapia(item))
+          .filter(Boolean)
+      )
+    ).sort((a, b) => a.localeCompare(b, 'pt-BR'))
+  }, [dados])
+
   const filtrados = useMemo(() => {
     return dados
       .filter(terapiaDeveAparecer)
+      .filter((item) => {
+        if (!filters.busca) return true
+        const q = filters.busca.toLowerCase()
+        return (
+          getTerapeuta(item).toLowerCase().includes(q) ||
+          getPaciente(item).toLowerCase().includes(q)
+        )
+      })
       .filter((item) => {
         if (!filters.horario) return true
         return getHorarioInicial(item) === filters.horario
@@ -197,30 +200,21 @@ export default function ControleTerapeuticoPage() {
           .includes(filters.unidade.toLowerCase())
       })
       .filter((item) => {
-        if (!filters.terapeuta) return true
-        return getTerapeuta(item)
-          .toLowerCase()
-          .includes(filters.terapeuta.toLowerCase())
-      })
-      .filter((item) => {
-        if (!filters.paciente) return true
-        return getPaciente(item)
-          .toLowerCase()
-          .includes(filters.paciente.toLowerCase())
+        if (!filters.terapia) return true
+        const t = item.terapia_exibicao || item.terapia_exibicao_nome || getTerapia(item)
+        return t === filters.terapia
       })
       .sort((a, b) => {
         const horario = getHorarioInicial(a).localeCompare(getHorarioInicial(b))
-
         if (horario !== 0) return horario
-
         return getPaciente(a).localeCompare(getPaciente(b))
       })
   }, [
     dados,
+    filters.busca,
     filters.horario,
     filters.unidade,
-    filters.terapeuta,
-    filters.paciente,
+    filters.terapia,
   ])
   
 function obterTodosAtendimentosDoTerapeuta(
@@ -236,64 +230,23 @@ function obterTodosAtendimentosDoTerapeuta(
 function calcularStatusAtual(
   atendimentos: ControleTerapeuticoItem[]
 ) {
+  const statuses = atendimentos.map((a) => normalizarStatus(a.status))
 
-  const agora = new Date()
+  const temDisponivel   = statuses.some((s) => s === 'disponivel')
+  const temIndisponivel = statuses.some((s) => s === 'indisponivel')
+  const temSubstituido  = statuses.some((s) => s === 'substituido')
+  const todosPendente   = statuses.every((s) => s === 'pendente')
 
-  const ordenados =
-    [...atendimentos].sort(
-      (a, b) =>
-        String(a.hora_inicial)
-          .localeCompare(
-            String(b.hora_inicial)
-          )
-    )
-
-  const atual =
-    ordenados.find((item) => {
-
-      const inicio =
-        new Date(
-          `${item.data_atendimento}T${item.hora_inicial}`
-        )
-
-      const fim =
-        new Date(
-          `${item.data_atendimento}T${item.hora_final}`
-        )
-
-      return (
-        agora >= inicio &&
-        agora <= fim
-      )
-    })
-
-  if (atual?.status) {
-    return normalizarStatus(
-      atual.status
-    )
-  }
-
-  const proximo =
-    ordenados.find((item) => {
-
-      const inicio =
-        new Date(
-          `${item.data_atendimento}T${item.hora_inicial}`
-        )
-
-      return inicio >= agora
-    })
-
-  if (proximo?.status) {
-    return normalizarStatus(
-      proximo.status
-    )
-  }
+  if (temDisponivel && temIndisponivel) return 'parcial'
+  if (temIndisponivel && !temDisponivel) return 'indisponivel'
+  if (temSubstituido && !temIndisponivel && !temDisponivel) return 'substituido'
+  if (temDisponivel && !temIndisponivel) return 'disponivel'
+  if (todosPendente) return 'pendente'
 
   return normalizarStatus(
-    ordenados[
-      ordenados.length - 1
-    ]?.status
+    [...atendimentos].sort((a, b) =>
+      String(a.hora_inicial).localeCompare(String(b.hora_inicial))
+    ).at(-1)?.status
   ) || 'pendente'
 }
 
@@ -354,6 +307,7 @@ Object.values(grupos).forEach(
         | 'pendente'
         | 'disponivel'
         | 'indisponivel'
+        | 'parcial'
         | 'substituido'
   }
 )
@@ -371,7 +325,7 @@ return (
       <div className="flex items-center justify-between">
 
         <ControleKpiCards
-          dados={filtrados}
+          grupos={gruposPorTerapeuta}
           loading={loading}
         />
 
@@ -381,7 +335,7 @@ return (
           disabled={sincronizando || loading}
           title="Sincronizar dados operacionais"
           className="
-            flex-shrink-0
+            shrink-0
             h-12
             w-12
             rounded-xl
@@ -412,6 +366,7 @@ return (
       <ControleFiltersBar
         filters={filters}
         horarios={horarios}
+        terapias={terapias}
         onChange={setFilters}
       />
 
@@ -475,7 +430,7 @@ return (
 				) => {
 				  void atualizarStatusDireto(
 					grupo as any,
-					status
+					status as any
 				  )
 				}}
 
@@ -502,6 +457,13 @@ return (
 		atualizarStatusSelecionado
 	  }
 	  setModalStatus={setModalStatus}
+	/>
+
+	<CoberturaModal
+	  grupo={grupoCobertura}
+	  data={filters.data}
+	  onClose={() => setGrupoCobertura(null)}
+	  onSuccess={carregarDados}
 	/>
 
   </div>

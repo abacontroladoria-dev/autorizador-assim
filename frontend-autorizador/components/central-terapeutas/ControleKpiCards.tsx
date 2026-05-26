@@ -1,18 +1,17 @@
 'use client'
 
 import {
-  CalendarCheck2,
-  CheckCircle2,
+  AlertCircle,
+  CalendarX2,
   Clock,
-  RefreshCcw,
-  ShieldCheck,
+  UserCheck,
+  Users,
   UserX,
 } from 'lucide-react'
-import type { ControleTerapeuticoItem } from './types'
-import { getStatus, normalizarStatus } from './helpers'
+import type { GrupoTerapeutaMobile } from './types'
 
 type Props = {
-  dados: ControleTerapeuticoItem[]
+  grupos: GrupoTerapeutaMobile[]
   loading?: boolean
 }
 
@@ -20,97 +19,103 @@ type KpiConfig = {
   key: string
   title: string
   value: number
+  total: number
   tone: string
   iconTone: string
   barTone: string
-  icon: typeof Clock
+  icon: typeof UserCheck
+  hideProgress?: boolean
 }
 
-export default function ControleKpiCards({
-  dados,
-  loading,
-}: Props) {
-  const total = dados.length
+export default function ControleKpiCards({ grupos, loading }: Props) {
+  const totalGrupos = grupos.length
 
-  const presentes = contarStatus(dados, 'presente')
-  const faltas = contarStatus(dados, 'faltou')
-  const coberturasPlanejadas = contarStatus(dados, 'cobertura_planejada')
-  const coberturasConfirmadas = contarStatus(dados, 'cobertura_confirmada')
-  const pendentes = contarStatus(dados, 'pendente')
+  const totalSessoes = grupos.reduce((acc, g) => acc + g.atendimentos.length, 0)
+
+  const pendentes = grupos.filter((g) => g.status === 'pendente').length
+  const disponiveis = grupos.filter((g) => g.status === 'disponivel').length
+  const indisponibilidades = grupos.filter((g) => g.status === 'indisponivel').length
+  const coberturasPendentes = grupos.filter(
+    (g) => g.status === 'indisponivel' && !g.substituto
+  ).length
+  const semCobertura = grupos.reduce(
+    (acc, g) =>
+      acc +
+      g.atendimentos.filter(
+        (a) =>
+          a.status === 'indisponivel' && !a.profissional_substituto_nome
+      ).length,
+    0
+  )
 
   const cards: KpiConfig[] = [
     {
       key: 'total',
-      title: 'Total de atendimentos',
-      value: total,
+      title: 'Total de terapeutas',
+      value: totalGrupos,
+      total: 0,
       tone: 'text-slate-700',
       iconTone: 'bg-slate-100 text-slate-600',
-      barTone: 'bg-slate-300',
-      icon: CalendarCheck2,
+      barTone: 'bg-slate-400',
+      icon: Users,
+      hideProgress: true,
     },
     {
-      key: 'presentes',
-      title: 'Presentes',
-      value: presentes,
+      key: 'disponiveis',
+      title: 'Disponíveis',
+      value: disponiveis,
+      total: totalGrupos,
       tone: 'text-emerald-700',
       iconTone: 'bg-emerald-50 text-emerald-700',
       barTone: 'bg-emerald-500',
-      icon: CheckCircle2,
+      icon: UserCheck,
     },
     {
-      key: 'faltas',
-      title: 'Faltas',
-      value: faltas,
+      key: 'pendentes',
+      title: 'Pendentes',
+      value: pendentes,
+      total: totalGrupos,
+      tone: 'text-violet-700',
+      iconTone: 'bg-violet-50 text-violet-700',
+      barTone: 'bg-violet-500',
+      icon: Clock,
+    },
+    {
+      key: 'indisponibilidades',
+      title: 'Indisponibilidades',
+      value: indisponibilidades,
+      total: totalGrupos,
       tone: 'text-rose-700',
       iconTone: 'bg-rose-50 text-rose-700',
       barTone: 'bg-rose-500',
       icon: UserX,
     },
     {
-      key: 'cobertura-planejada',
-      title: 'Coberturas planejadas',
-      value: coberturasPlanejadas,
+      key: 'cobertura-pendente',
+      title: 'Coberturas pendentes',
+      value: coberturasPendentes,
+      total: totalGrupos,
       tone: 'text-amber-700',
       iconTone: 'bg-amber-50 text-amber-700',
       barTone: 'bg-amber-500',
-      icon: RefreshCcw,
+      icon: AlertCircle,
     },
     {
-      key: 'cobertura-confirmada',
-      title: 'Coberturas confirmadas',
-      value: coberturasConfirmadas,
-      tone: 'text-sky-700',
-      iconTone: 'bg-sky-50 text-sky-700',
-      barTone: 'bg-sky-500',
-      icon: ShieldCheck,
-    },
-    {
-      key: 'pendentes',
-      title: 'Pendentes',
-      value: pendentes,
-      tone: 'text-slate-600',
-      iconTone: 'bg-slate-100 text-slate-600',
-      barTone: 'bg-slate-400',
-      icon: Clock,
+      key: 'sem-cobertura',
+      title: 'Sessões sem cobertura',
+      value: semCobertura,
+      total: totalSessoes,
+      tone: 'text-orange-700',
+      iconTone: 'bg-orange-50 text-orange-700',
+      barTone: 'bg-orange-500',
+      icon: CalendarX2,
     },
   ]
 
   return (
-    <section
-      className="
-        grid
-        grid-cols-2
-        gap-3
-        xl:grid-cols-6
-      "
-    >
+    <section className="flex-1 grid grid-cols-3 xl:grid-cols-6 gap-3">
       {cards.map((card) => (
-        <KpiCard
-          key={card.key}
-          card={card}
-          total={total}
-          loading={loading}
-        />
+        <KpiCard key={card.key} card={card} loading={loading} />
       ))}
     </section>
   )
@@ -118,27 +123,25 @@ export default function ControleKpiCards({
 
 function KpiCard({
   card,
-  total,
   loading,
 }: {
   card: KpiConfig
-  total: number
   loading?: boolean
 }) {
   const Icon = card.icon
-  const percent = total > 0 ? Math.round((card.value / total) * 100) : 0
+  const percent =
+    card.total > 0 ? Math.round((card.value / card.total) * 100) : 0
 
   return (
     <div
       className="
-        group
         bg-white/95
         border border-slate-200
         rounded-xl
         p-3
         shadow-sm
         transition
-        hover:-translate-y-[1px]
+        hover:-translate-y-px
         hover:shadow-md
       "
     >
@@ -151,21 +154,18 @@ function KpiCard({
             <span className={`text-2xl font-bold leading-none ${card.tone}`}>
               {loading ? '--' : card.value}
             </span>
-            <span className="pb-0.5 text-[11px] font-semibold text-slate-400">
-              {loading ? '' : `${percent}%`}
-            </span>
+            {!card.hideProgress && (
+              <span className="pb-0.5 text-[11px] font-semibold text-slate-400">
+                {loading ? '' : `${percent}%`}
+              </span>
+            )}
           </div>
         </div>
 
         <div
           className={`
-            h-9
-            w-9
-            shrink-0
-            rounded-xl
-            flex
-            items-center
-            justify-center
+            h-9 w-9 shrink-0 rounded-xl
+            flex items-center justify-center
             ${card.iconTone}
           `}
         >
@@ -173,19 +173,14 @@ function KpiCard({
         </div>
       </div>
 
-      <div className="mt-3 h-1.5 rounded-full bg-slate-100 overflow-hidden">
-        <div
-          className={`h-full rounded-full ${card.barTone}`}
-          style={{ width: `${loading ? 0 : percent}%` }}
-        />
-      </div>
+      {!card.hideProgress && (
+        <div className="mt-3 h-1.5 rounded-full bg-slate-100 overflow-hidden">
+          <div
+            className={`h-full rounded-full ${card.barTone}`}
+            style={{ width: `${loading ? 0 : percent}%` }}
+          />
+        </div>
+      )}
     </div>
   )
-}
-
-function contarStatus(
-  dados: ControleTerapeuticoItem[],
-  status: string
-) {
-  return dados.filter((item) => normalizarStatus(getStatus(item)) === status).length
 }
