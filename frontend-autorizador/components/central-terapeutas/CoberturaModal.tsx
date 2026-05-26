@@ -34,6 +34,8 @@ type Props = {
 }
 
 export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Props) {
+  const [etapa, setEtapa] = useState<'motivo' | 'cobertura'>('motivo')
+  const [motivo, setMotivo] = useState('')
   const [sessoes, setSessoes] = useState<SessaoCobertura[]>([])
   const [profissionais, setProfissionais] = useState<SlotModalSubstituicao[]>([])
   const [carregando, setCarregando] = useState(false)
@@ -44,6 +46,8 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
   useEffect(() => {
     if (!grupo) return
 
+    setEtapa('motivo')
+    setMotivo('')
     document.body.style.overflow = 'hidden'
 
     const ordenados = [...grupo.atendimentos].sort((a, b) =>
@@ -139,6 +143,7 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
           atualizarStatusAtendimentosEmLote({
             tita_agendamento_ids: semSubstituto,
             status: 'indisponivel',
+            observacao: motivo || null,
           })
         )
       }
@@ -156,6 +161,7 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
             tita_agendamento_ids: ids,
             status: 'substituido',
             profissional_substituto_nome: nome,
+            observacao: motivo || null,
           })
         )
       }
@@ -173,6 +179,70 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
   const iniciais = getIniciais(grupo.terapeuta)
   const dataFormatada = formatarData(data)
 
+  // ── Step 1: Motivo ──────────────────────────────────────────────
+  if (etapa === 'motivo') {
+    return (
+      <div
+        onClick={onClose}
+        className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
+      >
+        <div
+          onClick={(e) => e.stopPropagation()}
+          className="bg-white w-full max-w-lg rounded-2xl flex flex-col overflow-hidden shadow-2xl"
+        >
+          {/* Header */}
+          <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between gap-4">
+            <div className="flex items-center gap-3 min-w-0">
+              <div className="w-12 h-12 rounded-full bg-[#eef5fb] text-[#3A8FB7] flex items-center justify-center font-bold text-base shrink-0 select-none">
+                {iniciais}
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-lg font-bold text-slate-800 leading-tight truncate">{grupo.terapeuta}</h2>
+                <p className="text-sm text-[#3A8FB7] font-medium">{grupo.terapia}</p>
+              </div>
+            </div>
+            <button onClick={onClose} className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 transition shrink-0">
+              <X size={20} />
+            </button>
+          </div>
+
+          {/* Body */}
+          <div className="px-6 py-6">
+            <label className="block text-sm font-semibold text-slate-700 mb-2">
+              Motivo da indisponibilidade:
+            </label>
+            <textarea
+              rows={3}
+              value={motivo}
+              onChange={(e) => setMotivo(e.target.value)}
+              placeholder="ex: Atestado médico, saída antecipada, compromisso pessoal…"
+              className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-300 resize-none transition"
+            />
+            <p className="mt-1.5 text-xs text-slate-400">Campo opcional — pode prosseguir sem preencher.</p>
+          </div>
+
+          {/* Footer */}
+          <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/60 flex justify-end gap-2">
+            <button
+              onClick={onClose}
+              className="px-5 h-10 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:bg-slate-50 transition"
+            >
+              Cancelar
+            </button>
+            <button
+              onClick={() => setEtapa('cobertura')}
+              className="px-5 h-10 rounded-xl bg-violet-600 text-white text-sm font-semibold hover:bg-violet-700 transition flex items-center gap-2"
+            >
+              Continuar
+              <Check size={15} />
+            </button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ── Step 2: Cobertura ───────────────────────────────────────────
   return (
     <div
       onClick={onClose}
@@ -208,6 +278,13 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
                   <b>{sessoes.length}</b> sessões afetadas
                 </span>
               </div>
+              {motivo && (
+                <div className="mt-1.5 flex items-center gap-1.5">
+                  <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded-lg px-2 py-1 leading-tight">
+                    Motivo: {motivo}
+                  </span>
+                </div>
+              )}
             </div>
           </div>
 
