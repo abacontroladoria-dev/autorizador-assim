@@ -54,7 +54,7 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
       ordenados.map((a) => ({
         id: a.tita_agendamento_id as number,
         atendimento: a,
-        disponivel: false,
+        disponivel: String(a.status ?? '').toLowerCase() === 'disponivel',
         substitutoId: null,
         substitutoNome: null,
       }))
