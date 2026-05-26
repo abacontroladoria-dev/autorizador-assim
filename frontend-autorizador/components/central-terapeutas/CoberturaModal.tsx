@@ -21,6 +21,7 @@ import ProfissionaisVerMaisModal from './ProfissionaisVerMaisModal'
 type SessaoCobertura = {
   id: number
   atendimento: ControleTerapeuticoItem
+  disponivel: boolean
   substitutoId: number | null
   substitutoNome: string | null
 }
@@ -53,6 +54,7 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
       ordenados.map((a) => ({
         id: a.tita_agendamento_id as number,
         atendimento: a,
+        disponivel: false,
         substitutoId: null,
         substitutoNome: null,
       }))
@@ -90,7 +92,8 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
     [sessoes]
   )
   const sessoesExibidas = abaAtiva === 'manha' ? sessoesManha : sessoesTarde
-  const semCobertura = sessoes.filter((s) => !s.substitutoId).length
+  const semCobertura = sessoes.filter((s) => !s.substitutoId && !s.disponivel).length
+  const totalDisponiveis = sessoes.filter((s) => s.disponivel).length
 
   const horaInicial = sessoes[0]?.atendimento.hora_inicial
     ? String(sessoes[0].atendimento.hora_inicial).slice(0, 5)
@@ -102,7 +105,15 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
   function selecionarSubstituto(sessaoId: number, profId: number | null, profNome: string | null) {
     setSessoes((prev) =>
       prev.map((s) =>
-        s.id === sessaoId ? { ...s, substitutoId: profId, substitutoNome: profNome } : s
+        s.id === sessaoId ? { ...s, disponivel: false, substitutoId: profId, substitutoNome: profNome } : s
+      )
+    )
+  }
+
+  function marcarDisponivel(sessaoId: number) {
+    setSessoes((prev) =>
+      prev.map((s) =>
+        s.id === sessaoId ? { ...s, disponivel: true, substitutoId: null, substitutoNome: null } : s
       )
     )
   }
@@ -112,7 +123,17 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
     try {
       const promessas: Promise<any>[] = []
 
-      const semSubstituto = sessoes.filter((s) => !s.substitutoId).map((s) => s.id)
+      const disponiveisIds = sessoes.filter((s) => s.disponivel).map((s) => s.id)
+      if (disponiveisIds.length > 0) {
+        promessas.push(
+          atualizarStatusAtendimentosEmLote({
+            tita_agendamento_ids: disponiveisIds,
+            status: 'disponivel',
+          })
+        )
+      }
+
+      const semSubstituto = sessoes.filter((s) => !s.substitutoId && !s.disponivel).map((s) => s.id)
       if (semSubstituto.length > 0) {
         promessas.push(
           atualizarStatusAtendimentosEmLote({
@@ -206,22 +227,12 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
                 </span>
               </div>
               <p className={`text-base font-bold ${semCobertura === 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-                {semCobertura === sessoes.length
-                  ? 'Aguardando cobertura'
-                  : semCobertura === 0
-                    ? 'Cobertura completa'
-                    : `${semCobertura} sem cobertura`}
+                {semCobertura === 0 ? 'Cobertura completa' : `${semCobertura} sem cobertura`}
               </p>
               <p className={`text-xs mt-0.5 ${semCobertura === 0 ? 'text-emerald-500' : 'text-rose-400'}`}>
-                {semCobertura === sessoes.length
-                  ? 'Todas as sessões estão como'
-                  : semCobertura === 0
-                    ? `${sessoes.length} com substituto`
-                    : `${sessoes.length - semCobertura} com substituto`}
+                {totalDisponiveis > 0 && `${totalDisponiveis} disponível · `}
+                {sessoes.filter((s) => s.substitutoId).length} com substituto
               </p>
-              {semCobertura === sessoes.length && (
-                <p className="text-xs font-bold text-rose-600 mt-0.5">Sem substituição</p>
-              )}
             </div>
 
             <button
@@ -275,6 +286,7 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
                   sessao={sessao}
                   profissionais={profissionais}
                   onSelecionar={selecionarSubstituto}
+                  onMarcarDisponivel={marcarDisponivel}
                   onVerMais={() => setVerMaisSessao(sessao)}
                 />
               ))}
@@ -349,11 +361,13 @@ function SessionRow({
   sessao,
   profissionais,
   onSelecionar,
+  onMarcarDisponivel,
   onVerMais,
 }: {
   sessao: SessaoCobertura
   profissionais: SlotModalSubstituicao[]
   onSelecionar: (id: number, profId: number | null, nome: string | null) => void
+  onMarcarDisponivel: (id: number) => void
   onVerMais: () => void
 }) {
   const hora = String(sessao.atendimento.hora_inicial).slice(0, 5)
@@ -418,19 +432,45 @@ function SessionRow({
           Profissionais compatíveis da semana
         </p>
         <div className="flex flex-wrap gap-2 items-start">
+          {/* Disponível */}
+          <button
+            type="button"
+            onClick={() => onMarcarDisponivel(sessao.id)}
+            className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition w-25 ${
+              sessao.disponivel
+                ? 'border-emerald-500 bg-emerald-50'
+                : 'border-slate-200 hover:border-emerald-300 bg-white'
+            }`}
+          >
+            <div className="relative w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
+              <Check size={14} className="text-emerald-600" />
+              {sessao.disponivel && (
+                <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center">
+                  <Check size={9} className="text-white" />
+                </div>
+              )}
+            </div>
+            <span className="text-[11px] font-bold text-slate-700 text-center leading-tight w-full truncate px-0.5">
+              Disponível
+            </span>
+            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap bg-emerald-100 text-emerald-700">
+              Atende
+            </span>
+          </button>
+
           {/* Sem substituição */}
           <button
             type="button"
             onClick={() => onSelecionar(sessao.id, null, null)}
             className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition w-25 ${
-              !selecionadoId
+              !selecionadoId && !sessao.disponivel
                 ? 'border-violet-500 bg-violet-50'
                 : 'border-slate-200 hover:border-violet-300 bg-white'
             }`}
           >
             <div className="relative w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
               <Clock size={14} className="text-slate-400" />
-              {!selecionadoId && (
+              {!selecionadoId && !sessao.disponivel && (
                 <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-violet-600 flex items-center justify-center">
                   <Check size={9} className="text-white" />
                 </div>
@@ -470,7 +510,16 @@ function SessionRow({
 
       {/* Col 4 – Seleção atual */}
       <div className="w-52 shrink-0 px-3 py-4 flex items-center">
-        {selecionadoId ? (
+        {sessao.disponivel ? (
+          <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 w-full">
+            <div className="flex items-center gap-1.5 mb-1">
+              <Check size={13} className="text-emerald-600" />
+              <span className="text-xs font-semibold text-emerald-700">Seleção atual</span>
+            </div>
+            <p className="text-sm font-bold text-emerald-700 leading-snug">Terapeuta disponível</p>
+            <p className="text-xs text-emerald-500 mt-0.5 leading-tight">Atenderá normalmente</p>
+          </div>
+        ) : selecionadoId ? (
           <div className="bg-violet-50 border border-violet-200 rounded-xl p-3 w-full">
             <div className="flex items-center gap-1.5 mb-1">
               <Check size={13} className="text-violet-600" />
