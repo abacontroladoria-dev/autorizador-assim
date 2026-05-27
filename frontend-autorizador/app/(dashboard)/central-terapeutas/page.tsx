@@ -105,15 +105,9 @@ export default function ControleTerapeuticoPage() {
 
 	const abrirModalStatus = (
 	  grupo: GrupoTerapeutaMobile,
-	  status:
-		| 'disponivel'
-		| 'indisponivel'
+	  _status: 'disponivel' | 'indisponivel'
 	) => {
-	  if (status === 'indisponivel') {
-	    setGrupoCobertura(grupo)
-	  } else {
-	    abrirModalStatusOriginal(grupo as any, status)
-	  }
+	  setGrupoCobertura(grupo)
 	}
 
   useEffect(() => {

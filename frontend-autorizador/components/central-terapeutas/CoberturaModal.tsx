@@ -46,7 +46,11 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
   useEffect(() => {
     if (!grupo) return
 
-    setEtapa('motivo')
+    const jaIndisponivel = grupo.atendimentos.some((a) => {
+      const s = String(a.status ?? '').toLowerCase()
+      return s === 'indisponivel' || s === 'substituido'
+    })
+    setEtapa(jaIndisponivel ? 'cobertura' : 'motivo')
     setMotivo('')
     document.body.style.overflow = 'hidden'
 
@@ -218,7 +222,7 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
               placeholder="ex: Atestado médico, saída antecipada, compromisso pessoal…"
               className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-300 resize-none transition"
             />
-            <p className="mt-1.5 text-xs text-slate-400">Campo opcional — pode prosseguir sem preencher.</p>
+            <p className="mt-1.5 text-xs text-slate-400">Campo obrigatório para registrar a indisponibilidade.</p>
           </div>
 
           {/* Footer */}
@@ -231,7 +235,8 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
             </button>
             <button
               onClick={() => setEtapa('cobertura')}
-              className="px-5 h-10 rounded-xl bg-violet-600 text-white text-sm font-semibold hover:bg-violet-700 transition flex items-center gap-2"
+              disabled={!motivo.trim()}
+              className="px-5 h-10 rounded-xl bg-violet-600 text-white text-sm font-semibold hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-2"
             >
               Continuar
               <Check size={15} />
