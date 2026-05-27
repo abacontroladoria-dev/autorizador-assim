@@ -384,14 +384,6 @@ export default function Sidebar() {
           <MenuItem label="Auditoria ASSIM" icon={ClipboardList} path="/auditoria-assim" />
         )}
 
-        {/* SISTEMA */}
-        {canAccess("/admin") && (
-          <>
-            <SectionLabel label="Sistema" />
-            <MenuItem label="Admin" icon={ShieldCheck} path="/admin" />
-          </>
-        )}
-
         {/* CALCULADORA DE REMUNERAÇÕES */}
         {canAccess("/remuneracao/analise") && (
           <>
@@ -408,6 +400,14 @@ export default function Sidebar() {
           </>
         )}
 
+        {/* SISTEMA */}
+        {canAccess("/admin") && (
+          <>
+            <SectionLabel label="Sistema" />
+            <MenuItem label="Admin" icon={ShieldCheck} path="/admin" />
+          </>
+        )}
+		
       </nav>
 
       {/* FOOTER — PERFIL */}

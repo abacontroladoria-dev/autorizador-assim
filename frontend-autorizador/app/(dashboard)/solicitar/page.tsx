@@ -153,6 +153,8 @@ const unidades = [
   
   const [pacienteFaltaDia, setPacienteFaltaDia] = useState<any>(null)
 
+  const [justificativaFalta, setJustificativaFalta] = useState('')
+
   const [filtro, setFiltro] = useState('')
   
   const [MACHINE_ID, setMachineId] = useState<string | null>(null)
@@ -521,7 +523,7 @@ async function handleSolicitarLista(
   // ❌ FALTA
   // =========================
 
-async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
+async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta', justificativa?: string) {
 
   try {
     const { data: existente } = await supabase
@@ -545,7 +547,8 @@ async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
         .update({
           status: 'falta',
           tipo_falta: tipo,
-          terapia_falta: p.terapias?.join(' + ') || null
+          terapia_falta: p.terapias?.join(' + ') || null,
+          justificativa_falta: justificativa || null
         })
         .eq('id', existente.id)
 
@@ -597,7 +600,8 @@ async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
       .from('fila_autorizacoes')
       .update({
         tipo_falta: tipo,
-        terapia_falta: p.terapias?.join(' + ') || null
+        terapia_falta: p.terapias?.join(' + ') || null,
+        justificativa_falta: justificativa || null
       })
       .eq('id', inserted.id)
 
@@ -619,7 +623,7 @@ async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta') {
   // ❌ FALTA DIA DE ATENDIMENTO
   // ===========================
   
-async function handleFaltaDia(paciente: any) {
+async function handleFaltaDia(paciente: any, justificativa?: string) {
 
   const dataAtendimento = paciente.data_atendimento
 
@@ -669,7 +673,8 @@ const atendimentos = Object.values(
         .update({
           status: 'falta',
           tipo_falta: 'paciente',
-          terapia_falta: p.terapias?.join(' + ') || null
+          terapia_falta: p.terapias?.join(' + ') || null,
+          justificativa_falta: justificativa || null
         })
         .eq('id', existente.id)
 
@@ -706,7 +711,8 @@ const atendimentos = Object.values(
         .from('fila_autorizacoes')
         .update({
           tipo_falta: 'paciente',
-          terapia_falta: p.terapias?.join(' + ') || null
+          terapia_falta: p.terapias?.join(' + ') || null,
+          justificativa_falta: justificativa || null
         })
         .eq('id', inserted.id)
     }
@@ -1563,7 +1569,7 @@ useEffect(() => {
 
       {/* BOTÃO FECHAR (X) */}
       <button
-        onClick={() => setConfirmarFaltaDia(false)}
+        onClick={() => { setConfirmarFaltaDia(false); setJustificativaFalta('') }}
         className="absolute top-3 right-3 text-slate-400 hover:text-slate-600 text-lg"
       >
         ✕
@@ -1579,31 +1585,44 @@ useEffect(() => {
         {pacienteFaltaDia?.paciente_nome}
       </p>
 
+      {/* JUSTIFICATIVA */}
+      <textarea
+        value={justificativaFalta}
+        onChange={e => setJustificativaFalta(e.target.value)}
+        placeholder="Justificativa obrigatória"
+        rows={3}
+        className="w-full mt-4 px-3 py-2 text-sm border border-slate-200 rounded-lg resize-none focus:outline-none focus:ring-2 focus:ring-blue-300 text-slate-700 placeholder:text-slate-400"
+      />
+
       {/* ESPAÇO */}
-      <div className="mt-6 flex flex-col gap-3">
+      <div className="mt-4 flex flex-col gap-3">
 
         {/* SÓ ESTE */}
         <button
+          disabled={!justificativaFalta.trim()}
           onClick={async () => {
             if (!pacienteFaltaDia) return
-            await handleFalta(pacienteFaltaDia, 'paciente')
+            await handleFalta(pacienteFaltaDia, 'paciente', justificativaFalta)
+            setJustificativaFalta('')
             setConfirmarFaltaDia(false)
           }}
-          className="w-full py-2.5 rounded-lg bg-blue-500 text-white font-semibold hover:bg-blue-600 transition"
+          className="w-full py-2.5 rounded-lg bg-blue-500 text-white font-semibold hover:bg-blue-600 transition disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Só este atendimento
         </button>
 
         {/* DIA TODO */}
         <button
+          disabled={!justificativaFalta.trim()}
           onClick={async () => {
             if (!pacienteFaltaDia) return
+            const justificativa = justificativaFalta
 			setConfirmarFaltaDia(false)
 			setPacienteFaltaDia(null)
-
-			await handleFaltaDia(pacienteFaltaDia)
+            setJustificativaFalta('')
+			await handleFaltaDia(pacienteFaltaDia, justificativa)
           }}
-          className="w-full py-2.5 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition"
+          className="w-full py-2.5 rounded-lg bg-red-500 text-white font-semibold hover:bg-red-600 transition disabled:opacity-40 disabled:cursor-not-allowed"
         >
           Todos os atendimentos do dia
         </button>
