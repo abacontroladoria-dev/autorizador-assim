@@ -59,13 +59,20 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
     )
 
     setSessoes(
-      ordenados.map((a) => ({
-        id: a.tita_agendamento_id as number,
-        atendimento: a,
-        disponivel: String(a.status ?? '').toLowerCase() === 'disponivel',
-        substitutoId: null,
-        substitutoNome: null,
-      }))
+      ordenados.map((a) => {
+        const s = String(a.status ?? '').toLowerCase()
+        return {
+          id: a.tita_agendamento_id as number,
+          atendimento: a,
+          disponivel: s === 'disponivel',
+          substitutoId: s === 'substituido'
+            ? ((a as any).profissional_substituto_id as number | null) ?? null
+            : null,
+          substitutoNome: s === 'substituido'
+            ? ((a as any).profissional_substituto_nome as string | null) ?? null
+            : null,
+        }
+      })
     )
 
     const terapiaRaw =
@@ -480,6 +487,7 @@ function SessionRow({
   const top3 = profsComStatus.slice(0, 5)
   const restante = Math.max(0, profsComStatus.length - 5)
   const selecionadoId = sessao.substitutoId
+  const temSubstituto = !!selecionadoId || !!sessao.substitutoNome
 
   return (
     <div className="flex items-stretch gap-0 bg-white border border-slate-100 rounded-xl overflow-hidden hover:border-slate-200 transition">
@@ -545,14 +553,14 @@ function SessionRow({
             type="button"
             onClick={() => onSelecionar(sessao.id, null, null)}
             className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition w-25 ${
-              !selecionadoId && !sessao.disponivel
+              !temSubstituto && !sessao.disponivel
                 ? 'border-violet-500 bg-violet-50'
                 : 'border-slate-200 hover:border-violet-300 bg-white'
             }`}
           >
             <div className="relative w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
               <Clock size={14} className="text-slate-400" />
-              {!selecionadoId && !sessao.disponivel && (
+              {!temSubstituto && !sessao.disponivel && (
                 <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-violet-600 flex items-center justify-center">
                   <Check size={9} className="text-white" />
                 </div>
@@ -601,7 +609,7 @@ function SessionRow({
             <p className="text-sm font-bold text-emerald-700 leading-snug">Terapeuta disponível</p>
             <p className="text-xs text-emerald-500 mt-0.5 leading-tight">Atenderá normalmente</p>
           </div>
-        ) : selecionadoId ? (
+        ) : temSubstituto ? (
           <div className="bg-violet-50 border border-violet-200 rounded-xl p-3 w-full">
             <div className="flex items-center gap-1.5 mb-1">
               <Check size={13} className="text-violet-600" />
