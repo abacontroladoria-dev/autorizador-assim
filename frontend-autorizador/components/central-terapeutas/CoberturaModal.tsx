@@ -21,7 +21,7 @@ import ProfissionaisVerMaisModal from './ProfissionaisVerMaisModal'
 type SessaoCobertura = {
   id: number
   atendimento: ControleTerapeuticoItem
-  disponivel: boolean
+  disponivel: boolean | null   // null = não decidido (pendente)
   substitutoId: number | null
   substitutoNome: string | null
 }
@@ -65,7 +65,7 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
         return {
           id: a.tita_agendamento_id as number,
           atendimento: a,
-          disponivel: s === 'disponivel',
+          disponivel: s === 'disponivel' ? true : s === 'indisponivel' ? false : null,
           substitutoId: isSubstituido
             ? (a.profissional_substituto_id as number | null) ?? null
             : null,
@@ -119,7 +119,7 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
     [sessoes]
   )
   const sessoesExibidas = abaAtiva === 'manha' ? sessoesManha : sessoesTarde
-  const semCobertura = sessoes.filter((s) => !s.substitutoId && !s.disponivel).length
+  const semCobertura = sessoes.filter((s) => s.disponivel === false && !s.substitutoId).length
   const totalDisponiveis = sessoes.filter((s) => s.disponivel).length
 
   const horaInicial = sessoes[0]?.atendimento.hora_inicial
@@ -160,7 +160,9 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
         )
       }
 
-      const semSubstituto = sessoes.filter((s) => !s.substitutoId && !s.disponivel).map((s) => s.id)
+      const semSubstituto = sessoes
+        .filter((s) => s.disponivel === false && !s.substitutoId && !s.substitutoNome)
+        .map((s) => s.id)
       if (semSubstituto.length > 0) {
         promessas.push(
           atualizarStatusAtendimentosEmLote({
@@ -565,14 +567,14 @@ function SessionRow({
             type="button"
             onClick={() => onSelecionar(sessao.id, null, null)}
             className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition w-25 min-h-24 ${
-              !temSubstituto && !sessao.disponivel
+              sessao.disponivel === false && !temSubstituto
                 ? 'border-violet-500 bg-violet-50'
                 : 'border-slate-200 hover:border-violet-300 bg-white'
             }`}
           >
             <div className="relative w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
               <Clock size={14} className="text-slate-400" />
-              {!temSubstituto && !sessao.disponivel && (
+              {sessao.disponivel === false && !temSubstituto && (
                 <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-violet-600 flex items-center justify-center">
                   <Check size={9} className="text-white" />
                 </div>
@@ -612,7 +614,7 @@ function SessionRow({
 
       {/* Col 4 – Seleção atual */}
       <div className="w-52 shrink-0 px-3 py-4 flex items-center">
-        {sessao.disponivel ? (
+        {sessao.disponivel === true ? (
           <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 w-full">
             <div className="flex items-center gap-1.5 mb-1">
               <Check size={13} className="text-emerald-600" />
@@ -629,7 +631,7 @@ function SessionRow({
             </div>
             <p className="text-sm font-bold text-slate-800 leading-snug">{sessao.substitutoNome}</p>
           </div>
-        ) : (
+        ) : sessao.disponivel === false ? (
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 w-full">
             <div className="flex items-center gap-1.5 mb-1">
               <Clock size={13} className="text-slate-400" />
@@ -639,6 +641,14 @@ function SessionRow({
             <p className="text-xs text-slate-400 mt-0.5 leading-tight">
               Paciente ficará sem cobertura
             </p>
+          </div>
+        ) : (
+          <div className="bg-slate-50 border border-dashed border-slate-200 rounded-xl p-3 w-full">
+            <div className="flex items-center gap-1.5 mb-1">
+              <Clock size={13} className="text-slate-300" />
+              <span className="text-xs font-semibold text-slate-400">Aguarda decisão</span>
+            </div>
+            <p className="text-sm text-slate-400">Sessão pendente</p>
           </div>
         )}
       </div>
