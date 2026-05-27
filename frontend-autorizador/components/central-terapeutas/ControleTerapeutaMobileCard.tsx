@@ -61,6 +61,9 @@ export default function ControleTerapeutaMobileCard({
   )
   const parcial = status === 'parcial'
   const indisponivelOuSubstituido = indisponivel || substituido || parcial
+  const temPendente = grupo.atendimentos.some(
+    (a) => String(a.status ?? '').toLowerCase() === 'pendente'
+  )
 
   const horariosOrdenados = [...grupo.atendimentos].sort((a, b) =>
     String(a.hora_inicial).localeCompare(String(b.hora_inicial))
@@ -164,14 +167,36 @@ export default function ControleTerapeutaMobileCard({
           )}
 
           {disponivel && (
-            <button
-              type="button"
-              disabled={salvando}
-              onClick={() => abrirModalStatus(grupo, 'indisponivel')}
-              className="w-full h-8 px-4 rounded-lg border border-rose-300 text-rose-600 text-xs font-semibold disabled:opacity-50 transition hover:bg-rose-50"
-            >
-              Encerrar disponibilidade
-            </button>
+            <>
+              {temPendente && (
+                <button
+                  type="button"
+                  disabled={salvando}
+                  onClick={() =>
+                    atualizarStatusDireto(
+                      {
+                        ...grupo,
+                        atendimentos: grupo.atendimentos.filter(
+                          (a) => String(a.status ?? '').toLowerCase() === 'pendente'
+                        ),
+                      },
+                      'disponivel'
+                    )
+                  }
+                  className="w-full h-8 px-4 rounded-lg bg-emerald-600 text-white text-xs font-semibold disabled:opacity-50 transition hover:bg-emerald-700"
+                >
+                  Confirmar pendentes
+                </button>
+              )}
+              <button
+                type="button"
+                disabled={salvando}
+                onClick={() => abrirModalStatus(grupo, 'indisponivel')}
+                className="w-full h-8 px-4 rounded-lg border border-rose-300 text-rose-600 text-xs font-semibold disabled:opacity-50 transition hover:bg-rose-50"
+              >
+                Encerrar disponibilidade
+              </button>
+            </>
           )}
 
           {indisponivelOuSubstituido && (
