@@ -89,11 +89,12 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
     setCarregando(true)
     listarModalSubstituicao({ terapiaExibicaoNome: terapiaExibicaoNome || '', unidade: grupo.unidade })
       .then((data) => {
-        setProfissionais(data)
+        const semTerapeuta = data.filter((p) => p.profissional_nome !== grupo.terapeuta)
+        setProfissionais(semTerapeuta)
         // Resolve substitutoId por nome para sessões pré-carregadas sem ID
         setSessoes((prev) => prev.map((s) => {
           if (s.substitutoNome && !s.substitutoId) {
-            const prof = data.find((p) => p.profissional_nome === s.substitutoNome)
+            const prof = semTerapeuta.find((p) => p.profissional_nome === s.substitutoNome)
             if (prof) return { ...s, substitutoId: prof.profissional_id }
           }
           return s
@@ -537,7 +538,7 @@ function SessionRow({
           <button
             type="button"
             onClick={() => onMarcarDisponivel(sessao.id)}
-            className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition w-25 ${
+            className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition w-25 min-h-24 ${
               sessao.disponivel
                 ? 'border-emerald-500 bg-emerald-50'
                 : 'border-slate-200 hover:border-emerald-300 bg-white'
@@ -563,7 +564,7 @@ function SessionRow({
           <button
             type="button"
             onClick={() => onSelecionar(sessao.id, null, null)}
-            className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition w-25 ${
+            className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition w-25 min-h-24 ${
               !temSubstituto && !sessao.disponivel
                 ? 'border-violet-500 bg-violet-50'
                 : 'border-slate-200 hover:border-violet-300 bg-white'
@@ -677,7 +678,8 @@ function ProfMiniCard({
     <button
       type="button"
       onClick={onClick}
-      className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition w-25 ${
+      title={prof.nome}
+      className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition w-25 min-h-24 ${
         selecionado
           ? 'border-violet-500 bg-violet-50'
           : 'border-slate-200 hover:border-violet-300 bg-white'

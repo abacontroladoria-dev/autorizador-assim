@@ -92,6 +92,13 @@ serve(async (req: Request) => {
     return jsonResponse({ error: "not_authenticated" }, 401);
   }
 
+  const { data: usuarioData } = await supabaseAdmin
+    .from("usuarios")
+    .select("nome")
+    .eq("id", user.id)
+    .single();
+  const confirmadoPorNome: string | null = usuarioData?.nome ?? null;
+
   try {
     const body = await req.json();
     const items = Array.isArray(body?.items) ? (body.items as UpsertItem[]) : [];
@@ -146,9 +153,6 @@ serve(async (req: Request) => {
 
     const rows = sanitizedItems.map((item) => {
       const agenda = agendaById.get(Number(item.tita_agendamento_id));
-      const confirmado = ["presente", "faltou", "cobertura_confirmada"].includes(
-        item.status || ""
-      );
 
       return {
         tita_agendamento_id: item.tita_agendamento_id,
@@ -156,8 +160,9 @@ serve(async (req: Request) => {
         profissional_substituto_id: toBigintValue(item.profissional_substituto_id),
         profissional_substituto_nome: item.profissional_substituto_nome || null,
         observacao: item.observacao || null,
-        confirmado_por: confirmado ? user.id : null,
-        confirmado_em: confirmado ? new Date().toISOString() : null,
+        confirmado_por: user.id,
+        confirmado_em: new Date().toISOString(),
+        confirmado_por_nome: confirmadoPorNome,
         data_atendimento: agenda?.data_atendimento || null,
         hora_inicial: agenda?.hora_inicial || null,
         hora_final: agenda?.hora_final || null,
