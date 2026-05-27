@@ -93,6 +93,7 @@ export default function RegistroDisponibilidadePage() {
     horario: '',
     unidade: '',
     terapia: '',
+    statusFiltro: [],
   })
 
   const [ordenacao, setOrdenacao] = useState<Ordenacao>('alfabetica')
