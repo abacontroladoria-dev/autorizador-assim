@@ -2,11 +2,9 @@
 
 import type { GrupoTerapeutaMobile } from '@/components/central-terapeutas/types'
 import { useEffect, useMemo, useState } from 'react'
-import { RefreshCw } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useHeader } from '@/contexts/HeaderContext'
 import ControleFiltersBar from '@/components/central-terapeutas/ControleFiltersBar'
-import ControleKpiCards from '@/components/central-terapeutas/ControleKpiCards'
 import ControleTerapeutaMobileCard from '@/components/central-terapeutas/ControleTerapeutaMobileCard'
 import CoberturaModal from '@/components/central-terapeutas/CoberturaModal'
 import {
@@ -59,6 +57,7 @@ export default function ControleTerapeuticoPage() {
     horario: '',
     unidade: '',
     terapia: '',
+    statusFiltro: [],
   })
 
   useEffect(() => {
@@ -311,57 +310,43 @@ Object.values(grupos).forEach(
 	)
   }, [filtrados])
 
+  const statusContagem = useMemo(() => {
+    const contagem = { disponivel: 0, indisponivel: 0, substituido: 0, parcial: 0, pendente: 0 }
+    for (const g of gruposPorTerapeuta) {
+      const statuses = new Set(g.atendimentos.map((a) => String(a.status ?? '').toLowerCase()))
+      if (statuses.has('disponivel'))   contagem.disponivel++
+      if (statuses.has('indisponivel')) contagem.indisponivel++
+      if (statuses.has('substituido'))  contagem.substituido++
+      if (g.status === 'parcial')       contagem.parcial++
+      if (statuses.has('pendente'))     contagem.pendente++
+    }
+    return contagem
+  }, [gruposPorTerapeuta])
+
+  const gruposFiltradosPorStatus = useMemo(() => {
+    if (!filters.statusFiltro || filters.statusFiltro.length === 0) return gruposPorTerapeuta
+    return gruposPorTerapeuta.filter((g) =>
+      g.atendimentos.some((a) =>
+        filters.statusFiltro.includes(String(a.status ?? '').toLowerCase())
+      )
+    )
+  }, [gruposPorTerapeuta, filters.statusFiltro])
+
 return (
   <div className="bg-[#f7f9fc] rounded-2xl">
 
     <div className="flex flex-col gap-4 overflow-hidden">
 
-      <div className="flex items-center justify-between">
-
-        <ControleKpiCards
-          grupos={gruposPorTerapeuta}
-          loading={loading}
-        />
-
-        <button
-          type="button"
-          onClick={handleSincronizar}
-          disabled={sincronizando || loading}
-          title="Sincronizar dados operacionais"
-          className="
-            shrink-0
-            h-12
-            w-12
-            rounded-xl
-            bg-white
-            border border-slate-200
-            text-slate-600
-            flex items-center justify-center
-            hover:bg-slate-50
-            disabled:opacity-50
-            disabled:cursor-not-allowed
-            transition
-          "
-        >
-
-          <RefreshCw
-            size={20}
-            className={
-              sincronizando
-                ? 'animate-spin'
-                : ''
-            }
-          />
-
-        </button>
-
-      </div>
-
       <ControleFiltersBar
         filters={filters}
         horarios={horarios}
         terapias={terapias}
+        totalGrupos={gruposPorTerapeuta.length}
+        statusContagem={statusContagem}
         onChange={setFilters}
+        onSincronizar={handleSincronizar}
+        sincronizando={sincronizando}
+        loading={loading}
       />
 
       <div className="space-y-3">
@@ -380,7 +365,7 @@ return (
           )}
 
         {!loading &&
-          gruposPorTerapeuta.map((grupo) => (
+          gruposFiltradosPorStatus.map((grupo) => (
 
 			  <ControleTerapeutaMobileCard
 				key={grupo.terapeuta}

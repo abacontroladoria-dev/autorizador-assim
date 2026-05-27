@@ -1,0 +1,5 @@
+- Nunca usar modal dentro de modal
+- Sempre iniciar como "Sem substituição"
+- Mostrar apenas sessões existentes
+- Priorizar profissionais livres
+- Mostrar top 3 inicialmente

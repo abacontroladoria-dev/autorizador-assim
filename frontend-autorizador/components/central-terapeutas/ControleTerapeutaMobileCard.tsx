@@ -69,6 +69,18 @@ export default function ControleTerapeutaMobileCard({
     String(a.hora_inicial).localeCompare(String(b.hora_inicial))
   )
 
+  const contagem = grupo.atendimentos.reduce(
+    (acc, a) => {
+      const s = String(a.status ?? '').toLowerCase()
+      if (s === 'disponivel') acc.disponivel++
+      else if (s === 'indisponivel') acc.indisponivel++
+      else if (s === 'substituido') acc.substituido++
+      else acc.pendente++
+      return acc
+    },
+    { disponivel: 0, indisponivel: 0, substituido: 0, pendente: 0 }
+  )
+
   const horaInicialGrupo = horariosOrdenados[0]?.hora_inicial
     ? String(horariosOrdenados[0].hora_inicial).slice(0, 5)
     : undefined
@@ -118,8 +130,40 @@ export default function ControleTerapeutaMobileCard({
           </div>
         </button>
 
-        {/* Coluna direita — status + ações + chevron */}
-        <div className="shrink-0 flex flex-col items-end px-4 py-4 gap-2">
+        {/* Coluna central — chips de status 2×2 */}
+        <div className="shrink-0 grid grid-cols-2 gap-1.5 pl-6 pr-12 py-4 content-center">
+          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap text-center ${
+            contagem.disponivel > 0
+              ? 'bg-emerald-100 text-emerald-700'
+              : 'bg-slate-50 text-slate-300 border border-slate-100'
+          }`}>
+            Disponível: {contagem.disponivel}
+          </span>
+          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap text-center ${
+            contagem.indisponivel > 0
+              ? 'bg-rose-100 text-rose-700'
+              : 'bg-slate-50 text-slate-300 border border-slate-100'
+          }`}>
+            Indisponível: {contagem.indisponivel}
+          </span>
+          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap text-center ${
+            contagem.substituido > 0
+              ? 'bg-sky-100 text-sky-700'
+              : 'bg-slate-50 text-slate-300 border border-slate-100'
+          }`}>
+            Substituída: {contagem.substituido}
+          </span>
+          <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap text-center ${
+            contagem.pendente > 0
+              ? 'bg-violet-100 text-violet-700'
+              : 'bg-slate-50 text-slate-300 border border-slate-100'
+          }`}>
+            Pendente: {contagem.pendente}
+          </span>
+        </div>
+
+        {/* Coluna direita — status + botões de ação + chevron */}
+        <div className="w-52 shrink-0 flex flex-col items-end px-4 py-4 gap-2">
 
           {/* Linha 1: status badge + chevron */}
           <div className="flex items-center gap-2">
@@ -134,7 +178,7 @@ export default function ControleTerapeutaMobileCard({
             </button>
           </div>
 
-          {/* Linhas 2-3: botões de ação */}
+          {/* Botões de ação abaixo do status */}
           {pendente && (
             <>
               <button

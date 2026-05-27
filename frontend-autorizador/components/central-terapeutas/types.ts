@@ -6,6 +6,7 @@ export type ControleFilters = {
   horario: string
   unidade: string
   terapia: string
+  statusFiltro: string[]
 }
 
 export type ControleTerapeuticoItem = AtendimentoTerapeutico

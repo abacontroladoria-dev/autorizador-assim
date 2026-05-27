@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import {
   CalendarDays,
   Check,
+  ChevronDown,
   Clock,
   MapPin,
   Users,
@@ -35,7 +36,11 @@ type Props = {
 
 export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Props) {
   const [etapa, setEtapa] = useState<'motivo' | 'cobertura'>('motivo')
-  const [motivo, setMotivo] = useState('')
+  const [tipoOcorrencia, setTipoOcorrencia] = useState('')
+  const [justificativa, setJustificativa] = useState('')
+  const motivoCompleto = tipoOcorrencia && justificativa
+    ? `${tipoOcorrencia} — ${justificativa}`
+    : ''
   const [sessoes, setSessoes] = useState<SessaoCobertura[]>([])
   const [profissionais, setProfissionais] = useState<SlotModalSubstituicao[]>([])
   const [carregando, setCarregando] = useState(false)
@@ -51,7 +56,8 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
       return s === 'indisponivel' || s === 'substituido'
     })
     setEtapa(jaIndisponivel ? 'cobertura' : 'motivo')
-    setMotivo('')
+    setTipoOcorrencia('')
+    setJustificativa('')
     document.body.style.overflow = 'hidden'
 
     const ordenados = [...grupo.atendimentos].sort((a, b) =>
@@ -145,6 +151,18 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
     )
   }
 
+  function marcarTodosDisponiveis() {
+    setSessoes((prev) =>
+      prev.map((s) => ({ ...s, disponivel: true, substitutoId: null, substitutoNome: null }))
+    )
+  }
+
+  function marcarTodosIndisponiveis() {
+    setSessoes((prev) =>
+      prev.map((s) => ({ ...s, disponivel: false, substitutoId: null, substitutoNome: null }))
+    )
+  }
+
   async function handleConfirmar() {
     setSalvando(true)
     try {
@@ -168,7 +186,7 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
           atualizarStatusAtendimentosEmLote({
             tita_agendamento_ids: semSubstituto,
             status: 'indisponivel',
-            observacao: motivo || null,
+            observacao: motivoCompleto || null,
           })
         )
       }
@@ -186,7 +204,7 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
             tita_agendamento_ids: ids,
             status: 'substituido',
             profissional_substituto_nome: nome,
-            observacao: motivo || null,
+            observacao: motivoCompleto || null,
           })
         )
       }
@@ -232,18 +250,66 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
           </div>
 
           {/* Body */}
-          <div className="px-6 py-6">
-            <label className="block text-sm font-semibold text-slate-700 mb-2">
-              Motivo da indisponibilidade:
-            </label>
-            <textarea
-              rows={3}
-              value={motivo}
-              onChange={(e) => setMotivo(e.target.value)}
-              placeholder="ex: Atestado médico, saída antecipada, compromisso pessoal…"
-              className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-700 outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-300 resize-none transition"
-            />
-            <p className="mt-1.5 text-xs text-slate-400">Campo obrigatório para registrar a indisponibilidade.</p>
+          <div className="px-6 py-6 space-y-4">
+            {/* Tipo de Ocorrência */}
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
+                Tipo de Ocorrência
+              </label>
+              <div className="relative">
+                <select
+                  value={tipoOcorrencia}
+                  onChange={(e) => setTipoOcorrencia(e.target.value)}
+                  className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3 pr-10 text-sm font-medium text-slate-700 outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-400 transition cursor-pointer"
+                >
+                  <option value="">Selecione o tipo...</option>
+                  <option value="Atraso">Atraso</option>
+                  <option value="Falta Parcial">Falta Parcial</option>
+                  <option value="Falta Integral">Falta Integral</option>
+                  <option value="Falta programada (futuro)">Falta programada (futuro)</option>
+                  <option value="Saída antecipada">Saída antecipada</option>
+                </select>
+                <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
+            </div>
+
+            {/* Justificativa */}
+            <div>
+              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
+                Justificativa
+              </label>
+              <div className="relative">
+                <select
+                  value={justificativa}
+                  onChange={(e) => setJustificativa(e.target.value)}
+                  className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3 pr-10 text-sm font-medium text-slate-700 outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-400 transition cursor-pointer"
+                >
+                  <option value="">Selecione a justificativa...</option>
+                  <option value="Saúde do profissional">Saúde do profissional</option>
+                  <option value="Saúde de familiar">Saúde de familiar</option>
+                  <option value="Compromissos pessoais">Compromissos pessoais</option>
+                  <option value="Consulta médica">Consulta médica</option>
+                  <option value="Cursos/congressos">Cursos/congressos</option>
+                  <option value="Viagem">Viagem</option>
+                  <option value="Sem justificativa">Sem justificativa</option>
+                </select>
+                <ChevronDown size={16} className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              </div>
+            </div>
+
+            {/* Preview em tempo real */}
+            {tipoOcorrencia && justificativa && (
+              <div className="rounded-xl bg-violet-50 border border-violet-100 px-4 py-3 flex items-start gap-3">
+                <div className="w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center shrink-0 mt-0.5">
+                  <Check size={14} className="text-violet-600" />
+                </div>
+                <div>
+                  <p className="text-xs font-semibold text-violet-700 uppercase tracking-wide mb-0.5">Registro selecionado</p>
+                  <p className="text-sm font-bold text-slate-800">{tipoOcorrencia}</p>
+                  <p className="text-xs text-slate-500 mt-0.5">{justificativa}</p>
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Footer */}
@@ -256,7 +322,7 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
             </button>
             <button
               onClick={() => setEtapa('cobertura')}
-              disabled={!motivo.trim()}
+              disabled={!tipoOcorrencia || !justificativa}
               className="px-5 h-10 rounded-xl bg-violet-600 text-white text-sm font-semibold hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-2"
             >
               Continuar
@@ -304,10 +370,10 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
                   <b>{sessoes.length}</b> sessões afetadas
                 </span>
               </div>
-              {motivo && (
+              {motivoCompleto && (
                 <div className="mt-1.5 flex items-center gap-1.5">
                   <span className="text-xs bg-amber-50 text-amber-700 border border-amber-200 rounded-lg px-2 py-1 leading-tight">
-                    Motivo: {motivo}
+                    Motivo: {motivoCompleto}
                   </span>
                 </div>
               )}
@@ -348,7 +414,7 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
         </div>
 
         {/* ── Abas ── */}
-        <div className="px-6 py-3 border-b border-slate-100 flex items-center gap-2 shrink-0">
+        <div className="px-6 py-3 border-b border-slate-100 flex items-center gap-2 shrink-0 flex-wrap">
           <button
             onClick={() => setAbaAtiva('manha')}
             className={`flex items-center gap-2 px-4 py-2 rounded-xl text-base font-semibold transition ${
@@ -369,6 +435,22 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
           >
             🌙 Tarde ({sessoesTarde.length})
           </button>
+          <div className="flex items-center gap-2 ml-auto">
+            <button
+              type="button"
+              onClick={marcarTodosDisponiveis}
+              className="h-8 px-3 rounded-lg border border-emerald-300 text-emerald-700 text-xs font-semibold hover:bg-emerald-50 transition"
+            >
+              Todos disponíveis
+            </button>
+            <button
+              type="button"
+              onClick={marcarTodosIndisponiveis}
+              className="h-8 px-3 rounded-lg border border-rose-300 text-rose-600 text-xs font-semibold hover:bg-rose-50 transition"
+            >
+              Todos indisponíveis
+            </button>
+          </div>
         </div>
 
         {/* ── Lista de sessões ── */}
@@ -435,7 +517,10 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
       {/* ── Modal Ver mais ── */}
       {verMaisSessao && (
         <ProfissionaisVerMaisModal
-          profissionais={profissionais}
+          profissionais={profissionaisDoTurno(
+            profissionais,
+            String(verMaisSessao.atendimento.hora_inicial).slice(0, 5)
+          )}
           sessaoContext={{
             horario: `${String(verMaisSessao.atendimento.hora_inicial).slice(0, 5)} – ${String(verMaisSessao.atendimento.hora_final).slice(0, 5)}`,
             horaInicial: String(verMaisSessao.atendimento.hora_inicial).slice(0, 5),
@@ -492,8 +577,21 @@ function SessionRow({
   const profsUnicos = useMemo(() => getProfissionaisUnicos(profissionais), [profissionais])
 
   const profsComStatus = useMemo(() => {
+    const turnoSessao = hora < '13:00' ? 'manha' : 'tarde'
     const ordemStatus: Record<string, number> = { livre: 0, ocupado: 1, sem_agenda_hoje: 2 }
-    return profsUnicos
+
+    const profsDoTurno = profsUnicos.filter((p) => {
+      const slotsDoDia = profissionais.filter(
+        (s) => s.profissional_id === p.id && s.status_slot !== 'sem_agenda_hoje'
+      )
+      if (slotsDoDia.length === 0) return false
+      return slotsDoDia.some((s) => {
+        const h = s.hora.slice(0, 5)
+        return turnoSessao === 'manha' ? h < '13:00' : h >= '13:00'
+      })
+    })
+
+    return profsDoTurno
       .map((p) => ({ ...p, ...getStatusProfNaHora(profissionais, p.id, hora) }))
       .sort((a, b) => (ordemStatus[a.status] ?? 3) - (ordemStatus[b.status] ?? 3))
   }, [profsUnicos, profissionais, hora])
@@ -513,82 +611,60 @@ function SessionRow({
         <span className="text-xs text-slate-400 mt-0.5">40 min</span>
       </div>
 
-      {/* Col 2 – Paciente */}
-      <div className="w-52 shrink-0 flex items-start gap-2 px-3 py-4 border-r border-slate-100">
-        <div className="w-10 h-10 rounded-full bg-[#eef5fb] text-[#3A8FB7] flex items-center justify-center text-xs font-bold shrink-0 mt-0.5 select-none">
-          {iniciaisPaciente}
+      {/* Col 2 – Paciente + decisão */}
+      <div className="w-64 shrink-0 flex flex-col justify-between px-3 py-4 border-r border-slate-100">
+        <div className="flex items-start gap-2">
+          <div className="w-10 h-10 rounded-full bg-[#eef5fb] text-[#3A8FB7] flex items-center justify-center text-xs font-bold shrink-0 mt-0.5 select-none">
+            {iniciaisPaciente}
+          </div>
+          <div className="min-w-0">
+            <p className="text-base font-semibold text-slate-800 leading-tight truncate">{paciente}</p>
+            <p className="text-sm text-[#3A8FB7] font-medium mt-0.5 truncate">{terapia}</p>
+            {sala ? (
+              <div className="flex items-center gap-1 mt-1">
+                <MapPin size={12} className="text-slate-400 shrink-0" />
+                <span className="text-xs text-slate-400">{sala}</span>
+              </div>
+            ) : null}
+          </div>
         </div>
-        <div className="min-w-0">
-          <p className="text-base font-semibold text-slate-800 leading-tight truncate">{paciente}</p>
-          <p className="text-sm text-[#3A8FB7] font-medium mt-0.5 truncate">{terapia}</p>
-          {sala ? (
-            <div className="flex items-center gap-1 mt-1">
-              <MapPin size={12} className="text-slate-400 shrink-0" />
-              <span className="text-xs text-slate-400">{sala}</span>
-            </div>
-          ) : null}
+
+        {/* Botões de decisão */}
+        <div className="mt-3 flex flex-col gap-1.5">
+          <button
+            type="button"
+            onClick={() => onMarcarDisponivel(sessao.id)}
+            className={`flex items-center justify-center gap-1.5 h-8 px-3 rounded-lg border-2 text-xs font-semibold transition ${
+              sessao.disponivel
+                ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
+                : 'border-slate-200 hover:border-emerald-300 bg-white text-slate-600'
+            }`}
+          >
+            <Check size={12} className={sessao.disponivel ? 'text-emerald-600' : 'text-slate-400'} />
+            Disponível
+          </button>
+          <button
+            type="button"
+            onClick={() => onSelecionar(sessao.id, null, null)}
+            className={`flex items-center justify-center gap-1.5 h-8 px-3 rounded-lg border-2 text-xs font-semibold transition ${
+              sessao.disponivel === false && !temSubstituto
+                ? 'border-rose-500 bg-rose-50 text-rose-700'
+                : 'border-slate-200 hover:border-rose-300 bg-white text-slate-600'
+            }`}
+          >
+            <Clock size={12} className={sessao.disponivel === false && !temSubstituto ? 'text-rose-500' : 'text-slate-400'} />
+            Indisponível
+          </button>
         </div>
       </div>
 
-      {/* Col 3 – Profissionais */}
+      {/* Col 3 – Profissionais substitutos */}
       <div className="flex-1 px-3 py-4 border-r border-slate-100">
         <p className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide">
           Profissionais compatíveis da semana
         </p>
         <div className="flex flex-wrap gap-2 items-start">
-          {/* Disponível */}
-          <button
-            type="button"
-            onClick={() => onMarcarDisponivel(sessao.id)}
-            className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition w-25 min-h-24 ${
-              sessao.disponivel
-                ? 'border-emerald-500 bg-emerald-50'
-                : 'border-slate-200 hover:border-emerald-300 bg-white'
-            }`}
-          >
-            <div className="relative w-10 h-10 rounded-full bg-emerald-100 flex items-center justify-center shrink-0">
-              <Check size={14} className="text-emerald-600" />
-              {sessao.disponivel && (
-                <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-emerald-500 flex items-center justify-center">
-                  <Check size={9} className="text-white" />
-                </div>
-              )}
-            </div>
-            <span className="text-[11px] font-bold text-slate-700 text-center leading-tight w-full truncate px-0.5">
-              Disponível
-            </span>
-            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap bg-emerald-100 text-emerald-700">
-              Atende
-            </span>
-          </button>
-
-          {/* Sem substituição */}
-          <button
-            type="button"
-            onClick={() => onSelecionar(sessao.id, null, null)}
-            className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition w-25 min-h-24 ${
-              sessao.disponivel === false && !temSubstituto
-                ? 'border-violet-500 bg-violet-50'
-                : 'border-slate-200 hover:border-violet-300 bg-white'
-            }`}
-          >
-            <div className="relative w-10 h-10 rounded-full bg-slate-100 flex items-center justify-center shrink-0">
-              <Clock size={14} className="text-slate-400" />
-              {sessao.disponivel === false && !temSubstituto && (
-                <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-violet-600 flex items-center justify-center">
-                  <Check size={9} className="text-white" />
-                </div>
-              )}
-            </div>
-            <span className="text-[11px] font-bold text-slate-700 text-center leading-tight w-full truncate px-0.5">
-              Sem subst.
-            </span>
-            <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap bg-slate-100 text-slate-500">
-              Sem cob.
-            </span>
-          </button>
-
-          {/* Top 3 profissionais */}
+          {/* Profissionais */}
           {top3.map((prof) => (
             <ProfMiniCard
               key={prof.id}
@@ -719,6 +795,22 @@ function ProfMiniCard({
 }
 
 // ── Helpers ─────────────────────────────────────────────────────
+
+function profissionaisDoTurno(
+  slots: SlotModalSubstituicao[],
+  hora: string
+): SlotModalSubstituicao[] {
+  const turno = hora < '13:00' ? 'manha' : 'tarde'
+  const idsDoTurno = new Set<number>()
+  for (const s of slots) {
+    if (s.status_slot === 'sem_agenda_hoje') continue
+    const h = s.hora.slice(0, 5)
+    if (turno === 'manha' ? h < '13:00' : h >= '13:00') {
+      idsDoTurno.add(s.profissional_id)
+    }
+  }
+  return slots.filter((s) => idsDoTurno.has(s.profissional_id))
+}
 
 function getIniciais(nome: string): string {
   const partes = nome.trim().split(/\s+/)
