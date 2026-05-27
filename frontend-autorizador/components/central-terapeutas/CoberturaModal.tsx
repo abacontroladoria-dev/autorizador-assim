@@ -61,15 +61,16 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
     setSessoes(
       ordenados.map((a) => {
         const s = String(a.status ?? '').toLowerCase()
+        const isSubstituido = s === 'substituido'
         return {
           id: a.tita_agendamento_id as number,
           atendimento: a,
           disponivel: s === 'disponivel',
-          substitutoId: s === 'substituido'
-            ? ((a as any).profissional_substituto_id as number | null) ?? null
+          substitutoId: isSubstituido
+            ? (a.profissional_substituto_id as number | null) ?? null
             : null,
-          substitutoNome: s === 'substituido'
-            ? ((a as any).profissional_substituto_nome as string | null) ?? null
+          substitutoNome: isSubstituido
+            ? a.profissional_substituto_nome ?? null
             : null,
         }
       })
@@ -87,7 +88,17 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
 
     setCarregando(true)
     listarModalSubstituicao({ terapiaExibicaoNome: terapiaExibicaoNome || '', unidade: grupo.unidade })
-      .then(setProfissionais)
+      .then((data) => {
+        setProfissionais(data)
+        // Resolve substitutoId por nome para sessões pré-carregadas sem ID
+        setSessoes((prev) => prev.map((s) => {
+          if (s.substitutoNome && !s.substitutoId) {
+            const prof = data.find((p) => p.profissional_nome === s.substitutoNome)
+            if (prof) return { ...s, substitutoId: prof.profissional_id }
+          }
+          return s
+        }))
+      })
       .finally(() => setCarregando(false))
 
     const temManha = ordenados.some((a) => String(a.hora_inicial).slice(0, 5) < '13:00')
