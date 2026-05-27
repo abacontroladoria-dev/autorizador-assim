@@ -7,12 +7,16 @@ import {
   getMostActiveUnit,
   getPeakSlot,
   getDailyAverage,
+  getPeriodPointAverage,
 } from "./data"
+
+type Period = "hoje" | "semana" | "mensal"
 
 interface KpiMiniCardsProps {
   slotData: FluxoSlotPoint[]
   atendimentos: FluxoUnitCount | null
   terapeutas: FluxoUnitCount | null
+  period?: Period
   loading?: boolean
 }
 
@@ -58,28 +62,60 @@ function MiniCard({
   )
 }
 
-export default function KpiMiniCards({ slotData, atendimentos, terapeutas, loading }: KpiMiniCardsProps) {
+export default function KpiMiniCards({
+  slotData,
+  atendimentos,
+  terapeutas,
+  period = "hoje",
+  loading,
+}: KpiMiniCardsProps) {
   const total = atendimentos?.total ?? 0
-  const avg = getDailyAverage(slotData)
   const peak = getPeakSlot(slotData)
   const activeUnit = getMostActiveUnit(atendimentos)
   const totalTerapeutas = terapeutas?.total ?? 0
+  const periodAvg = getPeriodPointAverage(slotData)
+
+  // Labels adaptados por período
+  const avgLabel =
+    period === "hoje"
+      ? `Média: ${getDailyAverage(slotData)} por slot`
+      : period === "semana"
+        ? `Média: ${periodAvg} por dia`
+        : `Média: ${periodAvg} por semana`
+
+  const peakTitle =
+    period === "hoje" ? "Horário de pico" : period === "semana" ? "Dia de pico" : "Semana mais ativa"
+
+  const peakSub = peak.total ? `${peak.total} atendimentos` : "—"
+
+  const card4Title =
+    period === "hoje"
+      ? "Terapeutas em atendimento"
+      : period === "semana"
+        ? "Média diária"
+        : "Média semanal"
+
+  const card4Value =
+    period === "hoje" ? String(totalTerapeutas) : String(periodAvg)
+
+  const card4Sub =
+    period === "hoje" ? "Agora" : period === "semana" ? "atendimentos/dia" : "atendimentos/semana"
 
   return (
     <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
       <MiniCard
         title="Total de atendimentos"
         value={loading ? "—" : String(total)}
-        sub={`Média: ${avg} por slot`}
+        sub={avgLabel}
         iconBg="bg-blue-50"
         icon={<CalendarDays size={18} className="text-blue-500" />}
         subColor="text-slate-400"
         loading={loading}
       />
       <MiniCard
-        title="Horário de pico"
+        title={peakTitle}
         value={peak.slot || "—"}
-        sub={peak.total ? `${peak.total} atendimentos` : "—"}
+        sub={peakSub}
         iconBg="bg-purple-50"
         icon={<Clock size={18} className="text-purple-500" />}
         valueColor="text-purple-700"
@@ -96,9 +132,9 @@ export default function KpiMiniCards({ slotData, atendimentos, terapeutas, loadi
         loading={loading}
       />
       <MiniCard
-        title="Terapeutas em atendimento"
-        value={loading ? "—" : String(totalTerapeutas)}
-        sub="Agora"
+        title={card4Title}
+        value={loading ? "—" : card4Value}
+        sub={card4Sub}
         iconBg="bg-orange-50"
         icon={<Users size={18} className="text-orange-500" />}
         valueColor="text-orange-600"

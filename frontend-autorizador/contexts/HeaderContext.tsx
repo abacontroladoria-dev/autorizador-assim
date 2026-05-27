@@ -2,6 +2,7 @@
 
 import {
   createContext,
+  useCallback,
   useContext,
   useState,
 } from 'react'
@@ -35,13 +36,10 @@ export function HeaderProvider({
   const [subtitle, setSubtitle] =
     useState('')
 
-  function setHeader(
-    newTitle: string,
-    newSubtitle?: string
-  ) {
+  const setHeader = useCallback((newTitle: string, newSubtitle?: string) => {
     setTitle(newTitle)
     setSubtitle(newSubtitle || '')
-  }
+  }, [])
 
   return (
     <HeaderContext.Provider

@@ -65,13 +65,15 @@ function DashboardShell({
       <Sidebar />
       <div className="ml-64 flex flex-col min-h-screen">
 
-        {/* HEADER */}
-        <header className="h-20 bg-white flex items-center px-6 shrink-0">
-          <div>
-            <h1 className="text-lg font-bold text-slate-800 leading-tight">{title}</h1>
-            {subtitle && <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>}
-          </div>
-        </header>
+        {/* HEADER — só exibe quando há título */}
+        {title && (
+          <header className="h-20 bg-white flex items-center px-6 shrink-0">
+            <div>
+              <h1 className="text-lg font-bold text-slate-800 leading-tight">{title}</h1>
+              {subtitle && <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>}
+            </div>
+          </header>
+        )}
 
         {/* PAGE */}
         <main className="flex-1 p-6 overflow-auto">

@@ -16,6 +16,7 @@ import { FluxoSlotPoint, UNIT_COLORS, getDailyAverage, getPeakSlot, getCurrentSl
 
 interface FluxoChartProps {
   data: FluxoSlotPoint[]
+  showCurrentSlot?: boolean
 }
 
 interface TooltipEntry {
@@ -114,10 +115,10 @@ function PeakBadge({ viewBox }: { viewBox?: { x?: number; y?: number } }) {
 
 // ─── Chart ────────────────────────────────────────────────────────────────────
 
-export default function FluxoChart({ data }: FluxoChartProps) {
+export default function FluxoChart({ data, showCurrentSlot = true }: FluxoChartProps) {
   const dailyAverage = getDailyAverage(data)
   const peakSlot = getPeakSlot(data).slot
-  const currentSlot = getCurrentSlotKey()
+  const currentSlot = showCurrentSlot ? getCurrentSlotKey() : null
 
   return (
     <div className="w-full">

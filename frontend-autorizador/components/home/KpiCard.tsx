@@ -1,32 +1,27 @@
 "use client"
 
-import { LucideIcon } from "lucide-react"
+import { LucideIcon, MoreVertical } from "lucide-react"
 
 interface UnitValue {
   label: string
   value: number | null
 }
 
-type Variant = "blue" | "purple"
+type Variant = "blue" | "purple" | "amber" | "rose"
 
-const V = {
-  blue: {
-    leftBorder: "#3A8FB7",
-    iconBg: "bg-[#eaf4fb]",
-    iconColor: "text-[#3A8FB7]",
-    numberColor: "text-[#3A8FB7]",
-    dotBg: "bg-[#3A8FB7]",
-    ghostColor: "#3A8FB7",
-  },
-  purple: {
-    leftBorder: "#7c3aed",
-    iconBg: "bg-purple-50",
-    iconColor: "text-purple-600",
-    numberColor: "text-purple-600",
-    dotBg: "bg-purple-400",
-    ghostColor: "#7c3aed",
-  },
-} as const
+const V: Record<
+  Variant,
+  {
+    accent: string
+    iconBg: string
+    chipBg: string
+  }
+> = {
+  blue:   { accent: "#2563EB", iconBg: "#EFF6FF", chipBg: "#F8FAFC" },
+  amber:  { accent: "#F59E0B", iconBg: "#FFF4E5", chipBg: "#FFFBF0" },
+  purple: { accent: "#7C3AED", iconBg: "#F3EBFF", chipBg: "#FAF8FF" },
+  rose:   { accent: "#E11D48", iconBg: "#FEF2F2", chipBg: "#FFF5F5" },
+}
 
 interface KpiCardProps {
   title: string
@@ -48,51 +43,89 @@ export default function KpiCard({
 
   return (
     <div
-      className="relative bg-white rounded-2xl border border-slate-100 shadow-sm hover:shadow-md transition-shadow duration-200 overflow-hidden"
-      style={{ borderLeft: `4px solid ${s.leftBorder}` }}
+      className="relative bg-white rounded-2xl overflow-hidden h-full flex flex-col hover:-translate-y-0.5 transition-all duration-200"
+      style={{
+        border: `1px solid ${s.accent}30`,
+        boxShadow: "0 2px 8px rgba(16,24,40,0.06), 0 0 0 0 transparent",
+      }}
     >
-      {/* Ghost icon */}
-      <div
-        className="absolute right-3 top-3 pointer-events-none select-none"
-        style={{ color: s.ghostColor, opacity: 0.06 }}
-      >
-        <Icon size={100} strokeWidth={1} />
-      </div>
+      {/* Accent bar */}
+      <div className="absolute top-0 left-0 w-0.75 h-full rounded-l-2xl" style={{ backgroundColor: s.accent }} />
 
-      <div className="p-6">
-        {/* Icon + Title + Number */}
-        <div className="flex items-start gap-3 mb-5">
-          <div className={`${s.iconBg} ${s.iconColor} p-2.5 rounded-xl shrink-0`}>
-            <Icon size={20} />
+      <div className="px-5 pt-5 pb-4 flex-1 flex flex-col gap-4">
+
+        {/* ── Top row ──────────────────────────────────────────────────── */}
+        <div className="flex items-start gap-3">
+
+          {/* Icon circle */}
+          <div
+            className="w-10 h-10 rounded-full flex items-center justify-center shrink-0"
+            style={{ backgroundColor: s.iconBg }}
+          >
+            <Icon size={20} style={{ color: s.accent }} />
           </div>
-          <div className="flex-1">
-            <p className="text-sm font-medium text-slate-500 leading-snug">{title}</p>
+
+          {/* Title */}
+          <div className="flex-1 min-w-0 pt-0.5">
+            <p className="text-sm font-semibold text-slate-800 leading-snug line-clamp-2">{title}</p>
+            <p className="text-xs text-slate-400 mt-0.5">Resumo do dia</p>
+          </div>
+
+          {/* Divider */}
+          <div className="self-stretch w-px border-l border-dashed border-slate-200 mx-1 shrink-0" />
+
+          {/* Total */}
+          <div className="shrink-0 text-right">
+            <p className="text-[9px] font-bold tracking-[0.12em] text-slate-400 uppercase mb-1">Total Geral</p>
             {loading ? (
-              <div className="h-10 w-24 bg-slate-100 rounded-lg animate-pulse mt-1.5" />
+              <div className="h-10 w-14 bg-slate-100 rounded-lg animate-pulse" />
             ) : (
-              <p className={`text-5xl font-bold leading-none mt-1.5 ${s.numberColor}`}>
-                {total}
-              </p>
+              <p className="text-3xl font-bold tracking-tight leading-none" style={{ color: s.accent }}>{total}</p>
             )}
           </div>
+
+          {/* Menu */}
+          <button className="text-slate-300 hover:text-slate-500 transition-colors ml-1 mt-0.5 shrink-0">
+            <MoreVertical size={15} />
+          </button>
         </div>
 
-        {/* Unit breakdown */}
-        <div className="border-t border-slate-50 pt-3 space-y-2.5">
+        {/* ── Divider ──────────────────────────────────────────────────── */}
+        <div className="border-t border-slate-100" />
+
+        {/* ── Unit chips ───────────────────────────────────────────────── */}
+        <div className="grid grid-cols-3 gap-2">
           {units.map((unit) => (
-            <div key={unit.label} className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <span className={`w-2 h-2 rounded-full ${s.dotBg}`} />
-                <span className="text-xs text-slate-500">{unit.label}</span>
+            <div
+              key={unit.label}
+              className="flex flex-col items-center rounded-xl px-2 py-2.5"
+              style={{ backgroundColor: s.chipBg, border: `1px solid ${s.accent}20` }}
+            >
+              <div className="flex items-center gap-1.5 mb-1.5">
+                <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: s.accent }} />
+                <span className="text-[10px] text-slate-500 leading-none truncate">{unit.label}</span>
               </div>
               {loading ? (
-                <div className="h-3 w-6 bg-slate-100 rounded animate-pulse" />
+                <div className="h-5 w-8 bg-slate-200 rounded animate-pulse" />
               ) : (
-                <span className="text-xs font-bold text-slate-700">{unit.value ?? "—"}</span>
+                <span className="text-lg font-bold leading-none" style={{ color: s.accent }}>
+                  {unit.value ?? "—"}
+                </span>
               )}
             </div>
           ))}
         </div>
+
+      </div>
+
+      {/* ── Wave ─────────────────────────────────────────────────────────── */}
+      <div className="h-8 w-full pointer-events-none select-none" style={{ opacity: 0.12 }}>
+        <svg viewBox="0 0 400 28" preserveAspectRatio="none" className="w-full h-full">
+          <path
+            d="M0,14 C40,4 80,24 120,14 C160,4 200,24 240,14 C280,4 320,24 360,14 C380,9 392,18 400,14 L400,28 L0,28 Z"
+            fill={s.accent}
+          />
+        </svg>
       </div>
     </div>
   )

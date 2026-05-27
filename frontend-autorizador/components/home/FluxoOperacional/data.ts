@@ -110,6 +110,154 @@ export function getDailyAverage(data: FluxoSlotPoint[]): number {
   return Math.round(allValues.reduce((s, v) => s + v, 0) / allValues.length)
 }
 
+// ─── Unit key helper (shared) ─────────────────────────────────────────────────
+
+export function salaToUnitKey(
+  salaNome: string | null,
+): "realengo" | "fazendinha" | "padreMiguel" | null {
+  if (!salaNome) return null
+  const lower = salaNome.toLowerCase()
+  if (lower.includes("realengo")) return "realengo"
+  if (lower.includes("fazendinha")) return "fazendinha"
+  if (lower.includes("padre miguel")) return "padreMiguel"
+  return null
+}
+
+// ─── Date range helpers ───────────────────────────────────────────────────────
+
+function toISO(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
+const SHORT_DAYS = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]
+
+// Seg–Sex apenas (5 dias úteis)
+export function getWeekDateRange(): { start: string; end: string; dates: string[]; labels: string[] } {
+  const today = new Date()
+  const dow = today.getDay()
+  const monday = new Date(today)
+  monday.setDate(today.getDate() - (dow === 0 ? 6 : dow - 1))
+
+  const dates: string[] = []
+  const labels: string[] = []
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(monday)
+    d.setDate(monday.getDate() + i)
+    dates.push(toISO(d))
+    labels.push(`${SHORT_DAYS[d.getDay()]} ${String(d.getDate()).padStart(2, "0")}`)
+  }
+  return { start: dates[0], end: dates[4], dates, labels }
+}
+
+// Agrupa os dias do mês vigente em blocos de 7 (ex: "01-07", "08-14", ...)
+export interface WeekGroup {
+  label: string
+  dates: string[]
+  start: string
+  end: string
+}
+
+export function getMonthWeekGroups(): WeekGroup[] {
+  const today = new Date()
+  const year = today.getFullYear()
+  const month = today.getMonth()
+  const lastDay = new Date(year, month + 1, 0).getDate()
+  const mm = String(month + 1).padStart(2, "0")
+
+  const groups: WeekGroup[] = []
+  let day = 1
+  while (day <= lastDay) {
+    const groupEnd = Math.min(day + 6, lastDay)
+    const dates: string[] = []
+    for (let d = day; d <= groupEnd; d++) {
+      dates.push(`${year}-${mm}-${String(d).padStart(2, "0")}`)
+    }
+    groups.push({
+      label: `${String(day).padStart(2, "0")}-${String(groupEnd).padStart(2, "0")}`,
+      dates,
+      start: dates[0],
+      end: dates[dates.length - 1],
+    })
+    day = groupEnd + 1
+  }
+  return groups
+}
+
+// Constrói dados de slot agrupados por data (para visão semanal)
+export function buildDateSlotData(
+  rows: { data_atendimento: string; sala_nome: string[] | null }[],
+  blacklist: Set<string>,
+  dates: string[],
+  labels: string[],
+): FluxoSlotPoint[] {
+  const counts: Record<string, { realengo: number; fazendinha: number; padreMiguel: number }> = {}
+  for (const date of dates) counts[date] = { realengo: 0, fazendinha: 0, padreMiguel: 0 }
+
+  for (const row of rows) {
+    const date = row.data_atendimento
+    if (!date || !counts[date]) continue
+
+    const salas = row.sala_nome ?? []
+    let uk: "realengo" | "fazendinha" | "padreMiguel" | null = null
+    for (const sala of salas) {
+      uk = salaToUnitKey(sala)
+      if (uk) break
+    }
+    if (uk) counts[date][uk]++
+  }
+
+  return dates.map((date, i) => ({ slot: labels[i], ...counts[date] }))
+}
+
+// Constrói dados de slot agrupados por semana (para visão mensal)
+export function buildGroupedSlotData(
+  rows: { data_atendimento: string; sala_nome: string[] | null }[],
+  groups: WeekGroup[],
+): FluxoSlotPoint[] {
+  const dateToGroup = new Map<string, number>()
+  for (let i = 0; i < groups.length; i++) {
+    for (const date of groups[i].dates) dateToGroup.set(date, i)
+  }
+
+  const counts = groups.map(() => ({ realengo: 0, fazendinha: 0, padreMiguel: 0 }))
+
+  for (const row of rows) {
+    const idx = dateToGroup.get(row.data_atendimento)
+    if (idx === undefined) continue
+
+    const salas = row.sala_nome ?? []
+    let uk: "realengo" | "fazendinha" | "padreMiguel" | null = null
+    for (const sala of salas) {
+      uk = salaToUnitKey(sala)
+      if (uk) break
+    }
+    if (uk) counts[idx][uk]++
+  }
+
+  return groups.map((g, i) => ({ slot: g.label, ...counts[i] }))
+}
+
+// Média de atendimentos por ponto do gráfico (slot / dia / semana)
+export function getPeriodPointAverage(data: FluxoSlotPoint[]): number {
+  if (!data.length) return 0
+  const totals = data.map((d) => d.realengo + d.fazendinha + d.padreMiguel)
+  return Math.round(totals.reduce((s, v) => s + v, 0) / totals.length)
+}
+
+// Computa totais de unidade a partir de slotData de período
+export function computePeriodUnitCount(slotData: FluxoSlotPoint[]): FluxoUnitCount {
+  const uc: FluxoUnitCount = { realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 }
+  for (const d of slotData) {
+    uc.realengo = (uc.realengo ?? 0) + d.realengo
+    uc.fazendinha = (uc.fazendinha ?? 0) + d.fazendinha
+    uc.padreMiguel = (uc.padreMiguel ?? 0) + d.padreMiguel
+    uc.total = (uc.total ?? 0) + d.realengo + d.fazendinha + d.padreMiguel
+  }
+  return uc
+}
+
+// ─── Current slot ─────────────────────────────────────────────────────────────
+
 export function getCurrentSlotKey(): string | null {
   const now = new Date()
   const h = now.getHours()
