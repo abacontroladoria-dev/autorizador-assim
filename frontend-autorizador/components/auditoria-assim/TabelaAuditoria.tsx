@@ -74,6 +74,11 @@ const SITUACAO_CONFIG: Record<string, SituacaoConfigEntry> = {
     dot: 'bg-gray-500',
     className: 'bg-gray-100 text-gray-500 ring-1 ring-gray-300',
   },
+  FALTA: {
+    label: 'Falta',
+    dot: 'bg-yellow-500',
+    className: 'bg-yellow-50 text-yellow-600 ring-1 ring-yellow-300',
+  },
 }
 
 export default function TabelaAuditoria({
@@ -154,10 +159,14 @@ export default function TabelaAuditoria({
                       {item.situacao === 'GLOSA' && (
                         <button
                           onClick={() => setItemSelecionado(item)}
-                          className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold text-violet-600 border border-violet-300 bg-transparent hover:bg-violet-50 hover:border-violet-400 hover:text-violet-700 transition-all duration-150 whitespace-nowrap cursor-pointer select-none"
+                          className={
+                            item.motivo_glosa
+                              ? 'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold text-green-700 border border-green-300 bg-green-50 hover:bg-green-100 hover:border-green-400 transition-all duration-150 whitespace-nowrap cursor-pointer select-none'
+                              : 'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold text-violet-600 border border-violet-300 bg-transparent hover:bg-violet-50 hover:border-violet-400 hover:text-violet-700 transition-all duration-150 whitespace-nowrap cursor-pointer select-none'
+                          }
                         >
                           <FileText size={11} className="shrink-0" />
-                          Detalhe
+                          {item.motivo_glosa ? 'Detalhado' : 'Detalhe'}
                         </button>
                       )}
                     </div>

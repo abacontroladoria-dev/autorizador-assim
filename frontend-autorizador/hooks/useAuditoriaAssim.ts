@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { listarAuditoriaAssim, buscarKpisAuditoriaAssim } from '@/services/auditoria-assim.service'
+import { listarAuditoriaAssim, listarFaltasAuditoria, buscarKpisAuditoriaAssim } from '@/services/auditoria-assim.service'
 import { getSupabaseClient } from '@/lib/supabase/client'
 import type { AuditoriaAssimItem, AuditoriaFilters, KpisAuditoriaAssim } from '@/components/auditoria-assim/types'
 
@@ -58,11 +58,12 @@ export function useAuditoriaAssim() {
   async function carregarDados(silent = false) {
     if (!silent) setLoading(true)
     const data = filtersRef.current.data || getHojeLocal()
-    const [registros, kpisData] = await Promise.all([
+    const [registros, faltas, kpisData] = await Promise.all([
       listarAuditoriaAssim(data),
+      listarFaltasAuditoria(data),
       buscarKpisAuditoriaAssim(data),
     ])
-    setDados(registros)
+    setDados([...registros, ...faltas])
     setKpis(kpisData)
     setLoading(false)
   }

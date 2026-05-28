@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { AlertTriangle, Loader2, Save, X } from 'lucide-react'
+import { AlertTriangle, CheckCircle2, Loader2, Save, X } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { salvarMotivoGlosa } from '@/services/auditoria-assim.service'
 import type { AuditoriaAssimItem } from './types'
@@ -31,6 +31,8 @@ function InfoCard({ label, value }: { label: string; value: string | null | unde
 export default function ModalDetalhamentoGlosa({ item, open, onClose, onSalvo }: Props) {
   const [motivo, setMotivo] = useState('')
   const [loading, setLoading] = useState(false)
+
+  const soLeitura = Boolean(item?.motivo_glosa)
 
   useEffect(() => {
     if (open && item) {
@@ -66,7 +68,11 @@ export default function ModalDetalhamentoGlosa({ item, open, onClose, onSalvo }:
         <div className="flex items-start justify-between px-6 pt-6 pb-4">
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Detalhamento da Glosa</h2>
-            <p className="text-sm text-slate-500 mt-0.5">Informe o motivo da glosa para este atendimento.</p>
+            <p className="text-sm text-slate-500 mt-0.5">
+              {soLeitura
+                ? 'Motivo já registrado. Apenas visualização.'
+                : 'Informe o motivo da glosa para este atendimento.'}
+            </p>
           </div>
           <button
             onClick={onClose}
@@ -107,48 +113,66 @@ export default function ModalDetalhamentoGlosa({ item, open, onClose, onSalvo }:
             </div>
           )}
 
-          {/* Textarea motivo */}
+          {/* Motivo — somente leitura ou edição */}
           <div>
-            <label className="text-sm font-semibold text-slate-700 mb-2 block">
-              Motivo / Detalhamento da glosa{' '}
-              <span className="text-red-500">*</span>
-            </label>
-            <textarea
-              value={motivo}
-              onChange={(e) => setMotivo(e.target.value.slice(0, 1000))}
-              placeholder="Descreva o motivo da glosa..."
-              rows={5}
-              className="w-full rounded-xl border border-slate-200 p-3 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#3A8FB7] focus:border-transparent resize-none transition"
-            />
-            <div className="flex justify-between mt-1.5">
-              <span className="text-xs text-slate-400">Campo obrigatório.</span>
-              <span className="text-xs text-slate-400">{motivo.length} / 1000</span>
-            </div>
+            <h3 className="text-sm font-semibold text-slate-700 mb-2">Motivo / Detalhamento da glosa</h3>
+
+            {soLeitura ? (
+              <div className="flex items-start gap-3 rounded-xl bg-green-50 border border-green-200 px-4 py-3">
+                <CheckCircle2 size={16} className="text-green-600 shrink-0 mt-0.5" />
+                <span className="text-sm text-green-900 whitespace-pre-wrap">{item.motivo_glosa}</span>
+              </div>
+            ) : (
+              <>
+                <textarea
+                  value={motivo}
+                  onChange={(e) => setMotivo(e.target.value.slice(0, 1000))}
+                  placeholder="Descreva o motivo da glosa..."
+                  rows={5}
+                  className="w-full rounded-xl border border-slate-200 p-3 text-sm text-slate-700 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#3A8FB7] focus:border-transparent resize-none transition"
+                />
+                <div className="flex justify-between mt-1.5">
+                  <span className="text-xs text-slate-400">Campo obrigatório.</span>
+                  <span className="text-xs text-slate-400">{motivo.length} / 1000</span>
+                </div>
+              </>
+            )}
           </div>
 
         </div>
 
         {/* Footer */}
         <div className="border-t border-slate-100 px-6 py-4 flex justify-end gap-3">
-          <button
-            onClick={onClose}
-            disabled={loading}
-            className="px-5 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 transition disabled:opacity-50"
-          >
-            Cancelar
-          </button>
-          <button
-            onClick={handleSalvar}
-            disabled={loading || !motivo.trim()}
-            className="px-5 py-2.5 rounded-xl bg-[#3A8FB7] text-white text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
-          >
-            {loading ? (
-              <Loader2 size={15} className="animate-spin" />
-            ) : (
-              <Save size={15} />
-            )}
-            {loading ? 'Salvando...' : 'Salvar'}
-          </button>
+          {soLeitura ? (
+            <button
+              onClick={onClose}
+              className="px-5 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 transition"
+            >
+              Fechar
+            </button>
+          ) : (
+            <>
+              <button
+                onClick={onClose}
+                disabled={loading}
+                className="px-5 py-2.5 rounded-xl border border-slate-200 text-slate-700 text-sm font-medium hover:bg-slate-50 transition disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleSalvar}
+                disabled={loading || !motivo.trim()}
+                className="px-5 py-2.5 rounded-xl bg-[#3A8FB7] text-white text-sm font-medium hover:opacity-90 transition disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+              >
+                {loading ? (
+                  <Loader2 size={15} className="animate-spin" />
+                ) : (
+                  <Save size={15} />
+                )}
+                {loading ? 'Salvando...' : 'Salvar'}
+              </button>
+            </>
+          )}
         </div>
       </div>
     </div>
