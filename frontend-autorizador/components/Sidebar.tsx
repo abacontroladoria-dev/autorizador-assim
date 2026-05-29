@@ -11,12 +11,9 @@ import {
   CalendarDays,
   UserRound,
   Building2,
-  BarChart2,
-  ClipboardCheck,
-  User,
-  Settings,
-  History,
-  BookOpen,
+  Stethoscope,
+  BriefcaseBusiness,
+  Star,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
@@ -26,6 +23,22 @@ import toast from "react-hot-toast"
 import ModalPerfil from "@/components/perfil/ModalPerfil"
 import ModalAlterarSenha from "@/components/perfil/ModalAlterarSenha"
 import ModalErros from "@/components/perfil/ModalErros"
+import { SidebarGroup } from "@/components/sidebar/SidebarGroup"
+
+type Favorito = { label: string; path: string }
+
+const pathIconMap: Record<string, any> = {
+  "/": LayoutDashboard,
+  "/solicitar": PlusCircle,
+  "/central-pacientes": Activity,
+  "/central-terapeutas": UserRound,
+  "/agenda/pacientes": CalendarDays,
+  "/agenda/terapeutas": CalendarDays,
+  "/agenda/salas": Building2,
+  "/guias-digitais": FileText,
+  "/auditoria-assim": ClipboardList,
+  "/admin": ShieldCheck,
+}
 
 export default function Sidebar() {
   const pathname = usePathname()
@@ -50,106 +63,118 @@ export default function Sidebar() {
   const [modalPerfil, setModalPerfil] = useState(false)
   const [modalSenha, setModalSenha] = useState(false)
   const [modalErros, setModalErros] = useState(false)
-  
-	function isActive(path: string) {
-	  if (path === "/") {
-		return pathname === "/"
-	  }
+  const [favoritos, setFavoritos] = useState<Favorito[]>([])
 
-	  return pathname.startsWith(path)
-	}
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem("sidebar_favoritos")
+      if (stored) setFavoritos(JSON.parse(stored))
+    } catch {}
+  }, [])
+
+  function toggleFavorito(label: string, path: string) {
+    setFavoritos(prev => {
+      const next = prev.some(f => f.path === path)
+        ? prev.filter(f => f.path !== path)
+        : [...prev, { label, path }]
+      localStorage.setItem("sidebar_favoritos", JSON.stringify(next))
+      return next
+    })
+  }
+
+  function isActive(path: string) {
+    if (path === "/") {
+      return pathname === "/"
+    }
+    return pathname.startsWith(path)
+  }
 
   async function handleLogout() {
     setLoadingLogout(true)
     await supabase.auth.signOut()
     router.replace("/login")
   }
-	const permissions = {
-	  admin: [
-		"/",
-		"/solicitar",
-		"/central-pacientes",
-		"/central-terapeutas",
-		"/agenda/pacientes",
-		"/agenda/terapeutas",
-		"/agenda/salas",
-		"/guias-digitais",
-		"/financeiro",
-		"/admin",
-		"/auditoria-assim",
-	  ],
 
-	  diretoria: [
-		"/",
-		"/solicitar",
-		"/central-pacientes",
-		"/central-terapeutas",
-		"/agenda/pacientes",
-		"/agenda/terapeutas",
-		"/agenda/salas",
-		"/guias-digitais",
-		"/financeiro",
-		"/auditoria-assim",
-	  ],
-
-	  recepcao: [
-		"/",
-		"/solicitar",
-		"/central-pacientes",
-		"/agenda/pacientes",
-		"/auditoria-assim",
-	  ],
-
-	  autorizacao: [
-		"/",
-		"/agenda/pacientes",
-		"/agenda/terapeutas",
-		"/agenda/salas",
-		"/auditoria-assim",
-	  ],
-
-	  terapeutico: [
-		"/",
-		"/central-terapeutas",
-		"/agenda/salas",
-		"/agenda/terapeutas",
-	  ],
-
-	  faturamento: [
-		"/",
-		"/guias-digitais",
-		"/agenda/pacientes",
-		"/agenda/terapeutas",
-		"/agenda/salas",
-	  ],
-
+  const permissions = {
+    admin: [
+      "/",
+      "/solicitar",
+      "/central-pacientes",
+      "/central-terapeutas",
+      "/agenda/pacientes",
+      "/agenda/terapeutas",
+      "/agenda/salas",
+      "/guias-digitais",
+      "/financeiro",
+      "/admin",
+      "/auditoria-assim",
+    ],
+    diretoria: [
+      "/",
+      "/solicitar",
+      "/central-pacientes",
+      "/central-terapeutas",
+      "/agenda/pacientes",
+      "/agenda/terapeutas",
+      "/agenda/salas",
+      "/guias-digitais",
+      "/financeiro",
+      "/auditoria-assim",
+    ],
+    recepcao: [
+      "/",
+      "/solicitar",
+      "/central-pacientes",
+      "/agenda/pacientes",
+      "/auditoria-assim",
+    ],
+    autorizacao: [
+      "/",
+      "/agenda/pacientes",
+      "/agenda/terapeutas",
+      "/agenda/salas",
+      "/auditoria-assim",
+    ],
+    terapeutico: [
+      "/",
+      "/central-terapeutas",
+      "/agenda/salas",
+      "/agenda/terapeutas",
+    ],
+    faturamento: [
+      "/",
+      "/guias-digitais",
+      "/agenda/pacientes",
+      "/agenda/terapeutas",
+      "/agenda/salas",
+    ],
     rp: [
       "/",
       "/central-terapeutas",
     ],
-	}
+  }
 
-	const allowedPaths =
-	  permissions[role as keyof typeof permissions] || []
+  const allowedPaths =
+    permissions[role as keyof typeof permissions] || []
 
-	function canAccess(path: string) {
-	  return allowedPaths.includes(path)
-	}
-	
-	useEffect(() => {
-	  async function loadRole() {
-		const { data: { user } } = await supabase.auth.getUser()
-		if (!user) { setLoadingRole(false); return }
-		const { data } = await supabase
-		  .from('usuarios')
-		  .select('role')
-		  .eq('id', user.id)
-		  .single()
-		setRole(data?.role || null)
-		setLoadingRole(false)
-	  }
-	  loadRole()
-	}, [])
+  function canAccess(path: string) {
+    return allowedPaths.includes(path)
+  }
+
+  useEffect(() => {
+    async function loadRole() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (!user) { setLoadingRole(false); return }
+      const { data } = await supabase
+        .from("usuarios")
+        .select("role")
+        .eq("id", user.id)
+        .single()
+      setRole(data?.role || null)
+      setLoadingRole(false)
+    }
+    loadRole()
+  }, [])
 
   useEffect(() => {
     async function checkUser() {
@@ -168,13 +193,11 @@ export default function Sidebar() {
         setMachineId(maquina.id)
         setAutomacaoAtiva(maquina.ativa ?? true)
       }
-
       const { data: perfil } = await supabase
         .from("usuarios")
         .select("nome")
         .eq("id", uid)
         .single()
-
       if (perfil?.nome) {
         setNome(perfil.nome.split(" ")[0])
       } else {
@@ -207,7 +230,7 @@ export default function Sidebar() {
     document.addEventListener("mousedown", handleClickOutside)
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
-	
+
   async function handlePausar() {
     if (!machineId) { toast.error("Máquina não identificada"); return }
     setLoadingPausar(true)
@@ -269,14 +292,6 @@ export default function Sidebar() {
     setLoadingLiberar(false)
   }
 
-  function SectionLabel({ label }: { label: string }) {
-    return (
-      <p className="px-4 pt-4 pb-1 text-[10px] font-semibold tracking-widest text-slate-400 uppercase select-none">
-        {label}
-      </p>
-    )
-  }
-
   function MenuItem({
     label,
     icon: Icon,
@@ -287,238 +302,264 @@ export default function Sidebar() {
     path: string
   }) {
     const active = isActive(path)
+    const isFav = favoritos.some(f => f.path === path)
 
     return (
       <button
         onClick={() => router.push(path)}
-        className={`relative w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all duration-150
+        className={`group flex w-full items-center gap-2.5 py-2 pr-2 rounded-lg text-sm transition-colors duration-150
         ${
           active
-            ? "text-white bg-[#3A8FB7] shadow-sm"
-            : "text-slate-600 hover:bg-blue-50/70 hover:text-slate-800 hover:translate-x-0.5"
+            ? "border-l-2 border-blue-500 bg-blue-50 pl-2.5 text-blue-700 font-medium"
+            : "border-l-2 border-transparent pl-2.5 text-slate-600 hover:bg-slate-50 hover:text-slate-800"
         }`}
       >
-        <span
-          className={`absolute left-0 top-1/2 -translate-y-1/2 h-7 w-1 rounded-r-full bg-[#3A8FB7] transition-all duration-200
-          ${active ? "opacity-100" : "opacity-0"}`}
+        <Icon
+          size={16}
+          className={`shrink-0 ${active ? "text-blue-600" : "text-slate-400"}`}
         />
-        <Icon size={17} className="shrink-0" />
-        {label}
+        <span className="flex-1 text-left">{label}</span>
+        {path !== "/" && (
+          <span
+            onClick={e => { e.stopPropagation(); toggleFavorito(label, path) }}
+            className={`p-1 rounded transition-all duration-150 hover:bg-slate-200/70
+              ${isFav
+                ? "opacity-100 text-yellow-500"
+                : "opacity-0 group-hover:opacity-100 text-slate-300 hover:text-yellow-400"
+              }`}
+          >
+            <Star size={12} fill={isFav ? "currentColor" : "none"} />
+          </span>
+        )}
       </button>
     )
   }
 
   return (
     <>
-    <aside className="fixed top-0 left-0 w-64 h-screen bg-white border-r border-slate-200 flex flex-col z-50">
+      <aside className="fixed top-0 left-0 w-64 h-screen bg-white border-r border-slate-200 flex flex-col z-50">
 
-      {/* LOGO */}
-      <div className="h-20 flex items-center justify-center border-b border-slate-100 px-6">
-        <img src="/logo-universo-aba.png" className="h-20 object-contain" />
-      </div>
+        {/* LOGO */}
+        <div className="h-20 flex items-center justify-center border-b border-slate-100 px-6">
+          <img src="/logo-universo-aba.png" className="h-20 object-contain" />
+        </div>
 
-      {/* MENU */}
-      <nav className="flex-1 px-3 py-4 overflow-y-auto space-y-0.5">
+        {/* MENU */}
+        <nav className="flex-1 px-3 py-3 overflow-y-auto space-y-0.5">
 
-        {canAccess("/") && (
-          <MenuItem label="Home" icon={LayoutDashboard} path="/" />
-        )}
+          {/* Dashboard */}
+          <MenuItem label="Dashboard" icon={LayoutDashboard} path="/" />
 
-        {/* ATENDIMENTO */}
-        {(canAccess("/solicitar") || canAccess("/central-pacientes") || canAccess("/central-terapeutas")) && (
-          <SectionLabel label="Atendimento" />
-        )}
+          {/* Favoritos */}
+          <div className="pt-2">
+            <p className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 select-none">
+              ⭐ Favoritos
+            </p>
+            {favoritos
+              .filter(f => canAccess(f.path))
+              .map(f => (
+                <MenuItem key={f.path} label={f.label} icon={pathIconMap[f.path] ?? Star} path={f.path} />
+              ))}
+          </div>
 
-        {canAccess("/solicitar") && (
-          <MenuItem label="Nova Solicitação" icon={PlusCircle} path="/solicitar" />
-        )}
-        {canAccess("/central-pacientes") && (
-          <MenuItem label="Controle de Pacientes" icon={Activity} path="/central-pacientes" />
-        )}
-        {canAccess("/central-terapeutas") && (
-          <MenuItem label="Controle de Terapeutas" icon={Users} path="/central-terapeutas" />
-        )}
+          <hr className="my-2 border-slate-100" />
 
-        {/* CENTRAL DE AGENDA */}
-        {(canAccess("/agenda/pacientes") || canAccess("/agenda/terapeutas") || canAccess("/agenda/salas")) && (
-          <SectionLabel label="Central de Agenda" />
-        )}
-
-        {canAccess("/agenda/pacientes") && (
-          <MenuItem label="Pacientes" icon={UserRound} path="/agenda/pacientes" />
-        )}
-        {canAccess("/agenda/terapeutas") && (
-          <MenuItem label="Terapeutas" icon={CalendarDays} path="/agenda/terapeutas" />
-        )}
-        {canAccess("/agenda/salas") && (
-          <MenuItem label="Salas" icon={Building2} path="/agenda/salas" />
-        )}
-
-        {/* PROCESSOS */}
-        {(canAccess("/guias-digitais") || canAccess("/auditoria-assim")) && (
-          <SectionLabel label="Processos" />
-        )}
-
-        {canAccess("/guias-digitais") && (
-          <MenuItem label="Guias Digitais" icon={FileText} path="/guias-digitais" />
-        )}
-        {canAccess("/auditoria-assim") && (
-          <MenuItem label="Auditoria ASSIM" icon={ClipboardList} path="/auditoria-assim" />
-        )}
-
-        {/* SISTEMA */}
-        {canAccess("/admin") && (
-          <>
-            <SectionLabel label="Sistema" />
-            <MenuItem label="Admin" icon={ShieldCheck} path="/admin" />
-          </>
-        )}
-		
-      </nav>
-
-      {/* FOOTER — PERFIL */}
-      <div className="p-4 border-t border-slate-100" ref={menuRef}>
-        <div className="relative">
-
-          <button
-            onClick={() => setOpen(!open)}
-            className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 transition-colors duration-150 cursor-pointer"
-          >
-            <div className="w-9 h-9 rounded-full bg-[#3A8FB7] text-white flex items-center justify-center font-semibold text-sm shrink-0">
-              {nome?.charAt(0)?.toUpperCase() || "U"}
-            </div>
-            <div className="flex-1 text-left min-w-0">
-              <p className="text-sm font-semibold text-slate-700 truncate leading-tight">{nome}</p>
-              {role && (
-                <p className="text-xs text-slate-400 capitalize leading-tight">
-                  {{
-                    admin: "Administrador",
-                    diretoria: "Diretoria",
-                    recepcao: "Recepção",
-                    autorizacao: "Autorização",
-                    terapeutico: "Terapêutico",
-                    faturamento: "Faturamento",
-                    rp: "RP — Remuneração e Pagamentos",
-                  }[role] ?? role}
-                </p>
+          {/* Pacientes */}
+          {(canAccess("/solicitar") || canAccess("/central-pacientes") || canAccess("/agenda/pacientes")) && (
+            <SidebarGroup title="Pacientes" icon={Users}>
+              {canAccess("/solicitar") && (
+                <MenuItem label="Atendimentos" icon={PlusCircle} path="/solicitar" />
               )}
-            </div>
-            <span className={`text-slate-400 text-xs transition-transform duration-200 shrink-0 ${open ? "rotate-180" : ""}`}>
-              ▼
-            </span>
-          </button>
-
-          {open && (
-            <div className="absolute bottom-full left-0 mb-2 w-72 rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.2)] p-3 text-sm z-999 bg-linear-to-br from-[#1f3f5b] to-[#2f6f95] text-white">
-
-              <div className="px-3 pb-3">
-                <div className="text-sm font-semibold">{nome}</div>
-                <div className="text-xs text-white/60">{email || "—"}</div>
-              </div>
-
-              <div className="border-t border-white/10 my-2" />
-
-              <div className="px-3 text-xs text-white/50 mb-1">Conta</div>
-
-              <button
-                onClick={() => { setOpen(false); setModalPerfil(true) }}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition"
-              >
-                Meu perfil
-              </button>
-
-              <button
-                onClick={() => { setOpen(false); setModalSenha(true) }}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition"
-              >
-                Alterar senha
-              </button>
-
-              <div className="border-t border-white/10 my-2" />
-
-              <div className="px-3 text-xs text-white/50 mb-1 flex justify-between items-center">
-                <span>Automação</span>
-                <span className={`flex items-center gap-2 font-medium ${automacaoAtiva ? "text-green-300" : "text-orange-300"}`}>
-                  <span className={`w-2 h-2 rounded-full ${automacaoAtiva ? "bg-green-400" : "bg-orange-400"}`} />
-                  {automacaoAtiva ? "Ativa" : "Pausada"}
-                </span>
-              </div>
-
-              {automacaoAtiva ? (
-                <button
-                  onClick={handlePausar}
-                  disabled={loadingPausar}
-                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition disabled:opacity-50"
-                >
-                  {loadingPausar ? "Pausando..." : "Pausar automação"}
-                </button>
-              ) : (
-                <button
-                  onClick={handleRetomar}
-                  disabled={loadingRetomar}
-                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition disabled:opacity-50"
-                >
-                  {loadingRetomar ? "Retomando..." : "Retomar automação"}
-                </button>
+              {canAccess("/central-pacientes") && (
+                <MenuItem label="Gestão" icon={Activity} path="/central-pacientes" />
               )}
-
-              <button
-                onClick={handleReiniciar}
-                disabled={loadingReiniciar}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition disabled:opacity-50"
-              >
-                {loadingReiniciar ? "Reiniciando..." : "Reiniciar worker"}
-              </button>
-
-              <button
-                onClick={handleLiberarTravados}
-                disabled={loadingLiberar}
-                className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition disabled:opacity-50"
-              >
-                {loadingLiberar ? "Liberando..." : "Liberar processos travados"}
-              </button>
-
-              <div className="border-t border-white/10 my-2" />
-
-              <div className="px-3 py-2 text-xs flex justify-between text-white/70">
-                <span>{countProcessando} em processamento</span>
-                {countErros > 0 ? (
-                  <button
-                    onClick={() => { setOpen(false); setModalErros(true) }}
-                    className="text-red-300 font-medium hover:text-red-200 transition"
-                  >
-                    {countErros} erro{countErros !== 1 ? "s" : ""}
-                  </button>
-                ) : (
-                  <span className="text-white/40">0 erros</span>
-                )}
-              </div>
-
-              <div className="border-t border-white/10 my-2" />
-
-              <button
-                onClick={handleLogout}
-                disabled={loadingLogout}
-                className="w-full text-left px-3 py-2 rounded-lg text-red-300 hover:bg-red-500/30 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                {loadingLogout ? "Saindo..." : "Sair"}
-              </button>
-
-            </div>
+              {canAccess("/agenda/pacientes") && (
+                <MenuItem label="Cronograma" icon={CalendarDays} path="/agenda/pacientes" />
+              )}
+            </SidebarGroup>
           )}
 
+          {/* Terapêutico */}
+          {(canAccess("/central-terapeutas") || canAccess("/agenda/terapeutas") || canAccess("/agenda/salas")) && (
+            <SidebarGroup title="Terapêutico" icon={Stethoscope}>
+              {canAccess("/central-terapeutas") && (
+                <MenuItem label="Escala Terapêutica" icon={UserRound} path="/central-terapeutas" />
+              )}
+              {canAccess("/agenda/terapeutas") && (
+                <MenuItem label="Agenda Terapêutica" icon={CalendarDays} path="/agenda/terapeutas" />
+              )}
+              {canAccess("/agenda/salas") && (
+                <MenuItem label="Salas" icon={Building2} path="/agenda/salas" />
+              )}
+            </SidebarGroup>
+          )}
+
+          {/* Operações */}
+          {(canAccess("/auditoria-assim") || canAccess("/guias-digitais")) && (
+            <SidebarGroup title="Operações" icon={BriefcaseBusiness}>
+              {canAccess("/auditoria-assim") && (
+                <MenuItem label="Auditoria ASSIM" icon={ClipboardList} path="/auditoria-assim" />
+              )}
+              {canAccess("/guias-digitais") && (
+                <MenuItem label="Guias Digitais" icon={FileText} path="/guias-digitais" />
+              )}
+            </SidebarGroup>
+          )}
+
+          {/* Administração */}
+          {canAccess("/admin") && (
+            <SidebarGroup title="Administração" icon={ShieldCheck}>
+              <MenuItem label="Usuários" icon={Users} path="/admin" />
+              <MenuItem label="Permissões" icon={ShieldCheck} path="/admin" />
+            </SidebarGroup>
+          )}
+
+
+        </nav>
+
+        {/* FOOTER — PERFIL */}
+        <div className="p-4 border-t border-slate-100" ref={menuRef}>
+          <div className="relative">
+
+            <button
+              onClick={() => setOpen(!open)}
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 transition-colors duration-150 cursor-pointer"
+            >
+              <div className="w-9 h-9 rounded-full bg-[#3A8FB7] text-white flex items-center justify-center font-semibold text-sm shrink-0">
+                {nome?.charAt(0)?.toUpperCase() || "U"}
+              </div>
+              <div className="flex-1 text-left min-w-0">
+                <p className="text-sm font-semibold text-slate-700 truncate leading-tight">{nome}</p>
+                {role && (
+                  <p className="text-xs text-slate-400 capitalize leading-tight">
+                    {{
+                      admin: "Administrador",
+                      diretoria: "Diretoria",
+                      recepcao: "Recepção",
+                      autorizacao: "Autorização",
+                      terapeutico: "Terapêutico",
+                      faturamento: "Faturamento",
+                      rp: "RP — Remuneração e Pagamentos",
+                    }[role] ?? role}
+                  </p>
+                )}
+              </div>
+              <span className={`text-slate-400 text-xs transition-transform duration-200 shrink-0 ${open ? "rotate-180" : ""}`}>
+                ▼
+              </span>
+            </button>
+
+            {open && (
+              <div className="absolute bottom-full left-0 mb-2 w-72 rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.2)] p-3 text-sm z-999 bg-linear-to-br from-[#1f3f5b] to-[#2f6f95] text-white">
+
+                <div className="px-3 pb-3">
+                  <div className="text-sm font-semibold">{nome}</div>
+                  <div className="text-xs text-white/60">{email || "—"}</div>
+                </div>
+
+                <div className="border-t border-white/10 my-2" />
+
+                <div className="px-3 text-xs text-white/50 mb-1">Conta</div>
+
+                <button
+                  onClick={() => { setOpen(false); setModalPerfil(true) }}
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition"
+                >
+                  Meu perfil
+                </button>
+
+                <button
+                  onClick={() => { setOpen(false); setModalSenha(true) }}
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition"
+                >
+                  Alterar senha
+                </button>
+
+                <div className="border-t border-white/10 my-2" />
+
+                <div className="px-3 text-xs text-white/50 mb-1 flex justify-between items-center">
+                  <span>Automação</span>
+                  <span className={`flex items-center gap-2 font-medium ${automacaoAtiva ? "text-green-300" : "text-orange-300"}`}>
+                    <span className={`w-2 h-2 rounded-full ${automacaoAtiva ? "bg-green-400" : "bg-orange-400"}`} />
+                    {automacaoAtiva ? "Ativa" : "Pausada"}
+                  </span>
+                </div>
+
+                {automacaoAtiva ? (
+                  <button
+                    onClick={handlePausar}
+                    disabled={loadingPausar}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition disabled:opacity-50"
+                  >
+                    {loadingPausar ? "Pausando..." : "Pausar automação"}
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleRetomar}
+                    disabled={loadingRetomar}
+                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition disabled:opacity-50"
+                  >
+                    {loadingRetomar ? "Retomando..." : "Retomar automação"}
+                  </button>
+                )}
+
+                <button
+                  onClick={handleReiniciar}
+                  disabled={loadingReiniciar}
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition disabled:opacity-50"
+                >
+                  {loadingReiniciar ? "Reiniciando..." : "Reiniciar worker"}
+                </button>
+
+                <button
+                  onClick={handleLiberarTravados}
+                  disabled={loadingLiberar}
+                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition disabled:opacity-50"
+                >
+                  {loadingLiberar ? "Liberando..." : "Liberar processos travados"}
+                </button>
+
+                <div className="border-t border-white/10 my-2" />
+
+                <div className="px-3 py-2 text-xs flex justify-between text-white/70">
+                  <span>{countProcessando} em processamento</span>
+                  {countErros > 0 ? (
+                    <button
+                      onClick={() => { setOpen(false); setModalErros(true) }}
+                      className="text-red-300 font-medium hover:text-red-200 transition"
+                    >
+                      {countErros} erro{countErros !== 1 ? "s" : ""}
+                    </button>
+                  ) : (
+                    <span className="text-white/40">0 erros</span>
+                  )}
+                </div>
+
+                <div className="border-t border-white/10 my-2" />
+
+                <button
+                  onClick={handleLogout}
+                  disabled={loadingLogout}
+                  className="w-full text-left px-3 py-2 rounded-lg text-red-300 hover:bg-red-500/30 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {loadingLogout ? "Saindo..." : "Sair"}
+                </button>
+
+              </div>
+            )}
+
+          </div>
         </div>
-      </div>
 
-    </aside>
+      </aside>
 
-    {userId && (
-      <>
-        <ModalPerfil open={modalPerfil} onClose={() => setModalPerfil(false)} userId={userId} />
-        <ModalAlterarSenha open={modalSenha} onClose={() => setModalSenha(false)} email={email} />
-      </>
-    )}
-    <ModalErros open={modalErros} onClose={() => setModalErros(false)} />
+      {userId && (
+        <>
+          <ModalPerfil open={modalPerfil} onClose={() => setModalPerfil(false)} userId={userId} />
+          <ModalAlterarSenha open={modalSenha} onClose={() => setModalSenha(false)} email={email} />
+        </>
+      )}
+      <ModalErros open={modalErros} onClose={() => setModalErros(false)} />
     </>
   )
 }
