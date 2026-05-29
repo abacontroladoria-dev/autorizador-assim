@@ -64,16 +64,6 @@ export default function Sidebar() {
     await supabase.auth.signOut()
     router.replace("/login")
   }
-  const REMUN_ROUTES = [
-    "/remuneracao/analise",
-    "/remuneracao/apuracao",
-    "/remuneracao/individual",
-    "/remuneracao/psicologos",
-    "/remuneracao/config",
-    "/remuneracao/historico",
-    "/remuneracao/legenda",
-  ]
-
 	const permissions = {
 	  admin: [
 		"/",
@@ -87,7 +77,6 @@ export default function Sidebar() {
 		"/financeiro",
 		"/admin",
 		"/auditoria-assim",
-    ...REMUN_ROUTES,
 	  ],
 
 	  diretoria: [
@@ -101,7 +90,6 @@ export default function Sidebar() {
 		"/guias-digitais",
 		"/financeiro",
 		"/auditoria-assim",
-    ...REMUN_ROUTES,
 	  ],
 
 	  recepcao: [
@@ -133,17 +121,11 @@ export default function Sidebar() {
 		"/agenda/pacientes",
 		"/agenda/terapeutas",
 		"/agenda/salas",
-    "/remuneracao/analise",
-    "/remuneracao/apuracao",
-    "/remuneracao/individual",
-    "/remuneracao/historico",
-    "/remuneracao/legenda",
 	  ],
 
     rp: [
       "/",
       "/central-terapeutas",
-      ...REMUN_ROUTES,
     ],
 	}
 
@@ -382,22 +364,6 @@ export default function Sidebar() {
         )}
         {canAccess("/auditoria-assim") && (
           <MenuItem label="Auditoria ASSIM" icon={ClipboardList} path="/auditoria-assim" />
-        )}
-
-        {/* CALCULADORA DE REMUNERAÇÕES */}
-        {canAccess("/remuneracao/analise") && (
-          <>
-            <p className="px-4 pt-4 pb-1 text-[10px] font-semibold tracking-widest text-slate-400 uppercase select-none">
-              Calculadora de Remunerações
-            </p>
-            <MenuItem label="Análise Futura"       icon={BarChart2}      path="/remuneracao/analise" />
-            <MenuItem label="Apuração Real"         icon={ClipboardCheck} path="/remuneracao/apuracao" />
-            <MenuItem label="Individual"            icon={User}           path="/remuneracao/individual" />
-            <MenuItem label="Psicólogos Analistas"  icon={Users}          path="/remuneracao/psicologos" />
-            <MenuItem label="Configurações"         icon={Settings}       path="/remuneracao/config" />
-            <MenuItem label="Histórico"             icon={History}        path="/remuneracao/historico" />
-            <MenuItem label="Legenda"               icon={BookOpen}       path="/remuneracao/legenda" />
-          </>
         )}
 
         {/* SISTEMA */}
