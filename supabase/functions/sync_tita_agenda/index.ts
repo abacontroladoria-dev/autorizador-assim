@@ -64,12 +64,6 @@ async function sincronizarData(
 
   const rawData = await response.json()
 
-  // Desativa registros anteriores desta data antes do upsert
-  await supabase
-    .from("agenda_tita")
-    .update({ ativo: false })
-    .eq("data_atendimento", data)
-
   const agendas = (rawData as any[]).flatMap((grupo: any) => grupo.agenda_favorecido || [])
 
   const registros = agendas.map((a: any) => {
@@ -110,11 +104,26 @@ async function sincronizarData(
     }
   })
 
+  // Upsert primeiro: garante que todos os registros do TiTa ficam ativo=true
   for (let i = 0; i < registros.length; i += 100) {
     const { error } = await supabase
       .from("agenda_tita")
       .upsert(registros.slice(i, i + 100), { onConflict: "tita_agendamento_id" })
     if (error) throw error
+  }
+
+  // Desativa apenas registros desta data que NÃO vieram na resposta do TiTa
+  // (sessões substituídas no TiTa ganham novo ID → o registro antigo é desativado)
+  const idsAtivos = registros
+    .map(r => r.tita_agendamento_id)
+    .filter((id): id is number => id != null)
+
+  if (idsAtivos.length > 0) {
+    await supabase
+      .from("agenda_tita")
+      .update({ ativo: false })
+      .eq("data_atendimento", data)
+      .not("tita_agendamento_id", "in", `(${idsAtivos.join(",")})`)
   }
 
   return registros.length

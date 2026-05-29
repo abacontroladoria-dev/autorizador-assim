@@ -256,6 +256,7 @@ export type SlotModalSubstituicao = {
   status_slot: string
   paciente_nome: string | null
   sala_nome: string | null
+  turno_semana?: string // 'manha' | 'tarde' | 'ambos' — presente apenas em sem_agenda_hoje
 }
 
 /**
@@ -267,6 +268,7 @@ export type SlotModalSubstituicao = {
 export async function listarModalSubstituicao(params: {
   terapiaExibicaoNome: string
   unidade: string
+  dataAtendimento: string
 }): Promise<SlotModalSubstituicao[]> {
   try {
     const [{ data: slotsHoje, error: erroHoje }, { data: semana, error: erroSemana }] =
@@ -276,11 +278,12 @@ export async function listarModalSubstituicao(params: {
           .select('profissional_id, profissional_nome, terapia_exibicao_nome, unidade, hora, status_slot, paciente_nome, sala_nome')
           .eq('terapia_exibicao_nome', params.terapiaExibicaoNome)
           .eq('unidade', params.unidade)
+          .eq('data_grade', params.dataAtendimento)
           .order('profissional_nome', { ascending: true })
           .order('hora', { ascending: true }),
         supabase
           .from('vw_terapeutas_semana')
-          .select('profissional_id, profissional_nome, terapia_exibicao_nome, unidade')
+          .select('profissional_id, profissional_nome, terapia_exibicao_nome, unidade, turno_semana')
           .eq('terapia_exibicao_nome', params.terapiaExibicaoNome)
           .eq('unidade', params.unidade),
       ])
@@ -307,6 +310,7 @@ export async function listarModalSubstituicao(params: {
         status_slot: 'sem_agenda_hoje',
         paciente_nome: null,
         sala_nome: null,
+        turno_semana: (t as any).turno_semana ?? undefined,
       })
     }
 

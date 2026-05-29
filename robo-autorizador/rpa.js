@@ -99,6 +99,23 @@ async function aguardarResultadoEnvio(page, timeoutMs = 120000) {
     return 'sucesso';
 
   } catch (e) {
+    // Verifica resposta do ASSIM visível na página antes de declarar timeout
+    try {
+      const bodyText = await page.locator('body').innerText();
+
+      if (/Liberado \*/.test(bodyText)) {
+        console.log("🚫 CANCELADO pelo ASSIM (Liberado *)");
+        return 'cancelado';
+      }
+
+      // Código de rejeição: padrão NNNN-TEXTO (ex: "1601-REINCIDENCIA NO ATEN")
+      const glosaMatch = bodyText.match(/\b\d{4}-[A-ZÁÉÍÓÚÃÕÂÊÔÇ\s]+/);
+      if (glosaMatch) {
+        console.log("⛔ GLOSA DETECTADA:", glosaMatch[0].trim());
+        return 'glosa';
+      }
+    } catch (_) {}
+
     console.log("❌ Não apareceu confirmação");
     return 'timeout';
   }

@@ -302,7 +302,7 @@ const statusChips = [
   },
   {
     key: 'parcial',
-    label: 'Indispon.\nparcial',
+    label: 'Indisponibilidade\nParcial',
     icon: AlertCircle,
     numClass: 'text-amber-600',
     iconTone: 'bg-amber-50 text-amber-600',

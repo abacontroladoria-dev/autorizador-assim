@@ -40,6 +40,7 @@ export type AtendimentoTerapeutico = {
   profissional_substituto_nome?: string | null
   observacao?: string | null
   confirmado_em?: string | null
+  confirmado_por_nome?: string | null
   terapia_exibicao?: string
   terapia_exibicao_nome?: string
   terapia_exibicao_id?: number
@@ -76,7 +77,8 @@ export async function listarCentralTerapeutica(data: string): Promise<Atendiment
 
   observacao,
 
-  confirmado_em
+  confirmado_em,
+  confirmado_por_nome
 `)
     .eq('data_atendimento', data)
     .order('hora_inicial', {

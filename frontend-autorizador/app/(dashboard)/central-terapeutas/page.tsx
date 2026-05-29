@@ -302,6 +302,14 @@ Object.values(grupos).forEach(
         | 'indisponivel'
         | 'parcial'
         | 'substituido'
+
+    const comAlteracao = grupo.atendimentos
+      .filter((a) => a.confirmado_em && a.confirmado_por_nome)
+      .sort((a, b) => (b.confirmado_em! > a.confirmado_em! ? 1 : -1))
+    if (comAlteracao.length > 0) {
+      grupo.ultimaAlteracaoPor = comAlteracao[0].confirmado_por_nome ?? null
+      grupo.ultimaAlteracaoEm  = comAlteracao[0].confirmado_em ?? null
+    }
   }
 )
 
@@ -326,9 +334,12 @@ Object.values(grupos).forEach(
   const gruposFiltradosPorStatus = useMemo(() => {
     if (!filters.statusFiltro || filters.statusFiltro.length === 0) return gruposPorTerapeuta
     return gruposPorTerapeuta.filter((g) =>
-      g.atendimentos.some((a) =>
-        filters.statusFiltro.includes(String(a.status ?? '').toLowerCase())
-      )
+      filters.statusFiltro.some((s) => {
+        if (s === 'parcial') return g.status === 'parcial'
+        return g.atendimentos.some((a) =>
+          String(a.status ?? '').toLowerCase() === s
+        )
+      })
     )
   }, [gruposPorTerapeuta, filters.statusFiltro])
 

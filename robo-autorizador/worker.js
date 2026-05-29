@@ -250,6 +250,20 @@ async function iniciarWorker() {
 		  });
 		  await registrarLog(tarefa.id, 'Execução concluída');
 		  console.log("✅ Concluído:", tarefa.id);
+		} else if (resultado === 'glosa') {
+		  await atualizarStatus(tarefa.id, 'glosa', {
+		    completed_at: agora,
+		    execution_time_ms: execMs
+		  });
+		  await registrarLog(tarefa.id, 'Glosa ASSIM detectada');
+		  console.log("⛔ Glosa:", tarefa.id);
+		} else if (resultado === 'cancelado') {
+		  await atualizarStatus(tarefa.id, 'cancelado', {
+		    completed_at: agora,
+		    execution_time_ms: execMs
+		  });
+		  await registrarLog(tarefa.id, 'Cancelado pelo ASSIM (Liberado *)');
+		  console.log("🚫 Cancelado:", tarefa.id);
 		} else {
 		  await atualizarStatus(tarefa.id, 'erro', {
 		    completed_at: agora,

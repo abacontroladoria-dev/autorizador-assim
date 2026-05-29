@@ -5,6 +5,7 @@ import { useState } from 'react'
 import {
   ChevronDown,
   ChevronUp,
+  Clock,
   UserRound,
 } from 'lucide-react'
 
@@ -25,6 +26,8 @@ type GrupoTerapeutaMobile = {
   primeiroHorario: string
   status: string
   substituto?: string
+  ultimaAlteracaoPor?: string | null
+  ultimaAlteracaoEm?: string | null
   atendimentos: ControleTerapeuticoItem[]
 }
 
@@ -267,6 +270,19 @@ export default function ControleTerapeutaMobileCard({
         </div>
       </div>
 
+      {/* ── Metadata footer — auditoria ── */}
+      {grupo.ultimaAlteracaoPor && grupo.status !== 'pendente' && (
+        <div className="border-t border-slate-100 px-5 py-1.5 flex justify-end items-center gap-1.5">
+          <Clock className="h-3 w-3 text-slate-300 shrink-0" />
+          <span className="text-[11px] text-slate-400">
+            Atualizado por{' '}
+            <span className="font-medium text-slate-500">{grupo.ultimaAlteracaoPor}</span>
+            <span className="mx-1.5 text-slate-300">·</span>
+            {formatarDataHora(grupo.ultimaAlteracaoEm)}
+          </span>
+        </div>
+      )}
+
       {/* ── Sessões expandidas ── */}
       {aberto && (
         <div className="border-t border-slate-100 divide-y divide-slate-100">
@@ -376,4 +392,14 @@ function statusBadgeLabel(status: StatusDisponibilidade): string {
     default:
       return 'Pendente'
   }
+}
+
+function formatarDataHora(iso?: string | null): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  const dia  = String(d.getDate()).padStart(2, '0')
+  const mes  = String(d.getMonth() + 1).padStart(2, '0')
+  const hora = String(d.getHours()).padStart(2, '0')
+  const min  = String(d.getMinutes()).padStart(2, '0')
+  return `${dia}/${mes} às ${hora}:${min}`
 }

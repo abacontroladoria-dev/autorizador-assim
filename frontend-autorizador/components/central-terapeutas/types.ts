@@ -27,5 +27,7 @@ export type GrupoTerapeutaMobile = {
   primeiroHorario: string
   status: StatusDisponibilidadeGrupo
   substituto?: string
+  ultimaAlteracaoPor?: string | null
+  ultimaAlteracaoEm?: string | null
   atendimentos: ControleTerapeuticoItem[]
 }

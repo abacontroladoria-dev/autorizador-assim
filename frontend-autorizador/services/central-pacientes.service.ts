@@ -10,19 +10,8 @@ export async function listarCentralPacientes(
 
   const { data: response, error } =
     await supabase
-
-      .from('vw_central_pacientes')
-
-      .select('*')
-
-      .eq(
-        'data_atendimento',
-        data
-      )
-
-      .order('horario', {
-        ascending: true
-      })
+      .rpc('listar_central_pacientes', { p_data: data })
+      .order('horario', { ascending: true })
 
   if (error) {
 

@@ -93,7 +93,7 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
       : terapiaRaw
 
     setCarregando(true)
-    listarModalSubstituicao({ terapiaExibicaoNome: terapiaExibicaoNome || '', unidade: grupo.unidade })
+    listarModalSubstituicao({ terapiaExibicaoNome: terapiaExibicaoNome || '', unidade: grupo.unidade, dataAtendimento: data })
       .then((data) => {
         const semTerapeuta = data.filter((p) => p.profissional_nome !== grupo.terapeuta)
         setProfissionais(semTerapeuta)
@@ -584,11 +584,21 @@ function SessionRow({
       const slotsDoDia = profissionais.filter(
         (s) => s.profissional_id === p.id && s.status_slot !== 'sem_agenda_hoje'
       )
-      if (slotsDoDia.length === 0) return false
-      return slotsDoDia.some((s) => {
-        const h = s.hora.slice(0, 5)
-        return turnoSessao === 'manha' ? h < '13:00' : h >= '13:00'
-      })
+
+      // Tem slots hoje: incluir apenas se algum slot é do turno correto
+      if (slotsDoDia.length > 0) {
+        return slotsDoDia.some((s) => {
+          const h = s.hora.slice(0, 5)
+          return turnoSessao === 'manha' ? h < '13:00' : h >= '13:00'
+        })
+      }
+
+      // Sem agenda hoje: incluir se turno_semana bate com o turno da sessão
+      const semAgenda = profissionais.find(
+        (s) => s.profissional_id === p.id && s.status_slot === 'sem_agenda_hoje'
+      )
+      if (!semAgenda?.turno_semana) return false
+      return semAgenda.turno_semana === 'ambos' || semAgenda.turno_semana === turnoSessao
     })
 
     return profsDoTurno
@@ -803,7 +813,12 @@ function profissionaisDoTurno(
   const turno = hora < '13:00' ? 'manha' : 'tarde'
   const idsDoTurno = new Set<number>()
   for (const s of slots) {
-    if (s.status_slot === 'sem_agenda_hoje') continue
+    if (s.status_slot === 'sem_agenda_hoje') {
+      if (s.turno_semana === 'ambos' || s.turno_semana === turno) {
+        idsDoTurno.add(s.profissional_id)
+      }
+      continue
+    }
     const h = s.hora.slice(0, 5)
     if (turno === 'manha' ? h < '13:00' : h >= '13:00') {
       idsDoTurno.add(s.profissional_id)
