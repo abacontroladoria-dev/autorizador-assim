@@ -18,18 +18,16 @@ function jsonResponse(body: unknown, status = 200) {
   })
 }
 
-// Retorna Seg e Sex da semana corrente no fuso de São Paulo
-function getWeekRange(): { dataInicio: string; dataFim: string } {
-  const agora  = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }))
-  const dow    = agora.getDay()
-  const difSeg = dow === 0 ? -6 : 1 - dow
-  const seg    = new Date(agora)
-  seg.setDate(agora.getDate() + difSeg)
-  const sex = new Date(seg)
-  sex.setDate(seg.getDate() + 4)
+// Retorna hoje → último dia útil do mês seguinte no fuso de São Paulo.
+function getRangeUntilEndOfNextMonth(): { dataInicio: string; dataFim: string } {
+  const agora   = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }))
+  const lastDay = new Date(agora.getFullYear(), agora.getMonth() + 2, 0)
+  const dow     = lastDay.getDay()
+  if (dow === 0) lastDay.setDate(lastDay.getDate() - 2)
+  else if (dow === 6) lastDay.setDate(lastDay.getDate() - 1)
   return {
-    dataInicio: seg.toISOString().slice(0, 10),
-    dataFim:    sex.toISOString().slice(0, 10),
+    dataInicio: agora.toISOString().slice(0, 10),
+    dataFim:    lastDay.toISOString().slice(0, 10),
   }
 }
 
@@ -130,12 +128,12 @@ serve(async (req: Request) => {
   })
 
   try {
-    // body: {} → sincroniza Seg–Sex da semana corrente
+    // body: {} → sincroniza hoje até o último dia útil do mês seguinte
     // body: { "data_inicio": "YYYY-MM-DD", "data_fim": "YYYY-MM-DD" } → período específico
     const body = await req.json().catch(() => ({})) as { data_inicio?: string; data_fim?: string }
     const { dataInicio, dataFim } = body.data_inicio && body.data_fim
       ? { dataInicio: body.data_inicio, dataFim: body.data_fim }
-      : getWeekRange()
+      : getRangeUntilEndOfNextMonth()
 
     const total = await sincronizarGrade(dataInicio, dataFim, supabase)
     console.log(`[sync_tita_grade] ${dataInicio}–${dataFim}: ${total} registros`)

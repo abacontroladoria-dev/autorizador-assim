@@ -18,18 +18,29 @@ function jsonResponse(body: unknown, status = 200) {
   })
 }
 
-// Retorna Seg–Sex da semana corrente no fuso de São Paulo
-function getWeekDates(): string[] {
-  const agora  = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }))
-  const dow    = agora.getDay()
-  const difSeg = dow === 0 ? -6 : 1 - dow
-  const seg    = new Date(agora)
-  seg.setDate(agora.getDate() + difSeg)
-  return Array.from({ length: 5 }, (_, i) => {
-    const d = new Date(seg)
-    d.setDate(seg.getDate() + i)
-    return d.toISOString().slice(0, 10)
-  })
+// Retorna o último dia útil do mês seguinte no fuso de São Paulo.
+function getLastBusinessDayOfNextMonth(): string {
+  const agora   = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }))
+  // Dia 0 do mês (getMonth()+2) = último dia do mês seguinte
+  const lastDay = new Date(agora.getFullYear(), agora.getMonth() + 2, 0)
+  const dow     = lastDay.getDay()
+  if (dow === 0) lastDay.setDate(lastDay.getDate() - 2) // domingo → sexta
+  else if (dow === 6) lastDay.setDate(lastDay.getDate() - 1) // sábado → sexta
+  return lastDay.toISOString().slice(0, 10)
+}
+
+// Retorna todos os dias úteis de hoje até o último dia útil do mês seguinte.
+function getBusinessDaysUntilEndOfNextMonth(): string[] {
+  const agora = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }))
+  const fim   = new Date(getLastBusinessDayOfNextMonth())
+  const datas: string[] = []
+  const d = new Date(agora.toISOString().slice(0, 10))
+  while (d <= fim) {
+    const dow = d.getDay()
+    if (dow !== 0 && dow !== 6) datas.push(d.toISOString().slice(0, 10))
+    d.setDate(d.getDate() + 1)
+  }
+  return datas
 }
 
 function normalizarDataNascimento(valor: unknown): string | null {
@@ -41,6 +52,17 @@ function normalizarDataNascimento(valor: unknown): string | null {
   if (iso) return new Date(`${iso[1]}-${iso[2]}-${iso[3]}`).toISOString().slice(0, 10)
   return null
 }
+
+// Compara dois valores anuláveis convertendo para string.
+const eq = (a: unknown, b: unknown): boolean => {
+  if (a == null && b == null) return true
+  if (a == null || b == null) return false
+  return String(a) === String(b)
+}
+
+// Normaliza hora para HH:MM para comparação segura (08:00 == 08:00:00).
+const hhMM = (t: unknown): string | null =>
+  t != null ? String(t).slice(0, 5) : null
 
 async function sincronizarData(
   data: string,
@@ -63,13 +85,14 @@ async function sincronizarData(
   }
 
   const rawData = await response.json()
-
   const agendas = (rawData as any[]).flatMap((grupo: any) => grupo.agenda_favorecido || [])
 
-  const registros = agendas.map((a: any) => {
+  // Monta mapa dos registros vindos do TiTa: tita_agendamento_id → registro
+  const incoming = new Map<number, Record<string, unknown>>()
+  for (const a of agendas) {
     const familiar = a.favorecido?.familiares?.[0]
     const vinculo  = a.favorecido?.vinc_fav_clinica?.[0]
-    return {
+    const r: Record<string, unknown> = {
       tita_agendamento_id:   a.id,
       origem:                a.origem,
       data_atendimento:      a.data?.split("/")?.reverse()?.join("-"),
@@ -99,34 +122,94 @@ async function sincronizarData(
       responsavel_email:     familiar?.email            ?? null,
       atividade:             a.atividade                ?? null,
       ativo:                 true,
+      motivo_inativacao:     null,
       raw_json:              a,
       updated_at:            new Date().toISOString(),
     }
-  })
+    if (r.tita_agendamento_id != null) {
+      incoming.set(r.tita_agendamento_id as number, r)
+    }
+  }
 
-  // Upsert primeiro: garante que todos os registros do TiTa ficam ativo=true
-  for (let i = 0; i < registros.length; i += 100) {
+  // Busca registros ativos existentes para esta data
+  const { data: existentes, error: fetchError } = await supabase
+    .from("agenda_tita")
+    .select("id, tita_agendamento_id, paciente_id, profissional_id, terapia_id, sala_id, hora_inicial, hora_final")
+    .eq("data_atendimento", data)
+    .eq("ativo", true)
+
+  if (fetchError) throw fetchError
+
+  const existenteMap = new Map<number, any>(
+    (existentes || []).map((e: any) => [e.tita_agendamento_id as number, e]),
+  )
+
+  const novos: Record<string, unknown>[] = []
+  const inutilizarAlterado: number[] = []
+  const inutilizarExcluido: number[] = []
+
+  // Processa registros vindos do TiTa
+  for (const [titaId, reg] of incoming) {
+    const existente = existenteMap.get(titaId)
+
+    if (!existente) {
+      novos.push(reg)
+    } else {
+      const mudou =
+        !eq(existente.paciente_id,    reg.paciente_id)    ||
+        !eq(existente.profissional_id, reg.profissional_id) ||
+        !eq(existente.terapia_id,     reg.terapia_id)     ||
+        !eq(existente.sala_id,        reg.sala_id)        ||
+        hhMM(existente.hora_inicial) !== hhMM(reg.hora_inicial) ||
+        hhMM(existente.hora_final)   !== hhMM(reg.hora_final)
+
+      if (mudou) {
+        inutilizarAlterado.push(existente.id)
+        novos.push(reg)
+      }
+      // Sem mudança: ignora (não regrava o registro)
+    }
+  }
+
+  // Registros ativos no banco que não voltaram do TiTa → foram excluídos.
+  // Só aplica para hoje ou datas futuras: o TiTa não garante retornar
+  // sessões passadas completas, o que causaria inativações incorretas.
+  const hoje = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }))
+    .toISOString().slice(0, 10)
+  if (data >= hoje) {
+    for (const existente of (existentes || [])) {
+      if (!incoming.has(existente.tita_agendamento_id)) {
+        inutilizarExcluido.push(existente.id)
+      }
+    }
+  }
+
+  const agora = new Date().toISOString()
+
+  if (inutilizarAlterado.length > 0) {
     const { error } = await supabase
       .from("agenda_tita")
-      .upsert(registros.slice(i, i + 100), { onConflict: "tita_agendamento_id" })
+      .update({ ativo: false, motivo_inativacao: "alterado", updated_at: agora })
+      .in("id", inutilizarAlterado)
     if (error) throw error
   }
 
-  // Desativa apenas registros desta data que NÃO vieram na resposta do TiTa
-  // (sessões substituídas no TiTa ganham novo ID → o registro antigo é desativado)
-  const idsAtivos = registros
-    .map(r => r.tita_agendamento_id)
-    .filter((id): id is number => id != null)
-
-  if (idsAtivos.length > 0) {
-    await supabase
+  if (inutilizarExcluido.length > 0) {
+    const { error } = await supabase
       .from("agenda_tita")
-      .update({ ativo: false })
-      .eq("data_atendimento", data)
-      .not("tita_agendamento_id", "in", `(${idsAtivos.join(",")})`)
+      .update({ ativo: false, motivo_inativacao: "excluido", updated_at: agora })
+      .in("id", inutilizarExcluido)
+    if (error) throw error
   }
 
-  return registros.length
+  for (let i = 0; i < novos.length; i += 100) {
+    const { error } = await supabase
+      .from("agenda_tita")
+      .insert(novos.slice(i, i + 100))
+    if (error) throw error
+  }
+
+  return incoming.size
 }
 
 serve(async (req: Request) => {
@@ -138,10 +221,10 @@ serve(async (req: Request) => {
   })
 
   try {
-    // body: {} → sincroniza a semana inteira (Seg–Sex corrente)
+    // body: {} → sincroniza hoje até o último dia útil do mês seguinte
     // body: { "data": "YYYY-MM-DD" } → sincroniza só aquela data
     const body = await req.json().catch(() => ({})) as { data?: string }
-    const datas: string[] = body.data ? [body.data] : getWeekDates()
+    const datas: string[] = body.data ? [body.data] : getBusinessDaysUntilEndOfNextMonth()
 
     const resultados: Record<string, number> = {}
     for (const data of datas) {
