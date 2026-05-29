@@ -14,6 +14,7 @@ import {
   Stethoscope,
   BriefcaseBusiness,
   Star,
+  KeyRound,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
@@ -38,6 +39,7 @@ const pathIconMap: Record<string, any> = {
   "/guias-digitais": FileText,
   "/auditoria-assim": ClipboardList,
   "/admin": ShieldCheck,
+  "/admin/permissoes": KeyRound,
 }
 
 export default function Sidebar() {
@@ -83,10 +85,7 @@ export default function Sidebar() {
   }
 
   function isActive(path: string) {
-    if (path === "/") {
-      return pathname === "/"
-    }
-    return pathname.startsWith(path)
+    return pathname === path
   }
 
   async function handleLogout() {
@@ -107,6 +106,7 @@ export default function Sidebar() {
       "/guias-digitais",
       "/financeiro",
       "/admin",
+      "/admin/permissoes",
       "/auditoria-assim",
     ],
     diretoria: [
@@ -410,7 +410,9 @@ export default function Sidebar() {
           {canAccess("/admin") && (
             <SidebarGroup title="Administração" icon={ShieldCheck}>
               <MenuItem label="Usuários" icon={Users} path="/admin" />
-              <MenuItem label="Permissões" icon={ShieldCheck} path="/admin" />
+              {canAccess("/admin/permissoes") && (
+                <MenuItem label="Permissões" icon={KeyRound} path="/admin/permissoes" />
+              )}
             </SidebarGroup>
           )}
 
