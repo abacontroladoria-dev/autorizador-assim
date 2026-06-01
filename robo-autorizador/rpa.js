@@ -312,7 +312,7 @@ const page = await context.newPage();
 		);
 
 		const updatePayload = {
-		  status: 'concluido',
+		  status: numeroAutorizacao ? 'concluido' : 'concluido_sem_guia',
 		  forma_autorizacao: formaValidacao,
 		  validacao_finalizada_em: new Date().toISOString()
 		};
@@ -359,6 +359,7 @@ const page = await context.newPage();
 
 		const jaConcluido =
 		  atual?.status === 'concluido' ||
+		  atual?.status === 'concluido_sem_guia' ||
 		  atual?.forma_autorizacao ||
 		  atual?.validacao_finalizada_em;
 

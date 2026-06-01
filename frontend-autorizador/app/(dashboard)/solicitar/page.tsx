@@ -400,7 +400,8 @@ async function handleSolicitarLista(
       }
 
       if (
-        existente.status === 'concluido'
+        existente.status === 'concluido' ||
+        existente.status === 'concluido_sem_guia'
       ) {
 
         toast.error(
@@ -1015,7 +1016,7 @@ useEffect(() => {
               }
 
               // REMOVE DA TELA
-              if (novo.status === 'concluido') {
+              if (novo.status === 'concluido' || novo.status === 'concluido_sem_guia') {
                 return null
               }
 

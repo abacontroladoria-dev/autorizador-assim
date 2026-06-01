@@ -74,6 +74,21 @@ function getStatusConfig(status?: string) {
       }
 
     // =========================
+    // CONCLUIDO SEM GUIA
+    // =========================
+
+    case 'concluido_sem_guia':
+
+      return {
+        label: 'Aguardando guia',
+
+        className:
+          'bg-amber-50 text-amber-700 border-amber-200',
+
+        icon: AlertTriangle,
+      }
+
+    // =========================
     // PRESENÇA
     // =========================
 
