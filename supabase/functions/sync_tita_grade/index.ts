@@ -31,6 +31,14 @@ function getRangeUntilEndOfNextMonth(): { dataInicio: string; dataFim: string } 
   }
 }
 
+// TiTa pode enviar campos bigint como "1993, 2200, 1898" — pega só o primeiro valor
+function toInt(val: unknown): number | null {
+  if (val === null || val === undefined) return null
+  const first = String(val).split(",")[0].trim()
+  const n = parseInt(first, 10)
+  return isNaN(n) ? null : n
+}
+
 function parseTitaDate(valor: unknown): string | null {
   if (!valor) return null
   const s = String(valor).trim()
@@ -47,17 +55,15 @@ async function sincronizarGrade(
   dataFim: string,
   supabase: ReturnType<typeof createClient>,
 ): Promise<number> {
-  const response = await fetch(
-    "https://apiv2.apptita.com.br/api/integracao/grade_profissionais",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type":      "application/json",
-        "X-INTEGRACAO-TOKEN": TITA_TOKEN,
-      },
-      body: JSON.stringify({ data_inicio: dataInicio, data_fim: dataFim }),
+  const gradeUrl = new URL("https://apiv2.apptita.com.br/api/integracao/grade_profissionais")
+  gradeUrl.searchParams.set("data_inicio", dataInicio)
+  gradeUrl.searchParams.set("data_fim", dataFim)
+  const response = await fetch(gradeUrl.toString(), {
+    method: "GET",
+    headers: {
+      "X-INTEGRACAO-TOKEN": TITA_TOKEN,
     },
-  )
+  })
 
   if (!response.ok) {
     const erro = await response.text()
@@ -81,9 +87,9 @@ async function sincronizarGrade(
   if (deleteError) throw deleteError
 
   const registros = rawData.map((g: any) => ({
-    grade_terapeuta_id:         g.grade_terapeuta_id   ?? null,
-    grade_clinica_id:           g.grade_clinica_id     ?? null,
-    profissional_id:            g.profissional_id      ?? g.id_profissional    ?? null,
+    grade_terapeuta_id:         toInt(g.grade_terapeuta_id),
+    grade_clinica_id:           toInt(g.grade_clinica_id),
+    profissional_id:            toInt(g.profissional_id ?? g.id_profissional),
     nome_profissional:          g.nome_profissional    ?? null,
     cpf_profissional:           g.cpf_profissional     ?? null,
     numero_telefone:            g.numero_telefone      ?? null,
@@ -91,28 +97,38 @@ async function sincronizarGrade(
     registro_profissional:      g.registro_profissional ?? null,
     tipo_registro_profissional: g.tipo_registro_profissional ?? null,
     uf_registro_profissional:   g.uf_registro_profissional   ?? null,
-    id_unidade:                 g.id_unidade           ?? null,
+    id_unidade:                 toInt(g.id_unidade),
     nome_unidade:               g.nome_unidade         ?? null,
     dia_semana:                 g.dia_semana           ?? null,
     data:                       parseTitaDate(g.data),
     hora_inicial:               g.hora_inicial         ?? null,
     hora_final:                 g.hora_final           ?? null,
     status_agendamento:         g.status_agendamento   ?? null,
-    terapia_id:                 g.terapia_id           ?? null,
+    terapia_id:                 toInt(g.terapia_id),
     nome_terapia:               g.nome_terapia         ?? null,
-    terapia_exibicao_id:        g.terapia_exibicao_id  ?? null,
+    terapia_exibicao_id:        toInt(g.terapia_exibicao_id),
     terapia_exibicao:           g.terapia_exibicao     ?? null,
-    id_sala:                    g.id_sala              ?? null,
+    id_sala:                    toInt(g.id_sala),
     sala:                       g.sala                 ?? null,
     observacoes_sala:           g.observacoes_sala     ?? null,
     raw_json:                   g,
     updated_at:                 new Date().toISOString(),
   }))
 
-  for (let i = 0; i < registros.length; i += 100) {
+  // TiTa pode retornar o mesmo slot mais de uma vez — deduplicar antes do upsert
+  const seen = new Map<string, (typeof registros)[0]>()
+  for (const r of registros) {
+    const key = `${r.grade_terapeuta_id}|${r.data}|${r.hora_inicial}`
+    seen.set(key, r)
+  }
+  const deduped = Array.from(seen.values())
+
+  for (let i = 0; i < deduped.length; i += 100) {
     const { error } = await supabase
       .from("grade_profissionais_tita")
-      .insert(registros.slice(i, i + 100))
+      .upsert(deduped.slice(i, i + 100), {
+        onConflict: "grade_terapeuta_id,data,hora_inicial",
+      })
     if (error) throw error
   }
 

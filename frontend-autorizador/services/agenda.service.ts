@@ -163,6 +163,7 @@ export async function buscarAgenda(
     .order('data_atendimento', { ascending: true })
     .order('hora_inicial', { ascending: true })
     .not('hora_inicial', 'is', null)
+    .not('clinica_nome', 'ilike', '%INATIVA%')
 
   if (filters.paciente)  query = query.ilike('paciente_nome', `%${filters.paciente}%`)
   if (filters.unidade)   query = query.eq('clinica_nome', filters.unidade)

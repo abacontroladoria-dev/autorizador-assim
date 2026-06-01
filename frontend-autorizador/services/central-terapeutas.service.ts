@@ -86,7 +86,11 @@ export async function listarCentralTerapeutica(data: string): Promise<Atendiment
     })
 
   if (error) {
-    console.error(error)
+    console.error('listarCentralTerapeutica:', error.message, {
+      code: error.code,
+      details: error.details,
+      hint: error.hint,
+    })
     return []
   }
 

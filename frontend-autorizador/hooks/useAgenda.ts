@@ -115,7 +115,9 @@ export function useAgenda(mode: AgendaMode, options?: { autoLoad?: boolean }) {
         buscarAgenda(mode, weekRange.inicio, weekRange.fim, filters),
         fetchGrade,
       ])
-      setEvents(collapseOverlaps([...data, ...gradeData]))
+      const realSlotStarts = new Set(data.map(e => e.start))
+      const uniqueGrade = gradeData.filter(e => !realSlotStarts.has(e.start))
+      setEvents(collapseOverlaps([...data, ...uniqueGrade]))
     } finally {
       setLoading(false)
     }
