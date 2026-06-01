@@ -174,12 +174,25 @@ async function sincronizarData(
   // Registros ativos no banco que não voltaram do TiTa → foram excluídos.
   // Só aplica para hoje ou datas futuras: o TiTa não garante retornar
   // sessões passadas completas, o que causaria inativações incorretas.
+  //
+  // Para hoje especificamente: o TiTa deixa de retornar sessões assim que
+  // elas são atendidas (horário já passou). Sem esse guarda, o sync marcaria
+  // como "excluido" sessões que foram normalmente realizadas, fazendo-as
+  // desaparecer do Controle de Pacientes. Portanto, só marcamos excluido
+  // sessões de hoje cujo hora_inicial ainda não passou.
   const hoje = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }))
     .toISOString().slice(0, 10)
   if (data >= hoje) {
+    const agoraBRT = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }))
+    const horaAtual = `${String(agoraBRT.getHours()).padStart(2, "0")}:${String(agoraBRT.getMinutes()).padStart(2, "0")}`
     for (const existente of (existentes || [])) {
       if (!incoming.has(existente.tita_agendamento_id)) {
-        inutilizarExcluido.push(existente.id)
+        // Para datas futuras: excluir sempre.
+        // Para hoje: só excluir se a sessão ainda não começou (hora_inicial > agora).
+        const sessaoJaComeçou = data === hoje && (hhMM(existente.hora_inicial) ?? "") <= horaAtual
+        if (!sessaoJaComeçou) {
+          inutilizarExcluido.push(existente.id)
+        }
       }
     }
   }
