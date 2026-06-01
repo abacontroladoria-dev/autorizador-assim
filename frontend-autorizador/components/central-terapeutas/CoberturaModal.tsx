@@ -13,6 +13,8 @@ import {
 import {
   listarModalSubstituicao,
   atualizarStatusAtendimentosEmLote,
+  ABA_GROUP,
+  COORD_CASO,
   type SlotModalSubstituicao,
 } from '@/services/controle-terapeutico.service'
 import type { GrupoTerapeutaMobile, ControleTerapeuticoItem } from './types'
@@ -82,20 +84,16 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
       })
     )
 
-    const terapiaRaw =
-      (grupo.atendimentos[0] as any)?.terapia_exibicao_nome ||
-      (grupo.atendimentos[0] as any)?.terapia_exibicao ||
-      grupo.terapiaExibicao ||
-      grupo.terapia
-
-    const terapiaExibicaoNome = terapiaRaw?.startsWith('Aplicador ABA')
-      ? 'Psicologia ABA'
-      : terapiaRaw
+    // Compatibilidade usa Terapia Real (terapia_nome), não Terapia de Exibição
+    const terapiaNome = String(
+      (grupo.atendimentos[0] as any)?.terapia_nome || ''
+    )
 
     setCarregando(true)
-    listarModalSubstituicao({ terapiaExibicaoNome: terapiaExibicaoNome || '', unidade: grupo.unidade, dataAtendimento: data })
+    listarModalSubstituicao({ terapiaNome, unidade: grupo.unidade, dataAtendimento: data })
       .then((data) => {
         const semTerapeuta = data.filter((p) => p.profissional_nome !== grupo.terapeuta)
+        console.log('[Cobertura] após remover terapeuta principal:', semTerapeuta.length)
         setProfissionais(semTerapeuta)
         // Resolve substitutoId por nome para sessões pré-carregadas sem ID
         setSessoes((prev) => prev.map((s) => {
@@ -519,7 +517,8 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
         <ProfissionaisVerMaisModal
           profissionais={profissionaisDoTurno(
             profissionais,
-            String(verMaisSessao.atendimento.hora_inicial).slice(0, 5)
+            String(verMaisSessao.atendimento.hora_inicial).slice(0, 5),
+            String((verMaisSessao.atendimento as any)?.terapia_nome || '')
           )}
           sessaoContext={{
             horario: `${String(verMaisSessao.atendimento.hora_inicial).slice(0, 5)} – ${String(verMaisSessao.atendimento.hora_final).slice(0, 5)}`,
@@ -585,12 +584,9 @@ function SessionRow({
         (s) => s.profissional_id === p.id && s.status_slot !== 'sem_agenda_hoje'
       )
 
-      // Tem slots hoje: incluir apenas se algum slot é do turno correto
+      // Tem slots hoje: incluir somente se há slot no horário exato da sessão
       if (slotsDoDia.length > 0) {
-        return slotsDoDia.some((s) => {
-          const h = s.hora.slice(0, 5)
-          return turnoSessao === 'manha' ? h < '13:00' : h >= '13:00'
-        })
+        return slotsDoDia.some((s) => s.hora.slice(0, 5) === hora)
       }
 
       // Sem agenda hoje: incluir se turno_semana bate com o turno da sessão
@@ -601,9 +597,32 @@ function SessionRow({
       return semAgenda.turno_semana === 'ambos' || semAgenda.turno_semana === turnoSessao
     })
 
-    return profsDoTurno
+    const profsComStatusRaw = profsDoTurno
       .map((p) => ({ ...p, ...getStatusProfNaHora(profissionais, p.id, hora) }))
-      .sort((a, b) => (ordemStatus[a.status] ?? 3) - (ordemStatus[b.status] ?? 3))
+
+    // Regra Coordenador de Caso (spec): só exibir quando não houver nenhum ABA Livre
+    const sessaoTerapiaNome = String((sessao.atendimento as any)?.terapia_nome || '')
+    const isAbaSession = (ABA_GROUP as readonly string[]).includes(sessaoTerapiaNome)
+
+    let profsFinais = profsComStatusRaw
+    if (isAbaSession) {
+      const hasLivreAba = profsComStatusRaw.some(
+        (p) => p.status === 'livre' && (ABA_GROUP as readonly string[]).includes(p.terapia_nome)
+      )
+      if (hasLivreAba) {
+        profsFinais = profsComStatusRaw.filter((p) => p.terapia_nome !== COORD_CASO)
+      }
+    }
+
+    console.log(
+      `[Cobertura ${hora}]`,
+      `Livre: ${profsFinais.filter((p) => p.status === 'livre').length}`,
+      `| Ocupado: ${profsFinais.filter((p) => p.status === 'ocupado').length}`,
+      `| NãoTrab: ${profsFinais.filter((p) => p.status === 'sem_agenda_hoje').length}`,
+      `| total renderizado: ${profsFinais.length}`,
+    )
+
+    return profsFinais.sort((a, b) => (ordemStatus[a.status] ?? 3) - (ordemStatus[b.status] ?? 3))
   }, [profsUnicos, profissionais, hora])
 
   const top3 = profsComStatus.slice(0, 5)
@@ -808,7 +827,8 @@ function ProfMiniCard({
 
 function profissionaisDoTurno(
   slots: SlotModalSubstituicao[],
-  hora: string
+  hora: string,
+  sessaoTerapiaNome: string
 ): SlotModalSubstituicao[] {
   const turno = hora < '13:00' ? 'manha' : 'tarde'
   const idsDoTurno = new Set<number>()
@@ -819,12 +839,23 @@ function profissionaisDoTurno(
       }
       continue
     }
-    const h = s.hora.slice(0, 5)
-    if (turno === 'manha' ? h < '13:00' : h >= '13:00') {
+    if (s.hora.slice(0, 5) === hora) {
       idsDoTurno.add(s.profissional_id)
     }
   }
-  return slots.filter((s) => idsDoTurno.has(s.profissional_id))
+
+  const elegiveis = slots.filter((s) => idsDoTurno.has(s.profissional_id))
+
+  // Regra CC: para sessões ABA, ocultar CC quando houver ABA Livre
+  const isAba = (ABA_GROUP as readonly string[]).includes(sessaoTerapiaNome)
+  if (!isAba) return elegiveis
+
+  const hasLivreAba = elegiveis.some(
+    (s) => s.status_slot === 'livre' && (ABA_GROUP as readonly string[]).includes(s.terapia_nome)
+  )
+  return hasLivreAba
+    ? elegiveis.filter((s) => s.terapia_nome !== COORD_CASO)
+    : elegiveis
 }
 
 function getIniciais(nome: string): string {
@@ -851,14 +882,15 @@ function formatarData(data: string): string {
 
 function getProfissionaisUnicos(
   slots: SlotModalSubstituicao[]
-): { id: number; nome: string; unidade: string }[] {
-  const map = new Map<number, { id: number; nome: string; unidade: string }>()
+): { id: number; nome: string; unidade: string; terapia_nome: string }[] {
+  const map = new Map<number, { id: number; nome: string; unidade: string; terapia_nome: string }>()
   for (const s of slots) {
     if (!map.has(s.profissional_id)) {
       map.set(s.profissional_id, {
         id: s.profissional_id,
         nome: s.profissional_nome,
         unidade: s.unidade,
+        terapia_nome: s.terapia_nome,
       })
     }
   }

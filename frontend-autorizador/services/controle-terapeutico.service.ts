@@ -247,10 +247,39 @@ export async function buscarItensAgenda(
   }
 }
 
+// Terapias do Grupo ABA — equivalentes para substituição (spec: cobertura-clinica.md)
+export const ABA_GROUP = [
+  'Aplicador ABA (AE)',
+  'Aplicador ABA (PS)',
+  'Aplicador ABA (SF)',
+] as const
+
+export const COORD_CASO = 'Coordenador de Caso'
+
+// Compatibilidade direcional EXTRA além do grupo ABA.
+// Chave = Terapia Real da SESSÃO a cobrir; valores = Terapias Reais que podem cobri-la.
+// Unidirecional: a base cobre o sub-tipo ABA, mas o ABA não cobre a base.
+const COMPAT_EXTRA: Record<string, readonly string[]> = {
+  'Aplicador ABA (PS)': ['Psicopedagogia'],
+}
+
+/**
+ * Terapias Reais compatíveis para cobrir uma sessão da terapia informada.
+ * Grupo ABA: os três subtipos + Coordenador de Caso. Demais: exact-match.
+ * Acrescenta a compatibilidade direcional definida em COMPAT_EXTRA.
+ */
+export function terapiasCompativeis(terapiaNome: string): string[] {
+  const isAba = (ABA_GROUP as readonly string[]).includes(terapiaNome)
+  const base = isAba ? [...ABA_GROUP, COORD_CASO] : [terapiaNome]
+  const extra = COMPAT_EXTRA[terapiaNome] ?? []
+  return [...new Set([...base, ...extra])]
+}
+
 export type SlotModalSubstituicao = {
   profissional_id: number
   profissional_nome: string
-  terapia_exibicao_nome: string
+  terapia_nome: string           // Terapia Real — usado para compatibilidade
+  terapia_exibicao_nome: string  // Terapia de Exibição — somente para display
   unidade: string
   hora: string
   status_slot: string
@@ -260,31 +289,32 @@ export type SlotModalSubstituicao = {
 }
 
 /**
- * Busca profissionais para o modal de substituição.
- * Combina os slots do dia (vw_modal_substituicao_terapeutas) com todos os terapeutas
- * que possuem a mesma terapia na semana (vw_terapeutas_semana), para que profissionais
- * que não trabalham hoje mas podem ter acordado uma troca também apareçam.
+ * Busca profissionais para o modal de substituição usando Terapia Real (terapia_nome).
+ * Compatibilidade por terapia_exibicao_nome é incorreta — este serviço usa terapia_nome.
+ * Para o Grupo ABA, busca os três subtipos + Coordenador de Caso em uma única query.
  */
 export async function listarModalSubstituicao(params: {
-  terapiaExibicaoNome: string
+  terapiaNome: string   // Terapia Real
   unidade: string
   dataAtendimento: string
 }): Promise<SlotModalSubstituicao[]> {
   try {
+    const terapiasQuery = terapiasCompativeis(params.terapiaNome)
+
     const [{ data: slotsHoje, error: erroHoje }, { data: semana, error: erroSemana }] =
       await Promise.all([
         supabase
           .from('vw_modal_substituicao_terapeutas')
-          .select('profissional_id, profissional_nome, terapia_exibicao_nome, unidade, hora, status_slot, paciente_nome, sala_nome')
-          .eq('terapia_exibicao_nome', params.terapiaExibicaoNome)
+          .select('profissional_id, profissional_nome, terapia_nome, terapia_exibicao_nome, unidade, hora, status_slot, paciente_nome, sala_nome')
+          .in('terapia_nome', terapiasQuery)
           .eq('unidade', params.unidade)
           .eq('data_grade', params.dataAtendimento)
           .order('profissional_nome', { ascending: true })
           .order('hora', { ascending: true }),
         supabase
           .from('vw_terapeutas_semana')
-          .select('profissional_id, profissional_nome, terapia_exibicao_nome, unidade, turno_semana')
-          .eq('terapia_exibicao_nome', params.terapiaExibicaoNome)
+          .select('profissional_id, profissional_nome, terapia_nome, terapia_exibicao_nome, unidade, turno_semana')
+          .in('terapia_nome', terapiasQuery)
           .eq('unidade', params.unidade),
       ])
 
@@ -304,7 +334,8 @@ export async function listarModalSubstituicao(params: {
       slotsAdicionais.push({
         profissional_id: t.profissional_id,
         profissional_nome: t.profissional_nome,
-        terapia_exibicao_nome: t.terapia_exibicao_nome,
+        terapia_nome: (t as any).terapia_nome ?? '',
+        terapia_exibicao_nome: (t as any).terapia_exibicao_nome ?? '',
         unidade: t.unidade,
         hora: '',
         status_slot: 'sem_agenda_hoje',
@@ -314,9 +345,19 @@ export async function listarModalSubstituicao(params: {
       })
     }
 
-    return [...slots, ...slotsAdicionais].sort((a, b) =>
+    const result = [...slots, ...slotsAdicionais].sort((a, b) =>
       a.profissional_nome.localeCompare(b.profissional_nome, 'pt-BR')
     )
+
+    console.log(
+      '[Cobertura] carregados →',
+      'slotsHoje:', slots.length,
+      '| semana:', semana?.length ?? 0,
+      '| total:', result.length,
+      '| terapias:', terapiasQuery,
+    )
+
+    return result
   } catch (err) {
     console.error('Erro ao listar modal substituição:', err)
     return []

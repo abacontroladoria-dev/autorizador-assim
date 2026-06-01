@@ -66,6 +66,41 @@ function normalizarTexto(texto) {
     .replace(/[^a-zA-Z0-9\s]/g, "");
 }
 
+// Marca uma aba que ser\u00e1 deixada aberta (Token p/ impress\u00e3o ou erro p/ debug).
+// window.name persiste enquanto a aba ficar ociosa, ent\u00e3o sobrevive entre tarefas
+// (cada tarefa reconecta via CDP e perde as refer\u00eancias de Page anteriores).
+async function marcarAba(page) {
+  try {
+    await page.evaluate((m) => { window.name = m; }, `RPA::${Date.now()}`);
+  } catch (_) {}
+}
+
+// Aplica o teto global de abas: mant\u00e9m apenas as MAX_ABAS_ABERTAS mais recentes
+// marcadas com "RPA::<timestamp>" e fecha as anteriores. Abas sem marcador
+// (aba base / aba de trabalho atual) s\u00e3o ignoradas. Nunca derruba a tarefa.
+async function limparAbasAntigas(context) {
+  try {
+    const marcadas = [];
+    for (const p of context.pages()) {
+      let nome = '';
+      try { nome = await p.evaluate(() => window.name); } catch (_) { continue; }
+      if (typeof nome === 'string' && nome.startsWith('RPA::')) {
+        const ts = Number(nome.slice(5)) || 0;
+        marcadas.push({ page: p, ts });
+      }
+    }
+
+    if (marcadas.length <= MAX_ABAS_ABERTAS) return;
+
+    marcadas.sort((a, b) => a.ts - b.ts); // mais antigas primeiro
+    const aFechar = marcadas.slice(0, marcadas.length - MAX_ABAS_ABERTAS);
+    for (const { page: p } of aFechar) {
+      try { await p.close(); } catch (_) {}
+    }
+    console.log(`\ud83e\uddf9 Abas antigas fechadas: ${aFechar.length} (teto ${MAX_ABAS_ABERTAS})`);
+  } catch (_) {}
+}
+
 // =========================
 // CONFIG
 // =========================
@@ -78,6 +113,9 @@ const SOLICITANTE_FIXO = process.env.ASSIM_SOLICITANTE || '8888';
 const TIPO_CONSULTA = process.env.ASSIM_TIPO_CONSULTA;
 const TIPO_SAIDA = process.env.ASSIM_TIPO_SAIDA;
 const SISTEMA_URL = process.env.SISTEMA_URL;
+// Teto de abas que o RPA deixa abertas no Chrome 9222 (Token p/ impressão + erros p/ debug).
+// Mantém apenas as N mais recentes no total; as anteriores são fechadas a cada tarefa.
+const MAX_ABAS_ABERTAS = Number(process.env.MAX_ABAS_ABERTAS) || 3;
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -378,20 +416,20 @@ const page = await context.newPage();
 
 	  } finally {
 
-		if (sucessoExecucao) {
-
-		  if (formaValidacaoFinal === 'Token') {
-		    console.log("🖨️ Token selecionado — aba mantida aberta para impressão");
-		  } else {
-		    console.log("✅ Execução finalizada");
-		    try { await page.close(); } catch (_) {}
-		  }
-
+		if (sucessoExecucao && formaValidacaoFinal !== 'Token') {
+		  console.log("✅ Execução finalizada");
+		  try { await page.close(); } catch (_) {}
+		} else if (sucessoExecucao) {
+		  console.log("🖨️ Token selecionado — aba mantida aberta para impressão");
+		  await marcarAba(page);
 		} else {
-
 		  console.log("🧪 Aba mantida aberta para debug");
-
+		  await marcarAba(page);
 		}
+
+		// Aplica o teto de abas (com a conexão ainda viva) e libera o socket CDP.
+		await limparAbasAntigas(context);
+		try { await browser.disconnect(); } catch (_) {}
 
 	  }
 }
