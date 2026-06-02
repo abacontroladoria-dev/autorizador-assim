@@ -51,10 +51,10 @@ BEGIN
 END;
 $$;
 
--- Sync semanal completo (Seg–Sex) toda segunda às 09:55, após o sync de agenda (09:50)
+-- Sync semanal completo (Seg–Sex) toda segunda às 06:35
 SELECT cron.schedule(
   'sync-tita-grade-semanal',
-  '55 9 * * 1',
+  '35 6 * * 1',
   'SELECT fn_sync_tita_grade()'
 );
 

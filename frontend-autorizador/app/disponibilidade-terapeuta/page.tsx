@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation'
 import { ChevronDown, Search } from 'lucide-react'
 import { useControleDisponibilidade } from '@/hooks/useControleDisponibilidade'
 import StatusModal from '@/components/controle-disponibilidade/StatusModal'
-import ControleTerapeutaMobileCard from '@/components/central-terapeutas/ControleTerapeutaMobileCard'
+import DisponibilidadeTerapeutaCard from '@/components/controle-disponibilidade/DisponibilidadeTerapeutaCard'
 import {
   getHorarioInicial,
   getPaciente,
@@ -15,7 +15,9 @@ import {
   getUnidade,
   normalizarStatus,
   terapiaDeveAparecer,
+  unidadesControle,
 } from '@/components/central-terapeutas/helpers'
+import CoberturaModal from '@/components/central-terapeutas/CoberturaModal'
 import type {
   ControleFilters,
   ControleTerapeuticoItem,
@@ -65,6 +67,7 @@ export default function RegistroDisponibilidadePage() {
 
   const [dados, setDados] = useState<ControleTerapeuticoItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [erro, setErro] = useState<string | null>(null)
 
   const [filters, setFilters] = useState<ControleFilters>({
     data: hoje,
@@ -75,19 +78,29 @@ export default function RegistroDisponibilidadePage() {
     statusFiltro: [],
   })
 
+  const [autenticado, setAutenticado] = useState<boolean | null>(null)
   const [ordenacao, setOrdenacao] = useState<Ordenacao>('alfabetica')
   const [filtroStatus, setFiltroStatus] = useState<'todos' | StatusDisponibilidadeGrupo>('todos')
+  const [grupoCobertura, setGrupoCobertura] = useState<GrupoTerapeutaMobile | null>(null)
 
   async function carregarDados() {
     setLoading(true)
-    const response = await listarCentralTerapeutica(filters.data)
-    setDados(response || [])
-    setLoading(false)
+    setErro(null)
+    try {
+      const response = await listarCentralTerapeutica(filters.data)
+      console.log('[disponibilidade] carregarDados:', response?.length ?? 0, 'sessões para', filters.data)
+      setDados(response || [])
+    } catch {
+      setErro('Não foi possível carregar os dados. Verifique sua conexão e tente novamente.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   useEffect(() => {
     supabase.auth.getSession().then(async ({ data }) => {
       if (!data.session) {
+        setLoading(false)
         router.replace('/disponibilidade-terapeuta/login/')
         return
       }
@@ -97,8 +110,13 @@ export default function RegistroDisponibilidadePage() {
         .eq('id', data.session.user.id)
         .single()
       if (perfil?.role !== 'disponibilidade_terapeuta') {
+        console.warn('[disponibilidade] role inválido:', perfil?.role, '→ redirecionando para /login/')
+        setLoading(false)
         router.replace('/login/')
+        return
       }
+      console.log('[disponibilidade] auth OK, role:', perfil?.role)
+      setAutenticado(true)
     })
   }, [])
 
@@ -119,6 +137,8 @@ export default function RegistroDisponibilidadePage() {
   })
 
   useEffect(() => {
+    if (autenticado !== true) return
+
     carregarDados()
 
     const channel = supabase
@@ -139,7 +159,7 @@ export default function RegistroDisponibilidadePage() {
     return () => {
       supabase.removeChannel(channel)
     }
-  }, [filters.data])
+  }, [filters.data, autenticado])
 
   function obterTodosAtendimentosDoTerapeuta(terapeuta: string) {
     return dados.filter((item) => getTerapeuta(item) === terapeuta)
@@ -149,10 +169,14 @@ export default function RegistroDisponibilidadePage() {
     return dados
       .filter(terapiaDeveAparecer)
       .filter((item) => {
+        if (!filters.unidade) return true
+        return getUnidade(item) === filters.unidade
+      })
+      .filter((item) => {
         if (!filters.busca) return true
         return getTerapeuta(item).toLowerCase().includes(filters.busca.toLowerCase())
       })
-  }, [dados, filters.busca])
+  }, [dados, filters.unidade, filters.busca])
 
   const grupos = useMemo(() => {
     const gruposMap: Record<string, GrupoTerapeutaMobile> = {}
@@ -216,8 +240,16 @@ export default function RegistroDisponibilidadePage() {
     return lista
   }, [filtrados, filtroStatus, ordenacao])
 
+  const anuncioResultado = loading
+    ? 'Carregando profissionais...'
+    : erro
+      ? 'Erro ao carregar dados.'
+      : grupos.length === 0
+        ? 'Nenhum profissional encontrado.'
+        : `${grupos.length} profissional${grupos.length !== 1 ? 'is' : ''} encontrado${grupos.length !== 1 ? 's' : ''}.`
+
   return (
-    <main className="min-h-screen bg-[#f4f7fb] pb-28">
+    <main className="min-h-screen bg-brand-bg pb-28">
       <header className="sticky top-0 z-40 bg-white border-b border-slate-200 px-4 py-3">
         <div className="flex items-center gap-3">
           <div className="h-10 w-10 rounded-xl border border-slate-200 overflow-hidden bg-white flex items-center justify-center">
@@ -229,79 +261,126 @@ export default function RegistroDisponibilidadePage() {
           </div>
           <div>
             <h1 className="text-sm font-bold text-slate-800">Clínica Universo ABA</h1>
-            <p className="text-sm font-semibold text-[#3A8FB7]">Registro de Disponibilidade</p>
+            <p className="text-sm font-semibold text-brand-fg">Registro de Disponibilidade</p>
           </div>
         </div>
       </header>
 
-      <section className="p-3 space-y-3">
-        <div className="bg-white rounded-2xl p-3 shadow-sm border border-slate-200 space-y-3">
+      <section className="p-3 space-y-3" aria-label="Filtros e lista de profissionais">
+        <div className="bg-white rounded-2xl p-3 shadow-sm border border-slate-200 space-y-3" role="search" aria-label="Filtros">
+          <label className="sr-only" htmlFor="filtro-data">Data</label>
           <input
+            id="filtro-data"
             type="date"
             value={filters.data}
             onChange={(e) =>
               setFilters((prev) => ({ ...prev, data: e.target.value }))
             }
-            className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm"
+            className="w-full border border-slate-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
           />
 
           <div className="relative">
+            <label className="sr-only" htmlFor="filtro-ordenacao">Ordenar por</label>
             <select
+              id="filtro-ordenacao"
               value={ordenacao}
               onChange={(e) => setOrdenacao(e.target.value as Ordenacao)}
-              className="w-full appearance-none border border-slate-200 rounded-xl px-4 py-3 text-sm bg-white"
+              className="w-full appearance-none border border-slate-200 rounded-xl px-4 py-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
             >
               <option value="alfabetica">Ordem alfabética</option>
               <option value="sala">Número da sala</option>
               <option value="horario">Horário inicial</option>
             </select>
-            <ChevronDown className="absolute right-4 top-3.5 h-4 w-4 text-slate-400 pointer-events-none" />
+            <ChevronDown className="absolute right-4 top-3.5 h-4 w-4 text-slate-400 pointer-events-none" aria-hidden="true" />
           </div>
 
           <div className="relative">
+            <label className="sr-only" htmlFor="filtro-unidade">Filtrar por unidade</label>
             <select
+              id="filtro-unidade"
+              value={filters.unidade}
+              onChange={(e) =>
+                setFilters((prev) => ({ ...prev, unidade: e.target.value }))
+              }
+              className="w-full appearance-none border border-slate-200 rounded-xl px-4 py-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
+            >
+              <option value="">Todas as unidades</option>
+              {unidadesControle.map((u) => (
+                <option key={u} value={u}>{u}</option>
+              ))}
+            </select>
+            <ChevronDown className="absolute right-4 top-3.5 h-4 w-4 text-slate-400 pointer-events-none" aria-hidden="true" />
+          </div>
+
+          <div className="relative">
+            <label className="sr-only" htmlFor="filtro-status">Filtrar por status</label>
+            <select
+              id="filtro-status"
               value={filtroStatus}
               onChange={(e) =>
                 setFiltroStatus(e.target.value as 'todos' | StatusDisponibilidadeGrupo)
               }
-              className="w-full appearance-none border border-slate-200 rounded-xl px-4 py-3 text-sm bg-white"
+              className="w-full appearance-none border border-slate-200 rounded-xl px-4 py-3 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
             >
               <option value="todos">Todos os status</option>
               <option value="pendente">Pendentes</option>
               <option value="disponivel">Disponíveis</option>
               <option value="indisponivel">Indisponíveis</option>
             </select>
-            <ChevronDown className="absolute right-4 top-3.5 h-4 w-4 text-slate-400 pointer-events-none" />
+            <ChevronDown className="absolute right-4 top-3.5 h-4 w-4 text-slate-400 pointer-events-none" aria-hidden="true" />
           </div>
 
           <div className="relative">
-            <Search className="absolute left-3 top-3.5 h-4 w-4 text-slate-400" />
+            <Search className="absolute left-3 top-3.5 h-4 w-4 text-slate-400 pointer-events-none" aria-hidden="true" />
+            <label className="sr-only" htmlFor="busca-terapeuta">Buscar terapeuta</label>
             <input
+              id="busca-terapeuta"
               value={filters.busca}
               onChange={(e) =>
                 setFilters((prev) => ({ ...prev, busca: e.target.value }))
               }
               placeholder="Buscar terapeuta..."
-              className="w-full border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm"
+              className="w-full border border-slate-200 rounded-xl pl-10 pr-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent"
             />
           </div>
         </div>
 
+        <div aria-live="polite" aria-atomic="true" className="sr-only">
+          {anuncioResultado}
+        </div>
+
         {loading && (
-          <div className="bg-white rounded-2xl p-10 text-center text-slate-400">
-            Carregando profissionais...
+          <div
+            role="status"
+            aria-label="Carregando profissionais"
+            className="bg-white rounded-2xl p-10 text-center text-slate-500"
+          >
+            <span aria-hidden="true">Carregando profissionais...</span>
           </div>
         )}
 
-        {!loading && grupos.length === 0 && (
-          <div className="bg-white rounded-2xl p-10 text-center text-slate-400">
+        {!loading && erro && (
+          <div role="alert" className="bg-rose-50 border border-rose-200 rounded-2xl p-6 text-center">
+            <p className="text-sm text-rose-700 mb-3">{erro}</p>
+            <button
+              type="button"
+              onClick={carregarDados}
+              className="text-sm font-semibold text-rose-700 underline underline-offset-2 hover:text-rose-900 focus:outline-none focus:ring-2 focus:ring-rose-500 rounded"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        )}
+
+        {!loading && !erro && grupos.length === 0 && (
+          <div className="bg-white rounded-2xl p-10 text-center text-slate-500">
             Nenhum profissional encontrado
           </div>
         )}
 
-        {!loading &&
+        {!loading && !erro &&
           grupos.map((grupo) => (
-            <ControleTerapeutaMobileCard
+            <DisponibilidadeTerapeutaCard
               key={grupo.terapeuta}
               grupo={grupo}
               onStatusChanged={carregarDados}
@@ -319,6 +398,15 @@ export default function RegistroDisponibilidadePage() {
               atualizarStatusDireto={(g, status) => {
                 void atualizarStatusDireto(g as any, status as any)
               }}
+              onAbrirCobertura={(g) => {
+                const grupoCompleto = grupos.find((gr) => gr.terapeuta === g.terapeuta)
+                if (grupoCompleto) {
+                  setGrupoCobertura({
+                    ...grupoCompleto,
+                    atendimentos: obterTodosAtendimentosDoTerapeuta(grupoCompleto.terapeuta),
+                  })
+                }
+              }}
               salvandoStatus={salvandoStatus}
             />
           ))}
@@ -334,6 +422,13 @@ export default function RegistroDisponibilidadePage() {
         toggleHorario={toggleHorario}
         atualizarStatusSelecionado={atualizarStatusSelecionado}
         setModalStatus={setModalStatus}
+      />
+
+      <CoberturaModal
+        grupo={grupoCobertura}
+        data={filters.data}
+        onClose={() => setGrupoCobertura(null)}
+        onSuccess={carregarDados}
       />
     </main>
   )

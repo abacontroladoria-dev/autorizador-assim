@@ -45,6 +45,20 @@
     --radius-2xl: calc(var(--radius) * 1.8);
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
+
+    /* ── Brand tokens ───────────────────────────────────────── */
+    /* accent: icons, borders, focus rings, fills (non-text)     */
+    --color-brand: oklch(0.62 0.092 217);
+    /* dark: hover state for brand-filled buttons                */
+    --color-brand-dark: oklch(0.54 0.092 217);
+    /* fg: text on white / light surfaces — WCAG AA ≥4.5:1      */
+    --color-brand-fg: oklch(0.48 0.092 217);
+    /* surface: avatar bg, subtle tinted containers              */
+    --color-brand-surface: oklch(0.966 0.018 217);
+    /* hover: button hover background                            */
+    --color-brand-hover: oklch(0.979 0.011 217);
+    /* bg: page-level background                                 */
+    --color-brand-bg: oklch(0.975 0.009 217);
 }
 
 :root {

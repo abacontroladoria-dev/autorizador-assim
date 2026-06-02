@@ -383,7 +383,7 @@ export default function Sidebar() {
           {(canAccess("/central-terapeutas") || canAccess("/agenda/terapeutas") || canAccess("/agenda/salas")) && (
             <SidebarGroup title="Terapêutico" icon={Stethoscope}>
               {canAccess("/central-terapeutas") && (
-                <MenuItem label="Escala Terapêutica" icon={UserRound} path="/central-terapeutas" />
+                <MenuItem label="Gestão" icon={UserRound} path="/central-terapeutas" />
               )}
               {canAccess("/agenda/terapeutas") && (
                 <MenuItem label="Agenda Terapêutica" icon={CalendarDays} path="/agenda/terapeutas" />

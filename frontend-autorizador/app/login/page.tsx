@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react"
+import Image from "next/image"
 import { getSupabaseClient } from "@/lib/supabase/client";
 import { getFunctionUrl } from "@/lib/supabase/functions";
 import { useRouter } from "next/navigation";
@@ -14,7 +15,6 @@ export default function Login() {
   const [erro, setErro] = useState("");
   const router = useRouter();
   const supabase = getSupabaseClient()
-  const [checking, setChecking] = useState(true)
 
   async function handleLogin(e: React.FormEvent) {
     e.preventDefault();
@@ -31,7 +31,7 @@ export default function Login() {
       })
 
       if (!res.ok) {
-        setErro("Usuário não encontrado");
+        setErro("Usuário não encontrado. Tente acessar com seu e-mail.");
         setLoading(false);
         return;
       }
@@ -46,7 +46,7 @@ export default function Login() {
     });
 
     if (error || !data?.user) {
-      setErro("Login ou senha inválidos");
+      setErro("Login ou senha incorretos. Verifique e tente novamente.");
       setLoading(false);
       return;
     }
@@ -67,107 +67,124 @@ export default function Login() {
   useEffect(() => {
     let mounted = true
 
-    async function checkUser() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!mounted) return
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (!mounted || !user) return
+      supabase
+        .from('usuarios')
+        .select('role')
+        .eq('id', user.id)
+        .single()
+        .then(({ data: perfil }) => {
+          if (!mounted) return
+          if (perfil?.role === 'disponibilidade_terapeuta') {
+            router.replace('/disponibilidade-terapeuta/')
+          } else {
+            router.replace("/")
+          }
+        })
+    })
 
-      if (user) {
-        const { data: perfil } = await supabase
-          .from('usuarios')
-          .select('role')
-          .eq('id', user.id)
-          .single()
-
-        if (perfil?.role === 'disponibilidade_terapeuta') {
-          router.replace('/disponibilidade-terapeuta/')
-        } else {
-          router.replace("/")
-        }
-      } else {
-        setChecking(false)
-      }
-    }
-
-    checkUser()
     return () => { mounted = false }
   }, [])
 
-  if (checking) return null
-
   return (
-    <div className="min-h-screen flex items-center justify-center bg-linear-to-br from-gray-100 to-gray-200">
-      <div className="w-full max-w-md bg-white p-8 rounded-2xl shadow-2xl">
+    <main className="min-h-dvh flex flex-col items-center justify-center bg-brand-bg px-4 py-6">
+      <div className="w-full max-w-md bg-white p-6 sm:p-8 rounded-2xl shadow-sm border border-slate-200">
 
         <div className="flex justify-center mb-4">
-          <img
+          <Image
             src="/logo-universo-aba.png"
             alt="Universo ABA"
-            className="h-32 object-contain drop-shadow-sm"
+            width={200}
+            height={128}
+            priority
+            sizes="(max-width: 639px) 125px, 175px"
+            className="h-20 sm:h-28 w-auto object-contain drop-shadow-sm"
           />
         </div>
 
         <div className="text-center mb-6">
-          <h1 className="text-xl font-semibold text-gray-800">
+          <h1 id="page-title" className="text-xl font-semibold text-slate-800 text-balance">
             Central de Autorizações
           </h1>
-          <p className="text-sm text-gray-500">
-            GESTAO_CLINICA • Sistema interno
+          <p className="mt-1 text-sm text-slate-600">
+            Clínica Universo ABA · Sistema interno
           </p>
         </div>
 
-        <form onSubmit={handleLogin} className="space-y-4">
+        <form onSubmit={handleLogin} aria-labelledby="page-title" className="space-y-4">
 
           {erro && (
-            <div className="bg-red-50 border border-red-200 text-red-600 text-sm px-3 py-2 rounded-lg">
+            <div
+              id="login-error"
+              role="alert"
+              className="bg-rose-50 border border-rose-200 text-rose-700 text-sm px-3 py-2.5 rounded-lg"
+            >
               {erro}
             </div>
           )}
 
           <div>
-            <label className="text-xs font-semibold text-gray-500 uppercase">
-              Login
+            <label
+              htmlFor="login-field"
+              className="text-xs font-semibold text-slate-600"
+            >
+              Usuário ou e-mail
             </label>
             <input
+              id="login-field"
               type="text"
-              placeholder="E-mail ou usuário"
+              autoComplete="username"
+              autoFocus
               value={login}
               onChange={(e) => setLogin(e.target.value.toLowerCase())}
-              className="mt-1 w-full border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:ring-2 focus:ring-[#3A8FB7]"
+              aria-invalid={erro ? true : undefined}
+              aria-describedby={erro ? "login-error" : undefined}
+              className="mt-1 w-full border border-slate-200 rounded-xl px-4 py-3 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent aria-invalid:border-rose-300 aria-invalid:focus:ring-rose-400 transition-colors"
             />
           </div>
 
           <div>
-            <label className="text-xs font-semibold text-gray-500 uppercase">
+            <label
+              htmlFor="senha-field"
+              className="text-xs font-semibold text-slate-600"
+            >
               Senha
             </label>
             <div className="relative mt-1">
               <input
+                id="senha-field"
                 type={showPassword ? "text" : "password"}
-                placeholder="Senha"
+                autoComplete="current-password"
                 value={senha}
                 onChange={(e) => setSenha(e.target.value)}
-                className="w-full border border-gray-300 rounded-lg px-4 py-2 pr-10 focus:outline-none focus:ring-2 focus:ring-[#3A8FB7]"
+                aria-invalid={erro ? true : undefined}
+                aria-describedby={erro ? "login-error" : undefined}
+                className="w-full border border-slate-200 rounded-xl px-4 py-3 pr-11 text-sm text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent aria-invalid:border-rose-300 aria-invalid:focus:ring-rose-400 transition-colors"
               />
               <button
                 type="button"
+                aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
                 onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-2.5 text-gray-400 hover:text-gray-600"
+                className="absolute inset-y-0 right-0 flex items-center pr-3 pl-2 text-slate-400 hover:text-slate-600 active:text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand rounded-r-xl transition-colors"
               >
-                {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
               </button>
             </div>
           </div>
 
-          <button
-            type="submit"
-            disabled={loading}
-            className="w-full bg-[#3A8FB7] hover:bg-[#2f7aa0] text-white py-2 rounded-lg font-medium transition disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {loading ? "Entrando..." : "Entrar"}
-          </button>
+          <div className="pt-2">
+            <button
+              type="submit"
+              disabled={loading}
+              className="w-full h-11 bg-brand hover:bg-brand-dark active:opacity-90 text-white rounded-xl font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2"
+            >
+              {loading ? "Entrando…" : "Entrar"}
+            </button>
+          </div>
 
         </form>
       </div>
-    </div>
+    </main>
   );
 }

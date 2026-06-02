@@ -1,0 +1,211 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-02T00:00:00Z",
+  "title": "Design System: ASSIM Autorizador",
+  "extensions": {
+    "colorMeta": {
+      "clinical-steel": {
+        "role": "primary",
+        "displayName": "Clinical Steel",
+        "canonical": "oklch(0.62 0.092 217)",
+        "tonalRamp": [
+          "oklch(0.15 0.060 217)",
+          "oklch(0.25 0.070 217)",
+          "oklch(0.35 0.085 217)",
+          "oklch(0.48 0.092 217)",
+          "oklch(0.62 0.092 217)",
+          "oklch(0.72 0.060 217)",
+          "oklch(0.85 0.035 217)",
+          "oklch(0.966 0.018 217)"
+        ]
+      },
+      "clinical-steel-fg": {
+        "role": "primary-text",
+        "displayName": "Clinical Steel (accessible text)",
+        "canonical": "oklch(0.48 0.092 217)",
+        "note": "WCAG AA compliant on white: ≥4.5:1. Use for all brand-colored text below 24px."
+      },
+      "clinical-steel-surface": {
+        "role": "primary-surface",
+        "displayName": "Steel Tint",
+        "canonical": "oklch(0.966 0.018 217)"
+      },
+      "clinical-ground": {
+        "role": "neutral-bg",
+        "displayName": "Clinical Ground",
+        "canonical": "oklch(0.975 0.009 217)"
+      },
+      "status-available": {
+        "role": "semantic-success",
+        "displayName": "Available Emerald",
+        "canonical": "#059669",
+        "tonalRamp": ["#064e3b","#065f46","#047857","#059669","#10b981","#34d399","#6ee7b7","#d1fae5"]
+      },
+      "status-unavailable": {
+        "role": "semantic-error",
+        "displayName": "Unavailable Rose",
+        "canonical": "#e11d48",
+        "tonalRamp": ["#4c0519","#881337","#be123c","#e11d48","#f43f5e","#fb7185","#fda4af","#ffe4e6"]
+      },
+      "status-partial": {
+        "role": "semantic-warning",
+        "displayName": "Partial Amber",
+        "canonical": "#b45309",
+        "tonalRamp": ["#451a03","#78350f","#92400e","#b45309","#d97706","#f59e0b","#fbbf24","#fef3c7"]
+      },
+      "status-substituted": {
+        "role": "semantic-info",
+        "displayName": "Substitute Sky",
+        "canonical": "#0369a1",
+        "tonalRamp": ["#082f49","#0c4a6e","#075985","#0369a1","#0284c7","#0ea5e9","#38bdf8","#e0f2fe"]
+      },
+      "status-pending": {
+        "role": "neutral-secondary",
+        "displayName": "Pending Slate",
+        "canonical": "#64748b",
+        "tonalRamp": ["#0f172a","#1e293b","#334155","#475569","#64748b","#94a3b8","#cbd5e1","#f1f5f9"]
+      }
+    },
+    "typographyMeta": {
+      "title": { "displayName": "Title", "purpose": "Therapist names and primary card identity labels." },
+      "body": { "displayName": "Body", "purpose": "Therapy types, form control values, button labels, dropdowns." },
+      "label": { "displayName": "Label", "purpose": "Status badges, session patient names, session timestamps." },
+      "caption": { "displayName": "Caption", "purpose": "Audit trail metadata only — never for instructional or interactive text." }
+    },
+    "shadows": [
+      {
+        "name": "card-ambient",
+        "value": "0 1px 2px rgba(15, 23, 42, 0.04)",
+        "purpose": "Applied to Therapist Cards and Filter Panel only. Lifts cards off Clinical Ground. No other shadow in the system."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-transition",
+        "value": "150ms ease-out",
+        "purpose": "Default for button hover background shifts, chevron rotate, opacity changes. Never applied to layout properties."
+      }
+    ],
+    "breakpoints": [
+      { "name": "mobile", "value": "375px", "note": "Primary target — PWA on therapist phones." },
+      { "name": "tablet", "value": "768px" },
+      { "name": "desktop", "value": "1024px", "note": "Dashboard/manager surfaces with sidebar." }
+    ]
+  },
+  "components": [
+    {
+      "name": "Button — Mark Available",
+      "kind": "button",
+      "refersTo": "button-available",
+      "description": "Primary action. Confirms therapist presence for all pending sessions in the group.",
+      "html": "<button class=\"ds-btn-available\">Disponível</button>",
+      "css": ".ds-btn-available { background: #059669; color: #ffffff; border: none; border-radius: 14px; height: 44px; padding: 0 16px; font-size: 14px; font-weight: 600; font-family: Geist, system-ui, sans-serif; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: background 150ms ease-out; } .ds-btn-available:hover { background: #047857; } .ds-btn-available:focus-visible { outline: none; box-shadow: 0 0 0 2px #059669, 0 0 0 4px rgba(5,150,105,0.25); } .ds-btn-available:disabled { opacity: 0.5; cursor: not-allowed; }"
+    },
+    {
+      "name": "Button — Mark Unavailable",
+      "kind": "button",
+      "refersTo": "button-unavailable",
+      "description": "Destructive action. Opens the status modal to capture reason and select which sessions are affected.",
+      "html": "<button class=\"ds-btn-unavailable\">Indisponível</button>",
+      "css": ".ds-btn-unavailable { background: #e11d48; color: #ffffff; border: none; border-radius: 14px; height: 44px; padding: 0 16px; font-size: 14px; font-weight: 600; font-family: Geist, system-ui, sans-serif; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: background 150ms ease-out; } .ds-btn-unavailable:hover { background: #be123c; } .ds-btn-unavailable:focus-visible { outline: none; box-shadow: 0 0 0 2px #e11d48, 0 0 0 4px rgba(225,29,72,0.25); } .ds-btn-unavailable:disabled { opacity: 0.5; cursor: not-allowed; }"
+    },
+    {
+      "name": "Button — Brand Outline",
+      "kind": "button",
+      "refersTo": "button-brand-outline",
+      "description": "Tertiary action for secondary paths: Substituição, Encerrar disponibilidade. Brand border, accessible brand text.",
+      "html": "<button class=\"ds-btn-brand-outline\">Substituição</button>",
+      "css": ".ds-btn-brand-outline { background: transparent; color: oklch(0.48 0.092 217); border: 1px solid oklch(0.62 0.092 217); border-radius: 14px; height: 44px; padding: 0 16px; font-size: 14px; font-weight: 600; font-family: Geist, system-ui, sans-serif; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: background 150ms ease-out; } .ds-btn-brand-outline:hover { background: oklch(0.979 0.011 217); } .ds-btn-brand-outline:focus-visible { outline: none; box-shadow: 0 0 0 2px oklch(0.62 0.092 217), 0 0 0 4px oklch(0.62 0.092 217 / 0.25); } .ds-btn-brand-outline:disabled { opacity: 0.5; cursor: not-allowed; }"
+    },
+    {
+      "name": "Status Badge",
+      "kind": "chip",
+      "refersTo": "status-badge-available",
+      "description": "Five-state pill indicating current therapist availability. Color and label both required — never color alone.",
+      "html": "<div class=\"ds-badge-row\"><span class=\"ds-badge ds-badge-disponivel\">Disponível</span><span class=\"ds-badge ds-badge-indisponivel\">Indisponível</span><span class=\"ds-badge ds-badge-parcial\">Indispon. parcial</span><span class=\"ds-badge ds-badge-substituido\">Substituído</span><span class=\"ds-badge ds-badge-pendente\">Pendente</span></div>",
+      "css": ".ds-badge-row { display: flex; flex-wrap: wrap; gap: 8px; } .ds-badge { display: inline-flex; align-items: center; border-radius: 9999px; padding: 4px 12px; font-size: 12px; font-weight: 600; font-family: Geist, system-ui, sans-serif; white-space: nowrap; } .ds-badge-disponivel { background: #d1fae5; color: #059669; } .ds-badge-indisponivel { background: #ffe4e6; color: #e11d48; } .ds-badge-parcial { background: #fef3c7; color: #b45309; } .ds-badge-substituido { background: #e0f2fe; color: #0369a1; } .ds-badge-pendente { background: #f1f5f9; color: #64748b; }"
+    },
+    {
+      "name": "Filter Input",
+      "kind": "input",
+      "refersTo": null,
+      "description": "Standard text/date/select control used in the Filter Panel. Clinical Steel focus ring, full-radius pill.",
+      "html": "<div class=\"ds-input-wrap\"><input class=\"ds-input\" type=\"text\" placeholder=\"Buscar terapeuta...\" /></div>",
+      "css": ".ds-input-wrap { position: relative; width: 100%; } .ds-input { width: 100%; background: #ffffff; border: 1px solid #e2e8f0; border-radius: 14px; padding: 12px 16px; font-size: 14px; font-weight: 500; font-family: Geist, system-ui, sans-serif; color: #1e293b; box-sizing: border-box; transition: border-color 150ms ease-out, box-shadow 150ms ease-out; } .ds-input::placeholder { color: #64748b; } .ds-input:focus { outline: none; border-color: transparent; box-shadow: 0 0 0 2px oklch(0.62 0.092 217); }"
+    },
+    {
+      "name": "Therapist Card (shell)",
+      "kind": "card",
+      "refersTo": "therapist-card",
+      "description": "Two-zone layout. Identity zone (top): avatar + therapist name + therapy type + meta row + status badge. Action zone (below divider): 44px action buttons. Optional audit trail and expanded session rows.",
+      "html": "<div class=\"ds-card\"><div class=\"ds-card-identity\"><div class=\"ds-avatar\">AB</div><div class=\"ds-card-info\"><h3 class=\"ds-card-name\">Ana Beatriz</h3><p class=\"ds-card-therapy\">ABA Intensivo</p><div class=\"ds-card-meta\"><span class=\"ds-meta-unit\">Unidade Norte</span><span class=\"ds-meta-sep\">·</span><span>4 sessões</span><span class=\"ds-meta-sep\">·</span><span class=\"ds-meta-time\">08:00 – 12:00</span></div></div><span class=\"ds-badge ds-badge-pendente\">Pendente</span></div><div class=\"ds-card-actions\"><button class=\"ds-btn-available\" style=\"flex:1\">Disponível</button><button class=\"ds-btn-unavailable\" style=\"flex:1\">Indisponível</button></div></div>",
+      "css": ".ds-card { background: #ffffff; border: 1px solid #e2e8f0; border-radius: 18px; box-shadow: 0 1px 2px rgba(15,23,42,0.04); overflow: hidden; font-family: Geist, system-ui, sans-serif; } .ds-card-identity { display: flex; align-items: center; padding: 16px; gap: 12px; } .ds-avatar { width: 44px; height: 44px; border-radius: 9999px; background: oklch(0.966 0.018 217); color: oklch(0.48 0.092 217); display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px; flex-shrink: 0; } .ds-card-info { min-width: 0; flex: 1; } .ds-card-name { margin: 0; font-size: 16px; font-weight: 700; color: #1e293b; line-height: 1.25; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-card-therapy { margin: 2px 0 0; font-size: 14px; font-weight: 500; color: oklch(0.48 0.092 217); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; } .ds-card-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-top: 4px; font-size: 12px; color: #64748b; } .ds-meta-unit { font-weight: 600; color: #334155; } .ds-meta-sep { color: #cbd5e1; } .ds-meta-time { font-weight: 700; color: #6d28d9; } .ds-card-actions { border-top: 1px solid #f1f5f9; padding: 12px 16px 16px; display: flex; gap: 8px; } .ds-badge { display: inline-flex; align-items: center; border-radius: 9999px; padding: 4px 12px; font-size: 12px; font-weight: 600; white-space: nowrap; flex-shrink: 0; } .ds-badge-pendente { background: #f1f5f9; color: #64748b; } .ds-btn-available { background: #059669; color: #fff; border: none; border-radius: 14px; height: 44px; padding: 0 16px; font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: background 150ms ease-out; } .ds-btn-available:hover { background: #047857; } .ds-btn-unavailable { background: #e11d48; color: #fff; border: none; border-radius: 14px; height: 44px; padding: 0 16px; font-size: 14px; font-weight: 600; font-family: inherit; cursor: pointer; display: inline-flex; align-items: center; justify-content: center; transition: background 150ms ease-out; } .ds-btn-unavailable:hover { background: #be123c; }"
+    },
+    {
+      "name": "Sidebar Nav Item",
+      "kind": "nav",
+      "refersTo": null,
+      "description": "Fixed left sidebar navigation. Default and active states. Active uses left border indicator + tinted bg.",
+      "html": "<nav class=\"ds-sidebar\"><button class=\"ds-nav-item ds-nav-active\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><rect x=\"3\" y=\"3\" width=\"7\" height=\"7\"/><rect x=\"14\" y=\"3\" width=\"7\" height=\"7\"/><rect x=\"3\" y=\"14\" width=\"7\" height=\"7\"/><rect x=\"14\" y=\"14\" width=\"7\" height=\"7\"/></svg>Dashboard</button><button class=\"ds-nav-item\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\"><path d=\"M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2\"/><circle cx=\"9\" cy=\"7\" r=\"4\"/><path d=\"M23 21v-2a4 4 0 0 0-3-3.87\"/><path d=\"M16 3.13a4 4 0 0 1 0 7.75\"/></svg>Terapeutas</button></nav>",
+      "css": ".ds-sidebar { background: #ffffff; width: 256px; padding: 12px; display: flex; flex-direction: column; gap: 2px; border-right: 1px solid #e2e8f0; } .ds-nav-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px 8px 12px; border-radius: 8px; font-size: 14px; font-family: Geist, system-ui, sans-serif; cursor: pointer; border: none; border-left: 2px solid transparent; color: #475569; background: transparent; text-align: left; transition: background 150ms ease-out, color 150ms ease-out; } .ds-nav-item:hover { background: #f8fafc; color: #1e293b; } .ds-nav-item.ds-nav-active { background: #eff6ff; border-left-color: #3b82f6; color: #1d4ed8; font-weight: 500; padding-left: 10px; } .ds-nav-item svg { flex-shrink: 0; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Clinical Dispatch",
+    "overview": "The ASSIM Autorizador is an operational tool, not a product experience. Every therapist who opens it is already in the middle of a workday — arriving at the clinic, checking which sessions are covered, marking their own availability before the 08:00 block begins. The interface must report clearly, accept input immediately, and disappear. The job is done when the therapist has marked their status and moved on.\n\nThe system's aesthetic is white-surface clinical: flat cards, a single steel-blue brand signal, and a five-color semantic vocabulary for session status. Color means something specific here; it is never decorative. The typography is a single weight-modulated family (Geist) at fixed rem scales — no fluid clamp, no display pairing — because the interface loads in the same DPI context every time and users need consistency, not dynamism.\n\nThe design explicitly rejects: multi-step flows that delay the core status action, calendar-view abstractions that hide individual session detail, and mobile-hostile layouts (the tool is used as a PWA on the clinic floor, often on a phone).",
+    "keyCharacteristics": [
+      "White-surface base with brand steel-blue as the single identity signal",
+      "Five fixed semantic colors for availability states — no improvisation",
+      "44px minimum touch targets throughout — no exceptions",
+      "Cards organized by therapist, not by time slot",
+      "Two-zone card structure: identity zone above the divider, action zone below",
+      "Flat elevation with shadow-sm cards floating on a brand-tinted ground"
+    ],
+    "rules": [
+      {
+        "name": "The One Steel Rule",
+        "body": "Clinical Steel appears as an accent signal, not a background color. It colors initials, focus rings, brand-label text, and navigation indicators. It does not fill buttons, tint sections, or paint headings.",
+        "section": "colors"
+      },
+      {
+        "name": "The Status Lock Rule",
+        "body": "The five semantic state colors (emerald, rose, amber, sky, slate) are locked to their meanings. Adding a sixth color for a new state requires updating DESIGN.md first.",
+        "section": "colors"
+      },
+      {
+        "name": "The Fixed Scale Rule",
+        "body": "No clamp(), no fluid type. Font sizes are fixed rem values. The tool runs on known DPI contexts and users need stable spatial memory.",
+        "section": "typography"
+      },
+      {
+        "name": "The Single Family Rule",
+        "body": "Geist at weight contrast carries all hierarchy. Adding a second typeface is prohibited.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat-by-Default Rule",
+        "body": "Surfaces rest flat. shadow-sm lifts cards off the page background, and that is its only job. A button that adds a shadow on hover is wrong.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do use Clinical Steel fg (oklch(0.48 0.092 217)) for any brand-colored text on white or Clinical Steel Surface.",
+      "Do make every interactive element at least 44px tall.",
+      "Do show patient name, time, and room detail inside the card before confirming status.",
+      "Do use the full five-badge vocabulary for status — every state has a distinct semantic and visual identity.",
+      "Do separate card identity (who) from card action (what to do) with the slate-100 divider.",
+      "Do announce loading state, error state, and result count via aria-live='polite' regions.",
+      "Do wrap all form controls in label elements, even when the label is visually hidden."
+    ],
+    "donts": [
+      "Don't bury session detail behind a calendar or timeline view.",
+      "Don't introduce multi-step flows for the core available/unavailable action — one or two taps maximum.",
+      "Don't use the base Clinical Steel as text color on any surface lighter than oklch(0.50).",
+      "Don't add new status colors without updating the Status Lock Rule in this document first.",
+      "Don't add shadow on hover or active states — state changes are color shifts, not elevation changes.",
+      "Don't build mobile-hostile layouts — no hover-only affordances, no fixed-width containers.",
+      "Don't use placeholder text as the only form label.",
+      "Don't use side-stripe borders (border-left or border-right wider than 1px) on cards or list items."
+    ]
+  }
+}

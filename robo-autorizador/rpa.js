@@ -259,7 +259,7 @@ const browser = await chromium.connectOverCDP(
   'http://127.0.0.1:9222'
 );
 
-const context = browser.contexts()[0];
+const context = browser.contexts()[0] ?? await browser.newContext();
 
 const page = await context.newPage();
 
