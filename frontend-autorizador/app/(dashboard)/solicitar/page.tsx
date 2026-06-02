@@ -2,7 +2,7 @@
 
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useState, useMemo } from 'react'
 
 import { getSupabaseClient } from '@/lib/supabase/client'
 
@@ -126,6 +126,27 @@ const unidades = [
   )
 
 ].sort()
+
+  const sessoesHoje = useMemo(() => {
+    const grupos: Record<number, { horario: string; terapia: string }[]> = {}
+
+    listaDia.forEach(p => {
+      if (!p.mostrar_na_tela) return
+      const id = p.paciente_id
+      if (!grupos[id]) grupos[id] = []
+      grupos[id].push({ horario: p.horario ?? '', terapia: p.terapias?.[0] ?? '' })
+    })
+
+    const lookup: Record<string, { index: number; total: number }> = {}
+    Object.entries(grupos).forEach(([id, sessoes]) => {
+      sessoes.sort((a, b) => a.horario.localeCompare(b.horario))
+      sessoes.forEach((s, i) => {
+        lookup[`${id}_${s.horario}_${s.terapia}`] = { index: i + 1, total: sessoes.length }
+      })
+    })
+
+    return lookup
+  }, [listaDia])
 
   const convenios = [
 
@@ -1304,6 +1325,9 @@ useEffect(() => {
 			  <div className="space-y-3">
 				{(listaOrdenada as any[]).map((p) => {
 
+          const sessaoKey = `${p.paciente_id}_${p.horario ?? ''}_${p.terapias?.[0] ?? ''}`
+          const sessaoInfo = sessoesHoje[sessaoKey]
+
 			  const ativo =
 				![
 				  'processando',
@@ -1324,10 +1348,15 @@ useEffect(() => {
 			  className="flex rounded-2xl border border-white/60 bg-white/90 border-slate-200/60 backdrop-blur-md shadow-[0_8px_30px_rgba(0,0,0,0.06)] hover:shadow-[0_10px_40px_rgba(0,0,0,0.10)] hover:-translate-y-[1px] transition-all duration-200 overflow-hidden"
 			>
 			  {/* ⏰ HORÁRIO */}
-			<div className="bg-gradient-to-b from-[#3A8FB7]/15 to-[#3A8FB7]/5 px-6 flex items-center justify-center min-w-[130px] border-r border-slate-200/60">
+			<div className="bg-gradient-to-b from-[#3A8FB7]/15 to-[#3A8FB7]/5 px-6 flex flex-col items-center justify-center gap-1 min-w-[130px] border-r border-slate-200/60">
 			  <span className="text-2xl font-bold text-[#3A8FB7] tracking-tight">
 				{p.horario?.slice(0, 5)}
 			  </span>
+			  {sessaoInfo && sessaoInfo.total > 1 && (
+			    <span className="text-[11px] font-bold text-white bg-[#3A8FB7] px-2.5 py-0.5 rounded-full shadow-sm">
+			      {sessaoInfo.index}/{sessaoInfo.total}
+			    </span>
+			  )}
 			</div>
 
 {/* CONTEÚDO */}

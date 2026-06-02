@@ -85,7 +85,8 @@ export default function Sidebar() {
   }
 
   function isActive(path: string) {
-    return pathname === path
+    const current = pathname.replace(/\/$/, "") || "/"
+    return current === path
   }
 
   async function handleLogout() {
@@ -307,25 +308,27 @@ export default function Sidebar() {
     return (
       <button
         onClick={() => router.push(path)}
-        className={`group flex w-full items-center gap-2.5 py-2 pr-2 rounded-lg text-sm transition-colors duration-150
+        className={`group flex w-full items-center gap-2.5 py-2 pr-2 rounded-lg text-sm transition-all duration-150
         ${
           active
-            ? "border-l-2 border-blue-500 bg-blue-50 pl-2.5 text-blue-700 font-medium"
-            : "border-l-2 border-transparent pl-2.5 text-slate-600 hover:bg-slate-50 hover:text-slate-800"
+            ? "border-l-2 border-[#3A8FB7] pl-2.5 font-semibold"
+            : "border-l-2 border-transparent pl-2.5 hover:bg-white/5"
         }`}
+        style={active ? { backgroundColor: "rgba(58,143,183,0.22)", color: "#e8f5fc" } : { color: "#b0c8e0" }}
       >
         <Icon
           size={16}
-          className={`shrink-0 ${active ? "text-blue-600" : "text-slate-400"}`}
+          className="shrink-0"
+          style={{ color: active ? "#5BAFD4" : "#7a9ab8" }}
         />
         <span className="flex-1 text-left">{label}</span>
         {path !== "/" && (
           <span
             onClick={e => { e.stopPropagation(); toggleFavorito(label, path) }}
-            className={`p-1 rounded transition-all duration-150 hover:bg-slate-200/70
+            className={`p-1 rounded transition-all duration-150 hover:bg-white/10
               ${isFav
-                ? "opacity-100 text-yellow-500"
-                : "opacity-0 group-hover:opacity-100 text-slate-300 hover:text-yellow-400"
+                ? "opacity-100 text-yellow-400"
+                : "opacity-0 group-hover:opacity-100 text-slate-600 hover:text-yellow-400"
               }`}
           >
             <Star size={12} fill={isFav ? "currentColor" : "none"} />
@@ -337,22 +340,25 @@ export default function Sidebar() {
 
   return (
     <>
-      <aside className="fixed top-0 left-0 w-64 h-screen bg-white border-r border-slate-200 flex flex-col z-50">
+      <aside className="fixed top-0 left-0 w-64 h-screen flex flex-col z-50"
+        style={{ background: "linear-gradient(180deg, #0e1c2e 0%, #0a1620 100%)", borderRight: "1px solid rgba(255,255,255,0.06)" }}>
 
         {/* LOGO */}
-        <div className="h-20 flex items-center justify-center border-b border-slate-100 px-6">
+        <div className="h-20 flex items-center justify-center px-6"
+          style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
           <img src="/logo-universo-aba.png" className="h-20 object-contain" />
         </div>
 
         {/* MENU */}
-        <nav className="flex-1 px-3 py-3 overflow-y-auto space-y-0.5">
+        <nav className="flex-1 px-3 py-3 overflow-y-auto space-y-0.5"
+          style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.08) transparent" }}>
 
           {/* Dashboard */}
           <MenuItem label="Dashboard" icon={LayoutDashboard} path="/" />
 
           {/* Favoritos */}
           <div className="pt-2">
-            <p className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider text-slate-400 select-none">
+            <p className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider select-none" style={{ color: "#6b8ba8" }}>
               ⭐ Favoritos
             </p>
             {favoritos
@@ -362,7 +368,7 @@ export default function Sidebar() {
               ))}
           </div>
 
-          <hr className="my-2 border-slate-100" />
+          <hr className="my-2" style={{ borderColor: "rgba(255,255,255,0.06)" }} />
 
           {/* Pacientes */}
           {(canAccess("/solicitar") || canAccess("/central-pacientes") || canAccess("/agenda/pacientes")) && (
@@ -420,20 +426,20 @@ export default function Sidebar() {
         </nav>
 
         {/* FOOTER — PERFIL */}
-        <div className="p-4 border-t border-slate-100" ref={menuRef}>
+        <div className="p-4" ref={menuRef} style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
           <div className="relative">
 
             <button
               onClick={() => setOpen(!open)}
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 transition-colors duration-150 cursor-pointer"
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors duration-150 cursor-pointer"
             >
               <div className="w-9 h-9 rounded-full bg-[#3A8FB7] text-white flex items-center justify-center font-semibold text-sm shrink-0">
                 {nome?.charAt(0)?.toUpperCase() || "U"}
               </div>
               <div className="flex-1 text-left min-w-0">
-                <p className="text-sm font-semibold text-slate-700 truncate leading-tight">{nome}</p>
+                <p className="text-sm font-semibold text-slate-200 truncate leading-tight">{nome}</p>
                 {role && (
-                  <p className="text-xs text-slate-400 capitalize leading-tight">
+                  <p className="text-xs text-slate-500 capitalize leading-tight">
                     {{
                       admin: "Administrador",
                       diretoria: "Diretoria",
@@ -446,7 +452,7 @@ export default function Sidebar() {
                   </p>
                 )}
               </div>
-              <span className={`text-slate-400 text-xs transition-transform duration-200 shrink-0 ${open ? "rotate-180" : ""}`}>
+              <span className={`text-slate-600 text-xs transition-transform duration-200 shrink-0 ${open ? "rotate-180" : ""}`}>
                 ▼
               </span>
             </button>

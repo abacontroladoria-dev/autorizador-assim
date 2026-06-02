@@ -80,11 +80,11 @@
     --border: oklch(0.922 0 0);
     --input: oklch(0.922 0 0);
     --ring: oklch(0.708 0 0);
-    --chart-1: oklch(0.87 0 0);
-    --chart-2: oklch(0.556 0 0);
-    --chart-3: oklch(0.439 0 0);
-    --chart-4: oklch(0.371 0 0);
-    --chart-5: oklch(0.269 0 0);
+    --chart-1: oklch(0.62 0.092 217);
+    --chart-2: oklch(0.68 0.14 169);
+    --chart-3: oklch(0.66 0.19 304);
+    --chart-4: oklch(0.76 0.15 73);
+    --chart-5: oklch(0.64 0.20 28);
     --radius: 0.625rem;
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
@@ -140,6 +140,34 @@
   html {
     @apply font-sans;
     }
+}
+
+/* ─── Global scrollbar ───────────────────────────────────────────────────── */
+html {
+  scrollbar-width: thin;
+  scrollbar-color: #cbd5e1 transparent;
+}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+
+/* ─── Login page ambient glow pulse ─────────────────────────────────────── */
+@keyframes glow-breathe {
+  0%, 100% { opacity: 0.55; transform: scale(1); }
+  50%       { opacity: 1;    transform: scale(1.08); }
+}
+
+/* ─── Login card accent bar shimmer ─────────────────────────────────────── */
+@keyframes shimmer-bar {
+  0%, 100% { background-position: 0% 50%; }
+  50%       { background-position: 100% 50%; }
+}
+
+/* ─── Login card float ───────────────────────────────────────────────────── */
+@keyframes float-card {
+  0%, 100% { transform: translateY(0px); }
+  50%       { transform: translateY(-10px); }
 }
 
 /* ─── FullCalendar — design system ASSIM ─────────────────────────────── */
