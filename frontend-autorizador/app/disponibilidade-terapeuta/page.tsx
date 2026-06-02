@@ -19,23 +19,13 @@ import {
 import type {
   ControleFilters,
   ControleTerapeuticoItem,
+  GrupoTerapeutaMobile,
+  StatusDisponibilidadeGrupo,
 } from '@/components/central-terapeutas/types'
 import { listarCentralTerapeutica } from '@/services/central-terapeutas.service'
 import { getSupabaseClient } from '@/lib/supabase/client'
 
 const supabase = getSupabaseClient()
-
-type GrupoTerapeutaMobile = {
-  terapeuta: string
-  terapia: string
-  terapiaExibicao?: string
-  unidade: string
-  sala: string
-  primeiroHorario: string
-  status: StatusDisponibilidade
-  substituto?: string
-  atendimentos: ControleTerapeuticoItem[]
-}
 
 type Ordenacao = 'alfabetica' | 'sala' | 'horario'
 
@@ -49,35 +39,24 @@ function getHojeLocal() {
 
 function calcularStatusAtual(
   atendimentos: ControleTerapeuticoItem[]
-): StatusDisponibilidade {
-  const agora = new Date()
-  const ordenados = [...atendimentos].sort((a, b) =>
-    String(a.hora_inicial).localeCompare(String(b.hora_inicial))
-  )
+): StatusDisponibilidadeGrupo {
+  const statuses = atendimentos.map((a) => normalizarStatus(a.status))
+  const temDisponivel   = statuses.some((s) => s === 'disponivel')
+  const temIndisponivel = statuses.some((s) => s === 'indisponivel')
+  const temSubstituido  = statuses.some((s) => s === 'substituido')
+  const todosPendente   = statuses.every((s) => s === 'pendente')
 
-  const atual = ordenados.find((item) => {
-    const inicio = new Date(`${item.data_atendimento}T${item.hora_inicial}`)
-    const fim = new Date(`${item.data_atendimento}T${item.hora_final}`)
-    return agora >= inicio && agora <= fim
-  })
+  if (temDisponivel && temIndisponivel) return 'parcial'
+  if (temIndisponivel && !temDisponivel) return 'indisponivel'
+  if (temSubstituido && !temIndisponivel && !temDisponivel) return 'substituido'
+  if (temDisponivel && !temIndisponivel) return 'disponivel'
+  if (todosPendente) return 'pendente'
 
-  if (atual?.status) {
-    return (normalizarStatus(atual.status) as StatusDisponibilidade) || 'pendente'
-  }
-
-  const proximo = ordenados.find((item) => {
-    const inicio = new Date(`${item.data_atendimento}T${item.hora_inicial}`)
-    return inicio >= agora
-  })
-
-  if (proximo?.status) {
-    return (normalizarStatus(proximo.status) as StatusDisponibilidade) || 'pendente'
-  }
-
-  return (
-    (normalizarStatus(ordenados[ordenados.length - 1]?.status) as StatusDisponibilidade) ||
-    'pendente'
-  )
+  return (normalizarStatus(
+    [...atendimentos].sort((a, b) =>
+      String(a.hora_inicial).localeCompare(String(b.hora_inicial))
+    ).at(-1)?.status
+  ) as StatusDisponibilidadeGrupo) || 'pendente'
 }
 
 export default function RegistroDisponibilidadePage() {
@@ -97,7 +76,7 @@ export default function RegistroDisponibilidadePage() {
   })
 
   const [ordenacao, setOrdenacao] = useState<Ordenacao>('alfabetica')
-  const [filtroStatus, setFiltroStatus] = useState<'todos' | StatusDisponibilidade>('todos')
+  const [filtroStatus, setFiltroStatus] = useState<'todos' | StatusDisponibilidadeGrupo>('todos')
 
   async function carregarDados() {
     setLoading(true)
@@ -210,6 +189,14 @@ export default function RegistroDisponibilidadePage() {
 
     Object.values(gruposMap).forEach((grupo) => {
       grupo.status = calcularStatusAtual(grupo.atendimentos)
+
+      const comAlteracao = grupo.atendimentos
+        .filter((a) => a.confirmado_em && a.confirmado_por_nome)
+        .sort((a, b) => (b.confirmado_em! > a.confirmado_em! ? 1 : -1))
+      if (comAlteracao.length > 0) {
+        grupo.ultimaAlteracaoPor = comAlteracao[0].confirmado_por_nome ?? null
+        grupo.ultimaAlteracaoEm  = comAlteracao[0].confirmado_em ?? null
+      }
     })
 
     let lista = Object.values(gruposMap)
@@ -275,7 +262,7 @@ export default function RegistroDisponibilidadePage() {
             <select
               value={filtroStatus}
               onChange={(e) =>
-                setFiltroStatus(e.target.value as 'todos' | StatusDisponibilidade)
+                setFiltroStatus(e.target.value as 'todos' | StatusDisponibilidadeGrupo)
               }
               className="w-full appearance-none border border-slate-200 rounded-xl px-4 py-3 text-sm bg-white"
             >
@@ -323,7 +310,7 @@ export default function RegistroDisponibilidadePage() {
                   ...g,
                   status: g.status as StatusDisponibilidade,
                   atendimentos: obterTodosAtendimentosDoTerapeuta(g.terapeuta),
-                } as GrupoTerapeutaMobile
+                }
 
                 if (status === 'disponivel' || status === 'indisponivel') {
                   abrirModalStatusOriginal(grupoCompleto, status)

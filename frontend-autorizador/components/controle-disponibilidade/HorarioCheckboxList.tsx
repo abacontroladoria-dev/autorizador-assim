@@ -30,7 +30,7 @@ export default function HorarioCheckboxList({
 
         const retroativo =
           new Date(
-            `${data}T${horario.horario.slice}`
+            `${data}T${horario.horario.slice(0, 5)}:00`
           ) < new Date()
 
         return (
