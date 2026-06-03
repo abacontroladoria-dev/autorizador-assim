@@ -95,34 +95,12 @@ Profissionais classificados como "não trabalha hoje" devem continuar aparecendo
 
 ## Recomendação Automática
 
-A recomendação automática somente poderá ocorrer entre profissionais classificados como **Livre**.
+## Recomendação Automática
 
-Profissionais classificados como **Ocupado** ou **Não trabalha hoje** nunca poderão ser pré-selecionados automaticamente.
+As regras de recomendação e pré-seleção automática de substitutos são definidas em documento próprio.
 
-### Critérios de Priorização
+Consultar:
 
-Entre os profissionais livres elegíveis, a ordem de prioridade será:
+`recomendacao-automatica-substituicoes.md`
 
-1. Já atende o paciente atualmente;
-2. Possui Terapia Real compatível;
-3. Menor carga de atendimentos no dia.
-
-### Regra Especial do Grupo ABA
-
-Para sessões do Grupo ABA:
-
-1. Buscar profissionais livres das terapias:
-
-   * Aplicador ABA (AE)
-   * Aplicador ABA (PS)
-   * Aplicador ABA (SF)
-
-2. Somente se não existir nenhum profissional livre do Grupo ABA, permitir a recomendação de:
-
-   * Coordenador de Caso
-
-### Pré-seleção
-
-O profissional com maior prioridade deverá ser exibido já selecionado no card de substituição.
-
-Caso não exista nenhum profissional livre elegível, nenhuma pré-seleção automática deverá ser realizada.
+A separação foi realizada para permitir evolução independente das regras de elegibilidade e das regras de distribuição automática.
