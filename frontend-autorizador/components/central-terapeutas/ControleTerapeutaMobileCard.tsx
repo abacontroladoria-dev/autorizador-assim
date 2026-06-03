@@ -1,6 +1,6 @@
 'use client'
 
-import { memo, useState } from 'react'
+import { memo, useMemo, useState } from 'react'
 
 import {
   ChevronDown,
@@ -15,7 +15,6 @@ import type { StatusDisponibilidade } from '@/hooks/useControleDisponibilidade'
 
 type Props = {
   grupo: GrupoTerapeutaMobile
-  onStatusChanged?: () => void
   abrirModalStatus: (
     grupo: GrupoTerapeutaMobile,
     status: StatusDisponibilidade
@@ -41,44 +40,61 @@ function ControleTerapeutaMobileCard({
   const disponivel = status === 'disponivel'
   const indisponivel = status === 'indisponivel'
   const substituido = status === 'substituido'
-  const temSlotCritico = grupo.atendimentos.some(
-    (a) => a.status === 'indisponivel' || a.status === 'substituido'
-  )
   const parcial = status === 'parcial'
   const indisponivelOuSubstituido = indisponivel || substituido || parcial
-  const temPendente = grupo.atendimentos.some(
-    (a) => String(a.status ?? '').toLowerCase() === 'pendente'
+
+  const horariosOrdenados = useMemo(
+    () =>
+      [...grupo.atendimentos].sort((a, b) =>
+        String(a.hora_inicial).localeCompare(String(b.hora_inicial))
+      ),
+    [grupo.atendimentos]
   )
 
-  const horariosOrdenados = [...grupo.atendimentos].sort((a, b) =>
-    String(a.hora_inicial).localeCompare(String(b.hora_inicial))
+  const contagem = useMemo(
+    () =>
+      grupo.atendimentos.reduce(
+        (acc, a) => {
+          const s = String(a.status ?? '').toLowerCase()
+          if (s === 'disponivel') acc.disponivel++
+          else if (s === 'indisponivel') acc.indisponivel++
+          else if (s === 'substituido') acc.substituido++
+          else acc.pendente++
+          return acc
+        },
+        { disponivel: 0, indisponivel: 0, substituido: 0, pendente: 0 }
+      ),
+    [grupo.atendimentos]
   )
 
-  const contagem = grupo.atendimentos.reduce(
-    (acc, a) => {
-      const s = String(a.status ?? '').toLowerCase()
-      if (s === 'disponivel') acc.disponivel++
-      else if (s === 'indisponivel') acc.indisponivel++
-      else if (s === 'substituido') acc.substituido++
-      else acc.pendente++
-      return acc
-    },
-    { disponivel: 0, indisponivel: 0, substituido: 0, pendente: 0 }
+  const temSlotCritico = useMemo(
+    () =>
+      grupo.atendimentos.some(
+        (a) => a.status === 'indisponivel' || a.status === 'substituido'
+      ),
+    [grupo.atendimentos]
   )
 
-  const horaInicialGrupo = horariosOrdenados[0]?.hora_inicial
-    ? String(horariosOrdenados[0].hora_inicial).slice(0, 5)
-    : undefined
-  const horaFinalGrupo =
-    horariosOrdenados[horariosOrdenados.length - 1]?.hora_final
+  const temPendente = useMemo(
+    () =>
+      grupo.atendimentos.some(
+        (a) => String(a.status ?? '').toLowerCase() === 'pendente'
+      ),
+    [grupo.atendimentos]
+  )
+
+  const horarioTotal = useMemo(() => {
+    const ini = horariosOrdenados[0]?.hora_inicial
+      ? String(horariosOrdenados[0].hora_inicial).slice(0, 5)
+      : undefined
+    const fim = horariosOrdenados[horariosOrdenados.length - 1]?.hora_final
       ? String(horariosOrdenados[horariosOrdenados.length - 1].hora_final).slice(0, 5)
       : undefined
-  const iniciais = getIniciais(grupo.terapeuta)
+    return ini && fim ? `${ini} – ${fim}` : grupo.primeiroHorario
+  }, [horariosOrdenados, grupo.primeiroHorario])
+
+  const iniciais = useMemo(() => getIniciais(grupo.terapeuta), [grupo.terapeuta])
   const sessoesId = `sessoes-${grupo.terapeuta.replace(/\s+/g, '-')}`
-  const horarioTotal =
-    horaInicialGrupo && horaFinalGrupo
-      ? `${horaInicialGrupo} – ${horaFinalGrupo}`
-      : grupo.primeiroHorario
 
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">

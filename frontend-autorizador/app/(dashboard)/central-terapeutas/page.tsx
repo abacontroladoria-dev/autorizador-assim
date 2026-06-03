@@ -1,7 +1,7 @@
 'use client'
 
 import type { GrupoTerapeutaMobile } from '@/components/central-terapeutas/types'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import { useHeader } from '@/contexts/HeaderContext'
 import ControleFiltersBar from '@/components/central-terapeutas/ControleFiltersBar'
@@ -111,6 +111,7 @@ export default function ControleTerapeuticoPage() {
 	  novoStatusModal,
 
 	  salvandoStatus,
+	  salvandoTerapeutas,
 
 	  erroStatus,
 
@@ -148,7 +149,7 @@ export default function ControleTerapeuticoPage() {
       if (debounceRef.current) clearTimeout(debounceRef.current)
       supabase.removeChannel(channel)
     }
-  }, [filters.data, carregarDados])
+  }, [filters.data])
 
   const handleSincronizar = useCallback(async () => {
     setSincronizando(true)
@@ -163,6 +164,9 @@ export default function ControleTerapeuticoPage() {
       setSincronizando(false)
     }
   }, [carregarDados])
+
+  // Deferred busca: keypresses stay responsive while filter results update asynchronously
+  const deferredBusca = useDeferredValue(filters.busca)
 
   const horarios = useMemo(() => {
     return Array.from(
@@ -201,8 +205,8 @@ export default function ControleTerapeuticoPage() {
       .filter(terapiaDeveAparecer)
       .filter((item) => !getTerapeuta(item).toLowerCase().includes('teste'))
       .filter((item) => {
-        if (!filters.busca) return true
-        const q = filters.busca.toLowerCase()
+        if (!deferredBusca) return true
+        const q = deferredBusca.toLowerCase()
         return (
           getTerapeuta(item).toLowerCase().includes(q) ||
           getPaciente(item).toLowerCase().includes(q)
@@ -230,7 +234,7 @@ export default function ControleTerapeuticoPage() {
       })
   }, [
     dados,
-    filters.busca,
+    deferredBusca,
     filters.horario,
     filters.unidade,
     filters.terapia,
@@ -393,10 +397,9 @@ return (
             <ControleTerapeutaMobileCard
               key={grupo.terapeuta}
               grupo={grupo}
-              onStatusChanged={carregarDados}
               abrirModalStatus={handleAbrirModalStatus}
               atualizarStatusDireto={handleAtualizarStatus}
-              salvandoStatus={salvandoStatus}
+              salvandoStatus={salvandoTerapeutas.has(grupo.terapeuta)}
             />
           ))}
 
