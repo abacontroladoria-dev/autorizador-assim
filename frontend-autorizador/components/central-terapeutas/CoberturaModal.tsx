@@ -1,11 +1,12 @@
 'use client'
 
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CalendarDays,
   Check,
   ChevronDown,
   Clock,
+  Loader2,
   MapPin,
   Users,
   X,
@@ -18,7 +19,7 @@ import {
   type SlotModalSubstituicao,
 } from '@/services/controle-terapeutico.service'
 import type { GrupoTerapeutaMobile, ControleTerapeuticoItem } from './types'
-import { getPaciente } from './helpers'
+import { getIniciais, getPaciente } from './helpers'
 import ProfissionaisVerMaisModal from './ProfissionaisVerMaisModal'
 
 type SessaoCobertura = {
@@ -49,6 +50,8 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
   const [salvando, setSalvando] = useState(false)
   const [abaAtiva, setAbaAtiva] = useState<'manha' | 'tarde'>('manha')
   const [verMaisSessao, setVerMaisSessao] = useState<SessaoCobertura | null>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const previousFocusRef = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     if (!grupo) return
@@ -93,7 +96,6 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
     listarModalSubstituicao({ terapiaNome, unidade: grupo.unidade, dataAtendimento: data })
       .then((data) => {
         const semTerapeuta = data.filter((p) => p.profissional_nome !== grupo.terapeuta)
-        console.log('[Cobertura] após remover terapeuta principal:', semTerapeuta.length)
         setProfissionais(semTerapeuta)
         // Resolve substitutoId por nome para sessões pré-carregadas sem ID
         setSessoes((prev) => prev.map((s) => {
@@ -113,6 +115,34 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
       document.body.style.overflow = 'auto'
     }
   }, [grupo])
+
+  useEffect(() => {
+    if (grupo) {
+      previousFocusRef.current = document.activeElement as HTMLElement
+      requestAnimationFrame(() => { dialogRef.current?.focus() })
+    } else {
+      previousFocusRef.current?.focus()
+      previousFocusRef.current = null
+    }
+  }, [grupo])
+
+  const handleKeyDown = useCallback((e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === 'Escape') { onClose(); return }
+    if (e.key !== 'Tab' || !dialogRef.current) return
+    const focusable = Array.from(
+      dialogRef.current.querySelectorAll<HTMLElement>(
+        'button:not([disabled]),[href],input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])'
+      )
+    )
+    if (focusable.length === 0) return
+    const first = focusable[0]
+    const last = focusable[focusable.length - 1]
+    if (e.shiftKey) {
+      if (document.activeElement === first) { e.preventDefault(); last.focus() }
+    } else {
+      if (document.activeElement === last) { e.preventDefault(); first.focus() }
+    }
+  }, [onClose])
 
   const sessoesManha = useMemo(
     () => sessoes.filter((s) => String(s.atendimento.hora_inicial).slice(0, 5) < '13:00'),
@@ -228,8 +258,14 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
         className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
       >
         <div
+          ref={dialogRef}
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="cobertura-modal-title"
+          tabIndex={-1}
           onClick={(e) => e.stopPropagation()}
-          className="bg-white w-full max-w-lg rounded-2xl flex flex-col overflow-hidden shadow-2xl"
+          onKeyDown={handleKeyDown}
+          className="bg-white w-full max-w-lg rounded-2xl flex flex-col overflow-hidden shadow-2xl outline-none"
         >
           {/* Header */}
           <div className="px-6 py-5 border-b border-slate-100 flex items-center justify-between gap-4">
@@ -238,11 +274,11 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
                 {iniciais}
               </div>
               <div className="min-w-0">
-                <h2 className="text-lg font-bold text-slate-800 leading-tight truncate">{grupo.terapeuta}</h2>
+                <h2 id="cobertura-modal-title" className="text-lg font-bold text-slate-800 leading-tight truncate">{grupo.terapeuta}</h2>
                 <p className="text-sm text-[#3A8FB7] font-medium">{grupo.terapia}</p>
               </div>
             </div>
-            <button onClick={onClose} className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 transition shrink-0">
+            <button onClick={onClose} aria-label="Fechar modal" className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 transition focus-visible:ring-2 focus-visible:ring-[#3A8FB7]/50 focus-visible:outline-none shrink-0">
               <X size={20} />
             </button>
           </div>
@@ -251,14 +287,15 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
           <div className="px-6 py-6 space-y-4">
             {/* Tipo de Ocorrência */}
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
+              <label htmlFor="tipo-ocorrencia" className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
                 Tipo de Ocorrência
               </label>
               <div className="relative">
                 <select
+                  id="tipo-ocorrencia"
                   value={tipoOcorrencia}
                   onChange={(e) => setTipoOcorrencia(e.target.value)}
-                  className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3 pr-10 text-sm font-medium text-slate-700 outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-400 transition cursor-pointer"
+                  className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3 pr-10 text-sm font-medium text-slate-700 outline-none focus:ring-4 focus:ring-[#3A8FB7]/20 focus:border-[#3A8FB7] transition cursor-pointer"
                 >
                   <option value="">Selecione o tipo...</option>
                   <option value="Atraso">Atraso</option>
@@ -273,14 +310,15 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
 
             {/* Justificativa */}
             <div>
-              <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
+              <label htmlFor="justificativa" className="block text-xs font-semibold uppercase tracking-wider text-slate-500 mb-1.5">
                 Justificativa
               </label>
               <div className="relative">
                 <select
+                  id="justificativa"
                   value={justificativa}
                   onChange={(e) => setJustificativa(e.target.value)}
-                  className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3 pr-10 text-sm font-medium text-slate-700 outline-none focus:ring-4 focus:ring-violet-100 focus:border-violet-400 transition cursor-pointer"
+                  className="w-full appearance-none rounded-xl border border-slate-200 bg-white px-4 py-3 pr-10 text-sm font-medium text-slate-700 outline-none focus:ring-4 focus:ring-[#3A8FB7]/20 focus:border-[#3A8FB7] transition cursor-pointer"
                 >
                   <option value="">Selecione a justificativa...</option>
                   <option value="Saúde do profissional">Saúde do profissional</option>
@@ -297,12 +335,12 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
 
             {/* Preview em tempo real */}
             {tipoOcorrencia && justificativa && (
-              <div className="rounded-xl bg-violet-50 border border-violet-100 px-4 py-3 flex items-start gap-3">
-                <div className="w-7 h-7 rounded-full bg-violet-100 flex items-center justify-center shrink-0 mt-0.5">
-                  <Check size={14} className="text-violet-600" />
+              <div className="rounded-xl bg-[#f0f8fd] border border-[#3A8FB7]/20 px-4 py-3 flex items-start gap-3">
+                <div className="w-7 h-7 rounded-full bg-[#eef5fb] flex items-center justify-center shrink-0 mt-0.5">
+                  <Check size={14} className="text-[#3A8FB7]" />
                 </div>
                 <div>
-                  <p className="text-xs font-semibold text-violet-700 uppercase tracking-wide mb-0.5">Registro selecionado</p>
+                  <p className="text-xs font-semibold text-[#3A8FB7] uppercase tracking-wide mb-0.5">Registro selecionado</p>
                   <p className="text-sm font-bold text-slate-800">{tipoOcorrencia}</p>
                   <p className="text-xs text-slate-500 mt-0.5">{justificativa}</p>
                 </div>
@@ -314,14 +352,14 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
           <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/60 flex justify-end gap-2">
             <button
               onClick={onClose}
-              className="px-5 h-10 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:bg-slate-50 transition"
+              className="px-5 h-10 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:bg-slate-50 transition focus-visible:ring-2 focus-visible:ring-[#3A8FB7]/50 focus-visible:outline-none"
             >
               Cancelar
             </button>
             <button
               onClick={() => setEtapa('cobertura')}
               disabled={!tipoOcorrencia || !justificativa}
-              className="px-5 h-10 rounded-xl bg-violet-600 text-white text-sm font-semibold hover:bg-violet-700 disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-2"
+              className="px-5 h-10 rounded-xl bg-[#3A8FB7] text-white text-sm font-semibold hover:bg-[#2d7a9b] disabled:opacity-40 disabled:cursor-not-allowed transition flex items-center gap-2 focus-visible:ring-2 focus-visible:ring-[#3A8FB7]/50 focus-visible:ring-offset-1 focus-visible:outline-none"
             >
               Continuar
               <Check size={15} />
@@ -339,8 +377,14 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
       className="fixed inset-0 z-50 bg-black/50 flex items-center justify-center p-4"
     >
       <div
+        ref={dialogRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="cobertura-modal-title"
+        tabIndex={-1}
         onClick={(e) => e.stopPropagation()}
-        className="bg-white w-full max-w-[96vw] max-h-[96vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl"
+        onKeyDown={handleKeyDown}
+        className="bg-white w-full max-w-[96vw] max-h-[96vh] rounded-2xl flex flex-col overflow-hidden shadow-2xl outline-none"
       >
         {/* ── Cabeçalho ── */}
         <div className="px-6 py-5 border-b border-slate-100 flex items-start justify-between gap-4 shrink-0">
@@ -349,7 +393,7 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
               {iniciais}
             </div>
             <div className="min-w-0">
-              <h2 className="text-2xl font-bold text-slate-800 leading-tight">{grupo.terapeuta}</h2>
+              <h2 id="cobertura-modal-title" className="text-2xl font-bold text-slate-800 leading-tight">{grupo.terapeuta}</h2>
               <p className="text-base text-[#3A8FB7] font-medium mt-0.5">{grupo.terapia}</p>
               <div className="mt-1.5 flex items-center gap-2 text-sm text-slate-500 flex-wrap">
                 <CalendarDays size={14} />
@@ -404,7 +448,8 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
 
             <button
               onClick={onClose}
-              className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 transition"
+              aria-label="Fechar modal"
+              className="p-2 rounded-xl hover:bg-slate-100 text-slate-400 transition focus-visible:ring-2 focus-visible:ring-[#3A8FB7]/50 focus-visible:outline-none"
             >
               <X size={20} />
             </button>
@@ -415,9 +460,9 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
         <div className="px-6 py-3 border-b border-slate-100 flex items-center gap-2 shrink-0 flex-wrap">
           <button
             onClick={() => setAbaAtiva('manha')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-base font-semibold transition ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-base font-semibold transition focus-visible:ring-2 focus-visible:ring-[#3A8FB7]/50 focus-visible:outline-none ${
               abaAtiva === 'manha'
-                ? 'bg-violet-100 text-violet-700 border border-violet-200'
+                ? 'bg-[#eef5fb] text-[#3A8FB7] border border-[#3A8FB7]/30'
                 : 'text-slate-500 hover:bg-slate-50 border border-transparent'
             }`}
           >
@@ -425,9 +470,9 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
           </button>
           <button
             onClick={() => setAbaAtiva('tarde')}
-            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-base font-semibold transition ${
+            className={`flex items-center gap-2 px-4 py-2 rounded-xl text-base font-semibold transition focus-visible:ring-2 focus-visible:ring-[#3A8FB7]/50 focus-visible:outline-none ${
               abaAtiva === 'tarde'
-                ? 'bg-violet-100 text-violet-700 border border-violet-200'
+                ? 'bg-[#eef5fb] text-[#3A8FB7] border border-[#3A8FB7]/30'
                 : 'text-slate-500 hover:bg-slate-50 border border-transparent'
             }`}
           >
@@ -437,14 +482,14 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
             <button
               type="button"
               onClick={marcarTodosDisponiveis}
-              className="h-8 px-3 rounded-lg border border-emerald-300 text-emerald-700 text-xs font-semibold hover:bg-emerald-50 transition"
+              className="h-8 px-3 rounded-lg border border-emerald-300 text-emerald-700 text-xs font-semibold hover:bg-emerald-50 transition focus-visible:ring-2 focus-visible:ring-emerald-400 focus-visible:outline-none"
             >
               Todos disponíveis
             </button>
             <button
               type="button"
               onClick={marcarTodosIndisponiveis}
-              className="h-8 px-3 rounded-lg border border-rose-300 text-rose-600 text-xs font-semibold hover:bg-rose-50 transition"
+              className="h-8 px-3 rounded-lg border border-rose-300 text-rose-600 text-xs font-semibold hover:bg-rose-50 transition focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:outline-none"
             >
               Todos indisponíveis
             </button>
@@ -496,17 +541,17 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
           <div className="flex gap-2 shrink-0">
             <button
               onClick={onClose}
-              className="px-6 h-11 rounded-xl border border-slate-200 bg-white text-base font-semibold text-slate-600 hover:bg-slate-50 transition"
+              className="px-6 h-11 rounded-xl border border-rose-200 bg-rose-50 text-base font-semibold text-rose-700 hover:bg-rose-100 transition focus-visible:ring-2 focus-visible:ring-rose-300 focus-visible:outline-none"
             >
-              Cancelar alterações
+              Cancelar
             </button>
             <button
               disabled={salvando}
               onClick={handleConfirmar}
-              className="px-6 h-11 rounded-xl bg-violet-600 text-white text-base font-semibold hover:bg-violet-700 disabled:opacity-50 transition flex items-center gap-2"
+              className="px-6 h-11 rounded-xl bg-[#059669] text-white text-base font-semibold hover:bg-[#047857] disabled:opacity-50 transition flex items-center gap-2 focus-visible:ring-2 focus-visible:ring-[#059669]/50 focus-visible:ring-offset-1 focus-visible:outline-none"
             >
-              <Check size={16} />
-              {salvando ? 'Salvando...' : 'Confirmar substituições'}
+              {salvando ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+              {salvando ? 'Salvando...' : 'Confirmar'}
             </button>
           </div>
         </div>
@@ -614,14 +659,6 @@ function SessionRow({
       }
     }
 
-    console.log(
-      `[Cobertura ${hora}]`,
-      `Livre: ${profsFinais.filter((p) => p.status === 'livre').length}`,
-      `| Ocupado: ${profsFinais.filter((p) => p.status === 'ocupado').length}`,
-      `| NãoTrab: ${profsFinais.filter((p) => p.status === 'sem_agenda_hoje').length}`,
-      `| total renderizado: ${profsFinais.length}`,
-    )
-
     return profsFinais.sort((a, b) => (ordemStatus[a.status] ?? 3) - (ordemStatus[b.status] ?? 3))
   }, [profsUnicos, profissionais, hora])
 
@@ -631,17 +668,17 @@ function SessionRow({
   const temSubstituto = !!selecionadoId || !!sessao.substitutoNome
 
   return (
-    <div className="flex items-stretch gap-0 bg-white border border-slate-100 rounded-xl overflow-hidden hover:border-slate-200 transition">
+    <div className="flex flex-col md:flex-row md:items-stretch bg-white border border-slate-100 rounded-xl overflow-hidden hover:border-slate-200 transition">
       {/* Col 1 – Horário */}
-      <div className="w-24 shrink-0 flex flex-col items-center justify-center gap-1 py-4 px-2 bg-slate-50/60 border-r border-slate-100">
-        <Clock size={15} className="text-violet-500" />
-        <span className="text-sm font-bold text-violet-700 tabular-nums">{hora}</span>
+      <div className="md:w-24 md:shrink-0 flex md:flex-col items-center md:justify-center gap-3 md:gap-1 py-3 md:py-4 px-4 md:px-2 bg-slate-50/60 border-b border-slate-100 md:border-b-0 md:border-r">
+        <Clock size={15} className="text-[#3A8FB7]" />
+        <span className="text-sm font-bold text-[#3A8FB7] tabular-nums">{hora}</span>
         <span className="text-xs text-slate-400 tabular-nums">{horaFim}</span>
-        <span className="text-xs text-slate-400 mt-0.5">40 min</span>
+        <span className="hidden md:block text-xs text-slate-400 md:mt-0.5">40 min</span>
       </div>
 
       {/* Col 2 – Paciente + decisão */}
-      <div className="w-64 shrink-0 flex flex-col justify-between px-3 py-4 border-r border-slate-100">
+      <div className="md:w-64 md:shrink-0 flex flex-col justify-between px-3 py-4 border-b border-slate-100 md:border-b-0 md:border-r">
         <div className="flex items-start gap-2">
           <div className="w-10 h-10 rounded-full bg-[#eef5fb] text-[#3A8FB7] flex items-center justify-center text-xs font-bold shrink-0 mt-0.5 select-none">
             {iniciaisPaciente}
@@ -663,7 +700,7 @@ function SessionRow({
           <button
             type="button"
             onClick={() => onMarcarDisponivel(sessao.id)}
-            className={`flex items-center justify-center gap-1.5 h-8 px-3 rounded-lg border-2 text-xs font-semibold transition ${
+            className={`flex items-center justify-center gap-1.5 h-10 md:h-8 px-3 rounded-lg border-2 text-xs font-semibold transition focus-visible:ring-2 focus-visible:ring-[#3A8FB7]/50 focus-visible:outline-none ${
               sessao.disponivel
                 ? 'border-emerald-500 bg-emerald-50 text-emerald-700'
                 : 'border-slate-200 hover:border-emerald-300 bg-white text-slate-600'
@@ -675,7 +712,7 @@ function SessionRow({
           <button
             type="button"
             onClick={() => onSelecionar(sessao.id, null, null)}
-            className={`flex items-center justify-center gap-1.5 h-8 px-3 rounded-lg border-2 text-xs font-semibold transition ${
+            className={`flex items-center justify-center gap-1.5 h-10 md:h-8 px-3 rounded-lg border-2 text-xs font-semibold transition focus-visible:ring-2 focus-visible:ring-[#3A8FB7]/50 focus-visible:outline-none ${
               sessao.disponivel === false && !temSubstituto
                 ? 'border-rose-500 bg-rose-50 text-rose-700'
                 : 'border-slate-200 hover:border-rose-300 bg-white text-slate-600'
@@ -688,11 +725,11 @@ function SessionRow({
       </div>
 
       {/* Col 3 – Profissionais substitutos */}
-      <div className="flex-1 px-3 py-4 border-r border-slate-100">
+      <div className="flex-1 min-w-0 px-3 py-4 border-b border-slate-100 md:border-b-0 md:border-r">
         <p className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide">
           Profissionais compatíveis da semana
         </p>
-        <div className="flex flex-wrap gap-2 items-start">
+        <div className="flex flex-nowrap md:flex-wrap gap-2 items-start overflow-x-auto pb-1 md:pb-0">
           {/* Profissionais */}
           {top3.map((prof) => (
             <ProfMiniCard
@@ -708,7 +745,7 @@ function SessionRow({
             <button
               type="button"
               onClick={onVerMais}
-              className="flex flex-col items-center justify-center gap-1 p-2 rounded-xl border-2 border-dashed border-slate-200 hover:border-violet-300 transition w-25 min-h-22"
+              className="flex flex-col items-center justify-center gap-1 p-2 rounded-xl border-2 border-dashed border-slate-200 hover:border-[#3A8FB7]/50 transition shrink-0 w-25 min-h-22 focus-visible:ring-2 focus-visible:ring-[#3A8FB7]/50 focus-visible:outline-none"
             >
               <span className="text-base font-bold text-slate-500">+{restante}</span>
               <span className="text-xs text-slate-400 text-center leading-tight">Ver mais</span>
@@ -718,7 +755,7 @@ function SessionRow({
       </div>
 
       {/* Col 4 – Seleção atual */}
-      <div className="w-52 shrink-0 px-3 py-4 flex items-center">
+      <div className="md:w-52 md:shrink-0 px-3 py-4 flex items-center">
         {sessao.disponivel === true ? (
           <div className="bg-emerald-50 border border-emerald-200 rounded-xl p-3 w-full">
             <div className="flex items-center gap-1.5 mb-1">
@@ -729,10 +766,10 @@ function SessionRow({
             <p className="text-xs text-emerald-500 mt-0.5 leading-tight">Atenderá normalmente</p>
           </div>
         ) : temSubstituto ? (
-          <div className="bg-violet-50 border border-violet-200 rounded-xl p-3 w-full">
+          <div className="bg-[#f0f8fd] border border-[#3A8FB7]/30 rounded-xl p-3 w-full">
             <div className="flex items-center gap-1.5 mb-1">
-              <Check size={13} className="text-violet-600" />
-              <span className="text-xs font-semibold text-violet-700">Seleção atual</span>
+              <Check size={13} className="text-[#3A8FB7]" />
+              <span className="text-xs font-semibold text-[#3A8FB7]">Seleção atual</span>
             </div>
             <p className="text-sm font-bold text-slate-800 leading-snug">{sessao.substitutoNome}</p>
           </div>
@@ -773,7 +810,6 @@ function ProfMiniCard({
   onClick: () => void
 }) {
   const iniciais = getIniciais(prof.nome)
-  const nomeExibicao = prof.nome
 
   const label =
     prof.status === 'livre'
@@ -784,32 +820,32 @@ function ProfMiniCard({
 
   const badgeClass =
     prof.status === 'livre'
-      ? 'bg-green-100 text-green-700'
+      ? 'bg-emerald-100 text-emerald-700'
       : prof.status === 'sem_agenda_hoje'
-        ? 'bg-blue-100 text-blue-700'
-        : 'bg-orange-100 text-orange-700'
+        ? 'bg-sky-100 text-sky-700'
+        : 'bg-amber-100 text-amber-700'
 
   return (
     <button
       type="button"
       onClick={onClick}
       title={prof.nome}
-      className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition w-25 min-h-24 ${
+      className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition focus-visible:ring-2 focus-visible:ring-[#3A8FB7]/50 focus-visible:outline-none shrink-0 w-25 min-h-24 ${
         selecionado
-          ? 'border-violet-500 bg-violet-50'
-          : 'border-slate-200 hover:border-violet-300 bg-white'
+          ? 'border-[#3A8FB7] bg-[#f0f8fd]'
+          : 'border-slate-200 hover:border-[#3A8FB7]/50 bg-white'
       }`}
     >
       <div className="relative w-10 h-10 rounded-full bg-[#eef5fb] text-[#3A8FB7] flex items-center justify-center text-xs font-bold select-none shrink-0">
         {iniciais}
         {selecionado && (
-          <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-violet-600 flex items-center justify-center">
+          <div className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-[#3A8FB7] flex items-center justify-center">
             <Check size={9} className="text-white" />
           </div>
         )}
       </div>
       <span className="text-[11px] font-bold text-slate-700 text-center leading-tight w-full truncate px-0.5">
-        {nomeExibicao}
+        {prof.nome}
       </span>
       <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${badgeClass}`}>
         {label}
@@ -856,14 +892,6 @@ function profissionaisDoTurno(
   return hasLivreAba
     ? elegiveis.filter((s) => s.terapia_nome !== COORD_CASO)
     : elegiveis
-}
-
-function getIniciais(nome: string): string {
-  const partes = nome.trim().split(/\s+/)
-  if (partes.length >= 2) {
-    return (partes[0][0] + partes[partes.length - 1][0]).toUpperCase()
-  }
-  return partes[0].slice(0, 2).toUpperCase()
 }
 
 function formatarData(data: string): string {

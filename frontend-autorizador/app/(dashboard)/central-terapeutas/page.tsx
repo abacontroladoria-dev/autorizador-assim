@@ -1,7 +1,7 @@
 'use client'
 
 import type { GrupoTerapeutaMobile } from '@/components/central-terapeutas/types'
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import toast from 'react-hot-toast'
 import { useHeader } from '@/contexts/HeaderContext'
 import ControleFiltersBar from '@/components/central-terapeutas/ControleFiltersBar'
@@ -18,7 +18,6 @@ import {
   getTerapia,
   getTerapeuta,
   getUnidade,
-  getStatus,
   normalizarStatus,
   terapiaDeveAparecer,
 } from '@/components/central-terapeutas/helpers'
@@ -42,6 +41,29 @@ function getHojeLocal() {
   return `${ano}-${mes}-${dia}`
 }
 
+function calcularStatusAtual(
+  atendimentos: ControleTerapeuticoItem[]
+) {
+  const statuses = atendimentos.map((a) => normalizarStatus(a.status))
+
+  const temDisponivel   = statuses.some((s) => s === 'disponivel')
+  const temIndisponivel = statuses.some((s) => s === 'indisponivel')
+  const temSubstituido  = statuses.some((s) => s === 'substituido')
+  const todosPendente   = statuses.every((s) => s === 'pendente')
+
+  if (temDisponivel && temIndisponivel) return 'parcial'
+  if (temIndisponivel && !temDisponivel) return 'indisponivel'
+  if (temSubstituido && !temIndisponivel && !temDisponivel) return 'substituido'
+  if (temDisponivel && !temIndisponivel) return 'disponivel'
+  if (todosPendente) return 'pendente'
+
+  return normalizarStatus(
+    [...atendimentos].sort((a, b) =>
+      String(a.hora_inicial).localeCompare(String(b.hora_inicial))
+    ).at(-1)?.status
+  ) || 'pendente'
+}
+
 export default function ControleTerapeuticoPage() {
   const { setHeader } = useHeader()
   const hoje = getHojeLocal()
@@ -60,6 +82,8 @@ export default function ControleTerapeuticoPage() {
     statusFiltro: [],
   })
 
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
   useEffect(() => {
     setHeader(
       'Operação Clínica',
@@ -67,14 +91,15 @@ export default function ControleTerapeuticoPage() {
     )
   }, [setHeader])
 
-  async function carregarDados() {
-    setLoading(true)
-
-    const response = await listarCentralTerapeutica(filters.data)
-
-    setDados(response || [])
-    setLoading(false)
-  }
+  const carregarDados = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true)
+    try {
+      const response = await listarCentralTerapeutica(filters.data)
+      setDados(response || [])
+    } finally {
+      if (showLoading) setLoading(false)
+    }
+  }, [filters.data])
 
   const {
 	  modalStatus,
@@ -88,9 +113,6 @@ export default function ControleTerapeuticoPage() {
 
 	  erroStatus,
 
-	  abrirModalStatus:
-			abrirModalStatusOriginal,
-
 	  atualizarStatusDireto,
 
 	  atualizarStatusSelecionado,
@@ -102,15 +124,8 @@ export default function ControleTerapeuticoPage() {
 	  onSuccess: carregarDados,
 	})
 
-	const abrirModalStatus = (
-	  grupo: GrupoTerapeutaMobile,
-	  _status: 'disponivel' | 'indisponivel'
-	) => {
-	  setGrupoCobertura(grupo)
-	}
-
   useEffect(() => {
-    carregarDados()
+    carregarDados(true)
 
     const channel = supabase
       .channel(`controle-terapeutico-central-${filters.data}`)
@@ -122,32 +137,31 @@ export default function ControleTerapeuticoPage() {
           table: 'controle_terapeutico',
         },
         () => {
-          carregarDados()
+          if (debounceRef.current) clearTimeout(debounceRef.current)
+          debounceRef.current = setTimeout(() => carregarDados(false), 400)
         }
       )
       .subscribe()
 
     return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
       supabase.removeChannel(channel)
     }
-  }, [filters.data])
+  }, [filters.data, carregarDados])
 
-  const handleSincronizar = async () => {
+  const handleSincronizar = useCallback(async () => {
     setSincronizando(true)
     try {
-      const resultado = await sincronizar()
+      await sincronizar()
       toast.success('✓ Sincronização concluída com sucesso')
-      
-      // Recarregar dados após sincronização
-      const response = await listarCentralTerapeutica(filters.data)
-      setDados(response || [])
+      await carregarDados(true)
     } catch (err) {
       console.error('Erro ao sincronizar:', err)
       toast.error('Erro ao sincronizar dados operacionais')
     } finally {
       setSincronizando(false)
     }
-  }
+  }, [carregarDados])
 
   const horarios = useMemo(() => {
     return Array.from(
@@ -171,9 +185,20 @@ export default function ControleTerapeuticoPage() {
     ).sort((a, b) => a.localeCompare(b, 'pt-BR'))
   }, [dados])
 
+  const atendimentosPorTerapeuta = useMemo(() => {
+    const map: Record<string, ControleTerapeuticoItem[]> = {}
+    for (const item of dados) {
+      const t = getTerapeuta(item)
+      if (!map[t]) map[t] = []
+      map[t].push(item)
+    }
+    return map
+  }, [dados])
+
   const filtrados = useMemo(() => {
     return dados
       .filter(terapiaDeveAparecer)
+      .filter((item) => !getTerapeuta(item).toLowerCase().includes('teste'))
       .filter((item) => {
         if (!filters.busca) return true
         const q = filters.busca.toLowerCase()
@@ -209,39 +234,6 @@ export default function ControleTerapeuticoPage() {
     filters.unidade,
     filters.terapia,
   ])
-  
-function obterTodosAtendimentosDoTerapeuta(
-  terapeuta: string
-) {
-
-  return dados.filter(
-    (item) =>
-      getTerapeuta(item) === terapeuta
-  )
-}
-
-function calcularStatusAtual(
-  atendimentos: ControleTerapeuticoItem[]
-) {
-  const statuses = atendimentos.map((a) => normalizarStatus(a.status))
-
-  const temDisponivel   = statuses.some((s) => s === 'disponivel')
-  const temIndisponivel = statuses.some((s) => s === 'indisponivel')
-  const temSubstituido  = statuses.some((s) => s === 'substituido')
-  const todosPendente   = statuses.every((s) => s === 'pendente')
-
-  if (temDisponivel && temIndisponivel) return 'parcial'
-  if (temIndisponivel && !temDisponivel) return 'indisponivel'
-  if (temSubstituido && !temIndisponivel && !temDisponivel) return 'substituido'
-  if (temDisponivel && !temIndisponivel) return 'disponivel'
-  if (todosPendente) return 'pendente'
-
-  return normalizarStatus(
-    [...atendimentos].sort((a, b) =>
-      String(a.hora_inicial).localeCompare(String(b.hora_inicial))
-    ).at(-1)?.status
-  ) || 'pendente'
-}
 
   const gruposPorTerapeuta = useMemo(() => {
     const grupos: Record<string, GrupoTerapeutaMobile> = {}
@@ -343,6 +335,26 @@ Object.values(grupos).forEach(
     )
   }, [gruposPorTerapeuta, filters.statusFiltro])
 
+  const handleAbrirModalStatus = useCallback(
+    (grupo: GrupoTerapeutaMobile, status: string) => {
+      const grupoCompleto = {
+        ...grupo,
+        atendimentos: atendimentosPorTerapeuta[grupo.terapeuta] ?? [],
+      } as GrupoTerapeutaMobile
+      if (status === 'disponivel' || status === 'indisponivel') {
+        setGrupoCobertura(grupoCompleto)
+      }
+    },
+    [atendimentosPorTerapeuta]
+  )
+
+  const handleAtualizarStatus = useCallback(
+    (grupo: GrupoTerapeutaMobile, status: string) => {
+      void atualizarStatusDireto(grupo, status)
+    },
+    [atualizarStatusDireto]
+  )
+
 return (
   <div className="bg-[#f7f9fc] rounded-2xl">
 
@@ -377,59 +389,15 @@ return (
 
         {!loading &&
           gruposFiltradosPorStatus.map((grupo) => (
-
-			  <ControleTerapeutaMobileCard
-				key={grupo.terapeuta}
-
-				grupo={grupo}
-				onStatusChanged={carregarDados}
-
-				abrirModalStatus={(
-				  grupo,
-				  status
-				) => {
-
-				  const grupoCompleto = {
-					  ...grupo,
-
-					  status: grupo.status as
-						| 'pendente'
-						| 'disponivel'
-						| 'indisponivel',
-
-					  atendimentos:
-						obterTodosAtendimentosDoTerapeuta(
-						  grupo.terapeuta
-						),
-					} as GrupoTerapeutaMobile
-
-				  if (
-					  status === 'disponivel' ||
-					  status === 'indisponivel'
-					) {
-					  abrirModalStatus(
-						grupoCompleto,
-						status
-					  )
-					}
-				}}
-
-				atualizarStatusDireto={(
-				  grupo,
-				  status
-				) => {
-				  void atualizarStatusDireto(
-					grupo as any,
-					status as any
-				  )
-				}}
-
-				salvandoStatus={
-				  salvandoStatus
-				}
-			  />
-
-			))}
+            <ControleTerapeutaMobileCard
+              key={grupo.terapeuta}
+              grupo={grupo}
+              onStatusChanged={carregarDados}
+              abrirModalStatus={handleAbrirModalStatus}
+              atualizarStatusDireto={handleAtualizarStatus}
+              salvandoStatus={salvandoStatus}
+            />
+          ))}
 
       </div>
 

@@ -71,10 +71,10 @@ export default function ControleTable({
                 text-left
                 transition
                 hover:bg-slate-50
-                ${ativo ? 'bg-violet-50/70' : 'bg-white'}
+                ${ativo ? 'bg-[#f0f8fd]' : 'bg-white'}
               `}
             >
-              <span className="text-sm font-bold text-violet-700 text-center">
+              <span className="text-sm font-bold text-[#3A8FB7] text-center">
                 {getHorarioInicial(item).slice(0, 5)}
               </span>
               <span className="text-sm text-slate-600 truncate">

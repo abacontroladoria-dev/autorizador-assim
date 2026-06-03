@@ -35,7 +35,7 @@ export default function ControleMobileCard({
     >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-xs font-bold text-violet-700">
+          <p className="text-xs font-bold text-[#3A8FB7]">
             {getHorario(item)}
           </p>
           <h3 className="mt-1 text-base font-bold text-slate-800 leading-tight">

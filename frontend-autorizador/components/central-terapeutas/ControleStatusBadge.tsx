@@ -35,7 +35,7 @@ const statusConfig: Record<
   },
   parcial: {
     label: 'Parcial',
-    className: 'bg-violet-50 text-violet-700 border-violet-200',
+    className: 'bg-amber-50 text-amber-700 border-amber-200',
     icon: GitBranch,
   },
   cobertura_pendente: {

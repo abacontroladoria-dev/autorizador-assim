@@ -159,7 +159,7 @@ export default function ProfissionaisVerMaisModal({
               </div>
               <button
                 onClick={limparFiltros}
-                className="text-xs text-violet-600 font-semibold hover:underline"
+                className="text-xs text-[#3A8FB7] font-semibold hover:underline"
               >
                 Limpar
               </button>
@@ -172,7 +172,7 @@ export default function ProfissionaisVerMaisModal({
                 <select
                   value={filtroUnidade}
                   onChange={(e) => { setFiltroUnidade(e.target.value); setPagina(1) }}
-                  className="w-full h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-violet-300 focus:ring-2 focus:ring-violet-100 transition"
+                  className="w-full h-9 rounded-xl border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#3A8FB7] focus:ring-2 focus:ring-[#3A8FB7]/20 transition"
                 >
                   <option value="todas">Todas as unidades</option>
                   {unidades.map((u) => (
@@ -184,7 +184,7 @@ export default function ProfissionaisVerMaisModal({
               {/* Contexto da sessão */}
               <div className="bg-slate-50 rounded-xl p-3">
                 <p className="text-[10px] font-semibold text-slate-400 mb-1 uppercase tracking-wide">Sessão</p>
-                <p className="text-xs font-bold text-violet-700">{sessaoContext.horario}</p>
+                <p className="text-xs font-bold text-[#3A8FB7]">{sessaoContext.horario}</p>
                 <p className="text-xs text-slate-700 font-medium mt-0.5 truncate">{sessaoContext.paciente}</p>
                 <p className="text-[10px] text-[#3A8FB7] mt-0.5 truncate">{sessaoContext.terapia}</p>
               </div>
@@ -344,13 +344,13 @@ function ProfCardGrid({
       onClick={onClick}
       className={`relative flex flex-col items-center gap-2 p-3 rounded-2xl border-2 transition text-left w-full ${
         selecionado
-          ? 'border-violet-500 bg-violet-50'
-          : 'border-slate-200 bg-white hover:border-violet-300 hover:bg-slate-50'
+          ? 'border-[#3A8FB7] bg-[#f0f8fd]'
+          : 'border-slate-200 bg-white hover:border-[#3A8FB7]/50 hover:bg-slate-50'
       }`}
     >
       {selecionado && (
         <div className="absolute top-2 right-2">
-          <Star size={13} className="text-violet-500 fill-violet-400" />
+          <Star size={13} className="text-[#3A8FB7] fill-[#3A8FB7]/60" />
         </div>
       )}
 
@@ -417,7 +417,7 @@ function CheckboxFiltro({
     <label className="flex items-center gap-2.5 cursor-pointer group">
       <div
         className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 transition ${
-          checked ? 'border-violet-500 bg-violet-500' : 'border-slate-300 group-hover:border-violet-300'
+          checked ? 'border-[#3A8FB7] bg-[#3A8FB7]' : 'border-slate-300 group-hover:border-[#3A8FB7]/50'
         }`}
         onClick={() => onChange(!checked)}
       >

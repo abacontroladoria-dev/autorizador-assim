@@ -168,6 +168,7 @@ export default function RegistroDisponibilidadePage() {
   const filtrados = useMemo(() => {
     return dados
       .filter(terapiaDeveAparecer)
+      .filter((item) => !getTerapeuta(item).toLowerCase().includes('teste'))
       .filter((item) => {
         if (!filters.unidade) return true
         return getUnidade(item) === filters.unidade

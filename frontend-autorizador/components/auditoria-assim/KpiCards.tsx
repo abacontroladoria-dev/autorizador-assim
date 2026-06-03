@@ -7,6 +7,7 @@ type Props = {
   kpis: KpisAuditoriaAssim | null
   loading?: boolean
   activeFilter: string
+  totalFiltrados?: number
   onFilter: (situacao: string) => void
 }
 
@@ -25,7 +26,7 @@ type KpiConfig = {
   situacao: string
 }
 
-export default function KpiCards({ kpis, loading, activeFilter, onFilter }: Props) {
+export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, onFilter }: Props) {
   const total = (kpis?.total ?? 0) + (kpis?.faltas ?? 0)
 
   const cards: KpiConfig[] = [
@@ -130,6 +131,7 @@ export default function KpiCards({ kpis, loading, activeFilter, onFilter }: Prop
         total={total}
         loading={loading}
         active={activeFilter === ''}
+        totalFiltrados={totalFiltrados}
         onFilter={() => onFilter('')}
       />
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-7 flex-1">
@@ -152,14 +154,17 @@ function TotalCard({
   total,
   loading,
   active,
+  totalFiltrados,
   onFilter,
 }: {
   total: number
   loading?: boolean
   active: boolean
+  totalFiltrados?: number
   onFilter: () => void
 }) {
   const bars = [35, 55, 42, 68, 52, 78, 62, 88, 72, 95]
+  const isFiltered = totalFiltrados !== undefined
 
   return (
     <button
@@ -186,11 +191,23 @@ function TotalCard({
           Total de Sessões
         </span>
 
-        <span className="text-4xl font-bold text-white leading-none mt-1">
-          {loading ? '—' : total}
-        </span>
-
-        <span className="text-[11px] text-indigo-300 mt-0.5">100% do total</span>
+        {isFiltered ? (
+          <div className="flex flex-col items-center mt-1">
+            <span className="text-4xl font-bold text-white leading-none">
+              {loading ? '—' : totalFiltrados}
+            </span>
+            <span className="text-[11px] text-indigo-300 mt-0.5">
+              {loading ? '' : `/ ${total} no dia`}
+            </span>
+          </div>
+        ) : (
+          <>
+            <span className="text-4xl font-bold text-white leading-none mt-1">
+              {loading ? '—' : total}
+            </span>
+            <span className="text-[11px] text-indigo-300 mt-0.5">100% do total</span>
+          </>
+        )}
       </div>
 
       <div className="absolute bottom-0 left-0 right-0 flex items-end gap-0.75 px-3 z-0">

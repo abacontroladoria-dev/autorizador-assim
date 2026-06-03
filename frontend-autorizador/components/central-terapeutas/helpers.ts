@@ -89,3 +89,11 @@ export function normalizarStatus(status?: string | null) {
 export function terapiaDeveAparecer(item: ControleTerapeuticoItem) {
   return !terapiasIgnoradas.includes(getTerapia(item))
 }
+
+export function getIniciais(nome: string): string {
+  const partes = nome.trim().split(/\s+/)
+  if (partes.length >= 2) {
+    return (partes[0][0] + partes[partes.length - 1][0]).toUpperCase()
+  }
+  return partes[0].slice(0, 2).toUpperCase()
+}

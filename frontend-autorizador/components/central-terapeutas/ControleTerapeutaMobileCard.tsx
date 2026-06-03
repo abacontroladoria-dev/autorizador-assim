@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { memo, useState } from 'react'
 
 import {
   ChevronDown,
@@ -9,7 +9,7 @@ import {
   UserRound,
 } from 'lucide-react'
 
-import { getHorario, getPaciente } from './helpers'
+import { getHorario, getIniciais, getPaciente } from './helpers'
 import type { ControleTerapeuticoItem } from './types'
 
 type StatusDisponibilidade =
@@ -45,7 +45,7 @@ type Props = {
   salvandoStatus: boolean
 }
 
-export default function ControleTerapeutaMobileCard({
+function ControleTerapeutaMobileCard({
   grupo,
   abrirModalStatus,
   atualizarStatusDireto,
@@ -92,6 +92,7 @@ export default function ControleTerapeutaMobileCard({
       ? String(horariosOrdenados[horariosOrdenados.length - 1].hora_final).slice(0, 5)
       : undefined
   const iniciais = getIniciais(grupo.terapeuta)
+  const sessoesId = `sessoes-${grupo.terapeuta.replace(/\s+/g, '-')}`
   const horarioTotal =
     horaInicialGrupo && horaFinalGrupo
       ? `${horaInicialGrupo} – ${horaFinalGrupo}`
@@ -107,6 +108,8 @@ export default function ControleTerapeutaMobileCard({
         <button
           type="button"
           onClick={() => setAberto(!aberto)}
+          aria-expanded={aberto}
+          aria-controls={sessoesId}
           className="flex-1 text-left px-4 py-4"
         >
           <div className="flex items-start gap-3">
@@ -127,7 +130,7 @@ export default function ControleTerapeutaMobileCard({
                 <span>·</span>
                 <span>{grupo.atendimentos.length} sessões</span>
                 <span>·</span>
-                <span className="font-bold text-violet-700">{horarioTotal}</span>
+                <span className="font-bold text-[#3A8FB7]">{horarioTotal}</span>
               </div>
             </div>
           </div>
@@ -158,7 +161,7 @@ export default function ControleTerapeutaMobileCard({
           </span>
           <span className={`text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap text-center ${
             contagem.pendente > 0
-              ? 'bg-violet-100 text-violet-700'
+              ? 'bg-[#eef5fb] text-[#3A8FB7]'
               : 'bg-slate-50 text-slate-300 border border-slate-100'
           }`}>
             Pendente: {contagem.pendente}
@@ -173,7 +176,7 @@ export default function ControleTerapeutaMobileCard({
             <span className={`whitespace-nowrap px-2.5 py-0.5 rounded-full text-xs font-semibold ${statusBadgeClass(status)}`}>
               {statusBadgeLabel(status)}
             </span>
-            <button type="button" onClick={() => setAberto(!aberto)} className="text-slate-400">
+            <button type="button" onClick={() => setAberto(!aberto)} aria-expanded={aberto} aria-label={aberto ? 'Recolher sessões' : 'Expandir sessões'} className="text-slate-400">
               {aberto
                 ? <ChevronUp className="h-4 w-4" />
                 : <ChevronDown className="h-4 w-4" />
@@ -188,7 +191,8 @@ export default function ControleTerapeutaMobileCard({
                 type="button"
                 disabled={salvando}
                 onClick={() => atualizarStatusDireto(grupo, 'disponivel')}
-                className="w-full h-8 px-4 rounded-lg bg-emerald-600 text-white text-xs font-semibold disabled:opacity-50 transition hover:bg-emerald-700"
+                aria-label={`Marcar ${grupo.terapeuta} como disponível`}
+                className="w-full h-11 px-4 rounded-lg bg-emerald-600 text-white text-xs font-semibold disabled:opacity-50 transition hover:bg-emerald-700"
               >
                 Disponível
               </button>
@@ -196,7 +200,8 @@ export default function ControleTerapeutaMobileCard({
                 type="button"
                 disabled={salvando}
                 onClick={() => abrirModalStatus(grupo, 'indisponivel')}
-                className="w-full h-8 px-4 rounded-lg bg-rose-600 text-white text-xs font-semibold disabled:opacity-50 transition hover:bg-rose-700"
+                aria-label={`Registrar indisponibilidade de ${grupo.terapeuta}`}
+                className="w-full h-11 px-4 rounded-lg bg-rose-600 text-white text-xs font-semibold disabled:opacity-50 transition hover:bg-rose-700"
               >
                 Indisponível
               </button>
@@ -205,7 +210,8 @@ export default function ControleTerapeutaMobileCard({
                   type="button"
                   disabled={salvando}
                   onClick={() => abrirModalStatus(grupo, 'indisponivel')}
-                  className="w-full h-8 px-4 rounded-lg border border-[#3A8FB7] text-[#3A8FB7] text-xs font-semibold disabled:opacity-50 transition hover:bg-[#f0f8fd]"
+                  aria-label={`Registrar substituição para ${grupo.terapeuta}`}
+                  className="w-full h-11 px-4 rounded-lg border border-[#3A8FB7] text-[#3A8FB7] text-xs font-semibold disabled:opacity-50 transition hover:bg-[#f0f8fd]"
                 >
                   Substituição
                 </button>
@@ -230,7 +236,8 @@ export default function ControleTerapeutaMobileCard({
                       'disponivel'
                     )
                   }
-                  className="w-full h-8 px-4 rounded-lg bg-emerald-600 text-white text-xs font-semibold disabled:opacity-50 transition hover:bg-emerald-700"
+                  aria-label={`Confirmar sessões pendentes de ${grupo.terapeuta}`}
+                  className="w-full h-11 px-4 rounded-lg border border-emerald-300 bg-white text-emerald-600 text-xs font-semibold disabled:opacity-50 transition hover:bg-emerald-50"
                 >
                   Confirmar pendentes
                 </button>
@@ -239,7 +246,8 @@ export default function ControleTerapeutaMobileCard({
                 type="button"
                 disabled={salvando}
                 onClick={() => abrirModalStatus(grupo, 'indisponivel')}
-                className="w-full h-8 px-4 rounded-lg border border-rose-300 text-rose-600 text-xs font-semibold disabled:opacity-50 transition hover:bg-rose-50"
+                aria-label={`Encerrar disponibilidade de ${grupo.terapeuta}`}
+                className="w-full h-11 px-4 rounded-lg border border-rose-300 text-rose-600 text-xs font-semibold disabled:opacity-50 transition hover:bg-rose-50"
               >
                 Encerrar disponibilidade
               </button>
@@ -252,7 +260,8 @@ export default function ControleTerapeutaMobileCard({
                 type="button"
                 disabled={salvando}
                 onClick={() => abrirModalStatus(grupo, 'disponivel')}
-                className="w-full h-8 px-4 rounded-lg bg-emerald-600 text-white text-xs font-semibold disabled:opacity-50 transition hover:bg-emerald-700"
+                aria-label={`Marcar ${grupo.terapeuta} como disponível agora`}
+                className="w-full h-11 px-4 rounded-lg border border-emerald-300 bg-white text-emerald-600 text-xs font-semibold disabled:opacity-50 transition hover:bg-emerald-50"
               >
                 Disponível agora
               </button>
@@ -260,7 +269,8 @@ export default function ControleTerapeutaMobileCard({
                 type="button"
                 disabled={salvando}
                 onClick={() => abrirModalStatus(grupo, 'indisponivel')}
-                className="w-full h-8 px-4 rounded-lg border border-[#3A8FB7] text-[#3A8FB7] text-xs font-semibold disabled:opacity-50 transition hover:bg-[#f0f8fd]"
+                aria-label={`Registrar substituição para ${grupo.terapeuta}`}
+                className="w-full h-11 px-4 rounded-lg border border-[#3A8FB7] text-[#3A8FB7] text-xs font-semibold disabled:opacity-50 transition hover:bg-[#f0f8fd]"
               >
                 Substituição
               </button>
@@ -285,7 +295,7 @@ export default function ControleTerapeutaMobileCard({
 
       {/* ── Sessões expandidas ── */}
       {aberto && (
-        <div className="border-t border-slate-100 divide-y divide-slate-100">
+        <div id={sessoesId} className="border-t border-slate-100 divide-y divide-slate-100">
           {horariosOrdenados.map((item) => (
             <div
               key={item.tita_agendamento_id}
@@ -356,14 +366,6 @@ function normalizarStatusDisponibilidade(
   return 'pendente'
 }
 
-function getIniciais(nome: string): string {
-  const partes = nome.trim().split(/\s+/)
-  if (partes.length >= 2) {
-    return (partes[0][0] + partes[partes.length - 1][0]).toUpperCase()
-  }
-  return partes[0].slice(0, 2).toUpperCase()
-}
-
 function statusBadgeClass(status: StatusDisponibilidade): string {
   switch (status) {
     case 'disponivel':
@@ -403,3 +405,5 @@ function formatarDataHora(iso?: string | null): string {
   const min  = String(d.getMinutes()).padStart(2, '0')
   return `${dia}/${mes} às ${hora}:${min}`
 }
+
+export default memo(ControleTerapeutaMobileCard)

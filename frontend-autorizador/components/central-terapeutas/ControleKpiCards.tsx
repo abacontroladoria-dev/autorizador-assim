@@ -75,9 +75,9 @@ export default function ControleKpiCards({ grupos, loading }: Props) {
       title: 'Pendentes',
       value: pendentes,
       total: totalGrupos,
-      tone: 'text-violet-700',
-      iconTone: 'bg-violet-50 text-violet-700',
-      barTone: 'bg-violet-500',
+      tone: 'text-slate-600',
+      iconTone: 'bg-slate-100 text-slate-500',
+      barTone: 'bg-slate-400',
       icon: Clock,
     },
     {

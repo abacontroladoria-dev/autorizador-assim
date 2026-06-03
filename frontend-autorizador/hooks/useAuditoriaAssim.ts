@@ -1,13 +1,13 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { listarAuditoriaAssim, listarFaltasAuditoria, buscarKpisAuditoriaAssim } from '@/services/auditoria-assim.service'
+import { listarAuditoriaAssim, listarFaltasAuditoria } from '@/services/auditoria-assim.service'
 import { getSupabaseClient } from '@/lib/supabase/client'
 import type { AuditoriaAssimItem, AuditoriaFilters, KpisAuditoriaAssim } from '@/components/auditoria-assim/types'
 
-const PAGE_SIZE    = 30
-const POLL_MS      = 60_000
-const DEBOUNCE_MS  = 800
+const PAGE_SIZE       = 30
+const DEBOUNCE_MS     = 800
+const DATE_DEBOUNCE_MS = 400
 
 function getHojeLocal() {
   const hoje = new Date()
@@ -21,11 +21,11 @@ export type SortKey = keyof AuditoriaAssimItem
 export type SortDir = 'asc' | 'desc'
 
 export function useAuditoriaAssim() {
-  const [dados, setDados] = useState<AuditoriaAssimItem[]>([])
-  const [kpis, setKpis] = useState<KpisAuditoriaAssim | null>(null)
+  const [rawDados, setRawDados] = useState<AuditoriaAssimItem[]>([])
   const [loading, setLoading] = useState(true)
   const [pagina, setPagina] = useState(1)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const dateDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hasMountedRef = useRef(false)
   const [sortKey, setSortKey] = useState<SortKey>('hora_inicial')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
@@ -58,28 +58,47 @@ export function useAuditoriaAssim() {
   async function carregarDados(silent = false) {
     if (!silent) setLoading(true)
     const data = filtersRef.current.data || getHojeLocal()
-    const [registros, faltas, kpisData] = await Promise.all([
+    const [registros, faltas] = await Promise.all([
       listarAuditoriaAssim(data),
       listarFaltasAuditoria(data),
-      buscarKpisAuditoriaAssim(data),
     ])
-    setDados([...registros, ...faltas])
-    setKpis(kpisData)
+    setRawDados([...registros, ...faltas])
     setLoading(false)
   }
+
+  // KPIs derivados client-side — elimina o 3º round-trip ao banco
+  const kpis = useMemo((): KpisAuditoriaAssim | null => {
+    if (loading) return null
+    const registros = rawDados.filter((d) => d.situacao !== 'FALTA')
+    const faltas = rawDados.filter((d) => d.situacao === 'FALTA')
+    return {
+      total: registros.length,
+      faltas: faltas.length,
+      liberadas: registros.filter((d) => d.situacao === 'LIBERADA').length,
+      nao_solicitadas: registros.filter((d) => d.situacao === 'NAO_SOLICITADA').length,
+      sincronizando: registros.filter((d) => d.situacao === 'SINCRONIZANDO').length,
+      retorno_nao_confirmado: registros.filter((d) => d.situacao === 'RETORNO_NAO_CONFIRMADO' || d.situacao === 'AGUARDANDO_RETORNO').length,
+      canceladas: registros.filter((d) => d.situacao === 'CANCELADA').length,
+      glosas: registros.filter((d) => d.situacao === 'GLOSA').length,
+    }
+  }, [rawDados, loading])
 
   useEffect(() => {
     carregarDados()
   }, [])
 
-  // Recarrega dados completos quando a data muda (evita duplo load no mount)
+  // Debounce na troca de data — evita múltiplos fetches ao digitar a data manualmente
   useEffect(() => {
     if (!hasMountedRef.current) {
       hasMountedRef.current = true
       return
     }
     if (!filters.data) return
-    carregarDados(false)
+    if (dateDebounceRef.current) clearTimeout(dateDebounceRef.current)
+    dateDebounceRef.current = setTimeout(() => carregarDados(false), DATE_DEBOUNCE_MS)
+    return () => {
+      if (dateDebounceRef.current) clearTimeout(dateDebounceRef.current)
+    }
   }, [filters.data])
 
   useEffect(() => {
@@ -96,17 +115,14 @@ export function useAuditoriaAssim() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'autorizacoes_assim' }, dispatchReload)
       .subscribe()
 
-    const poll = setInterval(dispatchReload, POLL_MS)
-
     return () => {
       supabase.removeChannel(channel)
-      clearInterval(poll)
       if (debounceRef.current) clearTimeout(debounceRef.current)
     }
   }, [])
 
   const filtrados = useMemo(() => {
-    const filtered = dados.filter((item) => {
+    const filtered = rawDados.filter((item) => {
       if (
         filters.paciente &&
         !item.paciente_nome?.toLowerCase().includes(filters.paciente.toLowerCase())
@@ -138,7 +154,7 @@ export function useAuditoriaAssim() {
       }
       return 0
     })
-  }, [dados, filters.paciente, filters.situacao, filters.tuss, sortKey, sortDir])
+  }, [rawDados, filters.paciente, filters.situacao, filters.tuss, sortKey, sortDir])
 
   const totalPaginas = useMemo(
     () => Math.max(1, Math.ceil(filtrados.length / PAGE_SIZE)),

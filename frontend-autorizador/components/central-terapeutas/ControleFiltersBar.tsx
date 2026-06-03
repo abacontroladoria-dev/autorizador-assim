@@ -73,29 +73,49 @@ export default function ControleFiltersBar({
           type="button"
           onClick={() => onChange({ ...filters, statusFiltro: [] })}
           className={`
-            relative overflow-hidden shrink-0
-            flex flex-col items-center justify-between
-            rounded-2xl p-3 pt-4 shadow-md min-h-28 w-36
-            bg-linear-to-br from-indigo-600 to-violet-700
-            cursor-pointer transition hover:-translate-y-px hover:shadow-lg
+            shrink-0 flex flex-col items-center w-36
+            rounded-xl p-2 shadow-sm cursor-pointer
+            transition hover:-translate-y-px hover:shadow-md
             border-2
-            ${(filters.statusFiltro ?? []).length === 0 ? 'border-white/60' : 'border-transparent'}
+            ${(filters.statusFiltro ?? []).length === 0
+              ? 'border-[#3A8FB7] bg-[#f0f8fd]'
+              : 'border-slate-200/80 bg-white hover:border-slate-300'}
           `}
         >
-          <div className="relative z-10 flex flex-col items-center gap-1 w-full">
-            <div className="h-8 w-8 rounded-full bg-white/15 flex items-center justify-center mb-1">
-              <Users size={17} className="text-white" />
+          <div className="w-full">
+            <div className={`h-7 w-7 rounded-full flex items-center justify-center mx-auto ${
+              (filters.statusFiltro ?? []).length === 0
+                ? 'bg-[#3A8FB7]/10 text-[#3A8FB7]'
+                : 'bg-slate-100 text-slate-500'
+            }`}>
+              <Users size={13} />
             </div>
-            <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-200 leading-tight text-center">
-              Total Terapeutas
-            </span>
-            <span className="text-4xl font-bold text-white leading-none mt-1">{totalGrupos}</span>
-            <span className="text-[11px] text-indigo-300 mt-0.5">100% do total</span>
+            <p className="text-[11px] font-semibold text-slate-600 leading-snug text-center mt-1.5">
+              Total
+            </p>
           </div>
-          <div className="absolute bottom-0 left-0 right-0 flex items-end gap-0.5 px-3 z-0">
-            {[35, 55, 42, 68, 52, 78, 62, 88, 72, 95].map((h, i) => (
-              <div key={i} className="flex-1 rounded-t-[3px] bg-white/10" style={{ height: `${h * 0.45}px` }} />
-            ))}
+          <div className="flex-1 flex items-center justify-center py-1">
+            <span className={`text-2xl font-bold leading-none ${
+              (filters.statusFiltro ?? []).length === 0 ? 'text-[#3A8FB7]' : 'text-slate-700'
+            }`}>
+              {totalGrupos}
+            </span>
+          </div>
+          <div className="w-full px-1">
+            <div className="flex justify-center mb-1.5">
+              <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                (filters.statusFiltro ?? []).length === 0
+                  ? 'bg-[#3A8FB7]/10 text-[#3A8FB7]'
+                  : 'bg-slate-100 text-slate-500'
+              }`}>
+                100%
+              </span>
+            </div>
+            <div className="h-1 rounded-full bg-slate-100 overflow-hidden">
+              <div className={`h-full rounded-full transition-all duration-500 ${
+                (filters.statusFiltro ?? []).length === 0 ? 'bg-[#3A8FB7]' : 'bg-slate-300'
+              }`} style={{ width: '100%' }} />
+            </div>
           </div>
         </button>
 
@@ -170,16 +190,7 @@ export default function ControleFiltersBar({
       </div>
 
       {/* Barra de filtros */}
-      <div
-        className="
-          bg-white/90
-          backdrop-blur
-          border border-white/50
-          rounded-2xl
-          p-3
-          shadow-sm
-        "
-      >
+      <div className="bg-white border border-slate-200 rounded-2xl p-3 shadow-sm">
         <div
           className="
             grid
@@ -190,6 +201,7 @@ export default function ControleFiltersBar({
         >
           {/* Data */}
           <label className="relative">
+            <span className="sr-only">Data do atendimento</span>
             <CalendarDays className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
             <input
               type="date"
@@ -201,6 +213,7 @@ export default function ControleFiltersBar({
 
           {/* Busca unificada — terapeuta ou paciente */}
           <label className="relative">
+            <span className="sr-only">Buscar terapeuta ou paciente</span>
             <Search className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
             <input
               placeholder="Buscar terapeuta ou paciente"
@@ -212,6 +225,7 @@ export default function ControleFiltersBar({
 
           {/* Horário */}
           <label className="relative">
+            <span className="sr-only">Filtrar por horário</span>
             <Clock3 className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
             <select
               value={filters.horario}
@@ -229,6 +243,7 @@ export default function ControleFiltersBar({
 
           {/* Unidade */}
           <label className="relative">
+            <span className="sr-only">Filtrar por unidade</span>
             <MapPin className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
             <select
               value={filters.unidade}
@@ -246,6 +261,7 @@ export default function ControleFiltersBar({
 
           {/* Terapia */}
           <label className="relative">
+            <span className="sr-only">Filtrar por terapia</span>
             <Stethoscope className="w-4 h-4 text-slate-400 absolute left-4 top-1/2 -translate-y-1/2" />
             <select
               value={filters.terapia}
@@ -315,12 +331,12 @@ const statusChips = [
     key: 'pendente',
     label: 'Pendente',
     icon: Clock,
-    numClass: 'text-violet-600',
-    iconTone: 'bg-violet-50 text-violet-600',
-    barTone: 'bg-violet-500',
-    borderActive: 'border-violet-400',
-    hoverBorder: 'hover:border-violet-300',
-    bgActive: 'bg-violet-50/60',
+    numClass: 'text-slate-600',
+    iconTone: 'bg-slate-100 text-slate-500',
+    barTone: 'bg-slate-400',
+    borderActive: 'border-slate-400',
+    hoverBorder: 'hover:border-slate-300',
+    bgActive: 'bg-slate-50/60',
   },
 ]
 
@@ -335,7 +351,7 @@ const inputClass = `
   text-slate-700
   outline-none
   focus:ring-4
-  focus:ring-violet-100
-  focus:border-violet-300
+  focus:ring-[#3A8FB7]/20
+  focus:border-[#3A8FB7]
   transition
 `

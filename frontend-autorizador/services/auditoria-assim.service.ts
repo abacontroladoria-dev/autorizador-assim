@@ -5,36 +5,7 @@ const supabase = getSupabaseClient()
 
 export async function listarAuditoriaAssim(data: string): Promise<AuditoriaAssimItem[]> {
   const { data: result, error } = await supabase
-    .from('vw_auditoria_autorizacoes_assim')
-    .select(`
-      bloco_id,
-      paciente_id,
-      paciente_nome,
-      data_atendimento,
-      hora_inicial,
-      codigo_tuss,
-      convenio_nome,
-      terapias,
-      profissionais,
-      quantidade_sessoes,
-      guia,
-      status_assim,
-      codigo_erro,
-      descricao_erro,
-      data_execucao,
-      situacao,
-      prioridade,
-      dias_atraso,
-      possui_autorizacao,
-      possui_solicitacao,
-      observacao,
-      motivo_glosa
-    `)
-    .eq('data_atendimento', data)
-    .order('prioridade', { ascending: true })
-    .order('hora_inicial', { ascending: true })
-    .not('terapias', 'ilike', '%Equoterapia%')
-    .not('terapias', 'ilike', '%Fisioterapia Aquática%')
+    .rpc('get_auditoria_assim', { p_data: data })
 
   if (error) {
     console.error('Erro ao buscar auditoria ASSIM:', error)
