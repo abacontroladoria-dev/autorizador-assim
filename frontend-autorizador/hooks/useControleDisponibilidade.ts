@@ -22,7 +22,7 @@ export type HorarioEdicao = {
 
 type GrupoBase = {
   terapeuta: string
-  status: StatusDisponibilidade
+  status: string
   atendimentos: any[]
 }
 

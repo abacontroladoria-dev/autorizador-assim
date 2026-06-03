@@ -10,26 +10,8 @@ import {
 } from 'lucide-react'
 
 import { getHorario, getIniciais, getPaciente } from './helpers'
-import type { ControleTerapeuticoItem } from './types'
-
-type StatusDisponibilidade =
-  | 'pendente'
-  | 'disponivel'
-  | 'indisponivel'
-  | 'parcial'
-  | 'substituido'
-
-type GrupoTerapeutaMobile = {
-  terapeuta: string
-  terapia: string
-  unidade: string
-  primeiroHorario: string
-  status: string
-  substituto?: string
-  ultimaAlteracaoPor?: string | null
-  ultimaAlteracaoEm?: string | null
-  atendimentos: ControleTerapeuticoItem[]
-}
+import type { GrupoTerapeutaMobile, StatusDisponibilidadeGrupo } from './types'
+import type { StatusDisponibilidade } from '@/hooks/useControleDisponibilidade'
 
 type Props = {
   grupo: GrupoTerapeutaMobile
@@ -353,7 +335,7 @@ function ControleTerapeutaMobileCard({
 
 function normalizarStatusDisponibilidade(
   status?: string | null
-): StatusDisponibilidade {
+): StatusDisponibilidadeGrupo {
   if (
     status === 'disponivel' ||
     status === 'indisponivel' ||
@@ -366,7 +348,7 @@ function normalizarStatusDisponibilidade(
   return 'pendente'
 }
 
-function statusBadgeClass(status: StatusDisponibilidade): string {
+function statusBadgeClass(status: StatusDisponibilidadeGrupo): string {
   switch (status) {
     case 'disponivel':
       return 'bg-emerald-100 text-emerald-700'
@@ -381,7 +363,7 @@ function statusBadgeClass(status: StatusDisponibilidade): string {
   }
 }
 
-function statusBadgeLabel(status: StatusDisponibilidade): string {
+function statusBadgeLabel(status: StatusDisponibilidadeGrupo): string {
   switch (status) {
     case 'disponivel':
       return 'Disponível'

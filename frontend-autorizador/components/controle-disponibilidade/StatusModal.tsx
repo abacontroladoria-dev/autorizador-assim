@@ -22,7 +22,7 @@ type HorarioEdicao = {
 
 type Grupo = {
   terapeuta: string
-  status: StatusDisponibilidade
+  status: string
   atendimentos: any[]
 }
 

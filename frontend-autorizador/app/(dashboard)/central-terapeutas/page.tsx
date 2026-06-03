@@ -8,7 +8,8 @@ import ControleFiltersBar from '@/components/central-terapeutas/ControleFiltersB
 import ControleTerapeutaMobileCard from '@/components/central-terapeutas/ControleTerapeutaMobileCard'
 import CoberturaModal from '@/components/central-terapeutas/CoberturaModal'
 import {
-  useControleDisponibilidade
+  useControleDisponibilidade,
+  type StatusDisponibilidade,
 } from '@/hooks/useControleDisponibilidade'
 
 import StatusModal from '@/components/controle-disponibilidade/StatusModal'
@@ -350,7 +351,7 @@ Object.values(grupos).forEach(
 
   const handleAtualizarStatus = useCallback(
     (grupo: GrupoTerapeutaMobile, status: string) => {
-      void atualizarStatusDireto(grupo, status)
+      void atualizarStatusDireto(grupo, status as StatusDisponibilidade)
     },
     [atualizarStatusDireto]
   )
