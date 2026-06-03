@@ -131,7 +131,6 @@ const unidades = [
     const grupos: Record<number, { horario: string; terapia: string }[]> = {}
 
     listaDia.forEach(p => {
-      if (!p.mostrar_na_tela) return
       const id = p.paciente_id
       if (!grupos[id]) grupos[id] = []
       grupos[id].push({ horario: p.horario ?? '', terapia: p.terapias?.[0] ?? '' })
