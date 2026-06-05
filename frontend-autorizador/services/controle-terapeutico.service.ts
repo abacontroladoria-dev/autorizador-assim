@@ -250,6 +250,7 @@ export async function buscarItensAgenda(
 // Terapias do Grupo ABA — equivalentes para substituição (spec: cobertura-clinica.md)
 export const ABA_GROUP = [
   'Aplicador ABA (AE)',
+  'Aplicador ABA (EF)',
   'Aplicador ABA (PS)',
   'Aplicador ABA (SF)',
 ] as const

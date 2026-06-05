@@ -18,6 +18,12 @@ import {
   COORD_CASO,
   type SlotModalSubstituicao,
 } from '@/services/controle-terapeutico.service'
+import {
+  registrarSubstituicao,
+  buscarCriteriosRecomendacao,
+  calcularRecomendacaoAutomatica,
+} from '@/services/substituicoes.service'
+import { getSupabaseClient } from '@/lib/supabase/client'
 import type { GrupoTerapeutaMobile, ControleTerapeuticoItem } from './types'
 import { getIniciais, getPaciente } from './helpers'
 import ProfissionaisVerMaisModal from './ProfissionaisVerMaisModal'
@@ -28,6 +34,7 @@ type SessaoCobertura = {
   disponivel: boolean | null   // null = não decidido (pendente)
   substitutoId: number | null
   substitutoNome: string | null
+  recomendadoId: number | null // profissional pré-selecionado pelo algoritmo
 }
 
 type Props = {
@@ -83,6 +90,7 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
           substitutoNome: isSubstituido
             ? a.profissional_substituto_nome ?? null
             : null,
+          recomendadoId: null,
         }
       })
     )
@@ -94,9 +102,10 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
 
     setCarregando(true)
     listarModalSubstituicao({ terapiaNome, unidade: grupo.unidade, dataAtendimento: data })
-      .then((data) => {
-        const semTerapeuta = data.filter((p) => p.profissional_nome !== grupo.terapeuta)
+      .then(async (profData) => {
+        const semTerapeuta = profData.filter((p) => p.profissional_nome !== grupo.terapeuta)
         setProfissionais(semTerapeuta)
+
         // Resolve substitutoId por nome para sessões pré-carregadas sem ID
         setSessoes((prev) => prev.map((s) => {
           if (s.substitutoNome && !s.substitutoId) {
@@ -105,6 +114,76 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
           }
           return s
         }))
+
+        // ── Recomendação automática ──────────────────────────────────
+        // Apenas profissionais Livres participam da pré-seleção (spec).
+        const livres = semTerapeuta.filter((p) => p.status_slot === 'livre')
+        if (livres.length === 0) return
+
+        const profIds = [...new Set(livres.map((p) => p.profissional_id))]
+        const competencia = `${data.slice(0, 4)}-${data.slice(5, 7)}`
+
+        // Coleta paciente_id distintos das sessões sem decisão
+        const pacienteIds = [
+          ...new Set(
+            ordenados
+              .filter((a) => {
+                const st = String(a.status ?? '').toLowerCase()
+                return st !== 'disponivel' && st !== 'indisponivel'
+              })
+              .map((a) => (a as any).paciente_id as number | null)
+              .filter((id): id is number => id != null)
+          ),
+        ]
+
+        const criteria = await buscarCriteriosRecomendacao({
+          pacienteIds,
+          data,
+          competencia,
+          profIds,
+        })
+
+        setSessoes((prev) =>
+          prev.map((s) => {
+            // Não sobrescreve sessões que já têm decisão ou substituto definido
+            if (s.disponivel !== null || s.substitutoId !== null) return s
+
+            const hora = String(s.atendimento.hora_inicial || '').slice(0, 5)
+            const sessaoTerapiaNome = String((s.atendimento as any)?.terapia_nome || '')
+            const pacId = (s.atendimento as any).paciente_id as number | null
+
+            // Profissionais livres disponíveis neste horário específico
+            const livresNaHoraBase = semTerapeuta.filter(
+              (p) => p.status_slot === 'livre' && p.hora.slice(0, 5) === hora
+            )
+            // Regra do Coordenador: mesma lógica do SessionRow — exclui Coordenador de Caso
+            // quando há pelo menos um Livre ABA, alinhando o algoritmo com o que o UI exibe.
+            const isAbaRec = (ABA_GROUP as readonly string[]).includes(sessaoTerapiaNome)
+            const hasLivreAbaRec = isAbaRec && livresNaHoraBase.some(
+              (p) => (ABA_GROUP as readonly string[]).includes(p.terapia_nome)
+            )
+            const livresNaHora = hasLivreAbaRec
+              ? livresNaHoraBase.filter((p) => p.terapia_nome !== COORD_CASO)
+              : livresNaHoraBase
+
+            const recId = calcularRecomendacaoAutomatica(
+              livresNaHora,
+              sessaoTerapiaNome,
+              pacId,
+              criteria
+            )
+            if (!recId) return s
+
+            const prof = semTerapeuta.find((p) => p.profissional_id === recId)
+            return {
+              ...s,
+              disponivel: false,
+              substitutoId: recId,
+              substitutoNome: prof?.profissional_nome ?? null,
+              recomendadoId: recId,
+            }
+          })
+        )
       })
       .finally(() => setCarregando(false))
 
@@ -192,6 +271,7 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
   }
 
   async function handleConfirmar() {
+    if (!grupo) return
     setSalvando(true)
     try {
       const promessas: Promise<any>[] = []
@@ -219,25 +299,75 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
         )
       }
 
-      const bySubst = new Map<string, number[]>()
+      // Agrupa por substituto (ID + nome) para também passar profissional_substituto_id
+      type SubstKey = { id: number; nome: string; ids: number[] }
+      const bySubst = new Map<string, SubstKey>()
       for (const s of sessoes.filter((s) => s.substitutoId)) {
-        const key = s.substitutoNome!
-        if (!bySubst.has(key)) bySubst.set(key, [])
-        bySubst.get(key)!.push(s.id)
+        const key = `${s.substitutoId}|${s.substitutoNome}`
+        if (!bySubst.has(key)) {
+          bySubst.set(key, { id: s.substitutoId!, nome: s.substitutoNome!, ids: [] })
+        }
+        bySubst.get(key)!.ids.push(s.id)
       }
 
-      for (const [nome, ids] of bySubst) {
-        promessas.push(
-          atualizarStatusAtendimentosEmLote({
-            tita_agendamento_ids: ids,
+      // Executa upserts de substituídos rastreando qual batch salvou com sucesso.
+      // Histórico só é gravado para sessões cujo upsert retornou dados (não null).
+      const substResultados = await Promise.all(
+        [...bySubst.values()].map(async (batch) => {
+          const res = await atualizarStatusAtendimentosEmLote({
+            tita_agendamento_ids: batch.ids,
             status: 'substituido',
-            profissional_substituto_nome: nome,
+            profissional_substituto_id: batch.id,
+            profissional_substituto_nome: batch.nome,
             observacao: motivoCompleto || null,
           })
+          return res !== null ? batch : null
+        })
+      )
+
+      await Promise.all(promessas)
+
+      // ── Registro histórico (somente substituições efetivamente salvas) ────
+      const idsComSucesso = new Set(
+        substResultados.filter(Boolean).flatMap((b) => b!.ids)
+      )
+      const sessoesSub = sessoes.filter(
+        (s) => s.substitutoId && s.substitutoNome && idsComSucesso.has(s.id)
+      )
+      if (sessoesSub.length > 0) {
+        const competencia = `${data.slice(0, 4)}-${data.slice(5, 7)}`
+        const supabase = getSupabaseClient()
+        const { data: { user } } = await supabase.auth.getUser()
+        const usuarioResponsavel = user?.email ?? null
+
+        const profOriginalId =
+          typeof grupo.atendimentos[0]?.profissional_id === 'number'
+            ? (grupo.atendimentos[0].profissional_id as number)
+            : null
+
+        await Promise.all(
+          sessoesSub.map((s) =>
+            registrarSubstituicao({
+              sessao_id:                    s.id,
+              paciente_id:                  (s.atendimento as any).paciente_id ?? null,
+              paciente_nome:                ((s.atendimento as any).paciente_nome ?? null) as string | null,
+              unidade_nome:                 grupo.unidade,
+              terapia_real:                 String((s.atendimento as any).terapia_nome || ''),
+              data_sessao:                  data,
+              horario_inicio:               s.atendimento.hora_inicial ? String(s.atendimento.hora_inicial).slice(0, 5) : null,
+              horario_fim:                  s.atendimento.hora_final ? String(s.atendimento.hora_final).slice(0, 5) : null,
+              profissional_original_id:     profOriginalId,
+              profissional_original_nome:   grupo.terapeuta,
+              profissional_substituto_id:   s.substitutoId!,
+              profissional_substituto_nome: s.substitutoNome!,
+              competencia,
+              motivo:                       motivoCompleto || null,
+              usuario_responsavel:          usuarioResponsavel,
+            })
+          )
         )
       }
 
-      await Promise.all(promessas)
       onSuccess()
       onClose()
     } finally {
@@ -513,6 +643,7 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
                   key={sessao.id}
                   sessao={sessao}
                   profissionais={profissionais}
+                  recomendadoId={sessao.recomendadoId}
                   onSelecionar={selecionarSubstituto}
                   onMarcarDisponivel={marcarDisponivel}
                   onVerMais={() => setVerMaisSessao(sessao)}
@@ -592,12 +723,14 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
 function SessionRow({
   sessao,
   profissionais,
+  recomendadoId,
   onSelecionar,
   onMarcarDisponivel,
   onVerMais,
 }: {
   sessao: SessaoCobertura
   profissionais: SlotModalSubstituicao[]
+  recomendadoId: number | null
   onSelecionar: (id: number, profId: number | null, nome: string | null) => void
   onMarcarDisponivel: (id: number) => void
   onVerMais: () => void
@@ -662,8 +795,18 @@ function SessionRow({
     return profsFinais.sort((a, b) => (ordemStatus[a.status] ?? 3) - (ordemStatus[b.status] ?? 3))
   }, [profsUnicos, profissionais, hora])
 
-  const top3 = profsComStatus.slice(0, 5)
-  const restante = Math.max(0, profsComStatus.length - 5)
+  // Garante que o profissional recomendado seja sempre o primeiro card visível
+  const profsOrdenados = useMemo(() => {
+    if (!recomendadoId) return profsComStatus
+    const idx = profsComStatus.findIndex((p) => p.id === recomendadoId)
+    if (idx <= 0) return profsComStatus
+    const lista = [...profsComStatus]
+    lista.unshift(lista.splice(idx, 1)[0])
+    return lista
+  }, [profsComStatus, recomendadoId])
+
+  const top3 = profsOrdenados.slice(0, 5)
+  const restante = Math.max(0, profsOrdenados.length - 5)
   const selecionadoId = sessao.substitutoId
   const temSubstituto = !!selecionadoId || !!sessao.substitutoNome
 
@@ -736,6 +879,7 @@ function SessionRow({
               key={prof.id}
               prof={prof}
               selecionado={selecionadoId === prof.id}
+              recomendado={recomendadoId === prof.id}
               onClick={() => onSelecionar(sessao.id, prof.id, prof.nome)}
             />
           ))}
@@ -803,10 +947,12 @@ function SessionRow({
 function ProfMiniCard({
   prof,
   selecionado,
+  recomendado,
   onClick,
 }: {
   prof: { id: number; nome: string; status: string; paciente: string | null }
   selecionado: boolean
+  recomendado: boolean
   onClick: () => void
 }) {
   const iniciais = getIniciais(prof.nome)
@@ -833,7 +979,9 @@ function ProfMiniCard({
       className={`flex flex-col items-center gap-1 p-2 rounded-xl border-2 transition focus-visible:ring-2 focus-visible:ring-[#3A8FB7]/50 focus-visible:outline-none shrink-0 w-25 min-h-24 ${
         selecionado
           ? 'border-[#3A8FB7] bg-[#f0f8fd]'
-          : 'border-slate-200 hover:border-[#3A8FB7]/50 bg-white'
+          : recomendado
+            ? 'border-amber-400 bg-amber-50 hover:border-amber-500'
+            : 'border-slate-200 hover:border-[#3A8FB7]/50 bg-white'
       }`}
     >
       <div className="relative w-10 h-10 rounded-full bg-[#eef5fb] text-[#3A8FB7] flex items-center justify-center text-xs font-bold select-none shrink-0">
@@ -850,7 +998,12 @@ function ProfMiniCard({
       <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded-full whitespace-nowrap ${badgeClass}`}>
         {label}
       </span>
-      {prof.status === 'ocupado' && prof.paciente && (
+      {recomendado && !selecionado && (
+        <span className="text-[10px] font-semibold text-amber-600 whitespace-nowrap">
+          Recomendado
+        </span>
+      )}
+      {prof.status === 'ocupado' && prof.paciente && !recomendado && (
         <span className="text-[10px] text-slate-400 text-center leading-tight truncate w-full px-0.5">
           {prof.paciente.split(' ')[0]}
         </span>

@@ -4,7 +4,14 @@
       "Bash(node \"c:\\\\Users\\\\UNIVERSO\\\\projeto_automacao\\\\assim-autorizacao\\\\.claude\\\\skills\\\\impeccable\\\\scripts\\\\context.mjs\")",
       "Bash(npm run *)",
       "Bash(echo \"PID: $!\")",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:3000)",
+      "Bash(ls -la \"c:\\\\\\\\Users\\\\\\\\UNIVERSO\\\\\\\\projeto_automacao\\\\\\\\assim-autorizacao\\\\\\\\frontend-autorizador\\\\\\\\lib\\\\\\\\supabase\")",
+      "Bash(find \"c:\\\\\\\\Users\\\\\\\\UNIVERSO\\\\\\\\projeto_automacao\\\\\\\\assim-autorizacao\\\\\\\\frontend-autorizador\\\\\\\\lib\\\\\\\\supabase\" -type f -name \"*.ts\")",
+      "Bash(ls -la \"c:\\\\\\\\Users\\\\\\\\UNIVERSO\\\\\\\\projeto_automacao\\\\\\\\assim-autorizacao\\\\\\\\frontend-autorizador\\\\\\\\app\\\\\\\\login\")",
+      "Bash(find \"c:\\\\\\\\Users\\\\\\\\UNIVERSO\\\\\\\\projeto_automacao\\\\\\\\assim-autorizacao\\\\\\\\frontend-autorizador\\\\\\\\components\" -type d)",
+      "Bash(ls -la \"c:\\\\\\\\Users\\\\\\\\UNIVERSO\\\\\\\\projeto_automacao\\\\\\\\assim-autorizacao\\\\\\\\frontend-autorizador\\\\\\\\lib\")",
+      "Bash(find \"c:\\\\\\\\Users\\\\\\\\UNIVERSO\\\\\\\\projeto_automacao\\\\\\\\assim-autorizacao\\\\\\\\frontend-autorizador\\\\\\\\app\" -name \"page.tsx\")",
+      "Bash(gh pr *)"
     ]
   }
 }

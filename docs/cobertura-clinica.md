@@ -34,6 +34,7 @@ Profissional possui terapia compatível e trabalha no mesmo turno, mas não poss
 
 As seguintes terapias são consideradas equivalentes para substituição:
 
+* Aplicador ABA (EF)
 * Aplicador ABA (AE)
 * Aplicador ABA (PS)
 * Aplicador ABA (SF)

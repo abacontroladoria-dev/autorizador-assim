@@ -15,6 +15,7 @@ export type ControleTerapeuticoStatus =
 export type AtendimentoTerapeutico = {
   tita_agendamento_id: string | number
   data_atendimento?: string | null
+  paciente_id?: number | null
   paciente_nome?: string | null
   nome_paciente?: string | null
   profissional_id?: string | number | null
@@ -54,6 +55,7 @@ export async function listarCentralTerapeutica(data: string): Promise<Atendiment
 
   data_atendimento,
 
+  paciente_id,
   paciente_nome,
 
   profissional_id,
