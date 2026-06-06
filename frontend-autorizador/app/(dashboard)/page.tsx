@@ -251,6 +251,18 @@ export default function Home() {
       <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_6px_24px_-2px_rgba(0,0,0,0.08)] px-7 py-6">
         <div className="flex items-center justify-between gap-8">
           <div className="min-w-0">
+            {/* Product identity */}
+            <div className="mb-4">
+              <span
+                className="text-lg font-bold uppercase tracking-[0.22em] block leading-none"
+                style={{ color: "#3A8FB7" }}
+              >
+                PULSAR
+              </span>
+              <span className="text-xs font-medium text-slate-400 mt-1 block">
+                Centro de Operações Universo ABA
+              </span>
+            </div>
             <h1 className="text-2xl font-bold text-slate-800 leading-tight">
               {greeting()}, {nomeUsuario}! 👋
             </h1>

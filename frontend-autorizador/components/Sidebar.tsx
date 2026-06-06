@@ -344,9 +344,23 @@ export default function Sidebar() {
         style={{ background: "linear-gradient(180deg, #0e1c2e 0%, #0a1620 100%)", borderRight: "1px solid rgba(255,255,255,0.06)" }}>
 
         {/* LOGO */}
-        <div className="h-20 flex items-center justify-center px-6"
-          style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-          <img src="/logo-universo-aba.png" className="h-20 object-contain" />
+        <div className="flex items-center justify-center gap-3 px-5 py-4"
+          style={{ borderBottom: "1px solid rgba(255,255,255,0.05)", minHeight: "5rem" }}>
+          <img src="/logo-universo-aba.png" className="h-14 w-14 object-contain shrink-0" />
+          <div className="flex flex-col items-center leading-tight">
+            <span
+              className="font-bold uppercase text-[17px] tracking-[0.22em]"
+              style={{ color: "#38bdf8" }}
+            >
+              PULSAR
+            </span>
+            <span
+              className="text-[13px] font-medium mt-0.5"
+              style={{ color: "rgba(255,255,255,0.4)" }}
+            >
+              Universo ABA
+            </span>
+          </div>
         </div>
 
         {/* MENU */}
