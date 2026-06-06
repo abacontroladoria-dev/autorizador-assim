@@ -13,3 +13,6 @@ package-lock.json
 package.json
 .vscode/
 backup_12MAI2026/
+.claude
+.impeccable
+.vscode
