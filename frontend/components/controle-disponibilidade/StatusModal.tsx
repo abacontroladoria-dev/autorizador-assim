@@ -128,7 +128,7 @@ useEffect(() => {
               Selecione os horários de alteração
             </h3>
 
-			<div className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-[#eef5fb] border border-[#d7e8f3]">
+			<div className="mt-2 inline-flex items-center gap-2 px-3 py-1.5 rounded-full bg-blue-50 border border-blue-100">
 
 			  <div className="rounded-full bg-[#3A8FB7]" />
 

@@ -86,14 +86,14 @@
     --chart-4: oklch(0.76 0.15 73);
     --chart-5: oklch(0.64 0.20 28);
     --radius: 0.625rem;
-    --sidebar: oklch(0.985 0 0);
-    --sidebar-foreground: oklch(0.145 0 0);
-    --sidebar-primary: oklch(0.205 0 0);
-    --sidebar-primary-foreground: oklch(0.985 0 0);
-    --sidebar-accent: oklch(0.97 0 0);
-    --sidebar-accent-foreground: oklch(0.205 0 0);
-    --sidebar-border: oklch(0.922 0 0);
-    --sidebar-ring: oklch(0.708 0 0);
+    --sidebar: #F8FAFC;
+    --sidebar-foreground: #334155;
+    --sidebar-primary: #2563EB;
+    --sidebar-primary-foreground: #FFFFFF;
+    --sidebar-accent: #DBEAFE;
+    --sidebar-accent-foreground: #1D4ED8;
+    --sidebar-border: #E2E8F0;
+    --sidebar-ring: #93C5FD;
 }
 
 .dark {
@@ -355,3 +355,203 @@ html {
 .agenda-calendar .fc-event-main * {
   color: inherit;
 }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   DARK MODE — Token system de overrides
+   CSS fora de @layer tem prioridade sobre @layer utilities do Tailwind v4,
+   então .dark .bg-white (especificidade 0,2,0) ganha de .bg-white (0,1,0)
+   sem precisar de !important.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+.dark { scrollbar-color: #475569 transparent; }
+.dark ::-webkit-scrollbar-thumb       { background: #475569; }
+.dark ::-webkit-scrollbar-thumb:hover { background: #64748b; }
+
+/* ── Branco → superfície dark ────────────────────────────────────────────── */
+.dark .bg-white      { background-color: var(--card); }
+.dark .bg-white\/95  { background-color: oklch(0.205 0 0 / 0.97); }
+.dark .bg-white\/90  { background-color: oklch(0.205 0 0 / 0.93); }
+.dark .bg-white\/80  { background-color: oklch(0.205 0 0 / 0.85); }
+.dark .bg-white\/70  { background-color: oklch(0.205 0 0 / 0.80); }
+
+/* ── Neutros ─────────────────────────────────────────────────────────────── */
+.dark .bg-slate-50,  .dark .bg-gray-50,  .dark .bg-zinc-50  { background-color: oklch(0.18  0    0);   }
+.dark .bg-slate-100, .dark .bg-gray-100, .dark .bg-zinc-100 { background-color: oklch(0.22  0    0);   }
+.dark .bg-slate-200, .dark .bg-gray-200, .dark .bg-zinc-200 { background-color: oklch(0.28  0    0);   }
+.dark .bg-slate-300, .dark .bg-gray-300                     { background-color: oklch(0.34  0    0);   }
+.dark .bg-slate-800, .dark .bg-gray-800                     { background-color: oklch(0.22  0    0);   }
+
+/* ── Semânticos -50 ──────────────────────────────────────────────────────── */
+.dark .bg-emerald-50 { background-color: oklch(0.25 0.045 160); }
+.dark .bg-rose-50    { background-color: oklch(0.25 0.045  10); }
+.dark .bg-red-50     { background-color: oklch(0.25 0.045  15); }
+.dark .bg-amber-50   { background-color: oklch(0.25 0.045  80); }
+.dark .bg-orange-50  { background-color: oklch(0.25 0.045  50); }
+.dark .bg-blue-50    { background-color: oklch(0.25 0.035 245); }
+.dark .bg-sky-50     { background-color: oklch(0.25 0.035 220); }
+.dark .bg-purple-50  { background-color: oklch(0.25 0.035 300); }
+.dark .bg-green-50   { background-color: oklch(0.25 0.045 145); }
+.dark .bg-indigo-50  { background-color: oklch(0.25 0.04  265); }
+.dark .bg-teal-50    { background-color: oklch(0.25 0.04  185); }
+.dark .bg-violet-50  { background-color: oklch(0.25 0.035 290); }
+.dark .bg-yellow-50  { background-color: oklch(0.25 0.04   85); }
+.dark .bg-pink-50    { background-color: oklch(0.25 0.04    0); }
+.dark .bg-lime-50    { background-color: oklch(0.25 0.04  130); }
+
+/* ── Semânticos -100 (badges) ────────────────────────────────────────────── */
+.dark .bg-blue-100    { background-color: oklch(0.28 0.04  245); }
+.dark .bg-green-100   { background-color: oklch(0.28 0.04  145); }
+.dark .bg-red-100     { background-color: oklch(0.28 0.04   15); }
+.dark .bg-yellow-100  { background-color: oklch(0.28 0.04   85); }
+.dark .bg-amber-100   { background-color: oklch(0.28 0.04   80); }
+.dark .bg-orange-100  { background-color: oklch(0.28 0.04   50); }
+.dark .bg-emerald-100 { background-color: oklch(0.28 0.04  160); }
+.dark .bg-rose-100    { background-color: oklch(0.28 0.04   10); }
+.dark .bg-violet-100  { background-color: oklch(0.28 0.04  290); }
+.dark .bg-sky-100     { background-color: oklch(0.28 0.035 220); }
+.dark .bg-purple-100  { background-color: oklch(0.28 0.035 300); }
+.dark .bg-indigo-100  { background-color: oklch(0.28 0.04  265); }
+.dark .bg-teal-100    { background-color: oklch(0.28 0.04  185); }
+.dark .bg-pink-100    { background-color: oklch(0.28 0.04    0); }
+
+/* Opacity variants */
+.dark .bg-emerald-50\/60 { background-color: oklch(0.25 0.045 160 / 0.7); }
+.dark .bg-rose-50\/60    { background-color: oklch(0.25 0.045  10 / 0.7); }
+.dark .bg-orange-50\/60  { background-color: oklch(0.25 0.045  50 / 0.7); }
+.dark .bg-yellow-50\/60  { background-color: oklch(0.25 0.04   85 / 0.7); }
+.dark .bg-green-50\/60   { background-color: oklch(0.25 0.045 145 / 0.7); }
+.dark .bg-blue-50\/60    { background-color: oklch(0.25 0.035 245 / 0.7); }
+.dark .bg-violet-50\/60  { background-color: oklch(0.25 0.035 290 / 0.7); }
+.dark .bg-slate-100\/70  { background-color: oklch(0.22 0     0   / 0.75); }
+
+/* ── Bordas neutras ──────────────────────────────────────────────────────── */
+.dark .border-slate-100, .dark .border-slate-200,
+.dark .border-gray-100,  .dark .border-gray-200  { border-color: var(--border); }
+.dark .border-slate-300, .dark .border-gray-300  { border-color: oklch(0.38 0 0); }
+
+/* Bordas semânticas */
+.dark .border-blue-100,   .dark .border-blue-200   { border-color: oklch(0.32 0.05 245); }
+.dark .border-green-200,  .dark .border-green-300  { border-color: oklch(0.35 0.06 145); }
+.dark .border-red-200,    .dark .border-red-300    { border-color: oklch(0.35 0.06  15); }
+.dark .border-yellow-200, .dark .border-yellow-300 { border-color: oklch(0.35 0.06  85); }
+.dark .border-amber-200,  .dark .border-amber-300  { border-color: oklch(0.35 0.06  80); }
+.dark .border-orange-200, .dark .border-orange-300 { border-color: oklch(0.35 0.06  50); }
+.dark .border-emerald-200,.dark .border-emerald-300 { border-color: oklch(0.35 0.06 160); }
+.dark .border-rose-200,   .dark .border-rose-300   { border-color: oklch(0.35 0.06  10); }
+.dark .border-violet-200, .dark .border-violet-300 { border-color: oklch(0.35 0.05 290); }
+.dark .border-blue-300                             { border-color: oklch(0.38 0.06 245); }
+.dark .border-indigo-200, .dark .border-indigo-300 { border-color: oklch(0.35 0.05 265); }
+
+/* Ring (shadow) semânticos */
+.dark .ring-blue-300    { --tw-ring-color: oklch(0.38 0.06 245); }
+.dark .ring-green-300   { --tw-ring-color: oklch(0.38 0.06 145); }
+.dark .ring-red-300     { --tw-ring-color: oklch(0.38 0.06  15); }
+.dark .ring-yellow-300  { --tw-ring-color: oklch(0.38 0.06  85); }
+.dark .ring-orange-300  { --tw-ring-color: oklch(0.38 0.06  50); }
+.dark .ring-violet-300  { --tw-ring-color: oklch(0.38 0.05 290); }
+.dark .ring-gray-300    { --tw-ring-color: oklch(0.38 0    0);   }
+
+/* ── Divisores ───────────────────────────────────────────────────────────── */
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-slate-200 > :not([hidden]) ~ :not([hidden]),
+.dark .divide-gray-100  > :not([hidden]) ~ :not([hidden]) { border-color: var(--border); }
+
+/* ── Texto neutro ────────────────────────────────────────────────────────── */
+.dark .text-slate-900, .dark .text-gray-900 { color: var(--foreground); }
+.dark .text-slate-800, .dark .text-gray-800 { color: oklch(0.92 0 0); }
+.dark .text-slate-700, .dark .text-gray-700 { color: oklch(0.78 0 0); }
+.dark .text-slate-600, .dark .text-gray-600 { color: oklch(0.72 0 0); }
+.dark .text-slate-500, .dark .text-gray-500 { color: var(--muted-foreground); }
+.dark .text-slate-400, .dark .text-gray-400 { color: oklch(0.60 0 0); }
+.dark .text-slate-300, .dark .text-gray-300 { color: oklch(0.52 0 0); }
+
+/* ── Texto semântico -700 ────────────────────────────────────────────────── */
+.dark .text-emerald-700 { color: oklch(0.72 0.13 160); }
+.dark .text-rose-700    { color: oklch(0.72 0.13  10); }
+.dark .text-red-700     { color: oklch(0.72 0.13  15); }
+.dark .text-amber-700   { color: oklch(0.78 0.13  80); }
+.dark .text-orange-700  { color: oklch(0.78 0.13  50); }
+.dark .text-blue-700    { color: oklch(0.72 0.10 245); }
+.dark .text-blue-800    { color: oklch(0.72 0.10 245); }
+.dark .text-sky-700     { color: oklch(0.72 0.10 220); }
+.dark .text-purple-700  { color: oklch(0.72 0.10 300); }
+.dark .text-green-700   { color: oklch(0.72 0.13 145); }
+.dark .text-indigo-700  { color: oklch(0.72 0.10 265); }
+.dark .text-teal-700    { color: oklch(0.72 0.10 185); }
+
+/* ── Texto semântico -600 (badges e ícones) ──────────────────────────────── */
+.dark .text-blue-600    { color: oklch(0.76 0.12 245); }
+.dark .text-green-600   { color: oklch(0.76 0.14 145); }
+.dark .text-red-600     { color: oklch(0.76 0.14  15); }
+.dark .text-yellow-600  { color: oklch(0.84 0.14  85); }
+.dark .text-amber-600   { color: oklch(0.82 0.14  80); }
+.dark .text-orange-600  { color: oklch(0.82 0.14  50); }
+.dark .text-emerald-600 { color: oklch(0.76 0.14 160); }
+.dark .text-rose-600    { color: oklch(0.76 0.14  10); }
+.dark .text-violet-600  { color: oklch(0.76 0.12 290); }
+.dark .text-purple-600  { color: oklch(0.76 0.12 300); }
+.dark .text-sky-600     { color: oklch(0.76 0.12 220); }
+.dark .text-indigo-600  { color: oklch(0.76 0.12 265); }
+.dark .text-teal-600    { color: oklch(0.76 0.12 185); }
+.dark .text-pink-600    { color: oklch(0.76 0.14   0); }
+
+/* ── Texto semântico -700 (complemento) ──────────────────────────────────── */
+.dark .text-yellow-700  { color: oklch(0.82 0.14  85); }
+.dark .text-violet-700  { color: oklch(0.72 0.13 290); }
+
+/* ── Texto semântico -500 ────────────────────────────────────────────────── */
+.dark .text-blue-500    { color: oklch(0.82 0.14 245); }
+.dark .text-emerald-500 { color: oklch(0.82 0.14 160); }
+.dark .text-amber-500   { color: oklch(0.87 0.14  80); }
+
+/* ── Hover states interativos ────────────────────────────────────────────── */
+.dark .hover\:bg-white:hover         { background-color: var(--card); }
+.dark .hover\:bg-emerald-50:hover    { background-color: oklch(0.28 0.04  160); }
+.dark .hover\:bg-rose-50:hover       { background-color: oklch(0.28 0.04   10); }
+.dark .hover\:bg-blue-50:hover       { background-color: oklch(0.28 0.04  245); }
+.dark .hover\:bg-orange-50:hover     { background-color: oklch(0.28 0.04   50); }
+.dark .hover\:bg-orange-200:hover    { background-color: oklch(0.32 0.05   50); }
+.dark .hover\:bg-slate-50:hover,
+.dark .hover\:bg-gray-50:hover       { background-color: oklch(0.22 0    0);    }
+.dark .hover\:bg-slate-100:hover,
+.dark .hover\:bg-gray-100:hover      { background-color: oklch(0.26 0    0);    }
+.dark .hover\:bg-emerald-100:hover   { background-color: oklch(0.32 0.05  160); }
+.dark .hover\:bg-rose-100:hover      { background-color: oklch(0.32 0.05   10); }
+.dark .hover\:border-blue-300:hover  { border-color: oklch(0.38 0.06 245); }
+.dark .hover\:border-orange-300:hover { border-color: oklch(0.38 0.06  50); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   KpiCard — design tokens via data-kpi attribute
+   ══════════════════════════════════════════════════════════════════════════ */
+[data-kpi="blue"]   { --kpi-icon-bg: #EFF6FF; --kpi-chip-bg: #F8FAFC; --kpi-chip-border: rgba(37,99,235,0.12);  --kpi-card-border: rgba(37,99,235,0.19);  }
+[data-kpi="amber"]  { --kpi-icon-bg: #FFF4E5; --kpi-chip-bg: #FFFBF0; --kpi-chip-border: rgba(245,158,11,0.12); --kpi-card-border: rgba(245,158,11,0.19); }
+[data-kpi="purple"] { --kpi-icon-bg: #F3EBFF; --kpi-chip-bg: #FAF8FF; --kpi-chip-border: rgba(124,58,237,0.12); --kpi-card-border: rgba(124,58,237,0.19); }
+[data-kpi="rose"]   { --kpi-icon-bg: #FEF2F2; --kpi-chip-bg: #FFF5F5; --kpi-chip-border: rgba(225,29,72,0.12);  --kpi-card-border: rgba(225,29,72,0.19);  }
+
+.dark [data-kpi="blue"]   { --kpi-icon-bg: oklch(0.22 0.04 245); --kpi-chip-bg: oklch(0.20 0.025 245); --kpi-chip-border: oklch(0.55 0.10 245 / 0.25); --kpi-card-border: oklch(0.55 0.10 245 / 0.30); }
+.dark [data-kpi="amber"]  { --kpi-icon-bg: oklch(0.22 0.04  80); --kpi-chip-bg: oklch(0.20 0.025  80); --kpi-chip-border: oklch(0.65 0.12  80 / 0.25); --kpi-card-border: oklch(0.65 0.12  80 / 0.30); }
+.dark [data-kpi="purple"] { --kpi-icon-bg: oklch(0.22 0.04 300); --kpi-chip-bg: oklch(0.20 0.025 300); --kpi-chip-border: oklch(0.55 0.10 300 / 0.25); --kpi-card-border: oklch(0.55 0.10 300 / 0.30); }
+.dark [data-kpi="rose"]   { --kpi-icon-bg: oklch(0.22 0.04  10); --kpi-chip-bg: oklch(0.20 0.025  10); --kpi-chip-border: oklch(0.55 0.10  10 / 0.25); --kpi-card-border: oklch(0.55 0.10  10 / 0.30); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   FullCalendar — dark mode
+   ══════════════════════════════════════════════════════════════════════════ */
+.dark .agenda-calendar .fc-scrollgrid td,
+.dark .agenda-calendar .fc-scrollgrid th                   { border-color: oklch(1 0 0 / 8%); }
+.dark .agenda-calendar .fc-col-header-cell                 { background: var(--card); border-bottom-color: oklch(1 0 0 / 8%); }
+.dark .agenda-calendar .fc-timegrid-slot-label,
+.dark .agenda-calendar .fc-timegrid-axis                   { border-right-color: oklch(0.62 0.092 217 / 0.6) !important; }
+.dark .agenda-calendar .fc-turno-intervalo                 { background: oklch(0.22 0 0) !important; }
+.dark .agenda-calendar .fc-turno-intervalo::before         { background: oklch(0.22 0 0) !important; }
+.dark .agenda-calendar .fc-timegrid-col-bg                 { background: transparent; }
+.dark .agenda-calendar .fc-non-business                    { background: oklch(1 0 0 / 3%); }
+.dark .agenda-calendar .fc-timegrid-more-link              { background: oklch(0.269 0 0 / 0.95) !important; border: 1px solid oklch(1 0 0 / 12%) !important; color: oklch(0.70 0 0) !important; }
+.dark .agenda-calendar .fc-timegrid-more-link:hover        { background: oklch(0.31 0 0 / 0.98) !important; color: oklch(0.85 0 0) !important; }
+/* Base cell backgrounds */
+.dark .agenda-calendar .fc-view-harness,
+.dark .agenda-calendar .fc-scroller                         { background: var(--card); }
+.dark .agenda-calendar .fc-timegrid-axis                    { background: var(--card); }
+.dark .agenda-calendar .fc-timegrid-col                     { background: var(--card); }
+.dark .agenda-calendar .fc-day-today:not(.fc-col-header-cell) { background: oklch(0.22 0.03 245 / 0.4) !important; }
+.dark .agenda-calendar .fc-scroller::-webkit-scrollbar-thumb { background-color: oklch(0.45 0 0); }

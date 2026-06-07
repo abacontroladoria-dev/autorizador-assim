@@ -25,6 +25,8 @@ import ModalPerfil from "@/components/perfil/ModalPerfil"
 import ModalAlterarSenha from "@/components/perfil/ModalAlterarSenha"
 import ModalErros from "@/components/perfil/ModalErros"
 import { SidebarGroup } from "@/components/sidebar/SidebarGroup"
+import { ThemeSwitcher } from "@/components/sidebar/ThemeSwitcher"
+import { useTheme } from "@/contexts/ThemeContext"
 
 type Favorito = { label: string; path: string }
 
@@ -46,6 +48,7 @@ export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
   const supabase = getSupabaseClient()
+  const { theme } = useTheme()
   const [loadingLogout, setLoadingLogout] = useState(false)
   const [role, setRole] = useState<string | null>(null)
   const [loadingRole, setLoadingRole] = useState(true)
@@ -311,24 +314,23 @@ export default function Sidebar() {
         className={`group flex w-full items-center gap-2.5 py-2 pr-2 rounded-lg text-sm transition-all duration-150
         ${
           active
-            ? "border-l-2 border-[#3A8FB7] pl-2.5 font-semibold"
-            : "border-l-2 border-transparent pl-2.5 hover:bg-white/5"
+            ? "border-l-2 border-sidebar-primary pl-2.5 font-semibold bg-sidebar-accent text-sidebar-accent-foreground"
+            : "border-l-2 border-transparent pl-2.5 text-sidebar-foreground hover:bg-sidebar-accent/50 hover:text-sidebar-accent-foreground"
         }`}
-        style={active ? { backgroundColor: "rgba(58,143,183,0.22)", color: "#e8f5fc" } : { color: "#b0c8e0" }}
       >
         <Icon
           size={16}
           className="shrink-0"
-          style={{ color: active ? "#5BAFD4" : "#7a9ab8" }}
+          style={{ color: active ? "var(--color-sidebar-primary)" : "var(--color-sidebar-foreground)" }}
         />
         <span className="flex-1 text-left">{label}</span>
         {path !== "/" && (
           <span
             onClick={e => { e.stopPropagation(); toggleFavorito(label, path) }}
-            className={`p-1 rounded transition-all duration-150 hover:bg-white/10
+            className={`p-1 rounded transition-all duration-150 hover:bg-sidebar-accent
               ${isFav
-                ? "opacity-100 text-yellow-400"
-                : "opacity-0 group-hover:opacity-100 text-slate-600 hover:text-yellow-400"
+                ? "opacity-100 text-yellow-500"
+                : "opacity-0 group-hover:opacity-100 text-sidebar-foreground/40 hover:text-yellow-500"
               }`}
           >
             <Star size={12} fill={isFav ? "currentColor" : "none"} />
@@ -338,27 +340,32 @@ export default function Sidebar() {
     )
   }
 
+  const isDark = theme === 'dark'
+
   return (
     <>
-      <aside className="fixed top-0 left-0 w-64 h-screen flex flex-col z-50"
-        style={{ background: "linear-gradient(180deg, #0e1c2e 0%, #0a1620 100%)", borderRight: "1px solid rgba(255,255,255,0.06)" }}>
+      <aside
+        className="fixed top-0 left-0 w-64 h-screen flex flex-col z-50 bg-sidebar border-r border-sidebar-border transition-colors duration-300"
+      >
 
         {/* LOGO */}
-        <div className="h-20 flex items-center justify-center px-6"
-          style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}>
-          <img src="/logo-universo-aba.png" className="h-20 object-contain" />
+        <div className="h-20 flex items-center justify-center px-6 border-b border-sidebar-border">
+          <img
+            src="/logo-universo-aba.png"
+            className="h-20 object-contain"
+            style={{ filter: isDark ? 'brightness(0) invert(1)' : 'none' }}
+          />
         </div>
 
         {/* MENU */}
-        <nav className="flex-1 px-3 py-3 overflow-y-auto space-y-0.5"
-          style={{ scrollbarWidth: "thin", scrollbarColor: "rgba(255,255,255,0.08) transparent" }}>
+        <nav className="flex-1 px-3 py-3 overflow-y-auto space-y-0.5">
 
           {/* Dashboard */}
           <MenuItem label="Dashboard" icon={LayoutDashboard} path="/" />
 
           {/* Favoritos */}
           <div className="pt-2">
-            <p className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider select-none" style={{ color: "#6b8ba8" }}>
+            <p className="px-3 py-1 text-[11px] font-semibold uppercase tracking-wider select-none text-sidebar-foreground/50">
               ⭐ Favoritos
             </p>
             {favoritos
@@ -368,7 +375,7 @@ export default function Sidebar() {
               ))}
           </div>
 
-          <hr className="my-2" style={{ borderColor: "rgba(255,255,255,0.06)" }} />
+          <hr className="my-2 border-sidebar-border" />
 
           {/* Pacientes */}
           {(canAccess("/solicitar") || canAccess("/central-pacientes") || canAccess("/agenda/pacientes")) && (
@@ -422,24 +429,28 @@ export default function Sidebar() {
             </SidebarGroup>
           )}
 
-
         </nav>
 
+        {/* THEME SWITCHER */}
+        <div className="px-4 pb-3">
+          <ThemeSwitcher />
+        </div>
+
         {/* FOOTER — PERFIL */}
-        <div className="p-4" ref={menuRef} style={{ borderTop: "1px solid rgba(255,255,255,0.06)" }}>
+        <div className="p-4 border-t border-sidebar-border" ref={menuRef}>
           <div className="relative">
 
             <button
               onClick={() => setOpen(!open)}
-              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/5 transition-colors duration-150 cursor-pointer"
+              className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-sidebar-accent/60 transition-colors duration-150 cursor-pointer"
             >
-              <div className="w-9 h-9 rounded-full bg-[#3A8FB7] text-white flex items-center justify-center font-semibold text-sm shrink-0">
+              <div className="w-9 h-9 rounded-full bg-sidebar-primary text-white flex items-center justify-center font-semibold text-sm shrink-0">
                 {nome?.charAt(0)?.toUpperCase() || "U"}
               </div>
               <div className="flex-1 text-left min-w-0">
-                <p className="text-sm font-semibold text-slate-200 truncate leading-tight">{nome}</p>
+                <p className="text-sm font-semibold text-sidebar-foreground truncate leading-tight">{nome}</p>
                 {role && (
-                  <p className="text-xs text-slate-500 capitalize leading-tight">
+                  <p className="text-xs text-sidebar-foreground/50 capitalize leading-tight">
                     {{
                       admin: "Administrador",
                       diretoria: "Diretoria",
@@ -452,42 +463,47 @@ export default function Sidebar() {
                   </p>
                 )}
               </div>
-              <span className={`text-slate-600 text-xs transition-transform duration-200 shrink-0 ${open ? "rotate-180" : ""}`}>
+              <span className={`text-sidebar-foreground/40 text-xs transition-transform duration-200 shrink-0 ${open ? "rotate-180" : ""}`}>
                 ▼
               </span>
             </button>
 
             {open && (
-              <div className="absolute bottom-full left-0 mb-2 w-72 rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.2)] p-3 text-sm z-999 bg-linear-to-br from-[#1f3f5b] to-[#2f6f95] text-white">
+              <div className={`absolute bottom-full left-0 mb-2 w-72 rounded-2xl shadow-[0_10px_30px_rgba(0,0,0,0.15)] p-3 text-sm z-999
+                ${isDark
+                  ? "bg-linear-to-br from-[#1f3f5b] to-[#2f6f95] text-white"
+                  : "bg-white border border-sidebar-border text-slate-800"
+                }`}
+              >
 
                 <div className="px-3 pb-3">
                   <div className="text-sm font-semibold">{nome}</div>
-                  <div className="text-xs text-white/60">{email || "—"}</div>
+                  <div className={`text-xs ${isDark ? "text-white/60" : "text-slate-500"}`}>{email || "—"}</div>
                 </div>
 
-                <div className="border-t border-white/10 my-2" />
+                <div className={`border-t my-2 ${isDark ? "border-white/10" : "border-slate-100"}`} />
 
-                <div className="px-3 text-xs text-white/50 mb-1">Conta</div>
+                <div className={`px-3 text-xs mb-1 ${isDark ? "text-white/50" : "text-slate-400"}`}>Conta</div>
 
                 <button
                   onClick={() => { setOpen(false); setModalPerfil(true) }}
-                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition"
+                  className={`w-full text-left px-3 py-2 rounded-lg transition ${isDark ? "hover:bg-white/10 active:bg-white/20" : "hover:bg-slate-50 active:bg-slate-100"}`}
                 >
                   Meu perfil
                 </button>
 
                 <button
                   onClick={() => { setOpen(false); setModalSenha(true) }}
-                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition"
+                  className={`w-full text-left px-3 py-2 rounded-lg transition ${isDark ? "hover:bg-white/10 active:bg-white/20" : "hover:bg-slate-50 active:bg-slate-100"}`}
                 >
                   Alterar senha
                 </button>
 
-                <div className="border-t border-white/10 my-2" />
+                <div className={`border-t my-2 ${isDark ? "border-white/10" : "border-slate-100"}`} />
 
-                <div className="px-3 text-xs text-white/50 mb-1 flex justify-between items-center">
+                <div className={`px-3 py-2 text-xs flex justify-between mb-1 ${isDark ? "text-white/50" : "text-slate-400"}`}>
                   <span>Automação</span>
-                  <span className={`flex items-center gap-2 font-medium ${automacaoAtiva ? "text-green-300" : "text-orange-300"}`}>
+                  <span className={`flex items-center gap-2 font-medium ${automacaoAtiva ? "text-green-500" : "text-orange-500"}`}>
                     <span className={`w-2 h-2 rounded-full ${automacaoAtiva ? "bg-green-400" : "bg-orange-400"}`} />
                     {automacaoAtiva ? "Ativa" : "Pausada"}
                   </span>
@@ -497,7 +513,7 @@ export default function Sidebar() {
                   <button
                     onClick={handlePausar}
                     disabled={loadingPausar}
-                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition disabled:opacity-50"
+                    className={`w-full text-left px-3 py-2 rounded-lg transition disabled:opacity-50 ${isDark ? "hover:bg-white/10" : "hover:bg-slate-50"}`}
                   >
                     {loadingPausar ? "Pausando..." : "Pausar automação"}
                   </button>
@@ -505,7 +521,7 @@ export default function Sidebar() {
                   <button
                     onClick={handleRetomar}
                     disabled={loadingRetomar}
-                    className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition disabled:opacity-50"
+                    className={`w-full text-left px-3 py-2 rounded-lg transition disabled:opacity-50 ${isDark ? "hover:bg-white/10" : "hover:bg-slate-50"}`}
                   >
                     {loadingRetomar ? "Retomando..." : "Retomar automação"}
                   </button>
@@ -514,7 +530,7 @@ export default function Sidebar() {
                 <button
                   onClick={handleReiniciar}
                   disabled={loadingReiniciar}
-                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition disabled:opacity-50"
+                  className={`w-full text-left px-3 py-2 rounded-lg transition disabled:opacity-50 ${isDark ? "hover:bg-white/10" : "hover:bg-slate-50"}`}
                 >
                   {loadingReiniciar ? "Reiniciando..." : "Reiniciar worker"}
                 </button>
@@ -522,33 +538,33 @@ export default function Sidebar() {
                 <button
                   onClick={handleLiberarTravados}
                   disabled={loadingLiberar}
-                  className="w-full text-left px-3 py-2 rounded-lg hover:bg-white/10 active:bg-white/20 transition disabled:opacity-50"
+                  className={`w-full text-left px-3 py-2 rounded-lg transition disabled:opacity-50 ${isDark ? "hover:bg-white/10" : "hover:bg-slate-50"}`}
                 >
                   {loadingLiberar ? "Liberando..." : "Liberar processos travados"}
                 </button>
 
-                <div className="border-t border-white/10 my-2" />
+                <div className={`border-t my-2 ${isDark ? "border-white/10" : "border-slate-100"}`} />
 
-                <div className="px-3 py-2 text-xs flex justify-between text-white/70">
+                <div className={`px-3 py-2 text-xs flex justify-between ${isDark ? "text-white/70" : "text-slate-500"}`}>
                   <span>{countProcessando} em processamento</span>
                   {countErros > 0 ? (
                     <button
                       onClick={() => { setOpen(false); setModalErros(true) }}
-                      className="text-red-300 font-medium hover:text-red-200 transition"
+                      className="text-red-500 font-medium hover:text-red-600 transition"
                     >
                       {countErros} erro{countErros !== 1 ? "s" : ""}
                     </button>
                   ) : (
-                    <span className="text-white/40">0 erros</span>
+                    <span className={isDark ? "text-white/40" : "text-slate-400"}>0 erros</span>
                   )}
                 </div>
 
-                <div className="border-t border-white/10 my-2" />
+                <div className={`border-t my-2 ${isDark ? "border-white/10" : "border-slate-100"}`} />
 
                 <button
                   onClick={handleLogout}
                   disabled={loadingLogout}
-                  className="w-full text-left px-3 py-2 rounded-lg text-red-300 hover:bg-red-500/30 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
+                  className="w-full text-left px-3 py-2 rounded-lg text-red-500 hover:bg-red-50 dark:hover:bg-red-500/20 transition font-medium disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {loadingLogout ? "Saindo..." : "Sair"}
                 </button>

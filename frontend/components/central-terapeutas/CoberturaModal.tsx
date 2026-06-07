@@ -465,8 +465,8 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
 
             {/* Preview em tempo real */}
             {tipoOcorrencia && justificativa && (
-              <div className="rounded-xl bg-[#f0f8fd] border border-[#3A8FB7]/20 px-4 py-3 flex items-start gap-3">
-                <div className="w-7 h-7 rounded-full bg-[#eef5fb] flex items-center justify-center shrink-0 mt-0.5">
+              <div className="rounded-xl bg-blue-50 border border-[#3A8FB7]/20 px-4 py-3 flex items-start gap-3">
+                <div className="w-7 h-7 rounded-full bg-blue-100 flex items-center justify-center shrink-0 mt-0.5">
                   <Check size={14} className="text-[#3A8FB7]" />
                 </div>
                 <div>

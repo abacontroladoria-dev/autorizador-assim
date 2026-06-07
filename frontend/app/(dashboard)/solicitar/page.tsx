@@ -1066,9 +1066,9 @@ useEffect(() => {
   // =========================
 
   return (
-    <div className="p-6 min-h-[calc(100vh-80px)] bg-gradient-to-br from-slate-50 via-white to-slate-100">
+    <div className="p-6 min-h-[calc(100vh-80px)] bg-background">
       {/* HEADER */}
-      <div className="mb-6 px-5 py-3 bg-white/70 backdrop-blur-sm border border-slate-200/70 rounded-2xl shadow-sm">
+      <div className="mb-6 px-5 py-3 bg-card border border-border rounded-2xl shadow-sm">
         <h1 className="text-2xl font-semibold text-slate-600">
           Central de Atendimentos
         </h1>
@@ -1101,7 +1101,7 @@ useEffect(() => {
         {/* ========================= */}
         {/* CARD PRINCIPAL */}
         {/* ========================= */}
-        <div className="bg-white/70 backdrop-blur-md border border-slate-200/70 rounded-2xl shadow-sm p-6">
+        <div className="bg-card border border-border rounded-2xl shadow-sm p-6">
 	
 {/* HEADER COM FILTRO */}
 <div className="grid grid-cols-12 gap-3 mb-5">

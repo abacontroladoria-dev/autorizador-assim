@@ -71,7 +71,7 @@ export default function ControleTable({
                 text-left
                 transition
                 hover:bg-slate-50
-                ${ativo ? 'bg-[#f0f8fd]' : 'bg-white'}
+                ${ativo ? 'bg-blue-50' : 'bg-white'}
               `}
             >
               <span className="text-sm font-bold text-[#3A8FB7] text-center">

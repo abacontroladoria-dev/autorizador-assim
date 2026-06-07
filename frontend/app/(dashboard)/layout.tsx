@@ -9,6 +9,7 @@ import {
   HeaderProvider,
   useHeader,
 } from '@/contexts/HeaderContext'
+import { ThemeProvider } from '@/contexts/ThemeContext'
 
 const supabase = getSupabaseClient()
 
@@ -42,14 +43,13 @@ export default function DashboardLayout({
   if (checking) return null
 
   return (
-
-    <HeaderProvider>
-
-      <DashboardShell>
-        {children}
-      </DashboardShell>
-
-    </HeaderProvider>
+    <ThemeProvider>
+      <HeaderProvider>
+        <DashboardShell>
+          {children}
+        </DashboardShell>
+      </HeaderProvider>
+    </ThemeProvider>
   )
 }
 
@@ -61,16 +61,16 @@ function DashboardShell({
   const { title, subtitle } = useHeader()
 
   return (
-    <div className="min-h-screen" style={{ background: "linear-gradient(180deg, #f8fbff 0%, #f0f5fb 100%)" }}>
+    <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
       <Sidebar />
       <div className="ml-64 flex flex-col min-h-screen">
 
         {/* HEADER — só exibe quando há título */}
         {title && (
-          <header className="h-20 bg-white flex items-center px-6 shrink-0">
+          <header className="h-20 bg-card border-b border-border flex items-center px-6 shrink-0">
             <div>
-              <h1 className="text-lg font-bold text-slate-800 leading-tight">{title}</h1>
-              {subtitle && <p className="text-xs text-slate-500 mt-0.5">{subtitle}</p>}
+              <h1 className="text-lg font-bold text-foreground leading-tight">{title}</h1>
+              {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}
             </div>
           </header>
         )}

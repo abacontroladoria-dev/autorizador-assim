@@ -232,7 +232,7 @@ useEffect(() => {
 
   return (
 
-	<div className="bg-[#f7f9fc] rounded-2xl">
+	<div className="bg-card rounded-2xl">
       <div className="flex flex-col gap-4 overflow-hidden">
 
         <KpiCards

@@ -148,10 +148,10 @@ export default function Login() {
 
           <div className="text-center mb-7">
             <h1 id="page-title" className="text-3xl font-bold text-slate-800 text-balance leading-tight">
-              Central de Autorizações
+              Sistema PULSAR
             </h1>
             <p className="mt-2 text-base text-slate-500">
-              Clínica Universo ABA · Sistema interno
+              Clínica Universo ABA
             </p>
           </div>
 

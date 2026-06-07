@@ -215,7 +215,7 @@ export default function AdminPageShell({
   }
 
   return (
-    <div className="bg-[#f7f9fc] rounded-2xl p-6">
+    <div className="bg-card rounded-2xl p-6">
       <div className="space-y-4">
         <div className="space-y-4">
           <AdminSummaryCards counts={totals} />

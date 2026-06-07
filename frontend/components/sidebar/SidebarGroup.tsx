@@ -18,14 +18,12 @@ export function SidebarGroup({ title, icon: Icon, defaultOpen = false, children 
     <div>
       <button
         onClick={() => setIsOpen(!isOpen)}
-        className="flex w-full items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg transition-colors hover:bg-white/10"
-        style={{ color: "#8fb3cc", backgroundColor: "rgba(255,255,255,0.07)" }}
+        className="flex w-full items-center gap-2 px-3 py-2 text-sm font-semibold rounded-lg transition-colors hover:bg-sidebar-accent/30 bg-sidebar-accent/15 text-sidebar-foreground/60"
       >
-        <Icon className="h-4 w-4 shrink-0" style={{ color: "#7a9ab8" }} />
+        <Icon className="h-4 w-4 shrink-0 text-sidebar-foreground/40" />
         <span className="flex-1 text-left">{title}</span>
         <ChevronRight
-          className={`h-3.5 w-3.5 transition-transform duration-200 ${isOpen ? "rotate-90" : ""}`}
-          style={{ color: "#7a9ab8" }}
+          className={`h-3.5 w-3.5 transition-transform duration-200 text-sidebar-foreground/40 ${isOpen ? "rotate-90" : ""}`}
         />
       </button>
       <div
