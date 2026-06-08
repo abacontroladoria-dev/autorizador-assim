@@ -142,14 +142,29 @@ async function syncTITASessions(
 ): Promise<number> {
   console.log("[cco-sync-tita-sessions] Fetching TITA CSV...")
 
+  // Get today's date and calculate date range for this month
+  const today = new Date()
+  const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
+  const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0)
+
+  const dateFormat = (d: Date) => d.toISOString().split("T")[0]
+  const dataInicio = dateFormat(startOfMonth)
+  const dataFim = dateFormat(endOfMonth)
+
+  console.log(`[cco-sync-tita-sessions] Fetching TITA data from ${dataInicio} to ${dataFim}`)
+
   const response = await fetch(
     "https://apiv2.apptita.com.br/api/integracao/csv_grade_profissionais",
     {
-      method: "GET",
+      method: "POST",
       headers: {
         "Content-Type": "application/json",
         "X-INTEGRACAO-TOKEN": TITA_TOKEN,
       },
+      body: JSON.stringify({
+        data_inicio: dataInicio,
+        data_fim: dataFim,
+      }),
     },
   )
 
