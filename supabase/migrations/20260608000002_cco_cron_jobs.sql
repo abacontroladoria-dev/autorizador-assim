@@ -9,12 +9,14 @@
 -- Dependencies: None (reads external API)
 SELECT cron.schedule(
   'cco-sync-tita-sessions',
-  '*/5 * * * *',  -- every 5 minutes at :00, :05, :10, :15, etc.
-  'SELECT net.http_post(
-    url := ''https://'''||current_setting(''app.supabase_url'')||'''/functions/v1/cco-sync-tita-sessions'',
-    headers := jsonb_build_object(''authorization'', ''Bearer '''||current_setting(''app.service_role_key'')||'''),
-    body := ''{}''::jsonb
-  ) as request_id'
+  '*/5 * * * *',
+  $$
+    SELECT net.http_post(
+      url := current_setting('app.supabase_url') || '/functions/v1/cco-sync-tita-sessions',
+      headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || current_setting('app.service_role_key')),
+      body := '{}'::jsonb
+    )
+  $$
 );
 
 -- ============================================================================
@@ -24,12 +26,14 @@ SELECT cron.schedule(
 -- Dependencies: Requires Job 1 to have populated cco.atendimentos (3-min buffer)
 SELECT cron.schedule(
   'cco-sync-assim-authorizations',
-  '3,8,13,18,23,28,33,38,43,48,53,58 * * * *',  -- every 5 minutes starting at :03 (offset +3 min)
-  'SELECT net.http_post(
-    url := ''https://'''||current_setting(''app.supabase_url'')||'''/functions/v1/cco-sync-assim-authorizations'',
-    headers := jsonb_build_object(''authorization'', ''Bearer '''||current_setting(''app.service_role_key'')||'''),
-    body := ''{}''::jsonb
-  ) as request_id'
+  '3,8,13,18,23,28,33,38,43,48,53,58 * * * *',
+  $$
+    SELECT net.http_post(
+      url := current_setting('app.supabase_url') || '/functions/v1/cco-sync-assim-authorizations',
+      headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || current_setting('app.service_role_key')),
+      body := '{}'::jsonb
+    )
+  $$
 );
 
 -- ============================================================================
@@ -39,12 +43,14 @@ SELECT cron.schedule(
 -- Dependencies: Requires Job 1 to have populated cco.atendimentos (4-min buffer)
 SELECT cron.schedule(
   'cco-sync-authorization-queue',
-  '4,9,14,19,24,29,34,39,44,49,54,59 * * * *',  -- every 5 minutes starting at :04 (offset +4 min)
-  'SELECT net.http_post(
-    url := ''https://'''||current_setting(''app.supabase_url'')||'''/functions/v1/cco-sync-authorization-queue'',
-    headers := jsonb_build_object(''authorization'', ''Bearer '''||current_setting(''app.service_role_key'')||'''),
-    body := ''{}''::jsonb
-  ) as request_id'
+  '4,9,14,19,24,29,34,39,44,49,54,59 * * * *',
+  $$
+    SELECT net.http_post(
+      url := current_setting('app.supabase_url') || '/functions/v1/cco-sync-authorization-queue',
+      headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || current_setting('app.service_role_key')),
+      body := '{}'::jsonb
+    )
+  $$
 );
 
 -- ============================================================================
@@ -54,12 +60,14 @@ SELECT cron.schedule(
 -- Dependencies: Requires Job 1 to have populated cco.atendimentos (5-min buffer)
 SELECT cron.schedule(
   'cco-sync-therapist-control',
-  '5,20,35,50 * * * *',  -- every 15 minutes starting at :05 (offset +5 min)
-  'SELECT net.http_post(
-    url := ''https://'''||current_setting(''app.supabase_url'')||'''/functions/v1/cco-sync-therapist-control'',
-    headers := jsonb_build_object(''authorization'', ''Bearer '''||current_setting(''app.service_role_key'')||'''),
-    body := ''{}''::jsonb
-  ) as request_id'
+  '5,20,35,50 * * * *',
+  $$
+    SELECT net.http_post(
+      url := current_setting('app.supabase_url') || '/functions/v1/cco-sync-therapist-control',
+      headers := jsonb_build_object('Content-Type', 'application/json', 'Authorization', 'Bearer ' || current_setting('app.service_role_key')),
+      body := '{}'::jsonb
+    )
+  $$
 );
 
 -- ============================================================================

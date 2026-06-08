@@ -1,0 +1,61 @@
+{
+  "start_time": "2026-06-08T13:39:22.126731",
+  "jobs": {
+    "cco-sync-tita-sessions": {
+      "status": "FAILED",
+      "error": "HTTP 500"
+    },
+    "cco-sync-assim-authorizations": {
+      "status": "SUCCESS",
+      "rows_processed": 0,
+      "response": {
+        "ok": true,
+        "job": "cco-sync-assim-authorizations",
+        "rows_processed": 0
+      }
+    },
+    "cco-sync-authorization-queue": {
+      "status": "SUCCESS",
+      "rows_processed": 0,
+      "response": {
+        "ok": true,
+        "job": "cco-sync-authorization-queue",
+        "rows_processed": 0
+      }
+    },
+    "cco-sync-therapist-control": {
+      "status": "SUCCESS",
+      "rows_processed": 0,
+      "response": {
+        "ok": true,
+        "job": "cco-sync-therapist-control",
+        "rows_processed": 0
+      }
+    }
+  },
+  "engine": {
+    "status": "SUCCESS",
+    "response": {
+      "ok": true,
+      "job": "cco-conciliation-engine",
+      "occurrences_generated": 0,
+      "occurrences_auto_resolved": 0,
+      "total_processed": 0
+    }
+  },
+  "validation": {
+    "sessions": {
+      "total": 0,
+      "active": 0,
+      "orphaned": 0
+    },
+    "mutations": 0,
+    "authorizations": 0,
+    "occurrences": {
+      "total": 0,
+      "active": 0
+    }
+  },
+  "status": "FAILED",
+  "end_time": "2026-06-08T13:40:32.997379"
+}

@@ -34,14 +34,23 @@ export class JobLogger {
     this.logEntry.finished_at = new Date().toISOString()
     this.logEntry.rows_processed = rowsProcessed
 
-    const { error } = await supabase
-      .from("cco.processing_logs")
-      .insert([this.logEntry])
+    try {
+      const { error } = await supabase.rpc("log_job_execution", {
+        p_job_name: this.logEntry.job_name,
+        p_started_at: this.logEntry.started_at,
+        p_finished_at: this.logEntry.finished_at,
+        p_status: this.logEntry.status,
+        p_rows_processed: this.logEntry.rows_processed,
+        p_error_message: null,
+      })
 
-    if (error) {
-      console.error(`[${this.logEntry.job_name}] Failed to log success:`, error)
-    } else {
-      console.log(`[${this.logEntry.job_name}] Logged success: ${rowsProcessed} rows`)
+      if (error) {
+        console.warn(`[${this.logEntry.job_name}] Logging unavailable (RPC), continuing anyway...`)
+      } else {
+        console.log(`[${this.logEntry.job_name}] Logged success: ${rowsProcessed} rows`)
+      }
+    } catch (err) {
+      console.warn(`[${this.logEntry.job_name}] Logging error (non-fatal), continuing...`)
     }
   }
 
@@ -50,14 +59,23 @@ export class JobLogger {
     this.logEntry.finished_at = new Date().toISOString()
     this.logEntry.error_message = err.message
 
-    const { error: logError } = await supabase
-      .from("cco.processing_logs")
-      .insert([this.logEntry])
+    try {
+      const { error: logError } = await supabase.rpc("log_job_execution", {
+        p_job_name: this.logEntry.job_name,
+        p_started_at: this.logEntry.started_at,
+        p_finished_at: this.logEntry.finished_at,
+        p_status: this.logEntry.status,
+        p_rows_processed: this.logEntry.rows_processed,
+        p_error_message: this.logEntry.error_message,
+      })
 
-    if (logError) {
-      console.error(`[${this.logEntry.job_name}] Failed to log error:`, logError)
-    } else {
-      console.error(`[${this.logEntry.job_name}] Logged error: ${err.message}`)
+      if (logError) {
+        console.warn(`[${this.logEntry.job_name}] Failed to log error (RPC unavailable): ${err.message}`)
+      } else {
+        console.error(`[${this.logEntry.job_name}] Logged error: ${err.message}`)
+      }
+    } catch (logErr) {
+      console.error(`[${this.logEntry.job_name}] Logging error: ${logErr instanceof Error ? logErr.message : String(logErr)}`)
     }
   }
 }

@@ -19,6 +19,10 @@ import {
   buildSessionKey,
   computeSHA256,
 } from "../cco-shared/logger.ts"
+import {
+  detectSessionMutations,
+  processMutations,
+} from "../cco-shared/mutation-detector.ts"
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
@@ -39,6 +43,7 @@ function jsonResponse(body: unknown, status = 200) {
 
 interface TITASession {
   id?: number
+  tita_agendamento_id?: number
   paciente_nome?: string
   data_sessao?: string
   hora_inicio?: string
@@ -109,6 +114,7 @@ async function parseTITAResponse(
       const header = headers[j]
       const value = values[j] ?? "" // Handle missing columns (fewer values than headers)
 
+      if (header === "id" || header === "tita_agendamento_id") session.tita_agendamento_id = value ? parseInt(value) : undefined
       if (header === "paciente_nome") session.paciente_nome = value || null
       if (header === "data_sessao") session.data_sessao = normalizeDate(value)
       if (header === "hora_inicio") session.hora_inicio = normalizeTime(value)
@@ -153,23 +159,38 @@ async function syncTITASessions(
 
   console.log(`[cco-sync-tita-sessions] Fetching TITA data from ${dataInicio} to ${dataFim}`)
 
-  const response = await fetch(
-    "https://apiv2.apptita.com.br/api/integracao/csv_grade_profissionais",
-    {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-INTEGRACAO-TOKEN": TITA_TOKEN,
-      },
-      body: JSON.stringify({
-        data_inicio: dataInicio,
-        data_fim: dataFim,
-      }),
-    },
-  )
+  const controller = new AbortController()
+  const timeoutId = setTimeout(() => controller.abort(), 50000) // 50s timeout
 
-  if (!response.ok) {
-    throw new Error(`TITA API returned ${response.status}: ${await response.text()}`)
+  let response: Response
+  try {
+    response = await fetch(
+      "https://apiv2.apptita.com.br/api/integracao/csv_grade_profissionais",
+      {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-INTEGRACAO-TOKEN": TITA_TOKEN,
+        },
+        body: JSON.stringify({
+          data_inicio: dataInicio,
+          data_fim: dataFim,
+        }),
+        signal: controller.signal,
+      },
+    )
+
+    clearTimeout(timeoutId)
+
+    if (!response.ok) {
+      throw new Error(`TITA API returned ${response.status}: ${await response.text()}`)
+    }
+  } catch (err) {
+    clearTimeout(timeoutId)
+    if (err instanceof Error && err.name === "AbortError") {
+      throw new Error("TITA API request timeout after 50s")
+    }
+    throw err
   }
 
   const csvText = await response.text()
@@ -191,6 +212,7 @@ async function syncTITASessions(
     )
 
     rows.push({
+      tita_agendamento_id: session.tita_agendamento_id,
       session_key,
       paciente_nome: session.paciente_nome,
       data_sessao: session.data_sessao,
@@ -221,11 +243,11 @@ async function syncTITASessions(
   for (let i = 0; i < rows.length; i += 100) {
     const batch = rows.slice(i, i + 100)
 
-    // Use count() instead of .select("id") to avoid fetching unnecessary data
+    // Use select() to fetch count of upserted rows
     const { count, error } = await supabase
       .from("cco.atendimentos")
       .upsert(batch, { onConflict: "session_key" })
-      .select("count", { count: "planned" })
+      .select()
 
     if (error) {
       throw new Error(`Upsert failed: ${error.message}`)
@@ -233,6 +255,31 @@ async function syncTITASessions(
 
     upsertedCount += count || 0
     console.log(`[cco-sync-tita-sessions] Upserted batch ${i / 100 + 1}: ${count} rows`)
+  }
+
+  // Detect session mutations (remarcations/deletions)
+  console.log("[cco-sync-tita-sessions] Detecting session mutations...")
+  const mutations = await detectSessionMutations(
+    supabase,
+    rows
+      .filter((r) => r.tita_agendamento_id)
+      .map((r) => ({
+        tita_agendamento_id: r.tita_agendamento_id as number,
+        session_key: r.session_key,
+        data_sessao: r.data_sessao,
+        hora_inicio: r.hora_inicio,
+        paciente_nome: r.paciente_nome,
+      })),
+  )
+
+  if (mutations.length > 0) {
+    console.log(
+      `[cco-sync-tita-sessions] Found ${mutations.length} mutations, consolidating...`,
+    )
+    const consolidated = await processMutations(supabase, mutations)
+    console.log(
+      `[cco-sync-tita-sessions] Consolidated ${consolidated}/${mutations.length} mutations`,
+    )
   }
 
   return upsertedCount
