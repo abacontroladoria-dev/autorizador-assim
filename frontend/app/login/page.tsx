@@ -89,10 +89,18 @@ export default function Login() {
 
   return (
     <main
+<<<<<<< HEAD
       className="min-h-dvh flex items-center justify-center relative px-4 py-8 overflow-hidden"
       style={{ background: "radial-gradient(ellipse 140% 100% at 60% 50%, #2a6080 0%, #1a3a55 50%, #0f2540 100%)" }}
     >
       {/* Dot grid overlay */}
+=======
+      className="min-h-dvh flex flex-col items-center justify-center relative px-4 py-8 overflow-hidden"
+      style={{ background: "radial-gradient(ellipse 120% 80% at 50% -10%, #2a6080 0%, #1a3a55 45%, #0f2540 100%)" }}
+    >
+
+      {/* Dot grid */}
+>>>>>>> design
       <div
         className="absolute inset-0 pointer-events-none select-none"
         style={{
@@ -103,12 +111,19 @@ export default function Login() {
         }}
       />
 
+<<<<<<< HEAD
       {/* Large white card */}
       <div
         className="relative w-full max-w-4xl rounded-3xl overflow-hidden bg-white"
+=======
+      {/* Ambient glow */}
+      <div
+        className="absolute top-0 left-1/2 -translate-x-1/2 w-175 h-105 pointer-events-none"
+>>>>>>> design
         style={{
           boxShadow: "0 8px 16px rgba(0,0,0,0.12), 0 32px 64px rgba(0,0,0,0.35), 0 64px 120px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.08)",
         }}
+<<<<<<< HEAD
       >
         {/* Top light reflection */}
         <div
@@ -123,12 +138,45 @@ export default function Login() {
             className="flex flex-col items-center justify-center md:w-2/5 px-8 py-12 md:py-16"
             style={{ background: "linear-gradient(160deg, #f0f7fc 0%, #e3f0f9 100%)" }}
           >
+=======
+      />
+
+      {/* Card */}
+      <div
+        className="relative w-full max-w-3xl rounded-3xl overflow-hidden"
+        style={{
+          boxShadow: [
+            "0 4px 8px rgba(0,0,0,0.15)",
+            "0 12px 24px rgba(0,0,0,0.3)",
+            "0 32px 56px rgba(0,0,0,0.45)",
+            "0 64px 100px rgba(0,0,0,0.5)",
+            "0 0 0 1px rgba(255,255,255,0.09)",
+            "0 0 80px rgba(58,143,183,0.1)",
+          ].join(", "),
+        }}
+      >
+
+        {/* Reflexo de luz no topo */}
+        <div
+          className="pointer-events-none"
+          style={{
+            height: "1px",
+            background: "linear-gradient(90deg, transparent 5%, rgba(255,255,255,0.55) 50%, transparent 95%)",
+          }}
+        />
+
+        <div className="grid sm:grid-cols-[5fr_7fr]">
+
+          {/* Painel esquerdo: logo */}
+          <div className="hidden sm:flex flex-col items-center justify-center gap-4 p-10 bg-brand-bg border-r border-brand-surface">
+>>>>>>> design
             <Image
               src="/logo-universo-aba.png"
               alt="Universo ABA"
               width={220}
               height={140}
               priority
+<<<<<<< HEAD
               sizes="(max-width: 767px) 160px, 220px"
               className="w-40 md:w-52 h-auto object-contain drop-shadow-sm"
             />
@@ -149,6 +197,37 @@ export default function Login() {
               </p>
             </div>
 
+=======
+              sizes="200px"
+              className="w-44 h-auto object-contain drop-shadow-sm"
+            />
+          </div>
+
+          {/* Painel direito: formulário */}
+          <div className="bg-white px-8 sm:px-10 pt-8 pb-10">
+
+            {/* Logo mobile */}
+            <div className="flex justify-center mb-6 sm:hidden">
+              <Image
+                src="/logo-universo-aba.png"
+                alt="Universo ABA"
+                width={160}
+                height={100}
+                priority
+                className="h-20 w-auto object-contain"
+              />
+            </div>
+
+            <div className="mb-7">
+              <h1 id="page-title" className="text-2xl font-bold text-brand-fg text-balance leading-tight">
+                Sistema PULSAR
+              </h1>
+              <p className="mt-1.5 text-sm text-slate-500">
+                Clínica Universo ABA
+              </p>
+            </div>
+
+>>>>>>> design
             <form onSubmit={handleLogin} aria-labelledby="page-title" className="space-y-5">
 
               {erro && (
@@ -164,11 +243,19 @@ export default function Login() {
               {/* Usuário */}
               <div>
                 <label htmlFor="login-field" className="text-sm font-semibold text-slate-700">
+<<<<<<< HEAD
                   Usuário ou e-mail <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative mt-1.5">
                   <span className="absolute inset-y-0 left-0 flex items-center pl-4 text-slate-400 pointer-events-none">
                     <User size={17} aria-hidden="true" />
+=======
+                  Usuário ou e-mail
+                </label>
+                <div className="relative mt-1.5">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-4 text-brand pointer-events-none">
+                    <User size={18} aria-hidden="true" />
+>>>>>>> design
                   </span>
                   <input
                     id="login-field"
@@ -177,7 +264,11 @@ export default function Login() {
                     autoFocus
                     value={login}
                     onChange={(e) => setLogin(e.target.value.toLowerCase())}
+<<<<<<< HEAD
                     placeholder="seu.usuario ou email@universoaba.com.br"
+=======
+                    placeholder="usuario ou email"
+>>>>>>> design
                     aria-invalid={erro ? true : undefined}
                     aria-describedby={erro ? "login-error" : undefined}
                     className="w-full border border-slate-200 rounded-xl pl-11 pr-4 py-3.5 text-base text-slate-800 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent aria-invalid:border-rose-300 aria-invalid:focus:ring-rose-400 transition-colors"
@@ -188,11 +279,19 @@ export default function Login() {
               {/* Senha */}
               <div>
                 <label htmlFor="senha-field" className="text-sm font-semibold text-slate-700">
+<<<<<<< HEAD
                   Senha <span className="text-rose-500">*</span>
                 </label>
                 <div className="relative mt-1.5">
                   <span className="absolute inset-y-0 left-0 flex items-center pl-4 text-slate-400 pointer-events-none">
                     <Lock size={17} aria-hidden="true" />
+=======
+                  Senha
+                </label>
+                <div className="relative mt-1.5">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-4 text-brand pointer-events-none">
+                    <Lock size={18} aria-hidden="true" />
+>>>>>>> design
                   </span>
                   <input
                     id="senha-field"
@@ -209,21 +308,35 @@ export default function Login() {
                     type="button"
                     aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
                     onClick={() => setShowPassword(!showPassword)}
+<<<<<<< HEAD
                     className="absolute inset-y-0 right-0 flex items-center pr-4 pl-2 text-slate-400 hover:text-slate-600 active:text-slate-800 focus:outline-none focus:ring-2 focus:ring-brand rounded-r-xl transition-colors"
                   >
                     {showPassword ? <EyeOff size={17} aria-hidden="true" /> : <Eye size={17} aria-hidden="true" />}
+=======
+                    className="absolute inset-y-0 right-0 flex items-center pr-4 pl-2 text-brand hover:text-brand-dark active:text-brand-fg focus:outline-none focus:ring-2 focus:ring-brand rounded-r-xl transition-colors"
+                  >
+                    {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
+>>>>>>> design
                   </button>
                 </div>
               </div>
 
               {/* Botão */}
+<<<<<<< HEAD
               <div className="pt-2">
+=======
+              <div className="pt-1">
+>>>>>>> design
                 <button
                   type="submit"
                   disabled={loading}
                   className="w-full h-13 bg-brand hover:bg-brand-dark active:opacity-90 text-white rounded-xl text-base font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2"
                 >
+<<<<<<< HEAD
                   {loading ? "Entrando…" : (<><span>Entrar</span><ArrowRight size={18} aria-hidden="true" /></>)}
+=======
+                  {loading ? "Entrando…" : (<><span>Acessar Sistema</span><ArrowRight size={18} aria-hidden="true" /></>)}
+>>>>>>> design
                 </button>
               </div>
 
@@ -232,9 +345,13 @@ export default function Login() {
         </div>
       </div>
 
+<<<<<<< HEAD
       <p className="absolute bottom-4 left-1/2 -translate-x-1/2 text-xs text-slate-500/60 select-none whitespace-nowrap">
         Universo ABA — Sistema de Gestão Clínica
       </p>
+=======
+      <p className="relative mt-5 text-xs text-white/55 select-none tracking-wide">Universo ABA — Sistema de Gestão Clínica</p>
+>>>>>>> design
     </main>
   );
 }
