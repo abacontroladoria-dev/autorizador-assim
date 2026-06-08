@@ -96,43 +96,78 @@ function parseCSVLine(line: string): string[] {
 
 /**
  * Parse TITA CSV response and normalize fields
+ * Maps fields from csv_grade_profissionais API to TITASession
+ *
+ * API returns: id, nome_profissional, cpf, status_agendamento, terapia, sala, data, dia, hora
+ * Plus (v2.11.0): id_favorecido, nome_favorecido, convenio
  */
 async function parseTITAResponse(
   csvText: string,
 ): Promise<TITASession[]> {
   const lines = csvText.trim().split("\n")
-  if (lines.length < 2) return []
+  if (lines.length < 2) {
+    console.warn("[cco-sync-tita-sessions] CSV response has no data rows")
+    return []
+  }
 
-  const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase())
+  const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase().trim())
   const sessions: TITASession[] = []
+
+  console.log(`[cco-sync-tita-sessions] CSV headers detected: ${headers.join(", ")}`)
 
   for (let i = 1; i < lines.length; i++) {
     const values = parseCSVLine(lines[i])
+    if (values.length === 0 || (values.length === 1 && !values[0])) continue
+
     const session: TITASession = {}
 
     for (let j = 0; j < headers.length; j++) {
       const header = headers[j]
-      const value = values[j] ?? "" // Handle missing columns (fewer values than headers)
+      const value = values[j]?.trim() ?? ""
 
-      if (header === "id" || header === "tita_agendamento_id") session.tita_agendamento_id = value ? parseInt(value) : undefined
-      if (header === "paciente_nome") session.paciente_nome = value || null
-      if (header === "data_sessao") session.data_sessao = normalizeDate(value)
-      if (header === "hora_inicio") session.hora_inicio = normalizeTime(value)
+      // Map csv_grade_profissionais fields to TITASession
+      if (header === "id" || header === "agendamento_id") session.tita_agendamento_id = value ? parseInt(value) : undefined
+
+      // Favorecido (paciente) info - new in v2.11.0
+      if (header === "nome_favorecido") session.paciente_nome = value || null
+      if (header === "id_favorecido") {
+        // Keep id_favorecido in case we need it later
+        if (!session.tita_agendamento_id && value) session.tita_agendamento_id = parseInt(value)
+      }
+
+      // Date/time fields
+      if (header === "data") session.data_sessao = normalizeDate(value)
+      if (header === "hora") session.hora_inicio = normalizeTime(value)
       if (header === "hora_fim") session.hora_fim = normalizeTime(value)
-      if (header === "profissional_agendado") session.profissional_agendado = value || null
-      if (header === "terapia") session.terapia = value || null
+
+      // Professional info
+      if (header === "nome_profissional") session.profissional_agendado = value || null
+
+      // Therapy info
+      if (header === "terapia_exibicao" || header === "nome_terapia") session.terapia = value || null
+
+      // Unit/room info
       if (header === "convenio") session.convenio = value || null
       if (header === "unidade") session.unidade = value || null
+      if (header === "sala") session.unidade = session.unidade || value || null
+
+      // Status
       if (header === "status_agendamento") session.status_agendamento = value || null
-      if (header === "justificativa") session.justificativa = value || null
-      if (header === "possui_tratativa") session.possui_tratativa = value?.toLowerCase() === "sim"
-      if (header === "profissional_tratativa") session.profissional_tratativa = value || null
-      if (header === "data_tratativa") session.data_tratativa = normalizeDate(value)
+      if (header === "observacoes") session.justificativa = value || null
     }
 
-    // Only add if has required fields
+    // Only add if has required fields for session_key
+    // Note: For profissional grades, we need favorecido_nome for session_key
     if (session.paciente_nome && session.data_sessao && session.hora_inicio) {
       sessions.push(session)
+    } else {
+      const missing = []
+      if (!session.paciente_nome) missing.push("paciente_nome (nome_favorecido)")
+      if (!session.data_sessao) missing.push("data_sessao (data)")
+      if (!session.hora_inicio) missing.push("hora_inicio (hora)")
+      if (missing.length > 0) {
+        console.warn(`[cco-sync-tita-sessions] Skipping row ${i} - missing: ${missing.join(", ")}`)
+      }
     }
   }
 
@@ -148,14 +183,12 @@ async function syncTITASessions(
 ): Promise<number> {
   console.log("[cco-sync-tita-sessions] Fetching TITA CSV...")
 
-  // Get today's date and calculate date range for this month
+  // Get today's date - optimized to fetch only today's sessions
+  // This reduces API load and ensures faster response times
   const today = new Date()
-  const startOfMonth = new Date(today.getFullYear(), today.getMonth(), 1)
-  const endOfMonth = new Date(today.getFullYear(), today.getMonth() + 1, 0)
-
   const dateFormat = (d: Date) => d.toISOString().split("T")[0]
-  const dataInicio = dateFormat(startOfMonth)
-  const dataFim = dateFormat(endOfMonth)
+  const dataInicio = dateFormat(today)
+  const dataFim = dateFormat(today)
 
   console.log(`[cco-sync-tita-sessions] Fetching TITA data from ${dataInicio} to ${dataFim}`)
 

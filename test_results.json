@@ -1,9 +1,14 @@
 {
-  "start_time": "2026-06-08T13:39:22.126731",
+  "start_time": "2026-06-08T13:47:24.976453",
   "jobs": {
     "cco-sync-tita-sessions": {
-      "status": "FAILED",
-      "error": "HTTP 500"
+      "status": "SUCCESS",
+      "rows_processed": 0,
+      "response": {
+        "ok": true,
+        "job": "cco-sync-tita-sessions",
+        "rows_processed": 0
+      }
     },
     "cco-sync-assim-authorizations": {
       "status": "SUCCESS",
@@ -56,6 +61,6 @@
       "active": 0
     }
   },
-  "status": "FAILED",
-  "end_time": "2026-06-08T13:40:32.997379"
+  "status": "PARTIAL",
+  "end_time": "2026-06-08T13:47:46.970964"
 }
