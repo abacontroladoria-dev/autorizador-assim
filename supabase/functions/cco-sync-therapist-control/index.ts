@@ -65,7 +65,8 @@ async function syncTherapistControl(
   // Transform controle_terapeutico records to CCO format
   // Fetch corresponding sessions from cco.atendimentos to get session_key
   const { data: sessions } = await supabase
-    .from("cco.atendimentos")
+    .schema("cco")
+    .from("atendimentos")
     .select("session_key, tita_agendamento_id")
 
   const sessionKeyMap = new Map(
@@ -124,7 +125,8 @@ async function syncTherapistControl(
 
     // Use count() instead of .select("id") to avoid fetching unnecessary data
     const { count, error } = await supabase
-      .from("cco.session_substitutions")
+      .schema("cco")
+      .from("session_substitutions")
       .upsert(batch, { onConflict: "session_key" })
       .select("count", { count: "planned" })
 

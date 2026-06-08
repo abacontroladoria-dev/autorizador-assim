@@ -152,6 +152,9 @@ def run_complete_test():
     info("Invoking motor de conciliação...")
     engine_result = invoke_function("cco-conciliation-engine", timeout=60)
 
+    print("\nENGINE RESPONSE:")
+    print(json.dumps(engine_result, indent=2, ensure_ascii=False))
+
     if "error" in engine_result:
         error(f"Engine failed: {engine_result.get('error')}")
         results["engine"]["status"] = "FAILED"

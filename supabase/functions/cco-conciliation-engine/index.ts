@@ -29,11 +29,7 @@ async function detectOccurrences(
   const candidates: Candidate[] = []
 
   // R1: AUTORIZACAO_PENDENTE
-  const r1 = await supabase
-    .schema("cco")
-    .from("session_authorizations")
-    .select("session_key")
-    .eq("authorization_status", "PENDENTE")
+  const r1 = await supabase.rpc("detect_r1_autorizacao_pendente")
 
   if (r1.error) {
     logEngine("R1 AUTORIZACAO_PENDENTE error: " + r1.error.message)
@@ -54,20 +50,35 @@ async function detectOccurrences(
     }
   }
 
-  // R2: SESSAO_SEM_AUTORIZACAO (skip RPC, will add later)
-  // const r2 = await supabase.rpc("detect_sessions_without_authorization")
+  // R2: SESSAO_SEM_AUTORIZACAO
+  const r2 = await supabase.rpc("detect_r2_sessao_sem_autorizacao")
+
+  if (r2.error) {
+    logEngine("R2 SESSAO_SEM_AUTORIZACAO error: " + r2.error.message)
+  } else {
+    logEngine("R2 SESSAO_SEM_AUTORIZACAO matches: " + (r2.data?.length || 0))
+  }
+
+  if (r2.data) {
+    for (const row of r2.data) {
+      candidates.push({
+        tipo: "SESSAO_SEM_AUTORIZACAO",
+        session_key: row.session_key,
+        severity: "WARNING",
+        titulo: "Sessão sem autorização encontrada",
+        descricao: "A sessão não possui autorização vinculada.",
+        fingerprint: `${row.session_key}:SESSAO_SEM_AUTORIZACAO`,
+      })
+      logEngine("Candidate added - SESSAO_SEM_AUTORIZACAO: " + row.session_key?.substring(0, 16))
+    }
+  }
 
   // R3: EVOLUCAO_ATRASADA - SKIPPED
   // TODO: Fix OR operator syntax in Supabase JS client
   // For now, searching only for FALTA_PACIENTE which we know exists
 
   // R4: FALTA_TERAPEUTA (absence without substitute)
-  const r4 = await supabase
-    .schema("cco")
-    .from("session_substitutions")
-    .select("session_key")
-    .eq("status_ct", "falta")
-    .is("profissional_substituto_id", null)
+  const r4 = await supabase.rpc("detect_r4_falta_terapeuta")
 
   if (r4.error) {
     logEngine("R4 FALTA_TERAPEUTA error: " + r4.error.message)
@@ -89,11 +100,7 @@ async function detectOccurrences(
   }
 
   // R5: SUBSTITUICAO (therapist substitution confirmed)
-  const r5 = await supabase
-    .schema("cco")
-    .from("session_substitutions")
-    .select("session_key")
-    .not("profissional_substituto_id", "is", null)
+  const r5 = await supabase.rpc("detect_r5_substituicao")
 
   if (r5.error) {
     logEngine("R5 SUBSTITUICAO error: " + r5.error.message)
@@ -115,11 +122,7 @@ async function detectOccurrences(
   }
 
   // R6: FALTA_PACIENTE
-  const r6 = await supabase
-    .schema("cco")
-    .from("atendimentos")
-    .select("session_key,justificativa")
-    .eq("status_agendamento", "FALTA_PACIENTE")
+  const r6 = await supabase.rpc("detect_r6_falta_paciente")
 
   if (r6.error) {
     logEngine("R6 FALTA_PACIENTE error: " + r6.error.message)
@@ -142,11 +145,7 @@ async function detectOccurrences(
   }
 
   // R7: GLOSA
-  const r7 = await supabase
-    .schema("cco")
-    .from("session_authorizations")
-    .select("session_key")
-    .eq("authorization_status", "GLOSA")
+  const r7 = await supabase.rpc("detect_r7_glosa")
 
   if (r7.error) {
     logEngine("R7 GLOSA error: " + r7.error.message)
@@ -188,59 +187,23 @@ async function upsertOccurrences(
     updated_at: new Date().toISOString(),
   }))
 
-  const { count, error } = await supabase
-    .schema("cco")
-    .from("occurrences")
-    .upsert(rows, { onConflict: "fingerprint" })
-    .select("count", { count: "planned" })
+  const { data, error } = await supabase.rpc("upsert_occurrences", {
+    p_rows: rows,
+  })
 
   if (error) {
-    console.error("[engine] upsert error:", error.message)
+    logEngine("upsert RPC error: " + error.message)
     throw error
   }
 
-  return count || 0
+  return (typeof data === "number" ? data : 0) || 0
 }
 
 async function updateDashboard(supabase: ReturnType<typeof createClient>): Promise<void> {
-  const today = new Date().toISOString().split("T")[0]
-
-  const { data: occurrencesByType } = await supabase
-    .schema("cco")
-    .from("occurrences")
-    .select("tipo")
-    .is("resolved_at", null)
-
-  const counts: Record<string, number> = {}
-  if (occurrencesByType) {
-    for (const row of occurrencesByType) {
-      counts[row.tipo] = (counts[row.tipo] || 0) + 1
-    }
-  }
-
-  const snapshot = {
-    data_ref: today,
-    autorizacoes_pendentes: counts["AUTORIZACAO_PENDENTE"] || 0,
-    sessoes_sem_autorizacao: counts["SESSAO_SEM_AUTORIZACAO"] || 0,
-    evolucoes_atrasadas: counts["EVOLUCAO_ATRASADA"] || 0,
-    faltas_terapeuta: counts["FALTA_TERAPEUTA"] || 0,
-    substituicoes: counts["SUBSTITUICAO"] || 0,
-    faltas_paciente: counts["FALTA_PACIENTE"] || 0,
-    glosas: counts["GLOSA"] || 0,
-    receita_em_risco_count:
-      (counts["AUTORIZACAO_PENDENTE"] || 0) +
-      (counts["SESSAO_SEM_AUTORIZACAO"] || 0) +
-      (counts["EVOLUCAO_ATRASADA"] || 0),
-    calculated_at: new Date().toISOString(),
-  }
-
-  const { error } = await supabase
-    .schema("cco")
-    .from("dashboard_snapshot")
-    .upsert(snapshot, { onConflict: "data_ref" })
+  const { error } = await supabase.rpc("update_dashboard_snapshot")
 
   if (error) {
-    console.error("[engine] dashboard error:", error.message)
+    logEngine("dashboard error: " + error.message)
     throw error
   }
 }

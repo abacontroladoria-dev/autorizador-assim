@@ -125,7 +125,8 @@ async function syncASSIMAuthorizations(
 
     // Use count() instead of .select("id") to avoid fetching unnecessary data
     const { count, error } = await supabase
-      .from("cco.session_authorizations")
+      .schema("cco")
+      .from("session_authorizations")
       .upsert(batch, { onConflict: "session_key,source" })
       .select("count", { count: "planned" })
 

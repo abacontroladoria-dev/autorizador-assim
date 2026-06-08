@@ -126,34 +126,34 @@ async function parseTITAResponse(
       const value = values[j]?.trim() ?? ""
 
       // Map csv_grade_profissionais fields to TITASession
-      if (header === "id" || header === "agendamento_id") session.tita_agendamento_id = value ? parseInt(value) : undefined
+      // NOTE: API returns headers in Portuguese with spaces, not underscores!
+      if (header === "id agendamento" || header === "id") session.tita_agendamento_id = value ? parseInt(value) : undefined
 
       // Favorecido (paciente) info - new in v2.11.0
-      if (header === "nome_favorecido") session.paciente_nome = value || null
-      if (header === "id_favorecido") {
-        // Keep id_favorecido in case we need it later
+      if (header === "nome favorecido") session.paciente_nome = value || null
+      if (header === "id favorecido") {
         if (!session.tita_agendamento_id && value) session.tita_agendamento_id = parseInt(value)
       }
 
-      // Date/time fields
+      // Date/time fields - API uses "data", "hora inicial", "hora final"
       if (header === "data") session.data_sessao = normalizeDate(value)
-      if (header === "hora") session.hora_inicio = normalizeTime(value)
-      if (header === "hora_fim") session.hora_fim = normalizeTime(value)
+      if (header === "hora inicial") session.hora_inicio = normalizeTime(value)
+      if (header === "hora final") session.hora_fim = normalizeTime(value)
 
       // Professional info
-      if (header === "nome_profissional") session.profissional_agendado = value || null
+      if (header === "profissional") session.profissional_agendado = value || null
 
       // Therapy info
-      if (header === "terapia_exibicao" || header === "nome_terapia") session.terapia = value || null
+      if (header === "terapia exibição" || header === "terapia") session.terapia = value || null
 
       // Unit/room info
-      if (header === "convenio") session.convenio = value || null
-      if (header === "unidade") session.unidade = value || null
+      if (header === "convênio") session.convenio = value || null
+      if (header === "nome unidade") session.unidade = value || null
       if (header === "sala") session.unidade = session.unidade || value || null
 
       // Status
-      if (header === "status_agendamento") session.status_agendamento = value || null
-      if (header === "observacoes") session.justificativa = value || null
+      if (header === "status do agendamento") session.status_agendamento = value || null
+      if (header === "observações da sala") session.justificativa = value || null
     }
 
     // Only add if has required fields for session_key
@@ -216,7 +216,8 @@ async function syncTITASessions(
     clearTimeout(timeoutId)
 
     if (!response.ok) {
-      throw new Error(`TITA API returned ${response.status}: ${await response.text()}`)
+      const errorText = await response.text()
+      throw new Error(`TITA API returned ${response.status}: ${errorText}`)
     }
   } catch (err) {
     clearTimeout(timeoutId)
@@ -227,9 +228,17 @@ async function syncTITASessions(
   }
 
   const csvText = await response.text()
+
+  // DEBUG: Log raw response
+  console.log(`[cco-sync-tita-sessions] Raw CSV response length: ${csvText.length} bytes`)
+  console.log(`[cco-sync-tita-sessions] First 500 chars: ${csvText.substring(0, 500)}`)
+
   const sessions = await parseTITAResponse(csvText)
 
   console.log(`[cco-sync-tita-sessions] Parsed ${sessions.length} sessions from TITA`)
+  if (sessions.length > 0) {
+    console.log(`[cco-sync-tita-sessions] Sample: ${JSON.stringify(sessions[0])}`)
+  }
 
   // Prepare UPSERT rows
   const rows = []
@@ -271,23 +280,24 @@ async function syncTITASessions(
     return 0
   }
 
-  // Batch upsert (PostgreSQL handles duplicate key via UNIQUE constraint)
+  // Batch upsert via RPC (workaround for schema access in Edge Functions)
   let upsertedCount = 0
   for (let i = 0; i < rows.length; i += 100) {
     const batch = rows.slice(i, i + 100)
 
-    // Use select() to fetch count of upserted rows
-    const { count, error } = await supabase
-      .from("cco.atendimentos")
-      .upsert(batch, { onConflict: "session_key" })
-      .select()
+    // Call RPC function to upsert into cco.atendimentos
+    const { data, error } = await supabase
+      .rpc("upsert_atendimentos", {
+        p_rows: batch,
+      })
 
     if (error) {
       throw new Error(`Upsert failed: ${error.message}`)
     }
 
-    upsertedCount += count || 0
-    console.log(`[cco-sync-tita-sessions] Upserted batch ${i / 100 + 1}: ${count} rows`)
+    const batchCount = data?.[0]?.upserted_count || batch.length
+    upsertedCount += batchCount
+    console.log(`[cco-sync-tita-sessions] Upserted batch ${i / 100 + 1}: ${batchCount} rows`)
   }
 
   // Detect session mutations (remarcations/deletions)
