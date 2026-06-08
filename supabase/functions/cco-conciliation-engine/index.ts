@@ -73,9 +73,28 @@ async function detectOccurrences(
     }
   }
 
-  // R3: EVOLUCAO_ATRASADA - SKIPPED
-  // TODO: Fix OR operator syntax in Supabase JS client
-  // For now, searching only for FALTA_PACIENTE which we know exists
+  // R3: EVOLUCAO_ATRASADA
+  const r3 = await supabase.rpc("detect_r3_evolucao_atrasada")
+
+  if (r3.error) {
+    logEngine("R3 EVOLUCAO_ATRASADA error: " + r3.error.message)
+  } else {
+    logEngine("R3 EVOLUCAO_ATRASADA matches: " + (r3.data?.length || 0))
+  }
+
+  if (r3.data) {
+    for (const row of r3.data) {
+      candidates.push({
+        tipo: "EVOLUCAO_ATRASADA",
+        session_key: row.session_key,
+        severity: "WARNING",
+        titulo: "Evolução pendente",
+        descricao: "Atendimento sem tratativa/evolução registrada.",
+        fingerprint: `${row.session_key}:EVOLUCAO_ATRASADA`,
+      })
+      logEngine("Candidate added - EVOLUCAO_ATRASADA: " + row.session_key?.substring(0, 16))
+    }
+  }
 
   // R4: FALTA_TERAPEUTA (absence without substitute)
   const r4 = await supabase.rpc("detect_r4_falta_terapeuta")
