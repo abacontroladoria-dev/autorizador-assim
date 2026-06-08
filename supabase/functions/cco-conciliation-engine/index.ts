@@ -23,167 +23,119 @@ interface Candidate {
   fingerprint: string
 }
 
+interface RuleConfig {
+  tipo: string
+  severity: string
+  titulo: string
+  descricao?: string | ((row: any) => string | undefined)
+}
+
+const RULE_CONFIGS: Record<string, RuleConfig> = {
+  R1: {
+    tipo: "AUTORIZACAO_PENDENTE",
+    severity: "WARNING",
+    titulo: "Autorização pendente",
+  },
+  R2: {
+    tipo: "SESSAO_SEM_AUTORIZACAO",
+    severity: "WARNING",
+    titulo: "Sessão sem autorização encontrada",
+    descricao: "A sessão não possui autorização vinculada.",
+  },
+  R3: {
+    tipo: "EVOLUCAO_ATRASADA",
+    severity: "WARNING",
+    titulo: "Evolução pendente",
+    descricao: "Atendimento sem tratativa/evolução registrada.",
+  },
+  R4: {
+    tipo: "FALTA_TERAPEUTA",
+    severity: "CRITICAL",
+    titulo: "Falta de terapeuta sem substituto",
+  },
+  R5: {
+    tipo: "SUBSTITUICAO",
+    severity: "INFO",
+    titulo: "Substituição de terapeuta confirmada",
+  },
+  R6: {
+    tipo: "FALTA_PACIENTE",
+    severity: "INFO",
+    titulo: "Falta do paciente",
+    descricao: (row: any) => row.justificativa || undefined,
+  },
+  R7: {
+    tipo: "GLOSA",
+    severity: "CRITICAL",
+    titulo: "Autorização contestada (glosa)",
+  },
+}
+
+function processRuleResults(
+  candidates: Candidate[],
+  ruleKey: string,
+  results: any[] | null,
+): void {
+  if (!results) return
+
+  const config = RULE_CONFIGS[ruleKey]
+  if (!config) return
+
+  logEngine(`${ruleKey} ${config.tipo} matches: ${results.length}`)
+
+  for (const row of results) {
+    const descricao = typeof config.descricao === "function" ? config.descricao(row) : config.descricao
+
+    candidates.push({
+      tipo: config.tipo,
+      session_key: row.session_key,
+      severity: config.severity,
+      titulo: config.titulo,
+      descricao,
+      fingerprint: `${row.session_key}:${config.tipo}`,
+    })
+  }
+}
+
 async function detectOccurrences(
   supabase: ReturnType<typeof createClient>,
 ): Promise<Candidate[]> {
   const candidates: Candidate[] = []
 
-  // R1: AUTORIZACAO_PENDENTE
-  const r1 = await supabase.rpc("detect_r1_autorizacao_pendente")
-
-  if (r1.error) {
-    logEngine("R1 AUTORIZACAO_PENDENTE error: " + r1.error.message)
-  } else {
-    logEngine("R1 AUTORIZACAO_PENDENTE matches: " + (r1.data?.length || 0))
-  }
-
-  if (r1.data) {
-    for (const row of r1.data) {
-      candidates.push({
-        tipo: "AUTORIZACAO_PENDENTE",
-        session_key: row.session_key,
-        severity: "WARNING",
-        titulo: "Autorização pendente",
-        fingerprint: `${row.session_key}:AUTORIZACAO_PENDENTE`,
-      })
-      logEngine("Candidate added - AUTORIZACAO_PENDENTE: " + row.session_key?.substring(0, 16))
+  // Helper to safely execute detection RPC
+  async function safeDetect(ruleName: string, rpcName: string) {
+    try {
+      const result = await supabase.rpc(rpcName)
+      if (result.error) {
+        logEngine(`${ruleName} error: ${result.error.message}`)
+        return null
+      }
+      return result.data
+    } catch (err) {
+      logEngine(`${ruleName} exception: ${err instanceof Error ? err.message : String(err)}`)
+      return null
     }
   }
 
-  // R2: SESSAO_SEM_AUTORIZACAO
-  const r2 = await supabase.rpc("detect_r2_sessao_sem_autorizacao")
+  // Execute all detection RPCs in parallel
+  const [r1, r2, r3, r4, r5, r6, r7] = await Promise.all([
+    safeDetect("R1 AUTORIZACAO_PENDENTE", "detect_r1_autorizacao_pendente"),
+    safeDetect("R2 SESSAO_SEM_AUTORIZACAO", "detect_r2_sessao_sem_autorizacao"),
+    safeDetect("R3 EVOLUCAO_ATRASADA", "detect_r3_evolucao_atrasada"),
+    safeDetect("R4 FALTA_TERAPEUTA", "detect_r4_falta_terapeuta"),
+    safeDetect("R5 SUBSTITUICAO", "detect_r5_substituicao"),
+    safeDetect("R6 FALTA_PACIENTE", "detect_r6_falta_paciente"),
+    safeDetect("R7 GLOSA", "detect_r7_glosa"),
+  ])
 
-  if (r2.error) {
-    logEngine("R2 SESSAO_SEM_AUTORIZACAO error: " + r2.error.message)
-  } else {
-    logEngine("R2 SESSAO_SEM_AUTORIZACAO matches: " + (r2.data?.length || 0))
-  }
-
-  if (r2.data) {
-    for (const row of r2.data) {
-      candidates.push({
-        tipo: "SESSAO_SEM_AUTORIZACAO",
-        session_key: row.session_key,
-        severity: "WARNING",
-        titulo: "Sessão sem autorização encontrada",
-        descricao: "A sessão não possui autorização vinculada.",
-        fingerprint: `${row.session_key}:SESSAO_SEM_AUTORIZACAO`,
-      })
-      logEngine("Candidate added - SESSAO_SEM_AUTORIZACAO: " + row.session_key?.substring(0, 16))
-    }
-  }
-
-  // R3: EVOLUCAO_ATRASADA
-  const r3 = await supabase.rpc("detect_r3_evolucao_atrasada")
-
-  if (r3.error) {
-    logEngine("R3 EVOLUCAO_ATRASADA error: " + r3.error.message)
-  } else {
-    logEngine("R3 EVOLUCAO_ATRASADA matches: " + (r3.data?.length || 0))
-  }
-
-  if (r3.data) {
-    for (const row of r3.data) {
-      candidates.push({
-        tipo: "EVOLUCAO_ATRASADA",
-        session_key: row.session_key,
-        severity: "WARNING",
-        titulo: "Evolução pendente",
-        descricao: "Atendimento sem tratativa/evolução registrada.",
-        fingerprint: `${row.session_key}:EVOLUCAO_ATRASADA`,
-      })
-      logEngine("Candidate added - EVOLUCAO_ATRASADA: " + row.session_key?.substring(0, 16))
-    }
-  }
-
-  // R4: FALTA_TERAPEUTA (absence without substitute)
-  const r4 = await supabase.rpc("detect_r4_falta_terapeuta")
-
-  if (r4.error) {
-    logEngine("R4 FALTA_TERAPEUTA error: " + r4.error.message)
-  } else {
-    logEngine("R4 FALTA_TERAPEUTA matches: " + (r4.data?.length || 0))
-  }
-
-  if (r4.data) {
-    for (const row of r4.data) {
-      candidates.push({
-        tipo: "FALTA_TERAPEUTA",
-        session_key: row.session_key,
-        severity: "CRITICAL",
-        titulo: "Falta de terapeuta sem substituto",
-        fingerprint: `${row.session_key}:FALTA_TERAPEUTA`,
-      })
-      logEngine("Candidate added - FALTA_TERAPEUTA: " + row.session_key?.substring(0, 16))
-    }
-  }
-
-  // R5: SUBSTITUICAO (therapist substitution confirmed)
-  const r5 = await supabase.rpc("detect_r5_substituicao")
-
-  if (r5.error) {
-    logEngine("R5 SUBSTITUICAO error: " + r5.error.message)
-  } else {
-    logEngine("R5 SUBSTITUICAO matches: " + (r5.data?.length || 0))
-  }
-
-  if (r5.data) {
-    for (const row of r5.data) {
-      candidates.push({
-        tipo: "SUBSTITUICAO",
-        session_key: row.session_key,
-        severity: "INFO",
-        titulo: "Substituição de terapeuta confirmada",
-        fingerprint: `${row.session_key}:SUBSTITUICAO`,
-      })
-      logEngine("Candidate added - SUBSTITUICAO: " + row.session_key?.substring(0, 16))
-    }
-  }
-
-  // R6: FALTA_PACIENTE
-  const r6 = await supabase.rpc("detect_r6_falta_paciente")
-
-  if (r6.error) {
-    logEngine("R6 FALTA_PACIENTE error: " + r6.error.message)
-  } else {
-    logEngine("R6 FALTA_PACIENTE matches: " + (r6.data?.length || 0))
-  }
-
-  if (r6.data) {
-    for (const row of r6.data) {
-      candidates.push({
-        tipo: "FALTA_PACIENTE",
-        session_key: row.session_key,
-        severity: "INFO",
-        titulo: "Falta do paciente",
-        descricao: row.justificativa || undefined,
-        fingerprint: `${row.session_key}:FALTA_PACIENTE`,
-      })
-      logEngine("Candidate added - FALTA_PACIENTE: " + row.session_key?.substring(0, 16))
-    }
-  }
-
-  // R7: GLOSA
-  const r7 = await supabase.rpc("detect_r7_glosa")
-
-  if (r7.error) {
-    logEngine("R7 GLOSA error: " + r7.error.message)
-  } else {
-    logEngine("R7 GLOSA matches: " + (r7.data?.length || 0))
-  }
-
-  if (r7.data) {
-    for (const row of r7.data) {
-      candidates.push({
-        tipo: "GLOSA",
-        session_key: row.session_key,
-        severity: "CRITICAL",
-        titulo: "Autorização contestada (glosa)",
-        fingerprint: `${row.session_key}:GLOSA`,
-      })
-      logEngine("Candidate added - GLOSA: " + row.session_key?.substring(0, 16))
-    }
-  }
+  // Process results for all rules
+  processRuleResults(candidates, "R1", r1)
+  processRuleResults(candidates, "R2", r2)
+  processRuleResults(candidates, "R3", r3)
+  processRuleResults(candidates, "R4", r4)
+  processRuleResults(candidates, "R5", r5)
+  processRuleResults(candidates, "R6", r6)
+  processRuleResults(candidates, "R7", r7)
 
   logEngine("Total candidates collected: " + candidates.length)
   return candidates
@@ -261,12 +213,15 @@ serve(async (req) => {
 
     logEngine("STEP 4 - Updating dashboard...")
     const t5 = Date.now()
+    let dashboardSuccess = false
     try {
       await updateDashboard(supabase)
+      dashboardSuccess = true
       const t6 = Date.now()
       logEngine(`STEP 4 COMPLETE - dashboard updated (${t6 - t5}ms)`)
     } catch (dashErr) {
-      logEngine("STEP 4 ERROR (non-fatal): " + (dashErr instanceof Error ? dashErr.message : String(dashErr)))
+      logEngine("STEP 4 FAILED: " + (dashErr instanceof Error ? dashErr.message : String(dashErr)))
+      logEngine("WARNING: Dashboard snapshot is stale. Next engine run will retry.")
     }
 
     const totalTime = Date.now() - t0
@@ -285,7 +240,7 @@ serve(async (req) => {
       ok: true,
       candidates_detected: candidates.length,
       occurrences_generated: upserted,
-      dashboard_updated: true,
+      dashboard_updated: dashboardSuccess,
       test_flag: "FILE_UPDATED_" + new Date().toISOString(),
       engine_logs: engineLogs,
       debug: {
