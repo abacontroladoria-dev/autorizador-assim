@@ -204,7 +204,7 @@ export default function Login() {
                     autoFocus
                     value={login}
                     onChange={(e) => setLogin(e.target.value.toLowerCase())}
-                    placeholder="seu.usuario ou email@universoaba.com.br"
+                    placeholder="usuario ou email"
                     aria-invalid={erro ? true : undefined}
                     aria-describedby={erro ? "login-error" : undefined}
                     className="w-full border border-slate-200 rounded-xl pl-11 pr-4 py-3.5 text-base text-slate-800 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent aria-invalid:border-rose-300 aria-invalid:focus:ring-rose-400 transition-colors"
@@ -250,7 +250,7 @@ export default function Login() {
                   disabled={loading}
                   className="w-full h-13 bg-brand hover:bg-brand-dark active:opacity-90 text-white rounded-xl text-base font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2"
                 >
-                  {loading ? "Entrando…" : (<><span>Entrar</span><ArrowRight size={18} aria-hidden="true" /></>)}
+                  {loading ? "Entrando…" : (<><span>Acessar Sistema</span><ArrowRight size={18} aria-hidden="true" /></>)}
                 </button>
               </div>
 
