@@ -9,6 +9,7 @@ LICENSE
 instalador/
 node/
 robo-autorizador/
+package-lock.json
 .vscode/
 backup_12MAI2026/
 .claude
