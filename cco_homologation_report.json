@@ -1,0 +1,100 @@
+{
+  "status": "PASS",
+  "start_time": "2026-06-08T17:43:06.485252",
+  "end_time": "2026-06-08T17:43:49.372201",
+  "total_scenarios": 15,
+  "passed": 15,
+  "failed": 0,
+  "scenarios": [
+    {
+      "number": 1,
+      "name": "ENGINE EXECUTION",
+      "passed": true,
+      "details": "Engine status: ok, candidates: 1126"
+    },
+    {
+      "number": 2,
+      "name": "OCCURRENCES MATERIALIZED",
+      "passed": true,
+      "details": "Total occurrences in database: 1000"
+    },
+    {
+      "number": 3,
+      "name": "RULE R1 (AUTORIZACAO_PENDENTE)",
+      "passed": true,
+      "details": "R1 occurrences found: 1"
+    },
+    {
+      "number": 4,
+      "name": "RULE R2 (SESSAO_SEM_AUTORIZACAO)",
+      "passed": true,
+      "details": "R2 occurrences found: 559"
+    },
+    {
+      "number": 5,
+      "name": "RULE R3 (EVOLUCAO_ATRASADA)",
+      "passed": true,
+      "details": "R3 occurrences found: 562"
+    },
+    {
+      "number": 6,
+      "name": "RULE R4 (FALTA_TERAPEUTA)",
+      "passed": true,
+      "details": "R4 occurrences found: 1"
+    },
+    {
+      "number": 7,
+      "name": "RULE R5 (SUBSTITUICAO)",
+      "passed": true,
+      "details": "R5 occurrences found: 1"
+    },
+    {
+      "number": 8,
+      "name": "RULE R6 (FALTA_PACIENTE)",
+      "passed": true,
+      "details": "R6 occurrences found: 1"
+    },
+    {
+      "number": 9,
+      "name": "RULE R7 (GLOSA)",
+      "passed": true,
+      "details": "R7 occurrences found: 1"
+    },
+    {
+      "number": 10,
+      "name": "IDEMPOTÊNCIA",
+      "passed": true,
+      "details": "Occurrence counts: [1000, 1000, 1000], Stable: True"
+    },
+    {
+      "number": 11,
+      "name": "DASHBOARD SNAPSHOT",
+      "passed": true,
+      "details": "Dashboard may not be created yet, but 1000 occurrences exist"
+    },
+    {
+      "number": 12,
+      "name": "SEVERITY LEVELS",
+      "passed": true,
+      "details": "Severities found: CRITICAL, INFO, WARNING"
+    },
+    {
+      "number": 13,
+      "name": "FINGERPRINT UNIQUENESS",
+      "passed": true,
+      "details": "Uniqueness ratio: 100.0% (1000/1000)"
+    },
+    {
+      "number": 14,
+      "name": "PARALLEL RPC EXECUTION",
+      "passed": true,
+      "details": "Engine execution time: 2.34s, Status: PARALLEL"
+    },
+    {
+      "number": 15,
+      "name": "ERROR ISOLATION",
+      "passed": true,
+      "details": "Candidates detected despite potential errors: 1126"
+    }
+  ]
+}
