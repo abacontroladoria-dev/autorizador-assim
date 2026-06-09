@@ -15,6 +15,7 @@ import {
   BriefcaseBusiness,
   Star,
   KeyRound,
+  BarChart3,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
@@ -40,6 +41,7 @@ const pathIconMap: Record<string, any> = {
   "/agenda/salas": Building2,
   "/guias-digitais": FileText,
   "/auditoria-assim": ClipboardList,
+  "/cco": BarChart3,
   "/admin": ShieldCheck,
   "/admin/permissoes": KeyRound,
 }
@@ -112,6 +114,7 @@ export default function Sidebar() {
       "/admin",
       "/admin/permissoes",
       "/auditoria-assim",
+      "/cco",
     ],
     diretoria: [
       "/",
@@ -124,6 +127,7 @@ export default function Sidebar() {
       "/guias-digitais",
       "/financeiro",
       "/auditoria-assim",
+      "/cco",
     ],
     recepcao: [
       "/",
@@ -151,6 +155,7 @@ export default function Sidebar() {
       "/agenda/pacientes",
       "/agenda/terapeutas",
       "/agenda/salas",
+      "/cco",
     ],
     rp: [
       "/",
@@ -408,8 +413,11 @@ export default function Sidebar() {
           )}
 
           {/* Operações */}
-          {(canAccess("/auditoria-assim") || canAccess("/guias-digitais")) && (
+          {(canAccess("/auditoria-assim") || canAccess("/guias-digitais") || canAccess("/cco")) && (
             <SidebarGroup title="Operações" icon={BriefcaseBusiness}>
+              {canAccess("/cco") && (
+                <MenuItem label="Conciliação ASSIM" icon={BarChart3} path="/cco" />
+              )}
               {canAccess("/auditoria-assim") && (
                 <MenuItem label="Auditoria ASSIM" icon={ClipboardList} path="/auditoria-assim" />
               )}
