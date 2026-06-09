@@ -57,6 +57,8 @@ interface TITASession {
   possui_tratativa?: boolean
   profissional_tratativa?: string
   data_tratativa?: string
+  id_profissional_tratativa?: number
+  origem_tratativa?: string
 }
 
 /**
@@ -154,6 +156,13 @@ async function parseTITAResponse(
       // Status
       if (header === "status do agendamento") session.status_agendamento = value || null
       if (header === "observações da sala") session.justificativa = value || null
+
+      // Tratativa info (CCO-010: headers confirmados pelo TITA csv_grade_profissionais)
+      if (header === "possui tratativa") session.possui_tratativa = value.toLowerCase() === "sim"
+      if (header === "nome profissional tratativa") session.profissional_tratativa = value || null
+      if (header === "criação tratativa") session.data_tratativa = normalizeDate(value)
+      if (header === "id profissional tratativa") session.id_profissional_tratativa = value ? parseInt(value) : undefined
+      if (header === "origem tratativa") session.origem_tratativa = value || null
     }
 
     // Only add if has required fields for session_key
@@ -189,14 +198,24 @@ async function syncTITASessions(
   const dateFormat = (d: Date) => d.toISOString().split("T")[0]
   const dataInicio = dateFormat(today)
   const dataFim = dateFormat(today)
+  const unidade = 280
 
   console.log(`[cco-sync-tita-sessions] Fetching TITA data from ${dataInicio} to ${dataFim}`)
+  console.log(`[cco-sync-tita-sessions] Requesting UNIT FILTER: unidade=${unidade}`)
 
   const controller = new AbortController()
   const timeoutId = setTimeout(() => controller.abort(), 50000) // 50s timeout
 
   let response: Response
   try {
+    const titaPayload = {
+      data_inicio: dataInicio,
+      data_fim: dataFim,
+      unidade: unidade,
+    }
+
+    console.log(`[cco-sync-tita-sessions] TITA request payload: ${JSON.stringify(titaPayload)}`)
+
     response = await fetch(
       "https://apiv2.apptita.com.br/api/integracao/csv_grade_profissionais",
       {
@@ -205,10 +224,7 @@ async function syncTITASessions(
           "Content-Type": "application/json",
           "X-INTEGRACAO-TOKEN": TITA_TOKEN,
         },
-        body: JSON.stringify({
-          data_inicio: dataInicio,
-          data_fim: dataFim,
-        }),
+        body: JSON.stringify(titaPayload),
         signal: controller.signal,
       },
     )
@@ -236,6 +252,25 @@ async function syncTITASessions(
   const sessions = await parseTITAResponse(csvText)
 
   console.log(`[cco-sync-tita-sessions] Parsed ${sessions.length} sessions from TITA`)
+
+  // AUDIT: Count sessions by unit
+  const sessionsByUnit = new Map<string, number>()
+  for (const session of sessions) {
+    const unitKey = session.unidade || "undefined"
+    sessionsByUnit.set(unitKey, (sessionsByUnit.get(unitKey) || 0) + 1)
+  }
+
+  console.log(`[cco-sync-tita-sessions] AUDIT - Sessions by unit:`)
+  for (const [unit, count] of sessionsByUnit.entries()) {
+    console.log(`  - Unit "${unit}": ${count} sessions`)
+  }
+  console.log(`[cco-sync-tita-sessions] AUDIT - Expected unit 280: ${sessionsByUnit.get("280") || 0} sessions`)
+  console.log(`[cco-sync-tita-sessions] AUDIT - Other units total: ${
+    Array.from(sessionsByUnit.entries())
+      .filter(([unit]) => unit !== "280" && unit !== "undefined")
+      .reduce((sum, [, count]) => sum + count, 0)
+  } sessions`)
+
   if (sessions.length > 0) {
     console.log(`[cco-sync-tita-sessions] Sample: ${JSON.stringify(sessions[0])}`)
   }
@@ -269,6 +304,8 @@ async function syncTITASessions(
       possui_tratativa: session.possui_tratativa,
       profissional_tratativa: session.profissional_tratativa,
       data_tratativa: session.data_tratativa,
+      id_profissional_tratativa: session.id_profissional_tratativa,
+      origem_tratativa: session.origem_tratativa,
       sync_hash,
       synced_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
