@@ -130,8 +130,40 @@ export default function Login() {
 
         <div className="grid sm:grid-cols-[5fr_7fr]">
 
-          {/* Painel esquerdo: logo */}
-          <div className="hidden sm:flex flex-col items-center justify-center gap-4 p-10 bg-brand-bg border-r border-brand-surface">
+          {/* Painel esquerdo: logo com gradiente elegante */}
+          <div
+            className="hidden sm:flex flex-col items-center justify-center gap-4 p-10"
+            style={{
+              background: "linear-gradient(135deg, #e6f2f9 0%, #dfe8f5 45%, #f0e8f9 100%)",
+              borderRight: "1px solid rgba(58, 143, 183, 0.15)",
+              position: "relative",
+              overflow: "hidden"
+            }}
+          >
+            {/* Efeito de luz sutil - roxo */}
+            <div
+              style={{
+                position: "absolute",
+                top: "-40%",
+                right: "-10%",
+                width: "200px",
+                height: "200px",
+                background: "radial-gradient(circle, rgba(138, 43, 226, 0.06) 0%, transparent 70%)",
+                pointerEvents: "none"
+              }}
+            />
+            {/* Efeito de luz sutil - azul */}
+            <div
+              style={{
+                position: "absolute",
+                bottom: "-20%",
+                left: "-5%",
+                width: "150px",
+                height: "150px",
+                background: "radial-gradient(circle, rgba(58, 143, 183, 0.05) 0%, transparent 70%)",
+                pointerEvents: "none"
+              }}
+            />
             <Image
               src="/logo-universo-aba.png"
               alt="Universo ABA"
@@ -139,12 +171,18 @@ export default function Login() {
               height={140}
               priority
               sizes="200px"
-              className="w-44 h-auto object-contain drop-shadow-sm"
+              className="w-44 h-auto object-contain drop-shadow-sm relative z-10"
             />
           </div>
 
-          {/* Painel direito: formulário */}
-          <div className="bg-white px-8 sm:px-10 pt-8 pb-10">
+          {/* Painel direito: formulário com fundo limpo */}
+          <div
+            className="px-8 sm:px-10 pt-8 pb-10 relative"
+            style={{
+              backgroundColor: '#FFFFFF',
+              background: "linear-gradient(135deg, #ffffff 0%, #fafbfc 100%)"
+            }}
+          >
 
             {/* Logo mobile */}
             <div className="flex justify-center mb-6 sm:hidden">
@@ -159,10 +197,10 @@ export default function Login() {
             </div>
 
             <div className="mb-7">
-              <h1 id="page-title" className="text-2xl font-bold text-brand-fg text-balance leading-tight">
+              <h1 id="page-title" className="text-2xl font-bold text-balance leading-tight" style={{ color: '#1e5a7d' }}>
                 Sistema PULSAR
               </h1>
-              <p className="mt-1.5 text-sm text-slate-500">
+              <p className="mt-1.5 text-sm" style={{ color: '#6b7280' }}>
                 Clínica Universo ABA
               </p>
             </div>
@@ -173,7 +211,12 @@ export default function Login() {
                 <div
                   id="login-error"
                   role="alert"
-                  className="bg-rose-50 border border-rose-200 text-rose-700 text-sm px-4 py-3 rounded-xl"
+                  className="border text-sm px-4 py-3 rounded-xl font-medium"
+                  style={{
+                    backgroundColor: '#fef2f2',
+                    borderColor: '#fecaca',
+                    color: '#dc2626',
+                  }}
                 >
                   {erro}
                 </div>
@@ -181,11 +224,11 @@ export default function Login() {
 
               {/* Usuário */}
               <div>
-                <label htmlFor="login-field" className="text-sm font-semibold text-slate-700">
+                <label htmlFor="login-field" className="text-sm font-semibold" style={{ color: '#1e5a7d' }}>
                   Usuário ou e-mail
                 </label>
                 <div className="relative mt-1.5">
-                  <span className="absolute inset-y-0 left-0 flex items-center pl-4 text-brand pointer-events-none">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none" style={{ color: '#3a8fb7' }}>
                     <User size={18} aria-hidden="true" />
                   </span>
                   <input
@@ -195,21 +238,36 @@ export default function Login() {
                     autoFocus
                     value={login}
                     onChange={(e) => setLogin(e.target.value.toLowerCase())}
-                    placeholder="usuario ou email"
+                    placeholder="usuario ou e-mail"
                     aria-invalid={erro ? true : undefined}
                     aria-describedby={erro ? "login-error" : undefined}
-                    className="w-full border border-slate-200 rounded-xl pl-11 pr-4 py-3.5 text-base text-slate-800 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent aria-invalid:border-rose-300 aria-invalid:focus:ring-rose-400 transition-colors"
+                    className="w-full rounded-xl pl-11 pr-4 py-3.5 text-base text-slate-800 placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:border-transparent aria-invalid:border-rose-300 aria-invalid:focus:ring-rose-400 transition-all"
+                    style={{
+                      border: '1.5px solid #e0e7ff',
+                      backgroundColor: '#f9fbfd',
+                      focusBorderColor: '#3a8fb7',
+                    }}
+                    onFocus={(e) => {
+                      e.currentTarget.style.borderColor = '#3a8fb7';
+                      e.currentTarget.style.boxShadow = '0 0 0 2px rgba(58, 143, 183, 0.1)';
+                      e.currentTarget.style.backgroundColor = '#ffffff';
+                    }}
+                    onBlur={(e) => {
+                      e.currentTarget.style.borderColor = '#e0e7ff';
+                      e.currentTarget.style.boxShadow = 'none';
+                      e.currentTarget.style.backgroundColor = '#f9fbfd';
+                    }}
                   />
                 </div>
               </div>
 
               {/* Senha */}
               <div>
-                <label htmlFor="senha-field" className="text-sm font-semibold text-slate-700">
+                <label htmlFor="senha-field" className="text-sm font-semibold" style={{ color: '#1e5a7d' }}>
                   Senha
                 </label>
                 <div className="relative mt-1.5">
-                  <span className="absolute inset-y-0 left-0 flex items-center pl-4 text-brand pointer-events-none">
+                  <span className="absolute inset-y-0 left-0 flex items-center pl-4 pointer-events-none" style={{ color: '#3a8fb7' }}>
                     <Lock size={18} aria-hidden="true" />
                   </span>
                   <input
@@ -221,13 +279,28 @@ export default function Login() {
                     placeholder="••••••••"
                     aria-invalid={erro ? true : undefined}
                     aria-describedby={erro ? "login-error" : undefined}
-                    className="w-full border border-slate-200 rounded-xl pl-11 pr-12 py-3.5 text-base text-slate-800 placeholder:text-slate-300 focus:outline-none focus:ring-2 focus:ring-brand focus:border-transparent aria-invalid:border-rose-300 aria-invalid:focus:ring-rose-400 transition-colors"
+                    className="w-full rounded-xl pl-11 pr-12 py-3.5 text-base text-slate-800 placeholder:text-slate-400 focus:outline-none focus:border-transparent aria-invalid:border-rose-300 aria-invalid:focus:ring-rose-400 transition-all"
+                    style={{
+                      border: '1.5px solid #e0e7ff',
+                      backgroundColor: '#f9fbfd',
+                    }}
+                    onFocus={(e) => {
+                      e.currentTarget.style.borderColor = '#3a8fb7';
+                      e.currentTarget.style.boxShadow = '0 0 0 2px rgba(58, 143, 183, 0.1)';
+                      e.currentTarget.style.backgroundColor = '#ffffff';
+                    }}
+                    onBlur={(e) => {
+                      e.currentTarget.style.borderColor = '#e0e7ff';
+                      e.currentTarget.style.boxShadow = 'none';
+                      e.currentTarget.style.backgroundColor = '#f9fbfd';
+                    }}
                   />
                   <button
                     type="button"
                     aria-label={showPassword ? "Ocultar senha" : "Mostrar senha"}
                     onClick={() => setShowPassword(!showPassword)}
-                    className="absolute inset-y-0 right-0 flex items-center pr-4 pl-2 text-brand hover:text-brand-dark active:text-brand-fg focus:outline-none focus:ring-2 focus:ring-brand rounded-r-xl transition-colors"
+                    className="absolute inset-y-0 right-0 flex items-center pr-4 pl-2 hover:opacity-75 active:opacity-60 focus:outline-none focus:ring-2 rounded-r-xl transition-all"
+                    style={{ color: '#3a8fb7' }}
                   >
                     {showPassword ? <EyeOff size={18} aria-hidden="true" /> : <Eye size={18} aria-hidden="true" />}
                   </button>
@@ -239,7 +312,25 @@ export default function Login() {
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full h-13 bg-brand hover:bg-brand-dark active:opacity-90 text-white rounded-xl text-base font-semibold flex items-center justify-center gap-2 transition-colors disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-brand focus:ring-offset-2"
+                  className="w-full h-13 text-white rounded-xl text-base font-semibold flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2"
+                  style={{
+                    background: 'linear-gradient(135deg, #2a8ba8 0%, #1e5a7d 100%)',
+                    focusRingColor: '#3a8fb7',
+                  }}
+                  onMouseEnter={(e) => {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, #1e7a96 0%, #164a6a 100%)';
+                    e.currentTarget.style.boxShadow = '0 8px 16px rgba(42, 139, 168, 0.3)';
+                  }}
+                  onMouseLeave={(e) => {
+                    e.currentTarget.style.background = 'linear-gradient(135deg, #2a8ba8 0%, #1e5a7d 100%)';
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
+                  onFocus={(e) => {
+                    e.currentTarget.style.boxShadow = '0 0 0 2px white, 0 0 0 4px #3a8fb7';
+                  }}
+                  onBlur={(e) => {
+                    e.currentTarget.style.boxShadow = 'none';
+                  }}
                 >
                   {loading ? "Entrando…" : (<><span>Acessar Sistema</span><ArrowRight size={18} aria-hidden="true" /></>)}
                 </button>
