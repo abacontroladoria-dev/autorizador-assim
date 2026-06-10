@@ -69,11 +69,13 @@ export function useAuditoriaAssim() {
   // KPIs derivados client-side — elimina o 3º round-trip ao banco
   const kpis = useMemo((): KpisAuditoriaAssim | null => {
     if (loading) return null
-    const registros = rawDados.filter((d) => d.situacao !== 'FALTA')
+    const registros = rawDados.filter((d) => d.situacao !== 'FALTA' && d.situacao !== 'FALTA_TERAPEUTA')
     const faltas = rawDados.filter((d) => d.situacao === 'FALTA')
+    const faltasTerapeuta = rawDados.filter((d) => d.situacao === 'FALTA_TERAPEUTA')
     return {
       total: registros.length,
       faltas: faltas.length,
+      faltas_terapeuta: faltasTerapeuta.length,
       liberadas: registros.filter((d) => d.situacao === 'LIBERADA').length,
       nao_solicitadas: registros.filter((d) => d.situacao === 'NAO_SOLICITADA').length,
       sincronizando: registros.filter((d) => d.situacao === 'SINCRONIZANDO').length,
