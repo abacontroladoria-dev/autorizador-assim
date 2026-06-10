@@ -15,7 +15,8 @@ const SITUACOES = [
   { value: 'LIBERADA', label: 'Liberada' },
   { value: 'GLOSA', label: 'Glosa' },
   { value: 'CANCELADA', label: 'Cancelada' },
-  { value: 'FALTA', label: 'Falta' },
+  { value: 'FALTA', label: 'Falta Paciente' },
+  { value: 'FALTA_TERAPEUTA', label: 'Falta Terapeuta' },
 ]
 
 export default function FiltrosAuditoria({ filters, onChange }: Props) {

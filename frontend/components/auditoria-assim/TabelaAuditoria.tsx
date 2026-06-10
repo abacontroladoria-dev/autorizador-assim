@@ -79,6 +79,11 @@ const SITUACAO_CONFIG: Record<string, SituacaoConfigEntry> = {
     dot: 'bg-yellow-500',
     className: 'bg-yellow-50 text-yellow-600 ring-1 ring-yellow-300',
   },
+  FALTA_TERAPEUTA: {
+    label: 'Falta Terapeuta',
+    dot: 'bg-red-500',
+    className: 'bg-red-50 text-red-600 ring-1 ring-red-300',
+  },
 }
 
 export default function TabelaAuditoria({

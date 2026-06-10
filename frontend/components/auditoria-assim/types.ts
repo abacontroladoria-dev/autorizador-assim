@@ -27,6 +27,7 @@ export type KpisAuditoriaAssim = {
   total: number
   liberadas: number
   faltas: number
+  faltas_terapeuta: number
   nao_solicitadas: number
   sincronizando: number
   retorno_nao_confirmado: number

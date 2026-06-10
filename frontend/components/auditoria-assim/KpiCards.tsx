@@ -27,7 +27,7 @@ type KpiConfig = {
 }
 
 export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, onFilter }: Props) {
-  const total = (kpis?.total ?? 0) + (kpis?.faltas ?? 0)
+  const total = (kpis?.total ?? 0) + (kpis?.faltas ?? 0) + (kpis?.faltas_terapeuta ?? 0)
 
   const cards: KpiConfig[] = [
     {
@@ -113,7 +113,7 @@ export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, 
     {
       key: 'faltas',
       situacao: 'FALTA',
-      title: 'Faltas',
+      title: 'Faltas Paciente',
       value: kpis?.faltas ?? 0,
       tone: 'text-yellow-600',
       iconTone: 'bg-yellow-50 text-yellow-600',
@@ -123,10 +123,23 @@ export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, 
       bgActive: 'bg-yellow-50/60',
       icon: UserX,
     },
+    {
+      key: 'faltas-terapeuta',
+      situacao: 'FALTA_TERAPEUTA',
+      title: 'Faltas Terapeuta',
+      value: kpis?.faltas_terapeuta ?? 0,
+      tone: 'text-red-600',
+      iconTone: 'bg-red-50 text-red-600',
+      barTone: 'bg-red-500',
+      borderActive: 'border-red-400',
+      hoverBorder: 'hover:border-red-300',
+      bgActive: 'bg-red-50/60',
+      icon: UserX,
+    },
   ]
 
   return (
-    <section className="flex flex-col gap-3 xl:flex-row pt-0.5">
+    <section className="flex flex-col gap-2 xl:flex-row pt-0.5">
       <TotalCard
         total={total}
         loading={loading}
@@ -134,7 +147,7 @@ export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, 
         totalFiltrados={totalFiltrados}
         onFilter={() => onFilter('')}
       />
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-7 flex-1">
+      <div className="grid grid-cols-2 gap-2 xl:grid-cols-8 flex-1">
         {cards.map((card) => (
           <KpiCard
             key={card.key}
@@ -171,11 +184,11 @@ function TotalCard({
       onClick={onFilter}
       className={`
         relative overflow-hidden
-        xl:w-44 xl:shrink-0
+        xl:w-40 xl:shrink-0
         flex flex-col items-center justify-between
-        rounded-2xl p-3 pt-4
+        rounded-2xl p-2.5 pt-3
         bg-linear-to-br from-indigo-600 to-violet-700
-        shadow-md min-h-28
+        shadow-md min-h-24
         cursor-pointer text-left
         transition hover:-translate-y-px hover:shadow-lg
         border-2
@@ -244,7 +257,7 @@ function KpiCard({
       onClick={onFilter}
       className={`
         group flex flex-col items-center w-full
-        rounded-xl p-2 shadow-sm
+        rounded-xl p-1.5 shadow-sm
         cursor-pointer text-left
         transition hover:-translate-y-px hover:shadow-md
         border-2
