@@ -27,6 +27,7 @@ export function useAuditoriaAssim() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dateDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const hasMountedRef = useRef(false)
+  const loadingRef = useRef(false)
   const [sortKey, setSortKey] = useState<SortKey>('hora_inicial')
   const [sortDir, setSortDir] = useState<SortDir>('asc')
 
@@ -56,14 +57,34 @@ export function useAuditoriaAssim() {
   }
 
   async function carregarDados(silent = false) {
+    if (loadingRef.current) return
+
+    loadingRef.current = true
     if (!silent) setLoading(true)
-    const data = filtersRef.current.data || getHojeLocal()
-    const [registros, faltas] = await Promise.all([
-      listarAuditoriaAssim(data),
-      listarFaltasAuditoria(data),
-    ])
-    setRawDados([...registros, ...faltas])
-    setLoading(false)
+    try {
+      const data = filtersRef.current.data || getHojeLocal()
+      const [registros, faltas] = await Promise.all([
+        listarAuditoriaAssim(data),
+        listarFaltasAuditoria(data),
+      ])
+
+      const seenBlocos = new Set<string | null>()
+      const deduplicated: AuditoriaAssimItem[] = []
+
+      for (const item of [...registros, ...faltas]) {
+        if (!seenBlocos.has(item.bloco_id)) {
+          seenBlocos.add(item.bloco_id)
+          deduplicated.push(item)
+        }
+      }
+
+      setRawDados(deduplicated)
+    } catch (error) {
+      console.error('Erro ao carregar dados de auditoria:', error)
+    } finally {
+      setLoading(false)
+      loadingRef.current = false
+    }
   }
 
   // KPIs derivados client-side — elimina o 3º round-trip ao banco
@@ -105,8 +126,10 @@ export function useAuditoriaAssim() {
 
   useEffect(() => {
     const supabase = getSupabaseClient()
+    let isSubscribed = true
 
     function dispatchReload() {
+      if (!isSubscribed) return
       if (debounceRef.current) clearTimeout(debounceRef.current)
       debounceRef.current = setTimeout(() => carregarDados(true), DEBOUNCE_MS)
     }
@@ -118,8 +141,9 @@ export function useAuditoriaAssim() {
       .subscribe()
 
     return () => {
-      supabase.removeChannel(channel)
+      isSubscribed = false
       if (debounceRef.current) clearTimeout(debounceRef.current)
+      supabase.removeChannel(channel)
     }
   }, [])
 
