@@ -9,6 +9,7 @@ drop policy if exists "Permitir update de autorizacoes" on "public"."autorizacoe
 drop policy if exists "update autorizacoes liberado" on "public"."autorizacoes";
 
 -- Recreate with authenticated requirement
+drop policy if exists "insert autorizacoes authenticated" on "public"."autorizacoes";
 create policy "insert autorizacoes authenticated"
 on "public"."autorizacoes"
 as permissive
@@ -16,6 +17,7 @@ for insert
 to authenticated
 with check (true);
 
+drop policy if exists "select autorizacoes authenticated" on "public"."autorizacoes";
 create policy "select autorizacoes authenticated"
 on "public"."autorizacoes"
 as permissive
@@ -23,6 +25,7 @@ for select
 to authenticated
 using (true);
 
+drop policy if exists "update autorizacoes authenticated" on "public"."autorizacoes";
 create policy "update autorizacoes authenticated"
 on "public"."autorizacoes"
 as permissive
@@ -38,6 +41,7 @@ with check (true);
 drop policy if exists "Liberar tudo chamada" on "public"."chamada_paciente";
 
 -- Recreate with authenticated requirement
+drop policy if exists "all chamada_paciente authenticated" on "public"."chamada_paciente";
 create policy "all chamada_paciente authenticated"
 on "public"."chamada_paciente"
 as permissive
@@ -51,6 +55,7 @@ with check (true);
 drop policy if exists "insert logs liberado geral" on "public"."logs";
 
 -- Recreate with authenticated requirement
+drop policy if exists "insert logs authenticated" on "public"."logs";
 create policy "insert logs authenticated"
 on "public"."logs"
 as permissive
@@ -66,6 +71,7 @@ drop policy if exists "Permitir select sync" on "public"."sync_controle";
 drop policy if exists "Permitir update sync" on "public"."sync_controle";
 
 -- Recreate with authenticated requirement
+drop policy if exists "select sync_controle authenticated" on "public"."sync_controle";
 create policy "select sync_controle authenticated"
 on "public"."sync_controle"
 as permissive
@@ -73,6 +79,7 @@ for select
 to authenticated
 using (true);
 
+drop policy if exists "update sync_controle authenticated" on "public"."sync_controle";
 create policy "update sync_controle authenticated"
 on "public"."sync_controle"
 as permissive
