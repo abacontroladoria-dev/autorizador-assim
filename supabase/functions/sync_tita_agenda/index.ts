@@ -87,15 +87,6 @@ async function sincronizarData(
   const rawData = await response.json()
   const agendas = (rawData as any[]).flatMap((grupo: any) => grupo.agenda_favorecido || [])
 
-  // [DEBUG] Verificar se os pacientes afetados chegam da API TiTa
-  const pacientesAfetados = rawData.filter((item: any) =>
-    JSON.stringify(item).match(/Isabella|Anny|Phettrus|Heitor/i)
-  )
-  if (pacientesAfetados.length > 0) {
-    console.log("[sync_tita_agenda] PACIENTES AFETADOS ENCONTRADOS NA API:", JSON.stringify(pacientesAfetados, null, 2))
-  } else {
-    console.log("[sync_tita_agenda] AVISO: nenhum dos pacientes afetados encontrado no payload da API para a data", data)
-  }
 
   // Monta mapa dos registros vindos do TiTa: tita_agendamento_id → registro
   const incoming = new Map<number, Record<string, unknown>>()
@@ -258,7 +249,20 @@ serve(async (req: Request) => {
     console.log("[sync_tita_agenda] Concluído:", resultados)
     return jsonResponse({ ok: true, datas, resultados })
   } catch (err) {
-    console.error("[sync_tita_agenda] Erro:", err)
-    return jsonResponse({ error: String(err) }, 500)
+    let errMsg = "Unknown error"
+    let errStack = "N/A"
+    try {
+      if (err instanceof Error) {
+        errMsg = err.message
+        errStack = err.stack || "N/A"
+      } else {
+        errMsg = JSON.stringify(err) || String(err)
+      }
+    } catch {
+      errMsg = "Error serialization failed"
+    }
+    console.error("[sync_tita_agenda] Erro:", errMsg)
+    console.error("[sync_tita_agenda] Stack:", errStack)
+    return jsonResponse({ error: errMsg, stack: errStack }, 500)
   }
 })
