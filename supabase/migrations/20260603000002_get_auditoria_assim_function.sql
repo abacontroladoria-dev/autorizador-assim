@@ -102,6 +102,10 @@ AS $$
             OR upper(COALESCE(f.tipo_falta, '')) LIKE '%TERAPEUTA%'
           )
       )
+        AND a.terapia_nome NOT ILIKE '%Aplicador ABA Escola%'
+        AND a.terapia_nome NOT ILIKE '%Aplicador ABA Casa%'
+        AND a.terapia_nome NOT ILIKE '%Aplicador Suporte%'
+        AND a.terapia_nome NOT ILIKE '%Supervisão ABA%'
     )
     SELECT
       concat_ws('_', asf.paciente_id, asf.data_atendimento, asf.codigo_tuss, asf.hora_inicial) AS bloco_id,
