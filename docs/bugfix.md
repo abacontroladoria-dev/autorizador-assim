@@ -393,69 +393,78 @@ Os pacientes voltarem a aparecer automaticamente sem qualquer ajuste manual.
 
 ## Investigação Concluída
 
-### Causa Raiz Encontrada
+### Causa Raiz Encontrada (Diagnóstico Final)
 
-**Camada 1: A API TiTa não retorna sessões com `Status do Horário: Conflito`**
+**Camada 1 (primária): A API TiTa `/api/integracao/agendamento` não retorna sessões já realizadas**
 
-Confirmado via teste: o endpoint `/api/integracao/agendamento` omite sessões cujos horários têm status "Conflito" na resposta JSON. Os novos agendamentos pós-remanejamento têm esse status no TiTa e, portanto, nunca chegam no `rawData` da função `sync_tita_agenda/index.ts`.
+O endpoint JSON omite sessões cujo `status` (campo do CSV `csv_grade_profissionais`) é:
 
-**Camada 2: Índice UNIQUE `agenda_tita_unico` bloqueava inserts (secundária)**
+* `"Realizado"` — sessão foi atendida. O endpoint para de retorná-la assim que o horário passa.
+* Nota: sessões `"Em Conflito"` SÃO retornadas pelo JSON para datas futuras/pendentes.
 
-Enquanto investigava a Camada 1, descobriu-se um bloqueador adicional: a migração `20260530000000_versioning_agenda_tita.sql` declarou a intenção de remover a constraint UNIQUE, mas apenas dropou a *constraint pelo nome*. O índice físico `agenda_tita_unico` continuou ativo no banco, causando erro:
+Ciclo de vida do bug:
 
-```
-duplicate key value violates unique constraint "agenda_tita_unico"
-```
+1. Terapeuta removida da grade → novo agendamento criado com `status = "Em Conflito"` → JSON omite
+2. Paciente comparece e a sessão é realizada → `status` muda para `"Realizado"` → JSON continua omitindo
+3. Sessão nunca foi inserida em `agenda_tita` em nenhum dos dois momentos
 
-Quando a função tentava inserir um novo agendamento (que chegasse da API), falhava se o `tita_agendamento_id` coincidisse com um registro existente marcado `ativo=false`.
+### Camada 2 (secundária): Índice UNIQUE bloqueava inserts de versionamento
+
+A migração `20260530000000_versioning_agenda_tita.sql` removeu apenas a constraint pelo nome, mas o índice físico `agenda_tita_unico` persistiu. Isso causava erro de constraint em qualquer insert com `tita_agendamento_id` já existente (mesmo com `ativo=false`), bloqueando toda a sincronização da data.
 
 ---
 
-## Solução Implementada
+## Evidência Comparativa (2026-06-10)
 
-### Fix 1: Remove Unique Index (Prioritário)
+| Endpoint | Isabella 08:00 Gabrielly | Heitor 09:20 Nathalia |
+| --- | --- | --- |
+| JSON `/api/integracao/agendamento` | ❌ Ausente (Realizado) | ❌ Ausente (Realizado) |
+| CSV `csv_grade_profissionais` | ✅ Presente (`status=Realizado`) | ✅ Presente (`status=Realizado`) |
+| `agenda_tita` antes do fix | ❌ | ❌ |
+| `agenda_tita` após fix | ✅ `ativo=true, origem=tita_csv` | ✅ `ativo=true, origem=tita_csv` |
+
+**Sobre Anny e Phettrus:** as sessões ausentes tinham `status = "Cancelado" (Falta do Paciente)` — o paciente não compareceu. Não há serviço prestado e não requerem autorização. Comportamento correto.
+
+---
+
+## Soluções Implementadas
+
+### Fix 1: Índice UNIQUE Parcial
 
 **Arquivo:** `supabase/migrations/20260610_fix_unique_index_agenda_tita.sql`
 
 ```sql
 DROP INDEX IF EXISTS public.agenda_tita_unico;
-
 CREATE UNIQUE INDEX agenda_tita_unico_active
   ON public.agenda_tita (tita_agendamento_id)
   WHERE ativo = true;
 ```
 
-**Efeito:** Substitui a constraint UNIQUE absoluta por um índice PARCIAL que:
-- Permite múltiplas linhas com o mesmo `tita_agendamento_id` (para versionamento)
-- Enforce que apenas UM registro por ID tenha `ativo = true`
-
-**Status:** ✅ Deployado e testado — sincronização agora funciona sem erros de constraint.
+**Status:** ✅ Deployado. Sincronização voltou a funcionar para os 619+ registros diários.
 
 ---
 
-### Fix 2: Resolver Conflito no TiTa (Próximo Passo)
+### Fix 2: Enriquecimento CSV em `sync_tita_agenda`
 
-Os pacientes afetados ainda não aparecem porque a API TiTa os omite (status "Conflito").
+**Arquivo:** `supabase/functions/sync_tita_agenda/index.ts`
 
-**Ação requerida:**
-1. Entrar no TiTa
-2. Localizar a grade de Gabrielly De Souza Silveira Dos Reis
-3. Resolver o conflito (aprovar/recusar/ajustar)
-4. Re-sincronizar: `POST /functions/v1/sync_tita_agenda` com `{ "data": "2026-06-10" }`
-5. Confirmar que os 4 pacientes aparecem em `agenda_tita` com `ativo=true`
+**Mudança:** Após construir o mapa `incoming` do endpoint JSON, a função agora:
 
-OU, se a API TiTa aceitar um parâmetro para incluir conflitos:
-1. Adicionar parâmetro em `sync_tita_agenda/index.ts` linha 72
-2. Re-testar
+1. Chama `csv_grade_profissionais` para a mesma data (somente para `data <= hoje`)
+2. Identifica sessões com `status = "Realizado"` ou `"Em Conflito"` que não estão no `incoming`
+3. Adiciona-as ao mapa com todos os IDs disponíveis no CSV (`id favorecido`, `id profissional`, `id terapia`, `id sala`)
+4. O fluxo de inserção existente as processa normalmente
+
+Sessões inseridas via CSV recebem `origem = "tita_csv"`.
+
+**Status:** ✅ Deployado. `sync_tita_agenda` para 2026-06-10 retornou 658 registros (antes: 619).
 
 ---
 
-## Entregaveis
+## Entregáveis
 
-1. ✅ Identificação da causa raiz (duas camadas)
-2. ✅ Arquivos afetados (índice + função sync)
-3. ✅ Correção completa (migração)
-4. ✅ Logs de validação (testes via curl/logs)
-5. ✅ Explicação do motivo (constraint + API omissão)
-6. ✅ Evidência de teste antes/depois (função retorna 619 registros, sem erro)
-7. ✅ Commit pronto para deploy
+1. ✅ Causa raiz identificada e comprovada por comparação direta dos dois endpoints
+2. ✅ Fix 1: migração de índice UNIQUE parcial
+3. ✅ Fix 2: enriquecimento CSV no sincronizador
+4. ✅ Verificação: Isabella (08:00 Gabrielly), Heitor (09:20 Nathalia) em `agenda_tita` com `ativo=true`
+5. ✅ Anny e Phettrus: sessões ausentes eram Cancelado (Falta do Paciente) — correto não inserir

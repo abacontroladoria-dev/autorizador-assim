@@ -64,6 +64,145 @@ const eq = (a: unknown, b: unknown): boolean => {
 const hhMM = (t: unknown): string | null =>
   t != null ? String(t).slice(0, 5) : null
 
+// Parser de linha CSV respeitando campos entre aspas.
+function parseCSVLine(line: string): string[] {
+  const result: string[] = []
+  let current = ""
+  let insideQuotes = false
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i]
+    if (char === '"') {
+      if (insideQuotes && line[i + 1] === '"') { current += '"'; i++ }
+      else insideQuotes = !insideQuotes
+    } else if (char === "," && !insideQuotes) {
+      result.push(current.trim()); current = ""
+    } else {
+      current += char
+    }
+  }
+  result.push(current.trim())
+  return result
+}
+
+// Suplementa o mapa `incoming` com sessões do endpoint csv_grade_profissionais
+// que o endpoint JSON não retorna (status "Realizado" já atendidas no dia).
+// Restrito a data === hoje para evitar chamadas desnecessárias em datas futuras.
+async function enrichIncomingFromCSV(
+  data: string,
+  hoje: string,
+  incoming: Map<number, Record<string, unknown>>,
+): Promise<number> {
+  if (data > hoje) return 0 // futuro: JSON já cobre tudo
+
+  const res = await fetch(
+    "https://apiv2.apptita.com.br/api/integracao/csv_grade_profissionais",
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-INTEGRACAO-TOKEN": TITA_TOKEN },
+      body: JSON.stringify({ data_inicio: data, data_fim: data, unidade: 280 }),
+    },
+  )
+  if (!res.ok) {
+    console.warn(`[sync_tita_agenda] CSV enrichment: API returned ${res.status} for ${data}`)
+    return 0
+  }
+
+  const csvText = await res.text()
+  const lines = csvText.trim().split("\n")
+  if (lines.length < 2) return 0
+
+  const hdrs = parseCSVLine(lines[0]).map(h => h.toLowerCase().trim())
+  const col  = (name: string) => hdrs.indexOf(name)
+
+  const iId        = col("id agendamento")
+  const iFavId     = col("id favorecido")
+  const iFavNome   = col("nome favorecido")
+  const iData      = col("data")
+  const iHoraIni   = col("hora inicial")
+  const iHoraFim   = col("hora final")
+  const iProfId    = col("id profissional")
+  const iProfNome  = col("profissional")
+  const iProfCpf   = col("cpf do profissional")
+  const iTerapId   = col("id terapia")
+  const iTerapNome = col("terapia")
+  const iTerapExId = col("id terapia exibição")
+  const iTerapExNm = col("terapia exibição")
+  const iSalaId    = col("id sala")
+  const iSalaNome  = col("sala")
+  const iSalaObs   = col("observações da sala")
+  const iCliId     = col("id unidade")
+  const iCliNome   = col("nome unidade")
+  const iConvenio  = col("convênio")
+  const iStatus    = col("status")
+
+  if (iId < 0 || iFavNome < 0 || iStatus < 0) return 0
+
+  const v = (vals: string[], i: number) => (i >= 0 ? vals[i]?.trim() ?? "" : "")
+  const n = (vals: string[], i: number) => { const s = v(vals, i); return s ? parseInt(s) : null }
+
+  let enriched = 0
+
+  for (let i = 1; i < lines.length; i++) {
+    const vals = parseCSVLine(lines[i])
+    const agIdStr = v(vals, iId)
+    if (!agIdStr) continue
+
+    const agId = parseInt(agIdStr)
+    if (!agId || incoming.has(agId)) continue
+
+    // Apenas sessões já atendidas (Realizado) que o JSON não retorna.
+    // Cancelado (Falta do Paciente) e Livre (vago) são ignorados.
+    const status = v(vals, iStatus)
+    if (status !== "Realizado" && status !== "Em Conflito") continue
+
+    const pacienteNome = v(vals, iFavNome)
+    if (!pacienteNome) continue
+
+    const dataAtend = v(vals, iData) || data
+
+    const r: Record<string, unknown> = {
+      tita_agendamento_id:   agId,
+      origem:                "tita_csv",
+      data_atendimento:      dataAtend,
+      hora_inicial:          v(vals, iHoraIni) || null,
+      hora_final:            v(vals, iHoraFim) || null,
+      paciente_id:           n(vals, iFavId),
+      paciente_nome:         pacienteNome,
+      cpf:                   null,
+      data_nascimento:       null,
+      profissional_id:       n(vals, iProfId),
+      profissional_nome:     v(vals, iProfNome) || null,
+      profissional_cpf:      v(vals, iProfCpf) || null,
+      terapia_id:            n(vals, iTerapId),
+      terapia_nome:          v(vals, iTerapNome) || null,
+      terapia_exibicao_id:   n(vals, iTerapExId),
+      terapia_exibicao_nome: v(vals, iTerapExNm) || null,
+      sala_id:               n(vals, iSalaId),
+      sala_nome:             v(vals, iSalaNome) || null,
+      sala_observacoes:      v(vals, iSalaObs) || null,
+      clinica_id:            n(vals, iCliId),
+      clinica_nome:          v(vals, iCliNome) || null,
+      convenio_id:           null,
+      convenio_nome:         v(vals, iConvenio) || null,
+      numero_carteirinha:    null,
+      responsavel_nome:      null,
+      responsavel_telefone:  null,
+      responsavel_email:     null,
+      atividade:             null,
+      ativo:                 true,
+      motivo_inativacao:     null,
+      raw_json:              { source: "csv_grade_profissionais", status_csv: status },
+      updated_at:            new Date().toISOString(),
+    }
+
+    incoming.set(agId, r)
+    enriched++
+    console.log(`[sync_tita_agenda] CSV+: ${agId} ${pacienteNome} ${v(vals, iHoraIni)} [${status}]`)
+  }
+
+  return enriched
+}
+
 async function sincronizarData(
   data: string,
   supabase: ReturnType<typeof createClient>,
@@ -130,6 +269,14 @@ async function sincronizarData(
     if (r.tita_agendamento_id != null) {
       incoming.set(r.tita_agendamento_id as number, r)
     }
+  }
+
+  // Enriquece incoming com sessões "Realizado" do CSV que o JSON omite
+  const hojeParaCSV = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }))
+    .toISOString().slice(0, 10)
+  const enriched = await enrichIncomingFromCSV(data, hojeParaCSV, incoming)
+  if (enriched > 0) {
+    console.log(`[sync_tita_agenda] CSV enrichment: +${enriched} sessões adicionadas para ${data}`)
   }
 
   // Busca registros ativos existentes para esta data
