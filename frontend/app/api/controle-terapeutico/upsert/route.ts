@@ -26,6 +26,22 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Não autenticado' }, { status: 401 })
   }
 
+  const { data: usuarioProfile } = await supabase
+    .from('usuarios')
+    .select('role')
+    .eq('id', user.id)
+    .single()
+
+  const role = usuarioProfile?.role
+  const rolesComAcesso = ['admin', 'terapeutico', 'terapeuta']
+
+  if (!role || !rolesComAcesso.includes(role)) {
+    return NextResponse.json(
+      { error: 'Acesso negado. Você não tem permissão para essa operação.' },
+      { status: 403 }
+    )
+  }
+
   const body = await request.json()
 
   const edgeResponse = await fetch(EDGE_URL, {

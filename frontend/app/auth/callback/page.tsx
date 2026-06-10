@@ -14,7 +14,8 @@ function CallbackHandler() {
     const code = searchParams.get('code')
     const token_hash = searchParams.get('token_hash')
     const type = searchParams.get('type')
-    const next = searchParams.get('next') ?? '/definir-senha'
+    const rawNext = searchParams.get('next') ?? '/definir-senha'
+    const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/definir-senha'
 
     async function handle() {
       if (code) {

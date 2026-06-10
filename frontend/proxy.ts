@@ -3,7 +3,7 @@ import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { supabaseService } from '@/lib/supabase/service'
 
-export default async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next()
 
   const supabase = createServerClient(
@@ -29,8 +29,8 @@ export default async function middleware(request: NextRequest) {
 
   const pathname = request.nextUrl.pathname
 
-  // Rotas acessíveis sem autenticação
-  const publicRoutes = ['/login', '/definir-senha', '/auth/callback']
+  // Rotas públicas
+  const publicRoutes = ['/login', '/definir-senha', '/auth/callback', '/disponibilidade-terapeuta/login']
 
   const isPublicRoute = publicRoutes.some(
     (route) => pathname === route || pathname.startsWith(route + '/')
@@ -96,6 +96,7 @@ export default async function middleware(request: NextRequest) {
     terapeutico: ['/', '/terapeutas'],
     faturamento: ['/', '/guias'],
     autorizacao: ['/', '/auditoria-assim'],
+    disponibilidade_terapeuta: ['/disponibilidade-terapeuta'],
   }
 
   const allowedRoutes = roleRoutes[role] || []

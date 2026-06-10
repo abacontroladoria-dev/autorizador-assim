@@ -1,12 +1,35 @@
 import { NextResponse } from "next/server"
+import { createServerClient } from "@supabase/ssr"
+import type { NextRequest } from "next/server"
 import { splitPdf } from "@/lib/guias-digitais/splitPdf"
 import { extractGuiaNumberFromPage } from "@/lib/guias-digitais/extractGuiaNumber"
 import { generateVerso } from "@/lib/guias-digitais/generateVerso"
 import { mergePdf } from "@/lib/guias-digitais/mergePdf"
 import { supabaseService } from "@/lib/supabase/service"
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   try {
+    const supabase = createServerClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      {
+        cookies: {
+          getAll() {
+            return request.cookies.getAll()
+          },
+          setAll() {},
+        },
+      }
+    )
+
+    const { data: { user } } = await supabase.auth.getUser()
+    if (!user) {
+      return NextResponse.json(
+        { error: "Não autorizado. Faça login para processar guias." },
+        { status: 401 }
+      )
+    }
+
     const contentType = request.headers.get("content-type") || ""
     if (!contentType.includes("multipart/form-data")) {
       return NextResponse.json(

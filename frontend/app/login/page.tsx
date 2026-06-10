@@ -21,27 +21,14 @@ export default function Login() {
     setErro("");
     setLoading(true);
 
-    let emailToUse = login;
-
     if (!login.includes("@")) {
-      const res = await fetch(getFunctionUrl('auth-lookup-username'), {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: login.toLowerCase() }),
-      })
-
-      if (!res.ok) {
-        setErro("Usuário não encontrado. Tente acessar com seu e-mail.");
-        setLoading(false);
-        return;
-      }
-
-      const { email } = await res.json()
-      emailToUse = email
+      setErro("Por favor, use seu endereço de e-mail para acessar o sistema.");
+      setLoading(false);
+      return;
     }
 
     const { data, error } = await supabase.auth.signInWithPassword({
-      email: emailToUse,
+      email: login,
       password: senha,
     });
 
