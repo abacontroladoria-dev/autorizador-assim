@@ -87,6 +87,16 @@ async function sincronizarData(
   const rawData = await response.json()
   const agendas = (rawData as any[]).flatMap((grupo: any) => grupo.agenda_favorecido || [])
 
+  // [DEBUG] Verificar se os pacientes afetados chegam da API TiTa
+  const pacientesAfetados = rawData.filter((item: any) =>
+    JSON.stringify(item).match(/Isabella|Anny|Phettrus|Heitor/i)
+  )
+  if (pacientesAfetados.length > 0) {
+    console.log("[sync_tita_agenda] PACIENTES AFETADOS ENCONTRADOS NA API:", JSON.stringify(pacientesAfetados, null, 2))
+  } else {
+    console.log("[sync_tita_agenda] AVISO: nenhum dos pacientes afetados encontrado no payload da API para a data", data)
+  }
+
   // Monta mapa dos registros vindos do TiTa: tita_agendamento_id → registro
   const incoming = new Map<number, Record<string, unknown>>()
   for (const a of agendas) {
