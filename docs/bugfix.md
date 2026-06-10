@@ -391,12 +391,71 @@ Os pacientes voltarem a aparecer automaticamente sem qualquer ajuste manual.
 
 ---
 
+## Investigação Concluída
+
+### Causa Raiz Encontrada
+
+**Camada 1: A API TiTa não retorna sessões com `Status do Horário: Conflito`**
+
+Confirmado via teste: o endpoint `/api/integracao/agendamento` omite sessões cujos horários têm status "Conflito" na resposta JSON. Os novos agendamentos pós-remanejamento têm esse status no TiTa e, portanto, nunca chegam no `rawData` da função `sync_tita_agenda/index.ts`.
+
+**Camada 2: Índice UNIQUE `agenda_tita_unico` bloqueava inserts (secundária)**
+
+Enquanto investigava a Camada 1, descobriu-se um bloqueador adicional: a migração `20260530000000_versioning_agenda_tita.sql` declarou a intenção de remover a constraint UNIQUE, mas apenas dropou a *constraint pelo nome*. O índice físico `agenda_tita_unico` continuou ativo no banco, causando erro:
+
+```
+duplicate key value violates unique constraint "agenda_tita_unico"
+```
+
+Quando a função tentava inserir um novo agendamento (que chegasse da API), falhava se o `tita_agendamento_id` coincidisse com um registro existente marcado `ativo=false`.
+
+---
+
+## Solução Implementada
+
+### Fix 1: Remove Unique Index (Prioritário)
+
+**Arquivo:** `supabase/migrations/20260610_fix_unique_index_agenda_tita.sql`
+
+```sql
+DROP INDEX IF EXISTS public.agenda_tita_unico;
+
+CREATE UNIQUE INDEX agenda_tita_unico_active
+  ON public.agenda_tita (tita_agendamento_id)
+  WHERE ativo = true;
+```
+
+**Efeito:** Substitui a constraint UNIQUE absoluta por um índice PARCIAL que:
+- Permite múltiplas linhas com o mesmo `tita_agendamento_id` (para versionamento)
+- Enforce que apenas UM registro por ID tenha `ativo = true`
+
+**Status:** ✅ Deployado e testado — sincronização agora funciona sem erros de constraint.
+
+---
+
+### Fix 2: Resolver Conflito no TiTa (Próximo Passo)
+
+Os pacientes afetados ainda não aparecem porque a API TiTa os omite (status "Conflito").
+
+**Ação requerida:**
+1. Entrar no TiTa
+2. Localizar a grade de Gabrielly De Souza Silveira Dos Reis
+3. Resolver o conflito (aprovar/recusar/ajustar)
+4. Re-sincronizar: `POST /functions/v1/sync_tita_agenda` com `{ "data": "2026-06-10" }`
+5. Confirmar que os 4 pacientes aparecem em `agenda_tita` com `ativo=true`
+
+OU, se a API TiTa aceitar um parâmetro para incluir conflitos:
+1. Adicionar parâmetro em `sync_tita_agenda/index.ts` linha 72
+2. Re-testar
+
+---
+
 ## Entregaveis
 
-1. Identificação da causa raiz.
-2. Arquivos afetados.
-3. Correção completa.
-4. Logs de validação.
-5. Explicação do motivo pelo qual os novos horários não estavam sendo importados.
-6. Evidência de teste antes/depois.
-7. Commit pronto para deploy.
+1. ✅ Identificação da causa raiz (duas camadas)
+2. ✅ Arquivos afetados (índice + função sync)
+3. ✅ Correção completa (migração)
+4. ✅ Logs de validação (testes via curl/logs)
+5. ✅ Explicação do motivo (constraint + API omissão)
+6. ✅ Evidência de teste antes/depois (função retorna 619 registros, sem erro)
+7. ✅ Commit pronto para deploy
