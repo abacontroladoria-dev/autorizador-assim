@@ -245,7 +245,6 @@ export default function Login() {
                     style={{
                       border: '1.5px solid #e0e7ff',
                       backgroundColor: '#f9fbfd',
-                      focusBorderColor: '#3a8fb7',
                     }}
                     onFocus={(e) => {
                       e.currentTarget.style.borderColor = '#3a8fb7';
@@ -315,7 +314,6 @@ export default function Login() {
                   className="w-full h-13 text-white rounded-xl text-base font-semibold flex items-center justify-center gap-2 transition-all disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-offset-2"
                   style={{
                     background: 'linear-gradient(135deg, #2a8ba8 0%, #1e5a7d 100%)',
-                    focusRingColor: '#3a8fb7',
                   }}
                   onMouseEnter={(e) => {
                     e.currentTarget.style.background = 'linear-gradient(135deg, #1e7a96 0%, #164a6a 100%)';
