@@ -174,16 +174,59 @@ npm run start
 
 ---
 
+---
+
+## Sprint 1.6-D: Add Recepcao Full Access to CCO
+
+**Migration:** `20260610000014_sprint_1_6_d_recepcao_full_access_cco.sql`
+
+### Changes
+
+Add full access policies for `recepcao` role on all CCO tables:
+
+- `cco.atendimentos`
+- `cco.occurrences`
+- `cco.dashboard_snapshot`
+- `cco.processing_logs`
+- `cco.session_authorizations`
+- `cco.session_mutations`
+- `cco.session_substitutions`
+
+### Access Model (Updated)
+
+```
+╔════════════╦════════╦════════╦════════════════════════════════════════════╗
+║ Role       ║ SELECT ║ INSERT ║ UPDATE/DELETE                              ║
+╠════════════╬════════╬════════╬════════════════════════════════════════════╣
+║ admin      ║   ✅   ║   ✅   ║   ✅ (via is_admin())                      ║
+║ recepcao   ║   ✅   ║   ✅   ║   ✅ (full access)                         ║
+║ diretoria  ║   ✅   ║   ❌   ║   ❌ (read-only)                           ║
+║ others     ║   ❌   ║   ❌   ║   ❌ (no access)                           ║
+║ service    ║   ✅   ║   ✅   ║   ✅ (bypasses RLS)                        ║
+╚════════════╩════════╩════════╩════════════════════════════════════════════╝
+```
+
+### How to Apply
+
+```bash
+supabase migration up
+# Or in Supabase Dashboard: SQL Editor > Run migration
+```
+
+---
+
 ## Deployment Order
 
 1. **Sprint 1.6-A** → Revoke RPC permissions
-2. **Sprint 1.6-B** → Enable RLS and create policies
+2. **Sprint 1.6-B** → Enable RLS and create policies (admin + diretoria)
 3. **Sprint 1.6-C** → Redeploy frontend with `'server-only'` directive
+4. **Sprint 1.6-D** → Add recepcao full access to CCO
 
 **Why this order?**
 - A comes first because it closes the most obvious attack surface
 - B comes second because it enforces access control at the database layer
 - C is frontend-only and can be done anytime (no database dependency)
+- D adds recepcao permissions after base RLS structure is in place
 
 ---
 
