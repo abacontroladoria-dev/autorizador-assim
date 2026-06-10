@@ -24,7 +24,7 @@ export async function listarFaltasAuditoria(data: string): Promise<AuditoriaAssi
     return []
   }
 
-  return (result || []).map((f: { paciente_id: string; paciente_nome: string; data_atendimento: string; hora_inicial: string; tuss: string; terapia_nome: string; tipo_falta: string }) => {
+  return (result || []).map((f: { paciente_id: string; paciente_nome: string; data_atendimento: string; hora_inicial: string; tuss: string; terapia_nome: string; tipo_falta: string; profissional_nome: string | null }) => {
     const isTerapeuta = f.tipo_falta?.toLowerCase().includes('terapeuta')
     return {
       bloco_id: null,
@@ -47,7 +47,9 @@ export async function listarFaltasAuditoria(data: string): Promise<AuditoriaAssi
       dias_atraso: null,
       possui_autorizacao: null,
       possui_solicitacao: null,
-      observacao: isTerapeuta ? 'Falta do terapeuta' : 'Falta do paciente',
+      observacao: isTerapeuta
+        ? (f.profissional_nome ?? 'Falta do terapeuta')
+        : 'Falta do paciente',
       motivo_glosa: null,
     }
   })
