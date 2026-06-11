@@ -129,18 +129,23 @@ export default function Home() {
 
       try {
         const { data: kpiData, error: kpiError } = await supabase
-          .from("vw_dashboard_kpis")
-          .select("*")
+          .rpc("get_dashboard_kpis")
 
         if (kpiError) {
-          console.error("[KPI] Erro ao buscar vw_dashboard_kpis:", kpiError)
+          console.warn("[KPI] View não disponível, usando valores padrão:", kpiError?.message)
+          setAtendimentos({ realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 })
+          setFaltasPaciente({ realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 })
+          setTerapeutas({ realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 })
+          setTerapeutasIndisponiveis({ realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 })
+          setSlotData([])
           setLoadingKpi(false)
           return
         }
 
-        // Parse KPI data (view returns 2 rows: atendimentos + faltas)
         const atend: UnitCount = { realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 }
         const faltas: UnitCount = { realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 }
+        const terapeutas: UnitCount = { realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 }
+        const indisponiveis: UnitCount = { realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 }
 
         for (const row of kpiData ?? []) {
           if (row.metric_type === 'kpi_atendimentos') {
@@ -153,19 +158,32 @@ export default function Home() {
             faltas.fazendinha = row.fazendinha ?? 0
             faltas.padreMiguel = row.padreMiguel ?? 0
             faltas.total = row.total ?? 0
+          } else if (row.metric_type === 'kpi_terapeutas') {
+            terapeutas.realengo = row.realengo ?? 0
+            terapeutas.fazendinha = row.fazendinha ?? 0
+            terapeutas.padreMiguel = row.padreMiguel ?? 0
+            terapeutas.total = row.total ?? 0
+          } else if (row.metric_type === 'kpi_terapeutas_indisponiveis') {
+            indisponiveis.realengo = row.realengo ?? 0
+            indisponiveis.fazendinha = row.fazendinha ?? 0
+            indisponiveis.padreMiguel = row.padreMiguel ?? 0
+            indisponiveis.total = row.total ?? 0
           }
         }
 
         setAtendimentos(atend)
         setFaltasPaciente(faltas)
-
-        // Placeholder para terapeutas e indisponíveis (pode ser adicionado à view depois)
-        setTerapeutas({ realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 })
-        setTerapeutasIndisponiveis({ realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 })
+        setTerapeutas(terapeutas)
+        setTerapeutasIndisponiveis(indisponiveis)
         setSlotData([])
 
       } catch (err) {
-        console.error("[KPI] Erro geral:", err)
+        console.warn("[KPI] Erro ao carregar KPIs:", err)
+        setAtendimentos({ realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 })
+        setFaltasPaciente({ realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 })
+        setTerapeutas({ realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 })
+        setTerapeutasIndisponiveis({ realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 })
+        setSlotData([])
       }
 
       setLoadingKpi(false)
