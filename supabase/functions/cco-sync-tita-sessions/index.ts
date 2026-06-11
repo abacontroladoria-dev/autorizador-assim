@@ -211,8 +211,8 @@ async function syncTITASessions(
 
   const today = new Date()
   const dateFormat = (d: Date) => d.toISOString().split("T")[0]
-  const fourteenDaysAgo = new Date(today.getTime() - 14 * 24 * 60 * 60 * 1000)
-  const dataInicio = dateFormat(fourteenDaysAgo)
+  const tenDaysAgo = new Date(today.getTime() - 10 * 24 * 60 * 60 * 1000)
+  const dataInicio = dateFormat(tenDaysAgo)
   const dataFim = dateFormat(today)
   const unidade = 280
 
