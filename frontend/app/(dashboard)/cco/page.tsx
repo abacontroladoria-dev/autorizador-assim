@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import CCOKpiCards from '@/components/cco/CCOKpiCards'
 import OcorrenciasRevisaoDrawer from '@/components/cco/OcorrenciasRevisaoDrawer'
 import EvolucoesPendentes from '@/components/cco/EvolucoesPendentes'
@@ -9,14 +9,13 @@ import PacientesPendenciasModal from '@/components/cco/PacientesPendenciasModal'
 import PacientesRevisaoModal from '@/components/cco/PacientesRevisaoModal'
 import PacienteDetalhesModal from '@/components/cco/PacienteDetalhesModal'
 import PeriodoCalendar from '@/components/cco/PeriodoCalendar'
-import { mockCCOData } from '@/components/cco/mock-data'
-import type { CCOData, Competencia, CCOSessaoDetalhada } from '@/components/cco/types'
+import { useCCO } from '@/hooks/useCCO'
+import type { CCOSessaoDetalhada } from '@/components/cco/types'
 
 export default function CCOPage() {
   const [dataInicio, setDataInicio] = useState('2026-06-01')
   const [dataFim, setDataFim] = useState('2026-06-30')
-  const [dados, setDados] = useState<CCOData | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { dados, loading } = useCCO(dataInicio, dataFim)
   const [revisaoDrawerOpen, setRevisaoDrawerOpen] = useState(false)
   const [pendenciasModalOpen, setPendenciasModalOpen] = useState(false)
   const [revisaoModalOpen, setRevisaoModalOpen] = useState(false)
@@ -39,19 +38,6 @@ export default function CCOPage() {
     setPacienteDetalhes(null)
   }
 
-
-  useEffect(() => {
-    setLoading(true)
-
-    // TODO: substituir por query real ao Supabase
-    // supabase.rpc('get_auditoria_assim', { data_inicio: dataInicio, data_fim: dataFim })
-    const timeout = setTimeout(() => {
-      setDados(mockCCOData)
-      setLoading(false)
-    }, 400)
-
-    return () => clearTimeout(timeout)
-  }, [dataInicio, dataFim])
 
   return (
     <div className="space-y-8">

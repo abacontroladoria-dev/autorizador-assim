@@ -4,17 +4,17 @@ const roleDefaults: Record<string, string[]> = {
   admin: [
     'dashboard', 'atendimentos', 'gestao', 'cronograma',
     'escala_terapeutica', 'agenda_terapeutica', 'salas',
-    'guias_digitais', 'auditoria_assim', 'usuarios', 'permissoes',
+    'guias_digitais', 'auditoria_assim', 'usuarios', 'permissoes', 'cco',
   ],
   diretoria: [
     'dashboard', 'atendimentos', 'gestao', 'cronograma',
     'escala_terapeutica', 'agenda_terapeutica', 'salas',
-    'guias_digitais', 'auditoria_assim',
+    'guias_digitais', 'auditoria_assim', 'cco',
   ],
   recepcao: ['dashboard', 'atendimentos', 'gestao', 'cronograma', 'auditoria_assim'],
   autorizacao: ['dashboard', 'cronograma', 'agenda_terapeutica', 'salas', 'auditoria_assim'],
   terapeutico: ['dashboard', 'escala_terapeutica', 'salas', 'agenda_terapeutica'],
-  faturamento: ['dashboard', 'guias_digitais', 'cronograma', 'agenda_terapeutica', 'salas'],
+  faturamento: ['dashboard', 'guias_digitais', 'cronograma', 'agenda_terapeutica', 'salas', 'cco'],
   rp: ['dashboard', 'escala_terapeutica'],
 }
 
