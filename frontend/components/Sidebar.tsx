@@ -28,6 +28,8 @@ import ModalErros from "@/components/perfil/ModalErros"
 import { SidebarGroup } from "@/components/sidebar/SidebarGroup"
 import { ThemeSwitcher } from "@/components/sidebar/ThemeSwitcher"
 import { useTheme } from "@/contexts/ThemeContext"
+import { useImpersonation } from "@/contexts/ImpersonationContext"
+import { ImpersonationSelector } from "@/components/admin/ImpersonationSelector"
 
 type Favorito = { label: string; path: string }
 
@@ -51,6 +53,7 @@ export default function Sidebar() {
   const router = useRouter()
   const supabase = getSupabaseClient()
   const { theme } = useTheme()
+  const { isImpersonating, impersonatedTarget, canImpersonate } = useImpersonation()
   const [loadingLogout, setLoadingLogout] = useState(false)
   const [role, setRole] = useState<string | null>(null)
   const [loadingRole, setLoadingRole] = useState(true)
@@ -174,6 +177,11 @@ export default function Sidebar() {
 
   useEffect(() => {
     async function loadRole() {
+      if (isImpersonating && impersonatedTarget) {
+        setRole(impersonatedTarget.role)
+        setLoadingRole(false)
+        return
+      }
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { setLoadingRole(false); return }
       const { data } = await supabase
@@ -185,7 +193,7 @@ export default function Sidebar() {
       setLoadingRole(false)
     }
     loadRole()
-  }, [])
+  }, [isImpersonating, impersonatedTarget])
 
   useEffect(() => {
     async function checkUser() {
@@ -364,6 +372,13 @@ export default function Sidebar() {
           />
         </div>
 
+        {/* IMPERSONATION SELECTOR (apenas para admin) */}
+        {canImpersonate && (
+          <div className="px-3 py-3 border-b border-sidebar-border">
+            <ImpersonationSelector />
+          </div>
+        )}
+
         {/* MENU */}
         <nav className="flex-1 px-3 py-3 overflow-y-auto space-y-0.5">
 
@@ -460,7 +475,8 @@ export default function Sidebar() {
               <div className="flex-1 text-left min-w-0">
                 <p className="text-sm font-semibold text-sidebar-foreground truncate leading-tight">{nome}</p>
                 {role && (
-                  <p className="text-xs text-sidebar-foreground/50 capitalize leading-tight">
+                  <p className={`text-xs capitalize leading-tight ${isImpersonating ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-sidebar-foreground/50'}`}>
+                    {isImpersonating ? '👁️ ' : ''}
                     {{
                       admin: "Administrador",
                       diretoria: "Diretoria",
@@ -469,6 +485,7 @@ export default function Sidebar() {
                       terapeutico: "Terapêutico",
                       faturamento: "Faturamento",
                       rp: "RP — Remuneração e Pagamentos",
+                      disponibilidade_terapeuta: "Terapeuta (Disponibilidade)",
                     }[role] ?? role}
                   </p>
                 )}

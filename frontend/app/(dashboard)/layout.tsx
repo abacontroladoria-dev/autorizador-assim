@@ -1,6 +1,7 @@
 'use client'
 
 import Sidebar from "@/components/Sidebar"
+import { ImpersonationBar } from '@/components/admin/ImpersonationBar'
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { getSupabaseClient } from '@/lib/supabase/client'
@@ -10,6 +11,7 @@ import {
   useHeader,
 } from '@/contexts/HeaderContext'
 import { ThemeProvider } from '@/contexts/ThemeContext'
+import { ImpersonationProvider } from '@/contexts/ImpersonationContext'
 
 const supabase = getSupabaseClient()
 
@@ -43,13 +45,15 @@ export default function DashboardLayout({
   if (checking) return null
 
   return (
-    <ThemeProvider>
-      <HeaderProvider>
-        <DashboardShell>
-          {children}
-        </DashboardShell>
-      </HeaderProvider>
-    </ThemeProvider>
+    <ImpersonationProvider>
+      <ThemeProvider>
+        <HeaderProvider>
+          <DashboardShell>
+            {children}
+          </DashboardShell>
+        </HeaderProvider>
+      </ThemeProvider>
+    </ImpersonationProvider>
   )
 }
 
@@ -62,6 +66,7 @@ function DashboardShell({
 
   return (
     <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
+      <ImpersonationBar />
       <Sidebar />
       <div className="ml-64 flex flex-col min-h-screen">
 
