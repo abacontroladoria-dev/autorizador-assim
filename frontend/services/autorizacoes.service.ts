@@ -196,6 +196,11 @@ export async function criarAutorizacao(
 		  JSON.stringify(error, null, 2)
 		)
 
+		const msg = [error.message, error.details, error.hint]
+		  .filter(Boolean)
+		  .join(' | ')
+		console.error('ERRO DETALHADO:', msg)
+
 	  return null
 	}
 

@@ -8,13 +8,26 @@ const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false },
 });
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+const ALLOWED_ORIGINS = [
+  "http://127.0.0.1:3000",
+  "https://127.0.0.1:3000",
+  "https://orbitaautomacao.com.br",
+];
 
-function jsonResponse(body: unknown, status = 200) {
+function getCorsHeaders(requestOrigin: string) {
+  const isAllowed = ALLOWED_ORIGINS.includes(requestOrigin);
+  return isAllowed
+    ? {
+        "Access-Control-Allow-Origin": requestOrigin,
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+      }
+    : {
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+      };
+}
+
+function jsonResponse(body: unknown, status = 200, corsHeaders: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders },
@@ -38,17 +51,20 @@ async function getCurrentUser(req: Request) {
 }
 
 serve(async (req: Request) => {
+  const origin = req.headers.get("origin") || "";
+  const corsHeaders = getCorsHeaders(origin);
+
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
-  if (req.method !== "POST") return jsonResponse({ error: "method_not_allowed" }, 405);
+  if (req.method !== "POST") return jsonResponse({ error: "method_not_allowed" }, 405, corsHeaders);
 
   const user = await getCurrentUser(req);
-  if (!user) return jsonResponse({ error: "not_authenticated" }, 401);
+  if (!user) return jsonResponse({ error: "not_authenticated" }, 401, corsHeaders);
 
   const body = await req.json();
   const { username } = body as { username?: string };
 
   if (!username || typeof username !== "string") {
-    return jsonResponse({ error: "invalid_username" }, 400);
+    return jsonResponse({ error: "invalid_username" }, 400, corsHeaders);
   }
 
   const { data: existing } = await supabaseAdmin
@@ -57,7 +73,7 @@ serve(async (req: Request) => {
     .eq("username", username.toLowerCase())
     .maybeSingle();
 
-  if (existing) return jsonResponse({ error: "username_taken" }, 409);
+  if (existing) return jsonResponse({ error: "username_taken" }, 409, corsHeaders);
 
   const { error: updateError } = await supabaseAdmin
     .from("usuarios")
@@ -65,8 +81,8 @@ serve(async (req: Request) => {
     .eq("id", user.id);
 
   if (updateError) {
-    return jsonResponse({ error: "update_failed", message: updateError.message }, 500);
+    return jsonResponse({ error: "update_failed", message: updateError.message }, 500, corsHeaders);
   }
 
-  return jsonResponse({ success: true });
+  return jsonResponse({ success: true }, 200, corsHeaders);
 });

@@ -8,10 +8,23 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in the environment")
 }
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+const ALLOWED_ORIGINS = [
+  "http://127.0.0.1:3000",
+  "https://127.0.0.1:3000",
+  "https://orbitaautomacao.com.br",
+]
+
+function getCorsHeaders(requestOrigin: string) {
+  const isAllowed = ALLOWED_ORIGINS.includes(requestOrigin)
+  return isAllowed
+    ? {
+        "Access-Control-Allow-Origin": requestOrigin,
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+      }
+    : {
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+      }
 }
 
 function toBase64(bytes: Uint8Array) {
@@ -25,7 +38,7 @@ function toBase64(bytes: Uint8Array) {
   return btoa(binary)
 }
 
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(body: unknown, status = 200, corsHeaders: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders },
@@ -251,19 +264,22 @@ export async function mergePdf(items: Uint8Array[]) {
 }
 
 serve(async (req: Request) => {
+  const origin = req.headers.get("origin") || ""
+  const corsHeaders = getCorsHeaders(origin)
+
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
   if (req.method !== "POST") {
-    return jsonResponse({ error: "method_not_allowed" }, 405)
+    return jsonResponse({ error: "method_not_allowed" }, 405, corsHeaders)
   }
 
   const token = parseBearerToken(req)
   if (!token) {
-    return jsonResponse({ error: "not_authenticated" }, 401)
+    return jsonResponse({ error: "not_authenticated" }, 401, corsHeaders)
   }
 
   const authResult = await verifyAuthenticatedUser(token)
   if (authResult.error) {
-    return jsonResponse({ error: authResult.error, message: authResult.message }, authResult.status)
+    return jsonResponse({ error: authResult.error, message: authResult.message }, authResult.status, corsHeaders)
   }
 
   try {
@@ -271,7 +287,8 @@ serve(async (req: Request) => {
     if (!contentType.includes("multipart/form-data")) {
       return jsonResponse(
         { error: "invalid_content_type", message: "Conteúdo inválido. Envie um PDF usando multipart/form-data." },
-        400
+        400,
+        corsHeaders
       )
     }
 
@@ -279,18 +296,18 @@ serve(async (req: Request) => {
     const file = formData.get("file")
 
     if (!(file instanceof File)) {
-      return jsonResponse({ error: "file_required", message: "Arquivo PDF obrigatório." }, 400)
+      return jsonResponse({ error: "file_required", message: "Arquivo PDF obrigatório." }, 400, corsHeaders)
     }
 
     if (file.type !== "application/pdf") {
-      return jsonResponse({ error: "invalid_file_type", message: "Somente arquivos PDF são aceitos." }, 400)
+      return jsonResponse({ error: "invalid_file_type", message: "Somente arquivos PDF são aceitos." }, 400, corsHeaders)
     }
 
     const rawBytes = new Uint8Array(await file.arrayBuffer())
     const pages = await splitPdf(rawBytes)
 
     if (pages.length === 0) {
-      return jsonResponse({ error: "empty_pdf", message: "O arquivo PDF não contém páginas válidas." }, 400)
+      return jsonResponse({ error: "empty_pdf", message: "O arquivo PDF não contém páginas válidas." }, 400, corsHeaders)
     }
 
     const results = [] as Array<{
@@ -357,12 +374,13 @@ serve(async (req: Request) => {
       })
     }
 
-    return jsonResponse({ results })
+    return jsonResponse({ results }, 200, corsHeaders)
   } catch (error) {
     console.error("Erro ao processar guias digitais:", error)
     return jsonResponse(
       { error: "processing_failed", message: "Falha no processamento do arquivo. Verifique o PDF e tente novamente." },
-      500
+      500,
+      corsHeaders
     )
   }
 })

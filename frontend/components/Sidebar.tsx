@@ -167,6 +167,8 @@ export default function Sidebar() {
     permissions[role as keyof typeof permissions] || []
 
   function canAccess(path: string) {
+    // Se role ainda não carregou, bloqueia tudo
+    if (!role) return false
     return allowedPaths.includes(path)
   }
 

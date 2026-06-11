@@ -19,13 +19,26 @@ import {
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+const ALLOWED_ORIGINS = [
+  "http://127.0.0.1:3000",
+  "https://127.0.0.1:3000",
+  "https://orbitaautomacao.com.br",
+]
+
+function getCorsHeaders(requestOrigin: string) {
+  const isAllowed = ALLOWED_ORIGINS.includes(requestOrigin)
+  return isAllowed
+    ? {
+        "Access-Control-Allow-Origin": requestOrigin,
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+      }
+    : {
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+      }
 }
 
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(body: unknown, status = 200, corsHeaders: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders },
@@ -144,8 +157,11 @@ async function syncASSIMAuthorizations(
 }
 
 serve(async (req: Request) => {
+  const origin = req.headers.get("origin") || ""
+  const corsHeaders = getCorsHeaders(origin)
+
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
-  if (req.method !== "POST") return jsonResponse({ error: "method_not_allowed" }, 405)
+  if (req.method !== "POST") return jsonResponse({ error: "method_not_allowed" }, 405, corsHeaders)
 
   const logger = new JobLogger("cco-sync-assim-authorizations")
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
@@ -160,12 +176,12 @@ serve(async (req: Request) => {
       ok: true,
       job: "cco-sync-assim-authorizations",
       rows_processed: count,
-    })
+    }, 200, corsHeaders)
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err))
     await logger.finishError(supabase, error)
 
     console.error("[cco-sync-assim-authorizations] Error:", error)
-    return jsonResponse({ error: error.message }, 500)
+    return jsonResponse({ error: error.message }, 500, corsHeaders)
   }
 })

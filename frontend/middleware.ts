@@ -2,9 +2,24 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { supabaseService } from '@/lib/supabase/service'
+import { checkRateLimit, getClientIp } from '@/lib/rate-limit'
 
-export async function proxy(request: NextRequest) {
+export async function middleware(request: NextRequest) {
   let response = NextResponse.next()
+
+  const clientIp = getClientIp(request)
+  const pathname = request.nextUrl.pathname
+
+  // Rate limit: 5 login attempts per 15 minutes per IP
+  if (pathname === '/login' && request.method === 'POST') {
+    const rateLimitKey = `login:${clientIp}`
+    if (checkRateLimit(rateLimitKey, 5, 15 * 60 * 1000)) {
+      return NextResponse.json(
+        { error: 'Too many login attempts. Please try again in 15 minutes.' },
+        { status: 429 }
+      )
+    }
+  }
 
   const supabase = createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -26,8 +41,6 @@ export async function proxy(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser()
-
-  const pathname = request.nextUrl.pathname
 
   // Rotas públicas
   const publicRoutes = ['/login', '/definir-senha', '/auth/callback', '/disponibilidade-terapeuta/login']

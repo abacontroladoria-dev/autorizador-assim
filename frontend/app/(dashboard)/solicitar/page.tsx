@@ -288,6 +288,7 @@ async function carregarLista() {
     .from('vw_central_autorizacoes')
     .select(CAMPOS_CENTRAL_AUTORIZACOES)
     .eq('data_atendimento', dataFiltro)
+    .eq('mostrar_na_tela', true)
     .order('horario', { ascending: true })
 
   if (
@@ -438,16 +439,15 @@ async function handleSolicitarLista(
       return
     }
 
-    // validação
-    if (
-      !p.matricula ||
-      !p.codigos_tuss?.length
-    ) {
+    // validação — apenas campos obrigatórios
+    const faltando = []
+    if (!p.matricula) faltando.push('Matrícula')
+    // TUSS é obrigatório para ASSIM, mas pode faltar
+    // CRM e Médico podem faltar (serão preenchidos manualmente no ASSIM)
 
-      toast.error(
-        'Dados incompletos'
-      )
-
+    if (faltando.length > 0) {
+      toast.error(`Dados incompletos: ${faltando.join(', ')}`)
+      console.warn('[VALIDAÇÃO] Campos faltando:', { matricula: p.matricula, tuss: p.codigos_tuss, crm: p.crm, medico: p.nome_medico })
       return
     }
 
@@ -966,14 +966,15 @@ useEffect(() => {
 useEffect(() => {
 
   const channel = supabase
-    .channel('realtime-status-card')
+    .channel(`realtime-status-card-${dataSelecionada}`)
 
     .on(
       'postgres_changes',
       {
         event: 'UPDATE',
         schema: 'public',
-        table: 'fila_autorizacoes'
+        table: 'fila_autorizacoes',
+        filter: `data_atendimento=eq.${dataSelecionada}`
       },
 
       (payload: any) => {

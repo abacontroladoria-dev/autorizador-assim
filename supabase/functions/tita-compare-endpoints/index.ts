@@ -2,10 +2,23 @@ import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 
 const TITA_TOKEN = Deno.env.get("TITA_TOKEN")!
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+const ALLOWED_ORIGINS = [
+  "http://127.0.0.1:3000",
+  "https://127.0.0.1:3000",
+  "https://orbitaautomacao.com.br",
+]
+
+function getCorsHeaders(requestOrigin: string) {
+  const isAllowed = ALLOWED_ORIGINS.includes(requestOrigin)
+  return isAllowed
+    ? {
+        "Access-Control-Allow-Origin": requestOrigin,
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+      }
+    : {
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+      }
 }
 
 const PACIENTES_ALVO = ["isabella", "anny karoline", "phettrus", "heitor lemos"]
@@ -36,6 +49,9 @@ function parseCSVLine(line: string): string[] {
 }
 
 serve(async (req: Request) => {
+  const origin = req.headers.get("origin") || ""
+  const corsHeaders = getCorsHeaders(origin)
+
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
 
   const body = await req.json().catch(() => ({})) as { data?: string }

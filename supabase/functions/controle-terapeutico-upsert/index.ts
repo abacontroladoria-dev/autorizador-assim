@@ -8,11 +8,24 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set");
 }
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+const ALLOWED_ORIGINS = [
+  "http://127.0.0.1:3000",
+  "https://127.0.0.1:3000",
+  "https://orbitaautomacao.com.br",
+];
+
+function getCorsHeaders(requestOrigin: string) {
+  const isAllowed = ALLOWED_ORIGINS.includes(requestOrigin);
+  return isAllowed
+    ? {
+        "Access-Control-Allow-Origin": requestOrigin,
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+      }
+    : {
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+      };
+}
 
 const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false },
@@ -37,7 +50,7 @@ type UpsertItem = {
   observacao?: string | null;
 };
 
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(body: unknown, status = 200, corsHeaders: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
@@ -78,18 +91,21 @@ function toBigintValue(value: string | number | null | undefined) {
 }
 
 serve(async (req: Request) => {
+  const origin = req.headers.get("origin") || "";
+  const corsHeaders = getCorsHeaders(origin);
+
   if (req.method === "OPTIONS") {
     return new Response("ok", { headers: corsHeaders });
   }
 
   if (req.method !== "POST") {
-    return jsonResponse({ error: "method_not_allowed" }, 405);
+    return jsonResponse({ error: "method_not_allowed" }, 405, corsHeaders);
   }
 
   const user = await getCurrentUser(req);
 
   if (!user) {
-    return jsonResponse({ error: "not_authenticated" }, 401);
+    return jsonResponse({ error: "not_authenticated" }, 401, corsHeaders);
   }
 
   const { data: usuarioData } = await supabaseAdmin
@@ -111,7 +127,7 @@ serve(async (req: Request) => {
       .filter((item) => item.tita_agendamento_id);
 
     if (sanitizedItems.length === 0) {
-      return jsonResponse({ error: "empty_items" }, 400);
+      return jsonResponse({ error: "empty_items" }, 400, corsHeaders);
     }
 
     const statusInvalido = sanitizedItems.find(
@@ -124,7 +140,8 @@ serve(async (req: Request) => {
           error: "invalid_status",
           status: statusInvalido.status,
         },
-        400
+        400,
+        corsHeaders
       );
     }
 
@@ -143,7 +160,8 @@ serve(async (req: Request) => {
           error: "agenda_lookup_failed",
           message: agendaError.message,
         },
-        500
+        500,
+        corsHeaders
       );
     }
 
@@ -188,21 +206,23 @@ serve(async (req: Request) => {
           details: error.details,
           hint: error.hint,
         },
-        500
+        500,
+        corsHeaders
       );
     }
 
     return jsonResponse({
       data,
       count: data?.length || 0,
-    });
+    }, 200, corsHeaders);
   } catch (error) {
     return jsonResponse(
       {
         error: "unexpected_error",
         message: error instanceof Error ? error.message : "Erro desconhecido",
       },
-      500
+      500,
+      corsHeaders
     );
   }
 });

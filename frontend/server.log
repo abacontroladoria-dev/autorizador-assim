@@ -1,0 +1,15 @@
+
+> frontend@0.1.0 dev
+> node --max-old-space-size=4096 node_modules/next/dist/bin/next dev
+
+▲ Next.js 16.2.3 (Turbopack)
+- Local:         http://localhost:3000
+- Network:       http://172.19.176.1:3000
+- Environments: .env.local
+✓ Ready in 478ms
+⚠ The "middleware" file convention is deprecated. Please use "proxy" instead. Learn more: https://nextjs.org/docs/messages/middleware-to-proxy
+
+ GET /login/ 200 in 576ms (next.js: 176ms, proxy.ts: 103ms, application-code: 296ms)
+[browser] AuthApiError: Service for this project is restricted due to the following violations: exceed_egress_quota. The project owner must upgrade their plan or remove spend caps to restore service.
+ GET /login/ 200 in 231ms (next.js: 17ms, proxy.ts: 17ms, application-code: 197ms)
+ GET /login/ 200 in 165ms (next.js: 15ms, proxy.ts: 26ms, application-code: 124ms)

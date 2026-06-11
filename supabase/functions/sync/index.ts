@@ -8,13 +8,26 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
   throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set in the environment")
 }
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+const ALLOWED_ORIGINS = [
+  "http://127.0.0.1:3000",
+  "https://127.0.0.1:3000",
+  "https://orbitaautomacao.com.br",
+]
+
+function getCorsHeaders(requestOrigin: string) {
+  const isAllowed = ALLOWED_ORIGINS.includes(requestOrigin)
+  return isAllowed
+    ? {
+        "Access-Control-Allow-Origin": requestOrigin,
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+      }
+    : {
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+      }
 }
 
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(body: unknown, status = 200, corsHeaders: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders },
@@ -76,19 +89,22 @@ async function fetchJson(url: string) {
 }
 
 serve(async (req: Request) => {
+  const origin = req.headers.get("origin") || ""
+  const corsHeaders = getCorsHeaders(origin)
+
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
   if (req.method !== "POST") {
-    return jsonResponse({ error: "method_not_allowed" }, 405)
+    return jsonResponse({ error: "method_not_allowed" }, 405, corsHeaders)
   }
 
   const token = parseBearerToken(req)
   if (!token) {
-    return jsonResponse({ error: "not_authenticated" }, 401)
+    return jsonResponse({ error: "not_authenticated" }, 401, corsHeaders)
   }
 
   const authResult = await verifyUser(token)
   if (authResult.error) {
-    return jsonResponse({ error: authResult.error, message: authResult.message }, authResult.status)
+    return jsonResponse({ error: authResult.error, message: authResult.message }, authResult.status, corsHeaders)
   }
 
   try {
@@ -136,7 +152,7 @@ serve(async (req: Request) => {
     }
 
     if (resultados.length === 0) {
-      return jsonResponse({ message: "Nenhum dado encontrado" }, 200)
+      return jsonResponse({ message: "Nenhum dado encontrado" }, 200, corsHeaders)
     }
 
     for (let i = 0; i < resultados.length; i += 100) {
@@ -161,9 +177,9 @@ serve(async (req: Request) => {
       }
     }
 
-    return jsonResponse({ message: "Sincronização concluída", processed: resultados.length })
+    return jsonResponse({ message: "Sincronização concluída", processed: resultados.length }, 200, corsHeaders)
   } catch (error) {
     console.error("Erro na sincronização:", error)
-    return jsonResponse({ error: "sync_failed", message: String(error) }, 500)
+    return jsonResponse({ error: "sync_failed", message: String(error) }, 500, corsHeaders)
   }
 })

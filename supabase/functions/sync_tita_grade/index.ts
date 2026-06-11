@@ -5,13 +5,26 @@ const SUPABASE_URL              = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const TITA_TOKEN                = Deno.env.get("TITA_TOKEN")!
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin":  "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+const ALLOWED_ORIGINS = [
+  "http://127.0.0.1:3000",
+  "https://127.0.0.1:3000",
+  "https://orbitaautomacao.com.br",
+]
+
+function getCorsHeaders(requestOrigin: string) {
+  const isAllowed = ALLOWED_ORIGINS.includes(requestOrigin)
+  return isAllowed
+    ? {
+        "Access-Control-Allow-Origin": requestOrigin,
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+      }
+    : {
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+      }
 }
 
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(body: unknown, status = 200, corsHeaders: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders },
@@ -136,8 +149,11 @@ async function sincronizarGrade(
 }
 
 serve(async (req: Request) => {
+  const origin = req.headers.get("origin") || ""
+  const corsHeaders = getCorsHeaders(origin)
+
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
-  if (req.method !== "POST")    return jsonResponse({ error: "method_not_allowed" }, 405)
+  if (req.method !== "POST")    return jsonResponse({ error: "method_not_allowed" }, 405, corsHeaders)
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false },
@@ -153,9 +169,9 @@ serve(async (req: Request) => {
 
     const total = await sincronizarGrade(dataInicio, dataFim, supabase)
     console.log(`[sync_tita_grade] ${dataInicio}–${dataFim}: ${total} registros`)
-    return jsonResponse({ ok: true, dataInicio, dataFim, total })
+    return jsonResponse({ ok: true, dataInicio, dataFim, total }, 200, corsHeaders)
   } catch (err) {
     console.error("[sync_tita_grade] Erro:", err)
-    return jsonResponse({ error: String(err) }, 500)
+    return jsonResponse({ error: String(err) }, 500, corsHeaders)
   }
 })

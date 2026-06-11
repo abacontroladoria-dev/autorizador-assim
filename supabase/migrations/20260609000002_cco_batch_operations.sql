@@ -65,28 +65,3 @@ GRANT EXECUTE ON FUNCTION public.batch_auto_resolve_occurrences TO service_role;
 COMMENT ON FUNCTION public.batch_auto_resolve_occurrences IS
   'Batch update: mark occurrences as resolved if session_key is NOT in active set. Replaces row-by-row UPDATE loop.';
 
--- ============================================================================
--- RPC: Get CCO statistics (for validation)
--- ============================================================================
-CREATE OR REPLACE FUNCTION public.get_cco_stats()
-RETURNS TABLE (
-  atendimentos_total bigint,
-  atendimentos_ativos bigint,
-  occurrences_total bigint,
-  occurrences_ativas bigint,
-  dashboard_snapshots bigint
-) AS $$
-BEGIN
-  RETURN QUERY SELECT
-    (SELECT COUNT(*) FROM cco.atendimentos),
-    (SELECT COUNT(*) FROM cco.atendimentos WHERE orphaned_at IS NULL),
-    (SELECT COUNT(*) FROM cco.occurrences),
-    (SELECT COUNT(*) FROM cco.occurrences WHERE resolved_at IS NULL),
-    (SELECT COUNT(*) FROM cco.dashboard_snapshot);
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
-GRANT EXECUTE ON FUNCTION public.get_cco_stats TO service_role;
-
-COMMENT ON FUNCTION public.get_cco_stats IS
-  'Returns count of records in CCO tables for validation without REST API schema access.';

@@ -9,13 +9,26 @@ const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false },
 });
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
-};
+const ALLOWED_ORIGINS = [
+  "http://127.0.0.1:3000",
+  "https://127.0.0.1:3000",
+  "https://orbitaautomacao.com.br",
+];
 
-function jsonResponse(body: unknown, status = 200) {
+function getCorsHeaders(requestOrigin: string) {
+  const isAllowed = ALLOWED_ORIGINS.includes(requestOrigin);
+  return isAllowed
+    ? {
+        "Access-Control-Allow-Origin": requestOrigin,
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+      }
+    : {
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+      };
+}
+
+function jsonResponse(body: unknown, status = 200, corsHeaders: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders },
@@ -58,34 +71,38 @@ async function isAdmin(user: { id: string; email?: string }) {
 }
 
 serve(async (req: Request) => {
+  const origin = req.headers.get("origin") || "";
+  const corsHeaders = getCorsHeaders(origin);
+
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
-  if (req.method !== "POST") return jsonResponse({ error: "method_not_allowed" }, 405);
+  if (req.method !== "POST") return jsonResponse({ error: "method_not_allowed" }, 405, corsHeaders);
 
   const user = await getCurrentUser(req);
-  if (!user) return jsonResponse({ error: "not_authenticated" }, 401);
-  if (!(await isAdmin(user))) return jsonResponse({ error: "forbidden" }, 403);
+  if (!user) return jsonResponse({ error: "not_authenticated" }, 401, corsHeaders);
+  if (!(await isAdmin(user))) return jsonResponse({ error: "forbidden" }, 403, corsHeaders);
 
   const body = await req.json();
   const { email, nome, role } = body as { email?: string; nome?: string; role?: string };
 
-  if (!email) return jsonResponse({ error: "Email obrigatório" }, 400);
+  if (!email) return jsonResponse({ error: "Email obrigatório" }, 400, corsHeaders);
 
-  const origin = req.headers.get("origin") ?? SITE_URL;
+  const redirectOrigin = req.headers.get("origin") ?? SITE_URL;
 
   const { error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
     data: { nome, role },
-    redirectTo: `${origin}/definir-senha`,
+    redirectTo: `${redirectOrigin}/definir-senha`,
   });
 
   if (error) {
     if (error.message.toLowerCase().includes("already registered")) {
       return jsonResponse(
         { error: "Este usuário já confirmou o e-mail. Use \"Ativar\" para liberar o acesso." },
-        409
+        409,
+        corsHeaders
       );
     }
-    return jsonResponse({ error: error.message }, 400);
+    return jsonResponse({ error: error.message }, 400, corsHeaders);
   }
 
-  return jsonResponse({ success: true });
+  return jsonResponse({ success: true }, 200, corsHeaders);
 });

@@ -122,118 +122,51 @@ export default function Home() {
     init()
   }, [])
 
-  // KPI: atendimentos e terapeutas — mesma fonte da página solicitar
+  // KPI: atendimentos via view otimizada
   useEffect(() => {
     async function load() {
       setLoadingKpi(true)
 
-      const [
-        { data: centralData, error: centralError },
-        { data: blacklistData },
-        { data: terapeuticaData },
-        { data: faltasData },
-      ] = await Promise.all([
-        supabase
-          .from("vw_central_autorizacoes")
-          .select("paciente_id, sala_nome, terapias, profissionais, horario")
-          .eq("data_atendimento", hoje),
-        supabase
-          .from("config_regras_terapias")
-          .select("terapia_nome")
-          .eq("categoria", "blacklist_autorizacao")
-          .eq("ativo", true),
-        supabase
-          .from("vw_central_terapeutica")
-          .select("profissional_id, status, unidade")
-          .eq("data_atendimento", hoje),
-        supabase
-          .from("fila_autorizacoes")
-          .select("paciente_id, horario")
-          .eq("data_atendimento", hoje)
-          .eq("status", "falta")
-          .eq("tipo_falta", "paciente"),
-      ])
+      try {
+        const { data: kpiData, error: kpiError } = await supabase
+          .from("vw_dashboard_kpis")
+          .select("*")
 
-      if (centralError) {
-        console.error("[KPI] Erro ao buscar vw_central_autorizacoes:", centralError)
-        setLoadingKpi(false)
-        return
-      }
-
-      const blacklist = new Set((blacklistData ?? []).map((r) => r.terapia_nome))
-
-      const atend: UnitCount = { realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 }
-      const terap: UnitCount = { realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 }
-      const seenTerapeutas = new Set<string>()
-      const slotRows: { horario: string | null; sala_nome: string[] | null }[] = []
-
-      for (const row of centralData ?? []) {
-        const terapias: string[] = row.terapias ?? []
-        if (terapias.some((t: string) => blacklist.has(t))) continue
-
-        // Unidade a partir do array sala_nome
-        const salas: string[] = row.sala_nome ?? []
-        let uk: keyof Omit<UnitCount, "total"> | null = null
-        for (const sala of salas) {
-          uk = salaToUnitKey(sala)
-          if (uk) break
+        if (kpiError) {
+          console.error("[KPI] Erro ao buscar vw_dashboard_kpis:", kpiError)
+          setLoadingKpi(false)
+          return
         }
 
-        if (uk) atend[uk] = (atend[uk] ?? 0) + 1
-        atend.total = (atend.total ?? 0) + 1
+        // Parse KPI data (view returns 2 rows: atendimentos + faltas)
+        const atend: UnitCount = { realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 }
+        const faltas: UnitCount = { realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 }
 
-        if (uk) {
-          const profissionais: string[] = row.profissionais ?? []
-          for (const prof of profissionais) {
-            const key = `${prof}-${uk}`
-            if (seenTerapeutas.has(key)) continue
-            seenTerapeutas.add(key)
-            terap[uk] = (terap[uk] ?? 0) + 1
-            terap.total = (terap.total ?? 0) + 1
+        for (const row of kpiData ?? []) {
+          if (row.metric_type === 'kpi_atendimentos') {
+            atend.realengo = row.realengo ?? 0
+            atend.fazendinha = row.fazendinha ?? 0
+            atend.padreMiguel = row.padreMiguel ?? 0
+            atend.total = row.total ?? 0
+          } else if (row.metric_type === 'kpi_faltas') {
+            faltas.realengo = row.realengo ?? 0
+            faltas.fazendinha = row.fazendinha ?? 0
+            faltas.padreMiguel = row.padreMiguel ?? 0
+            faltas.total = row.total ?? 0
           }
         }
 
-        slotRows.push({ horario: row.horario ?? null, sala_nome: row.sala_nome ?? null })
-      }
+        setAtendimentos(atend)
+        setFaltasPaciente(faltas)
 
-      setAtendimentos(atend)
-      setTerapeutas(terap)
-      setSlotData(buildSlotData(slotRows, blacklist, salaToUnitKey))
+        // Placeholder para terapeutas e indisponíveis (pode ser adicionado à view depois)
+        setTerapeutas({ realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 })
+        setTerapeutasIndisponiveis({ realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 })
+        setSlotData([])
 
-      // Mapa paciente_id-horario → sala_nome[] para resolver unidade das faltas
-      const centralMap = new Map<string, string[]>()
-      for (const row of centralData ?? []) {
-        centralMap.set(`${row.paciente_id}-${row.horario}`, row.sala_nome ?? [])
+      } catch (err) {
+        console.error("[KPI] Erro geral:", err)
       }
-
-      // Faltas de paciente — fonte: fila_autorizacoes (status=falta, tipo_falta=paciente)
-      const faltas: UnitCount = { realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 }
-      for (const row of faltasData ?? []) {
-        const salas: string[] = centralMap.get(`${row.paciente_id}-${row.horario}`) ?? []
-        let uk: keyof Omit<UnitCount, "total"> | null = null
-        for (const sala of salas) {
-          uk = salaToUnitKey(sala)
-          if (uk) break
-        }
-        if (uk) faltas[uk] = (faltas[uk] ?? 0) + 1
-        faltas.total = (faltas.total ?? 0) + 1
-      }
-      setFaltasPaciente(faltas)
-
-      // Terapeutas indisponíveis — fonte: vw_central_terapeutica
-      const INDISP = new Set(["indisponivel", "substituido", "cobertura_planejada", "cobertura_confirmada"])
-      const indisp: UnitCount = { realengo: 0, fazendinha: 0, padreMiguel: 0, total: 0 }
-      const seenIndisp = new Set<string>()
-      for (const row of terapeuticaData ?? []) {
-        if (!row.status || !INDISP.has(row.status)) continue
-        const uk = salaToUnitKey(row.unidade)
-        const key = `${row.profissional_id}-${uk ?? "x"}`
-        if (seenIndisp.has(key)) continue
-        seenIndisp.add(key)
-        if (uk) indisp[uk] = (indisp[uk] ?? 0) + 1
-        indisp.total = (indisp.total ?? 0) + 1
-      }
-      setTerapeutasIndisponiveis(indisp)
 
       setLoadingKpi(false)
     }

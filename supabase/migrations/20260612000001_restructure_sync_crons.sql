@@ -99,8 +99,20 @@ END;
 $$;
 
 -- Remove os crons antigos (redundantes)
-SELECT cron.unschedule('sync-tita-diario');
-SELECT cron.unschedule('sync-tita-semana-segunda');
+-- Ignora erros se os crons não existem
+DO $$
+BEGIN
+  PERFORM cron.unschedule('sync-tita-diario');
+  EXCEPTION WHEN OTHERS THEN NULL;
+END;
+$$;
+
+DO $$
+BEGIN
+  PERFORM cron.unschedule('sync-tita-semana-segunda');
+  EXCEPTION WHEN OTHERS THEN NULL;
+END;
+$$;
 
 -- Agenda os 3 novos crons
 -- Operacional: 06:00 e 12:00 BRT (= 09:00 e 15:00 UTC, São Paulo = UTC-3)

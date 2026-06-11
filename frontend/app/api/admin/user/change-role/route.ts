@@ -2,6 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { supabaseService } from '@/lib/supabase/service'
+import { checkRateLimit, getClientIp } from '@/lib/rate-limit'
 
 function buildCookieStore(request: NextRequest) {
   return {
@@ -60,6 +61,15 @@ export async function POST(request: NextRequest) {
 
   if (!(await isAdmin(user))) {
     return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  }
+
+  // Rate limit: 10 admin operations per minute per user
+  const rateLimitKey = `admin:change-role:${user.id}`
+  if (checkRateLimit(rateLimitKey, 10, 60 * 1000)) {
+    return NextResponse.json(
+      { error: 'Too many admin operations. Please try again in a moment.' },
+      { status: 429 }
+    )
   }
 
   const body = await request.json()
