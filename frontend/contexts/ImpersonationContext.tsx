@@ -74,7 +74,7 @@ export function ImpersonationProvider({ children }: { children: React.ReactNode 
     }
 
     initializeImpersonation()
-  }, [supabase])
+  }, [])
 
   const startImpersonation = (target: ImpersonationTarget) => {
     if (!canImpersonate) {

@@ -2,19 +2,9 @@
 
 import { useImpersonation } from '@/contexts/ImpersonationContext'
 import { getSupabaseClient } from '@/lib/supabase/client'
+import { ROLE_LABELS } from '@/constants/roleLabels'
 import { ChevronDown, Eye } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
-
-const ROLE_LABELS: Record<string, string> = {
-  admin: 'Administrador',
-  diretoria: 'Diretoria',
-  recepcao: 'Recepção',
-  terapeutico: 'Terapêutico',
-  faturamento: 'Faturamento',
-  autorizacao: 'Autorização',
-  rp: 'RP — Remuneração e Pagamentos',
-  disponibilidade_terapeuta: 'Terapeuta (Disponibilidade)',
-}
 
 const AVAILABLE_ROLES = [
   'diretoria',
@@ -67,7 +57,7 @@ export function ImpersonationSelector() {
     if (isOpen && usuarios.length === 0) {
       loadUsuarios()
     }
-  }, [isOpen, supabase, usuarios.length])
+  }, [isOpen])
 
   useEffect(() => {
     function handleClickOutside(event: MouseEvent) {

@@ -30,6 +30,7 @@ import { ThemeSwitcher } from "@/components/sidebar/ThemeSwitcher"
 import { useTheme } from "@/contexts/ThemeContext"
 import { useImpersonation } from "@/contexts/ImpersonationContext"
 import { ImpersonationSelector } from "@/components/admin/ImpersonationSelector"
+import { ROLE_LABELS } from "@/constants/roleLabels"
 
 type Favorito = { label: string; path: string }
 
@@ -176,24 +177,32 @@ export default function Sidebar() {
   }
 
   useEffect(() => {
+    let isMounted = true
+
     async function loadRole() {
       if (isImpersonating && impersonatedTarget) {
-        setRole(impersonatedTarget.role)
-        setLoadingRole(false)
+        if (isMounted) {
+          setRole(impersonatedTarget.role)
+          setLoadingRole(false)
+        }
         return
       }
       const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { setLoadingRole(false); return }
+      if (!user) { if (isMounted) setLoadingRole(false); return }
       const { data } = await supabase
         .from("usuarios")
         .select("role")
         .eq("id", user.id)
         .single()
-      setRole(data?.role || null)
-      setLoadingRole(false)
+      if (isMounted) {
+        setRole(data?.role || null)
+        setLoadingRole(false)
+      }
     }
     loadRole()
-  }, [isImpersonating, impersonatedTarget])
+
+    return () => { isMounted = false }
+  }, [isImpersonating, impersonatedTarget, supabase])
 
   useEffect(() => {
     async function checkUser() {
@@ -477,16 +486,7 @@ export default function Sidebar() {
                 {role && (
                   <p className={`text-xs capitalize leading-tight ${isImpersonating ? 'text-amber-600 dark:text-amber-400 font-semibold' : 'text-sidebar-foreground/50'}`}>
                     {isImpersonating ? '👁️ ' : ''}
-                    {{
-                      admin: "Administrador",
-                      diretoria: "Diretoria",
-                      recepcao: "Recepção",
-                      autorizacao: "Autorização",
-                      terapeutico: "Terapêutico",
-                      faturamento: "Faturamento",
-                      rp: "RP — Remuneração e Pagamentos",
-                      disponibilidade_terapeuta: "Terapeuta (Disponibilidade)",
-                    }[role] ?? role}
+                    {ROLE_LABELS[role] ?? role}
                   </p>
                 )}
               </div>

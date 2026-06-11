@@ -1,18 +1,8 @@
 'use client'
 
 import { useImpersonation } from '@/contexts/ImpersonationContext'
+import { ROLE_LABELS } from '@/constants/roleLabels'
 import { ArrowLeft } from 'lucide-react'
-
-const ROLE_LABELS: Record<string, string> = {
-  admin: 'Administrador',
-  diretoria: 'Diretoria',
-  recepcao: 'Recepção',
-  terapeutico: 'Terapêutico',
-  faturamento: 'Faturamento',
-  autorizacao: 'Autorização',
-  rp: 'RP — Remuneração e Pagamentos',
-  disponibilidade_terapeuta: 'Terapeuta (Disponibilidade)',
-}
 
 export function ImpersonationBar() {
   const { isImpersonating, impersonatedTarget, stopImpersonation } = useImpersonation()

@@ -1,0 +1,10 @@
+export const ROLE_LABELS: Record<string, string> = {
+  admin: 'Administrador',
+  diretoria: 'Diretoria',
+  recepcao: 'Recepção',
+  terapeutico: 'Terapêutico',
+  faturamento: 'Faturamento',
+  autorizacao: 'Autorização',
+  rp: 'RP — Remuneração e Pagamentos',
+  disponibilidade_terapeuta: 'Terapeuta (Disponibilidade)',
+}
