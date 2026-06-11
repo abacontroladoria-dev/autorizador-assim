@@ -28,7 +28,6 @@ export function ImpersonationProvider({ children }: { children: React.ReactNode 
   const [impersonatedTarget, setImpersonatedTarget] = useState<ImpersonationTarget | null>(null)
   const [realRole, setRealRole] = useState<string | null>(null)
   const [canImpersonate, setCanImpersonate] = useState(false)
-  const [isInitialized, setIsInitialized] = useState(false)
 
   const supabase = getSupabaseClient()
 
@@ -68,8 +67,6 @@ export function ImpersonationProvider({ children }: { children: React.ReactNode 
         }
       } catch (error) {
         console.error('Erro ao inicializar impersonação:', error)
-      } finally {
-        setIsInitialized(true)
       }
     }
 
@@ -93,10 +90,6 @@ export function ImpersonationProvider({ children }: { children: React.ReactNode 
   }
 
   const effectiveRole = isImpersonating && impersonatedTarget ? impersonatedTarget.role : realRole
-
-  if (!isInitialized) {
-    return <>{children}</>
-  }
 
   return (
     <ImpersonationContext.Provider

@@ -1,10 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react"
-import Image from "next/image"
+import { useState } from "react"
 import { getSupabaseClient } from "@/lib/supabase/client";
-import { getFunctionUrl } from "@/lib/supabase/functions";
-import { useRouter } from "next/navigation";
 import { Eye, EyeOff, User, Lock, ArrowRight } from "lucide-react";
 
 export default function Login() {
@@ -13,7 +10,6 @@ export default function Login() {
   const [senha, setSenha] = useState("");
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState("");
-  const router = useRouter();
   const supabase = getSupabaseClient()
 
   async function handleLogin(e: React.FormEvent) {
@@ -27,52 +23,50 @@ export default function Login() {
       return;
     }
 
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email: login,
-      password: senha,
-    });
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email: login,
+        password: senha,
+      });
 
-    if (error || !data?.user) {
-      setErro("Login ou senha incorretos. Verifique e tente novamente.");
+      if (error) {
+        setErro(error.message || "Login ou senha incorretos. Verifique e tente novamente.");
+        setLoading(false);
+        return;
+      }
+
+      if (!data?.user) {
+        setErro("Login ou senha incorretos. Verifique e tente novamente.");
+        setLoading(false);
+        return;
+      }
+
+      const { data: perfil, error: perfilError } = await supabase
+        .from('usuarios')
+        .select('role')
+        .eq('id', data.user.id)
+        .single()
+
+      if (perfilError) {
+        setErro("Erro ao carregar perfil. Tente novamente.");
+        setLoading(false);
+        return;
+      }
+
+      if (!perfil) {
+        setErro("Perfil de usuário não encontrado. Contate o administrador.");
+        setLoading(false);
+        return;
+      }
+
+      const redirectUrl = perfil.role === 'disponibilidade_terapeuta' ? '/disponibilidade-terapeuta/' : '/'
+      window.location.href = redirectUrl
+    } catch (err) {
+      setErro("Erro ao fazer login. Tente novamente.");
       setLoading(false);
-      return;
-    }
-
-    const { data: perfil } = await supabase
-      .from('usuarios')
-      .select('role')
-      .eq('id', data.user.id)
-      .single()
-
-    if (perfil?.role === 'disponibilidade_terapeuta') {
-      router.replace('/disponibilidade-terapeuta/')
-    } else {
-      router.replace("/")
     }
   }
 
-  useEffect(() => {
-    let mounted = true
-
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (!mounted || !user) return
-      supabase
-        .from('usuarios')
-        .select('role')
-        .eq('id', user.id)
-        .single()
-        .then(({ data: perfil }) => {
-          if (!mounted) return
-          if (perfil?.role === 'disponibilidade_terapeuta') {
-            router.replace('/disponibilidade-terapeuta/')
-          } else {
-            router.replace("/")
-          }
-        })
-    })
-
-    return () => { mounted = false }
-  }, [])
 
   return (
     <main
@@ -151,13 +145,9 @@ export default function Login() {
                 pointerEvents: "none"
               }}
             />
-            <Image
+            <img
               src="/logo-universo-aba.png"
               alt="Universo ABA"
-              width={220}
-              height={140}
-              priority
-              sizes="200px"
               className="w-44 h-auto object-contain drop-shadow-sm relative z-10"
             />
           </div>
@@ -173,12 +163,9 @@ export default function Login() {
 
             {/* Logo mobile */}
             <div className="flex justify-center mb-6 sm:hidden">
-              <Image
+              <img
                 src="/logo-universo-aba.png"
                 alt="Universo ABA"
-                width={160}
-                height={100}
-                priority
                 className="h-20 w-auto object-contain"
               />
             </div>

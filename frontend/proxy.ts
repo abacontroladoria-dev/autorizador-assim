@@ -4,7 +4,7 @@ import type { NextRequest } from 'next/server'
 import { supabaseService } from '@/lib/supabase/service'
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit'
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   let response = NextResponse.next()
 
   const clientIp = getClientIp(request)
@@ -60,11 +60,12 @@ export async function middleware(request: NextRequest) {
       .select('primeiro_acesso, username, ativo')
       .eq('id', user.id)
       .maybeSingle()
-    if (!p?.ativo) {
+
+    if (!p || !p.ativo) {
       await supabase.auth.signOut()
       return NextResponse.redirect(new URL('/login', request.url))
     }
-    if (p?.primeiro_acesso === true || !p?.username) {
+    if (p.primeiro_acesso === true || !p.username) {
       return NextResponse.redirect(new URL('/definir-senha', request.url))
     }
     return NextResponse.redirect(new URL('/', request.url))
@@ -75,19 +76,19 @@ export async function middleware(request: NextRequest) {
     return response
   }
 
-  let { data: perfil } = await supabaseService
+  let { data: perfil, error: perfilError } = await supabaseService
     .from('usuarios')
     .select('role, ativo, primeiro_acesso, username')
     .eq('id', user.id)
-    .single()
+    .maybeSingle()
 
   if (!perfil && user.email) {
-    const fallback = await supabaseService
+    const { data: fallback } = await supabaseService
       .from('usuarios')
       .select('role, ativo, primeiro_acesso, username')
       .eq('email', user.email)
-      .single()
-    perfil = fallback.data
+      .maybeSingle()
+    perfil = fallback
   }
 
   if (!perfil?.ativo) {

@@ -31,6 +31,8 @@ import { useTheme } from "@/contexts/ThemeContext"
 import { useImpersonation } from "@/contexts/ImpersonationContext"
 import { ImpersonationSelector } from "@/components/admin/ImpersonationSelector"
 import { ROLE_LABELS } from "@/constants/roleLabels"
+import { getRoleDefaultPermissions } from "@/lib/permissions/hasPermission"
+import { getUsuarioPermissoes } from "@/services/permissoes.service"
 
 type Favorito = { label: string; path: string }
 
@@ -75,6 +77,7 @@ export default function Sidebar() {
   const [modalSenha, setModalSenha] = useState(false)
   const [modalErros, setModalErros] = useState(false)
   const [favoritos, setFavoritos] = useState<Favorito[]>([])
+  const [allowedPaths, setAllowedPaths] = useState<string[]>([])
 
   useEffect(() => {
     try {
@@ -102,6 +105,21 @@ export default function Sidebar() {
     setLoadingLogout(true)
     await supabase.auth.signOut()
     router.replace("/login")
+  }
+
+  const CODIGO_PARA_ROTAS: Record<string, string[]> = {
+    dashboard: ["/"],
+    atendimentos: ["/solicitar"],
+    gestao: ["/central-pacientes"],
+    cronograma: ["/agenda/pacientes"],
+    escala_terapeutica: ["/central-terapeutas"],
+    agenda_terapeutica: ["/agenda/terapeutas"],
+    salas: ["/agenda/salas"],
+    guias_digitais: ["/guias-digitais"],
+    auditoria_assim: ["/auditoria-assim"],
+    usuarios: ["/admin"],
+    permissoes: ["/admin/permissoes"],
+    cco: ["/cco"],
   }
 
   const permissions = {
@@ -167,11 +185,7 @@ export default function Sidebar() {
     ],
   }
 
-  const allowedPaths =
-    permissions[role as keyof typeof permissions] || []
-
   function canAccess(path: string) {
-    // Se role ainda não carregou, bloqueia tudo
     if (!role) return false
     return allowedPaths.includes(path)
   }
@@ -180,28 +194,69 @@ export default function Sidebar() {
     let isMounted = true
 
     async function loadRole() {
+      let targetId: string | undefined
+      let targetRole: string | null
+
       if (isImpersonating && impersonatedTarget) {
-        if (isMounted) {
-          setRole(impersonatedTarget.role)
-          setLoadingRole(false)
+        targetId = impersonatedTarget.id
+        targetRole = impersonatedTarget.role
+      } else {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (!user) {
+          if (isMounted) setLoadingRole(false)
+          return
         }
+        targetId = user.id
+        const { data } = await supabase
+          .from("usuarios")
+          .select("role")
+          .eq("id", user.id)
+          .single()
+        targetRole = data?.role || null
+      }
+
+      if (!isMounted) return
+
+      setRole(targetRole)
+
+      if (!targetRole) {
+        setAllowedPaths([])
+        setLoadingRole(false)
         return
       }
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { if (isMounted) setLoadingRole(false); return }
-      const { data } = await supabase
-        .from("usuarios")
-        .select("role")
-        .eq("id", user.id)
-        .single()
+
+      const codigosPorRole = getRoleDefaultPermissions(targetRole)
+      let codigos = new Set(codigosPorRole)
+
+      if (targetId) {
+        try {
+          const overrides = await getUsuarioPermissoes(targetId)
+          for (const o of overrides) {
+            if (o.permitido) {
+              codigos.add(o.permissao_codigo)
+            } else {
+              codigos.delete(o.permissao_codigo)
+            }
+          }
+        } catch (error) {
+          console.error("Erro ao carregar permissões do usuário:", error)
+        }
+      }
+
+      const rotas = [...codigos].flatMap(c => CODIGO_PARA_ROTAS[c] ?? [])
+      if (!rotas.includes("/")) rotas.unshift("/")
+
       if (isMounted) {
-        setRole(data?.role || null)
+        setAllowedPaths(rotas)
         setLoadingRole(false)
       }
     }
+
     loadRole()
 
-    return () => { isMounted = false }
+    return () => {
+      isMounted = false
+    }
   }, [isImpersonating, impersonatedTarget, supabase])
 
   useEffect(() => {

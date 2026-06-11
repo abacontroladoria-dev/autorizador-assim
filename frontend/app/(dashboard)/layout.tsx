@@ -48,16 +48,22 @@ export default function DashboardLayout({
     <ImpersonationProvider>
       <ThemeProvider>
         <HeaderProvider>
-          <DashboardShell>
-            {children}
-          </DashboardShell>
+          <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
+            <ImpersonationBar />
+            <Sidebar />
+            <div className="ml-64 flex flex-col min-h-screen pt-16">
+              <DashboardShellContent>
+                {children}
+              </DashboardShellContent>
+            </div>
+          </div>
         </HeaderProvider>
       </ThemeProvider>
     </ImpersonationProvider>
   )
 }
 
-function DashboardShell({
+function DashboardShellContent({
   children,
 }: {
   children: React.ReactNode
@@ -65,27 +71,21 @@ function DashboardShell({
   const { title, subtitle } = useHeader()
 
   return (
-    <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
-      <ImpersonationBar />
-      <Sidebar />
-      <div className="ml-64 flex flex-col min-h-screen">
+    <>
+      {/* HEADER — só exibe quando há título */}
+      {title && (
+        <header className="h-20 bg-card border-b border-border flex items-center px-6 shrink-0">
+          <div>
+            <h1 className="text-lg font-bold text-foreground leading-tight">{title}</h1>
+            {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}
+          </div>
+        </header>
+      )}
 
-        {/* HEADER — só exibe quando há título */}
-        {title && (
-          <header className="h-20 bg-card border-b border-border flex items-center px-6 shrink-0">
-            <div>
-              <h1 className="text-lg font-bold text-foreground leading-tight">{title}</h1>
-              {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}
-            </div>
-          </header>
-        )}
-
-        {/* PAGE */}
-        <main className="flex-1 p-6 overflow-auto">
-          {children}
-        </main>
-
-      </div>
-    </div>
+      {/* PAGE */}
+      <main className="flex-1 p-6 overflow-auto">
+        {children}
+      </main>
+    </>
   )
 }
