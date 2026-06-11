@@ -130,7 +130,8 @@ async function parseTITAResponse(
   const headers = parseCSVLine(lines[0]).map(normalizeHeader)
   const sessions: TITASession[] = []
 
-  console.log(`[cco-sync-tita-sessions] CSV headers detected: ${headers.join(", ")}`)
+  console.log(`[cco-sync-tita-sessions] CSV headers (raw): ${parseCSVLine(lines[0]).join(", ")}`)
+  console.log(`[cco-sync-tita-sessions] CSV headers (normalized): ${headers.join(", ")}`)
 
   for (let i = 1; i < lines.length; i++) {
     const values = parseCSVLine(lines[i])
@@ -210,8 +211,8 @@ async function syncTITASessions(
 
   const today = new Date()
   const dateFormat = (d: Date) => d.toISOString().split("T")[0]
-  const thirtyDaysAgo = new Date(today.getTime() - 30 * 24 * 60 * 60 * 1000)
-  const dataInicio = dateFormat(thirtyDaysAgo)
+  const fourteenDaysAgo = new Date(today.getTime() - 14 * 24 * 60 * 60 * 1000)
+  const dataInicio = dateFormat(fourteenDaysAgo)
   const dataFim = dateFormat(today)
   const unidade = 280
 
@@ -219,7 +220,7 @@ async function syncTITASessions(
   console.log(`[cco-sync-tita-sessions] Requesting UNIT FILTER: unidade=${unidade}`)
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 50000) // 50s timeout
+  const timeoutId = setTimeout(() => controller.abort(), 90000) // 90s timeout
 
   let response: Response
   try {
@@ -288,6 +289,12 @@ async function syncTITASessions(
 
   if (sessions.length > 0) {
     console.log(`[cco-sync-tita-sessions] Sample: ${JSON.stringify(sessions[0])}`)
+    // DEBUG: Show all sessions with tratativa (profissional_tratativa set)
+    const comTratativa = sessions.filter(s => s.profissional_tratativa)
+    console.log(`[cco-sync-tita-sessions] Sessions with profissional_tratativa: ${comTratativa.length}`)
+    if (comTratativa.length > 0) {
+      console.log(`[cco-sync-tita-sessions] First one with tratativa: ${JSON.stringify(comTratativa[0])}`)
+    }
   }
 
   // Prepare UPSERT rows
