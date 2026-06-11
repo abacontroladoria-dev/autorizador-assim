@@ -5,13 +5,26 @@ const SUPABASE_URL              = Deno.env.get("SUPABASE_URL")!
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!
 const TITA_TOKEN                = Deno.env.get("TITA_TOKEN")!
 
-const corsHeaders = {
-  "Access-Control-Allow-Origin":  "*",
-  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
-  "Access-Control-Allow-Methods": "POST, OPTIONS",
+const ALLOWED_ORIGINS = [
+  "http://127.0.0.1:3000",
+  "https://127.0.0.1:3000",
+  "https://orbitaautomacao.com.br",
+]
+
+function getCorsHeaders(requestOrigin: string) {
+  const isAllowed = ALLOWED_ORIGINS.includes(requestOrigin)
+  return isAllowed
+    ? {
+        "Access-Control-Allow-Origin": requestOrigin,
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+      }
+    : {
+        "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
+      }
 }
 
-function jsonResponse(body: unknown, status = 200) {
+function jsonResponse(body: unknown, status = 200, corsHeaders: Record<string, string> = {}) {
   return new Response(JSON.stringify(body), {
     status,
     headers: { "Content-Type": "application/json", ...corsHeaders },
@@ -84,6 +97,80 @@ function parseCSVLine(line: string): string[] {
   return result
 }
 
+// Busca dados complementares de um paciente em agenda_orbita, agenda_tita ou autorizacoes_assim
+async function buscarDadosPaciente(
+  pacienteNome: string,
+  pacienteId: number | null,
+  supabase: ReturnType<typeof createClient>,
+): Promise<Record<string, unknown>> {
+  const dados: Record<string, unknown> = {
+    numero_carteirinha: null,
+    crm: null,
+    nome_medico: null,
+  }
+
+  try {
+    // Prioridade 1: Buscar em agenda_orbita
+    let query = supabase.from("agenda_orbita").select("crm, nome_medico, matricula, empresa, dep")
+
+    if (pacienteId) {
+      query = query.eq("paciente_id", String(pacienteId))
+    } else {
+      query = query.eq("paciente_nome", pacienteNome)
+    }
+
+    const { data: orbita } = await query.limit(1).maybeSingle()
+
+    if (orbita) {
+      const empresa = (orbita.empresa || "").padEnd(6, "0").slice(0, 6)
+      const matricula = (orbita.matricula || "").padEnd(7, "0").slice(0, 7)
+      const dep = (orbita.dep || "").padEnd(2, "0").slice(0, 2)
+      dados.numero_carteirinha = `${empresa}${matricula}${dep}`
+      dados.crm = orbita.crm || null
+      dados.nome_medico = orbita.nome_medico || null
+      return dados
+    }
+
+    // Prioridade 2: Buscar registros anteriores em agenda_tita que já têm numero_carteirinha
+    let query2 = supabase.from("agenda_tita").select("numero_carteirinha, crm, nome_medico").eq("ativo", true)
+
+    if (pacienteId) {
+      query2 = query2.eq("paciente_id", pacienteId)
+    } else {
+      query2 = query2.eq("paciente_nome", pacienteNome)
+    }
+
+    const { data: registrosAntigos } = await query2.limit(1).maybeSingle()
+
+    if (registrosAntigos?.numero_carteirinha) {
+      dados.numero_carteirinha = registrosAntigos.numero_carteirinha
+      dados.crm = registrosAntigos.crm || null
+      dados.nome_medico = registrosAntigos.nome_medico || null
+      return dados
+    }
+
+    // Prioridade 3: Buscar em autorizacoes_assim como último recurso
+    let query3 = supabase.from("autorizacoes_assim").select("matricula, paciente_id")
+
+    if (pacienteId) {
+      query3 = query3.eq("paciente_id", pacienteId)
+    } else {
+      query3 = query3.eq("paciente_nome", pacienteNome)
+    }
+
+    const { data: autorizado } = await query3.limit(1).maybeSingle()
+
+    if (autorizado?.matricula) {
+      const matricula = (autorizado.matricula || "").padEnd(7, "0").slice(0, 7)
+      dados.numero_carteirinha = `000000${matricula}00`
+    }
+  } catch (err) {
+    console.warn(`[buscarDadosPaciente] Erro ao buscar dados para ${pacienteNome}:`, err)
+  }
+
+  return dados
+}
+
 // Suplementa o mapa `incoming` com sessões do endpoint csv_grade_profissionais
 // que o endpoint JSON não retorna (status "Realizado" já atendidas no dia).
 // Restrito a data === hoje para evitar chamadas desnecessárias em datas futuras.
@@ -91,6 +178,7 @@ async function enrichIncomingFromCSV(
   data: string,
   hoje: string,
   incoming: Map<number, Record<string, unknown>>,
+  supabase: ReturnType<typeof createClient>,
 ): Promise<number> {
   if (data > hoje) return 0 // futuro: JSON já cobre tudo
 
@@ -159,6 +247,10 @@ async function enrichIncomingFromCSV(
     if (!pacienteNome) continue
 
     const dataAtend = v(vals, iData) || data
+    const pacienteId = n(vals, iFavId)
+
+    // Busca dados complementares (numero_carteirinha, crm, nome_medico)
+    const dadosPaciente = await buscarDadosPaciente(pacienteNome, pacienteId, supabase)
 
     const r: Record<string, unknown> = {
       tita_agendamento_id:   agId,
@@ -166,7 +258,7 @@ async function enrichIncomingFromCSV(
       data_atendimento:      dataAtend,
       hora_inicial:          v(vals, iHoraIni) || null,
       hora_final:            v(vals, iHoraFim) || null,
-      paciente_id:           n(vals, iFavId),
+      paciente_id:           pacienteId,
       paciente_nome:         pacienteNome,
       cpf:                   null,
       data_nascimento:       null,
@@ -184,7 +276,7 @@ async function enrichIncomingFromCSV(
       clinica_nome:          v(vals, iCliNome) || null,
       convenio_id:           null,
       convenio_nome:         v(vals, iConvenio) || null,
-      numero_carteirinha:    null,
+      numero_carteirinha:    dadosPaciente.numero_carteirinha,
       responsavel_nome:      null,
       responsavel_telefone:  null,
       responsavel_email:     null,
@@ -193,11 +285,14 @@ async function enrichIncomingFromCSV(
       motivo_inativacao:     null,
       raw_json:              { source: "csv_grade_profissionais", status_csv: status },
       updated_at:            new Date().toISOString(),
+      crm:                   dadosPaciente.crm,
+      nome_medico:           dadosPaciente.nome_medico,
     }
 
     incoming.set(agId, r)
     enriched++
-    console.log(`[sync_tita_agenda] CSV+: ${agId} ${pacienteNome} ${v(vals, iHoraIni)} [${status}]`)
+    const cartInfo = dadosPaciente.numero_carteirinha ? "✅" : "❌"
+    console.log(`[sync_tita_agenda] CSV+: ${agId} ${pacienteNome} ${v(vals, iHoraIni)} [${status}] ${cartInfo}`)
   }
 
   return enriched
@@ -274,7 +369,7 @@ async function sincronizarData(
   // Enriquece incoming com sessões "Realizado" do CSV que o JSON omite
   const hojeParaCSV = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }))
     .toISOString().slice(0, 10)
-  const enriched = await enrichIncomingFromCSV(data, hojeParaCSV, incoming)
+  const enriched = await enrichIncomingFromCSV(data, hojeParaCSV, incoming, supabase)
   if (enriched > 0) {
     console.log(`[sync_tita_agenda] CSV enrichment: +${enriched} sessões adicionadas para ${data}`)
   }
@@ -374,8 +469,11 @@ async function sincronizarData(
 }
 
 serve(async (req: Request) => {
+  const origin = req.headers.get("origin") || ""
+  const corsHeaders = getCorsHeaders(origin)
+
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders })
-  if (req.method !== "POST")    return jsonResponse({ error: "method_not_allowed" }, 405)
+  if (req.method !== "POST")    return jsonResponse({ error: "method_not_allowed" }, 405, corsHeaders)
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
     auth: { persistSession: false },
@@ -394,7 +492,7 @@ serve(async (req: Request) => {
     }
 
     console.log("[sync_tita_agenda] Concluído:", resultados)
-    return jsonResponse({ ok: true, datas, resultados })
+    return jsonResponse({ ok: true, datas, resultados }, 200, corsHeaders)
   } catch (err) {
     let errMsg = "Unknown error"
     let errStack = "N/A"
@@ -410,6 +508,6 @@ serve(async (req: Request) => {
     }
     console.error("[sync_tita_agenda] Erro:", errMsg)
     console.error("[sync_tita_agenda] Stack:", errStack)
-    return jsonResponse({ error: errMsg, stack: errStack }, 500)
+    return jsonResponse({ error: errMsg, stack: errStack }, 500, corsHeaders)
   }
 })
