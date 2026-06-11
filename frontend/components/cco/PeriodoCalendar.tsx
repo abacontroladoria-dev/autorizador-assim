@@ -3,6 +3,11 @@
 import { useState } from 'react'
 import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 
+function parseDateLocal(iso: string): Date {
+  const [y, m, d] = iso.split('-').map(Number)
+  return new Date(y, m - 1, d)
+}
+
 interface Props {
   dataInicio: string
   dataFim: string
@@ -85,8 +90,8 @@ export default function PeriodoCalendar({
   const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
   const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab']
 
-  const dataInicioDate = new Date(dataInicio)
-  const dataFimDate = new Date(dataFim)
+  const dataInicioDate = parseDateLocal(dataInicio)
+  const dataFimDate = parseDateLocal(dataFim)
 
   return (
     <div className="relative inline-block">
@@ -189,7 +194,7 @@ export default function PeriodoCalendar({
             <div className="pt-3 border-t border-border mb-4 text-xs text-foreground/60">
               <p className="mb-2">
                 {!selectingEnd && tempDataInicio && tempDataFim
-                  ? `Selecionado: ${new Date(tempDataInicio).toLocaleDateString('pt-BR')} até ${new Date(tempDataFim).toLocaleDateString('pt-BR')}`
+                  ? `Selecionado: ${parseDateLocal(tempDataInicio).toLocaleDateString('pt-BR')} até ${parseDateLocal(tempDataFim).toLocaleDateString('pt-BR')}`
                   : selectingEnd
                     ? 'Selecione a data final'
                     : 'Selecione a data inicial'}
