@@ -390,6 +390,7 @@ async function sincronizarData(
   const novos: Record<string, unknown>[] = []
   const inutilizarAlterado: number[] = []
   const inutilizarExcluido: number[] = []
+  const atualizarComDadosFaltantes: Array<{ id: number; paciente_nome: string; paciente_id: number | null }> = []
 
   // Processa registros vindos do TiTa
   for (const [titaId, reg] of incoming) {
@@ -409,8 +410,16 @@ async function sincronizarData(
       if (mudou) {
         inutilizarAlterado.push(existente.id)
         novos.push(reg)
+      } else if (!existente.numero_carteirinha) {
+        // Registro sem mudança estrutural, mas com dados faltantes (numero_carteirinha = NULL)
+        // Tenta buscar dados complementares para preenchimento
+        atualizarComDadosFaltantes.push({
+          id: existente.id,
+          paciente_nome: reg.paciente_nome as string,
+          paciente_id: reg.paciente_id as number | null,
+        })
       }
-      // Sem mudança: ignora (não regrava o registro)
+      // Sem mudança e com dados completos: ignora (não regrava o registro)
     }
   }
 
@@ -463,6 +472,27 @@ async function sincronizarData(
       .from("agenda_tita")
       .insert(novos.slice(i, i + 100))
     if (error) throw error
+  }
+
+  // Atualiza registros existentes que têm dados faltantes (numero_carteirinha = NULL)
+  for (const item of atualizarComDadosFaltantes) {
+    const dadosPaciente = await buscarDadosPaciente(item.paciente_nome, item.paciente_id, supabase)
+    if (dadosPaciente.numero_carteirinha) {
+      const { error } = await supabase
+        .from("agenda_tita")
+        .update({
+          numero_carteirinha: dadosPaciente.numero_carteirinha,
+          crm: dadosPaciente.crm,
+          nome_medico: dadosPaciente.nome_medico,
+          updated_at: agora,
+        })
+        .eq("id", item.id)
+      if (error) {
+        console.warn(`[sync_tita_agenda] Erro ao atualizar dados faltantes para ID ${item.id}:`, error)
+      } else {
+        console.log(`[sync_tita_agenda] ✅ Preenchidos dados faltantes: ${item.paciente_nome} (ID: ${item.id})`)
+      }
+    }
   }
 
   return incoming.size
