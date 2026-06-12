@@ -50,7 +50,8 @@ BEGIN
     CASE
       WHEN ss.profissional_substituto_nome IS NOT NULL
         THEN ss.profissional_substituto_nome
-      WHEN a.profissional_tratativa IS NOT NULL
+      WHEN a.possui_tratativa = true
+        AND a.profissional_tratativa IS NOT NULL
         AND a.profissional_tratativa <> ''
         AND a.profissional_agendado IS NOT NULL
         AND a.profissional_tratativa <> a.profissional_agendado

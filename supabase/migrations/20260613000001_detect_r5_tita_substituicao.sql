@@ -19,6 +19,7 @@ BEGIN
   SELECT a.session_key
   FROM cco.atendimentos a
   WHERE a.orphaned_at IS NULL
+    AND a.possui_tratativa = true
     AND a.profissional_tratativa IS NOT NULL
     AND a.profissional_tratativa <> ''
     AND a.profissional_agendado IS NOT NULL
