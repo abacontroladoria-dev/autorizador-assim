@@ -31,6 +31,12 @@ function getHojeLocal(): string {
 }
 
 function buildCCOData(rows: CCOAtendimentoRow[], hoje: string): CCOData {
+  // Excluir entradas administrativas/placeholder que não são pacientes reais
+  rows = rows.filter(row => {
+    const nome = (row.paciente_nome ?? '').toLowerCase()
+    return !nome.includes('horário administrat') && nome !== 'ainda não selecionado'
+  })
+
   const totalSessoes = rows.length
 
   // ─── Sessões categorizadas ───────────────────────────────────────────────
