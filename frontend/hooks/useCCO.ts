@@ -32,10 +32,11 @@ function getHojeLocal(): string {
 
 function buildCCOData(rows: CCOAtendimentoRow[], hoje: string): CCOData {
   // Excluir entradas administrativas/placeholder que não são pacientes reais
-  const normalizeString = (s: string) => s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
   rows = rows.filter(row => {
-    const nome = normalizeString(row.paciente_nome ?? '')
-    return !nome.includes('horario administrat') && nome !== 'ainda nao selecionado'
+    const nome = (row.paciente_nome ?? '').toLowerCase()
+    if (nome.includes('administrativo')) return false
+    if (nome.includes('ainda') && nome.includes('selecionado')) return false
+    return true
   })
 
   const totalSessoes = rows.length
