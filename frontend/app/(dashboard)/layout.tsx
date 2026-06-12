@@ -51,7 +51,7 @@ export default function DashboardLayout({
           <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
             <ImpersonationBar />
             <Sidebar />
-            <div className="ml-64 flex flex-col min-h-screen pt-16">
+            <div className="ml-64 flex flex-col min-h-screen">
               <DashboardShellContent>
                 {children}
               </DashboardShellContent>

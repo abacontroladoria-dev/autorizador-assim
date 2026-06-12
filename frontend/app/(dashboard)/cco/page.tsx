@@ -6,7 +6,7 @@ import Acompanhamento from '@/components/cco/Acompanhamento'
 import AcoesRapidas from '@/components/cco/AcoesRapidas'
 import CCOKpiCards from '@/components/cco/CCOKpiCards'
 import OcorrenciasRevisaoDrawer from '@/components/cco/OcorrenciasRevisaoDrawer'
-import EvolucoesPendentes from '@/components/cco/EvolucoesPendentes'
+import TopTerapeutasPendencias from '@/components/cco/TopTerapeutasPendencias'
 import PacientesComPendencias from '@/components/cco/PacientesComPendencias'
 import PacientesPendenciasModal from '@/components/cco/PacientesPendenciasModal'
 import PacientesRevisaoModal from '@/components/cco/PacientesRevisaoModal'
@@ -37,7 +37,7 @@ export default function CCOPage() {
 
 
   return (
-    <div className="space-y-8">
+    <div className="flex flex-col gap-8">
 
       {/* Header & Period Filter */}
       <div className="flex items-end justify-between gap-6">
@@ -87,7 +87,7 @@ export default function CCOPage() {
         <AcoesRapidas />
       </div>
 
-      {/* Pacientes com Pendências + Evoluções Pendentes */}
+      {/* Pacientes com Pendências + Top 10 Terapeutas */}
       <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <PacientesComPendencias
             pacientes={dados?.pacientesComPendencias ?? []}
@@ -101,9 +101,8 @@ export default function CCOPage() {
             loading={loading}
             onPacienteClick={abrirDetalhes}
           />
-          <EvolucoesPendentes
-            evolucoes={dados?.evolucoesPendentes ?? []}
-            evolucoesPorTerapeuta={dados?.pacientesEvolucaoPendentePorTerapeuta ?? []}
+          <TopTerapeutasPendencias
+            terapeutas={dados?.topTerapeutasComPendencias ?? []}
             loading={loading}
           />
       </div>
