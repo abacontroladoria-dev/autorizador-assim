@@ -160,6 +160,15 @@ export const mockCCOData: CCOData = {
     },
   ],
 
+  pacientesAcaoImediata: [
+    { pacienteNome: 'Sofia Martins', diasAtraso: 7 },
+    { pacienteNome: 'Beatriz Santos', diasAtraso: 6 },
+  ],
+
+  pacientesAcompanhamento: [
+    { pacienteNome: 'Lucas Oliveira', diasAtraso: 3 },
+  ],
+
   pacientesSessoes: {
     'Lucas Oliveira': [
       { id: 's1', paciente: 'Lucas Oliveira', data: '2026-06-03', horario: '09:00', terapia: 'ABA', profissional: 'Ana Clara Souza', evolucaoStatus: 'EVOLUIDA', evolucaoAutor: 'Ana Clara Souza', evolucaoDataHora: '2026-06-03 18:42' },

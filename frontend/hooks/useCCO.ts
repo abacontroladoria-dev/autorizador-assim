@@ -11,6 +11,7 @@ import type {
   PacienteComPendencia,
   EvolucaoPendentePorTerapeuta,
   CCOSessaoDetalhada,
+  PacientePendencia,
 } from '@/components/cco/types'
 
 const DEBOUNCE_MS = 400
@@ -185,6 +186,39 @@ function buildCCOData(rows: CCOAtendimentoRow[], hoje: string): CCOData {
     })
   }
 
+  // ─── Pacientes com pendência ordenados por maior atraso ─────────────────────
+  // Coleção intermediária reutilizada pelas Sprints 2 e 3 (evita recálculo)
+  const [hy, hm, hd] = hoje.split('-').map(Number)
+  const hojeMs = new Date(hy, hm - 1, hd).getTime()
+
+  const atrasoPorPaciente = new Map<string, number>()
+  for (const row of rows) {
+    if (!row.possui_tratativa && row.data_sessao < hoje) {
+      const [sy, sm, sd] = row.data_sessao.split('-').map(Number)
+      const dias = Math.floor((hojeMs - new Date(sy, sm - 1, sd).getTime()) / 86_400_000)
+      if (dias > 0) {
+        const atual = atrasoPorPaciente.get(row.paciente_nome) ?? 0
+        if (dias > atual) atrasoPorPaciente.set(row.paciente_nome, dias)
+      }
+    }
+  }
+
+  const pacientesPendentesOrdenados: PacientePendencia[] = Array.from(
+    atrasoPorPaciente.entries(),
+  )
+    .map(([pacienteNome, diasAtraso]) => ({ pacienteNome, diasAtraso }))
+    .sort((a, b) => b.diasAtraso - a.diasAtraso)
+
+  // Sprint 2 — Ação Imediata: >= 5 dias
+  const pacientesAcaoImediata = pacientesPendentesOrdenados.filter(
+    (p) => p.diasAtraso >= 5,
+  )
+
+  // Sprint 3 — Acompanhamento: 1 a 4 dias
+  const pacientesAcompanhamento = pacientesPendentesOrdenados.filter(
+    (p) => p.diasAtraso >= 1 && p.diasAtraso <= 4,
+  )
+
   return {
     kpis,
     motivosPendencias,
@@ -193,6 +227,8 @@ function buildCCOData(rows: CCOAtendimentoRow[], hoje: string): CCOData {
     pacientesComPendencias,
     pacientesEvolucaoPendentePorTerapeuta,
     pacientesSessoes: sessoesByPaciente,
+    pacientesAcaoImediata,
+    pacientesAcompanhamento,
   }
 }
 

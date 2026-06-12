@@ -3,6 +3,11 @@ export interface Competencia {
   ano: number
 }
 
+export interface PacientePendencia {
+  pacienteNome: string
+  diasAtraso: number
+}
+
 export interface CCOKpis {
   pacientes_conciliados: number
   pacientes_pendentes: number
@@ -92,4 +97,6 @@ export interface CCOData {
   pacientesComPendencias: PacienteComPendencia[]
   pacientesEvolucaoPendentePorTerapeuta: EvolucaoPendentePorTerapeuta[]
   pacientesSessoes: Record<string, CCOSessaoDetalhada[]>
+  pacientesAcaoImediata: PacientePendencia[]
+  pacientesAcompanhamento: PacientePendencia[]
 }

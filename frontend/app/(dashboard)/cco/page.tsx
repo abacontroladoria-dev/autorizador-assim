@@ -1,6 +1,9 @@
 'use client'
 
 import { useState } from 'react'
+import AcaoImediata from '@/components/cco/AcaoImediata'
+import Acompanhamento from '@/components/cco/Acompanhamento'
+import AcoesRapidas from '@/components/cco/AcoesRapidas'
 import CCOKpiCards from '@/components/cco/CCOKpiCards'
 import OcorrenciasRevisaoDrawer from '@/components/cco/OcorrenciasRevisaoDrawer'
 import EvolucoesPendentes from '@/components/cco/EvolucoesPendentes'
@@ -69,6 +72,19 @@ export default function CCOPage() {
           }}
           loading={loading}
         />
+      </div>
+
+      {/* Ação Imediata & Acompanhamento & Ações Rápidas */}
+      <div className="grid grid-cols-1 md:grid-cols-[2fr_2fr_1fr] gap-6">
+        <AcaoImediata
+          pacientes={dados?.pacientesAcaoImediata ?? []}
+          loading={loading}
+        />
+        <Acompanhamento
+          pacientes={dados?.pacientesAcompanhamento ?? []}
+          loading={loading}
+        />
+        <AcoesRapidas />
       </div>
 
       {/* Pacientes com Pendências + Evoluções Pendentes */}
