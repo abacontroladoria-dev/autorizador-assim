@@ -22,12 +22,6 @@ export default function CCOPage() {
   const [detalhesModalOpen, setDetalhesModalOpen] = useState(false)
   const [pacienteDetalhes, setPacienteDetalhes] = useState<string | null>(null)
 
-  // Lógica de negócio: percentual de pacientes conciliados em relação ao total
-  const pctProntas =
-    dados && dados.kpis.total_pacientes > 0
-      ? ((dados.kpis.pacientes_conciliados / dados.kpis.total_pacientes) * 100).toFixed(1)
-      : '0.0'
-
   const abrirDetalhes = (nomePaciente: string) => {
     setPacienteDetalhes(nomePaciente)
     setDetalhesModalOpen(true)
@@ -69,14 +63,11 @@ export default function CCOPage() {
             sessoes_em_revisao: 0,
             total_sessoes: 0,
             evolucoes_pendentes: 0,
+            evolucoes_atrasadas: 0,
             total_pacientes_assim: 0,
             total_sessoes_assim: 0,
           }}
-          pctProntas={pctProntas}
           loading={loading}
-          onConciliadosClick={() => {}}
-          onPendentesClick={() => setPendenciasModalOpen(true)}
-          onRevisaoClick={() => setRevisaoModalOpen(true)}
         />
       </div>
 

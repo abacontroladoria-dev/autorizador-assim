@@ -67,6 +67,7 @@ function buildCCOData(rows: CCOAtendimentoRow[], hoje: string): CCOData {
     pacientes_em_revisao:    pacientesRevisao.size,
     pacientes_pendentes:     pacientesPendentes.size,
     evolucoes_pendentes:     rows.filter(r => !r.possui_tratativa).length,
+    evolucoes_atrasadas:     rows.filter(r => r.data_sessao < hoje && !r.possui_tratativa).length,
     total_pacientes_assim:   todosPacientes.size,
     total_sessoes_assim:     totalSessoes,
   }

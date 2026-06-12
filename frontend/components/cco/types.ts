@@ -13,6 +13,7 @@ export interface CCOKpis {
   sessoes_em_revisao: number
   total_sessoes: number
   evolucoes_pendentes: number
+  evolucoes_atrasadas: number
   total_pacientes_assim: number
   total_sessoes_assim: number
 }

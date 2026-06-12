@@ -11,6 +11,7 @@ export const mockCCOData: CCOData = {
     sessoes_em_revisao: 23,
     total_sessoes: 520,
     evolucoes_pendentes: 68,
+    evolucoes_atrasadas: 42,
     total_pacientes_assim: 247,
     total_sessoes_assim: 1843,
   },
