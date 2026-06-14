@@ -12,6 +12,7 @@ import type {
   EvolucaoPendentePorTerapeuta,
   CCOSessaoDetalhada,
   PacientePendencia,
+  TerapeutaComPendencias,
 } from '@/components/cco/types'
 
 const DEBOUNCE_MS = 400
@@ -31,7 +32,7 @@ function getHojeLocal(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
-function buildCCOData(rows: CCOAtendimentoRow[], hoje: string): CCOData {
+function buildCCOData(rows: CCOAtendimentoRow[], hoje: string, dataFim: string): CCOData {
   // Excluir entradas administrativas/placeholder que não são pacientes reais
   rows = rows.filter(row => {
     const nome = (row.paciente_nome ?? '').toLowerCase()
@@ -123,14 +124,6 @@ function buildCCOData(rows: CCOAtendimentoRow[], hoje: string): CCOData {
     pendenciaByPaciente[row.paciente_nome].count += row.tipos_ocorrencia.length
     row.tipos_ocorrencia.forEach(t => pendenciaByPaciente[row.paciente_nome].tipos.add(t))
   }
-  const pacientesComPendencias: PacienteComPendencia[] = Object.entries(pendenciaByPaciente)
-    .sort((a, b) => b[1].count - a[1].count)
-    .map(([nome, { count, tipos }]) => ({
-      id:             nome,
-      nome,
-      ocorrencias:    count,
-      tiposPendencia: [...tipos],
-    }))
 
   // ─── Evoluções pendentes por terapeuta (nested) ──────────────────────────
   const evolNested: Record<string, Record<string, number>> = {}
@@ -191,17 +184,31 @@ function buildCCOData(rows: CCOAtendimentoRow[], hoje: string): CCOData {
   const [hy, hm, hd] = hoje.split('-').map(Number)
   const hojeMs = new Date(hy, hm - 1, hd).getTime()
 
+  const [dy, dm, dd] = dataFim.split('-').map(Number)
+  const dataFimMs = new Date(dy, dm - 1, dd).getTime()
+
   const atrasoPorPaciente = new Map<string, number>()
   for (const row of rows) {
-    if (!row.possui_tratativa && row.data_sessao < hoje) {
+    if (!row.possui_tratativa && row.data_sessao < dataFim) {
       const [sy, sm, sd] = row.data_sessao.split('-').map(Number)
-      const dias = Math.floor((hojeMs - new Date(sy, sm - 1, sd).getTime()) / 86_400_000)
+      const dias = Math.floor((dataFimMs - new Date(sy, sm - 1, sd).getTime()) / 86_400_000)
       if (dias > 0) {
         const atual = atrasoPorPaciente.get(row.paciente_nome) ?? 0
         if (dias > atual) atrasoPorPaciente.set(row.paciente_nome, dias)
       }
     }
   }
+
+  // Completar pacientesComPendencias com diasAtrasoMaisAntigo (reutilizando atrasoPorPaciente calculado acima)
+  const pacientesComPendencias: PacienteComPendencia[] = Object.entries(pendenciaByPaciente)
+    .sort((a, b) => b[1].count - a[1].count)
+    .map(([nome, { count, tipos }]) => ({
+      id:                     nome,
+      nome,
+      ocorrencias:            count,
+      tiposPendencia:         [...tipos],
+      diasAtrasoMaisAntigo:   atrasoPorPaciente.get(nome) ?? 0,
+    }))
 
   const pacientesPendentesOrdenados: PacientePendencia[] = Array.from(
     atrasoPorPaciente.entries(),
@@ -219,6 +226,47 @@ function buildCCOData(rows: CCOAtendimentoRow[], hoje: string): CCOData {
     (p) => p.diasAtraso >= 1 && p.diasAtraso <= 4,
   )
 
+  // ─── Sprint 5 — Top 10 Terapeutas com Mais Pendências ──────────────────────
+  const atrasoPorTerapeuta: Record<string, number> = {}
+  const ultimaEvolucaoPorTerapeuta: Record<string, number | null> = {}
+
+  for (const row of rows) {
+    const t = row.profissional ?? 'Sem terapeuta'
+    if (!row.possui_tratativa && row.data_sessao < dataFim) {
+      atrasoPorTerapeuta[t] = (atrasoPorTerapeuta[t] ?? 0) + 1
+    }
+  }
+
+  for (const row of rows) {
+    if (!row.possui_tratativa || !row.profissional_tratativa || !row.data_tratativa) continue
+    const t = row.profissional_tratativa
+    const [sy, sm, sd] = row.data_tratativa.split('-').map(Number)
+    const dias = Math.floor((dataFimMs - new Date(sy, sm - 1, sd).getTime()) / 86_400_000)
+    const atual = ultimaEvolucaoPorTerapeuta[t]
+    if (atual === undefined || dias < atual) {
+      ultimaEvolucaoPorTerapeuta[t] = dias
+    }
+  }
+
+  const topTerapeutas: TerapeutaComPendencias[] = Object.entries(atrasoPorTerapeuta)
+    .map(([terapeuta, evolucoes_atrasadas]) => ({
+      terapeuta,
+      evolucoes_atrasadas,
+      ultima_evolucao: ultimaEvolucaoPorTerapeuta[terapeuta] ?? null,
+    }))
+    .sort((a, b) => {
+      if (b.evolucoes_atrasadas !== a.evolucoes_atrasadas) {
+        return b.evolucoes_atrasadas - a.evolucoes_atrasadas
+      }
+      const ultimaA = a.ultima_evolucao ?? Infinity
+      const ultimaB = b.ultima_evolucao ?? Infinity
+      if (ultimaB !== ultimaA) {
+        return ultimaB - ultimaA
+      }
+      return a.terapeuta.localeCompare(b.terapeuta, 'pt-BR')
+    })
+    .slice(0, 10)
+
   return {
     kpis,
     motivosPendencias,
@@ -229,6 +277,7 @@ function buildCCOData(rows: CCOAtendimentoRow[], hoje: string): CCOData {
     pacientesSessoes: sessoesByPaciente,
     pacientesAcaoImediata,
     pacientesAcompanhamento,
+    topTerapeutasComPendencias: topTerapeutas,
   }
 }
 
@@ -276,8 +325,8 @@ export function useCCO(dataInicio: string, dataFim: string) {
 
   const dados = useMemo<CCOData | null>(() => {
     if (rawRows.length === 0) return null
-    return buildCCOData(rawRows, hoje)
-  }, [rawRows, hoje])
+    return buildCCOData(rawRows, hoje, dataFim)
+  }, [rawRows, hoje, dataFim])
 
   return { dados, loading, carregarDados }
 }

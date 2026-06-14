@@ -30,6 +30,11 @@ function formatDate(year: number, month: number, day: number): string {
   return `${year}-${String(month + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
+function parseDateLocal(dateStr: string): Date {
+  const [year, month, day] = dateStr.split('-').map(Number)
+  return new Date(year, month - 1, day)
+}
+
 export default function PeriodoCalendar({
   dataInicio,
   dataFim,
@@ -37,7 +42,7 @@ export default function PeriodoCalendar({
   onDataFimChange,
 }: Props) {
   const [isOpen, setIsOpen] = useState(false)
-  const [currentMonth, setCurrentMonth] = useState(new Date(new Date().getFullYear(), new Date().getMonth(), 1))
+  const [currentMonth, setCurrentMonth] = useState(() => parseDateLocal(dataInicio))
   const [tempDataInicio, setTempDataInicio] = useState(dataInicio)
   const [tempDataFim, setTempDataFim] = useState(dataFim)
   const [selectingEnd, setSelectingEnd] = useState(false)
@@ -74,8 +79,12 @@ export default function PeriodoCalendar({
   }
 
   const handleClear = () => {
-    setTempDataInicio(dataInicio)
-    setTempDataFim(dataFim)
+    const today = new Date()
+    const firstOfMonth = formatDate(today.getFullYear(), today.getMonth(), 1)
+    const todayStr = formatDate(today.getFullYear(), today.getMonth(), today.getDate())
+    setTempDataInicio(firstOfMonth)
+    setTempDataFim(todayStr)
+    setCurrentMonth(new Date(today.getFullYear(), today.getMonth(), 1))
     setSelectingEnd(false)
   }
 
@@ -85,8 +94,8 @@ export default function PeriodoCalendar({
   const monthNames = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro']
   const dayNames = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab']
 
-  const dataInicioDate = new Date(dataInicio)
-  const dataFimDate = new Date(dataFim)
+  const dataInicioDate = parseDateLocal(dataInicio)
+  const dataFimDate = parseDateLocal(dataFim)
 
   return (
     <div className="relative inline-block">
@@ -97,6 +106,7 @@ export default function PeriodoCalendar({
           setTempDataInicio(dataInicio)
           setTempDataFim(dataFim)
           setSelectingEnd(false)
+          setCurrentMonth(parseDateLocal(dataInicio))
         }}
         className="flex items-center gap-2 px-4 py-2.5 bg-foreground/2 border border-border rounded-lg hover:border-foreground/30 transition-colors"
         aria-label="Abrir seletor de período"
@@ -189,7 +199,7 @@ export default function PeriodoCalendar({
             <div className="pt-3 border-t border-border mb-4 text-xs text-foreground/60">
               <p className="mb-2">
                 {!selectingEnd && tempDataInicio && tempDataFim
-                  ? `Selecionado: ${new Date(tempDataInicio).toLocaleDateString('pt-BR')} até ${new Date(tempDataFim).toLocaleDateString('pt-BR')}`
+                  ? `Selecionado: ${parseDateLocal(tempDataInicio).toLocaleDateString('pt-BR')} até ${parseDateLocal(tempDataFim).toLocaleDateString('pt-BR')}`
                   : selectingEnd
                     ? 'Selecione a data final'
                     : 'Selecione a data inicial'}

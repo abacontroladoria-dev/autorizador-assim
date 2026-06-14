@@ -79,25 +79,20 @@ export default function CCOPage() {
         <AcaoImediata
           pacientes={dados?.pacientesAcaoImediata ?? []}
           loading={loading}
+          onPacienteClick={abrirDetalhes}
         />
         <Acompanhamento
           pacientes={dados?.pacientesAcompanhamento ?? []}
           loading={loading}
+          onPacienteClick={abrirDetalhes}
         />
         <AcoesRapidas />
       </div>
 
       {/* Pacientes com Pendências + Top 10 Terapeutas */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-stretch">
           <PacientesComPendencias
             pacientes={dados?.pacientesComPendencias ?? []}
-            sessoes={(() => {
-              const sessoes: CCOSessaoDetalhada[] = []
-              if (dados?.pacientesSessoes) {
-                Object.values(dados.pacientesSessoes).forEach(s => sessoes.push(...s))
-              }
-              return sessoes
-            })()}
             loading={loading}
             onPacienteClick={abrirDetalhes}
           />

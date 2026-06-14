@@ -45,11 +45,18 @@ export interface CCOEvolucaoPendente {
   quantidade: number
 }
 
+export interface TerapeutaComPendencias {
+  terapeuta: string
+  evolucoes_atrasadas: number
+  ultima_evolucao: number | null
+}
+
 export interface PacienteComPendencia {
   id: string
   nome: string
   ocorrencias: number
   tiposPendencia: string[]
+  diasAtrasoMaisAntigo: number
 }
 
 export interface PacienteEvolucaoPendente {
@@ -99,4 +106,5 @@ export interface CCOData {
   pacientesSessoes: Record<string, CCOSessaoDetalhada[]>
   pacientesAcaoImediata: PacientePendencia[]
   pacientesAcompanhamento: PacientePendencia[]
+  topTerapeutasComPendencias: TerapeutaComPendencias[]
 }

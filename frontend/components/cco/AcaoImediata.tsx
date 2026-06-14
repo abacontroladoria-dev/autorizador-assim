@@ -7,11 +7,12 @@ import type { PacientePendencia } from './types'
 interface AcaoImediataProps {
   pacientes: PacientePendencia[]
   loading?: boolean
+  onPacienteClick?: (nomePaciente: string) => void
 }
 
 const PREVIEW_COUNT = 5
 
-export default function AcaoImediata({ pacientes, loading }: AcaoImediataProps) {
+export default function AcaoImediata({ pacientes, loading, onPacienteClick }: AcaoImediataProps) {
   const [expandido, setExpandido] = useState(false)
 
   const total = pacientes.length
@@ -59,12 +60,13 @@ export default function AcaoImediata({ pacientes, loading }: AcaoImediataProps) 
               key={p.pacienteNome}
               className="flex items-center justify-between gap-3 py-2 min-w-0"
             >
-              <span
-                className="text-sm text-foreground truncate overflow-hidden whitespace-nowrap"
+              <button
+                onClick={() => onPacienteClick?.(p.pacienteNome)}
+                className="text-sm text-foreground truncate overflow-hidden whitespace-nowrap cursor-pointer hover:underline hover:text-primary transition-colors text-left"
                 title={p.pacienteNome}
               >
                 {p.pacienteNome}
-              </span>
+              </button>
               <span className="text-xs font-medium text-red-600 dark:text-red-400 shrink-0 whitespace-nowrap">
                 {p.diasAtraso} dias
               </span>
