@@ -39,7 +39,6 @@ export function ImpersonationProvider({ children }: { children: React.ReactNode 
         } = await supabase.auth.getUser()
 
         if (!user) {
-          setIsInitialized(true)
           return
         }
 

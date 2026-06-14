@@ -1,7 +1,6 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { supabaseService } from '@/lib/supabase/service'
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit'
 
 export async function proxy(request: NextRequest) {
@@ -55,7 +54,7 @@ export async function proxy(request: NextRequest) {
 
   if (user && pathname === '/login') {
     // Verifica se ainda precisa configurar antes de enviar ao dashboard
-    const { data: p } = await supabaseService
+    const { data: p } = await supabase
       .from('usuarios')
       .select('primeiro_acesso, username, ativo')
       .eq('id', user.id)
@@ -76,14 +75,14 @@ export async function proxy(request: NextRequest) {
     return response
   }
 
-  let { data: perfil, error: perfilError } = await supabaseService
+  let { data: perfil, error: perfilError } = await supabase
     .from('usuarios')
     .select('role, ativo, primeiro_acesso, username')
     .eq('id', user.id)
     .maybeSingle()
 
   if (!perfil && user.email) {
-    const { data: fallback } = await supabaseService
+    const { data: fallback } = await supabase
       .from('usuarios')
       .select('role, ativo, primeiro_acesso, username')
       .eq('email', user.email)
