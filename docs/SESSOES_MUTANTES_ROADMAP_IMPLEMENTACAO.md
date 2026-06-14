@@ -90,6 +90,7 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA cco TO service_role;
 ```
 
 **Checklist**:
+
 - [ ] SQL syntax validated
 - [ ] Migration tested on staging DB
 - [ ] Indexes created successfully
@@ -97,6 +98,7 @@ GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA cco TO service_role;
 - [ ] FK changes applied without data loss
 
 **Tests to Run**:
+
 ```bash
 supabase db reset  # Reset to latest migration
 # Verify:
@@ -150,6 +152,7 @@ export interface PreviousSessionState {
 ```
 
 **Checklist**:
+
 - [ ] TypeScript compiles without errors
 - [ ] Types exported from `cco-shared/logger.ts`
 - [ ] Shared utilities module updated
@@ -340,6 +343,7 @@ async function getPreviousSyncState(
 ```
 
 **Checklist**:
+
 - [ ] `detectMutations()` function implemented
 - [ ] `markOrphans()` function implemented
 - [ ] `getPreviousSyncState()` function implemented
@@ -348,6 +352,7 @@ async function getPreviousSyncState(
 - [ ] Error handling for orphan marking
 
 **Tests**:
+
 ```bash
 # Test 1: Normal run (no mutations)
 curl -X POST https://<url>/functions/v1/cco-sync-tita-sessions \
@@ -386,6 +391,7 @@ CREATE INDEX idx_snapshot_date ON cco.session_sync_snapshot(snapshot_date DESC);
 ```
 
 **Benefits**:
+
 - Faster lookup of previous state (don't scan entire table)
 - Can revert to previous state if needed
 
@@ -522,6 +528,7 @@ async function copyAuthorizations(
 ```
 
 **Checklist**:
+
 - [ ] Consolidation logic added to Engine
 - [ ] Tested with sample mutations
 - [ ] Logging implemented
@@ -600,6 +607,7 @@ serve(async (req: Request) => {
 ```
 
 **Cron Schedule**:
+
 ```sql
 -- Register in migration file
 SELECT cron.schedule(
@@ -615,6 +623,7 @@ SELECT cron.schedule(
 ```
 
 **Checklist**:
+
 - [ ] Retention job implemented
 - [ ] Cron schedule registered
 - [ ] Tested on staging (dry-run first)
@@ -702,6 +711,7 @@ curl -X POST https://<url>/functions/v1/cco-retention-orphans -d '{}'
 ```
 
 **Checklist**:
+
 - [ ] All unit tests pass
 - [ ] Integration test sequence passes
 - [ ] Idempotency verified
@@ -751,17 +761,20 @@ psql -c "SELECT COUNT(*) FROM cco.occurrences WHERE resolved_at IS NULL;
 ### Production Deployment Steps
 
 1. **Backup Database**
+
    ```bash
    supabase db backup
    ```
 
 2. **Apply Migrations**
+
    ```bash
    supabase db push
    # Or manually in Supabase SQL Editor
    ```
 
 3. **Deploy Edge Functions** (in order)
+
    ```bash
    supabase functions deploy cco-sync-tita-sessions  # Updated with mutations
    supabase functions deploy cco-conciliation-engine  # Updated with consolidation
@@ -769,12 +782,14 @@ psql -c "SELECT COUNT(*) FROM cco.occurrences WHERE resolved_at IS NULL;
    ```
 
 4. **Register Cron Job**
+
    ```sql
    -- Already in migration, but verify:
    SELECT * FROM cron.job WHERE jobname LIKE 'cco-retention%';
    ```
 
 5. **Verify**
+
    ```bash
    # Monitor first 24 hours
    SELECT * FROM cco.processing_logs 
@@ -783,6 +798,7 @@ psql -c "SELECT COUNT(*) FROM cco.occurrences WHERE resolved_at IS NULL;
    ```
 
 6. **Alert Setup**
+
    ```sql
    -- If orphaned_count > 50 detected, alert DevOps
    CREATE ALERT ... (optional, via monitoring tool)
@@ -876,4 +892,3 @@ Total: ~40 hours (10 days, 1 developer)
 **Document Owner**: Tech Lead  
 **Status**: Ready for Kick-Off  
 **Next Step**: Schedule design review before coding starts
-
