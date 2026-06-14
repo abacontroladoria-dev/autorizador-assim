@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { memo, useEffect, useState } from 'react'
 
 import Timeline from './Timeline'
 
@@ -12,7 +12,7 @@ interface Props {
   atendimento: any
 }
 
-export default function SidePanel({
+function SidePanel({
   atendimento,
 }: Props) {
 
@@ -52,13 +52,14 @@ export default function SidePanel({
     return (
 <div className="
   sticky top-42.5
-  
+
   bg-white/90
   backdrop-blur-sm
   rounded-3xl
-  border border-slate-200
-  shadow-sm
   border border-slate-200/80
+  shadow-sm
+  p-4
+  text-sm text-slate-400
 ">
         Selecione um atendimento
       </div>
@@ -68,14 +69,13 @@ export default function SidePanel({
   return (
 
 <div className="
-  sticky top-[170px]	
+  sticky top-[170px]
 
   bg-white/90
   backdrop-blur-sm
   rounded-3xl
-  border border-slate-200
-  shadow-sm
   border border-slate-200/80
+  shadow-sm
 ">
 
       {/* HEADER */}
@@ -301,6 +301,8 @@ export default function SidePanel({
     </div>
   )
 }
+
+export default memo(SidePanel)
 
 function Info({
   label,

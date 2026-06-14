@@ -1,9 +1,10 @@
+import { memo } from 'react'
 import StatusBadge from './StatusBadge'
 
-export default function AttendanceCard({ item, ativo, onClick }: any) {
+function AttendanceCard({ item, rowId, ativo, onSelect }: any) {
   return (
     <button
-      onClick={onClick}
+      onClick={() => onSelect(rowId)}
       className={`
         w-full
         bg-white
@@ -12,13 +13,12 @@ export default function AttendanceCard({ item, ativo, onClick }: any) {
         px-4 py-2
         text-left
         transition-all duration-200
-        duration-200
         hover:shadow-md
         hover:-translate-y-[1px]
-		
+
         ${ativo
-		  ? 'border-violet-400 border-l-4 ring-2 ring-violet-100 shadow-lg'
-		  : 'border-slate-200 border-l-4 border-l-transparent'}
+          ? 'border-emerald-400 border-l-4 ring-2 ring-emerald-100 shadow-lg'
+          : 'border-slate-200 border-l-4 border-l-transparent'}
       `}
     >
 
@@ -27,7 +27,7 @@ export default function AttendanceCard({ item, ativo, onClick }: any) {
         <div className="space-y-1.5 flex-1 min-w-0">
 
           <div className="flex items-center gap-3">
-            <div className="text-sm font-bold text-violet-700 min-w-[60px]">
+            <div className="text-sm font-bold text-emerald-700 min-w-[60px]">
               {item.horario?.slice(0, 5)}
             </div>
 
@@ -78,3 +78,5 @@ export default function AttendanceCard({ item, ativo, onClick }: any) {
     </button>
   )
 }
+
+export default memo(AttendanceCard)

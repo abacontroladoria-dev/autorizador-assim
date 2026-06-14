@@ -1,14 +1,14 @@
 	'use client'
 
-import { useEffect, useMemo, useState } from 'react'
-import PageHeader from '@/components/PageHeader'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getSupabaseClient } from '@/lib/supabase/client'
 import KpiCards from '@/components/central/KpiCards'
 import FiltersBar from '@/components/central/FiltersBar'
 import AttendanceList from '@/components/central/AttendanceList'
 import SidePanel from '@/components/central/SidePanel'
 import { useHeader } from '@/contexts/HeaderContext'
-import {listarCentralPacientes} from '@/services/central-pacientes.service'
+import { listarCentralPacientes } from '@/services/central-pacientes.service'
+import { getRowId } from '@/lib/central/rowId'
 
 export default function CentralTerapeuticaPage() {
   const { setHeader } = useHeader()
@@ -28,50 +28,71 @@ export default function CentralTerapeuticaPage() {
 
   const supabase = getSupabaseClient()
 
-  async function carregar() {
+  // Modelo A: estado atual lido por refs dentro de callbacks estáveis,
+  // evitando stale closure no realtime.
+  const dataRef = useRef(data)
+  const selecionadoIdRef = useRef(selecionadoId)
+  const reqIdRef = useRef(0)
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-    setLoading(true)
+  useEffect(() => {
+    selecionadoIdRef.current = selecionadoId
+  }, [selecionadoId])
 
-    const response: Record<string, any>[] =
-      await listarCentralPacientes(data)
+  // Callback estável ([]). Lê data/seleção atuais via ref.
+  // - silent: refetch sem flash de loading (usado pelo realtime).
+  // - autoSelect: seleciona o primeiro item quando não há seleção válida
+  //   (usado no carregamento inicial e na troca de data, nunca pelo realtime).
+  const carregar = useCallback(
+    async (opts?: { silent?: boolean; autoSelect?: boolean }) => {
+      const reqId = ++reqIdRef.current
 
-    setDados(response || [])
+      if (!opts?.silent) setLoading(true)
 
-	if (!selecionadoId && response?.length) {
+      const response: Record<string, any>[] =
+        await listarCentralPacientes(dataRef.current)
 
-	  const primeiro = response[0]
+      // Request guard: só a última requisição disparada escreve no estado.
+      if (reqId !== reqIdRef.current) return
 
-	  const id =
-		primeiro.id ??
-		`${primeiro.paciente_id}_${primeiro.data_atendimento}_${primeiro.horario}_${primeiro.terapia_exibicao_id}`
+      const lista = response || []
+      setDados(lista)
 
-	  setSelecionadoId(id)
-	}
+      // Validação 2: seleção órfã. Se o item selecionado sumiu, limpa.
+      const selAtual = selecionadoIdRef.current
+      const aindaExiste =
+        !!selAtual && lista.some((item) => getRowId(item) === selAtual)
 
-    setLoading(false)
-  }
+      if (opts?.autoSelect && !aindaExiste && lista.length) {
+        setSelecionadoId(getRowId(lista[0]))
+      } else if (selAtual && !aindaExiste) {
+        setSelecionadoId(null)
+      }
 
-useEffect(() => {
-
-  setHeader(
-    'Controle de Pacientes',
-    'Monitoramento operacional em tempo real'
+      if (!opts?.silent) setLoading(false)
+    },
+    []
   )
 
-}, [])
-
   useEffect(() => {
+    setHeader(
+      'Controle de Pacientes',
+      'Monitoramento operacional em tempo real'
+    )
+  }, [setHeader])
 
-    carregar()
-
-  }, [data])
-
+  // Troca de data (e carga inicial): atualiza a ref antes de carregar
+  // e auto-seleciona o primeiro item da nova data.
   useEffect(() => {
+    dataRef.current = data
+    carregar({ autoSelect: true })
+  }, [data, carregar])
 
+  // Realtime: subscription criada UMA vez. Coalesce a rajada de eventos
+  // do TiTa em uma única recarga silenciosa (debounce), sem mexer na seleção.
+  useEffect(() => {
     const channel = supabase
-
       .channel('central-terapeutica')
-
       .on(
         'postgres_changes',
         {
@@ -80,17 +101,19 @@ useEffect(() => {
           table: 'fila_autorizacoes',
         },
         () => {
-          carregar()
+          if (debounceRef.current) clearTimeout(debounceRef.current)
+          debounceRef.current = setTimeout(() => {
+            carregar({ silent: true })
+          }, 400)
         }
       )
-
       .subscribe()
 
     return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
       supabase.removeChannel(channel)
     }
-
-  }, [])
+  }, [supabase, carregar])
 
   const filtrados = useMemo(() => {
 
@@ -180,46 +203,36 @@ useEffect(() => {
     data
   ])
 
-  const selecionado = useMemo(() => {
+  const selecionado = useMemo(
+    () => filtrados.find((i) => getRowId(i) === selecionadoId),
+    [filtrados, selecionadoId]
+  )
 
-  return filtrados.find((i) => {
-
-    const id =
-      i.id ??
-      `${i.paciente_id}_${i.data_atendimento}_${i.horario}_${i.terapia_exibicao_id}`
-
-    return id === selecionadoId
-  })
-
-}, [filtrados, selecionadoId])
-
-  const indicadores = {
-
-    autorizados:
-      filtrados.filter(
-        a => a.status_operacional === 'autorizado'
+  // KPIs refletem o cenário operacional COMPLETO da data selecionada (sobre `dados`),
+  // não o subconjunto filtrado pela busca/filtros (`filtrados`). Assim os totais do dia
+  // permanecem estáveis durante a busca e KpiCards não re-renderiza a cada tecla.
+  const indicadores = useMemo(
+    () => ({
+      autorizados: dados.filter(
+        (a) => a.status_operacional === 'autorizado'
       ).length,
 
-    pendentes:
-      filtrados.filter(
-        a => a.status_operacional === 'pendente'
+      pendentes: dados.filter(
+        (a) => a.status_operacional === 'pendente'
       ).length,
 
-    processando:
-      filtrados.filter(
-        a => a.status_operacional === 'processando'
+      processando: dados.filter(
+        (a) => a.status_operacional === 'processando'
       ).length,
 
-    erros:
-      filtrados.filter(
-        a => a.status_operacional === 'erro'
-      ).length,
+      erros: dados.filter((a) => a.status_operacional === 'erro').length,
 
-    falta_terapeuta:
-      filtrados.filter(
-        a => a.status_operacional === 'falta_terapeuta'
+      falta_terapeuta: dados.filter(
+        (a) => a.status_operacional === 'falta_terapeuta'
       ).length,
-  }
+    }),
+    [dados]
+  )
 
   const conveniOpcoes = useMemo(() => {
     const set = new Set<string>()

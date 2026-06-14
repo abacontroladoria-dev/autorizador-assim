@@ -1,5 +1,6 @@
 'use client'
 
+import { memo } from 'react'
 import {
   Search,
   Filter,
@@ -23,7 +24,7 @@ interface Props {
   setData: (v: string) => void
 }
 
-export default function FiltersBar(props: Props) {
+function FiltersBar(props: Props) {
   return (
     <div
       className="
@@ -99,6 +100,8 @@ export default function FiltersBar(props: Props) {
   )
 }
 
+export default memo(FiltersBar)
+
 const inputClass = `
   h-10
   rounded-2xl
@@ -108,7 +111,7 @@ const inputClass = `
   text-sm
   outline-none
   focus:ring-4
-  focus:ring-violet-100
-  focus:border-violet-300
+  focus:ring-emerald-100
+  focus:border-emerald-300
   transition
 `

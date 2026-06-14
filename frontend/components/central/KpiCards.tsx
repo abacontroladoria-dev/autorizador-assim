@@ -1,5 +1,6 @@
 'use client'
 
+import { memo } from 'react'
 import {
   CheckCircle2,
   Clock3,
@@ -18,7 +19,7 @@ interface Props {
   }
 }
 
-export default function KpiCards({
+function KpiCards({
   indicadores,
 }: Props) {
   const cards = [
@@ -79,7 +80,7 @@ export default function KpiCards({
                   {card.title}
                 </p>
 
-                <h2 className="text-2x1 leading-none font-bold text-slate-800 mt-2">
+                <h2 className="text-2xl leading-none font-bold text-slate-800 mt-2">
                   {card.value}
                 </h2>
               </div>
@@ -145,3 +146,5 @@ function getColor(color: string) {
       }
   }
 }
+
+export default memo(KpiCards)
