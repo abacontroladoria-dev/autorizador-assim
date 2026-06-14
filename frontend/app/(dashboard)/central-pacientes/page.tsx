@@ -2,13 +2,27 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { getSupabaseClient } from '@/lib/supabase/client'
-import KpiCards from '@/components/central/KpiCards'
+import DayPulse from '@/components/central/DayPulse'
 import FiltersBar from '@/components/central/FiltersBar'
 import AttendanceList from '@/components/central/AttendanceList'
 import SidePanel from '@/components/central/SidePanel'
 import { useHeader } from '@/contexts/HeaderContext'
 import { listarCentralPacientes } from '@/services/central-pacientes.service'
 import { getRowId } from '@/lib/central/rowId'
+import { resolverStatus, houveSubstituicao } from '@/lib/central/severity'
+
+// Unidades operacionais (mesma normalização de vw_central_terapeutica):
+// reduz o sala_nome cru ("Unid. Realengo - Sala 3") a uma das três unidades.
+const ORDEM_UNIDADES = ['Realengo', 'Padre Miguel', 'Fazendinha'] as const
+
+function normalizarUnidade(raw?: string | null): string | null {
+  if (!raw) return null
+  const s = raw.toLowerCase()
+  if (s.includes('realengo')) return 'Realengo'
+  if (s.includes('padre miguel')) return 'Padre Miguel'
+  if (s.includes('fazendinha')) return 'Fazendinha'
+  return null
+}
 
 export default function CentralTerapeuticaPage() {
   const { setHeader } = useHeader()
@@ -20,9 +34,11 @@ export default function CentralTerapeuticaPage() {
   const [loading, setLoading] = useState(true)
 
   const [busca, setBusca] = useState('')
-  const [status, setStatus] = useState('')
+  const [foco, setFoco] = useState('')
+  const [horario, setHorario] = useState('')
   const [unidade, setUnidade] = useState('')
-  const [convenio, setConvenio] = useState('')
+  const [terapia, setTerapia] = useState('')
+  const [profissional, setProfissional] = useState('')
 
   const [data, setData] = useState(hoje)
 
@@ -140,34 +156,61 @@ export default function CentralTerapeuticaPage() {
         )
       })
 
-       .filter(a => {
+      .filter(a => {
 
-         if (!status) return true
+        if (!foco) return true
 
-         return (
-          a.status_assim ||
-           a.status
-        ) === status
+        if (foco === 'substituicao') return houveSubstituicao(a)
+
+        const key = resolverStatus(a).key
+
+        if (foco === 'resolvido') {
+          return key === 'autorizado' || key === 'presenca_confirmada'
+        }
+
+        if (foco === 'andamento') {
+          return (
+            key === 'processando' ||
+            key === 'pendente' ||
+            key === 'concluido_sem_guia'
+          )
+        }
+
+        return key === foco
+      })
+
+      .filter(a => {
+
+        if (!horario) return true
+
+        return (
+          a.horario?.slice(0, 5) ||
+          a.hora_inicial?.slice(0, 5)
+        ) === horario
       })
 
       .filter(a => {
 
         if (!unidade) return true
 
-        return (
-          a.unidade ||
-          a.sala_nome
-        ) === unidade
+        return normalizarUnidade(a.unidade || a.sala_nome) === unidade
       })
 
       .filter(a => {
 
-        if (!convenio) return true
+        if (!terapia) return true
 
-        return (
-          a.convenio ||
-          a.convenio_nome
-        ) === convenio
+        return a.classificacao_terapia === terapia
+      })
+
+      .filter(a => {
+
+        if (!profissional) return true
+
+        return [
+          a.profissional_nome,
+          a.profissional_realizou_nome,
+        ].includes(profissional)
       })
 
 .sort((a, b) => {
@@ -197,9 +240,11 @@ export default function CentralTerapeuticaPage() {
   }, [
     dados,
     busca,
-    status,
+    foco,
+    horario,
     unidade,
-    convenio,
+    terapia,
+    profissional,
     data
   ])
 
@@ -210,61 +255,100 @@ export default function CentralTerapeuticaPage() {
 
   // KPIs refletem o cenário operacional COMPLETO da data selecionada (sobre `dados`),
   // não o subconjunto filtrado pela busca/filtros (`filtrados`). Assim os totais do dia
-  // permanecem estáveis durante a busca e KpiCards não re-renderiza a cada tecla.
-  const indicadores = useMemo(
-    () => ({
-      autorizados: dados.filter(
-        (a) => a.status_operacional === 'autorizado'
-      ).length,
-
-      pendentes: dados.filter(
-        (a) => a.status_operacional === 'pendente'
-      ).length,
-
-      processando: dados.filter(
-        (a) => a.status_operacional === 'processando'
-      ).length,
-
-      erros: dados.filter((a) => a.status_operacional === 'erro').length,
-
-      falta_terapeuta: dados.filter(
-        (a) => a.status_operacional === 'falta_terapeuta'
-      ).length,
-    }),
-    [dados]
-  )
-
-  const conveniOpcoes = useMemo(() => {
-    const set = new Set<string>()
-    for (const a of dados) {
-      const v = a.convenio || a.convenio_nome
-      if (v) set.add(v)
+  // permanecem estáveis durante a busca e o DayPulse não re-renderiza a cada tecla.
+  const indicadores = useMemo(() => {
+    const acc = {
+      total: dados.length,
+      autorizados: 0,
+      em_processo: 0,
+      falta_paciente: 0,
+      falta_terapeuta: 0,
+      sem_autorizacao: 0,
+      substituicoes: 0,
     }
-    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'))
+
+    for (const a of dados) {
+      const key = resolverStatus(a).key
+
+      if (key === 'autorizado' || key === 'presenca_confirmada') acc.autorizados++
+      else if (
+        key === 'processando' ||
+        key === 'pendente' ||
+        key === 'concluido_sem_guia'
+      )
+        acc.em_processo++
+      else if (key === 'falta_paciente') acc.falta_paciente++
+      else if (key === 'falta_terapeuta') acc.falta_terapeuta++
+      else if (key === 'erro') acc.sem_autorizacao++
+
+      if (houveSubstituicao(a)) acc.substituicoes++
+    }
+
+    return acc
+  }, [dados])
+
+  // Opções distintas dos filtros, derivadas dos dados do dia.
+  const opcoes = useMemo(() => {
+    const horarios = new Set<string>()
+    const unidadesPresentes = new Set<string>()
+    const terapias = new Set<string>()
+    const profissionais = new Set<string>()
+
+    for (const a of dados) {
+      const h = a.horario?.slice(0, 5) || a.hora_inicial?.slice(0, 5)
+      if (h) horarios.add(h)
+
+      const u = normalizarUnidade(a.unidade || a.sala_nome)
+      if (u) unidadesPresentes.add(u)
+
+      if (a.classificacao_terapia) terapias.add(a.classificacao_terapia)
+
+      if (a.profissional_nome) profissionais.add(a.profissional_nome)
+      if (a.profissional_realizou_nome)
+        profissionais.add(a.profissional_realizou_nome)
+    }
+
+    const ordenar = (s: Set<string>) =>
+      Array.from(s).sort((a, b) => a.localeCompare(b, 'pt-BR'))
+
+    return {
+      horarios: Array.from(horarios).sort(),
+      // só Realengo, Padre Miguel e Fazendinha, na ordem canônica
+      unidades: ORDEM_UNIDADES.filter((u) => unidadesPresentes.has(u)),
+      terapias: ordenar(terapias),
+      profissionais: ordenar(profissionais),
+    }
   }, [dados])
 
   return (
 
-	<div className="bg-card rounded-2xl">
-      <div className="flex flex-col gap-4 overflow-hidden">
+    <div className="flex flex-col gap-4 overflow-hidden">
 
-        <KpiCards
+        <DayPulse
           indicadores={indicadores}
+          foco={foco}
+          setFoco={setFoco}
         />
 
         <FiltersBar
           busca={busca}
           setBusca={setBusca}
 
-          status={status}
-          setStatus={setStatus}
+          horario={horario}
+          setHorario={setHorario}
+          horarioOpcoes={opcoes.horarios}
 
           unidade={unidade}
           setUnidade={setUnidade}
+          unidadeOpcoes={opcoes.unidades}
 
-          convenio={convenio}
-          setConvenio={setConvenio}
-          conveniOpcoes={conveniOpcoes}
+          terapia={terapia}
+          setTerapia={setTerapia}
+          terapiaOpcoes={opcoes.terapias}
+
+          profissional={profissional}
+          setProfissional={setProfissional}
+          profissionalOpcoes={opcoes.profissionais}
 
           data={data}
           setData={setData}
@@ -299,7 +383,5 @@ export default function CentralTerapeuticaPage() {
         </div>
 
       </div>
-
-    </div>
   )
 }
