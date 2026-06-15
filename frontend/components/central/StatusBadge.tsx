@@ -1,196 +1,49 @@
 'use client'
 
-import {
-  CheckCircle2,
-  Clock3,
-  Loader2,
-  AlertTriangle,
-  XCircle,
-  UserCheck,
-} from 'lucide-react'
+import { resolverStatus, SEVERIDADE_UI } from '@/lib/central/severity'
 
 interface Props {
+  /** registro completo (preferido) … */
+  item?: any
+  /** … ou string de status crua (compatibilidade) */
   status?: string
+  /** 'word' (ícone + palavra, padrão) | 'pill' (preenchido) */
+  variant?: 'word' | 'pill'
 }
 
+/**
+ * Sinal de status enxuto: ícone + palavra, cor pela severidade.
+ * Um único badge por linha — sem empilhar pills coloridas.
+ */
 export default function StatusBadge({
+  item,
   status,
+  variant = 'word',
 }: Props) {
+  const token = resolverStatus(item ?? { status_operacional: status })
+  const ui = SEVERIDADE_UI[token.severidade]
+  const Icon = token.icon
 
-  const config =
-    getStatusConfig(status)
+  if (variant === 'pill') {
+    return (
+      <span
+        className={`
+          inline-flex items-center gap-1.5
+          px-2.5 py-1 rounded-full
+          text-xs font-medium
+          border ${ui.soft} ${ui.softBorder} ${ui.text}
+        `}
+      >
+        <Icon className={`w-3.5 h-3.5 ${token.spin ? 'animate-spin' : ''}`} />
+        {token.label}
+      </span>
+    )
+  }
 
   return (
-    <div
-      className={`
-        inline-flex
-        items-center
-        gap-2
-        px-3 py-1.5
-        rounded-full
-        text-xs
-        font-semibold
-        whitespace-nowrap
-        border
-        ${config.className}
-      `}
-    >
-
-      <config.icon
-        className={`
-          w-3.5 h-3.5
-          ${config.animate ? 'animate-spin' : ''}
-        `}
-      />
-
-      {config.label}
-
-    </div>
+    <span className={`inline-flex items-center gap-1.5 text-xs font-medium ${ui.text}`}>
+      <Icon className={`w-3.5 h-3.5 ${token.spin ? 'animate-spin' : ''}`} />
+      {token.label}
+    </span>
   )
-}
-
-function getStatusConfig(status?: string) {
-
-  const normalized =
-    status?.toLowerCase()
-
-  switch (normalized) {
-
-    // =========================
-    // AUTORIZADO
-    // =========================
-
-    case 'autorizado':
-
-    case 'concluido':
-
-      return {
-        label: 'Autorizado',
-
-        className:
-          'bg-emerald-50 text-emerald-700 border-emerald-200',
-
-        icon: CheckCircle2,
-      }
-
-    // =========================
-    // CONCLUIDO SEM GUIA
-    // =========================
-
-    case 'concluido_sem_guia':
-
-      return {
-        label: 'Aguardando guia',
-
-        className:
-          'bg-amber-50 text-amber-700 border-amber-200',
-
-        icon: AlertTriangle,
-      }
-
-    // =========================
-    // PRESENÇA
-    // =========================
-
-    case 'presenca_confirmada':
-
-      return {
-        label: 'Presença confirmada',
-
-        className:
-          'bg-blue-50 text-blue-700 border-blue-200',
-
-        icon: UserCheck,
-      }
-
-    // =========================
-    // PROCESSANDO
-    // =========================
-
-    case 'executando':
-
-    case 'processando':
-
-      return {
-        label: 'Processando',
-
-        className:
-          'bg-amber-50 text-amber-700 border-amber-200',
-
-        icon: Loader2,
-
-        animate: true,
-      }
-
-    // =========================
-    // FALTA
-    // =========================
-
-    case 'falta':
-
-      return {
-        label: 'Falta',
-
-        className:
-          'bg-orange-50 text-orange-700 border-orange-200',
-
-        icon: XCircle,
-      }
-
-    case 'falta_terapeuta':
-
-      return {
-        label: 'Falta terapeuta',
-
-        className:
-          'bg-red-50 text-red-700 border-red-200',
-
-        icon: XCircle,
-      }
-
-    // =========================
-    // ERRO
-    // =========================
-
-    case 'erro':
-
-      return {
-        label: 'Erro operacional',
-
-        className:
-          'bg-red-50 text-red-700 border-red-200',
-
-        icon: AlertTriangle,
-      }
-
-    // =========================
-    // PENDENTE
-    // =========================
-
-    case 'pendente':
-
-      return {
-        label: 'Pendente',
-
-        className:
-          'bg-slate-100 text-slate-700 border-slate-200',
-
-        icon: Clock3,
-      }
-
-    // =========================
-    // DEFAULT
-    // =========================
-
-    default:
-
-      return {
-        label: status || 'Sem status',
-
-        className:
-          'bg-slate-100 text-slate-700 border-slate-200',
-
-        icon: Clock3,
-      }
-  }
 }

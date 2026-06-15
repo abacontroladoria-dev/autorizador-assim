@@ -15,6 +15,7 @@ Quando um operador **remarca uma sessão** em TITA (ex: "Mudar de 08/06 14:00 pa
 - **Depois**: `session_key = sha256("joao silva" || "2026-06-09" || "14:00") = def456`
 
 **Problema**: O sistema não rastreia essa mudança. Resultado:
+
 - ❌ Sessão antiga (abc123) fica órfã em `cco.atendimentos`
 - ❌ Ocorrências apontam para `session_key` que desapareceu
 - ❌ Histórico de autorizações perdido
@@ -75,6 +76,7 @@ RESULTADO:
 ### 1. Integridade Referencial (🔴 CRÍTICO)
 
 **Cenário**: Ocorrência aponta para `session_key` que não existe mais
+
 ```sql
 -- Tentativa de listar ocorrências ativas:
 SELECT COUNT(*) FROM cco.occurrences WHERE resolved_at IS NULL;
@@ -89,6 +91,7 @@ WHERE o.resolved_at IS NULL;
 ```
 
 **FK Constraint Atual**: `ON DELETE RESTRICT`
+
 - Se tenta `DELETE FROM cco.atendimentos WHERE session_key='abc123'` **enquanto há ocorrências**
 - Operação **FALHA** com FK constraint violation
 - Ocorrências ficam **presas forever** (nunca podem ser deletadas)
@@ -99,6 +102,7 @@ Uma sessão foi autorizada em ASSIM para a data original (2026-06-08).
 Operador remarca para 2026-06-09.
 
 **Problema**:
+
 - Autorização em `cco.session_authorizations` aponta para `session_key=abc123`
 - Nova sessão tem `session_key=def456`
 - **Nenhum mecanismo copia a autorização** para a nova sessão
@@ -107,6 +111,7 @@ Operador remarca para 2026-06-09.
 ### 3. Duplicidade de Versões (🟡 MÉDIO)
 
 Se operador cancela a remarcação durante transição:
+
 ```
 TITA (em transição):
   ├─ João Silva, 2026-06-08 14:00 (versão antiga ainda visível)
@@ -160,6 +165,7 @@ cco.atendimentos tem:
 ```
 
 **Fluxo de sincronização**:
+
 1. Job 1 recebe CSV de TITA
 2. Computa `session_key` baseado em nome+data+hora
 3. UPSERT por `session_key`
@@ -200,6 +206,7 @@ ALTER TABLE cco.occurrences ADD COLUMN orphaned_at timestamptz;
 ```
 
 **Workflow**:
+
 1. Detectar que `session_key=abc123` desapareceu de TITA
 2. `UPDATE cco.atendimentos SET orphaned_at=now() WHERE session_key='abc123'`
 3. Esconder de queries: `WHERE orphaned_at IS NULL`
@@ -209,6 +216,7 @@ ALTER TABLE cco.occurrences ADD COLUMN orphaned_at timestamptz;
 #### 3️⃣ **History Consolidation** (Engine Enhancement)
 
 Quando detecta mutação (abc123 → def456):
+
 1. Buscar autorizações de abc123
 2. Copiar para def456 (com marca `copied_from_session_key`)
 3. Garantir def456 herda contexto de abc123
@@ -236,6 +244,7 @@ Quando detecta mutação (abc123 → def456):
 **Motivo**: Fase 3 rodará 7 regras de conciliação. Se dados estão corrompidos (orphans), será lixo dentro de lixo.
 
 **Timeline**:
+
 - ✅ Fase 1 (Schema): COMPLETO
 - ✅ Fase 2 (Sync Jobs): COMPLETO
 - 🔧 **Fase 2-B (Mutation Tracking): CRÍTICO — 1-2 semanas**
@@ -269,6 +278,7 @@ WHERE NOT EXISTS (
 ## Approval
 
 **Stakeholders**:
+
 - [ ] Tech Lead: Aprova incluir Fase 2-B no roadmap?
 - [ ] Product: Impacta SLA de remarcações? (Não, é backend)
 - [ ] QA: Pode começar testes após código?
@@ -281,6 +291,7 @@ WHERE NOT EXISTS (
 ## Documentação Adicional
 
 Ver arquivos complementares:
+
 - **`ANALISE_SESSOES_MUTANTES.md`** — Análise completa com SQL concreto
 - **`SESSOES_MUTANTES_DIAGNOSTICO.sql`** — Queries de validação e cleanup
 - **`SESSOES_MUTANTES_DIAGRAMA.md`** — Fluxos visuais e state machines

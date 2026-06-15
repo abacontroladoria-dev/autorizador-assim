@@ -37,11 +37,6 @@ export default function AuditoriaAssimPage() {
           kpis={kpis}
           loading={loading}
           activeFilter={filters.situacao}
-          totalFiltrados={
-            filters.situacao || filters.paciente || filters.tuss
-              ? totalFiltrados
-              : undefined
-          }
           onFilter={(situacao) => setFilters({ ...filters, situacao })}
         />
 

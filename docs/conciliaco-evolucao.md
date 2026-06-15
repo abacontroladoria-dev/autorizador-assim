@@ -1,14 +1,18 @@
 # SPEC-CCO-001
 
-# Central de Conciliação Operacional (CCO)
+## Central de Conciliação Operacional (CCO)
 
-# Sistema PULSAR
+### Sistema PULSAR
 
 ## Objetivo
 
-Implementar uma Central de Conciliação Operacional capaz de monitorar automaticamente o ciclo completo de atendimento da clínica, consolidando informações operacionais, assistenciais e financeiras.
+Implementar uma Central de Conciliação Operacional capaz de monitorar
+automaticamente o ciclo completo de atendimento da clínica, consolidando
+informações operacionais, assistenciais e financeiras.
 
-O sistema deverá identificar automaticamente situações que exigem atuação da coordenação, protegendo receita, monitorando autorizações, acompanhando evoluções e controlando substituições de terapeutas.
+O sistema deverá identificar automaticamente situações que exigem atuação da
+coordenação, protegendo receita, monitorando autorizações, acompanhando
+evoluções e controlando substituições de terapeutas.
 
 A Central não será uma tela de consulta de dados.
 
@@ -16,7 +20,7 @@ Ela será um centro de monitoramento baseado em ocorrências, alertas e ações 
 
 ---
 
-# Objetivos de Negócio
+## Objetivos de Negócio
 
 A Central deverá responder continuamente às seguintes perguntas:
 
@@ -48,13 +52,13 @@ A Central deverá responder continuamente às seguintes perguntas:
 
 ---
 
-# Fontes Oficiais de Dados
+## Fontes Oficiais de Dados
 
 ## 1. API do TITA
 
 Endpoint:
 
-https://apiv2.apptita.com.br/api/integracao/csv_grade_profissionais
+[https://apiv2.apptita.com.br/api/integracao/csv_grade_profissionais](https://apiv2.apptita.com.br/api/integracao/csv_grade_profissionais)
 
 Responsável por fornecer:
 
@@ -134,7 +138,10 @@ Regra:
 
 Esta tabela é a fonte oficial para faltas e substituições.
 
-Qualquer informação divergente identificada nos campos Possui Tratativa, Profissional Tratativa ou Data da Tratativa da fonte grade_profissionais deverá ser registrada como ocorrência de inconsistência operacional para análise da coordenação.
+Qualquer informação divergente identificada nos campos Possui Tratativa,
+Profissional Tratativa ou Data da Tratativa da fonte grade_profissionais
+deverá ser registrada como ocorrência de inconsistência operacional para
+análise da coordenação.
 
 Não inferir substituições comparando agenda e evolução.
 
@@ -142,9 +149,9 @@ Toda substituição deve existir formalmente nesta tabela.
 
 ---
 
-# Princípios Arquiteturais
+## Princípios Arquiteturais
 
-## Arquitetura Sidecar
+### Arquitetura Sidecar
 
 A Central de Conciliação deve ser completamente desacoplada dos módulos existentes.
 
@@ -179,7 +186,7 @@ Todos os dados deverão ser previamente materializados.
 
 ---
 
-# Banco de Dados
+## Banco de Dados
 
 Criar schema exclusivo:
 
@@ -201,7 +208,7 @@ cco.processing_logs
 
 ---
 
-# Entidade Principal
+## Entidade Principal
 
 ## cco.sessions
 
@@ -245,7 +252,7 @@ updated_at
 
 ---
 
-# Chave de Conciliação
+## Chave de Conciliação
 
 session_key
 
@@ -267,9 +274,9 @@ Uma sessão pode possuir substituição legítima.
 
 ---
 
-# Materialização
+## Materialização
 
-## Job 1
+### Job 1
 
 sync_tita_sessions
 
@@ -291,7 +298,7 @@ Atualizar lista de sessões.
 
 ---
 
-## Job 2
+### Job 2
 
 sync_assim_authorizations
 
@@ -313,7 +320,7 @@ Atualizar status final das autorizações.
 
 ---
 
-## Job 3
+### Job 3
 
 sync_authorization_queue
 
@@ -335,7 +342,7 @@ Atualizar solicitações pendentes.
 
 ---
 
-## Job 4
+### Job 4
 
 sync_therapist_control
 
@@ -357,7 +364,7 @@ Atualizar faltas e substituições.
 
 ---
 
-# Motor de Conciliação
+## Motor de Conciliação
 
 Serviço:
 
@@ -375,7 +382,7 @@ Nunca consultar sistemas externos.
 
 ---
 
-# Categorias de Ocorrências
+## Categorias de Ocorrências
 
 AUTORIZACAO_PENDENTE
 
@@ -393,9 +400,9 @@ GLOSA
 
 ---
 
-# Regras de Negócio
+## Regras de Negócio
 
-## AUTORIZACAO_PENDENTE
+### AUTORIZACAO_PENDENTE
 
 Condições:
 
@@ -420,7 +427,7 @@ Ações:
 
 ---
 
-## SESSAO_SEM_AUTORIZACAO
+### SESSAO_SEM_AUTORIZACAO
 
 Condições:
 
@@ -449,7 +456,7 @@ Receita em risco.
 
 ---
 
-## EVOLUCAO_ATRASADA
+### EVOLUCAO_ATRASADA
 
 Condições:
 
@@ -470,7 +477,7 @@ Ações:
 
 ---
 
-## FALTA_TERAPEUTA
+### FALTA_TERAPEUTA
 
 Condições:
 
@@ -491,7 +498,7 @@ Ações:
 
 ---
 
-## SUBSTITUICAO
+### SUBSTITUICAO
 
 Condições:
 
@@ -507,7 +514,7 @@ Somente monitoramento.
 
 ---
 
-## FALTA_PACIENTE
+### FALTA_PACIENTE
 
 Condições:
 
@@ -533,7 +540,7 @@ Pode existir evolução mesmo com falta.
 
 ---
 
-## GLOSA
+### GLOSA
 
 Condições:
 
@@ -549,7 +556,7 @@ Somente monitoramento.
 
 ---
 
-# Receita em Risco
+## Receita em Risco
 
 Uma sessão será considerada Receita em Risco quando possuir qualquer uma das situações:
 
@@ -561,7 +568,7 @@ Essa informação deverá ser calculada e exibida no dashboard.
 
 ---
 
-# Frontend
+## Frontend
 
 Módulo:
 
@@ -571,9 +578,9 @@ Totalmente isolado dos demais módulos.
 
 ---
 
-# Layout
+## Layout
 
-## Cards Superiores
+### Cards Superiores
 
 Autorizações Pendentes
 
@@ -593,7 +600,7 @@ Receita em Risco
 
 ---
 
-## Feed de Ocorrências
+### Feed de Ocorrências
 
 Formato:
 
@@ -621,7 +628,7 @@ Atendimento realizado por substituto
 
 ---
 
-# APIs
+## APIs
 
 GET /api/cco/dashboard
 
@@ -633,7 +640,7 @@ POST /api/cco/occurrences//resolve
 
 ---
 
-# Critérios de Aceite
+## Critérios de Aceite
 
 1. Nenhuma alteração em tabelas legadas.
 

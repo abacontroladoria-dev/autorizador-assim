@@ -17,15 +17,26 @@ export default function Login() {
     setErro("");
     setLoading(true);
 
-    if (!login.includes("@")) {
-      setErro("Por favor, use seu endereço de e-mail para acessar o sistema.");
-      setLoading(false);
-      return;
-    }
-
     try {
+      let emailParaLogin = login
+
+      if (!login.includes("@")) {
+        const { data: usuario } = await supabase
+          .from("usuarios")
+          .select("email")
+          .eq("username", login)
+          .maybeSingle()
+
+        if (!usuario?.email) {
+          setErro("Usuário não encontrado. Verifique e tente novamente.");
+          setLoading(false);
+          return;
+        }
+        emailParaLogin = usuario.email
+      }
+
       const { data, error } = await supabase.auth.signInWithPassword({
-        email: login,
+        email: emailParaLogin,
         password: senha,
       });
 

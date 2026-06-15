@@ -247,33 +247,39 @@ export async function buscarItensAgenda(
   }
 }
 
-// Terapias do Grupo ABA — equivalentes para substituição (spec: cobertura-clinica.md)
+// Terapias do Grupo ABA — equivalentes para substituição (spec: central-terapeutas-substituicao.md)
 export const ABA_GROUP = [
   'Aplicador ABA (AE)',
   'Aplicador ABA (EF)',
+  'Aplicador ABA (HS)',
   'Aplicador ABA (PS)',
   'Aplicador ABA (SF)',
 ] as const
 
 export const COORD_CASO = 'Coordenador de Caso'
 
-// Compatibilidade direcional EXTRA além do grupo ABA.
-// Chave = Terapia Real da SESSÃO a cobrir; valores = Terapias Reais que podem cobri-la.
-// Unidirecional: a base cobre o sub-tipo ABA, mas o ABA não cobre a base.
-const COMPAT_EXTRA: Record<string, readonly string[]> = {
-  'Aplicador ABA (PS)': ['Psicopedagogia'],
-}
+export const SUPERVISAO_ABA = 'Supervisão ABA'
 
 /**
  * Terapias Reais compatíveis para cobrir uma sessão da terapia informada.
- * Grupo ABA: os três subtipos + Coordenador de Caso. Demais: exact-match.
- * Acrescenta a compatibilidade direcional definida em COMPAT_EXTRA.
+ *
+ * Matriz:
+ * - Sessão ABA: coberta por qualquer ABA + CC + Supervisão ABA
+ * - Sessão CC: coberta por CC + ABA(EF) + ABA(PS) + Supervisão ABA
+ * - Sessão Supervisão ABA: coberta apenas por Supervisão ABA
+ * - Demais terapias: exact-match apenas
  */
 export function terapiasCompativeis(terapiaNome: string): string[] {
-  const isAba = (ABA_GROUP as readonly string[]).includes(terapiaNome)
-  const base = isAba ? [...ABA_GROUP, COORD_CASO] : [terapiaNome]
-  const extra = COMPAT_EXTRA[terapiaNome] ?? []
-  return [...new Set([...base, ...extra])]
+  if ((ABA_GROUP as readonly string[]).includes(terapiaNome)) {
+    return [...ABA_GROUP, COORD_CASO, SUPERVISAO_ABA]
+  }
+  if (terapiaNome === COORD_CASO) {
+    return [COORD_CASO, 'Aplicador ABA (EF)', 'Aplicador ABA (PS)', SUPERVISAO_ABA]
+  }
+  if (terapiaNome === SUPERVISAO_ABA) {
+    return [SUPERVISAO_ABA]
+  }
+  return [terapiaNome]
 }
 
 export type SlotModalSubstituicao = {

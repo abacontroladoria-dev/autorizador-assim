@@ -35,9 +35,8 @@ async function humanType(page, selector, texto) {
   }
 }
 
-async function aguardarTelaLivre(page, timeoutMs = 60000) {
-  const fim = Date.now() + timeoutMs;
-  while (Date.now() < fim) {
+async function aguardarTelaLivre(page) {
+  while (true) {
     const modal = await page.locator(`
       .jconfirm-box:visible,
       .modal:visible,
@@ -56,7 +55,6 @@ async function aguardarTelaLivre(page, timeoutMs = 60000) {
 
     await page.waitForTimeout(1000);
   }
-  throw new Error('Timeout: Assim não terminou de carregar (sistema travado)');
 }
 
 function normalizarTexto(texto) {
@@ -64,41 +62,6 @@ function normalizarTexto(texto) {
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
     .replace(/[^a-zA-Z0-9\s]/g, "");
-}
-
-// Marca uma aba que ser\u00e1 deixada aberta (Token p/ impress\u00e3o ou erro p/ debug).
-// window.name persiste enquanto a aba ficar ociosa, ent\u00e3o sobrevive entre tarefas
-// (cada tarefa reconecta via CDP e perde as refer\u00eancias de Page anteriores).
-async function marcarAba(page) {
-  try {
-    await page.evaluate((m) => { window.name = m; }, `RPA::${Date.now()}`);
-  } catch (_) {}
-}
-
-// Aplica o teto global de abas: mant\u00e9m apenas as MAX_ABAS_ABERTAS mais recentes
-// marcadas com "RPA::<timestamp>" e fecha as anteriores. Abas sem marcador
-// (aba base / aba de trabalho atual) s\u00e3o ignoradas. Nunca derruba a tarefa.
-async function limparAbasAntigas(context) {
-  try {
-    const marcadas = [];
-    for (const p of context.pages()) {
-      let nome = '';
-      try { nome = await p.evaluate(() => window.name); } catch (_) { continue; }
-      if (typeof nome === 'string' && nome.startsWith('RPA::')) {
-        const ts = Number(nome.slice(5)) || 0;
-        marcadas.push({ page: p, ts });
-      }
-    }
-
-    if (marcadas.length <= MAX_ABAS_ABERTAS) return;
-
-    marcadas.sort((a, b) => a.ts - b.ts); // mais antigas primeiro
-    const aFechar = marcadas.slice(0, marcadas.length - MAX_ABAS_ABERTAS);
-    for (const { page: p } of aFechar) {
-      try { await p.close(); } catch (_) {}
-    }
-    console.log(`\ud83e\uddf9 Abas antigas fechadas: ${aFechar.length} (teto ${MAX_ABAS_ABERTAS})`);
-  } catch (_) {}
 }
 
 // =========================
@@ -113,9 +76,6 @@ const SOLICITANTE_FIXO = process.env.ASSIM_SOLICITANTE || '8888';
 const TIPO_CONSULTA = process.env.ASSIM_TIPO_CONSULTA;
 const TIPO_SAIDA = process.env.ASSIM_TIPO_SAIDA;
 const SISTEMA_URL = process.env.SISTEMA_URL;
-// Teto de abas que o RPA deixa abertas no Chrome 9222 (Token p/ impressão + erros p/ debug).
-// Mantém apenas as N mais recentes no total; as anteriores são fechadas a cada tarefa.
-const MAX_ABAS_ABERTAS = Number(process.env.MAX_ABAS_ABERTAS) || 3;
 const supabase = createClient(
   process.env.SUPABASE_URL,
   process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -137,23 +97,6 @@ async function aguardarResultadoEnvio(page, timeoutMs = 120000) {
     return 'sucesso';
 
   } catch (e) {
-    // Verifica resposta do ASSIM visível na página antes de declarar timeout
-    try {
-      const bodyText = await page.locator('body').innerText();
-
-      if (/Liberado \*/.test(bodyText)) {
-        console.log("🚫 CANCELADO pelo ASSIM (Liberado *)");
-        return 'cancelado';
-      }
-
-      // Código de rejeição: padrão NNNN-TEXTO (ex: "1601-REINCIDENCIA NO ATEN")
-      const glosaMatch = bodyText.match(/\b\d{4}-[A-ZÁÉÍÓÚÃÕÂÊÔÇ\s]+/);
-      if (glosaMatch) {
-        console.log("⛔ GLOSA DETECTADA:", glosaMatch[0].trim());
-        return 'glosa';
-      }
-    } catch (_) {}
-
     console.log("❌ Não apareceu confirmação");
     return 'timeout';
   }
@@ -249,22 +192,16 @@ async function selecionarFormaValidacao(page) {
 // =========================
 // FUNÇÃO PRINCIPAL
 // =========================
-async function executarRpa(tarefa, verificarCancelamento) {
+async function executarRpa(tarefa, verificarCancelamento, browser) {
 
   if (!verificarCancelamento) {
     verificarCancelamento = async () => false;
   }
 
-const browser = await chromium.connectOverCDP(
-  'http://127.0.0.1:9222'
-);
-
-const context = browser.contexts()[0] ?? await browser.newContext();
-
-const page = await context.newPage();
+  const context = await browser.newContext();
+  const page = await context.newPage();
 
   let sucessoExecucao = false;
-  let formaValidacaoFinal = null;
 
   try {
     console.log("🚀 Iniciando RPA...");
@@ -323,44 +260,24 @@ const page = await context.newPage();
 
 		console.log("📄 Aguardando tela final...");
 
-		await delay(1000);
-
-		// Tenta capturar número de autorização gerado pelo ASSIM
-		let numeroAutorizacao = null;
-		try {
-		  const textoConfirmacao = await page.locator('body').innerText();
-		  const match =
-		    textoConfirmacao.match(/n[uú]mero.*?[:\s]+(\d{6,15})/i) ||
-		    textoConfirmacao.match(/autoriza[cç][aã]o.*?[:\s]+(\d{6,15})/i) ||
-		    textoConfirmacao.match(/senha.*?[:\s]+(\d{6,15})/i);
-		  if (match) {
-		    numeroAutorizacao = match[1];
-		    console.log("🔢 Número de autorização:", numeroAutorizacao);
-		  }
-		} catch (_) {}
+		await page.waitForLoadState('networkidle');
+		await delay(2000);
 
 		const formaValidacao =
 		  await selecionarFormaValidacao(page);
-
-		formaValidacaoFinal = formaValidacao;
 
 		console.log(
 		  "✅ Forma de validação:",
 		  formaValidacao
 		);
-
-		const updatePayload = {
-		  status: numeroAutorizacao ? 'concluido' : 'concluido_sem_guia',
-		  forma_autorizacao: formaValidacao,
-		  validacao_finalizada_em: new Date().toISOString()
-		};
-		if (numeroAutorizacao) {
-		  updatePayload.numero_autorizacao = numeroAutorizacao;
-		}
-
+		
 		const { error } = await supabase
 		  .from('fila_autorizacoes')
-		  .update(updatePayload)
+		  .update({
+			status: 'concluido',
+			forma_autorizacao: formaValidacao,
+			validacao_finalizada_em: new Date().toISOString()
+		  })
 		  .eq('id', tarefa.id);
 
 		if (error) {
@@ -371,9 +288,8 @@ const page = await context.newPage();
 
 		sucessoExecucao = true;
 
-		await delay(1000);
-
 		console.log("✅ RPA finalizado");
+		console.log("🧪 Navegador mantido aberto");
 
 		return 'sucesso';
     }
@@ -384,52 +300,27 @@ const page = await context.newPage();
 
 	  } catch (erro) {
 
-		console.error("❌ Erro completo:", erro);
-		const { data: atual } = await supabase
-		  .from('fila_autorizacoes')
-		  .select(`
-			status,
-			forma_autorizacao,
-			validacao_finalizada_em
-		  `)
-		  .eq('id', tarefa.id)
-		  .single();
+		console.error("❌ Erro no RPA:", erro.message);
 
-		const jaConcluido =
-		  atual?.status === 'concluido' ||
-		  atual?.status === 'concluido_sem_guia' ||
-		  atual?.forma_autorizacao ||
-		  atual?.validacao_finalizada_em;
-
-		if (!jaConcluido) {
-
+		// Só atualiza para 'erro' se o RPA ainda não concluiu com sucesso
+		if (!sucessoExecucao) {
 		  await supabase
 			.from('fila_autorizacoes')
 			.update({
-			  status: 'erro',
-			  erro_rpa: erro.message
+			  status: 'erro'
 			})
 			.eq('id', tarefa.id);
-
 		}
+
 		throw erro;
 
 	  } finally {
 
-		if (sucessoExecucao && formaValidacaoFinal !== 'Token') {
-		  console.log("✅ Execução finalizada");
-		  try { await page.close(); } catch (_) {}
-		} else if (sucessoExecucao) {
-		  console.log("🖨️ Token selecionado — aba mantida aberta para impressão");
-		  await marcarAba(page);
+		if (sucessoExecucao) {
+		  console.log("✅ Aba mantida aberta para impressão/conferência");
 		} else {
 		  console.log("🧪 Aba mantida aberta para debug");
-		  await marcarAba(page);
 		}
-
-		// Aplica o teto de abas (com a conexão ainda viva) e libera o socket CDP.
-		await limparAbasAntigas(context);
-		try { await browser.disconnect(); } catch (_) {}
 
 	  }
 }

@@ -13,12 +13,14 @@
 **Objetivo**: Aprovar inclusão de Fase 2-B no roadmap
 
 **Destinatários**:
+
 - [ ] Tech Lead (aprovação de escopo)
 - [ ] Product Manager (impacto em timeline)
 - [ ] QA Lead (recursos para testes)
 - [ ] DevOps (deployment preparado)
 
 **Mensagem Padrão**:
+
 ```
 Assunto: CRÍTICO - Descoberto problema de integridade em CCO 
          (bloqueador para Fase 3)
@@ -51,6 +53,7 @@ Documentação:
 ```
 
 **Entregáveis para apresentação**:
+
 - [ ] Resumo Executivo (2 páginas)
 - [ ] Timeline (1 semana, 40h)
 - [ ] Exemplos de dados corrompidos (queries)
@@ -89,6 +92,7 @@ Documentação:
 ```
 
 **Deck Points**:
+
 1. **The Problem**: Visual diagram (cenário crítico)
 2. **The Impact**: % de dados afetados, timeline de acúmulo
 3. **The Solution**: 3 tabelas novas, mutation tracking, consolidation
@@ -163,11 +167,13 @@ psql ... > orphan_audit_2026-06-08.csv
 ```
 
 **Analisar resultados**:
+
 - [ ] Quantos órfãos existem AGORA?
 - [ ] Quantas remarcações foram detectadas?
 - [ ] Dashboard inconsistency está ocorrendo?
 
 **Usar para**:
+
 - Justificar urgência (% real de dados afetados)
 - Baseline para comparação pós-implementação
 - Identificar sessions específicas para investigate
@@ -227,33 +233,41 @@ When mutation detected (abc123 → def456):
 
 1. Find authorizations from abc123
    ```
+
    SELECT * FROM cco.session_authorizations
    WHERE session_key='abc123'
+
    ```
 
 2. For each auth, check if def456 already has it
    ```
+
    SELECT * FROM cco.session_authorizations
    WHERE session_key='def456' AND source=?
+
    ```
 
 3. If not, copy with tracking
    ```
+
    INSERT INTO cco.session_authorizations (
      session_key=def456,
      copied_from_session_key=abc123,
      copied_at=now(),
      ... (other columns from abc123 auth)
    )
+
    ```
 
 4. Log consolidation
    ```
+
    INSERT INTO cco.consolidation_log (
      source=abc123,
      target=def456,
      records_copied=1
    )
+
    ```
 
 Performance: O(n) where n=# of old auths (typically 1-2 per session)
@@ -269,6 +283,7 @@ EOF
 ### Sprint 1 (Seg-Ter): Schema Foundation
 
 **Segunda (10/06)**:
+
 - [ ] Kick-off meeting (10:00)
 - [ ] Data audit results discussed
 - [ ] Final approval on scope
@@ -276,6 +291,7 @@ EOF
 - [ ] Start migration DDL development
 
 **Terça (11/06)**:
+
 - [ ] Migration DDL completed
 - [ ] Code review on DDL
 - [ ] Test migration on staging DB
@@ -284,11 +300,13 @@ EOF
 ### Sprint 2 (Qua-Qui): Job 1 & Engine
 
 **Quarta (12/06)**:
+
 - [ ] Job 1 mutation detection complete
 - [ ] Unit tests passing
 - [ ] Integration test setup
 
 **Quinta (13/06)**:
+
 - [ ] Engine consolidation logic complete
 - [ ] Full integration test running
 - [ ] Retention job basic implementation
@@ -296,6 +314,7 @@ EOF
 ### Sprint 3 (Sex): Testing & Staging
 
 **Sexta (14/06)**:
+
 - [ ] All code reviewed
 - [ ] Staging deployment
 - [ ] Full test cycle
@@ -306,6 +325,7 @@ EOF
 ## 📋 Decision Gates
 
 ### Gate 1: Approval to Proceed (TODAY)
+
 ```
 [ ] Tech Lead: Aprova incluir na roadmap?
 [ ] Product: Ok com timeline?
@@ -314,6 +334,7 @@ EOF
 ```
 
 ### Gate 2: Code Review Complete (12/06)
+
 ```
 [ ] Migration DDL reviewed
 [ ] Job 1 mutations logic reviewed
@@ -322,6 +343,7 @@ EOF
 ```
 
 ### Gate 3: Staging Validation (14/06)
+
 ```
 [ ] Full integration test successful
 [ ] Performance acceptable (< 30s per job)
@@ -330,6 +352,7 @@ EOF
 ```
 
 ### Gate 4: Go-Live Approval (15/06)
+
 ```
 [ ] Staging sign-off
 [ ] Backup tested
@@ -431,6 +454,7 @@ Se houver bloqueadores:
 ## ✅ Final Checklist
 
 **Antes de começar coding**:
+
 - [ ] Stakeholder approval received (email)
 - [ ] Data audit completed (CSV results)
 - [ ] Risk assessment documented
@@ -441,6 +465,7 @@ Se houver bloqueadores:
 - [ ] Definition of Done criado
 
 **Antes de staging deployment**:
+
 - [ ] All unit tests passing (100%)
 - [ ] Integration test successful
 - [ ] Code reviewed + approved
@@ -448,6 +473,7 @@ Se houver bloqueadores:
 - [ ] Security review done (if needed)
 
 **Antes de production**:
+
 - [ ] Staging sign-off
 - [ ] Backup tested
 - [ ] Rollback plan executed (dry-run)
@@ -478,4 +504,3 @@ Se houver bloqueadores:
 **Last Updated**: 2026-06-08  
 **Next Review**: After Kick-Off Meeting  
 **Distribution**: Tech Team + Product + QA + DevOps
-

@@ -40,4 +40,5 @@ export type AuditoriaFilters = {
   situacao: string
   data: string
   tuss: string
+  horario_bloco: string
 }

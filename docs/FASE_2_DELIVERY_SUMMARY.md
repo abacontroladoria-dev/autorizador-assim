@@ -42,26 +42,30 @@
 ## 🎯 Acceptance Criteria (14 Tests)
 
 ### Deployment Tests
+
 1. ✅ **All 4 Edge Functions deploy** without errors
 2. ✅ **All 4 Cron jobs registered** in pg_cron with correct schedule
 
 ### Functional Tests
+
 3. ✅ **Job 1 invokes** and materializes TITA sessions to `cco.atendimentos`
-4. ✅ **Job 2 invokes** and materializes ASSIM authorizations (source='assim')
-5. ✅ **Job 3 invokes** and materializes fila authorizations (source='fila')
-6. ✅ **Job 4 invokes** and materializes therapist control records
+2. ✅ **Job 2 invokes** and materializes ASSIM authorizations (source='assim')
+3. ✅ **Job 3 invokes** and materializes fila authorizations (source='fila')
+4. ✅ **Job 4 invokes** and materializes therapist control records
 
 ### Idempotency Tests
+
 7. ✅ **Job 1 re-run** produces 0 new rows (idempotent)
-8. ✅ **Jobs 2 & 3 concurrent** produces no corruption
-9. ✅ **All jobs idempotent** after full cycle
+2. ✅ **Jobs 2 & 3 concurrent** produces no corruption
+3. ✅ **All jobs idempotent** after full cycle
 
 ### Data Quality Tests
+
 10. ✅ **No duplicate session_key** in `cco.atendimentos`
-11. ✅ **No duplicate (session_key, source)** in `cco.session_authorizations`
-12. ✅ **Valid enums** for authorization_status (5 values only)
-13. ✅ **No orphaned FK references** (all session_key exist in atendimentos)
-14. ✅ **Date/time normalization** (YYYY-MM-DD and HH:MM formats)
+2. ✅ **No duplicate (session_key, source)** in `cco.session_authorizations`
+3. ✅ **Valid enums** for authorization_status (5 values only)
+4. ✅ **No orphaned FK references** (all session_key exist in atendimentos)
+5. ✅ **Date/time normalization** (YYYY-MM-DD and HH:MM formats)
 
 **Bonus**: Logging, performance, error handling documented & testable
 
@@ -96,6 +100,7 @@ docs/
 ## 🔧 Key Features Implemented
 
 ### ✅ Idempotent UPSERT Pattern
+
 ```typescript
 // Each job uses atomic UPSERT by unique key
 await supabase
@@ -104,6 +109,7 @@ await supabase
 ```
 
 ### ✅ Deterministic session_key
+
 ```
 session_key = sha256(
   unaccent(lower(trim(paciente_nome))) 
@@ -111,21 +117,25 @@ session_key = sha256(
   || hora_inicio
 )
 ```
+
 - Same input → same hash (idempotent across jobs)
 - Bridges 4 different sources (TITA, ASSIM, fila, controle_terapeutico)
 
 ### ✅ Staggered Cron Offsets
+
 ```
 Job 1: :00, :05, :10, :15, ... (every 5 min)
 Job 2: :01, :06, :11, :16, ... (every 5 min, offset +1s)
 Job 3: :02, :07, :12, :17, ... (every 5 min, offset +2s)
 Job 4: :03, :18, :33, :48    (every 15 min)
 ```
+
 - Prevents thundering herd
 - Distributes load across interval
 - Rate-limits TITA API (max 12 calls/hour = 288/day)
 
 ### ✅ Structured Logging
+
 ```sql
 INSERT INTO cco.processing_logs (
   job_name, 
@@ -136,11 +146,13 @@ INSERT INTO cco.processing_logs (
   error_message
 )
 ```
+
 - Audit trail for all job executions
 - Error capture & debugging
 - Performance metrics (duration)
 
 ### ✅ Composite Keys for Authorization
+
 ```sql
 -- Each source has independent UPSERT path
 UNIQUE (session_key, source) 
@@ -150,6 +162,7 @@ UNIQUE (session_key, source)
 ```
 
 ### ✅ Batch Processing (100 rows)
+
 ```typescript
 // Process in safe batches
 for (let i = 0; i < rows.length; i += 100) {
@@ -157,11 +170,13 @@ for (let i = 0; i < rows.length; i += 100) {
   await upsert(batch)
 }
 ```
+
 - Memory efficient
 - Atomic per batch
 - Failure isolation
 
 ### ✅ Graceful Error Handling
+
 ```typescript
 // Skip malformed rows, log & continue
 if (!required_field) {
@@ -169,6 +184,7 @@ if (!required_field) {
   continue
 }
 ```
+
 - Non-blocking error pattern
 - Each job logs to `cco.processing_logs`
 - Auto-retry on next interval (pg_cron)
@@ -195,6 +211,7 @@ if (!required_field) {
 ## 🚀 Deployment Steps
 
 1. **Deploy Edge Functions**
+
    ```bash
    supabase functions deploy cco-sync-tita-sessions
    supabase functions deploy cco-sync-assim-authorizations
@@ -203,12 +220,15 @@ if (!required_field) {
    ```
 
 2. **Apply Migration**
+
    ```bash
    supabase db push
    ```
+
    Or paste `20260608000002_cco_cron_jobs.sql` into Supabase SQL Editor
 
 3. **Verify**
+
    ```sql
    SELECT jobname FROM cron.job WHERE jobname LIKE 'cco-%';
    -- Should show 4 jobs registered
