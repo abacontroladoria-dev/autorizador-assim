@@ -1,10 +1,12 @@
 'use client'
 
 import { memo, useEffect, useState } from 'react'
-import { Repeat2, ChevronDown } from 'lucide-react'
+import { Repeat2, ChevronDown, RotateCcw } from 'lucide-react'
 
 import Timeline from './Timeline'
 import StatusBadge from './StatusBadge'
+import { ReverteFaltaModal } from './ReverteFaltaModal'
+import { Button } from '@/components/ui/button'
 import { buscarLogsFila } from '@/services/logs.service'
 import {
   resolverStatus,
@@ -15,6 +17,7 @@ import {
 
 interface Props {
   atendimento: any
+  onReverterFalta?: (atendimento: any) => Promise<void>
 }
 
 /** Frase de situação por severidade — o coração da ficha. */
@@ -40,10 +43,12 @@ function fraseSituacao(item: any): string {
   }
 }
 
-function SidePanel({ atendimento }: Props) {
+function SidePanel({ atendimento, onReverterFalta }: Props) {
   const [logs, setLogs] = useState<any[]>([])
   const [loadingLogs, setLoadingLogs] = useState(false)
   const [logsAbertos, setLogsAbertos] = useState(false)
+  const [modalReverterAberto, setModalReverterAberto] = useState(false)
+  const [loadingReverter, setLoadingReverter] = useState(false)
 
   useEffect(() => {
     async function carregarLogs() {
@@ -58,6 +63,17 @@ function SidePanel({ atendimento }: Props) {
     }
     carregarLogs()
   }, [atendimento?.id])
+
+  const handleReverterConfirm = async () => {
+    if (!onReverterFalta) return
+    try {
+      setLoadingReverter(true)
+      await onReverterFalta(atendimento)
+    } finally {
+      setLoadingReverter(false)
+      setModalReverterAberto(false)
+    }
+  }
 
   if (!atendimento) {
     return (
@@ -104,6 +120,16 @@ function SidePanel({ atendimento }: Props) {
       <div className={`px-5 py-4 ${ui.soft} border-b border-slate-100`}>
         <SectionTitle>Situação atual</SectionTitle>
         <p className={`text-sm font-medium ${ui.text}`}>{fraseSituacao(atendimento)}</p>
+        {atendimento.status_operacional === 'falta_paciente' && onReverterFalta && (
+          <Button
+            size="sm"
+            onClick={() => setModalReverterAberto(true)}
+            className="mt-3 bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200"
+          >
+            <RotateCcw className="w-4 h-4 mr-1.5" />
+            Reverter falta
+          </Button>
+        )}
       </div>
 
       <div className="p-5 space-y-6">
@@ -225,6 +251,14 @@ function SidePanel({ atendimento }: Props) {
           </section>
         )}
       </div>
+
+      <ReverteFaltaModal
+        open={modalReverterAberto}
+        atendimento={atendimento}
+        onCancel={() => setModalReverterAberto(false)}
+        onConfirm={handleReverterConfirm}
+        loading={loadingReverter}
+      />
     </div>
   )
 }

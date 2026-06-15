@@ -1,6 +1,7 @@
 	'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useRouter } from 'next/navigation'
 import { getSupabaseClient } from '@/lib/supabase/client'
 import DayPulse from '@/components/central/DayPulse'
 import FiltersBar from '@/components/central/FiltersBar'
@@ -26,6 +27,7 @@ function normalizarUnidade(raw?: string | null): string | null {
 
 export default function CentralTerapeuticaPage() {
   const { setHeader } = useHeader()
+  const router = useRouter()
   const hoje = new Date().toLocaleDateString('en-CA')
 
   const [dados, setDados] = useState<any[]>([])
@@ -253,6 +255,30 @@ export default function CentralTerapeuticaPage() {
     [filtrados, selecionadoId]
   )
 
+  const handleReverterFalta = async (atendimento: any) => {
+    const { data: { user } } = await supabase.auth.getUser()
+    let nomeUsuario = user?.email ?? 'Desconhecido'
+    const { data: perfil } = await supabase
+      .from('usuarios')
+      .select('nome')
+      .eq('id', user!.id)
+      .maybeSingle()
+    if (perfil?.nome) nomeUsuario = perfil.nome
+
+    const { error } = await supabase.from('fila_autorizacoes').update({
+      status: 'pendente',
+      tipo_falta: null,
+      terapia_falta: null,
+      justificativa_falta: null,
+      falta_revertida_por_nome: nomeUsuario,
+      falta_revertida_em: new Date().toISOString(),
+    }).eq('id', atendimento.id)
+
+    if (error) throw error
+
+    router.push('/solicitar')
+  }
+
   // KPIs refletem o cenário operacional COMPLETO da data selecionada (sobre `dados`),
   // não o subconjunto filtrado pela busca/filtros (`filtrados`). Assim os totais do dia
   // permanecem estáveis durante a busca e o DayPulse não re-renderiza a cada tecla.
@@ -368,6 +394,7 @@ export default function CentralTerapeuticaPage() {
 			<div>
 			  <SidePanel
 				atendimento={selecionado}
+				onReverterFalta={handleReverterFalta}
 			  />
 			</div>
 
