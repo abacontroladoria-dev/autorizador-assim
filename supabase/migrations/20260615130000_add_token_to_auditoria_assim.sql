@@ -1,5 +1,8 @@
 -- Adiciona teve_token e token à função get_auditoria_assim
 -- Quando teve_token = TRUE, o token é exibido na observação
+-- Nota: DROP necessário para alterar RETURNS TABLE (PostgreSQL)
+
+DROP FUNCTION IF EXISTS public.get_auditoria_assim(date);
 
 CREATE OR REPLACE FUNCTION public.get_auditoria_assim(p_data date)
 RETURNS TABLE(
