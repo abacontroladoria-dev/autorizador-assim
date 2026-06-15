@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
-import { B, DIAS_UTIL, EXCLUIR_OCUP, isProfBloqueadoTemp, SK_SAIDA } from "@/lib/cronograma/constants"
+import { B, DIAS_UTIL, EXCLUIR_OCUP, isProfBloqueadoTemp, SK_SAIDA, TERAPIA_TO_ESP } from "@/lib/cronograma/constants"
 import { fmtName, getTurno } from "@/lib/cronograma/helpers"
 import { buildSaidaAnalise } from "@/lib/cronograma/saida"
 import { SaidaCronModal } from "./SaidaCronModal"
@@ -44,6 +44,8 @@ const PACIENTES_FICTICIOS = new Set([
 ])
 
 // ─── TIPOS ────────────────────────────────────────────────────────────────────
+
+interface CandidatoSlot { pac: string; esp: string; gap: number; conv: string }
 
 interface Props {
   cRows: CsvRow[]
@@ -111,6 +113,7 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
   const [selDT, setSelDT] = useState(new Set<string>())
   const [results, setResults] = useState<ResultItem[] | null>(null)
   const [modalItem, setModalItem] = useState<ResultItem | null>(null)
+  const [verSlot, setVerSlot] = useState<string | null>(null)
   const comboRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -294,6 +297,58 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
     }
   }, [semSolucaoItems])
 
+  // Candidatos para slots livres do novo profissional (inspirado em Vagas Agora)
+  const sugestoesPorSlot = useMemo<Record<string, CandidatoSlot[]>>(() => {
+    if (!novoProfData || !lRows.length) return {}
+
+    const especialidades = new Set(
+      semSolucaoItems.map(i => TERAPIA_TO_ESP[i.afetada.terapia] ?? i.afetada.terapia)
+    )
+
+    const offered: Record<string, number> = {}
+    for (const r of agendRows) {
+      const pac = String(r["Nome Favorecido"] || "")
+      const ter = String(r.Terapia || "")
+      const esp = TERAPIA_TO_ESP[ter] ?? ter
+      if (!pac || PACIENTES_FICTICIOS.has(pac)) continue
+      offered[`${pac}|||${esp}`] = (offered[`${pac}|||${esp}`] ?? 0) + 1
+    }
+
+    const candidatos: CandidatoSlot[] = []
+    const seenKey = new Set<string>()
+    for (const l of lRows) {
+      const pac = String(l["Paciente"] || "").trim()
+      const esp = String(l["Especialidade"] || "").trim()
+      const sit = String(l["Situação"] || "")
+      const aut = parseFloat(String(l["Qtd autorizada"] || "0")) || 0
+      if (!pac || !esp || !aut || sit !== "Vigente") continue
+      if (!especialidades.has(esp)) continue
+      const k = `${pac}|||${esp}`
+      if (seenKey.has(k)) continue
+      seenKey.add(k)
+      const gap = Math.round((aut - (offered[k] ?? 0)) * 10) / 10
+      if (gap <= 0) continue
+      candidatos.push({ pac, esp, gap, conv: String(l["Plano"] || "") })
+    }
+    candidatos.sort((a, b) => b.gap - a.gap)
+
+    const result: Record<string, CandidatoSlot[]> = {}
+    for (const dia of novoProfData.dias) {
+      for (const slot of novoProfData.dayWorkSlots[dia]) {
+        const chave = `${dia}|||${slot}`
+        if ((novoProfData.agendaMap[chave] ?? []).length > 0) continue
+        const ocupadosNoSlot = new Set(
+          agendRows
+            .filter(r => String(r["Dia da Semana"] || "") === dia && String(r.HI_str || "") === slot)
+            .map(r => String(r["Nome Favorecido"] || ""))
+        )
+        const sug = candidatos.filter(c => !ocupadosNoSlot.has(c.pac))
+        if (sug.length) result[chave] = sug
+      }
+    }
+    return result
+  }, [novoProfData, lRows, agendRows, semSolucaoItems])
+
   function toggleDT(dia: string, turno: string) {
     setSelDT(prev => {
       const n = new Set(prev)
@@ -430,6 +485,18 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
   }, [results])
 
   const canAnalyze = !!prof && selDT.size > 0 && cRows.length > 0
+
+  // Derivados das sugestões para os slots livres
+  const aConfirmarCount = Object.keys(sugestoesPorSlot).length
+  const livresCount = Math.max(0, (novoProfData?.livreSlots ?? 0) - aConfirmarCount)
+  const ocupPctExt = novoProfData
+    ? Math.min(100, ((novoProfData.total + aConfirmarCount) / novoProfData.totalSlots) * 100)
+    : 0
+  const cargaSlicesExt = novoProfData ? [
+    { name: "Confirmadas", value: novoProfData.total, color: "#22c55e" },
+    { name: "A confirmar", value: aConfirmarCount,    color: "#fbbf24" },
+    { name: "Livre",       value: livresCount,         color: "#f87171" },
+  ].filter(s => s.value > 0) : []
 
   // ─── RENDER ─────────────────────────────────────────────────────────────────
 
@@ -618,10 +685,14 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
                   Dias e turnos necessários para cobrir as sessões sem solução
                 </div>
 
-                <div style={{ display: "flex", gap: "14px", marginBottom: "10px" }}>
+                <div style={{ display: "flex", gap: "12px", marginBottom: "10px", flexWrap: "wrap" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
                     <div style={{ width: "11px", height: "11px", borderRadius: "3px", background: "#22c55e" }} />
-                    <span style={{ fontSize: "11px", color: "#6b7280" }}>ocupado</span>
+                    <span style={{ fontSize: "11px", color: "#6b7280" }}>sessões confirmadas</span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                    <div style={{ width: "11px", height: "11px", borderRadius: "3px", background: "#fbbf24" }} />
+                    <span style={{ fontSize: "11px", color: "#6b7280" }}>sessões a confirmar</span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
                     <div style={{ width: "11px", height: "11px", borderRadius: "3px", background: "#fca5a5" }} />
@@ -673,6 +744,26 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
                                 </td>
                               )
                             } else if (isWorking) {
+                              const chaveSlot = `${d}|||${slot}`
+                              const sugs = sugestoesPorSlot[chaveSlot]
+                              if (sugs?.length) {
+                                const isOpen = verSlot === chaveSlot
+                                return (
+                                  <td key={d} style={{ padding: "2px 4px", verticalAlign: "middle" }}>
+                                    <div
+                                      onClick={() => setVerSlot(isOpen ? null : chaveSlot)}
+                                      style={{ background: isOpen ? "#fcd34d" : "#fef3c7", border: "1px solid #fbbf24", borderRadius: "8px", minHeight: "36px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "3px 4px", gap: "1px", cursor: "pointer" }}
+                                    >
+                                      <div style={{ fontWeight: 600, fontSize: "10px", color: "#92400e", lineHeight: 1.2 }}>
+                                        {sugs.length} candidato{sugs.length > 1 ? "s" : ""}
+                                      </div>
+                                      <div style={{ fontSize: "9px", color: "#d97706", fontWeight: 700 }}>
+                                        {isOpen ? "fechar ▲" : "ver ▼"}
+                                      </div>
+                                    </div>
+                                  </td>
+                                )
+                              }
                               return (
                                 <td key={d} style={{ padding: "2px 4px", verticalAlign: "middle" }}>
                                   <div style={{ background: "#fca5a5", borderRadius: "8px", height: "36px" }} />
@@ -687,6 +778,42 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
                     })}
                   </tbody>
                 </table>
+
+                {/* Painel "Ver" — candidatos para o slot selecionado */}
+                {verSlot && sugestoesPorSlot[verSlot] && (
+                  <div style={{ marginTop: "12px", border: "1px solid #fbbf24", borderRadius: "10px", padding: "12px", background: "#fffbeb" }}>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
+                      <div style={{ fontWeight: 700, color: "#92400e", fontSize: "13px" }}>
+                        Sessões a confirmar — {verSlot.replace("|||", " ")}
+                      </div>
+                      <button onClick={() => setVerSlot(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", fontSize: "12px" }}>✕ fechar</button>
+                    </div>
+                    <div style={{ fontSize: "11px", color: "#92400e", marginBottom: "8px" }}>
+                      Pacientes com laudo Vigente e gap ≥ 1 na especialidade que não têm sessão neste horário.
+                      Requer confirmação da família antes de incluir no cronograma.
+                    </div>
+                    <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "12px" }}>
+                      <thead>
+                        <tr style={{ borderBottom: "1px solid #fcd34d" }}>
+                          <th style={{ textAlign: "left", padding: "4px 8px", color: "#92400e", fontWeight: 600, fontSize: "11px" }}>Paciente</th>
+                          <th style={{ textAlign: "left", padding: "4px 8px", color: "#92400e", fontWeight: 600, fontSize: "11px" }}>Especialidade</th>
+                          <th style={{ textAlign: "center", padding: "4px 8px", color: "#92400e", fontWeight: 600, fontSize: "11px" }}>Gap</th>
+                          <th style={{ textAlign: "left", padding: "4px 8px", color: "#92400e", fontWeight: 600, fontSize: "11px" }}>Convênio</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {sugestoesPorSlot[verSlot].map((c, i) => (
+                          <tr key={i} style={{ borderBottom: "1px solid #fef3c7" }}>
+                            <td style={{ padding: "6px 8px", fontWeight: 600, color: "#1f2937" }}>{c.pac}</td>
+                            <td style={{ padding: "6px 8px", color: "#374151" }}>{c.esp}</td>
+                            <td style={{ padding: "6px 8px", textAlign: "center", fontWeight: 700, color: "#d97706" }}>+{c.gap}</td>
+                            <td style={{ padding: "6px 8px", color: "#6b7280" }}>{c.conv || "—"}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
 
               {/* Carga semanal */}
@@ -698,13 +825,13 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
                   <ResponsiveContainer width="100%" height={150}>
                     <PieChart>
                       <Pie
-                        data={novoProfData.cargaSlices}
+                        data={cargaSlicesExt}
                         cx="50%" cy="50%"
                         innerRadius={46} outerRadius={66}
                         dataKey="value" strokeWidth={0}
                         startAngle={90} endAngle={-270}
                       >
-                        {novoProfData.cargaSlices.map((s, i) => <Cell key={i} fill={s.color} />)}
+                        {cargaSlicesExt.map((s, i) => <Cell key={i} fill={s.color} />)}
                       </Pie>
                       <Tooltip
                         formatter={(val: number, name: string) => [`${val} slot(s)`, name]}
@@ -714,14 +841,18 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
                   </ResponsiveContainer>
                   <div style={{ position: "absolute", top: "50%", left: "50%", transform: "translate(-50%, -50%)", textAlign: "center", pointerEvents: "none" }}>
                     <div style={{ fontSize: "20px", fontWeight: 800, color: B.navy, lineHeight: 1 }}>
-                      {novoProfData.ocupPct.toFixed(2).replace(".", ",")}%
+                      {ocupPctExt.toFixed(2).replace(".", ",")}%
                     </div>
                   </div>
                 </div>
 
-                <div style={{ display: "flex", justifyContent: "center", gap: "10px", fontSize: "11px", color: "#6b7280", marginBottom: "6px" }}>
-                  <span><span style={{ color: "#22c55e", fontWeight: 700 }}>●</span> Ocupada ({Math.round(novoProfData.ocupPct)}%)</span>
-                  <span><span style={{ color: "#f87171", fontWeight: 700 }}>●</span> Livre ({Math.round(100 - novoProfData.ocupPct)}%)</span>
+                <div style={{ display: "flex", justifyContent: "center", gap: "8px", fontSize: "11px", color: "#6b7280", marginBottom: "6px", flexWrap: "wrap" }}>
+                  {cargaSlicesExt.map((s, i) => (
+                    <span key={i}>
+                      <span style={{ color: s.color, fontWeight: 700 }}>●</span>{" "}
+                      {s.name} ({Math.round(s.value / novoProfData.totalSlots * 100)}%)
+                    </span>
+                  ))}
                 </div>
 
                 <div style={{ textAlign: "center", fontSize: "12px", color: "#6b7280", marginBottom: "2px" }}>
@@ -739,10 +870,16 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                   <div style={{ background: "#f0fdf4", borderRadius: "10px", padding: "8px 12px" }}>
                     <div style={{ fontSize: "18px", fontWeight: 800, color: "#166534", lineHeight: 1 }}>{fmtCh(novoProfData.chOcupMin)}</div>
-                    <div style={{ fontSize: "11px", color: "#22c55e", marginTop: "3px" }}>ocupadas</div>
+                    <div style={{ fontSize: "11px", color: "#22c55e", marginTop: "3px" }}>confirmadas</div>
                   </div>
+                  {aConfirmarCount > 0 && (
+                    <div style={{ background: "#fffbeb", borderRadius: "10px", padding: "8px 12px" }}>
+                      <div style={{ fontSize: "18px", fontWeight: 800, color: "#d97706", lineHeight: 1 }}>{fmtCh(aConfirmarCount * 40)}</div>
+                      <div style={{ fontSize: "11px", color: "#fbbf24", marginTop: "3px" }}>a confirmar</div>
+                    </div>
+                  )}
                   <div style={{ background: "#fef2f2", borderRadius: "10px", padding: "8px 12px" }}>
-                    <div style={{ fontSize: "18px", fontWeight: 800, color: "#dc2626", lineHeight: 1 }}>{fmtCh(novoProfData.chLivreMin)}</div>
+                    <div style={{ fontSize: "18px", fontWeight: 800, color: "#dc2626", lineHeight: 1 }}>{fmtCh(livresCount * 40)}</div>
                     <div style={{ fontSize: "11px", color: "#f87171", marginTop: "3px" }}>livres</div>
                   </div>
                 </div>
