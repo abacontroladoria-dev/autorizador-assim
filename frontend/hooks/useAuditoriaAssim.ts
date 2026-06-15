@@ -36,6 +36,7 @@ export function useAuditoriaAssim() {
     situacao: '',
     data: getHojeLocal(),
     tuss: '',
+    horario_bloco: '',
   })
 
   const filtersRef = useRef(filters)
@@ -161,6 +162,11 @@ export function useAuditoriaAssim() {
         !item.codigo_tuss?.toLowerCase().includes(filters.tuss.toLowerCase())
       ) return false
 
+      if (filters.horario_bloco && item.hora_inicial) {
+        const [inicio, fim] = filters.horario_bloco.split('-')
+        if (item.hora_inicial < inicio || item.hora_inicial >= fim) return false
+      }
+
       return true
     })
 
@@ -180,7 +186,7 @@ export function useAuditoriaAssim() {
       }
       return 0
     })
-  }, [rawDados, filters.paciente, filters.situacao, filters.tuss, sortKey, sortDir])
+  }, [rawDados, filters.paciente, filters.situacao, filters.tuss, filters.horario_bloco, sortKey, sortDir])
 
   const totalPaginas = useMemo(
     () => Math.max(1, Math.ceil(filtrados.length / PAGE_SIZE)),

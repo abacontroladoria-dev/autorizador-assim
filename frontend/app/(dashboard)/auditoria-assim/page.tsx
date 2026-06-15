@@ -38,7 +38,7 @@ export default function AuditoriaAssimPage() {
           loading={loading}
           activeFilter={filters.situacao}
           totalFiltrados={
-            filters.situacao || filters.paciente || filters.tuss
+            filters.situacao || filters.paciente || filters.tuss || filters.horario_bloco
               ? totalFiltrados
               : undefined
           }
