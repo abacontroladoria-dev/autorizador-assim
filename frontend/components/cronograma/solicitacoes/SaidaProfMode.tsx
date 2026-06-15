@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
 import { B, DIAS_UTIL, EXCLUIR_OCUP, isProfBloqueadoTemp, SK_SAIDA, TERAPIA_TO_ESP } from "@/lib/cronograma/constants"
-import { fmtName, getTurno } from "@/lib/cronograma/helpers"
+import { fmtName, getTurno, pm } from "@/lib/cronograma/helpers"
 import { buildSaidaAnalise } from "@/lib/cronograma/saida"
 import { SaidaCronModal } from "./SaidaCronModal"
 import type {
@@ -46,6 +46,7 @@ const PACIENTES_FICTICIOS = new Set([
 // ─── TIPOS ────────────────────────────────────────────────────────────────────
 
 interface CandidatoSlot { pac: string; esp: string; gap: number; conv: string }
+type CandidatoWA = "aguardando" | "recusado" | "inviavel"
 
 interface Props {
   cRows: CsvRow[]
@@ -114,6 +115,8 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
   const [results, setResults] = useState<ResultItem[] | null>(null)
   const [modalItem, setModalItem] = useState<ResultItem | null>(null)
   const [verSlot, setVerSlot] = useState<string | null>(null)
+  const [candidatoWA, setCandidatoWA] = useState<Record<string, CandidatoWA>>({})
+  const [verCandidatoKey, setVerCandidatoKey] = useState<string | null>(null)
   const comboRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -486,6 +489,9 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
 
   const canAnalyze = !!prof && selDT.size > 0 && cRows.length > 0
 
+  const verDia = verSlot ? verSlot.split("|||")[0] : ""
+  const verHora = verSlot ? verSlot.split("|||")[1] : ""
+
   // Derivados das sugestões para os slots livres
   const aConfirmarCount = Object.keys(sugestoesPorSlot).length
   const livresCount = Math.max(0, (novoProfData?.livreSlots ?? 0) - aConfirmarCount)
@@ -779,39 +785,181 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
                   </tbody>
                 </table>
 
-                {/* Painel "Ver" — candidatos para o slot selecionado */}
+                {/* Painel "Sessões a confirmar" — candidatos para o slot selecionado */}
                 {verSlot && sugestoesPorSlot[verSlot] && (
-                  <div style={{ marginTop: "12px", border: "1px solid #fbbf24", borderRadius: "10px", padding: "12px", background: "#fffbeb" }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
-                      <div style={{ fontWeight: 700, color: "#92400e", fontSize: "13px" }}>
-                        Sessões a confirmar — {verSlot.replace("|||", " ")}
+                  <div style={{ marginTop: "12px", border: "1px solid #fbbf24", borderRadius: "12px", background: "#fffbeb", overflow: "hidden" }}>
+                    {/* Header */}
+                    <div style={{ padding: "10px 14px", borderBottom: "1px solid #fef3c7", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fef9e7" }}>
+                      <div>
+                        <div style={{ fontWeight: 700, color: "#92400e", fontSize: "13px" }}>
+                          Sessões a confirmar — {DIA_ABR[verDia] ?? verDia} {verHora}
+                        </div>
+                        <div style={{ fontSize: "11px", color: "#d97706", marginTop: "2px" }}>
+                          Pacientes com laudo Vigente e gap ≥ 1. Confirme viabilidade antes de incluir no cronograma.
+                        </div>
                       </div>
-                      <button onClick={() => setVerSlot(null)} style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", fontSize: "12px" }}>✕ fechar</button>
+                      <button onClick={() => { setVerSlot(null); setVerCandidatoKey(null) }} style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", fontSize: "14px", padding: "4px 8px" }}>✕</button>
                     </div>
-                    <div style={{ fontSize: "11px", color: "#92400e", marginBottom: "8px" }}>
-                      Pacientes com laudo Vigente e gap ≥ 1 na especialidade que não têm sessão neste horário.
-                      Requer confirmação da família antes de incluir no cronograma.
+
+                    {/* Candidate cards */}
+                    <div style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: "6px" }}>
+                      {sugestoesPorSlot[verSlot].map((c, i) => {
+                        const cKey = `${verSlot}|||${c.pac}`
+                        const waStatus = candidatoWA[cKey] ?? null
+                        const isVerOpen = verCandidatoKey === cKey
+                        const isDone = waStatus === "recusado" || waStatus === "inviavel"
+
+                        // Validações R5.1 + R2.1 para o dia de destino
+                        const sessoesDia = agendRows.filter(r =>
+                          String(r["Nome Favorecido"] || "") === c.pac &&
+                          String(r["Dia da Semana"] || "") === verDia &&
+                          !EXCLUIR_OCUP.has(String(r.Terapia || ""))
+                        )
+                        const horasExist = sessoesDia.map(r => String(r.HI_str || "")).filter(Boolean)
+                        const horasAll = [...horasExist, verHora].sort()
+                        const hasGapR51 = horasAll.length > 1 && horasAll.some((h, idx) => {
+                          if (idx === 0) return false
+                          return ((pm(h) ?? 0) - (pm(horasAll[idx - 1]) ?? 0)) !== 40
+                        })
+                        const r21Violation = sessoesDia.length === 0
+                        const isValid = !hasGapR51 && !r21Violation
+
+                        return (
+                          <div key={i} style={{ border: `1px solid ${isDone ? "#e5e7eb" : "#fcd34d"}`, borderRadius: "10px", background: isDone ? "#f9fafb" : "white", opacity: isDone ? 0.6 : 1 }}>
+                            {/* Card header */}
+                            <div style={{ padding: "8px 12px", display: "flex", alignItems: "flex-start", gap: "8px", flexWrap: "wrap" }}>
+                              <div style={{ flex: "1 1 160px" }}>
+                                <div style={{ fontWeight: 700, color: "#1f2937", fontSize: "13px" }}>{c.pac}</div>
+                                <div style={{ fontSize: "11px", color: "#6b7280", marginTop: "2px" }}>
+                                  {c.esp} · gap <strong style={{ color: "#d97706" }}>+{c.gap}</strong> · {c.conv || "—"}
+                                </div>
+                                <div style={{ display: "flex", gap: "4px", marginTop: "5px", flexWrap: "wrap" }}>
+                                  {hasGapR51 && <span style={{ fontSize: "10px", background: "#fef2f2", color: "#dc2626", borderRadius: "5px", padding: "2px 5px", border: "1px solid #fca5a5", fontWeight: 600 }}>⚠ gap R5.1</span>}
+                                  {r21Violation && <span style={{ fontSize: "10px", background: "#fef2f2", color: "#dc2626", borderRadius: "5px", padding: "2px 5px", border: "1px solid #fca5a5", fontWeight: 600 }}>⚠ dia isolado R2.1</span>}
+                                  {isValid && !isDone && <span style={{ fontSize: "10px", background: "#f0fdf4", color: "#166534", borderRadius: "5px", padding: "2px 5px", fontWeight: 600 }}>✓ viável</span>}
+                                  {waStatus === "aguardando" && <span style={{ fontSize: "10px", background: B.blueLt, color: B.blue, borderRadius: "5px", padding: "2px 6px", fontWeight: 700 }}>⏳ Aguardando WA</span>}
+                                  {waStatus === "recusado" && <span style={{ fontSize: "10px", background: "#fef2f2", color: "#dc2626", borderRadius: "5px", padding: "2px 6px", fontWeight: 700 }}>❌ Recusou</span>}
+                                  {waStatus === "inviavel" && <span style={{ fontSize: "10px", background: "#f3f4f6", color: "#6b7280", borderRadius: "5px", padding: "2px 6px", fontWeight: 700 }}>⛔ Inviável</span>}
+                                </div>
+                              </div>
+
+                              {/* Botões de ação */}
+                              <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", alignItems: "flex-start" }}>
+                                <button
+                                  onClick={() => setVerCandidatoKey(isVerOpen ? null : cKey)}
+                                  style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: isVerOpen ? B.navy : B.blueLt, color: isVerOpen ? "white" : B.blue, border: `1px solid ${B.blue}33`, cursor: "pointer", fontWeight: 600 }}
+                                >
+                                  🗓 Ver
+                                </button>
+                                {!waStatus && (
+                                  <button
+                                    onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "aguardando" }))}
+                                    style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: B.blueLt, color: B.blue, border: `1px solid ${B.blue}33`, cursor: "pointer" }}
+                                  >
+                                    Oferecer via WA
+                                  </button>
+                                )}
+                                {waStatus === "aguardando" && (
+                                  <>
+                                    <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "recusado" }))} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", cursor: "pointer" }}>❌ Recusou</button>
+                                    <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "inviavel" }))} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer" }}>⛔ Inviável</button>
+                                    <button onClick={() => setCandidatoWA(p => { const n = { ...p }; delete n[cKey]; return n })} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer" }}>Desfazer envio</button>
+                                  </>
+                                )}
+                                {!waStatus && (
+                                  <>
+                                    <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "recusado" }))} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", cursor: "pointer" }}>❌ Recusou</button>
+                                    <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "inviavel" }))} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer" }}>⛔ Inviável</button>
+                                  </>
+                                )}
+                                {isDone && (
+                                  <button onClick={() => setCandidatoWA(p => { const n = { ...p }; delete n[cKey]; return n })} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer" }}>Resetar</button>
+                                )}
+                              </div>
+                            </div>
+
+                            {/* Vista de cronograma (🗓 Ver) */}
+                            {isVerOpen && (() => {
+                              const todasSessoes = agendRows.filter(r =>
+                                String(r["Nome Favorecido"] || "") === c.pac &&
+                                !EXCLUIR_OCUP.has(String(r.Terapia || ""))
+                              )
+                              const diasPac = new Set(todasSessoes.map(r => String(r["Dia da Semana"] || "")))
+                              diasPac.add(verDia)
+                              const diasSorted = DIAS_UTIL.filter(d => diasPac.has(d))
+                              const slotsUsados = new Set(todasSessoes.map(r => String(r.HI_str || "")).filter(Boolean))
+                              slotsUsados.add(verHora)
+                              const slotsGrid = ALL_SLOTS.filter(s => slotsUsados.has(s))
+
+                              return (
+                                <div style={{ borderTop: "1px solid #fef3c7", padding: "10px 12px", background: "#fefce8" }}>
+                                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#92400e", marginBottom: "6px" }}>
+                                    🗓 {c.pac.split(" ").slice(0, 2).join(" ")} — como ficaria após a adição
+                                  </div>
+                                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "8px" }}>
+                                    <span style={{ fontSize: "10px", fontWeight: 600, color: "#92400e" }}>{DIA_ABR[verDia] ?? verDia} {verHora}:</span>
+                                    {hasGapR51
+                                      ? <span style={{ fontSize: "10px", background: "#fef2f2", color: "#dc2626", borderRadius: "5px", padding: "2px 6px", border: "1px solid #fca5a5" }}>⚠ criaria buraco entre sessões (R5.1)</span>
+                                      : <span style={{ fontSize: "10px", background: "#f0fdf4", color: "#166534", borderRadius: "5px", padding: "2px 6px" }}>✓ sem buraco</span>
+                                    }
+                                    {r21Violation
+                                      ? <span style={{ fontSize: "10px", background: "#fef2f2", color: "#dc2626", borderRadius: "5px", padding: "2px 6px", border: "1px solid #fca5a5" }}>⚠ sessão isolada no dia (R2.1)</span>
+                                      : <span style={{ fontSize: "10px", background: "#f0fdf4", color: "#166534", borderRadius: "5px", padding: "2px 6px" }}>✓ min 2 sessões ok</span>
+                                    }
+                                  </div>
+                                  <table style={{ borderCollapse: "collapse", fontSize: "10px", width: "auto" }}>
+                                    <colgroup>
+                                      <col style={{ width: "44px" }} />
+                                      {diasSorted.map(d => <col key={d} style={{ width: "96px" }} />)}
+                                    </colgroup>
+                                    <thead>
+                                      <tr>
+                                        <th style={{ padding: "2px 4px", textAlign: "left", color: "#9ca3af", borderBottom: "1px solid #e5e7eb" }} />
+                                        {diasSorted.map(d => (
+                                          <th key={d} style={{ padding: "4px 6px", textAlign: "center", fontWeight: 700, fontSize: "11px", color: d === verDia ? "#92400e" : B.navy, borderBottom: d === verDia ? "2px solid #fbbf24" : "1px solid #e5e7eb" }}>
+                                            {DIA_ABR[d] ?? d}
+                                          </th>
+                                        ))}
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {slotsGrid.map(s => {
+                                        const isSep = s === "13:00"
+                                        return (
+                                          <tr key={s} style={{ borderTop: isSep ? "2px solid #d1d5db" : "1px solid #f3f4f6" }}>
+                                            <td style={{ padding: "2px 4px", color: s === verHora ? "#d97706" : "#9ca3af", fontWeight: s === verHora ? 700 : 400, fontSize: "10px", whiteSpace: "nowrap", verticalAlign: "middle", height: "32px" }}>
+                                              {s}
+                                            </td>
+                                            {diasSorted.map(d => {
+                                              const sess = todasSessoes.filter(r => String(r["Dia da Semana"] || "") === d && String(r.HI_str || "") === s)
+                                              const isNew = d === verDia && s === verHora
+                                              return (
+                                                <td key={d} style={{ padding: "2px 3px", verticalAlign: "middle" }}>
+                                                  {sess.map((r, ri) => (
+                                                    <div key={ri} style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: "5px", padding: "2px 4px", fontSize: "10px", fontWeight: 600, color: "#166534", marginBottom: "1px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "90px" }}>
+                                                      {abrvTer(String(r.Terapia || ""))}
+                                                    </div>
+                                                  ))}
+                                                  {isNew && (
+                                                    <div style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: "5px", padding: "2px 4px", fontSize: "10px", fontWeight: 700, color: "#92400e", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "90px" }}>
+                                                      + {c.esp.split(" ")[0]}
+                                                    </div>
+                                                  )}
+                                                </td>
+                                              )
+                                            })}
+                                          </tr>
+                                        )
+                                      })}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )
+                            })()}
+                          </div>
+                        )
+                      })}
                     </div>
-                    <table style={{ borderCollapse: "collapse", width: "100%", fontSize: "12px" }}>
-                      <thead>
-                        <tr style={{ borderBottom: "1px solid #fcd34d" }}>
-                          <th style={{ textAlign: "left", padding: "4px 8px", color: "#92400e", fontWeight: 600, fontSize: "11px" }}>Paciente</th>
-                          <th style={{ textAlign: "left", padding: "4px 8px", color: "#92400e", fontWeight: 600, fontSize: "11px" }}>Especialidade</th>
-                          <th style={{ textAlign: "center", padding: "4px 8px", color: "#92400e", fontWeight: 600, fontSize: "11px" }}>Gap</th>
-                          <th style={{ textAlign: "left", padding: "4px 8px", color: "#92400e", fontWeight: 600, fontSize: "11px" }}>Convênio</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {sugestoesPorSlot[verSlot].map((c, i) => (
-                          <tr key={i} style={{ borderBottom: "1px solid #fef3c7" }}>
-                            <td style={{ padding: "6px 8px", fontWeight: 600, color: "#1f2937" }}>{c.pac}</td>
-                            <td style={{ padding: "6px 8px", color: "#374151" }}>{c.esp}</td>
-                            <td style={{ padding: "6px 8px", textAlign: "center", fontWeight: 700, color: "#d97706" }}>+{c.gap}</td>
-                            <td style={{ padding: "6px 8px", color: "#6b7280" }}>{c.conv || "—"}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
                   </div>
                 )}
               </div>
