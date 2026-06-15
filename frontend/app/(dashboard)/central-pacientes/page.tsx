@@ -322,7 +322,7 @@ export default function CentralTerapeuticaPage() {
 
   return (
 
-    <div className="flex flex-col gap-4 overflow-hidden">
+    <div className="flex flex-col gap-4">
 
         <DayPulse
           indicadores={indicadores}
@@ -354,18 +354,9 @@ export default function CentralTerapeuticaPage() {
           setData={setData}
         />
 
-		<div
-		  className="
-			grid
-			grid-cols-[1fr_360px]
-			gap-5
-			flex-1
-			overflow-hidden
-			min-h-0
-		  "
-		>
+		<div className="grid grid-cols-[1fr_360px] gap-5">
 
-			<div className="overflow-y-auto min-h-0">
+			<div>
 			  <AttendanceList
 				dados={filtrados}
 				selecionado={selecionadoId}
@@ -374,7 +365,7 @@ export default function CentralTerapeuticaPage() {
 			  />
 			</div>
 
-			<div className="self-start">
+			<div>
 			  <SidePanel
 				atendimento={selecionado}
 			  />

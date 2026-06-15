@@ -61,7 +61,7 @@ function SidePanel({ atendimento }: Props) {
 
   if (!atendimento) {
     return (
-      <div className="sticky top-42.5 rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center">
+      <div className="sticky top-0 max-h-[calc(100vh-7rem)] overflow-y-auto rounded-2xl border border-dashed border-slate-200 bg-white p-8 text-center">
         <p className="text-sm font-medium text-slate-500">Nenhum atendimento</p>
         <p className="text-xs text-slate-400 mt-1">
           Selecione uma linha para ver a ficha operacional.
@@ -84,7 +84,7 @@ function SidePanel({ atendimento }: Props) {
     atendimento.horario?.slice(0, 5) || atendimento.hora_inicial?.slice(0, 5)
 
   return (
-    <div className="sticky top-42.5 overflow-hidden rounded-2xl border border-slate-200 bg-white">
+    <div className="sticky top-0 max-h-[calc(100vh-7rem)] overflow-y-auto rounded-2xl border border-slate-200 bg-white">
       {/* CABEÇALHO */}
       <div className="p-5 border-b border-slate-100">
         <h2 className="text-xl font-semibold leading-tight text-slate-900">
