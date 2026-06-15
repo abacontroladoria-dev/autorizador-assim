@@ -91,9 +91,31 @@ export function useAuditoriaAssim() {
   // KPIs derivados client-side — elimina o 3º round-trip ao banco
   const kpis = useMemo((): KpisAuditoriaAssim | null => {
     if (loading) return null
-    const registros = rawDados.filter((d) => d.situacao !== 'FALTA' && d.situacao !== 'FALTA_TERAPEUTA')
-    const faltas = rawDados.filter((d) => d.situacao === 'FALTA')
-    const faltasTerapeuta = rawDados.filter((d) => d.situacao === 'FALTA_TERAPEUTA')
+
+    const dataFiltrada = rawDados.filter((item) => {
+      if (
+        filters.paciente &&
+        !item.paciente_nome?.toLowerCase().includes(filters.paciente.toLowerCase())
+      ) return false
+
+      if (filters.situacao && item.situacao !== filters.situacao) return false
+
+      if (
+        filters.tuss &&
+        !item.codigo_tuss?.toLowerCase().includes(filters.tuss.toLowerCase())
+      ) return false
+
+      if (filters.horario_bloco && item.hora_inicial) {
+        const [inicio, fim] = filters.horario_bloco.split('-')
+        if (item.hora_inicial < inicio || item.hora_inicial >= fim) return false
+      }
+
+      return true
+    })
+
+    const registros = dataFiltrada.filter((d) => d.situacao !== 'FALTA' && d.situacao !== 'FALTA_TERAPEUTA')
+    const faltas = dataFiltrada.filter((d) => d.situacao === 'FALTA')
+    const faltasTerapeuta = dataFiltrada.filter((d) => d.situacao === 'FALTA_TERAPEUTA')
     return {
       total: registros.length,
       faltas: faltas.length,
@@ -105,7 +127,7 @@ export function useAuditoriaAssim() {
       canceladas: registros.filter((d) => d.situacao === 'CANCELADA').length,
       glosas: registros.filter((d) => d.situacao === 'GLOSA').length,
     }
-  }, [rawDados, loading])
+  }, [rawDados, loading, filters])
 
   useEffect(() => {
     carregarDados()
