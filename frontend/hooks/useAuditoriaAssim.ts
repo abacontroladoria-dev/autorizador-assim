@@ -126,6 +126,7 @@ export function useAuditoriaAssim() {
       retorno_nao_confirmado: registros.filter((d) => d.situacao === 'RETORNO_NAO_CONFIRMADO' || d.situacao === 'AGUARDANDO_RETORNO').length,
       canceladas: registros.filter((d) => d.situacao === 'CANCELADA').length,
       glosas: registros.filter((d) => d.situacao === 'GLOSA').length,
+      tokens: registros.filter((d) => d.teve_token === true).length,
     }
   }, [rawDados, loading, filters])
 

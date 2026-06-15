@@ -239,7 +239,7 @@ AS $$
                COALESCE(mt.codigo_erro, mt.status, 'Erro não identificado'),
                CASE WHEN mt.descricao_erro IS NOT NULL THEN concat(' - ', mt.descricao_erro) ELSE '' END)
       WHEN mt.status = 'Liberado' AND mt.teve_token = true
-        THEN concat('Autorização confirmada pela ASSIM - Token: ', mt.token)
+        THEN concat('TOKEN - ', mt.token)
       WHEN mt.status = 'Liberado'    THEN 'Autorização confirmada pela ASSIM'
       WHEN mt.status = 'Liberado *'  THEN 'Autorização cancelada'
       WHEN fo.matricula IS NOT NULL

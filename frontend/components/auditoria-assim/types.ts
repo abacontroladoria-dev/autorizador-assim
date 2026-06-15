@@ -35,6 +35,7 @@ export type KpisAuditoriaAssim = {
   retorno_nao_confirmado: number
   canceladas: number
   glosas: number
+  tokens: number
 }
 
 export type AuditoriaFilters = {
