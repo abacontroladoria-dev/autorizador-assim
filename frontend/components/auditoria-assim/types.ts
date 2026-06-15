@@ -21,6 +21,8 @@ export type AuditoriaAssimItem = {
   possui_solicitacao: boolean | null
   observacao: string | null
   motivo_glosa: string | null
+  teve_token: boolean | null
+  token: string | null
 }
 
 export type KpisAuditoriaAssim = {
