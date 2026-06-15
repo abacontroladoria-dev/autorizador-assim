@@ -42,7 +42,7 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   // Rotas públicas
-  const publicRoutes = ['/login', '/definir-senha', '/auth/callback', '/disponibilidade-terapeuta/login']
+  const publicRoutes = ['/login', '/definir-senha', '/auth/callback', '/disponibilidade-terapeuta/login', '/disponibilidade-terapeuta']
 
   const isPublicRoute = publicRoutes.some(
     (route) => pathname === route || pathname.startsWith(route + '/')
