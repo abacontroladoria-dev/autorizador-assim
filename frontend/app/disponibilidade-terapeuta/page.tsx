@@ -4,6 +4,7 @@ import type { StatusDisponibilidade } from '@/hooks/useControleDisponibilidade'
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { ChevronDown, Search, LogOut } from 'lucide-react'
+import toast from 'react-hot-toast'
 import { useControleDisponibilidade } from '@/hooks/useControleDisponibilidade'
 import StatusModal from '@/components/controle-disponibilidade/StatusModal'
 import DisponibilidadeTerapeutaCard from '@/components/controle-disponibilidade/DisponibilidadeTerapeutaCard'
@@ -252,8 +253,14 @@ export default function RegistroDisponibilidadePage() {
 
   async function handleLogout() {
     setLogoutLoading(true)
-    await supabase.auth.signOut()
-    router.replace('/disponibilidade-terapeuta/login/')
+    try {
+      await supabase.auth.signOut()
+      router.replace('/disponibilidade-terapeuta/login/')
+    } catch (error) {
+      console.error('[disponibilidade] logout error:', error)
+      toast.error('Falha ao fazer logout. Tente novamente.')
+      setLogoutLoading(false)
+    }
   }
 
   return (
