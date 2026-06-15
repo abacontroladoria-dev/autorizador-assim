@@ -52,6 +52,8 @@ export async function listarFaltasAuditoria(data: string): Promise<AuditoriaAssi
         ? (f.profissional_nome ?? 'Falta do terapeuta')
         : 'Falta do paciente',
       motivo_glosa: null,
+      teve_token: null,
+      token: null,
     }
   })
 }
