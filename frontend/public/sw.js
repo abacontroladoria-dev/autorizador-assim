@@ -1,4 +1,4 @@
-const CACHE_NAME = 'disponib-v1'
+const CACHE_NAME = 'disponib-v2'
 
 const PRECACHE_URLS = [
   '/disponibilidade-terapeuta/',
@@ -27,6 +27,12 @@ self.addEventListener('activate', (event) => {
 
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return
+
+  // Só intercepta requisições do próprio site. Requisições cross-origin
+  // (ex.: worker local em http://127.0.0.1:3010) passam direto pelo navegador,
+  // sem o SW — evita conflito com a Content Security Policy e cache indevido.
+  const url = new URL(event.request.url)
+  if (url.origin !== self.location.origin) return
 
   event.respondWith(
     caches.match(event.request).then((cached) => cached || fetch(event.request))

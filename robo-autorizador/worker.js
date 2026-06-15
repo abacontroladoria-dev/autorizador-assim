@@ -7,7 +7,10 @@
 require('dotenv').config({ path: __dirname + '/.env' })
 
 const executarRpa = require('./rpa')
+
 const os = require('os')
+
+const { chromium } = require('playwright')
 
 const { createClient } = require('@supabase/supabase-js')
 
@@ -26,24 +29,6 @@ if (!MACHINE_ID) {
   console.error('❌ MACHINE_ID não definido no .env — encerrando.')
   process.exit(1)
 }
-
-let tarefaAtual = null
-
-async function encerrarGraciosamente() {
-  console.log('\n⛔ Encerrando worker...')
-  if (tarefaAtual) {
-    console.log('🔄 Resetando tarefa em processamento:', tarefaAtual)
-    await supabase
-      .from('fila_autorizacoes')
-      .update({ status: 'pendente', updated_at: new Date().toISOString() })
-      .eq('id', tarefaAtual)
-      .eq('status', 'processando')
-  }
-  process.exit(0)
-}
-
-process.on('SIGTERM', encerrarGraciosamente)
-process.on('SIGINT', encerrarGraciosamente)
 
 const app = express()
 
@@ -73,7 +58,7 @@ app.use(cors({
   }
 }))
 
-const INTERVALO_SEM_TAREFA = 3000
+const INTERVALO = 3000
 
 console.log('Worker iniciado na máquina:', MACHINE_ID)
 
@@ -101,13 +86,12 @@ async function buscarTarefa() {
 // =========================
 // 🔄 ATUALIZAR STATUS
 // =========================
-async function atualizarStatus(id, status, extras = {}) {
+async function atualizarStatus(id, status) {
   const { error } = await supabase
-    .from('fila_autorizacoes')
+    .from('fila_autorizacoes') // ✅ CORRIGIDO
     .update({
       status,
       updated_at: new Date().toISOString(),
-      ...extras
     })
     .eq('id', id)
 
@@ -158,7 +142,6 @@ async function registrarLog(fila_id, mensagem) {
 // 🖥️ AUTO-REGISTRO DA MÁQUINA
 // =========================
 async function registrarMaquina() {
-  const hostname = os.hostname()
   const agora = new Date().toISOString()
 
   const { error } = await supabase
@@ -166,7 +149,7 @@ async function registrarMaquina() {
     .upsert({
       id: MACHINE_ID,
       nome: MACHINE_ID,
-      hostname,
+      hostname: os.hostname(),
       sistema_operacional: `${os.type()} ${os.release()}`,
       ativa: true,
       last_seen: agora,
@@ -185,9 +168,10 @@ async function registrarMaquina() {
 // =========================
 function iniciarHeartbeat(intervaloMs = 30000) {
   setInterval(async () => {
+    const agora = new Date().toISOString()
     await supabase
       .from('maquinas')
-      .update({ last_seen: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .update({ last_seen: agora, updated_at: agora })
       .eq('id', MACHINE_ID)
   }, intervaloMs)
 }
@@ -204,6 +188,14 @@ async function iniciarWorker() {
 
   await registrarMaquina()
   iniciarHeartbeat(30000)
+
+  let browser = await chromium.launch({ headless: false })
+  console.log("🌐 Browser iniciado")
+
+  browser.on('disconnected', () => {
+    console.log("⚠️ Browser fechado pela recepcionista — será relançado na próxima tarefa")
+    browser = null
+  })
 
 	while (true) {
 	  try {
@@ -232,7 +224,7 @@ async function iniciarWorker() {
 		const tarefa = await buscarTarefa()
 
 		if (!tarefa) {
-		  await new Promise(r => setTimeout(r, INTERVALO_SEM_TAREFA))
+		  await new Promise(r => setTimeout(r, 500))
 		  continue
 		}
 
@@ -241,13 +233,10 @@ async function iniciarWorker() {
       // =========================
       // 🔒 LOCK (CRÍTICO)
       // =========================
-      const inicioExecucao = Date.now()
-
       const { data: lockData, error: lockError } = await supabase
         .from('fila_autorizacoes')
         .update({
           status: 'processando',
-          started_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
         .match({
@@ -267,7 +256,6 @@ async function iniciarWorker() {
       }
 
       console.log("🔐 LOCK OK:", tarefa.id)
-      tarefaAtual = tarefa.id
 
       await registrarLog(tarefa.id, 'Iniciando execução')
 
@@ -280,67 +268,38 @@ async function iniciarWorker() {
         }
 
         // 🚀 EXECUTANDO
-        const resultado = await executarRpa(tarefa, verificarCancelamento);
+        if (!browser || !browser.isConnected()) {
+          browser = await chromium.launch({ headless: false })
+          console.log("🌐 Browser relançado")
+          browser.on('disconnected', () => {
+            console.log("⚠️ Browser fechado pela recepcionista — será relançado na próxima tarefa")
+            browser = null
+          })
+        }
 
-		const agora = new Date().toISOString()
-		const execMs = Date.now() - inicioExecucao
+        const resultado = await executarRpa(tarefa, verificarCancelamento, browser);
 
+		// O rpa.js gerencia o status internamente ('concluido' ou 'erro').
+		// O worker só registra o log com base no retorno.
 		if (resultado === 'sucesso') {
-		  await atualizarStatus(tarefa.id, 'concluido', {
-		    completed_at: agora,
-		    execution_time_ms: execMs
-		  });
 		  await registrarLog(tarefa.id, 'Execução concluída');
 		  console.log("✅ Concluído:", tarefa.id);
-		} else if (resultado === 'glosa') {
-		  await atualizarStatus(tarefa.id, 'glosa', {
-		    completed_at: agora,
-		    execution_time_ms: execMs
-		  });
-		  await registrarLog(tarefa.id, 'Glosa ASSIM detectada');
-		  console.log("⛔ Glosa:", tarefa.id);
-		} else if (resultado === 'cancelado') {
-		  await atualizarStatus(tarefa.id, 'cancelado', {
-		    completed_at: agora,
-		    execution_time_ms: execMs
-		  });
-		  await registrarLog(tarefa.id, 'Cancelado pelo ASSIM (Liberado *)');
-		  console.log("🚫 Cancelado:", tarefa.id);
 		} else {
-		  await atualizarStatus(tarefa.id, 'erro', {
-		    completed_at: agora,
-		    execution_time_ms: execMs
-		  });
 		  await registrarLog(tarefa.id, 'Falha na execução');
 		  console.log("❌ Falha:", tarefa.id);
 		}
-
-		tarefaAtual = null
+        
 		await new Promise(r => setTimeout(r, 200))
 
       } catch (erroExecucao) {
 
         console.error("❌ Erro:", erroExecucao.message)
 
-        // Não sobrescreve se rpa.js já gravou 'concluido' diretamente
-        const { data: statusAtual } = await supabase
-          .from('fila_autorizacoes')
-          .select('status')
-          .eq('id', tarefa.id)
-          .single()
-
-        if (statusAtual?.status !== 'concluido') {
-          await atualizarStatus(tarefa.id, 'erro', {
-            error_message: erroExecucao.message,
-            completed_at: new Date().toISOString(),
-            execution_time_ms: Date.now() - inicioExecucao
-          })
-        }
-
+        // O rpa.js já atualizou para 'erro' antes de relançar a exceção.
+        // O worker só registra o log para não sobrescrever o status.
         await registrarLog(tarefa.id, erroExecucao.message)
 
-        tarefaAtual = null
-		await new Promise(r => setTimeout(r, 1000))
+        await new Promise(r => setTimeout(r, 1000))
 
       }
 
@@ -375,11 +334,6 @@ app.get('/machine-id', (req, res) => {
   res.json({
     machine_id: MACHINE_ID
   })
-})
-
-app.post('/restart', (req, res) => {
-  res.json({ message: 'Reiniciando worker...' })
-  setTimeout(() => process.exit(0), 500)
 })
 
 const LOCAL_API_PORT =
