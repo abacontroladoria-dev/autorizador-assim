@@ -2,7 +2,7 @@
 
 import Sidebar from "@/components/Sidebar"
 import { ImpersonationBar } from '@/components/admin/ImpersonationBar'
-import { useEffect, useState } from 'react'
+import { useEffect, useState, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import { getSupabaseClient } from '@/lib/supabase/client'
 
@@ -50,7 +50,9 @@ export default function DashboardLayout({
         <HeaderProvider>
           <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
             <ImpersonationBar />
-            <Sidebar />
+            <Suspense fallback={null}>
+              <Sidebar />
+            </Suspense>
             <div className="ml-64 flex flex-col min-h-screen pt-16">
               <DashboardShellContent>
                 {children}

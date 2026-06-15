@@ -16,9 +16,23 @@ import {
   Star,
   KeyRound,
   BarChart3,
+  CalendarPlus,
+  Database,
+  LogOut,
+  TrendingUp,
+  UserCheck,
+  UserPlus,
+  Zap,
+  Clock,
+  XCircle,
+  AlertTriangle,
+  CalendarOff,
+  BookOpen,
+  Settings,
+  Lightbulb,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { getFunctionHeaders, getFunctionUrl } from "@/lib/supabase/functions"
 import toast from "react-hot-toast"
@@ -36,6 +50,23 @@ import { getUsuarioPermissoes } from "@/services/permissoes.service"
 
 type Favorito = { label: string; path: string }
 
+const CODIGO_PARA_ROTAS: Record<string, string[]> = {
+  dashboard: ["/"],
+  atendimentos: ["/solicitar"],
+  gestao: ["/central-pacientes"],
+  cronograma: ["/agenda/pacientes"],
+  escala_terapeutica: ["/central-terapeutas"],
+  agenda_terapeutica: ["/agenda/terapeutas"],
+  salas: ["/agenda/salas"],
+  guias_digitais: ["/guias-digitais"],
+  auditoria_assim: ["/auditoria-assim"],
+  usuarios: ["/admin"],
+  permissoes: ["/admin/permissoes"],
+  cco: ["/cco"],
+  cronograma_solicitacoes: ["/cronograma/solicitacoes"],
+  ocupacao_clinica: ["/cronograma/ocupacao"],
+}
+
 const pathIconMap: Record<string, any> = {
   "/": LayoutDashboard,
   "/solicitar": PlusCircle,
@@ -49,11 +80,25 @@ const pathIconMap: Record<string, any> = {
   "/cco": BarChart3,
   "/admin": ShieldCheck,
   "/admin/permissoes": KeyRound,
+  "/cronograma/solicitacoes?tab=simulacao": UserPlus,
+  "/cronograma/solicitacoes?tab=saida": LogOut,
+  "/cronograma/solicitacoes?tab=ocup-prof": TrendingUp,
+  "/cronograma/solicitacoes?tab=ocup-pac": UserCheck,
+  "/cronograma/solicitacoes?tab=novo-cron": CalendarPlus,
+  "/cronograma/solicitacoes?tab=banco": Database,
+  "/cronograma/ocupacao?tab=vagas": Zap,
+  "/cronograma/ocupacao?tab=fila": Clock,
+  "/cronograma/ocupacao?tab=recusados": XCircle,
+  "/cronograma/ocupacao?tab=inviavel": AlertTriangle,
+  "/cronograma/ocupacao?tab=gaps": CalendarOff,
+  "/cronograma/ocupacao?tab=guia": BookOpen,
+  "/cronograma/ocupacao?tab=config": Settings,
 }
 
 export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = getSupabaseClient()
   const { theme } = useTheme()
   const { isImpersonating, impersonatedTarget, canImpersonate } = useImpersonation()
@@ -97,8 +142,16 @@ export default function Sidebar() {
   }
 
   function isActive(path: string) {
+    const [rawPart, queryPart] = path.split("?")
+    const pathPart = rawPart.replace(/\/$/, "") || "/"
     const current = pathname.replace(/\/$/, "") || "/"
-    return current === path
+    if (current !== pathPart) return false
+    if (!queryPart) return true
+    const expected = new URLSearchParams(queryPart)
+    for (const [k, v] of expected) {
+      if (searchParams.get(k) !== v) return false
+    }
+    return true
   }
 
   async function handleLogout() {
@@ -107,87 +160,10 @@ export default function Sidebar() {
     router.replace("/login")
   }
 
-  const CODIGO_PARA_ROTAS: Record<string, string[]> = {
-    dashboard: ["/"],
-    atendimentos: ["/solicitar"],
-    gestao: ["/central-pacientes"],
-    cronograma: ["/agenda/pacientes"],
-    escala_terapeutica: ["/central-terapeutas"],
-    agenda_terapeutica: ["/agenda/terapeutas"],
-    salas: ["/agenda/salas"],
-    guias_digitais: ["/guias-digitais"],
-    auditoria_assim: ["/auditoria-assim"],
-    usuarios: ["/admin"],
-    permissoes: ["/admin/permissoes"],
-    cco: ["/cco"],
-  }
-
-  const permissions = {
-    admin: [
-      "/",
-      "/solicitar",
-      "/central-pacientes",
-      "/central-terapeutas",
-      "/agenda/pacientes",
-      "/agenda/terapeutas",
-      "/agenda/salas",
-      "/guias-digitais",
-      "/financeiro",
-      "/admin",
-      "/admin/permissoes",
-      "/auditoria-assim",
-      "/cco",
-    ],
-    diretoria: [
-      "/",
-      "/solicitar",
-      "/central-pacientes",
-      "/central-terapeutas",
-      "/agenda/pacientes",
-      "/agenda/terapeutas",
-      "/agenda/salas",
-      "/guias-digitais",
-      "/financeiro",
-      "/auditoria-assim",
-      "/cco",
-    ],
-    recepcao: [
-      "/",
-      "/solicitar",
-      "/central-pacientes",
-      "/agenda/pacientes",
-      "/auditoria-assim",
-    ],
-    autorizacao: [
-      "/",
-      "/agenda/pacientes",
-      "/agenda/terapeutas",
-      "/agenda/salas",
-      "/auditoria-assim",
-    ],
-    terapeutico: [
-      "/",
-      "/central-terapeutas",
-      "/agenda/salas",
-      "/agenda/terapeutas",
-    ],
-    faturamento: [
-      "/",
-      "/guias-digitais",
-      "/agenda/pacientes",
-      "/agenda/terapeutas",
-      "/agenda/salas",
-      "/cco",
-    ],
-    rp: [
-      "/",
-      "/central-terapeutas",
-    ],
-  }
-
   function canAccess(path: string) {
     if (!role) return false
-    return allowedPaths.includes(path)
+    const barePath = path.split("?")[0]
+    return allowedPaths.includes(barePath)
   }
 
   useEffect(() => {
@@ -505,6 +481,31 @@ export default function Sidebar() {
               {canAccess("/guias-digitais") && (
                 <MenuItem label="Guias Digitais" icon={FileText} path="/guias-digitais" />
               )}
+            </SidebarGroup>
+          )}
+
+          {/* Cronograma | Solicitações */}
+          {canAccess("/cronograma/solicitacoes") && (
+            <SidebarGroup title="Cronograma | Solicitações" icon={Lightbulb}>
+              <MenuItem label="Simulação de Novo Prestador" icon={UserPlus} path="/cronograma/solicitacoes?tab=simulacao" />
+              <MenuItem label="Saída de Profissional" icon={LogOut} path="/cronograma/solicitacoes?tab=saida" />
+              <MenuItem label="Aumentar Ocupação (Profissional)" icon={TrendingUp} path="/cronograma/solicitacoes?tab=ocup-prof" />
+              <MenuItem label="Aumentar Ocupação (Paciente)" icon={UserCheck} path="/cronograma/solicitacoes?tab=ocup-pac" />
+              <MenuItem label="Novo Cronograma" icon={CalendarPlus} path="/cronograma/solicitacoes?tab=novo-cron" />
+              <MenuItem label="Banco de Dados" icon={Database} path="/cronograma/solicitacoes?tab=banco" />
+            </SidebarGroup>
+          )}
+
+          {/* Cronograma | Equalizador */}
+          {canAccess("/cronograma/ocupacao") && (
+            <SidebarGroup title="Cronograma | Equalizador" icon={TrendingUp}>
+              <MenuItem label="Vagas Agora" icon={Zap} path="/cronograma/ocupacao?tab=vagas" />
+              <MenuItem label="Fila de Espera" icon={Clock} path="/cronograma/ocupacao?tab=fila" />
+              <MenuItem label="Recusados" icon={XCircle} path="/cronograma/ocupacao?tab=recusados" />
+              <MenuItem label="Inviáveis" icon={AlertTriangle} path="/cronograma/ocupacao?tab=inviavel" />
+              <MenuItem label="Gaps" icon={CalendarOff} path="/cronograma/ocupacao?tab=gaps" />
+              <MenuItem label="Guia" icon={BookOpen} path="/cronograma/ocupacao?tab=guia" />
+              <MenuItem label="Configurações" icon={Settings} path="/cronograma/ocupacao?tab=config" />
             </SidebarGroup>
           )}
 

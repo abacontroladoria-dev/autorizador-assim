@@ -43,7 +43,7 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   // Rotas públicas
-  const publicRoutes = ['/login', '/definir-senha', '/auth/callback', '/disponibilidade-terapeuta/login']
+  const publicRoutes = ['/login', '/definir-senha', '/auth/callback', '/disponibilidade-terapeuta/login', '/sem-permissao']
 
   const isPublicRoute = publicRoutes.some(
     (route) => pathname === route || pathname.startsWith(route + '/')
@@ -105,8 +105,8 @@ export async function proxy(request: NextRequest) {
 
   const roleRoutes: Record<string, string[]> = {
     admin: ['*'],
-    diretoria: ['/', '/solicitacao', '/guias', '/financeiro'],
-    recepcao: ['/', '/solicitacao'],
+    diretoria: ['/', '/solicitacao', '/guias', '/financeiro', '/cronograma'],
+    recepcao: ['/', '/solicitacao', '/cronograma/solicitacoes'],
     terapeutico: ['/', '/terapeutas'],
     faturamento: ['/', '/guias'],
     autorizacao: ['/', '/auditoria-assim'],
