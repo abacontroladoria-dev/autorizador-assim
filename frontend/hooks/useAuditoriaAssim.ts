@@ -98,7 +98,13 @@ export function useAuditoriaAssim() {
         !item.paciente_nome?.toLowerCase().includes(filters.paciente.toLowerCase())
       ) return false
 
-      if (filters.situacao && item.situacao !== filters.situacao) return false
+      if (filters.situacao) {
+        if (filters.situacao === 'TOKENS') {
+          if (!item.teve_token) return false
+        } else {
+          if (item.situacao !== filters.situacao) return false
+        }
+      }
 
       if (
         filters.tuss &&
@@ -178,7 +184,13 @@ export function useAuditoriaAssim() {
         !item.paciente_nome?.toLowerCase().includes(filters.paciente.toLowerCase())
       ) return false
 
-      if (filters.situacao && item.situacao !== filters.situacao) return false
+      if (filters.situacao) {
+        if (filters.situacao === 'TOKENS') {
+          if (!item.teve_token) return false
+        } else {
+          if (item.situacao !== filters.situacao) return false
+        }
+      }
 
       if (
         filters.tuss &&
