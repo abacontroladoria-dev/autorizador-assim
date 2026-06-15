@@ -393,7 +393,8 @@ async function handleSolicitarLista(
     if (existente) {
 
       if (
-        existente.status === 'erro'
+          existente.status === 'erro' ||
+          existente.status === 'cancelado'
       ) {
 
 		await supabase
