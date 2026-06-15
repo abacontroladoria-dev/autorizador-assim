@@ -3,7 +3,7 @@
 import type { StatusDisponibilidade } from '@/hooks/useControleDisponibilidade'
 import { useEffect, useMemo, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronDown, Search } from 'lucide-react'
+import { ChevronDown, Search, LogOut } from 'lucide-react'
 import { useControleDisponibilidade } from '@/hooks/useControleDisponibilidade'
 import StatusModal from '@/components/controle-disponibilidade/StatusModal'
 import DisponibilidadeTerapeutaCard from '@/components/controle-disponibilidade/DisponibilidadeTerapeutaCard'
@@ -82,6 +82,7 @@ export default function RegistroDisponibilidadePage() {
   const [ordenacao, setOrdenacao] = useState<Ordenacao>('alfabetica')
   const [filtroStatus, setFiltroStatus] = useState<'todos' | StatusDisponibilidadeGrupo>('todos')
   const [grupoCobertura, setGrupoCobertura] = useState<GrupoTerapeutaMobile | null>(null)
+  const [logoutLoading, setLogoutLoading] = useState(false)
 
   async function carregarDados() {
     setLoading(true)
@@ -249,21 +250,40 @@ export default function RegistroDisponibilidadePage() {
         ? 'Nenhum profissional encontrado.'
         : `${grupos.length} profissional${grupos.length !== 1 ? 'is' : ''} encontrado${grupos.length !== 1 ? 's' : ''}.`
 
+  async function handleLogout() {
+    setLogoutLoading(true)
+    await supabase.auth.signOut()
+    router.replace('/disponibilidade-terapeuta/login/')
+  }
+
   return (
     <main className="min-h-screen bg-brand-bg pb-28">
       <header className="sticky top-0 z-40 bg-white border-b border-slate-200 px-4 py-3">
-        <div className="flex items-center gap-3">
-          <div className="h-10 w-10 rounded-xl border border-slate-200 overflow-hidden bg-white flex items-center justify-center">
-            <img
-              src="/logo-universo-aba.png"
-              alt="Universo ABA"
-              className="h-9 w-9 object-contain"
-            />
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 rounded-xl border border-slate-200 overflow-hidden bg-white flex items-center justify-center">
+              <img
+                src="/logo-universo-aba.png"
+                alt="Universo ABA"
+                className="h-9 w-9 object-contain"
+              />
+            </div>
+            <div>
+              <h1 className="text-sm font-bold text-slate-800">Clínica Universo ABA</h1>
+              <p className="text-sm font-semibold text-brand-fg">Registro de Disponibilidade</p>
+            </div>
           </div>
-          <div>
-            <h1 className="text-sm font-bold text-slate-800">Clínica Universo ABA</h1>
-            <p className="text-sm font-semibold text-brand-fg">Registro de Disponibilidade</p>
-          </div>
+          <button
+            type="button"
+            onClick={handleLogout}
+            disabled={logoutLoading}
+            className="flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-semibold text-slate-700 hover:bg-slate-100 active:bg-slate-200 transition-colors disabled:opacity-50"
+            aria-label="Fazer logout"
+            title="Fazer logout"
+          >
+            <LogOut size={18} strokeWidth={2} />
+            <span className="hidden sm:inline">Sair</span>
+          </button>
         </div>
       </header>
 
