@@ -122,17 +122,18 @@ export function useAuditoriaAssim() {
     const registros = dataFiltrada.filter((d) => d.situacao !== 'FALTA' && d.situacao !== 'FALTA_TERAPEUTA')
     const faltas = dataFiltrada.filter((d) => d.situacao === 'FALTA')
     const faltasTerapeuta = dataFiltrada.filter((d) => d.situacao === 'FALTA_TERAPEUTA')
+    const comToken = registros.filter((d) => d.teve_token === true).length
     return {
       total: registros.length,
       faltas: faltas.length,
       faltas_terapeuta: faltasTerapeuta.length,
-      liberadas: registros.filter((d) => d.situacao === 'LIBERADA').length,
+      liberadas: registros.filter((d) => d.situacao === 'LIBERADA').length - comToken,
       nao_solicitadas: registros.filter((d) => d.situacao === 'NAO_SOLICITADA').length,
       sincronizando: registros.filter((d) => d.situacao === 'SINCRONIZANDO').length,
       retorno_nao_confirmado: registros.filter((d) => d.situacao === 'RETORNO_NAO_CONFIRMADO' || d.situacao === 'AGUARDANDO_RETORNO').length,
       canceladas: registros.filter((d) => d.situacao === 'CANCELADA').length,
       glosas: registros.filter((d) => d.situacao === 'GLOSA').length,
-      tokens: registros.filter((d) => d.teve_token === true).length,
+      tokens: comToken,
     }
   }, [rawDados, loading, filters])
 
