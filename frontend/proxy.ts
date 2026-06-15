@@ -106,7 +106,7 @@ export async function proxy(request: NextRequest) {
   const roleRoutes: Record<string, string[]> = {
     admin: ['*'],
     diretoria: ['/', '/solicitacao', '/guias', '/financeiro'],
-    recepcao: ['/', '/solicitacao'],
+    recepcao: ['/', '/solicitar', '/central-pacientes', '/agenda/pacientes', '/auditoria-assim'],
     terapeutico: ['/', '/terapeutas'],
     faturamento: ['/', '/guias'],
     autorizacao: ['/', '/auditoria-assim'],
