@@ -7,6 +7,7 @@
 require('dotenv').config({ path: __dirname + '/.env' })
 
 const executarRpa = require('./rpa')
+const os = require('os')
 
 const { createClient } = require('@supabase/supabase-js')
 
@@ -154,6 +155,44 @@ async function registrarLog(fila_id, mensagem) {
 }
 
 // =========================
+// 🖥️ AUTO-REGISTRO DA MÁQUINA
+// =========================
+async function registrarMaquina() {
+  const hostname = os.hostname()
+  const agora = new Date().toISOString()
+
+  const { error } = await supabase
+    .from('maquinas')
+    .upsert({
+      id: MACHINE_ID,
+      nome: MACHINE_ID,
+      hostname,
+      sistema_operacional: `${os.type()} ${os.release()}`,
+      ativa: true,
+      last_seen: agora,
+      updated_at: agora,
+    }, { onConflict: 'id', ignoreDuplicates: false })
+
+  if (error) {
+    console.error('⚠️ Erro ao registrar máquina:', error.message)
+  } else {
+    console.log('✅ Máquina registrada/atualizada:', MACHINE_ID)
+  }
+}
+
+// =========================
+// 💓 HEARTBEAT
+// =========================
+function iniciarHeartbeat(intervaloMs = 30000) {
+  setInterval(async () => {
+    await supabase
+      .from('maquinas')
+      .update({ last_seen: new Date().toISOString(), updated_at: new Date().toISOString() })
+      .eq('id', MACHINE_ID)
+  }, intervaloMs)
+}
+
+// =========================
 // 🚀 LOOP PRINCIPAL
 // =========================
 async function iniciarWorker() {
@@ -162,6 +201,9 @@ async function iniciarWorker() {
   console.log("🤖 WORKER RPA INICIADO")
   console.log("💻 Máquina:", MACHINE_ID)
   console.log("=================================")
+
+  await registrarMaquina()
+  iniciarHeartbeat(30000)
 
 	while (true) {
 	  try {
