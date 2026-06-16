@@ -2,16 +2,19 @@
 -- Execute após supabase db push
 
 -- ============================================================================
--- Query 1: Verificar registros tita_csv que ainda têm campos nulos
--- esperado: 0 (todos foram enriquecidos)
+-- Query 1: Verificar registros tita_csv ASSIM que ainda têm campos nulos
+-- esperado: 0 (todos os ASSIM foram enriquecidos)
+-- Nota: Pacientes de outros convênios (Particular, LEVE SAUDE, etc) podem ter
+-- numero_carteirinha=null e isso é aceitável. Só validamos ASSIM (convenio_id=930)
 -- ============================================================================
 SELECT
-  'Registros tita_csv com campos críticos nulos (tem grade sibling)' as validacao,
+  'Registros tita_csv ASSIM com campos críticos nulos (tem grade sibling)' as validacao,
   count(*) as total_encontrado,
   0 as esperado,
   CASE WHEN count(*) = 0 THEN '✓ PASS' ELSE '✗ FAIL' END as resultado
 FROM agenda_tita
 WHERE origem = 'tita_csv'
+  AND convenio_id = 930
   AND (cpf IS NULL OR numero_carteirinha IS NULL)
   AND EXISTS (
     SELECT 1 FROM agenda_tita a2
@@ -21,21 +24,22 @@ WHERE origem = 'tita_csv'
   );
 
 -- ============================================================================
--- Query 2: Verificar vw_central_autorizacoes
--- Esperado: 0 registros com empresa/matricula/dep nulos para pacientes
--- com grade sibling. Pode ter >0 apenas para pacientes EXCLUSIVAMENTE tita_csv
+-- Query 2: Verificar vw_central_autorizacoes para ASSIM apenas
+-- Esperado: 0 registros com empresa/matricula/dep nulos para ASSIM
+-- Nota: Filtrado apenas para convenio_id=930 (ASSIM). Outros convênios
+-- podem ter campos nulos e é aceitável.
 -- ============================================================================
 WITH tita_csv_sem_grade AS (
   SELECT DISTINCT paciente_id
   FROM agenda_tita
-  WHERE origem = 'tita_csv'
+  WHERE origem = 'tita_csv' AND convenio_id = 930
   EXCEPT
   SELECT DISTINCT paciente_id
   FROM agenda_tita
   WHERE origem = 'grade'
 )
 SELECT
-  'Registros vw_central_autorizacoes com empresa/matricula/dep nulos' as validacao,
+  'Registros vw_central_autorizacoes ASSIM com empresa/matricula/dep nulos' as validacao,
   count(*) as total_encontrado,
   (SELECT count(DISTINCT b.paciente_id) FROM tita_csv_sem_grade b) as esperado,
   CASE WHEN count(*) <= (SELECT count(DISTINCT b.paciente_id) FROM tita_csv_sem_grade b)
@@ -43,6 +47,7 @@ SELECT
 FROM vw_central_autorizacoes
 WHERE (empresa IS NULL OR matricula IS NULL OR dep IS NULL)
   AND mostrar_na_tela = true
+  AND convenio_id = 930
   AND paciente_id NOT IN (SELECT paciente_id FROM tita_csv_sem_grade);
 
 -- ============================================================================
