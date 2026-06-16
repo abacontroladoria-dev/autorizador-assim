@@ -58,11 +58,8 @@ function calcularStatusAtual(
   if (temDisponivel && !temIndisponivel) return 'disponivel'
   if (todosPendente) return 'pendente'
 
-  return normalizarStatus(
-    [...atendimentos].sort((a, b) =>
-      String(a.hora_inicial).localeCompare(String(b.hora_inicial))
-    ).at(-1)?.status
-  ) || 'pendente'
+  // atendimentos chega pré-ordenado por hora_inicial (via filtrados)
+  return normalizarStatus(atendimentos.at(-1)?.status) || 'pendente'
 }
 
 export default function ControleTerapeuticoPage() {
@@ -169,25 +166,23 @@ export default function ControleTerapeuticoPage() {
   const deferredBusca = useDeferredValue(filters.busca)
 
   const horarios = useMemo(() => {
-    return Array.from(
-      new Set(
-        dados
-          .filter(terapiaDeveAparecer)
-          .map(getHorarioInicial)
-          .filter(Boolean)
-      )
-    ).sort((a, b) => a.localeCompare(b))
+    const seen = new Set<string>()
+    for (const item of dados) {
+      if (!terapiaDeveAparecer(item)) continue
+      const h = getHorarioInicial(item)
+      if (h) seen.add(h)
+    }
+    return Array.from(seen).sort((a, b) => a.localeCompare(b))
   }, [dados])
 
   const terapias = useMemo(() => {
-    return Array.from(
-      new Set(
-        dados
-          .filter(terapiaDeveAparecer)
-          .map((item) => item.terapia_exibicao || item.terapia_exibicao_nome || getTerapia(item))
-          .filter(Boolean)
-      )
-    ).sort((a, b) => a.localeCompare(b, 'pt-BR'))
+    const seen = new Set<string>()
+    for (const item of dados) {
+      if (!terapiaDeveAparecer(item)) continue
+      const t = item.terapia_exibicao || item.terapia_exibicao_nome || getTerapia(item)
+      if (t) seen.add(t)
+    }
+    return Array.from(seen).sort((a, b) => a.localeCompare(b, 'pt-BR'))
   }, [dados])
 
   const atendimentosPorTerapeuta = useMemo(() => {
@@ -318,12 +313,19 @@ Object.values(grupos).forEach(
   const statusContagem = useMemo(() => {
     const contagem = { disponivel: 0, indisponivel: 0, substituido: 0, parcial: 0, pendente: 0 }
     for (const g of gruposPorTerapeuta) {
-      const statuses = new Set(g.atendimentos.map((a) => String(a.status ?? '').toLowerCase()))
-      if (statuses.has('disponivel'))   contagem.disponivel++
-      if (statuses.has('indisponivel')) contagem.indisponivel++
-      if (statuses.has('substituido'))  contagem.substituido++
-      if (g.status === 'parcial')       contagem.parcial++
-      if (statuses.has('pendente'))     contagem.pendente++
+      let temDisp = false, temIndisp = false, temSubst = false, temPend = false
+      for (const a of g.atendimentos) {
+        const s = String(a.status ?? '').toLowerCase()
+        if (!temDisp   && s === 'disponivel')   temDisp   = true
+        if (!temIndisp && s === 'indisponivel') temIndisp = true
+        if (!temSubst  && s === 'substituido')  temSubst  = true
+        if (!temPend   && s === 'pendente')     temPend   = true
+      }
+      if (temDisp)            contagem.disponivel++
+      if (temIndisp)          contagem.indisponivel++
+      if (temSubst)           contagem.substituido++
+      if (g.status === 'parcial') contagem.parcial++
+      if (temPend)            contagem.pendente++
     }
     return contagem
   }, [gruposPorTerapeuta])
