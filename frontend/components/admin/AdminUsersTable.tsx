@@ -7,14 +7,14 @@ import CreateUserModal from './CreateUserModal'
 
 const roleOptions = [
   { value: 'admin', label: 'Admin' },
-  { value: 'diretoria', label: 'Diretoria' },
-  { value: 'recepcao', label: 'Recepção' },
-  { value: 'terapeutico', label: 'Terapêutico' },
-  { value: 'faturamento', label: 'Faturamento' },
   { value: 'autorizacao', label: 'Autorização' },
-  { value: 'rp', label: 'RP' },
   { value: 'cronograma', label: 'Cronograma' },
   { value: 'disponibilidade_terapeuta', label: 'Disponib. Terapeuta' },
+  { value: 'diretoria', label: 'Diretoria' },
+  { value: 'faturamento', label: 'Faturamento' },
+  { value: 'recepcao', label: 'Recepção' },
+  { value: 'rp', label: 'RP' },
+  { value: 'terapeutico', label: 'Terapêutico' },
 ]
 
 export default function AdminUsersTable({
