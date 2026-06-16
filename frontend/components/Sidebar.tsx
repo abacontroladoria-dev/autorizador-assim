@@ -465,7 +465,11 @@ export default function Sidebar() {
 
           {/* Pacientes */}
           {(canAccess("/solicitar") || canAccess("/central-pacientes") || canAccess("/agenda/pacientes")) && (
-            <SidebarGroup title="Pacientes" icon={Users}>
+            <SidebarGroup
+              title="Pacientes"
+              icon={Users}
+              defaultOpen={["/solicitar", "/central-pacientes", "/agenda/pacientes"].some(p => pathname === p)}
+            >
               {canAccess("/solicitar") && (
                 <MenuItem label="Atendimentos" icon={PlusCircle} path="/solicitar" />
               )}
@@ -480,7 +484,11 @@ export default function Sidebar() {
 
           {/* Terapêutico */}
           {(canAccess("/central-terapeutas") || canAccess("/agenda/terapeutas") || canAccess("/agenda/salas")) && (
-            <SidebarGroup title="Terapêutico" icon={Stethoscope}>
+            <SidebarGroup
+              title="Terapêutico"
+              icon={Stethoscope}
+              defaultOpen={["/central-terapeutas", "/agenda/terapeutas", "/agenda/salas"].some(p => pathname === p)}
+            >
               {canAccess("/central-terapeutas") && (
                 <MenuItem label="Gestão" icon={UserRound} path="/central-terapeutas" />
               )}
@@ -495,7 +503,11 @@ export default function Sidebar() {
 
           {/* Operações */}
           {(canAccess("/auditoria-assim") || canAccess("/guias-digitais") || canAccess("/cco")) && (
-            <SidebarGroup title="Operações" icon={BriefcaseBusiness}>
+            <SidebarGroup
+              title="Operações"
+              icon={BriefcaseBusiness}
+              defaultOpen={["/auditoria-assim", "/guias-digitais", "/cco"].some(p => pathname === p)}
+            >
               {canAccess("/cco") && (
                 <MenuItem label="Conciliação ASSIM" icon={BarChart3} path="/cco" />
               )}
@@ -510,7 +522,11 @@ export default function Sidebar() {
 
           {/* Administração */}
           {canAccess("/admin") && (
-            <SidebarGroup title="Administração" icon={ShieldCheck}>
+            <SidebarGroup
+              title="Administração"
+              icon={ShieldCheck}
+              defaultOpen={["/admin", "/admin/permissoes"].some(p => pathname === p)}
+            >
               <MenuItem label="Usuários" icon={Users} path="/admin" />
               {canAccess("/admin/permissoes") && (
                 <MenuItem label="Permissões" icon={KeyRound} path="/admin/permissoes" />
