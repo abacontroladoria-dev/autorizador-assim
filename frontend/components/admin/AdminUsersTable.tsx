@@ -13,6 +13,7 @@ const roleOptions = [
   { value: 'faturamento', label: 'Faturamento' },
   { value: 'autorizacao', label: 'Autorização' },
   { value: 'rp', label: 'RP' },
+  { value: 'cronograma', label: 'Cronograma' },
   { value: 'disponibilidade_terapeuta', label: 'Disponib. Terapeuta' },
 ]
 
