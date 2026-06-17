@@ -2,8 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { createPortal } from "react-dom"
-import { B } from "@/lib/cronograma/constants"
-import { pm, fm } from "@/lib/cronograma/helpers"
+import { B, HORAS_GRID } from "@/lib/cronograma/constants"
+import { pm, fm, fmtName } from "@/lib/cronograma/helpers"
 import type { IncItem, IncTipo } from "@/lib/cronograma/inconsistencias"
 import type { CsvRow } from "@/types/cronograma"
 
@@ -123,11 +123,6 @@ function buildSchedule(pac: string, cRows: CsvRow[], incItems: IncItem[]): Recor
   return byDia
 }
 
-function fmtProf(nome: string) {
-  const parts = nome.split(" ").filter(Boolean)
-  if (parts.length <= 1) return nome
-  return parts[0] + " " + parts[parts.length - 1]
-}
 
 interface CronViewModalProps {
   pac: string
@@ -141,12 +136,31 @@ function CronViewModal({ pac, conv, cRows, items, onClose }: CronViewModalProps)
   const byDia = useMemo(() => buildSchedule(pac, cRows, items), [pac, cRows, items])
   const dias = DIAS_ORDER.filter(d => byDia[d])
 
+  // Grade: "dia|||hora" → SessaoView[]
+  const cMap: Record<string, SessaoView[]> = {}
+  for (const d of dias) {
+    for (const s of byDia[d]) {
+      const k = `${d}|||${s.hora}`
+      if (!cMap[k]) cMap[k] = []
+      cMap[k].push(s)
+    }
+  }
+  const horasGrid = HORAS_GRID.filter(h => dias.some(d => cMap[`${d}|||${h}`]?.length))
+
+  // Notas de inconsistência para exibir abaixo da grade
+  const flagNotes = dias.flatMap(d =>
+    (byDia[d] ?? []).filter(s => s.flagged && s.flagDetalhe).map(s => ({
+      label: `${d.replace("-feira", "")} ${s.hora}`,
+      detail: s.flagDetalhe,
+    }))
+  )
+
   return createPortal(
     <div
       style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", background: "rgba(0,0,0,.45)", padding: "24px 16px", overflowY: "auto" }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div style={{ background: "var(--color-card, white)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", width: "100%", maxWidth: "780px" }}>
+      <div style={{ background: "var(--color-card, white)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", width: "100%", maxWidth: "820px" }}>
         {/* Header */}
         <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "18px 20px 14px", borderBottom: "1px solid #e5e7eb" }}>
           <div>
@@ -161,73 +175,69 @@ function CronViewModal({ pac, conv, cRows, items, onClose }: CronViewModalProps)
           </button>
         </div>
 
-        {/* Schedule */}
-        <div style={{ padding: "16px 20px", display: "flex", flexDirection: "column", gap: "14px" }}>
-          {dias.length === 0 && (
+        {/* Grade */}
+        <div style={{ padding: "16px 20px", overflowX: "auto" }}>
+          {dias.length === 0 ? (
             <div style={{ textAlign: "center", color: "#9ca3af", fontSize: "13px", padding: "24px 0" }}>
               Nenhuma sessão agendada encontrada no CSV.
             </div>
-          )}
-          {dias.map(dia => (
-            <div key={dia}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#6b7280", textTransform: "uppercase", letterSpacing: "0.05em", marginBottom: "6px" }}>
-                {dia}
-              </div>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+          ) : (
+            <>
+              <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "320px" }}>
                 <thead>
-                  <tr style={{ background: "#f8fafc" }}>
-                    <th style={{ padding: "5px 10px", textAlign: "left", fontWeight: 600, color: "#6b7280", width: "60px", borderRadius: "6px 0 0 6px" }}>Hora</th>
-                    <th style={{ padding: "5px 10px", textAlign: "left", fontWeight: 600, color: "#6b7280" }}>Terapia</th>
-                    <th style={{ padding: "5px 10px", textAlign: "left", fontWeight: 600, color: "#6b7280" }}>Exibição</th>
-                    <th style={{ padding: "5px 10px", textAlign: "left", fontWeight: 600, color: "#6b7280" }}>Profissional</th>
-                    <th style={{ padding: "5px 10px", textAlign: "left", fontWeight: 600, color: "#6b7280", borderRadius: "0 6px 6px 0" }}>Unidade</th>
+                  <tr>
+                    <th style={{ width: "48px", paddingBottom: "6px", textAlign: "right", paddingRight: "8px", fontSize: "11px", color: "#9ca3af", fontWeight: 400 }}>Hora</th>
+                    {dias.map(d => (
+                      <th key={d} style={{ minWidth: "120px", paddingBottom: "6px", textAlign: "center", fontSize: "13px", color: B.navy, fontWeight: 800 }}>
+                        {d.replace("-feira", "")}
+                      </th>
+                    ))}
                   </tr>
                 </thead>
                 <tbody>
-                  {byDia[dia].map((s, i) => (
-                    s.missing ? (
-                      <tr
-                        key={i}
-                        style={{
-                          background: "#fef2f2",
-                          borderLeft: "3px solid #fca5a5",
-                        }}
-                      >
-                        <td style={{ padding: "6px 10px", fontWeight: 700, color: "#dc2626" }}>{s.hora}</td>
-                        <td colSpan={4} style={{ padding: "6px 10px", color: "#dc2626", fontStyle: "italic", fontSize: "11px" }}>
-                          — slot vazio —
-                        </td>
-                      </tr>
-                    ) : (
-                      <tr
-                        key={i}
-                        style={{
-                          background: s.flagged ? "#fef9c3" : "transparent",
-                          borderLeft: s.flagged ? "3px solid #f59e0b" : "3px solid transparent",
-                        }}
-                      >
-                        <td style={{ padding: "6px 10px", fontWeight: 700, color: s.flagged ? "#92400e" : "#374151" }}>{s.hora}</td>
-                        <td style={{ padding: "6px 10px", color: "#374151" }}>{s.terapia}</td>
-                        <td style={{ padding: "6px 10px", color: s.flagged ? "#dc2626" : "#374151" }}>{s.terapiaExib}</td>
-                        <td style={{ padding: "6px 10px", color: "#6b7280" }}>{fmtProf(s.prof)}</td>
-                        <td style={{ padding: "6px 10px", color: "#9ca3af", fontSize: "11px" }}>{s.unidade || "—"}</td>
-                      </tr>
-                    )
+                  {horasGrid.map(hora => (
+                    <tr key={hora} style={{ borderTop: "1px solid #f1f5f9" }}>
+                      <td style={{ textAlign: "right", paddingRight: "8px", verticalAlign: "top", paddingTop: "6px", fontFamily: "monospace", fontSize: "13px", fontWeight: 800, color: B.navy }}>{hora}</td>
+                      {dias.map(d => {
+                        const cells = cMap[`${d}|||${hora}`] || []
+                        return (
+                          <td key={d} style={{ padding: "2px", verticalAlign: "top" }}>
+                            {cells.map((s, ci) => (
+                              s.missing ? (
+                                <div key={ci} style={{ background: "#fef2f2", border: "1px dashed #fca5a5", borderRadius: "8px", padding: "6px 8px", marginBottom: "2px", minHeight: "48px", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                  <span style={{ fontSize: "10px", color: "#dc2626", fontStyle: "italic" }}>slot vazio</span>
+                                </div>
+                              ) : (
+                                <div key={ci} style={{ background: s.flagged ? "#fef9c3" : "#f8fafc", border: `1px solid ${s.flagged ? "#f59e0b" : "#e2e8f0"}`, borderRadius: "8px", padding: "6px 8px", marginBottom: "2px", minHeight: "58px", display: "flex", flexDirection: "column", gap: "2px" }}>
+                                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#1f2937", lineHeight: "1.3" }}>{s.terapia}</div>
+                                  {s.terapiaExib && s.terapiaExib !== "—" && s.terapiaExib !== s.terapia && (
+                                    <div style={{ fontSize: "10px", color: s.flagged ? "#dc2626" : "#6b7280", lineHeight: "1.2" }}>({s.terapiaExib})</div>
+                                  )}
+                                  <div style={{ fontSize: "10px", color: "#6b7280" }}>{fmtName(s.prof)}</div>
+                                  {s.flagged && <div style={{ fontSize: "9px", fontWeight: 700, color: "#92400e", marginTop: "auto" }}>⚠</div>}
+                                </div>
+                              )
+                            ))}
+                          </td>
+                        )
+                      })}
+                    </tr>
                   ))}
                 </tbody>
               </table>
-              {/* Detalhes das flags neste dia */}
-              {byDia[dia].some(s => s.flagged) && (
-                <div style={{ marginTop: "4px", display: "flex", flexDirection: "column", gap: "2px" }}>
-                  {byDia[dia].filter(s => s.flagged).map((s, i) => (
+
+              {/* Notas de inconsistência */}
+              {flagNotes.length > 0 && (
+                <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                  {flagNotes.map((n, i) => (
                     <div key={i} style={{ fontSize: "11px", color: "#92400e", background: "#fef3c7", borderRadius: "6px", padding: "4px 8px" }}>
-                      ⚠ {s.hora} — {s.flagDetalhe}
+                      ⚠ {n.label} — {n.detail}
                     </div>
                   ))}
                 </div>
               )}
-            </div>
-          ))}
+            </>
+          )}
         </div>
       </div>
     </div>,
