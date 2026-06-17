@@ -108,15 +108,18 @@ function buildSchedule(pac: string, cRows: CsvRow[], incItems: IncItem[]): Recor
     }
 
     if (i.tipo === "min_sessoes") {
-      // Adiciona um placeholder adjacente à sessão isolada
       const hMin = pm(i.hora)
       if (hMin === null) continue
       const minManha = pm("08:00") ?? 480
+      const existing = existingHoras(i.dia)
       const beforeHora = fm(hMin - 40)
       const afterHora  = fm(hMin + 40)
-      // Prefere antes (turno manhã) ou depois (última da manhã/tarde)
-      const candidato = hMin - 40 >= minManha ? beforeHora : afterHora
-      addPlaceholder(i.dia, candidato, "Slot vazio — falta 1 sessão no dia")
+      // Prefere slot anterior; se ocupado (ex: supervisão/coord), tenta posterior
+      if (hMin - 40 >= minManha && !existing.has(beforeHora)) {
+        addPlaceholder(i.dia, beforeHora, "Slot vazio — falta 1 sessão no dia")
+      } else if (!existing.has(afterHora)) {
+        addPlaceholder(i.dia, afterHora, "Slot vazio — falta 1 sessão no dia")
+      }
     }
   }
 
