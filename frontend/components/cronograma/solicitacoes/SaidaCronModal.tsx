@@ -135,7 +135,7 @@ interface CellEntry { tP: string; tE?: string; prof: string; tipo: CellTipo; uni
 function buildCMap(
   sessPac: SessPacItem[],
   afetadas: AfetadaItem | AfetadaItem[],
-  extra?: { dia: string; hora: string; tP: string; prof: string; tipo: CellTipo; unidade: string }[],
+  extra?: { dia: string; hora: string; tP: string; tE?: string; prof: string; tipo: CellTipo; unidade: string }[],
   remover?: { dia: string; hora: string; prof: string }[],
 ): Record<string, CellEntry[]> {
   const afetadasArr = Array.isArray(afetadas) ? afetadas : [afetadas]
@@ -156,7 +156,7 @@ function buildCMap(
   for (const e of extra ?? []) {
     const k = `${e.dia}|||${e.hora}`
     if (!cMap[k]) cMap[k] = []
-    cMap[k].push({ tP: e.tP, prof: e.prof, tipo: e.tipo, unidade: e.unidade })
+    cMap[k].push({ tP: e.tP, tE: e.tE, prof: e.prof, tipo: e.tipo, unidade: e.unidade })
   }
 
   return cMap
@@ -288,9 +288,23 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
   // ── Construção das grades Antes / Depois ──────────────────────────────────
 
   const remSet = new Set(movimentos.map(m => `${m.deDia}|||${m.deHora}|||${m.deProf}`))
+
+  // Lookup terapiaExib a partir do sessPac para reutilizar o valor já gravado no CSV
+  const sessPacExib = new Map<string, string>()
+  for (const s of sessPac) {
+    if (s.terapiaExib) sessPacExib.set(`${s.dia}|||${s.hora}|||${s.terapia}`, s.terapiaExib)
+  }
+  const ABA_EXIB_TERAPIAS = new Set([
+    "Aplicador ABA (PS)", "Aplicador ABA (SF)", "Aplicador ABA (AV)",
+    "Aplicador ABA (EF)", "Coordenador de Caso", "Supervisão ABA",
+    "Aplicador ABA (HS)", "Aplicador ABA (AE)",
+  ])
+
   const extraDepois = movimentos.map(m => ({
     dia: m.paraDia, hora: m.paraHora, tP: m.paraTerapia, prof: m.paraProf,
     tipo: "proposta" as CellTipo, unidade: m.paraUnidade,
+    tE: sessPacExib.get(`${m.deDia}|||${m.deHora}|||${m.deTerapia}`)
+      ?? (ABA_EXIB_TERAPIAS.has(m.paraTerapia) ? "Psicologia ABA" : undefined),
   }))
 
   const afetadasGrid = todasAfetadas && todasAfetadas.length > 1 ? todasAfetadas : afetada
