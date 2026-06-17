@@ -18,6 +18,17 @@ function CallbackHandler() {
     const next = rawNext.startsWith('/') && !rawNext.startsWith('//') ? rawNext : '/definir-senha'
 
     async function handle() {
+      console.log('[callback] searchParams:', {
+        code: searchParams.get('code'),
+        token_hash: searchParams.get('token_hash'),
+        type: searchParams.get('type'),
+        next: searchParams.get('next'),
+        error: searchParams.get('error'),
+        error_description: searchParams.get('error_description'),
+      })
+      console.log('[callback] hash:', typeof window !== 'undefined' ? window.location.hash : 'SSR')
+      console.log('[callback] full url:', typeof window !== 'undefined' ? window.location.href : 'SSR')
+
       if (code) {
         const { error } = await supabase.auth.exchangeCodeForSession(code)
         if (!error) { router.replace(next); return }
