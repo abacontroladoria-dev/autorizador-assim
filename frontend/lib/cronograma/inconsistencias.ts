@@ -1,5 +1,5 @@
 import { pm, getTurno, isLaudoComAlta } from "./helpers"
-import { EXCLUIR_OCUP } from "./constants"
+import { EXCLUIR_OCUP, PACS_ADMIN } from "./constants"
 import type { CsvRow, LaudoRow } from "@/types/cronograma"
 
 // ─── TIPOS ────────────────────────────────────────────────────────────────────
@@ -91,7 +91,7 @@ export function detectarInconsistencias(cRows: CsvRow[], lRows: LaudoRow[]): Inc
     const status = String(r["Status do Agendamento"] || "")
     if (status !== "Agendado") continue
     const pac = String(r["Nome Favorecido"] || "").trim()
-    if (!pac) continue
+    if (!pac || PACS_ADMIN.has(pac)) continue
     const hora = String(r["HI_str"] || String(r["Hora Inicial"] || "").slice(0, 5) || "")
     const hMin = pm(hora) ?? -1
     if (hMin < 0) continue

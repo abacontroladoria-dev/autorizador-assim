@@ -70,9 +70,10 @@ export const ABA_EXT = new Set(["Aplicador ABA Casa", "Aplicador ABA Escola", "A
 
 export const PACS_ADMIN = new Set([
   "Ainda não selecionado", "Notificação Prévia", "Horário Administrativo",
-  "Horário Bloqueado", "Alinhamento Gracielle", "Supervisora Fernanda Lima",
-  "Supervisora Susane Vitória", "Supervisora Michelle Brasil",
-  "Supervisor Severino Junior", "Supervisora Beatriz Paiva",
+  "Horário Bloqueado", "Alinhamento Gracielle", "Alinhamento Amanda",
+  "Supervisora Fernanda Lima", "Supervisora Susane Vitória",
+  "Supervisora Michelle Brasil", "Supervisor Severino Junior",
+  "Supervisora Beatriz Paiva", "Fonoaudiologia", "Facilitador Técnico",
 ])
 
 // ─── PROFISSIONAIS ────────────────────────────────────────────────────────────

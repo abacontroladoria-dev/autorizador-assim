@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
+import { createPortal } from "react-dom"
 import { B } from "@/lib/cronograma/constants"
 import type { IncItem, IncTipo } from "@/lib/cronograma/inconsistencias"
 import type { CsvRow } from "@/types/cronograma"
@@ -97,7 +98,7 @@ function CronViewModal({ pac, conv, cRows, items, onClose }: CronViewModalProps)
   const byDia = useMemo(() => buildSchedule(pac, cRows, items), [pac, cRows, items])
   const dias = DIAS_ORDER.filter(d => byDia[d])
 
-  return (
+  return createPortal(
     <div
       style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", background: "rgba(0,0,0,.45)", padding: "24px 16px", overflowY: "auto" }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
@@ -171,7 +172,8 @@ function CronViewModal({ pac, conv, cRows, items, onClose }: CronViewModalProps)
           ))}
         </div>
       </div>
-    </div>
+    </div>,
+    document.body
   )
 }
 
@@ -382,7 +384,7 @@ export function InconsistenciasTab({ items, cRows }: Props) {
                             fontFamily: "inherit", whiteSpace: "nowrap",
                           }}
                         >
-                          🔍 Ver
+                          🗓 Ver
                         </button>
                         <button
                           onClick={() => {
