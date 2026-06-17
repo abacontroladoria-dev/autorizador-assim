@@ -22,9 +22,9 @@ export function VagasAgoraTab({ res, waMap, onWA, onInv, onCron }: Props) {
   const [fEsp, setFEsp] = useState("")
   const [fPr, setFPr] = useState("")
   const [fWa, setFWa] = useState("")
-  const [grupoOpen, setGrupoOpen] = useState(true)
-  const [livreOpen, setLivreOpen] = useState(true)
-  const [filaOpen, setFilaOpen] = useState(true)
+  const [grupoOpen, setGrupoOpen] = useState(false)
+  const [livreOpen, setLivreOpen] = useState(false)
+  const [filaOpen, setFilaOpen] = useState(false)
 
   const unidOpts = useMemo(() => res ? [...new Set(res.vagasAgora.map(s => s.unidade))].sort() : [], [res])
   const espOpts = useMemo(() => res ? [...new Set(res.vagasAgora.map(s => s.esp))].sort() : [], [res])

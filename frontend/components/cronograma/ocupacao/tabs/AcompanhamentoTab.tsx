@@ -32,6 +32,8 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
   const { cRows, rec, inv, waMap, sRec, sInv, sWa } = useCronogramaData()
   const [sub, setSub] = useState<Sub>("aguardando")
   const [fOrigem, setFOrigem] = useState<Origem>("")
+  const [ocupOpen, setOcupOpen] = useState(false)
+  const [saidaOpen, setSaidaOpen] = useState(false)
   const [invModalPac, setInvModalPac] = useState<string | null>(null)
   const [invMotivo, setInvMotivo] = useState("")
 
@@ -161,8 +163,16 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
           {/* Seção Aumentar Ocupação (Clínica) */}
           {showOcup && aguardandoOcup.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              <OrigemLabel label="Aumentar Ocupação (Clínica)" count={aguardandoOcup.length} color={B.blue} />
-              {aguardandoOcup.map(({ key, pac, prof, dia, hora, sug }) => (
+              <button
+                onClick={() => setOcupOpen(o => !o)}
+                style={{ display: "flex", alignItems: "center", gap: "8px", background: B.blueLt, border: `1px solid ${B.blue}44`, borderRadius: "12px", padding: "10px 14px", cursor: "pointer", textAlign: "left", fontFamily: "inherit", width: "100%" }}
+              >
+                <span style={{ fontSize: "12px", color: B.blue, fontWeight: 700, flex: 1 }}>
+                  📋 Aumentar Ocupação (Clínica) · {aguardandoOcup.length}
+                </span>
+                <span style={{ fontSize: "11px", color: B.blue }}>{ocupOpen ? "▲ Recolher" : "▼ Expandir"}</span>
+              </button>
+              {ocupOpen && aguardandoOcup.map(({ key, pac, prof, dia, hora, sug }) => (
                 <OcupItem key={key}
                   pac={pac} prof={prof} dia={dia} hora={hora}
                   esp={sug?.esp} unidade={sug?.unidade} tP={sug?.tP} conv={sug?.conv}
@@ -179,8 +189,16 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
           {/* Seção Saída de Profissional */}
           {showSaida && aguardandoSaidaCount > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              <OrigemLabel label="Saída de Profissional" count={aguardandoSaidaCount} color={B.purple} />
-              <BancoDadosTab cRows={cRows} statusMap={statusMap} persistStatus={persistStatus} />
+              <button
+                onClick={() => setSaidaOpen(o => !o)}
+                style={{ display: "flex", alignItems: "center", gap: "8px", background: "#f5f3ff", border: `1px solid ${B.purple}44`, borderRadius: "12px", padding: "10px 14px", cursor: "pointer", textAlign: "left", fontFamily: "inherit", width: "100%" }}
+              >
+                <span style={{ fontSize: "12px", color: B.purple, fontWeight: 700, flex: 1 }}>
+                  🚪 Saída de Profissional · {aguardandoSaidaCount}
+                </span>
+                <span style={{ fontSize: "11px", color: B.purple }}>{saidaOpen ? "▲ Recolher" : "▼ Expandir"}</span>
+              </button>
+              {saidaOpen && <BancoDadosTab cRows={cRows} statusMap={statusMap} persistStatus={persistStatus} />}
             </div>
           )}
         </div>
