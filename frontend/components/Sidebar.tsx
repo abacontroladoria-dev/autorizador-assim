@@ -492,11 +492,11 @@ export default function Sidebar() {
               {canAccess("/cronograma/solicitacoes") && <MenuItem label="Ocp. Profissional" icon={TrendingUp} path="/cronograma/solicitacoes?tab=ocup-prof" />}
               {canAccess("/cronograma/solicitacoes") && <MenuItem label="Ocp. Paciente" icon={TrendingUp} path="/cronograma/solicitacoes?tab=ocup-pac" />}
               {canAccess("/cronograma/solicitacoes") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/solicitacoes?tab=saida" />}
-              {canAccess("/cronograma/ocupacao") && <MenuItem label="Acompanhamento" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
+              {canAccess("/cronograma/ocupacao") && <MenuItem label="Aceites e Recusas" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
               {canAccess("/cronograma/solicitacoes") && <MenuItem label="Novo Cronograma" icon={CalendarPlus} path="/cronograma/solicitacoes?tab=novo-cron" />}
               {canAccess("/cronograma/solicitacoes") && <MenuItem label="Simular Novo Profissional" icon={UserPlus} path="/cronograma/solicitacoes?tab=simulacao" />}
-              {canAccess("/cronograma/ocupacao") && <MenuItem label="Laudo Versus Oferta" icon={CalendarOff} path="/cronograma/ocupacao?tab=gaps" />}
-              {canAccess("/cronograma/ocupacao") && <MenuItem label="Regras Feridas Ou Exceções" icon={AlertTriangle} path="/cronograma/ocupacao?tab=inconsistencias" />}
+              {canAccess("/cronograma/ocupacao") && <MenuItem label="Laudo e Oferta" icon={CalendarOff} path="/cronograma/ocupacao?tab=gaps" />}
+              {canAccess("/cronograma/ocupacao") && <MenuItem label="Despadronizados" icon={AlertTriangle} path="/cronograma/ocupacao?tab=inconsistencias" />}
               {canAccess("/cronograma/ocupacao") && <MenuItem label="Guia" icon={BookOpen} path="/cronograma/ocupacao?tab=guia" />}
             </SidebarGroup>
           )}

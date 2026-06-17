@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { createPortal } from "react-dom"
 import { B } from "@/lib/cronograma/constants"
+import { pm, fm } from "@/lib/cronograma/helpers"
 import type { IncItem, IncTipo } from "@/lib/cronograma/inconsistencias"
 import type { CsvRow } from "@/types/cronograma"
 
@@ -28,7 +29,7 @@ const TIPO_COLOR: Record<IncTipo, { bg: string; c: string; border: string }> = {
   exibicao_ae:   { bg: "#fdf4ff", c: "#86198f", border: "#f0abfc" },
 }
 
-const DIAS_ORDER = ["Segunda", "Terça", "Quarta", "Quinta", "Sexta"]
+const DIAS_ORDER = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira"]
 
 interface Props {
   items: IncItem[]
@@ -46,6 +47,7 @@ interface SessaoView {
   unidade: string
   flagged: boolean
   flagDetalhe: string
+  missing?: boolean  // slot vazio injetado para representar buraco/sessão faltante
 }
 
 function buildSchedule(pac: string, cRows: CsvRow[], incItems: IncItem[]): Record<string, SessaoView[]> {
@@ -77,6 +79,47 @@ function buildSchedule(pac: string, cRows: CsvRow[], incItems: IncItem[]): Recor
   for (const d of Object.keys(byDia)) {
     byDia[d].sort((a, b) => a.hora.localeCompare(b.hora))
   }
+
+  // ── Injetar placeholders para buracos e dias com 1 sessão ─────────────────
+  const placeholderKey = (dia: string, hora: string) => `${dia}|||${hora}`
+  const existingHoras = (dia: string) => new Set((byDia[dia] ?? []).map(s => s.hora))
+
+  function addPlaceholder(dia: string, hora: string, motivo: string) {
+    if (!byDia[dia]) return
+    if (existingHoras(dia).has(hora)) return
+    byDia[dia].push({
+      dia, hora, terapia: "", terapiaExib: "", prof: "", unidade: "",
+      flagged: true, flagDetalhe: motivo, missing: true,
+    })
+    byDia[dia].sort((a, b) => a.hora.localeCompare(b.hora))
+  }
+
+  for (const i of incItems) {
+    if (i.pac !== pac) continue
+
+    if (i.tipo === "buraco") {
+      // i.hora é a sessão B (depois do buraco); A é a sessão imediatamente anterior
+      const sessoes = byDia[i.dia] ?? []
+      const bIdx = sessoes.findIndex(s => s.hora === i.hora && !s.missing)
+      if (bIdx > 0) {
+        const aMin = pm(sessoes[bIdx - 1].hora)
+        if (aMin !== null) addPlaceholder(i.dia, fm(aMin + 40), "Slot vazio — buraco no cronograma")
+      }
+    }
+
+    if (i.tipo === "min_sessoes") {
+      // Adiciona um placeholder adjacente à sessão isolada
+      const hMin = pm(i.hora)
+      if (hMin === null) continue
+      const minManha = pm("08:00") ?? 480
+      const beforeHora = fm(hMin - 40)
+      const afterHora  = fm(hMin + 40)
+      // Prefere antes (turno manhã) ou depois (última da manhã/tarde)
+      const candidato = hMin - 40 >= minManha ? beforeHora : afterHora
+      addPlaceholder(i.dia, candidato, "Slot vazio — falta 1 sessão no dia")
+    }
+  }
+
   return byDia
 }
 
@@ -142,19 +185,34 @@ function CronViewModal({ pac, conv, cRows, items, onClose }: CronViewModalProps)
                 </thead>
                 <tbody>
                   {byDia[dia].map((s, i) => (
-                    <tr
-                      key={i}
-                      style={{
-                        background: s.flagged ? "#fef9c3" : "transparent",
-                        borderLeft: s.flagged ? "3px solid #f59e0b" : "3px solid transparent",
-                      }}
-                    >
-                      <td style={{ padding: "6px 10px", fontWeight: 700, color: s.flagged ? "#92400e" : "#374151" }}>{s.hora}</td>
-                      <td style={{ padding: "6px 10px", color: "#374151" }}>{s.terapia}</td>
-                      <td style={{ padding: "6px 10px", color: s.flagged ? "#dc2626" : "#374151" }}>{s.terapiaExib}</td>
-                      <td style={{ padding: "6px 10px", color: "#6b7280" }}>{fmtProf(s.prof)}</td>
-                      <td style={{ padding: "6px 10px", color: "#9ca3af", fontSize: "11px" }}>{s.unidade || "—"}</td>
-                    </tr>
+                    s.missing ? (
+                      <tr
+                        key={i}
+                        style={{
+                          background: "#fef2f2",
+                          borderLeft: "3px solid #fca5a5",
+                        }}
+                      >
+                        <td style={{ padding: "6px 10px", fontWeight: 700, color: "#dc2626" }}>{s.hora}</td>
+                        <td colSpan={4} style={{ padding: "6px 10px", color: "#dc2626", fontStyle: "italic", fontSize: "11px" }}>
+                          — slot vazio —
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr
+                        key={i}
+                        style={{
+                          background: s.flagged ? "#fef9c3" : "transparent",
+                          borderLeft: s.flagged ? "3px solid #f59e0b" : "3px solid transparent",
+                        }}
+                      >
+                        <td style={{ padding: "6px 10px", fontWeight: 700, color: s.flagged ? "#92400e" : "#374151" }}>{s.hora}</td>
+                        <td style={{ padding: "6px 10px", color: "#374151" }}>{s.terapia}</td>
+                        <td style={{ padding: "6px 10px", color: s.flagged ? "#dc2626" : "#374151" }}>{s.terapiaExib}</td>
+                        <td style={{ padding: "6px 10px", color: "#6b7280" }}>{fmtProf(s.prof)}</td>
+                        <td style={{ padding: "6px 10px", color: "#9ca3af", fontSize: "11px" }}>{s.unidade || "—"}</td>
+                      </tr>
+                    )
                   ))}
                 </tbody>
               </table>
