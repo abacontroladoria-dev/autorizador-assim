@@ -1,4 +1,5 @@
 import { pm, getTurno, isLaudoComAlta } from "./helpers"
+import { EXCLUIR_OCUP } from "./constants"
 import type { CsvRow, LaudoRow } from "@/types/cronograma"
 
 // ─── TIPOS ────────────────────────────────────────────────────────────────────
@@ -77,7 +78,12 @@ export function detectarInconsistencias(cRows: CsvRow[], lRows: LaudoRow[]): Inc
   type Sess = {
     pac: string; conv: string; dia: string; hora: string; hMin: number
     terapia: string; terapiaExib: string; prof: string
-    unidade: string; turno: "manhã" | "tarde"; isAdmin: boolean
+    unidade: string; turno: "manhã" | "tarde"
+    // isAdmin: excluído de buraco/unidade E de min_sessoes (supervisão, triagem…)
+    isAdmin: boolean
+    // isExclOcup: excluído de buraco/unidade (= EXCLUIR_OCUP, inclui SF/AE)
+    // mas NÃO excluído de min_sessoes (paciente ainda comparece)
+    isExclOcup: boolean
   }
 
   const sessoes: Sess[] = []
@@ -86,7 +92,7 @@ export function detectarInconsistencias(cRows: CsvRow[], lRows: LaudoRow[]): Inc
     if (status !== "Agendado") continue
     const pac = String(r["Nome Favorecido"] || "").trim()
     if (!pac) continue
-    const hora = String(r.HI_str || String(r["Hora Inicial"] || "").slice(0, 5) || "")
+    const hora = String(r["HI_str"] || String(r["Hora Inicial"] || "").slice(0, 5) || "")
     const hMin = pm(hora) ?? -1
     if (hMin < 0) continue
     const terapia = String(r["Terapia"] || "").trim()
@@ -101,6 +107,7 @@ export function detectarInconsistencias(cRows: CsvRow[], lRows: LaudoRow[]): Inc
       unidade: String((r as Record<string, unknown>)["Unidade"] || "").trim(),
       turno: getTurno(hora),
       isAdmin: ADMIN_ONLY.has(terapia),
+      isExclOcup: EXCLUIR_OCUP.has(terapia),
     })
   }
 
@@ -118,10 +125,10 @@ export function detectarInconsistencias(cRows: CsvRow[], lRows: LaudoRow[]): Inc
 
   // ── R1: Unidade diferente no mesmo turno ──────────────────────────────────
   for (const group of byPacDia.values()) {
-    // Agrupa por turno
+    // Agrupa por turno — exclui sessões que não envolvem presença física do paciente
     const byTurno = new Map<string, Sess[]>()
     for (const s of group) {
-      if (s.isAdmin) continue
+      if (s.isExclOcup) continue
       if (!s.unidade || s.unidade === "AT Externo" || s.unidade === "Desconhecida") continue
       const k = `${s.turno}`
       if (!byTurno.has(k)) byTurno.set(k, [])
@@ -149,8 +156,9 @@ export function detectarInconsistencias(cRows: CsvRow[], lRows: LaudoRow[]): Inc
   }
 
   // ── R2: Buraco entre sessões ──────────────────────────────────────────────
+  // Usa isExclOcup (= EXCLUIR_OCUP, igual ao saida.ts) — exclui SF/AE além das admin
   for (const group of byPacDia.values()) {
-    const clinicas = group.filter(s => !s.isAdmin).sort((a, b) => a.hMin - b.hMin)
+    const clinicas = group.filter(s => !s.isExclOcup).sort((a, b) => a.hMin - b.hMin)
     for (let i = 0; i < clinicas.length - 1; i++) {
       const a = clinicas[i], b = clinicas[i + 1]
       // Só checa dentro do mesmo turno
@@ -194,7 +202,8 @@ export function detectarInconsistencias(cRows: CsvRow[], lRows: LaudoRow[]): Inc
     const isAssim = s.conv.toLowerCase().includes("assim")
 
     // R4 — ABA_BASE deve ter "Psicologia ABA"
-    if (ABA_BASE.has(s.terapia)) {
+    // SF+ASSIM é tratado em R6 — evita double-flag
+    if (ABA_BASE.has(s.terapia) && !(isAssim && s.terapia === "Aplicador ABA (SF)")) {
       if (s.terapiaExib !== "Psicologia ABA") {
         items.push({
           id: mkId(s.pac, s.dia, s.hora, s.terapia, "exibicao_aba"),

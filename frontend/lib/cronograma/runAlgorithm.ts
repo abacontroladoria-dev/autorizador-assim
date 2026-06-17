@@ -28,6 +28,7 @@ import {
   isUnidadeValida,
   pm,
 } from "./helpers"
+import { slotValidoParaPaciente } from "./candidatos"
 import type {
   AlgorithmConfig,
   AlgorithmResult,
@@ -61,6 +62,7 @@ export function runAlgorithm(
   )
 
   const qtdAut: Record<string, number> = {}
+  const altaAut: Record<string, number> = {}
   const cM: Record<string, string> = {}
   const aM: Record<string, string> = {}
   const fxM: Record<string, string> = {}
@@ -77,9 +79,14 @@ export function runAlgorithm(
       if (f) fxM[pac] = f
     }
     const espAlta = String(r["Especialidade"] || "").trim()
-    if (espAlta && isLaudoComAlta(r as Record<string, unknown>)) altaSet.add(`${pac}|||${espAlta}`)
-    if (espAlta && isLaudoComAlta(r as Record<string, unknown>)) continue
-    if (String(r["Situação"] || "") === "Vigente") {
+    if (espAlta && isLaudoComAlta(r as Record<string, unknown>)) {
+      const altaK = `${pac}|||${espAlta}`
+      altaSet.add(altaK)
+      const qAlta = parseFloat(String(r["Qtd autorizada"])) || 0
+      if (qAlta > 0) altaAut[altaK] = Math.max(altaAut[altaK] || 0, qAlta)
+      continue
+    }
+    if (String(r["Situação"] || "").toLowerCase() === "vigente") {
       const esp = String(r["Especialidade"] || "").trim()
       const q = parseFloat(String(r["Qtd autorizada"])) || 0
       if (esp && q > 0) {
@@ -123,6 +130,16 @@ export function runAlgorithm(
       if (of_ > 0) {
         allGaps.push({ pac, esp, aut: 0, of: Math.round(of_ * 10) / 10, gap: Math.round(-of_ * 10) / 10, prio: gPrio(pac, cM, jM) })
       }
+    }
+  }
+
+  // Linhas com alta — visíveis em GapsTab com badge "Alta" para justificar o gap
+  for (const k of altaSet) {
+    const [pac, esp] = k.split("|||")
+    const aut = altaAut[k] || 0
+    const of_ = qtdOf[k] || 0
+    if (aut > 0 || of_ > 0) {
+      allGaps.push({ pac, esp, aut: Math.round(aut * 10) / 10, of: Math.round(of_ * 10) / 10, gap: Math.round((aut - of_) * 10) / 10, prio: gPrio(pac, cM, jM), isAlta: true })
     }
   }
 
@@ -365,27 +382,7 @@ export function runAlgorithm(
       }
     }
 
-    // R4
-    const pSlot = aCli.filter(r => r["Dia da Semana"] === dia && r.Unidade === un && r.HI_str === hora)
-    for (const pR of pSlot) {
-      const pac = pR["Nome Favorecido"]
-      if (!(pac in mGap) || invSet.has(pac) || isRec(pac, prof, dia, hora) || slotReservadoOutro(pac, prof, dia, hora) || !canSug(pac, "Musicoterapia")) continue
-      const tm = pR["Terapia"], pA = pR["Profissional"]
-      const alt = livre.find(r => r["Profissional"] === pA && r["Terapia"] === tm && !(r["Dia da Semana"] === dia && r.HI_str === hora))
-      const altO = alt || livre.find(r => r["Terapia"] === tm && !(r["Dia da Semana"] === dia && r.HI_str === hora))
-      if (!altO) continue
-      const mP = altO["Profissional"] === pA
-      if (compat([], pac)) {
-        fila.push({
-          mod: "Musicoterapia", regra: "R4", prof, esp: "Musicoterapia", tP: "Musicoterapia",
-          unidade: un, dia, hora, pac, faixa: fxM[pac] || "?", colegas: "—",
-          vComp: `Mover ${tm} de ${dia} ${hora} → ${altO["Dia da Semana"]} ${altO.HI_str} c/ ${mP ? "mesmo prof" : altO["Profissional"].split(" ")[0] + " (prof diferente)"}`,
-          obs: mP ? "" : "⚠️ Prof diferente", gap: mGap[pac], conv: cM[pac] || "", prio: gPrio(pac, cM, jM),
-          isRem: true, remDia: altO["Dia da Semana"], remHora: altO.HI_str, remTer: tm,
-        })
-        incSug(pac, "Musicoterapia")
-      }
-    }
+    // R4 — requer remanejamento prévio; não exibido como sugestão direta
   }
 
   // Módulo Ocupação
@@ -451,6 +448,9 @@ export function runAlgorithm(
   )
 
   // Ocupação R2
+  // pAdj é um pré-filtro de performance (pacientes com sessão adjacente ao slot).
+  // slotValidoParaPaciente é o validador definitivo R2.1+R5.1, compartilhado com
+  // "Hipótese: novo profissional" em SaidaProfMode.tsx via candidatos.ts.
   for (const sl of lOcup) {
     const prof = sl["Profissional"], un = exU(sl["Sala"] || ""), dia = sl["Dia da Semana"], hora = sl.HI_str, hi = sl.HI
     const esp = TERAPIA_TO_ESP[sl["Terapia"]]
@@ -460,7 +460,8 @@ export function runAlgorithm(
     for (const pac of pAdj) {
       if (PACS_ADMIN.has(pac) || invSet.has(pac) || !gM[pac]?.[esp] || isRec(pac, prof, dia, hora) || slotReservadoOutro(pac, prof, dia, hora) || pacOcup(pac, dia, hora) || !canSug(pac, esp)) continue
       if (!turnoOk(pac, hi)) continue
-      sugs.push({ mod: "Ocupação", regra: "Ocup. R2", prof, esp, tP: sl["Terapia"], unidade: un, dia, hora, pac, faixa: fxM[pac] || "?", colegas: "—", vComp: "—", obs: isPP(prof) ? fmtName(prof) : "", gap: gM[pac][esp], conv: cM[pac] || "", prio: gPrio(pac, cM, jM), isPP: isPP(prof) })
+      if (!slotValidoParaPaciente(pac, dia, hora, aCli, un)) continue
+      sugs.push({ mod: "Ocupação", regra: "Ocup. R2", prof, esp, tP: sl["Terapia"], unidade: un, dia, hora, pac, faixa: fxM[pac] || "?", colegas: "—", vComp: "—", obs: "", gap: gM[pac][esp], conv: cM[pac] || "", prio: gPrio(pac, cM, jM), isPP: isPP(prof) })
       incSug(pac, esp)
     }
   }
@@ -483,7 +484,7 @@ export function runAlgorithm(
       const diaTxt = [...new Set(sessUn.map(r => r["Dia da Semana"].replace("-feira", "")).filter(Boolean))].slice(0, 4).join(", ")
       if (sessDia.length && !adjOk) continue
       if (sessDia.length) {
-        focoPend.push({ rank: 0, fila: false, pac, esp, s: { mod: "Foco Prof.", regra: "Foco adj.", prof, esp, tP: sl["Terapia"], unidade: un, dia, hora, pac, faixa: fxM[pac] || "?", colegas: "—", vComp: "—", obs: `🎯 ${fmtName(prof)}`, gap: gM[pac][esp], conv: cM[pac] || "", prio: gPrio(pac, cM, jM), isPP: true } })
+        focoPend.push({ rank: 0, fila: false, pac, esp, s: { mod: "Foco Prof.", regra: "Foco adj.", prof, esp, tP: sl["Terapia"], unidade: un, dia, hora, pac, faixa: fxM[pac] || "?", colegas: "—", vComp: "—", obs: "", gap: gM[pac][esp], conv: cM[pac] || "", prio: gPrio(pac, cM, jM), isPP: true } })
       } else {
         if (!unidadePrincipalOk(pac, un)) continue
         const comp = complementosNovoDia(pac, esp, dia, un, hi, sl)
@@ -495,8 +496,9 @@ export function runAlgorithm(
 
   focoPend.sort((a, b) => a.rank - b.rank || a.s.prio - b.s.prio || (DIAS_ORD[a.s.dia] ?? 9) - (DIAS_ORD[b.s.dia] ?? 9) || (pm(a.s.hora) || 0) - (pm(b.s.hora) || 0))
   for (const f of focoPend) {
+    if (f.fila) continue  // Foco novo dia requer coordenação extra — não exibir
     if (!canSug(f.pac, f.esp)) continue
-    ;(f.fila ? fila : sugs).push(f.s)
+    sugs.push(f.s)
     incSug(f.pac, f.esp)
   }
 
@@ -518,8 +520,9 @@ export function runAlgorithm(
   fila.sort(sF)
 
   // Deduplicação + slot único por paciente
+  // slotDono: slotKey → pac que ficou com a vaga (para registrar "próximo na fila")
   const seen = new Set<string>()
-  const slotUsed = new Set<string>()
+  const slotDono = new Map<string, string>()
   const vagasAgora: Sugestao[] = []
 
   for (const s of sugs) {
@@ -529,8 +532,11 @@ export function runAlgorithm(
     if (config.isolarAssim && (s.prio === 3 || s.prio === 4)) { fila.push({ ...s, filaM: "ASSIM isolado" }); continue }
     if (s.mod === "Ocupação" || s.mod === "Foco Prof.") {
       const slotK = `${s.prof}|||${s.dia}|||${s.hora}`
-      if (slotUsed.has(slotK)) continue
-      slotUsed.add(slotK)
+      if (slotDono.has(slotK)) {
+        fila.push({ ...s, filaM: `Próximo para: ${slotDono.get(slotK)}` })
+        continue
+      }
+      slotDono.set(slotK, s.pac)
     }
     vagasAgora.push(s)
   }
