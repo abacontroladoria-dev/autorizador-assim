@@ -58,7 +58,7 @@ export function detectarInconsistencias(cRows: CsvRow[], lRows: LaudoRow[]): Inc
     if (!pac || !esp) continue
     if (isLaudoComAlta(l)) continue
     const sit = String(l["Situação"] || "").toLowerCase()
-    if (sit && sit !== "vigente") continue
+    if (sit !== "vigente") continue
     const qtd = Number(l["Qtd autorizada"] || 0)
     if (qtd <= 0) continue
     const k = `${pac}|||${esp}`

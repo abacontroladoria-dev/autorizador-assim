@@ -407,7 +407,7 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
               <div className="flex gap-[5px] flex-wrap text-[11px]">
                 {(todasAfetadas && todasAfetadas.length > 1 ? todasAfetadas : [afetada]).map((af, i) => (
                   <span key={i} style={{ background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a588", borderRadius: "999px", padding: "2px 9px", fontWeight: 700 }}>
-                    Saída: {af.terapia} · {af.dia} {af.hora}
+                    Saída: {af.terapiaExib ?? af.terapia} · {af.dia} {af.hora}
                   </span>
                 ))}
                 {buracoSiRemover && <span style={{ background: "#fff7ed", color: "#c2410c", borderRadius: "999px", padding: "2px 9px", fontWeight: 600 }}>Cria buraco</span>}

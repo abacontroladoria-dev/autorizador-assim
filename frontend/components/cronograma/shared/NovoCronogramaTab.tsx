@@ -34,7 +34,7 @@ export function NovoCronogramaTab({ cRows, lRows, dispRows }: Props) {
   const pacsAtivos = useMemo(() => {
     const s = new Set(
       lRows
-        .filter(r => String(r["Situação"] || "") === "Vigente")
+        .filter(r => String(r["Situação"] || "").toLowerCase() === "vigente")
         .map(r => String(r["Paciente"] || "").trim())
         .filter(Boolean),
     )

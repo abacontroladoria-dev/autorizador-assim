@@ -79,7 +79,7 @@ export function runAlgorithm(
       if (f) fxM[pac] = f
     }
     const espAlta = String(r["Especialidade"] || "").trim()
-    if (espAlta && isLaudoComAlta(r as Record<string, unknown>)) {
+    if (espAlta && isLaudoComAlta(r as Record<string, unknown>) && String(r["Situação"] || "").toLowerCase() === "vigente") {
       const altaK = `${pac}|||${espAlta}`
       altaSet.add(altaK)
       const qAlta = parseFloat(String(r["Qtd autorizada"])) || 0

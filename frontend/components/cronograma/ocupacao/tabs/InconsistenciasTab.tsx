@@ -48,11 +48,12 @@ interface SessaoView {
 }
 
 function buildSchedule(pac: string, cRows: CsvRow[], incItems: IncItem[]): Record<string, SessaoView[]> {
-  const flagMap = new Map<string, string>()
+  const flagMap = new Map<string, string[]>()
   for (const i of incItems) {
     if (i.pac === pac) {
       const k = `${i.dia}|||${i.hora}|||${i.terapia}`
-      flagMap.set(k, i.detalhe + (i.terapiaExibAtual ? ` (atual: "${i.terapiaExibAtual}", esperado: "${i.terapiaExibEsperada}")` : ""))
+      const detail = i.detalhe + (i.terapiaExibAtual ? ` (atual: "${i.terapiaExibAtual}", esperado: "${i.terapiaExibEsperada}")` : "")
+      flagMap.set(k, [...(flagMap.get(k) || []), detail])
     }
   }
 
@@ -67,7 +68,7 @@ function buildSchedule(pac: string, cRows: CsvRow[], incItems: IncItem[]): Recor
     const prof = String(r["Profissional"] || "").trim()
     const unidade = String((r as Record<string, unknown>)["Unidade"] || "").trim()
     const k = `${dia}|||${hora}|||${terapia}`
-    const detalhe = flagMap.get(k) ?? ""
+    const detalhe = (flagMap.get(k) || []).join(" · ")
     if (!byDia[dia]) byDia[dia] = []
     byDia[dia].push({ dia, hora, terapia, terapiaExib, prof, unidade, flagged: !!detalhe, flagDetalhe: detalhe })
   }

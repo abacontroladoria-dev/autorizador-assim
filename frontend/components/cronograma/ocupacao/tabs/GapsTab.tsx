@@ -8,7 +8,7 @@ interface Props {
   res: AlgorithmResult | null
 }
 
-type GapFilt = "all" | "pos" | "zero" | "neg"
+type GapFilt = "all" | "pos" | "zero" | "neg" | "alta"
 
 export function GapsTab({ res }: Props) {
   const [gapSearch, setGapSearch] = useState("")
@@ -22,12 +22,17 @@ export function GapsTab({ res }: Props) {
     let r = res?.allGaps || []
     if (gapSearch) r = r.filter(g => g.pac.toLowerCase().includes(gapSearch.toLowerCase()))
     if (gapEsp) r = r.filter(g => g.esp === gapEsp)
-    if (gapFilt === "pos") r = r.filter(g => g.gap > 0)
-    else if (gapFilt === "zero") r = r.filter(g => g.gap === 0)
-    else if (gapFilt === "neg") r = r.filter(g => g.gap < 0)
+    if (gapFilt === "pos") r = r.filter(g => g.gap > 0 && !g.isAlta)
+    else if (gapFilt === "zero") r = r.filter(g => g.gap === 0 && !g.isAlta)
+    else if (gapFilt === "neg") r = r.filter(g => g.gap < 0 && !g.isAlta)
+    else if (gapFilt === "alta") r = r.filter(g => g.isAlta)
+    // "all" inclui tudo
     if (gapTudoZero) {
+      const baseGaps = gapFilt === "alta"
+        ? (res?.allGaps || []).filter(g => g.isAlta)
+        : (res?.allGaps || [])
       const pacOf: Record<string, number> = {}
-      for (const g of (res?.allGaps || [])) { pacOf[g.pac] = (pacOf[g.pac] || 0) + g.of }
+      for (const g of baseGaps) { pacOf[g.pac] = (pacOf[g.pac] || 0) + g.of }
       r = r.filter(g => pacOf[g.pac] === 0)
     }
     return [...r].sort((a, b) => a.pac.localeCompare(b.pac) || b.gap - a.gap)
@@ -48,11 +53,14 @@ export function GapsTab({ res }: Props) {
             <option value="">Todas especialidades</option>
             {espOpts.map(e => <option key={e} value={e}>{e}</option>)}
           </select>
-          {(["all", "pos", "zero", "neg"] as GapFilt[]).map(v => {
-            const labels: Record<GapFilt, string> = { all: "Todos", pos: "Gap > 0", zero: "Sem gap", neg: "Sobre-agendado" }
+          {(["all", "pos", "zero", "neg", "alta"] as GapFilt[]).map(v => {
+            const labels: Record<GapFilt, string> = { all: "Todos", pos: "Gap > 0", zero: "Sem gap", neg: "Sobre-agendado", alta: "⬆️ Com Alta" }
+            const isAlta = v === "alta"
+            const activeColor = isAlta ? "#d97706" : B.blue
+            const activeBg = isAlta ? "#fffbeb" : B.blueLt
             return (
               <button key={v} onClick={() => setGapFilt(v)}
-                style={{ padding: "6px 12px", borderRadius: "8px", border: `1px solid ${gapFilt === v ? B.blue : "#d1d5db"}`, background: gapFilt === v ? B.blueLt : "white", color: gapFilt === v ? B.blue : "#374151", fontSize: "12px", fontWeight: gapFilt === v ? 700 : 400, cursor: "pointer", fontFamily: "inherit" }}>
+                style={{ padding: "6px 12px", borderRadius: "8px", border: `1px solid ${gapFilt === v ? activeColor : "#d1d5db"}`, background: gapFilt === v ? activeBg : "white", color: gapFilt === v ? activeColor : "#374151", fontSize: "12px", fontWeight: gapFilt === v ? 700 : 400, cursor: "pointer", fontFamily: "inherit" }}>
                 {labels[v]}
               </button>
             )
@@ -94,18 +102,26 @@ export function GapsTab({ res }: Props) {
                   const tc = TERAPIA_CORES[g.esp]
                   const tcBg = tc && tc !== "#FFFFFF" && tc !== "#f0f0f0" ? tc + "22" : "#f0f0ff"
                   const tcBd = tc && tc !== "#FFFFFF" && tc !== "#f0f0f0" ? tc + "88" : "#c4c4e8"
+                  const rowBg = g.isAlta ? "#fffbeb" : i % 2 === 0 ? "white" : "#fafafa"
                   return (
-                    <tr key={i} style={{ borderTop: "1px solid #f0f0f0", background: i % 2 === 0 ? "white" : "#fafafa" }}>
+                    <tr key={i} style={{ borderTop: "1px solid #f0f0f0", background: rowBg, opacity: g.isAlta ? 0.8 : 1 }}>
                       <td style={{ padding: "8px 12px", fontWeight: 600, color: B.navy, fontSize: "12px" }}>{g.pac}</td>
                       <td style={{ padding: "8px 12px" }}>
                         <span style={{ background: tcBg, color: tc && tc !== "#FFFFFF" ? "#1a1a1a" : B.blue, border: `1px solid ${tcBd}`, borderRadius: "999px", padding: "2px 8px", fontSize: "11px", fontWeight: 600 }}>{g.esp}</span>
                       </td>
-                      <td style={{ padding: "8px 12px", textAlign: "center", color: "#374151", fontWeight: 600 }}>{g.aut}</td>
+                      <td style={{ padding: "8px 12px", textAlign: "center", color: "#374151", fontWeight: 600 }}>{g.aut || "—"}</td>
                       <td style={{ padding: "8px 12px", textAlign: "center", color: "#374151" }}>{g.of}</td>
                       <td style={{ padding: "8px 12px", textAlign: "center" }}>
-                        <span style={{ fontWeight: 800, color: gapColor(g.gap), background: gapBg(g.gap), borderRadius: "999px", padding: "2px 10px", fontSize: "12px" }}>
-                          {gapLabel(g.gap)}
-                        </span>
+                        {g.isAlta ? (
+                          <span style={{ fontWeight: 700, color: "#d97706", background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: "999px", padding: "2px 10px", fontSize: "11px" }}
+                            title="Paciente recebeu alta para esta especialidade. O gap é esperado.">
+                            ⬆️ Alta
+                          </span>
+                        ) : (
+                          <span style={{ fontWeight: 800, color: gapColor(g.gap), background: gapBg(g.gap), borderRadius: "999px", padding: "2px 10px", fontSize: "12px" }}>
+                            {gapLabel(g.gap)}
+                          </span>
+                        )}
                       </td>
                     </tr>
                   )

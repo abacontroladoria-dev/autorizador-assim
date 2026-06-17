@@ -75,7 +75,7 @@ export function buildNewCronograma(
     if (isLaudoComAlta(r as Record<string, unknown>)) { altaEsp.add(esp); continue }
     const sol = parseFloat(String(r["Qtd laudo"] || "0")) || 0
     const aut = parseFloat(String(r["Qtd autorizada"] || "0")) || 0
-    const vigente = String(r["Situação"] || "") === "Vigente"
+    const vigente = String(r["Situação"] || "").toLowerCase() === "vigente"
     if (!espTable[esp]) espTable[esp] = { sol: 0, aut: 0, of: 0, vigente: false }
     espTable[esp].sol = Math.max(espTable[esp].sol, sol)
     if (vigente) {

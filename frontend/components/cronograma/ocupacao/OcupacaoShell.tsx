@@ -102,7 +102,7 @@ export function OcupacaoShell() {
   const incItems = useMemo(() => detectarInconsistencias(cRows, lRows), [cRows, lRows])
 
   const handleApiFetch = useCallback(async () => {
-    if (!cfg.apiToken) { setApiErr("Configure o token em ⚙️ Config primeiro."); return }
+    if (!cfg.apiToken) { setApiErr("Configure o token em 📖 Guia primeiro."); return }
     setApiFetch(true); setApiErr("")
     const rw = getRefWeek()
     try {

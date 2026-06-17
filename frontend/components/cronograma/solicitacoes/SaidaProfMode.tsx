@@ -357,7 +357,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       const esp = String(l["Especialidade"] || "").trim()
       const sit = String(l["Situação"] || "")
       const aut = parseFloat(String(l["Qtd autorizada"] || "0")) || 0
-      if (!pac || !esp || !aut || sit !== "Vigente") continue
+      if (!pac || !esp || !aut || sit.toLowerCase() !== "vigente") continue
       if (!especialidades.has(esp)) continue
       const k = `${pac}|||${esp}`
       if (seenKey.has(k)) continue
