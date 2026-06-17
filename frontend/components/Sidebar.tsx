@@ -495,8 +495,8 @@ export default function Sidebar() {
               {canAccess("/cronograma/ocupacao") && <MenuItem label="Acompanhamento" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
               {canAccess("/cronograma/solicitacoes") && <MenuItem label="Novo Cronograma" icon={CalendarPlus} path="/cronograma/solicitacoes?tab=novo-cron" />}
               {canAccess("/cronograma/solicitacoes") && <MenuItem label="Simular Novo Profissional" icon={UserPlus} path="/cronograma/solicitacoes?tab=simulacao" />}
-              {canAccess("/cronograma/ocupacao") && <MenuItem label="Laudo versus oferta" icon={CalendarOff} path="/cronograma/ocupacao?tab=gaps" />}
-              {canAccess("/cronograma/ocupacao") && <MenuItem label="Regras feridas ou exceções" icon={AlertTriangle} path="/cronograma/ocupacao?tab=inconsistencias" />}
+              {canAccess("/cronograma/ocupacao") && <MenuItem label="Laudo Versus Oferta" icon={CalendarOff} path="/cronograma/ocupacao?tab=gaps" />}
+              {canAccess("/cronograma/ocupacao") && <MenuItem label="Regras Feridas Ou Exceções" icon={AlertTriangle} path="/cronograma/ocupacao?tab=inconsistencias" />}
               {canAccess("/cronograma/ocupacao") && <MenuItem label="Guia" icon={BookOpen} path="/cronograma/ocupacao?tab=guia" />}
             </SidebarGroup>
           )}
