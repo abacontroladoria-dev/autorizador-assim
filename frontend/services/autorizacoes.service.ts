@@ -212,6 +212,14 @@ export async function criarAutorizacao(
 	  return data
 	}
 
+export async function listarCentralAutorizacoes(data: string): Promise<Record<string, any>[]> {
+  const supabase = getSupabaseClient()
+  const { data: rows, error } = await supabase
+    .rpc('listar_central_autorizacoes', { p_data: data })
+  if (error) throw error
+  return rows ?? []
+}
+
 export async function listarAutorizacoes(): Promise<Record<string, any>[]> {
 
   const supabase =
