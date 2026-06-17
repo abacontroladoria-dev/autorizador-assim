@@ -145,6 +145,7 @@ export interface Gap {
   of: number
   gap: number
   prio: 1 | 2 | 3 | 4 | 5
+  isAlta?: boolean
 }
 
 /** Resultado completo do runAlgorithm */
@@ -178,6 +179,7 @@ export interface SessPacItem {
   dia: string
   hora: string
   terapia: string
+  terapiaExib?: string
   prof: string
   unidade: string
   isAdmin: boolean
@@ -260,6 +262,7 @@ export interface AnaliseResult {
 export interface AfetadaItem {
   pac: string
   terapia: string
+  terapiaExib?: string
   dia: string
   hora: string
   unidade: string

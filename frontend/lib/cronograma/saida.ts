@@ -430,10 +430,12 @@ export function buildSaidaAnalise(
     const k = `${r["Dia da Semana"]}|||${r.HI_str}|||${r.Terapia}|||${r.Profissional}`
     if (seen.has(k)) continue
     seen.add(k)
+    const tExib = String(r["Terapia Exibição"] || r["Terapia Exibicao"] || "")
     sessPac.push({
       dia: String(r["Dia da Semana"] || ""),
       hora: String(r.HI_str || ""),
       terapia: String(r.Terapia || ""),
+      terapiaExib: tExib || undefined,
       prof: String(r.Profissional || ""),
       unidade: String(r.Unidade || ""),
       isAdmin: EXCLUIR_OCUP.has(String(r.Terapia || "")),

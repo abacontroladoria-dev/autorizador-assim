@@ -7,7 +7,7 @@ import { SaidaProfMode } from "./SaidaProfMode"
 import { PreencherProfTab } from "@/components/cronograma/shared/PreencherProfTab"
 import { NovoCronogramaTab } from "@/components/cronograma/shared/NovoCronogramaTab"
 import { BancoDadosTab } from "./BancoDadosTab"
-import type { CsvRow, LaudoRow, DispRow, StatusMap } from "@/types/cronograma"
+import type { CsvRow, LaudoRow, DispRow, StatusMap, CfgState } from "@/types/cronograma"
 
 const TABS = [
   { key: "simulacao",  label: "Simulação de Novo Prestador" },
@@ -15,7 +15,6 @@ const TABS = [
   { key: "ocup-prof",  label: "Aumentar Ocupação (Profissional)" },
   { key: "ocup-pac",   label: "Aumentar Ocupação (Paciente)" },
   { key: "novo-cron",  label: "Novo Cronograma" },
-  { key: "banco",      label: "Banco de Dados" },
 ] as const
 
 type TabKey = (typeof TABS)[number]["key"]
@@ -24,9 +23,10 @@ export interface ShellProps {
   cRows: CsvRow[]
   lRows: LaudoRow[]
   dispRows: DispRow[]
+  cfg: CfgState
 }
 
-export function SolicitacoesShell({ cRows, lRows, dispRows }: ShellProps) {
+export function SolicitacoesShell({ cRows, lRows, dispRows, cfg }: ShellProps) {
   const searchParams = useSearchParams()
   const router = useRouter()
   const raw = searchParams.get("tab")
@@ -44,15 +44,15 @@ export function SolicitacoesShell({ cRows, lRows, dispRows }: ShellProps) {
 
   useEffect(() => {
     if (!raw) router.replace("/cronograma/solicitacoes?tab=saida")
-  }, [raw])
+  }, [raw, router])
 
   return (
-    <TabContent tab={activeTab} cRows={cRows} lRows={lRows} dispRows={dispRows} statusMap={statusMap} persistStatus={persistStatus} />
+    <TabContent tab={activeTab} cRows={cRows} lRows={lRows} dispRows={dispRows} cfg={cfg} statusMap={statusMap} persistStatus={persistStatus} />
   )
 }
 
 function TabContent({
-  tab, cRows, lRows, dispRows, statusMap, persistStatus,
+  tab, cRows, lRows, dispRows, cfg, statusMap, persistStatus,
 }: { tab: TabKey; statusMap: StatusMap; persistStatus: (m: StatusMap) => void } & ShellProps) {
   const label = TABS.find(t => t.key === tab)?.label ?? tab
 
@@ -64,7 +64,7 @@ function TabContent({
             Carregue o CSV da grade para usar esta ferramenta.
           </div>
         )}
-        <SaidaProfMode cRows={cRows} lRows={lRows} statusMap={statusMap} persistStatus={persistStatus} />
+        <SaidaProfMode cRows={cRows} lRows={lRows} cfg={cfg} statusMap={statusMap} persistStatus={persistStatus} />
       </>
     )
   }
@@ -83,10 +83,6 @@ function TabContent({
 
   if (tab === "novo-cron") {
     return <NovoCronogramaTab cRows={cRows} lRows={lRows} dispRows={dispRows} />
-  }
-
-  if (tab === "banco") {
-    return <BancoDadosTab cRows={cRows} statusMap={statusMap} persistStatus={persistStatus} />
   }
 
   return (

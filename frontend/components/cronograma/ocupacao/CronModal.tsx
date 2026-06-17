@@ -112,7 +112,8 @@ export function CronModal({ pac, sugsDosPac, agendRows, onClose }: CronModalProp
 
   // ── Dias que aparecem no grid ──
   const allDias = new Set<string>([
-    ...DIAS_LIST.filter(d => uniqueSess.some(r => r["Dia da Semana"] === d)),
+    ...DIAS_LIST.slice(0, 5), // Segunda a Sexta sempre presentes
+    ...DIAS_LIST.filter(d => uniqueSess.some(r => r["Dia da Semana"] === d)), // inclui Sábado se houver sessão
     ...uniqueSugs.map(s => s.dia),
     ...uniqueSugs.filter(s => s.remDia).map(s => s.remDia!),
     ...uniqueSugs.filter(s => s.vCompSlots?.length).flatMap(s => s.vCompSlots!.map(v => v.dia)),

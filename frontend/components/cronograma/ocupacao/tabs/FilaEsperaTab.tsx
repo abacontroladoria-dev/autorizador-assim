@@ -3,20 +3,17 @@
 import { B } from "@/lib/cronograma/constants"
 import { waKey } from "@/lib/cronograma/helpers"
 import { SugCard } from "../SugCard"
-import type { AlgorithmResult, Sugestao, WaMap, WaStatus } from "@/types/cronograma"
+import type { AlgorithmResult, Sugestao, WaMap } from "@/types/cronograma"
 
 interface Props {
   res: AlgorithmResult | null
   waMap: WaMap
   onWA: (s: Sugestao) => void
-  onWAUndo: (s: Sugestao) => void
-  onWAStatus: (s: Sugestao, st: WaStatus) => void
-  onRec: (s: Sugestao) => void
   onInv: (s: Sugestao) => void
   onCron: (s: Sugestao) => void
 }
 
-export function FilaEsperaTab({ res, waMap, onWA, onWAUndo, onWAStatus, onRec, onInv, onCron }: Props) {
+export function FilaEsperaTab({ res, waMap, onWA, onInv, onCron }: Props) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
       <div style={{ background: B.orangeLt, border: `1px solid ${B.orange}44`, borderRadius: "12px", padding: "10px 14px", fontSize: "12px", color: B.orange }}>
@@ -26,8 +23,7 @@ export function FilaEsperaTab({ res, waMap, onWA, onWAUndo, onWAStatus, onRec, o
       {res?.filaEspera?.map((s, i) => (
         <SugCard key={i} s={s} fila
           waStatus={waMap[waKey(s)] ?? null}
-          onWA={onWA} onWAUndo={onWAUndo} onWAStatus={onWAStatus}
-          onRec={onRec} onInv={onInv} onCron={onCron} />
+          onWA={onWA} onInv={onInv} onCron={onCron} />
       ))}
     </div>
   )

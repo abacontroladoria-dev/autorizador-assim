@@ -66,7 +66,7 @@ export const ABA_CLI_EXCL = new Set([
   "Coordenador de Caso",
 ])
 
-export const ABA_EXT = new Set(["Aplicador ABA Casa", "Aplicador ABA Escola"])
+export const ABA_EXT = new Set(["Aplicador ABA Casa", "Aplicador ABA Escola", "Aplicador ABA Escola/Casa"])
 
 export const PACS_ADMIN = new Set([
   "Ainda não selecionado", "Notificação Prévia", "Horário Administrativo",

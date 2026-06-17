@@ -5,11 +5,11 @@ import { SolicitacoesShell } from "@/components/cronograma/solicitacoes/Solicita
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 
 export default function SolicitacoesPage() {
-  const { cRows, lRows, dispRows } = useCronogramaData()
+  const { cRows, lRows, dispRows, cfg } = useCronogramaData()
 
   return (
     <Suspense fallback={null}>
-      <SolicitacoesShell cRows={cRows} lRows={lRows} dispRows={dispRows} />
+      <SolicitacoesShell cRows={cRows} lRows={lRows} dispRows={dispRows} cfg={cfg} />
     </Suspense>
   )
 }

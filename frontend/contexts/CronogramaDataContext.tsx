@@ -45,6 +45,9 @@ async function saveRemote(data: SavePayload): Promise<string | null> {
   }
 }
 
+// Tabela remota ausente — para de tentar sincronizar após o primeiro erro de schema
+let remoteTableMissing = false
+
 function triggerSave(
   data: SavePayload,
   hasSavedRef: React.MutableRefObject<boolean>,
@@ -55,9 +58,18 @@ function triggerSave(
   const { savedAt, localErr } = saveLocal(data)
   setSavedAt(savedAt)
   if (localErr) setSaveError(localErr)
+  if (remoteTableMissing) return
   saveRemote(data).then(remoteErr => {
-    if (remoteErr) setSaveError(remoteErr)
-    else if (!localErr) setSaveError(null)
+    if (remoteErr) {
+      if (remoteErr.includes("cronograma_estado") || remoteErr.includes("schema cache")) {
+        remoteTableMissing = true
+        setSaveError("Sincronização remota desativada: tabela cronograma_estado não existe no banco. Dados salvos localmente. Execute a migration SQL para reativar.")
+      } else {
+        setSaveError(remoteErr)
+      }
+    } else if (!localErr) {
+      setSaveError(null)
+    }
   })
 }
 
