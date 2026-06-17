@@ -2,12 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
-import { B, DIAS_UTIL, EXCLUIR_OCUP, isProfBloqueadoTemp, SK_SAIDA, TERAPIA_TO_ESP } from "@/lib/cronograma/constants"
-import { fmtName, getTurno, pm } from "@/lib/cronograma/helpers"
+import { B, DIAS_UTIL, EXCLUIR_OCUP, isProfBloqueadoTemp, TERAPIA_TO_ESP } from "@/lib/cronograma/constants"
+import { fmtName, getTurno, gPrio, pm } from "@/lib/cronograma/helpers"
+import { slotValidoParaPaciente } from "@/lib/cronograma/candidatos"
 import { buildSaidaAnalise } from "@/lib/cronograma/saida"
 import { SaidaCronModal } from "./SaidaCronModal"
 import type {
-  AfetadaItem, CsvRow, LaudoRow, OpcaoEstrategia, ResultItem, StatusEntry, StatusMap, StatusSaida, MovimentoSessao,
+  AfetadaItem, CsvRow, LaudoRow, OpcaoEstrategia, ResultItem, StatusEntry, StatusMap, StatusSaida, MovimentoSessao, CfgState,
 } from "@/types/cronograma"
 
 // ─── CONSTANTES ───────────────────────────────────────────────────────────────
@@ -45,12 +46,14 @@ const PACIENTES_FICTICIOS = new Set([
 
 // ─── TIPOS ────────────────────────────────────────────────────────────────────
 
-interface CandidatoSlot { pac: string; esp: string; gap: number; conv: string }
+interface CandidatoSlot { pac: string; esp: string; gap: number; conv: string; prio: 1 | 2 | 3 | 4 | 5 }
 type CandidatoWA = "aguardando" | "recusado" | "inviavel"
+interface ScheduleModalState { slotKey: string; candidato: CandidatoSlot }
 
 interface Props {
   cRows: CsvRow[]
   lRows: LaudoRow[]
+  cfg: CfgState
   statusMap: StatusMap
   persistStatus: (map: StatusMap) => void
 }
@@ -68,7 +71,7 @@ interface StatusPayload {
 
 const ST_S: Record<string, { bg: string; c: string; l: string }> = {
   pendente:    { bg: "#f3f4f6", c: "#6b7280",  l: "Pendente" },
-  aguardando:  { bg: B.blueLt,  c: B.blue,     l: "Aguardando WA" },
+  aguardando:  { bg: B.blueLt,  c: B.blue,     l: "Em Acompanhamento" },
   resolvido:   { bg: B.limeLt,  c: "#4a6e20",  l: "Resolvido" },
   recusado:    { bg: "#fef2f2", c: "#dc2626",  l: "Recusado" },
   sem_solucao: { bg: "#f3f4f6", c: "#6b7280",  l: "Sem solução" },
@@ -88,8 +91,10 @@ function fmtCh(min: number): string {
   return `${Math.floor(min / 60)}h${String(min % 60).padStart(2, "0")}`
 }
 
-function abrvTer(t: string): string {
-  return t.split(" ")[0].substring(0, 7)
+function normHora(t: string | null | undefined): string {
+  const min = pm(t)
+  if (min === null) return String(t || "")
+  return `${String(Math.floor(min / 60)).padStart(2, "0")}:${String(min % 60).padStart(2, "0")}`
 }
 
 function pctBadge(pct: number): { bg: string; color: string } {
@@ -105,18 +110,38 @@ function fmtPacAgenda(full: string): string {
   return `${words[0]} ${words[1]}`
 }
 
+// ─── MAPEAMENTOS DE ESTRATÉGIA ────────────────────────────────────────────────
+
+const ESTRATEGIA_FILTER_MAP: Record<string, (r: ResultItem) => boolean> = {
+  e1:  r => !!r.analise.e1,
+  e2:  r => !!r.analise.e2,
+  e3:  r => !!r.analise.e3,
+  e4:  r => r.analise.e4.length > 0,
+  e5:  r => !!r.analise.e5,
+  e6:  r => !!r.analise.e6,
+  e7:  r => !!r.analise.e7,
+  sem: r => !!r.analise.semSolucao,
+}
+
+const DONUT_NAME_TO_KEY: Record<string, string> = {
+  "#1": "e1", "#2": "e2", "#3": "e3", "#4": "e4",
+  "#5": "e5", "#6": "e6", "#7": "e7", "—": "sem",
+}
+
 // ─── COMPONENTE ───────────────────────────────────────────────────────────────
 
-export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props) {
+export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: Props) {
   const [prof, setProf] = useState("")
   const [inputVal, setInputVal] = useState("")
   const [dropOpen, setDropOpen] = useState(false)
   const [selDT, setSelDT] = useState(new Set<string>())
   const [results, setResults] = useState<ResultItem[] | null>(null)
-  const [modalItem, setModalItem] = useState<ResultItem | null>(null)
-  const [verSlot, setVerSlot] = useState<string | null>(null)
+  const [modalGroup, setModalGroup] = useState<ResultItem[] | null>(null)
+  const [modalTabIdx, setModalTabIdx] = useState(0)
+  const [slotModal, setSlotModal] = useState<string | null>(null)
+  const [scheduleModal, setScheduleModal] = useState<ScheduleModalState | null>(null)
   const [candidatoWA, setCandidatoWA] = useState<Record<string, CandidatoWA>>({})
-  const [verCandidatoKey, setVerCandidatoKey] = useState<string | null>(null)
+  const [estrategiaFiltro, setEstrategiaFiltro] = useState<Set<string>>(new Set())
   const comboRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -233,8 +258,8 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
     let totalSlots = 0
     for (const d of dias) {
       const items = byDay[d]
-      const hasManha = items.some(af => MANHA_SLOTS.has(af.hora))
-      const hasTarde = items.some(af => TARDE_SLOTS.has(af.hora))
+      const hasManha = items.some(af => MANHA_SLOTS.has(normHora(af.hora)))
+      const hasTarde = items.some(af => TARDE_SLOTS.has(normHora(af.hora)))
       const slots = new Set<string>()
       if (hasManha) { for (const s of MANHA_SLOTS) slots.add(s); totalSlots += 6 }
       if (hasTarde) { for (const s of TARDE_SLOTS) slots.add(s); totalSlots += 7 }
@@ -251,7 +276,7 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
 
     const agendaMap: Record<string, AfetadaItem[]> = {}
     for (const item of semSolucaoItems) {
-      const k = `${item.afetada.dia}|||${item.afetada.hora}`
+      const k = `${item.afetada.dia}|||${normHora(item.afetada.hora)}`
       if (!agendaMap[k]) agendaMap[k] = []
       agendaMap[k].push(item.afetada)
     }
@@ -300,13 +325,21 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
     }
   }, [semSolucaoItems])
 
-  // Candidatos para slots livres do novo profissional (inspirado em Vagas Agora)
+  // Candidatos para slots livres do novo profissional.
+  // A validação R2.1 + R5.1 usa slotValidoParaPaciente de candidatos.ts,
+  // a mesma fonte que o módulo "Vagas Agora" (runAlgorithm.ts, Ocupação R2).
   const sugestoesPorSlot = useMemo<Record<string, CandidatoSlot[]>>(() => {
     if (!novoProfData || !lRows.length) return {}
 
     const especialidades = new Set(
       semSolucaoItems.map(i => TERAPIA_TO_ESP[i.afetada.terapia] ?? i.afetada.terapia)
     )
+
+    const planoPorPac: Record<string, string> = {}
+    for (const l of lRows) {
+      const pac = String(l["Paciente"] || "").trim()
+      if (pac && l["Plano"] && !planoPorPac[pac]) planoPorPac[pac] = String(l["Plano"])
+    }
 
     const offered: Record<string, number> = {}
     for (const r of agendRows) {
@@ -331,32 +364,62 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
       seenKey.add(k)
       const gap = Math.round((aut - (offered[k] ?? 0)) * 10) / 10
       if (gap <= 0) continue
-      candidatos.push({ pac, esp, gap, conv: String(l["Plano"] || "") })
+      const conv = String(l["Plano"] || planoPorPac[pac] || "")
+      candidatos.push({ pac, esp, gap, conv, prio: gPrio(pac, planoPorPac, cfg.judicialMap || {}) })
     }
-    candidatos.sort((a, b) => b.gap - a.gap)
+    candidatos.sort((a, b) => a.prio - b.prio || b.gap - a.gap || a.pac.localeCompare(b.pac))
+
+    // Contagem de sugestões por pac|||esp para respeitar o limite do gap (canSug).
+    // Um paciente com gap=1 aparece em no máximo 1 slot; gap=2 em até 2 slots, etc.
+    const sugCount: Record<string, number> = {}
+    const canSug = (pac: string, esp: string, gap: number) =>
+      (sugCount[`${pac}|||${esp}`] ?? 0) < gap
+    const incSug = (pac: string, esp: string) => {
+      sugCount[`${pac}|||${esp}`] = (sugCount[`${pac}|||${esp}`] ?? 0) + 1
+    }
+
+    // Unidade por dia: o novo profissional trabalhará na mesma unidade do profissional saindo.
+    // Necessário para que slotValidoParaPaciente não misture sessões de unidades distintas
+    // ao checar R2.1 e R5.1 (o paciente não pode "preencher" R2.1 com sessões de outra unidade).
+    const diaUnidade: Record<string, string> = {}
+    for (const item of semSolucaoItems) {
+      const d = item.afetada.dia
+      if (!diaUnidade[d] && item.afetada.unidade) diaUnidade[d] = item.afetada.unidade
+    }
 
     const result: Record<string, CandidatoSlot[]> = {}
     for (const dia of novoProfData.dias) {
+      const unidade = diaUnidade[dia] || null
       for (const slot of novoProfData.dayWorkSlots[dia]) {
         const chave = `${dia}|||${slot}`
         if ((novoProfData.agendaMap[chave] ?? []).length > 0) continue
         const ocupadosNoSlot = new Set(
           agendRows
-            .filter(r => String(r["Dia da Semana"] || "") === dia && String(r.HI_str || "") === slot)
+            .filter(r => String(r["Dia da Semana"] || "") === dia && normHora(String(r.HI_str || "")) === slot)
             .map(r => String(r["Nome Favorecido"] || ""))
         )
-        const sug = candidatos.filter(c => !ocupadosNoSlot.has(c.pac))
-        if (sug.length) result[chave] = sug
+        const sug = candidatos.filter(c => {
+          if (ocupadosNoSlot.has(c.pac)) return false
+          if (!canSug(c.pac, c.esp, c.gap)) return false
+          // R2.1 + R5.1 via validador compartilhado com "Vagas Agora".
+          // unidade garante que sessões de outras unidades não contaminem os checks.
+          return slotValidoParaPaciente(c.pac, dia, slot, agendRows, unidade)
+        })
+        if (sug.length) {
+          for (const c of sug) incSug(c.pac, c.esp)
+          result[chave] = sug
+        }
       }
     }
     return result
-  }, [novoProfData, lRows, agendRows, semSolucaoItems])
+  }, [novoProfData, lRows, agendRows, semSolucaoItems, cfg.judicialMap])
 
   function toggleDT(dia: string, turno: string) {
     setSelDT(prev => {
       const n = new Set(prev)
       const k = `${dia}|||${turno}`
-      n.has(k) ? n.delete(k) : n.add(k)
+      if (n.has(k)) n.delete(k)
+      else n.add(k)
       return n
     })
     setResults(null)
@@ -391,15 +454,18 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
       const dia = String(r["Dia da Semana"] || "")
       const turno = getTurno(String(r.HI_str || ""))
       if (!selDT.has(`${dia}|||${turno}`)) { cSelDT++; continue }
-      const k = `${nome}|||${dia}|||${r.HI_str}|||${r.Terapia}`
+      const hora = normHora(String(r.HI_str || ""))
+      const k = `${nome}|||${dia}|||${hora}|||${r.Terapia}`
       if (seen.has(k)) { cSeen++; continue }
       seen.add(k)
 
+      const terapiaExibRaw = String(r["Terapia Exibição"] || r["Terapia Exibicao"] || "")
       const afetada: AfetadaItem = {
         pac: nome,
         terapia: String(r.Terapia || ""),
+        terapiaExib: terapiaExibRaw || undefined,
         dia,
-        hora: String(r.HI_str || ""),
+        hora,
         unidade: String(r.Unidade || ""),
         prof: String(r.Profissional || ""),
         conv: String(r["Convênio"] || ""),
@@ -458,6 +524,7 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
       return pri(a) - pri(b)
     })
     setResults(res)
+    setEstrategiaFiltro(new Set())
   }
 
   function handleStatus(afetada: AfetadaItem, status: StatusSaida, payload: StatusPayload) {
@@ -476,7 +543,10 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
   const counts = useMemo(() => {
     if (!results) return {} as Record<string, number>
     const c: Record<string, number> = { pendente: 0, aguardando: 0, resolvido: 0, recusado: 0, sem_solucao: 0 }
-    for (const r of results) c[getStatus(r.afetada).status ?? "pendente"]++
+    for (const r of results) {
+      const key = `${r.afetada.pac}|||${r.afetada.dia}|||${r.afetada.hora}|||${r.afetada.terapia}`
+      c[statusMap[key]?.status ?? "pendente"]++
+    }
     return c
   }, [results, statusMap])
 
@@ -487,10 +557,20 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
     return Object.values(acc)
   }, [results])
 
-  const canAnalyze = !!prof && selDT.size > 0 && cRows.length > 0
+  const filteredPacGroups = useMemo(() => {
+    if (estrategiaFiltro.size === 0) return pacGroups
+    return pacGroups
+      .map(g => g.filter(r => {
+        for (const key of estrategiaFiltro) {
+          const pred = ESTRATEGIA_FILTER_MAP[key]
+          if (pred?.(r)) return true
+        }
+        return false
+      }))
+      .filter(g => g.length > 0)
+  }, [pacGroups, estrategiaFiltro])
 
-  const verDia = verSlot ? verSlot.split("|||")[0] : ""
-  const verHora = verSlot ? verSlot.split("|||")[1] : ""
+  const canAnalyze = !!prof && selDT.size > 0 && cRows.length > 0
 
   // Derivados das sugestões para os slots livres
   const aConfirmarCount = Object.keys(sugestoesPorSlot).length
@@ -572,7 +652,7 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
           {prof && Object.keys(profDT).length === 0 && (
             <div style={{ fontSize: "11px", color: "#ef4444", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: "8px", padding: "8px 12px", marginBottom: "4px" }}>
               Nenhuma sessão clínica encontrada para este profissional no CSV carregado.
-              Possíveis causas: nome diferente no CSV, sessões com status diferente de "Agendado", ou todas as sessões são administrativas.
+              Possíveis causas: nome diferente no CSV, sessões com status diferente de &quot;Agendado&quot;, ou todas as sessões são administrativas.
               Abra o console (F12) e selecione este profissional novamente para ver o diagnóstico.
             </div>
           )}
@@ -630,7 +710,7 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
               <div style={{ width: "52px", height: "52px", borderRadius: "50%", border: "7px solid #e5e7eb" }} />
               <div style={{ fontSize: "11px", color: "#9ca3af", textAlign: "center", lineHeight: 1.5 }}>
                 {results === null
-                  ? <>Execute "Analisar Impacto"<br />para ver o resumo</>
+                  ? <>Execute &quot;Analisar Impacto&quot;<br />para ver o resumo</>
                   : <span style={{ color: "#ef4444" }}>Nenhuma sessão clínica encontrada para este profissional. Verifique o console (F12) para detalhes.</span>
                 }
               </div>
@@ -645,7 +725,7 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
                   <Pie data={donutData.slices} cx="50%" cy="50%" innerRadius={42} outerRadius={65} dataKey="value" strokeWidth={0}>
                     {donutData.slices.map((s, i) => <Cell key={i} fill={s.color} />)}
                   </Pie>
-                  <Tooltip formatter={(val: number, name: string) => [val, name]} contentStyle={{ fontSize: "11px", borderRadius: "8px", border: "1px solid #e5e7eb", padding: "4px 8px" }} />
+                  <Tooltip formatter={(val, name) => [val ?? 0, name]} contentStyle={{ fontSize: "11px", borderRadius: "8px", border: "1px solid #e5e7eb", padding: "4px 8px" }} />
                 </PieChart>
               </ResponsiveContainer>
               <div style={{ display: "flex", flexDirection: "column", gap: "5px", marginTop: "4px" }}>
@@ -706,7 +786,7 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
                   </div>
                 </div>
 
-                <table style={{ borderCollapse: "collapse", tableLayout: "fixed", fontSize: "11px", width: "auto" }}>
+                <table style={{ borderCollapse: "collapse", tableLayout: "fixed", fontSize: "11px", width: `${48 + DIAS_UTIL.length * 90}px` }}>
                   <colgroup>
                     <col style={{ width: "48px" }} />
                     {DIAS_UTIL.map(d => <col key={d} style={{ width: "90px" }} />)}
@@ -717,7 +797,7 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
                       {DIAS_UTIL.map(d => {
                         const isActive = novoProfData.dayWorkSlots[d] !== undefined
                         return (
-                          <th key={d} style={{ padding: "6px 8px", textAlign: "center", fontWeight: 700, borderBottom: isActive ? `2px solid ${B.navy}` : "2px solid #e5e7eb", fontSize: "13px", color: isActive ? B.navy : "#d1d5db" }}>
+                          <th key={d} style={{ width: "90px", padding: "6px 8px", textAlign: "center", fontWeight: 700, borderBottom: isActive ? `2px solid ${B.navy}` : "2px solid #e5e7eb", fontSize: "13px", color: isActive ? B.navy : "#d1d5db" }}>
                             {DIA_ABR[d] ?? d}
                             {isActive && <div style={{ fontSize: "11px", fontWeight: 600, color: B.blue, marginTop: "3px" }}>a contratar</div>}
                           </th>
@@ -753,18 +833,17 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
                               const chaveSlot = `${d}|||${slot}`
                               const sugs = sugestoesPorSlot[chaveSlot]
                               if (sugs?.length) {
-                                const isOpen = verSlot === chaveSlot
                                 return (
                                   <td key={d} style={{ padding: "2px 4px", verticalAlign: "middle" }}>
                                     <div
-                                      onClick={() => setVerSlot(isOpen ? null : chaveSlot)}
-                                      style={{ background: isOpen ? "#fcd34d" : "#fef3c7", border: "1px solid #fbbf24", borderRadius: "8px", minHeight: "36px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "3px 4px", gap: "1px", cursor: "pointer" }}
+                                      onClick={() => setSlotModal(chaveSlot)}
+                                      style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: "8px", minHeight: "36px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "3px 4px", gap: "1px", cursor: "pointer" }}
                                     >
                                       <div style={{ fontWeight: 600, fontSize: "10px", color: "#92400e", lineHeight: 1.2 }}>
                                         {sugs.length} candidato{sugs.length > 1 ? "s" : ""}
                                       </div>
                                       <div style={{ fontSize: "9px", color: "#d97706", fontWeight: 700 }}>
-                                        {isOpen ? "fechar ▲" : "ver ▼"}
+                                        ver
                                       </div>
                                     </div>
                                   </td>
@@ -785,183 +864,6 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
                   </tbody>
                 </table>
 
-                {/* Painel "Sessões a confirmar" — candidatos para o slot selecionado */}
-                {verSlot && sugestoesPorSlot[verSlot] && (
-                  <div style={{ marginTop: "12px", border: "1px solid #fbbf24", borderRadius: "12px", background: "#fffbeb", overflow: "hidden" }}>
-                    {/* Header */}
-                    <div style={{ padding: "10px 14px", borderBottom: "1px solid #fef3c7", display: "flex", alignItems: "center", justifyContent: "space-between", background: "#fef9e7" }}>
-                      <div>
-                        <div style={{ fontWeight: 700, color: "#92400e", fontSize: "13px" }}>
-                          Sessões a confirmar — {DIA_ABR[verDia] ?? verDia} {verHora}
-                        </div>
-                        <div style={{ fontSize: "11px", color: "#d97706", marginTop: "2px" }}>
-                          Pacientes com laudo Vigente e gap ≥ 1. Confirme viabilidade antes de incluir no cronograma.
-                        </div>
-                      </div>
-                      <button onClick={() => { setVerSlot(null); setVerCandidatoKey(null) }} style={{ background: "none", border: "none", cursor: "pointer", color: "#9ca3af", fontSize: "14px", padding: "4px 8px" }}>✕</button>
-                    </div>
-
-                    {/* Candidate cards */}
-                    <div style={{ padding: "8px 10px", display: "flex", flexDirection: "column", gap: "6px" }}>
-                      {sugestoesPorSlot[verSlot].map((c, i) => {
-                        const cKey = `${verSlot}|||${c.pac}`
-                        const waStatus = candidatoWA[cKey] ?? null
-                        const isVerOpen = verCandidatoKey === cKey
-                        const isDone = waStatus === "recusado" || waStatus === "inviavel"
-
-                        // Validações R5.1 + R2.1 para o dia de destino
-                        const sessoesDia = agendRows.filter(r =>
-                          String(r["Nome Favorecido"] || "") === c.pac &&
-                          String(r["Dia da Semana"] || "") === verDia &&
-                          !EXCLUIR_OCUP.has(String(r.Terapia || ""))
-                        )
-                        const horasExist = sessoesDia.map(r => String(r.HI_str || "")).filter(Boolean)
-                        const horasAll = [...horasExist, verHora].sort()
-                        const hasGapR51 = horasAll.length > 1 && horasAll.some((h, idx) => {
-                          if (idx === 0) return false
-                          return ((pm(h) ?? 0) - (pm(horasAll[idx - 1]) ?? 0)) !== 40
-                        })
-                        const r21Violation = sessoesDia.length === 0
-                        const isValid = !hasGapR51 && !r21Violation
-
-                        return (
-                          <div key={i} style={{ border: `1px solid ${isDone ? "#e5e7eb" : "#fcd34d"}`, borderRadius: "10px", background: isDone ? "#f9fafb" : "white", opacity: isDone ? 0.6 : 1 }}>
-                            {/* Card header */}
-                            <div style={{ padding: "8px 12px", display: "flex", alignItems: "flex-start", gap: "8px", flexWrap: "wrap" }}>
-                              <div style={{ flex: "1 1 160px" }}>
-                                <div style={{ fontWeight: 700, color: "#1f2937", fontSize: "13px" }}>{c.pac}</div>
-                                <div style={{ fontSize: "11px", color: "#6b7280", marginTop: "2px" }}>
-                                  {c.esp} · gap <strong style={{ color: "#d97706" }}>+{c.gap}</strong> · {c.conv || "—"}
-                                </div>
-                                <div style={{ display: "flex", gap: "4px", marginTop: "5px", flexWrap: "wrap" }}>
-                                  {hasGapR51 && <span style={{ fontSize: "10px", background: "#fef2f2", color: "#dc2626", borderRadius: "5px", padding: "2px 5px", border: "1px solid #fca5a5", fontWeight: 600 }}>⚠ gap R5.1</span>}
-                                  {r21Violation && <span style={{ fontSize: "10px", background: "#fef2f2", color: "#dc2626", borderRadius: "5px", padding: "2px 5px", border: "1px solid #fca5a5", fontWeight: 600 }}>⚠ dia isolado R2.1</span>}
-                                  {isValid && !isDone && <span style={{ fontSize: "10px", background: "#f0fdf4", color: "#166534", borderRadius: "5px", padding: "2px 5px", fontWeight: 600 }}>✓ viável</span>}
-                                  {waStatus === "aguardando" && <span style={{ fontSize: "10px", background: B.blueLt, color: B.blue, borderRadius: "5px", padding: "2px 6px", fontWeight: 700 }}>⏳ Aguardando WA</span>}
-                                  {waStatus === "recusado" && <span style={{ fontSize: "10px", background: "#fef2f2", color: "#dc2626", borderRadius: "5px", padding: "2px 6px", fontWeight: 700 }}>❌ Recusou</span>}
-                                  {waStatus === "inviavel" && <span style={{ fontSize: "10px", background: "#f3f4f6", color: "#6b7280", borderRadius: "5px", padding: "2px 6px", fontWeight: 700 }}>⛔ Inviável</span>}
-                                </div>
-                              </div>
-
-                              {/* Botões de ação */}
-                              <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", alignItems: "flex-start" }}>
-                                <button
-                                  onClick={() => setVerCandidatoKey(isVerOpen ? null : cKey)}
-                                  style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: isVerOpen ? B.navy : B.blueLt, color: isVerOpen ? "white" : B.blue, border: `1px solid ${B.blue}33`, cursor: "pointer", fontWeight: 600 }}
-                                >
-                                  🗓 Ver
-                                </button>
-                                {!waStatus && (
-                                  <button
-                                    onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "aguardando" }))}
-                                    style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: B.blueLt, color: B.blue, border: `1px solid ${B.blue}33`, cursor: "pointer" }}
-                                  >
-                                    Oferecer via WA
-                                  </button>
-                                )}
-                                {waStatus === "aguardando" && (
-                                  <>
-                                    <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "recusado" }))} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", cursor: "pointer" }}>❌ Recusou</button>
-                                    <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "inviavel" }))} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer" }}>⛔ Inviável</button>
-                                    <button onClick={() => setCandidatoWA(p => { const n = { ...p }; delete n[cKey]; return n })} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer" }}>Desfazer envio</button>
-                                  </>
-                                )}
-                                {!waStatus && (
-                                  <>
-                                    <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "recusado" }))} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", cursor: "pointer" }}>❌ Recusou</button>
-                                    <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "inviavel" }))} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer" }}>⛔ Inviável</button>
-                                  </>
-                                )}
-                                {isDone && (
-                                  <button onClick={() => setCandidatoWA(p => { const n = { ...p }; delete n[cKey]; return n })} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer" }}>Resetar</button>
-                                )}
-                              </div>
-                            </div>
-
-                            {/* Vista de cronograma (🗓 Ver) */}
-                            {isVerOpen && (() => {
-                              const todasSessoes = agendRows.filter(r =>
-                                String(r["Nome Favorecido"] || "") === c.pac &&
-                                !EXCLUIR_OCUP.has(String(r.Terapia || ""))
-                              )
-                              const diasPac = new Set(todasSessoes.map(r => String(r["Dia da Semana"] || "")))
-                              diasPac.add(verDia)
-                              const diasSorted = DIAS_UTIL.filter(d => diasPac.has(d))
-                              const slotsUsados = new Set(todasSessoes.map(r => String(r.HI_str || "")).filter(Boolean))
-                              slotsUsados.add(verHora)
-                              const slotsGrid = ALL_SLOTS.filter(s => slotsUsados.has(s))
-
-                              return (
-                                <div style={{ borderTop: "1px solid #fef3c7", padding: "10px 12px", background: "#fefce8" }}>
-                                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#92400e", marginBottom: "6px" }}>
-                                    🗓 {c.pac.split(" ").slice(0, 2).join(" ")} — como ficaria após a adição
-                                  </div>
-                                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginBottom: "8px" }}>
-                                    <span style={{ fontSize: "10px", fontWeight: 600, color: "#92400e" }}>{DIA_ABR[verDia] ?? verDia} {verHora}:</span>
-                                    {hasGapR51
-                                      ? <span style={{ fontSize: "10px", background: "#fef2f2", color: "#dc2626", borderRadius: "5px", padding: "2px 6px", border: "1px solid #fca5a5" }}>⚠ criaria buraco entre sessões (R5.1)</span>
-                                      : <span style={{ fontSize: "10px", background: "#f0fdf4", color: "#166534", borderRadius: "5px", padding: "2px 6px" }}>✓ sem buraco</span>
-                                    }
-                                    {r21Violation
-                                      ? <span style={{ fontSize: "10px", background: "#fef2f2", color: "#dc2626", borderRadius: "5px", padding: "2px 6px", border: "1px solid #fca5a5" }}>⚠ sessão isolada no dia (R2.1)</span>
-                                      : <span style={{ fontSize: "10px", background: "#f0fdf4", color: "#166534", borderRadius: "5px", padding: "2px 6px" }}>✓ min 2 sessões ok</span>
-                                    }
-                                  </div>
-                                  <table style={{ borderCollapse: "collapse", fontSize: "10px", width: "auto" }}>
-                                    <colgroup>
-                                      <col style={{ width: "44px" }} />
-                                      {diasSorted.map(d => <col key={d} style={{ width: "96px" }} />)}
-                                    </colgroup>
-                                    <thead>
-                                      <tr>
-                                        <th style={{ padding: "2px 4px", textAlign: "left", color: "#9ca3af", borderBottom: "1px solid #e5e7eb" }} />
-                                        {diasSorted.map(d => (
-                                          <th key={d} style={{ padding: "4px 6px", textAlign: "center", fontWeight: 700, fontSize: "11px", color: d === verDia ? "#92400e" : B.navy, borderBottom: d === verDia ? "2px solid #fbbf24" : "1px solid #e5e7eb" }}>
-                                            {DIA_ABR[d] ?? d}
-                                          </th>
-                                        ))}
-                                      </tr>
-                                    </thead>
-                                    <tbody>
-                                      {slotsGrid.map(s => {
-                                        const isSep = s === "13:00"
-                                        return (
-                                          <tr key={s} style={{ borderTop: isSep ? "2px solid #d1d5db" : "1px solid #f3f4f6" }}>
-                                            <td style={{ padding: "2px 4px", color: s === verHora ? "#d97706" : "#9ca3af", fontWeight: s === verHora ? 700 : 400, fontSize: "10px", whiteSpace: "nowrap", verticalAlign: "middle", height: "32px" }}>
-                                              {s}
-                                            </td>
-                                            {diasSorted.map(d => {
-                                              const sess = todasSessoes.filter(r => String(r["Dia da Semana"] || "") === d && String(r.HI_str || "") === s)
-                                              const isNew = d === verDia && s === verHora
-                                              return (
-                                                <td key={d} style={{ padding: "2px 3px", verticalAlign: "middle" }}>
-                                                  {sess.map((r, ri) => (
-                                                    <div key={ri} style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: "5px", padding: "2px 4px", fontSize: "10px", fontWeight: 600, color: "#166534", marginBottom: "1px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "90px" }}>
-                                                      {abrvTer(String(r.Terapia || ""))}
-                                                    </div>
-                                                  ))}
-                                                  {isNew && (
-                                                    <div style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: "5px", padding: "2px 4px", fontSize: "10px", fontWeight: 700, color: "#92400e", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", maxWidth: "90px" }}>
-                                                      + {c.esp.split(" ")[0]}
-                                                    </div>
-                                                  )}
-                                                </td>
-                                              )
-                                            })}
-                                          </tr>
-                                        )
-                                      })}
-                                    </tbody>
-                                  </table>
-                                </div>
-                              )
-                            })()}
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )}
               </div>
 
               {/* Carga semanal */}
@@ -982,7 +884,7 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
                         {cargaSlicesExt.map((s, i) => <Cell key={i} fill={s.color} />)}
                       </Pie>
                       <Tooltip
-                        formatter={(val: number, name: string) => [`${val} slot(s)`, name]}
+                        formatter={(val, name) => [`${val ?? 0} slot(s)`, name]}
                         contentStyle={{ fontSize: "11px", borderRadius: "8px", border: "1px solid #e5e7eb", padding: "4px 8px" }}
                       />
                     </PieChart>
@@ -1124,7 +1026,9 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
         <div className="bg-white rounded-[14px] border border-gray-200 p-4">
           <div className="flex justify-between items-start mb-3 flex-wrap gap-2">
             <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px" }}>
-              {pacGroups.length} paciente(s) afetado(s) · {results.length} sessão(ões)
+              {estrategiaFiltro.size > 0
+                ? `${filteredPacGroups.length} paciente(s) · ${filteredPacGroups.reduce((s, g) => s + g.length, 0)} sessão(ões) filtrados`
+                : `${pacGroups.length} paciente(s) afetado(s) · ${results.length} sessão(ões)`}
             </div>
             <div className="flex gap-[5px] flex-wrap">
               {Object.entries(ST_S).map(([k, v]) =>
@@ -1137,62 +1041,112 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
             </div>
           </div>
 
+          {/* ── Filtro por estratégia ── */}
+          {donutData && donutData.slices.length > 1 && (
+            <div className="flex gap-[5px] flex-wrap mb-3 items-center">
+              <button
+                onClick={() => {
+                  const allKeys = donutData.slices.map(s => DONUT_NAME_TO_KEY[s.name]).filter(Boolean) as string[]
+                  setEstrategiaFiltro(new Set(allKeys))
+                }}
+                style={{ padding: "3px 10px", borderRadius: "999px", fontSize: "11px", fontWeight: 700, cursor: "pointer", background: "#f3f4f6", color: "#374151", border: "1px solid #e5e7eb" }}
+              >
+                Filtrar tudo
+              </button>
+              <button
+                onClick={() => setEstrategiaFiltro(new Set())}
+                style={{ padding: "3px 10px", borderRadius: "999px", fontSize: "11px", fontWeight: 700, cursor: "pointer", background: "#f3f4f6", color: "#374151", border: "1px solid #e5e7eb" }}
+              >
+                Desmarcar tudo
+              </button>
+              <div style={{ width: "1px", height: "18px", background: "#e5e7eb", margin: "0 2px" }} />
+              {donutData.slices.map(slice => {
+                const key = DONUT_NAME_TO_KEY[slice.name]
+                if (!key) return null
+                const active = estrategiaFiltro.has(key)
+                return (
+                  <button
+                    key={key}
+                    onClick={() => {
+                      const next = new Set(estrategiaFiltro)
+                      active ? next.delete(key) : next.add(key)
+                      setEstrategiaFiltro(next)
+                    }}
+                    style={{
+                      padding: "3px 10px", borderRadius: "999px", fontSize: "11px", fontWeight: 700, cursor: "pointer",
+                      background: active ? slice.color : "#f3f4f6",
+                      color: active ? "white" : "#374151",
+                      border: active ? `1px solid ${slice.color}` : "1px solid #e5e7eb",
+                    }}
+                  >
+                    {slice.name} {slice.label} ({slice.value})
+                  </button>
+                )
+              })}
+            </div>
+          )}
+
           <div style={{ background: B.blueLt, border: `1px solid ${B.blue}33`, borderRadius: "9px", padding: "7px 12px", fontSize: "11px", color: B.blue, marginBottom: "12px" }}>
             Cada vaga é oferecida a um único paciente. Para liberar uma vaga, registre como Recusado.
           </div>
 
           <div className="flex flex-col gap-[7px]">
-            {pacGroups.map((sessoes, gi) => {
+            {filteredPacGroups.map((sessoes, gi) => {
               const hasProblem = sessoes.some(r => r.analise.buracoSiRemover || r.analise.semSolucao)
               const allResolvido = sessoes.every(r => getStatus(r.afetada).status === "resolvido")
               const borderColor = hasProblem ? "#fca5a5" : allResolvido ? BD["resolvido"] : "#e5e7eb"
 
               return (
                 <div key={gi} style={{ padding: "11px 13px", borderRadius: "12px", border: `1.5px solid ${borderColor}`, background: "white" }}>
-                  <div style={{ fontWeight: 700, fontSize: "13px", color: "#1f2937", marginBottom: "8px" }}>{sessoes[0].pac}</div>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", gap: "8px" }}>
+                    <div style={{ fontWeight: 700, fontSize: "13px", color: "#1f2937" }}>{sessoes[0].pac}</div>
+                    <button
+                      onClick={() => { setModalGroup(sessoes); const firstSolvable = sessoes.findIndex(r => !r.analise.semSolucao); setModalTabIdx(firstSolvable >= 0 ? firstSolvable : 0) }}
+                      style={{ padding: "6px 14px", borderRadius: "9px", background: B.navy, color: "white", border: "none", fontWeight: 700, fontSize: "11px", cursor: "pointer", flexShrink: 0 }}
+                    >
+                      Ver
+                    </button>
+                  </div>
                   {sessoes.map((r, si) => {
                     const st = getStatus(r.afetada)
                     const stSt = ST_S[st.status ?? "pendente"]
                     const { analise } = r
+                    const showExib = r.afetada.terapiaExib && r.afetada.terapiaExib !== r.afetada.terapia
                     return (
                       <div key={si} style={{ display: "flex", alignItems: "flex-start", gap: "10px", flexWrap: "wrap", paddingTop: si > 0 ? "8px" : "0", marginTop: si > 0 ? "8px" : "0", borderTop: si > 0 ? "1px solid #f3f4f6" : "none" }}>
                         <div style={{ flex: "1 1 220px" }}>
-                          <div style={{ fontSize: "11px", color: "#6b7280" }}>
-                            {r.afetada.terapia} · {r.afetada.dia} {r.afetada.hora} · {r.afetada.conv || "—"}
+                          <div style={{ fontSize: "12px", fontWeight: 700, color: "#1f2937", lineHeight: "1.3" }}>{r.afetada.terapia}</div>
+                          {showExib && <div style={{ fontSize: "11px", color: "#9ca3af" }}>({r.afetada.terapiaExib})</div>}
+                          <div style={{ fontSize: "11px", color: "#6b7280", marginTop: "1px" }}>{fmtName(r.afetada.prof)}</div>
+                          <div style={{ fontSize: "10px", color: "#9ca3af", marginTop: "1px" }}>{r.afetada.dia} {r.afetada.hora} · {r.afetada.conv || "—"}</div>
+                          <div className="flex gap-[3px] mt-[4px] flex-wrap items-center">
+                            {analise.semSolucao && <span style={{ background: "#fef2f2", color: "#dc2626", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px", border: "1px solid #fca5a5" }}>Removida</span>}
+                            {analise.buracoSiRemover && analise.semSolucao && <span style={{ background: "#fef2f2", color: "#dc2626", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px", border: "1px solid #fca5a5" }}>buraco</span>}
+                            {analise.min2Violation && analise.semSolucao && <span style={{ background: "#fef2f2", color: "#dc2626", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px", border: "1px solid #fca5a5" }}>min-2</span>}
+                            {analise.e1 && <span style={{ background: B.limeLt, color: "#4a6e20", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px" }}>#1 Mesma terapia, mesmo horário</span>}
+                            {analise.e2 && <span style={{ background: "#e0f2fe", color: "#0369a1", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px" }}>#2 Posições alteradas, prof. mantidos</span>}
+                            {analise.e3 && <span style={{ background: B.blueLt, color: B.blue, fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px" }}>#3 Mesma terapia, horário adjacente</span>}
+                            {analise.e4.length > 0 && <span style={{ background: B.purpleLt, color: B.purple, fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px" }}>#4 Outra terapia, mesmo horário{analise.e4.length > 1 ? ` (${analise.e4.length})` : ""}</span>}
+                            {analise.e5 && <span style={{ background: "#fff7ed", color: "#c2410c", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px" }}>#5 Posições alteradas, prof. alterados</span>}
+                            {analise.e6 && <span style={{ background: "#f5f3ff", color: "#6d28d9", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px" }}>#6 Alterar dia, prof. mantidos</span>}
+                            {analise.e7 && <span style={{ background: "#f3f4f6", color: "#374151", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px" }}>#7 Alterar dia, prof. alterados</span>}
+                            {analise.semSolucao && <span style={{ background: "#fef2f2", color: "#dc2626", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px", border: "1px solid #fca5a5" }}>Sem solução</span>}
                           </div>
-                          <div className="flex gap-[3px] mt-[5px] flex-wrap">
-                            {analise.buracoSiRemover && <span style={{ background: "#fef2f2", color: "#dc2626", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px", border: "1px solid #fca5a5" }}>buraco</span>}
-                            {analise.min2Violation && <span style={{ background: "#fef2f2", color: "#dc2626", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px", border: "1px solid #fca5a5" }}>min-2</span>}
-                            {analise.e1 && <span style={{ background: B.limeLt, color: "#4a6e20", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px" }}>#1</span>}
-                            {analise.e2 && <span style={{ background: "#e0f2fe", color: "#0369a1", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px" }}>#2</span>}
-                            {analise.e3 && <span style={{ background: B.blueLt, color: B.blue, fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px" }}>#3</span>}
-                            {analise.e4.length > 0 && <span style={{ background: B.purpleLt, color: B.purple, fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px" }}>#4({analise.e4.length})</span>}
-                            {analise.e5 && <span style={{ background: "#fff7ed", color: "#c2410c", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px" }}>#5</span>}
-                            {analise.e6 && <span style={{ background: "#f5f3ff", color: "#6d28d9", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px" }}>#6</span>}
-                            {analise.e7 && <span style={{ background: "#f3f4f6", color: "#374151", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px" }}>#7</span>}
-                            {analise.semSolucao && <span style={{ background: "#fef2f2", color: "#dc2626", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px", border: "1px solid #fca5a5" }}>sem vaga</span>}
-                          </div>
+                          {st.opcao && (
+                            <div style={{ marginTop: "5px", display: "inline-flex", alignItems: "center", gap: "4px", background: B.limeLt, border: `1px solid ${B.lime}`, borderRadius: "6px", padding: "2px 7px", fontSize: "10px", color: "#4a6e20", fontWeight: 600 }}>
+                              <span style={{ fontWeight: 700 }}>Proposta:</span> {fmtName(st.opcao.prof)} · {st.opcao.dia} {st.opcao.hora}
+                            </div>
+                          )}
                         </div>
 
                         <div style={{ flex: "1 1 160px" }}>
                           <span style={{ background: stSt.bg, color: stSt.c, borderRadius: "999px", padding: "3px 9px", fontSize: "10px", fontWeight: 700, display: "inline-block", marginBottom: "3px" }}>
                             {stSt.l}
                           </span>
-                          {st.opcao && (
-                            <div style={{ fontSize: "10px", color: "#374151", marginTop: "2px" }}>
-                              {fmtName(st.opcao.prof)} · {st.opcao.dia} {st.opcao.hora}
-                            </div>
-                          )}
-                          {st.obs && <div style={{ fontSize: "10px", color: "#9ca3af", marginTop: "1px", fontStyle: "italic" }}>"{st.obs}"</div>}
+                          {st.obs && <div style={{ fontSize: "10px", color: "#9ca3af", marginTop: "1px", fontStyle: "italic" }}>&quot;{st.obs}&quot;</div>}
                         </div>
 
                         <div className="flex flex-col gap-[5px] items-end">
-                          <button
-                            onClick={() => setModalItem(r)}
-                            style={{ padding: "6px 12px", borderRadius: "9px", background: B.navy, color: "white", border: "none", fontWeight: 700, fontSize: "11px", cursor: "pointer" }}
-                          >
-                            Ver
-                          </button>
                           {st.status && st.status !== "pendente" && (
                             <button
                               onClick={() => persistStatus({ ...statusMap, [`${r.afetada.pac}|||${r.afetada.dia}|||${r.afetada.hora}|||${r.afetada.terapia}`]: { status: "pendente" } })}
@@ -1211,22 +1165,212 @@ export function SaidaProfMode({ cRows, lRows, statusMap, persistStatus }: Props)
           </div>
 
           <div style={{ marginTop: "12px", padding: "9px 13px", background: "#f8fafc", borderRadius: "9px", fontSize: "11px", color: "#9ca3af", lineHeight: 1.7 }}>
-            <strong style={{ color: "#374151" }}>Fluxo:</strong> Ver → escolher estratégia → Aguardando WA → Resolvido ou Recusado (libera a vaga para outro paciente)
+            <strong style={{ color: "#374151" }}>Fluxo:</strong> Ver → escolher estratégia + opção → Aceitar (→ Acompanhamento) → Resolvido ou Recusado (libera para novo ciclo)
           </div>
         </div>
       )}
 
+      {slotModal && sugestoesPorSlot[slotModal] && (() => {
+        const [slotDia, slotHora] = slotModal.split("|||")
+        return (
+          <div
+            className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-3"
+            onClick={e => {
+              if (e.target === e.currentTarget) {
+                setSlotModal(null)
+                setScheduleModal(null)
+              }
+            }}
+          >
+            <div className="bg-white rounded-[18px] shadow-[0_24px_80px_rgba(0,0,0,.22)] w-[94vw] max-w-[760px] max-h-[88vh] flex flex-col overflow-hidden">
+              <div className="px-5 py-[14px] border-b border-gray-100 bg-gray-50">
+                <div className="flex justify-between items-start gap-3">
+                  <div>
+                    <div style={{ fontWeight: 900, fontSize: "15px", color: B.navy }}>
+                      Candidatos - {DIA_ABR[slotDia] ?? slotDia} {slotHora}
+                    </div>
+                    <div style={{ fontSize: "11px", color: "#6b7280", marginTop: "3px" }}>
+                      Pacientes elegíveis, ordenados por prioridade de oferta.
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => { setSlotModal(null); setScheduleModal(null) }}
+                    className="w-[30px] h-[30px] rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition-colors text-base"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-auto p-3 flex flex-col gap-2">
+                {sugestoesPorSlot[slotModal].map((c, i) => {
+                  const cKey = `${slotModal}|||${c.pac}`
+                  const waStatus = candidatoWA[cKey] ?? null
+                  const isDone = waStatus === "recusado" || waStatus === "inviavel"
+
+                  return (
+                    <div key={`${c.pac}-${c.esp}-${i}`} style={{ border: "1px solid #e2e8f0", borderRadius: "12px", background: isDone ? "#f9fafb" : "#f8fafc", opacity: isDone ? 0.65 : 1, padding: "10px 12px", display: "flex", gap: "10px", alignItems: "flex-start", flexWrap: "wrap" }}>
+                      <div style={{ flex: "1 1 240px", minWidth: 0 }}>
+                        <div style={{ fontWeight: 800, color: "#1f2937", fontSize: "13px" }}>{c.pac}</div>
+                        <div style={{ fontSize: "11px", color: "#6b7280", marginTop: "3px" }}>
+                          {c.esp} · {c.conv || "—"} · P{c.prio}
+                        </div>
+                        <div style={{ display: "flex", gap: "4px", marginTop: "6px", flexWrap: "wrap" }}>
+                          {waStatus === "aguardando" && <span style={{ fontSize: "10px", background: B.blueLt, color: B.blue, borderRadius: "5px", padding: "2px 6px", fontWeight: 700 }}>Aguardando Resposta</span>}
+                          {waStatus === "recusado" && <span style={{ fontSize: "10px", background: "#fef2f2", color: "#dc2626", borderRadius: "5px", padding: "2px 6px", fontWeight: 700 }}>Recusou</span>}
+                          {waStatus === "inviavel" && <span style={{ fontSize: "10px", background: "#f3f4f6", color: "#6b7280", borderRadius: "5px", padding: "2px 6px", fontWeight: 700 }}>Inviável</span>}
+                        </div>
+                      </div>
+
+                      <div style={{ display: "flex", gap: "5px", flexWrap: "wrap", justifyContent: "flex-end" }}>
+                        <button
+                          onClick={() => setScheduleModal({ slotKey: slotModal, candidato: c })}
+                          style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: B.blueLt, color: B.blue, border: `1px solid ${B.blue}33`, cursor: "pointer", fontWeight: 700 }}
+                        >
+                          🗓 Ver
+                        </button>
+                        {!waStatus && (
+                          <>
+                            <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "aguardando" }))} style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: "#f0fdf4", color: "#16a34a", border: "1px solid #86efac", cursor: "pointer", fontWeight: 700 }}>Aceitar (→ Acompanhamento)</button>
+                            <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "inviavel" }))} style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer" }}>⛔ Inviável</button>
+                          </>
+                        )}
+                        {waStatus === "aguardando" && (
+                          <>
+                            <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "inviavel" }))} style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer" }}>⛔ Inviável</button>
+                            <button onClick={() => setCandidatoWA(p => { const n = { ...p }; delete n[cKey]; return n })} style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer" }}>Cancelar</button>
+                          </>
+                        )}
+                        {isDone && (
+                          <button onClick={() => setCandidatoWA(p => { const n = { ...p }; delete n[cKey]; return n })} style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer" }}>Resetar</button>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
+      {scheduleModal && (() => {
+        const [slotDia, slotHora] = scheduleModal.slotKey.split("|||")
+        const c = scheduleModal.candidato
+        const todasSessoes = agendRows.filter(r =>
+          String(r["Nome Favorecido"] || "") === c.pac
+        )
+        const diasPac = new Set(todasSessoes.map(r => String(r["Dia da Semana"] || "")))
+        diasPac.add(slotDia)
+        const diasSorted = DIAS_UTIL.filter(d => diasPac.has(d))
+        const slotsUsados = new Set(todasSessoes.map(r => normHora(String(r.HI_str || ""))).filter(Boolean))
+        slotsUsados.add(slotHora)
+        const slotsGrid = ALL_SLOTS.filter(s => slotsUsados.has(s))
+
+        return (
+          <div
+            className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-3"
+            onClick={e => { if (e.target === e.currentTarget) setScheduleModal(null) }}
+          >
+            <div className="bg-white rounded-[18px] shadow-[0_20px_60px_rgba(0,0,0,.2)] w-[93vw] max-w-[980px] max-h-[93vh] flex flex-col overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-100 bg-[#fafafa]">
+                <div className="flex justify-between items-start gap-3">
+                  <div>
+                    <div style={{ fontWeight: 800, fontSize: "16px", color: B.navy }}>🗓 Cronograma — {c.pac}</div>
+                    <div className="flex gap-[6px] flex-wrap mt-[5px]">
+                      <span style={{ background: B.blueLt, color: B.blue, border: `1px solid ${B.blue}33`, borderRadius: "999px", padding: "2px 10px", fontSize: "11px", fontWeight: 800 }}>
+                        Convênio: {c.conv || "—"}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", marginTop: "6px", fontSize: "12px", color: "#9ca3af" }}>
+                      <span>
+                        <span style={{ display: "inline-block", width: "12px", height: "12px", borderRadius: "3px", background: B.limeLt, border: `1px solid ${B.lime}`, marginRight: "4px", verticalAlign: "middle" }} />
+                        Verde = nova terapia sugerida
+                      </span>
+                      <span>
+                        <span style={{ display: "inline-block", width: "12px", height: "12px", borderRadius: "3px", background: "#f8fafc", border: "1px solid #e2e8f0", marginRight: "4px", verticalAlign: "middle" }} />
+                        Cinza = existente
+                      </span>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setScheduleModal(null)}
+                    className="w-[30px] h-[30px] rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition-colors text-base"
+                  >
+                    ×
+                  </button>
+                </div>
+              </div>
+
+              <div className="overflow-auto p-4">
+                <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "520px" }}>
+                  <thead>
+                    <tr>
+                      <th style={{ width: "60px", paddingBottom: "10px", textAlign: "right", paddingRight: "14px", fontSize: "13px", color: "#9ca3af", fontWeight: 500 }}>Hora</th>
+                      {diasSorted.map(d => (
+                        <th key={d} style={{ minWidth: "155px", paddingBottom: "10px", textAlign: "center", fontSize: "15px", color: B.navy, fontWeight: 800 }}>
+                          {d.replace("-feira", "")}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {slotsGrid.map(s => (
+                      <tr key={s} style={{ borderTop: "1px solid #f1f5f9" }}>
+                        <td style={{ textAlign: "right", paddingRight: "14px", verticalAlign: "top", paddingTop: "10px", fontFamily: "monospace", fontSize: "17px", fontWeight: 800, color: B.navy, letterSpacing: "-0.5px" }}>{s}</td>
+                        {diasSorted.map(d => {
+                          const sess = todasSessoes.filter(r => String(r["Dia da Semana"] || "") === d && normHora(String(r.HI_str || "")) === s)
+                          const isNew = d === slotDia && s === slotHora
+                          return (
+                            <td key={d} style={{ padding: "2px", verticalAlign: "top" }}>
+                              {sess.map((r, ri) => (
+                                <div key={ri} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "9px 11px", minHeight: "80px", display: "flex", flexDirection: "column", gap: "3px", marginBottom: "4px" }}>
+                                  <div style={{ fontSize: "13px", fontWeight: 700, color: "#1f2937", lineHeight: 1.3 }}>{String(r.Terapia || "")}</div>
+                                  <div style={{ fontSize: "12px", color: "#6b7280" }}>{fmtName(String(r.Profissional || ""))}</div>
+                                </div>
+                              ))}
+                              {isNew && (
+                                <div style={{ background: B.limeLt, border: `1px solid ${B.lime}`, borderRadius: "10px", padding: "9px 11px", minHeight: "80px", display: "flex", flexDirection: "column", gap: "3px", marginBottom: "4px" }}>
+                                  <div style={{ fontSize: "13px", fontWeight: 700, color: "#1f2937", lineHeight: 1.3 }}>{c.esp}</div>
+                                  <div style={{ fontSize: "12px", color: "#6b7280" }}>Novo profissional</div>
+                                  <div style={{ fontSize: "12px", fontWeight: 700, color: B.purple, marginTop: "auto" }}>✦ Nova Terapia</div>
+                                </div>
+                              )}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )
+      })()}
+
       {/* Modal */}
-      {modalItem && (
-        <SaidaCronModal
-          pac={modalItem.pac}
-          afetada={modalItem.afetada}
-          analise={modalItem.analise}
-          statusAtual={getStatus(modalItem.afetada)}
-          onClose={() => setModalItem(null)}
-          onStatus={handleStatus}
-        />
-      )}
+      {modalGroup && modalGroup[modalTabIdx] && (() => {
+        const item = modalGroup[modalTabIdx]
+        return (
+          <SaidaCronModal
+            pac={item.pac}
+            afetada={item.afetada}
+            analise={item.analise}
+            statusAtual={getStatus(item.afetada)}
+            onClose={() => setModalGroup(null)}
+            onStatus={handleStatus}
+            sessionTabs={modalGroup.length > 1
+              ? modalGroup.map(r => ({ label: `${r.afetada.terapia} · ${r.afetada.dia} ${r.afetada.hora}` }))
+              : undefined}
+            sessionTabIdx={modalTabIdx}
+            onSessionTabChange={setModalTabIdx}
+            todasAfetadas={modalGroup.length > 1 ? modalGroup.map(r => r.afetada) : undefined}
+          />
+        )
+      })()}
     </div>
   )
 }
+
+

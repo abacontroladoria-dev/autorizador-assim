@@ -9,23 +9,20 @@ import { runAlgorithm } from "@/lib/cronograma/runAlgorithm"
 import { exportBase } from "@/lib/cronograma/xlsx"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 import { VagasAgoraTab } from "./tabs/VagasAgoraTab"
-import { FilaEsperaTab } from "./tabs/FilaEsperaTab"
-import { RecusadosTab } from "./tabs/RecusadosTab"
-import { InviavelTab } from "./tabs/InviavelTab"
 import { GapsTab } from "./tabs/GapsTab"
 import { GuiaTab } from "./tabs/GuiaTab"
-import { ConfigTab } from "./tabs/ConfigTab"
+import { AcompanhamentoTab } from "./tabs/AcompanhamentoTab"
+import { InconsistenciasTab } from "./tabs/InconsistenciasTab"
 import { CronModal } from "./CronModal"
+import { detectarInconsistencias } from "@/lib/cronograma/inconsistencias"
 import type { AlgorithmResult, CsvRow, Sugestao, WaStatus } from "@/types/cronograma"
 
 const TABS = [
-  { key: "vagas",     label: "📋 Vagas Agora" },
-  { key: "fila",      label: "⏳ Fila de Espera" },
-  { key: "recusados", label: "❌ Recusados" },
-  { key: "inviavel",  label: "⛔ Inviáveis" },
-  { key: "gaps",      label: "📊 Gaps" },
-  { key: "guia",      label: "📖 Guia" },
-  { key: "config",    label: "⚙️ Config" },
+  { key: "vagas",            label: "📋 Aumentar Ocupação (Clínica)" },
+  { key: "acompanhamento",   label: "📬 Acompanhamento" },
+  { key: "gaps",             label: "📊 Diferença: Laudo e Oferta" },
+  { key: "inconsistencias",  label: "⚠️ Inconsistências e Exceções" },
+  { key: "guia",             label: "📖 Guia" },
 ] as const
 
 type TabKey = (typeof TABS)[number]["key"]
@@ -102,6 +99,7 @@ export function OcupacaoShell() {
   }, [res])
 
   const aguardando = useMemo(() => Object.values(waMap).filter(v => v === "aguardando").length, [waMap])
+  const incItems = useMemo(() => detectarInconsistencias(cRows, lRows), [cRows, lRows])
 
   const handleApiFetch = useCallback(async () => {
     if (!cfg.apiToken) { setApiErr("Configure o token em ⚙️ Config primeiro."); return }
@@ -168,27 +166,16 @@ export function OcupacaoShell() {
       {/* Tab content */}
       {activeTab === "vagas" && (
         <VagasAgoraTab res={res} waMap={waMap}
+          onWA={handleWA} onInv={setCInv} onCron={s => setCronPac(s.pac)} />
+      )}
+      {activeTab === "acompanhamento" && (
+        <AcompanhamentoTab res={res}
           onWA={handleWA} onWAUndo={handleWAUndo} onWAStatus={handleWAStatus}
           onRec={setCRec} onInv={setCInv} onCron={s => setCronPac(s.pac)} />
-      )}
-      {activeTab === "fila" && (
-        <FilaEsperaTab res={res} waMap={waMap}
-          onWA={handleWA} onWAUndo={handleWAUndo} onWAStatus={handleWAStatus}
-          onRec={setCRec} onInv={setCInv} onCron={s => setCronPac(s.pac)} />
-      )}
-      {activeTab === "recusados" && (
-        <RecusadosTab rec={rec} inv={inv} waMap={waMap}
-          onRemove={i => sRec(rec.filter((_, j) => j !== i))}
-          onExport={() => exportBase(rec, inv, waMap)} />
-      )}
-      {activeTab === "inviavel" && (
-        <InviavelTab inv={inv} rec={rec} waMap={waMap}
-          onRemove={i => sInv(inv.filter((_, j) => j !== i))}
-          onExport={() => exportBase(rec, inv, waMap)} />
       )}
       {activeTab === "gaps" && <GapsTab res={res} />}
-      {activeTab === "guia" && <GuiaTab />}
-      {activeTab === "config" && <ConfigTab apiFetch={apiFetch} apiErr={apiErr} onApiFetch={handleApiFetch} />}
+      {activeTab === "inconsistencias" && <InconsistenciasTab items={incItems} cRows={cRows} />}
+      {activeTab === "guia" && <GuiaTab apiFetch={apiFetch} apiErr={apiErr} onApiFetch={handleApiFetch} />}
 
       {/* Modal Recusa */}
       {cRec && (
@@ -199,7 +186,7 @@ export function OcupacaoShell() {
             <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "14px" }}>Esta combinação não será sugerida novamente.</div>
             <div style={{ background: "#fef2f2", borderRadius: "10px", padding: "12px", fontSize: "13px", marginBottom: "14px" }}>
               <div><span style={{ color: "#9ca3af", fontSize: "11px" }}>Paciente</span><br /><strong>{cRec.pac}</strong></div>
-              <div style={{ marginTop: "6px" }}><span style={{ color: "#9ca3af", fontSize: "11px" }}>Slot</span><br />{cRec.dia} {cRec.hora} · {cRec.unidade}</div>
+              <div style={{ marginTop: "6px" }}><span style={{ color: "#9ca3af", fontSize: "11px" }}>Sessão</span><br />{cRec.dia} {cRec.hora} · {cRec.unidade}</div>
             </div>
             <div style={{ display: "flex", gap: "8px" }}>
               <button onClick={() => {

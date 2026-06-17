@@ -18,7 +18,7 @@ interface StatusStyle { bg: string; c: string }
 
 const ESTADO_S: Record<EstadoKey, EstadoStyle> = {
   sem_csv:      { bg: "#f3f4f6", c: "#6b7280",  label: "CSV não carregado" },
-  sem_slot:     { bg: "#f3f4f6", c: "#6b7280",  label: "Sem slot definido" },
+  sem_slot:     { bg: "#f3f4f6", c: "#6b7280",  label: "Sem sessão definida" },
   conflito:     { bg: "#fef2f2", c: "#dc2626",  label: "Conflito! Vaga dada a outro" },
   agendado:     { bg: B.limeLt,  c: "#4a6e20",  label: "Já agendado no CSV" },
   aguardando_ok:{ bg: B.blueLt,  c: B.blue,     label: "Aguardando, vaga disponível" },
@@ -131,13 +131,7 @@ export function BancoDadosTab({ cRows, statusMap, persistStatus }: Props) {
   }
 
   function confirmarItem(key: string, val: StatusMap[string]) {
-    persistStatus({ ...statusMap, [key]: { ...val, status: "resolvido" as StatusSaida, atualizadoEm: Date.now() } })
-  }
-
-  function excluir(key: string) {
-    const n = { ...statusMap }
-    delete n[key]
-    persistStatus(n)
+    persistStatus({ ...statusMap, [key]: { ...val, status: "resolvido" as StatusSaida, slotReservado: null, atualizadoEm: Date.now() } })
   }
 
   function exportar() {
@@ -171,7 +165,7 @@ export function BancoDadosTab({ cRows, statusMap, persistStatus }: Props) {
         <div className="flex justify-between items-start flex-wrap gap-2 mb-2.5">
           <div>
             <div className="font-extrabold text-[15px]" style={{ color: B.navy }}>
-              Banco de Dados — Aguardando Respostas
+              Em Acompanhamento
             </div>
             <div className="text-[12px] text-muted-foreground mt-0.5">
               Dados salvos neste navegador. {entries.length} registro(s).
@@ -289,21 +283,19 @@ export function BancoDadosTab({ cRows, statusMap, persistStatus }: Props) {
                         Marcar Recusado
                       </button>
                     )}
-                    {c.estado === "agendado" && (
-                      <button
-                        onClick={() => confirmarItem(c.key, c.val)}
-                        className="px-2 py-0.5 rounded-md text-[10px] cursor-pointer"
-                        style={{ background: B.limeLt, color: "#4a6e20", border: `1px solid ${B.lime}` }}
-                      >
-                        Confirmar
-                      </button>
-                    )}
                     <button
-                      onClick={() => excluir(c.key)}
-                      className="px-2 py-0.5 rounded-md text-[10px] cursor-pointer"
-                      style={{ background: "#f3f4f6", color: "#9ca3af", border: "1px solid #e5e7eb" }}
+                      onClick={() => confirmarItem(c.key, c.val)}
+                      className="px-2 py-0.5 rounded-md text-[10px] cursor-pointer font-semibold"
+                      style={{ background: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0" }}
                     >
-                      Excluir
+                      Responsável Confirmou
+                    </button>
+                    <button
+                      onClick={() => marcarRecusado(c.key, c.val)}
+                      className="px-2 py-0.5 rounded-md text-[10px] cursor-pointer font-semibold"
+                      style={{ background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5" }}
+                    >
+                      Recusou
                     </button>
                   </div>
                 </div>

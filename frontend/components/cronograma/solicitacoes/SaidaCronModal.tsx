@@ -1,7 +1,8 @@
 "use client"
 
-import { useState } from "react"
-import { B, DIAS_ORD, HORAS_GRID, UNID_COR } from "@/lib/cronograma/constants"
+import { useState, useRef } from "react"
+import { createPortal } from "react-dom"
+import { B, DIAS_LIST, DIAS_ORD, HORAS_GRID, UNID_COR } from "@/lib/cronograma/constants"
 import { fmtName, buildCronoUnitMeta, shouldShowSessionUnit, unidadeBadgeText } from "@/lib/cronograma/helpers"
 import { UnitHeaderBadges, CronoGlobalUnitBadge } from "@/components/cronograma/ui/UnitBadges"
 import type {
@@ -32,6 +33,10 @@ interface Props {
   statusAtual: StatusEntry
   onClose: () => void
   onStatus: (afetada: AfetadaItem, status: StatusSaida, payload: StatusPayload) => void
+  sessionTabs?: { label: string }[]
+  sessionTabIdx?: number
+  onSessionTabChange?: (i: number) => void
+  todasAfetadas?: AfetadaItem[]
 }
 
 // ─── HELPERS DE ESTILO ────────────────────────────────────────────────────────
@@ -58,40 +63,66 @@ const E_CORES: Record<string, string> = {
 
 const STMAP: Record<string, { label: string; bg: string; c: string }> = {
   pendente:    { label: "Pendente",      bg: "#f3f4f6", c: "#6b7280" },
-  aguardando:  { label: "Aguardando WA", bg: B.blueLt,  c: B.blue },
-  resolvido:   { label: "Resolvido",     bg: B.limeLt,  c: "#4a6e20" },
-  recusado:    { label: "Recusado",      bg: "#fef2f2", c: "#dc2626" },
-  sem_solucao: { label: "Sem solução",   bg: "#f3f4f6", c: "#6b7280" },
+  aguardando:  { label: "Em Acompanhamento",   bg: B.blueLt,  c: B.blue },
+  resolvido:   { label: "Resolvido",          bg: B.limeLt,  c: "#4a6e20" },
+  recusado:    { label: "Recusado",           bg: "#fef2f2", c: "#dc2626" },
+  sem_solucao: { label: "Sem solução",        bg: "#f3f4f6", c: "#6b7280" },
 }
 
-type CellTipo = "afetada" | "proposta" | "removida" | "admin" | "exist"
+type CellTipo = "afetada" | "proposta" | "removida" | "admin" | "exist" | "supervisao"
 
 function cellStyle(tipo: CellTipo) {
-  if (tipo === "afetada")  return { bg: "#fef2f2", bd: "#fca5a5",  label: "Removida", lc: "#dc2626" }
-  if (tipo === "proposta") return { bg: B.limeLt,  bd: B.lime,    label: "Proposta",  lc: "#4a6e20" }
-  if (tipo === "removida") return { bg: "#fef2f2", bd: "#fca5a5",  label: "Removida", lc: "#dc2626" }
-  if (tipo === "admin")    return { bg: "#f3f4f6", bd: "#d1d5db",  label: null, lc: null }
-  return                          { bg: "#f8fafc", bd: "#e2e8f0",  label: null, lc: null }
+  if (tipo === "afetada")    return { bg: "#fef2f2", bd: "#fca5a5", label: "Removida", lc: "#dc2626", tc: "#1f2937", sc: "#6b7280" }
+  if (tipo === "proposta")   return { bg: B.limeLt,  bd: B.lime,   label: "Proposta",  lc: "#4a6e20", tc: "#1f2937", sc: "#6b7280" }
+  if (tipo === "removida")   return { bg: "#fef2f2", bd: "#fca5a5", label: "Removida", lc: "#dc2626", tc: "#1f2937", sc: "#6b7280" }
+  if (tipo === "supervisao") return { bg: "#1e293b", bd: "#0f172a", label: null,        lc: null,      tc: "#f1f5f9", sc: "#94a3b8" }
+  /* admin e exist — mesma cor cinza */
+  return                            { bg: "#f8fafc", bd: "#e2e8f0", label: null,        lc: null,      tc: "#1f2937", sc: "#6b7280" }
 }
 
 // ─── INFO TIP ─────────────────────────────────────────────────────────────────
 
 function InfoTip({ text }: { text: string }) {
-  const [v, setV] = useState(false)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const ref = useRef<HTMLSpanElement>(null)
+
+  const calcPos = () => {
+    if (ref.current) {
+      const r = ref.current.getBoundingClientRect()
+      setPos({ top: r.top, left: r.left + r.width / 2 })
+    }
+  }
+
   return (
     <span
-      onMouseEnter={() => setV(true)}
-      onMouseLeave={() => setV(false)}
-      onClick={e => { e.stopPropagation(); setV(x => !x) }}
-      className="relative cursor-help inline-flex shrink-0 ml-1 align-middle"
+      ref={ref}
+      onMouseEnter={calcPos}
+      onMouseLeave={() => setPos(null)}
+      onClick={e => { e.stopPropagation(); pos ? setPos(null) : calcPos() }}
+      className="cursor-help inline-flex shrink-0 ml-1 align-middle"
     >
       <span className="text-[10px] font-black text-slate-400 bg-slate-100 rounded-full w-[15px] h-[15px] flex items-center justify-center border border-slate-200 leading-none">i</span>
-      {v && (
-        <div className="absolute left-1/2 bottom-5 -translate-x-1/2 bg-slate-800 text-white rounded-[10px] text-[11px] leading-relaxed w-[230px] z-[400] pointer-events-none shadow-xl"
-          style={{ padding: "9px 12px" }}>
+      {pos && typeof document !== "undefined" && createPortal(
+        <div style={{
+          position: "fixed",
+          top: pos.top - 8,
+          left: pos.left,
+          transform: "translate(-50%, -100%)",
+          background: "#1e293b",
+          color: "white",
+          borderRadius: "10px",
+          fontSize: "11px",
+          lineHeight: "1.5",
+          width: "230px",
+          zIndex: 9999,
+          padding: "9px 12px",
+          pointerEvents: "none",
+          boxShadow: "0 8px 24px rgba(0,0,0,.3)",
+        }}>
           {text}
-          <div className="absolute -bottom-[5px] left-1/2 -translate-x-1/2 w-[10px] h-[10px] bg-slate-800" style={{ clipPath: "polygon(0 0,100% 0,50% 100%)" }} />
-        </div>
+          <div style={{ position: "absolute", bottom: "-5px", left: "50%", transform: "translateX(-50%)", width: "10px", height: "10px", background: "#1e293b", clipPath: "polygon(0 0,100% 0,50% 100%)" }} />
+        </div>,
+        document.body
       )}
     </span>
   )
@@ -99,14 +130,16 @@ function InfoTip({ text }: { text: string }) {
 
 // ─── GRADE DE AGENDA ──────────────────────────────────────────────────────────
 
-interface CellEntry { tP: string; prof: string; tipo: CellTipo; unidade: string }
+interface CellEntry { tP: string; tE?: string; prof: string; tipo: CellTipo; unidade: string }
 
 function buildCMap(
   sessPac: SessPacItem[],
-  afetada: AfetadaItem,
+  afetadas: AfetadaItem | AfetadaItem[],
   extra?: { dia: string; hora: string; tP: string; prof: string; tipo: CellTipo; unidade: string }[],
   remover?: { dia: string; hora: string; prof: string }[],
 ): Record<string, CellEntry[]> {
+  const afetadasArr = Array.isArray(afetadas) ? afetadas : [afetadas]
+  const afetadaSet = new Set(afetadasArr.map(af => `${af.dia}|||${af.hora}|||${af.terapia}|||${af.prof}`))
   const remSet = new Set((remover ?? []).map(r => `${r.dia}|||${r.hora}|||${r.prof}`))
   const cMap: Record<string, CellEntry[]> = {}
 
@@ -114,8 +147,10 @@ function buildCMap(
     if (remSet.has(`${s.dia}|||${s.hora}|||${s.prof}`)) continue
     const k = `${s.dia}|||${s.hora}`
     if (!cMap[k]) cMap[k] = []
-    const isAfet = s.dia === afetada.dia && s.hora === afetada.hora && s.terapia === afetada.terapia && s.prof === afetada.prof
-    cMap[k].push({ tP: s.terapia, prof: s.prof, tipo: isAfet ? "afetada" : s.isAdmin ? "admin" : "exist", unidade: s.unidade })
+    const isAfet = afetadaSet.has(`${s.dia}|||${s.hora}|||${s.terapia}|||${s.prof}`)
+    const showTE = s.terapiaExib && s.terapiaExib !== s.terapia ? s.terapiaExib : undefined
+    const tipo: CellTipo = isAfet ? "afetada" : s.terapia === "Supervisão ABA" ? "supervisao" : "exist"
+    cMap[k].push({ tP: s.terapia, tE: showTE, prof: s.prof, tipo, unidade: s.unidade })
   }
 
   for (const e of extra ?? []) {
@@ -172,8 +207,9 @@ function AgendaGrid({
                     const isIncons = !modoWA && inconsMap.has(`${d}|||${hora}|||${c.prof}`)
                     return (
                       <div key={ci} style={{ background: isIncons ? "#fffbeb" : cs.bg, border: `1px solid ${isIncons ? "#fbbf24" : cs.bd}`, borderRadius: "8px", padding: "6px 8px", marginBottom: "2px", minHeight: "58px", display: "flex", flexDirection: "column", gap: "2px" }}>
-                        <div style={{ fontSize: "11px", fontWeight: 700, color: "#1f2937", lineHeight: "1.3" }}>{c.tP}</div>
-                        <div style={{ fontSize: "10px", color: "#6b7280" }}>{fmtName(c.prof)}</div>
+                        <div style={{ fontSize: "11px", fontWeight: 700, color: isIncons ? "#1f2937" : cs.tc, lineHeight: "1.3" }}>{c.tP}</div>
+                        {c.tE && <div style={{ fontSize: "10px", color: isIncons ? "#9ca3af" : cs.sc, lineHeight: "1.2" }}>({c.tE})</div>}
+                        <div style={{ fontSize: "10px", color: isIncons ? "#6b7280" : cs.sc }}>{fmtName(c.prof)}</div>
                         {shouldShowSessionUnit(unitMeta, d, hora) && c.unidade && c.unidade !== "Desconhecida" && (
                           <div style={{ fontSize: "9px", fontWeight: 800, color: B.blue, background: B.blueLt, border: `1px solid ${B.blue}33`, borderRadius: "999px", padding: "1px 5px", width: "fit-content" }}>
                             🏥 {unidadeBadgeText(c.unidade)}
@@ -196,7 +232,7 @@ function AgendaGrid({
 
 // ─── MODAL ────────────────────────────────────────────────────────────────────
 
-export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, onStatus }: Props) {
+export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, onStatus, sessionTabs, sessionTabIdx, onSessionTabChange, todasAfetadas }: Props) {
   const { sessPac, buracoSiRemover, min2Violation, pacUnidade, inconsistencias,
     e1, e2, e3, e4, e5, e6, e7, semSolucao } = analise
 
@@ -257,18 +293,20 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
     tipo: "proposta" as CellTipo, unidade: m.paraUnidade,
   }))
 
-  // "Antes": sessPac normal, sessão afetada marcada como removida
-  const cMapAntes = buildCMap(sessPac, afetada)
+  const afetadasGrid = todasAfetadas && todasAfetadas.length > 1 ? todasAfetadas : afetada
 
-  // "Depois": sessões removidas fora, propostas adicionadas
+  // "Antes": sessões afetadas marcadas como removida
+  const cMapAntes = buildCMap(sessPac, afetadasGrid)
+
+  // "Depois": sessão atual removida/substituída; demais afetadas continuam visíveis como Removida
   const cMapDepois = buildCMap(
     sessPac,
-    afetada,
+    afetadasGrid,
     extraDepois,
     movimentos.map(m => ({ dia: m.deDia, hora: m.deHora, prof: m.deProf })),
   )
 
-  const diasBase = [...new Set(sessPac.map(s => s.dia))].sort((a, b) => (DIAS_ORD[a] ?? 9) - (DIAS_ORD[b] ?? 9))
+  const diasBase = [...new Set([...DIAS_LIST.slice(0, 5), ...sessPac.map(s => s.dia)])].sort((a, b) => (DIAS_ORD[a] ?? 9) - (DIAS_ORD[b] ?? 9))
   const diasDepois = [...new Set([
     ...diasBase,
     ...movimentos.map(m => m.paraDia),
@@ -333,6 +371,24 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
 
         {/* Header */}
         <div className="px-5 py-[14px] border-b border-gray-100 bg-gray-50 rounded-t-[18px]">
+          {sessionTabs && sessionTabs.length > 1 && (
+            <div className="flex gap-[5px] flex-wrap mb-3">
+              {sessionTabs.map((tab, i) => (
+                <button
+                  key={i}
+                  onClick={() => onSessionTabChange?.(i)}
+                  style={{
+                    padding: "4px 11px", borderRadius: "999px", fontSize: "11px", fontWeight: 700, cursor: "pointer",
+                    background: sessionTabIdx === i ? "#fef2f2" : "#f3f4f6",
+                    color: sessionTabIdx === i ? "#dc2626" : "#6b7280",
+                    border: sessionTabIdx === i ? "1.5px solid #fca5a5" : "1.5px solid #e5e7eb",
+                  }}
+                >
+                  {tab.label}
+                </button>
+              ))}
+            </div>
+          )}
           <div className="flex justify-between items-start gap-2 flex-wrap">
             <div className="flex flex-col gap-[5px]">
               <div className="flex items-center gap-2 flex-wrap">
@@ -349,9 +405,11 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
                 <span style={{ background: stS.bg, color: stS.c, borderRadius: "999px", padding: "2px 9px", fontSize: "10px", fontWeight: 700 }}>{stS.label}</span>
               </div>
               <div className="flex gap-[5px] flex-wrap text-[11px]">
-                <span style={{ background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a588", borderRadius: "999px", padding: "2px 9px", fontWeight: 700 }}>
-                  Saída: {afetada.terapia} · {afetada.dia} {afetada.hora}
-                </span>
+                {(todasAfetadas && todasAfetadas.length > 1 ? todasAfetadas : [afetada]).map((af, i) => (
+                  <span key={i} style={{ background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a588", borderRadius: "999px", padding: "2px 9px", fontWeight: 700 }}>
+                    Saída: {af.terapia} · {af.dia} {af.hora}
+                  </span>
+                ))}
                 {buracoSiRemover && <span style={{ background: "#fff7ed", color: "#c2410c", borderRadius: "999px", padding: "2px 9px", fontWeight: 600 }}>Cria buraco</span>}
                 {min2Violation && <span style={{ background: "#fff7ed", color: "#c2410c", borderRadius: "999px", padding: "2px 9px", fontWeight: 600 }}>Ficaria com menos de 2 sessões</span>}
                 {!modoWA && inconsistencias.length > 0 && <span style={{ background: "#fff7ed", color: "#92400e", borderRadius: "999px", padding: "2px 9px", fontWeight: 600 }}>{inconsistencias.length} sessão(ões) unidade errada</span>}
@@ -495,8 +553,8 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
               <>
                 {/* Legenda */}
                 <div className="flex gap-3 mb-2 text-[10px] text-gray-400 flex-wrap">
-                  {(["Removida", "Proposta", "Existente", "Administrativo"] as const).map((l, i) => {
-                    const cs = [cellStyle("afetada"), cellStyle("proposta"), cellStyle("exist"), cellStyle("admin")][i]
+                  {(["Removida", "Proposta", "Existente", "Supervisão ABA"] as const).map((l, i) => {
+                    const cs = [cellStyle("afetada"), cellStyle("proposta"), cellStyle("exist"), cellStyle("supervisao")][i]
                     return (
                       <span key={l} className="flex items-center gap-1">
                         <span style={{ display: "inline-block", width: "9px", height: "9px", borderRadius: "2px", background: cs.bg, border: `1px solid ${cs.bd}` }} />
@@ -538,15 +596,18 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
         {/* Footer */}
         <div className="px-5 py-[10px] border-t border-gray-100 flex gap-[6px] flex-wrap items-center bg-gray-50 rounded-b-[18px]">
           <div className="flex-1 text-[11px] text-gray-400 truncate">{descricaoProposta()}</div>
-          {st !== "aguardando" && <>
-            <button onClick={() => save("aguardando")} disabled={!opcSel} style={{ padding: "7px 12px", borderRadius: "9px", border: "none", background: opcSel ? B.blue : B.blue + "55", color: "white", fontWeight: 700, fontSize: "11px", cursor: opcSel ? "pointer" : "not-allowed" }}>Aguardando WA</button>
-            <button onClick={() => save("resolvido")} disabled={!opcSel} style={{ padding: "7px 12px", borderRadius: "9px", border: "none", background: opcSel ? "#16a34a" : "#16a34a55", color: "white", fontWeight: 700, fontSize: "11px", cursor: opcSel ? "pointer" : "not-allowed" }}>Resolvido</button>
-          </>}
-          {st === "aguardando" && <>
-            <button onClick={() => save("resolvido")} style={{ padding: "7px 12px", borderRadius: "9px", border: "none", background: "#16a34a", color: "white", fontWeight: 700, fontSize: "11px", cursor: "pointer" }}>Resolvido</button>
-            <button onClick={() => save("recusado")} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid #fca5a5", background: "#fef2f2", color: "#dc2626", fontWeight: 700, fontSize: "11px", cursor: "pointer" }}>Recusado (libera vaga)</button>
-          </>}
-          <button onClick={() => save("sem_solucao")} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid #e5e7eb", background: "white", color: "#6b7280", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>Sem solução</button>
+          {(st === "pendente" || st === "recusado") && (
+            <>
+              <button onClick={() => save("aguardando")} disabled={!opcSel} style={{ padding: "7px 12px", borderRadius: "9px", border: "none", background: opcSel ? "#16a34a" : "#86efac", color: "white", fontWeight: 700, fontSize: "11px", cursor: opcSel ? "pointer" : "not-allowed" }}>Aceitar (→ Acompanhamento)</button>
+              <button onClick={() => save("sem_solucao")} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid #e5e7eb", background: "#f3f4f6", color: "#6b7280", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>⛔ Inviável</button>
+            </>
+          )}
+          {st === "aguardando" && (
+            <>
+              <button onClick={() => save("sem_solucao")} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid #e5e7eb", background: "#f3f4f6", color: "#6b7280", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>⛔ Inviável</button>
+              <button onClick={() => save("pendente")} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid #e5e7eb", background: "white", color: "#6b7280", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>Cancelar</button>
+            </>
+          )}
           <button onClick={onClose} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid #e5e7eb", background: "white", color: "#6b7280", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>Fechar</button>
         </div>
       </div>

@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react"
 import {
-  B, ABA_EXT, DIAS_ORD, ESP_CLINICO, EXCLUIR_OCUP, FOCO_CAMILA_PROF,
+  B, ABA_EXT, DIAS_LIST, DIAS_ORD, ESP_CLINICO, EXCLUIR_OCUP, FOCO_CAMILA_PROF,
   HORAS_GRID, PACS_ADMIN, TERAPIA_TO_ESP, isProfBloqueadoTemp,
   reservaSlotKey, reservasAtivasFromWa, DIAS_UTIL, SK_PREENCHER,
 } from "@/lib/cronograma/constants"
@@ -112,7 +112,7 @@ function PacPreencherModal({ pac, proposta, cRows, waStatus, onStatus, onClose }
     cMap[kC].push({ tP: vc.tP, prof: vc.prof || "Novo profissional", tipo: "proposta", unidade: vc.unidade || proposta.unidade })
   }
 
-  const diasComSess = [...new Set([...sessPac.map(s => s.dia), proposta.dia, ...proposta.vCompSlots.map(vc => vc.dia || proposta.dia)])]
+  const diasComSess = [...new Set([...DIAS_LIST.slice(0, 5), ...sessPac.map(s => s.dia), proposta.dia, ...proposta.vCompSlots.map(vc => vc.dia || proposta.dia)])]
     .sort((a, b) => (DIAS_ORD[a] ?? 9) - (DIAS_ORD[b] ?? 9))
   const horasGrid = HORAS_GRID.filter(h => diasComSess.some(d => cMap[`${d}|||${h}`]?.length))
   const unitMeta = buildCronoUnitMeta(diasComSess, cMap)
@@ -760,15 +760,15 @@ export function PreencherProfTab({ cRows, lRows, waMap: waMapProp, onWaChange, i
             ))}
           </div>
           <div style={{ fontSize: 11, color: "#9ca3af", background: "#f8fafc", borderRadius: 8, padding: "7px 10px" }}>
-            <strong>Pacientes</strong> = quem tem gap em {simEsp}, já frequenta a unidade no dia/turno avaliado e possui slot adjacente sem conflito. <strong>Sessões</strong> = soma dos encaixes possíveis. <InfoTip text="A contagem de sessões pode ser maior que a de pacientes porque um mesmo paciente pode caber em mais de um horário." />
+            <strong>Pacientes</strong> = quem tem gap em {simEsp}, já frequenta a unidade no dia/turno avaliado e possui sessão adjacente sem conflito. <strong>Sessões</strong> = soma dos encaixes possíveis. <InfoTip text="A contagem de sessões pode ser maior que a de pacientes porque um mesmo paciente pode caber em mais de um horário." />
           </div>
         </div>
         <div style={{ background: "white", borderRadius: 14, border: "1px solid #e5e7eb", overflow: "hidden" }}>
           <div style={{ padding: "11px 16px", background: "#f8fafc", borderBottom: "1px solid #f0f0f0", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span style={{ fontWeight: 800, color: B.navy, fontSize: 14 }}>{simUnid ? `Unidade fixa: ${simUnid}` : "Plano recomendado inteligente"}</span>
-            <span style={{ fontSize: 11, color: "#6b7280", marginLeft: "auto" }}>{simSlots.length} slot(s) com candidatos <InfoTip text="Cada bloco mostra dia, turno, unidade sugerida e horários com pacientes elegíveis." /></span>
+            <span style={{ fontSize: 11, color: "#6b7280", marginLeft: "auto" }}>{simSlots.length} sessão(ões) com candidatos <InfoTip text="Cada bloco mostra dia, turno, unidade sugerida e horários com pacientes elegíveis." /></span>
           </div>
-          {!simSlots.length ? <div style={{ padding: 24, textAlign: "center", color: "#9ca3af", fontSize: 13 }}>Nenhum slot com candidatos nesta combinação.</div>
+          {!simSlots.length ? <div style={{ padding: 24, textAlign: "center", color: "#9ca3af", fontSize: 13 }}>Nenhuma sessão com candidatos nesta combinação.</div>
             : simSlots.map((s, si) => {
               const terapiaSim = (ESP_CLINICO[simEsp] || [simEsp]).filter(t => !EXCLUIR_OCUP.has(t))[0] || simEsp
               return (
