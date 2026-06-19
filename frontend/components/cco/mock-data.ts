@@ -11,6 +11,7 @@ export const mockCCOData: CCOData = {
     sessoes_em_revisao: 23,
     total_sessoes: 520,
     evolucoes_pendentes: 68,
+    evolucoes_atrasadas: 42,
     total_pacientes_assim: 247,
     total_sessoes_assim: 1843,
   },
@@ -61,21 +62,21 @@ export const mockCCOData: CCOData = {
   ],
 
   pacientesComPendencias: [
-    { id: '1',  nome: 'Lucas Oliveira',      ocorrencias: 18, tiposPendencia: ['evolucao_pendente', 'glosa'] },
-    { id: '4',  nome: 'Sofia Martins',       ocorrencias: 15, tiposPendencia: ['evolucao_pendente', 'falta_terapeuta'] },
-    { id: '5',  nome: 'Gabriel Rodrigues',   ocorrencias: 12, tiposPendencia: ['evolucao_pendente'] },
-    { id: '2',  nome: 'Beatriz Santos',      ocorrencias: 12, tiposPendencia: ['sem_autorizacao', 'glosa'] },
-    { id: '3',  nome: 'Pedro Alves',         ocorrencias: 10, tiposPendencia: ['evolucao_pendente', 'falta_paciente'] },
-    { id: '6',  nome: 'Isabela Ferreira',    ocorrencias: 10, tiposPendencia: ['evolucao_pendente'] },
-    { id: '7',  nome: 'Mateus Costa',        ocorrencias: 10, tiposPendencia: ['sem_autorizacao'] },
-    { id: '8',  nome: 'Laura Pereira',       ocorrencias: 10, tiposPendencia: ['evolucao_pendente', 'glosa'] },
-    { id: '9',  nome: 'Enzo Nascimento',     ocorrencias:  8, tiposPendencia: ['evolucao_pendente', 'falta_terapeuta'] },
-    { id: '10', nome: 'Valentina Silva',     ocorrencias:  8, tiposPendencia: ['glosa'] },
-    { id: '11', nome: 'Arthur Lima',         ocorrencias:  8, tiposPendencia: ['evolucao_pendente'] },
-    { id: '12', nome: 'Alice Carvalho',      ocorrencias:  8, tiposPendencia: ['sem_autorizacao'] },
-    { id: '13', nome: 'Davi Mendes',         ocorrencias:  7, tiposPendencia: ['falta_paciente'] },
-    { id: '14', nome: 'Larissa Barbosa',     ocorrencias:  6, tiposPendencia: ['evolucao_pendente'] },
-    { id: '15', nome: 'Henrique Teixeira',   ocorrencias:  6, tiposPendencia: ['evolucao_pendente'] },
+    { id: '1',  nome: 'Lucas Oliveira',      ocorrencias: 18, tiposPendencia: ['evolucao_pendente', 'glosa'], diasAtrasoMaisAntigo: 12 },
+    { id: '4',  nome: 'Sofia Martins',       ocorrencias: 15, tiposPendencia: ['evolucao_pendente', 'falta_terapeuta'], diasAtrasoMaisAntigo: 10 },
+    { id: '5',  nome: 'Gabriel Rodrigues',   ocorrencias: 12, tiposPendencia: ['evolucao_pendente'], diasAtrasoMaisAntigo: 8 },
+    { id: '2',  nome: 'Beatriz Santos',      ocorrencias: 12, tiposPendencia: ['sem_autorizacao', 'glosa'], diasAtrasoMaisAntigo: 9 },
+    { id: '3',  nome: 'Pedro Alves',         ocorrencias: 10, tiposPendencia: ['evolucao_pendente', 'falta_paciente'], diasAtrasoMaisAntigo: 7 },
+    { id: '6',  nome: 'Isabela Ferreira',    ocorrencias: 10, tiposPendencia: ['evolucao_pendente'], diasAtrasoMaisAntigo: 6 },
+    { id: '7',  nome: 'Mateus Costa',        ocorrencias: 10, tiposPendencia: ['sem_autorizacao'], diasAtrasoMaisAntigo: 5 },
+    { id: '8',  nome: 'Laura Pereira',       ocorrencias: 10, tiposPendencia: ['evolucao_pendente', 'glosa'], diasAtrasoMaisAntigo: 4 },
+    { id: '9',  nome: 'Enzo Nascimento',     ocorrencias:  8, tiposPendencia: ['evolucao_pendente', 'falta_terapeuta'], diasAtrasoMaisAntigo: 3 },
+    { id: '10', nome: 'Valentina Silva',     ocorrencias:  8, tiposPendencia: ['glosa'], diasAtrasoMaisAntigo: 2 },
+    { id: '11', nome: 'Arthur Lima',         ocorrencias:  8, tiposPendencia: ['evolucao_pendente'], diasAtrasoMaisAntigo: 6 },
+    { id: '12', nome: 'Alice Carvalho',      ocorrencias:  8, tiposPendencia: ['sem_autorizacao'], diasAtrasoMaisAntigo: 1 },
+    { id: '13', nome: 'Davi Mendes',         ocorrencias:  7, tiposPendencia: ['falta_paciente'], diasAtrasoMaisAntigo: 5 },
+    { id: '14', nome: 'Larissa Barbosa',     ocorrencias:  6, tiposPendencia: ['evolucao_pendente'], diasAtrasoMaisAntigo: 3 },
+    { id: '15', nome: 'Henrique Teixeira',   ocorrencias:  6, tiposPendencia: ['evolucao_pendente'], diasAtrasoMaisAntigo: 2 },
   ],
 
   pacientesEvolucaoPendentePorTerapeuta: [
@@ -159,6 +160,15 @@ export const mockCCOData: CCOData = {
     },
   ],
 
+  pacientesAcaoImediata: [
+    { pacienteNome: 'Sofia Martins', diasAtraso: 7 },
+    { pacienteNome: 'Beatriz Santos', diasAtraso: 6 },
+  ],
+
+  pacientesAcompanhamento: [
+    { pacienteNome: 'Lucas Oliveira', diasAtraso: 3 },
+  ],
+
   pacientesSessoes: {
     'Lucas Oliveira': [
       { id: 's1', paciente: 'Lucas Oliveira', data: '2026-06-03', horario: '09:00', terapia: 'ABA', profissional: 'Ana Clara Souza', evolucaoStatus: 'EVOLUIDA', evolucaoAutor: 'Ana Clara Souza', evolucaoDataHora: '2026-06-03 18:42' },
@@ -205,4 +215,17 @@ export const mockCCOData: CCOData = {
       { id: 's36', paciente: 'Beatriz Santos', data: '2026-06-13', horario: '14:00', terapia: 'ABA', profissional: 'Juliana Costa', evolucaoStatus: 'EVOLUIDA', evolucaoAutor: 'Juliana Costa', evolucaoDataHora: '2026-06-13 19:45' },
     ],
   },
+
+  topTerapeutasComPendencias: [
+    { terapeuta: 'Ana Clara Souza', evolucoes_atrasadas: 12, ultima_evolucao: 5 },
+    { terapeuta: 'Juliana Costa', evolucoes_atrasadas: 10, ultima_evolucao: 2 },
+    { terapeuta: 'Mariana Lima', evolucoes_atrasadas: 8, ultima_evolucao: 1 },
+    { terapeuta: 'Patricia Gomes', evolucoes_atrasadas: 7, ultima_evolucao: 0 },
+    { terapeuta: 'Rafael Mendes', evolucoes_atrasadas: 6, ultima_evolucao: 3 },
+    { terapeuta: 'Carla Ferreira', evolucoes_atrasadas: 5, ultima_evolucao: null },
+    { terapeuta: 'Fernanda Rocha', evolucoes_atrasadas: 4, ultima_evolucao: 6 },
+    { terapeuta: 'Carlos Eduardo', evolucoes_atrasadas: 3, ultima_evolucao: 4 },
+    { terapeuta: 'Thiago Andrade', evolucoes_atrasadas: 2, ultima_evolucao: 2 },
+    { terapeuta: 'Marcos Silva', evolucoes_atrasadas: 1, ultima_evolucao: null },
+  ],
 }

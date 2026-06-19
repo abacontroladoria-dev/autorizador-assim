@@ -1,33 +1,29 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import AcaoImediata from '@/components/cco/AcaoImediata'
+import Acompanhamento from '@/components/cco/Acompanhamento'
+import AcoesRapidas from '@/components/cco/AcoesRapidas'
 import CCOKpiCards from '@/components/cco/CCOKpiCards'
 import OcorrenciasRevisaoDrawer from '@/components/cco/OcorrenciasRevisaoDrawer'
-import EvolucoesPendentes from '@/components/cco/EvolucoesPendentes'
+import TopTerapeutasPendencias from '@/components/cco/TopTerapeutasPendencias'
 import PacientesComPendencias from '@/components/cco/PacientesComPendencias'
 import PacientesPendenciasModal from '@/components/cco/PacientesPendenciasModal'
 import PacientesRevisaoModal from '@/components/cco/PacientesRevisaoModal'
 import PacienteDetalhesModal from '@/components/cco/PacienteDetalhesModal'
 import PeriodoCalendar from '@/components/cco/PeriodoCalendar'
-import { mockCCOData } from '@/components/cco/mock-data'
-import type { CCOData, Competencia, CCOSessaoDetalhada } from '@/components/cco/types'
+import { useCCO } from '@/hooks/useCCO'
+import type { CCOSessaoDetalhada } from '@/components/cco/types'
 
 export default function CCOPage() {
   const [dataInicio, setDataInicio] = useState('2026-06-01')
   const [dataFim, setDataFim] = useState('2026-06-30')
-  const [dados, setDados] = useState<CCOData | null>(null)
-  const [loading, setLoading] = useState(true)
+  const { dados, loading } = useCCO(dataInicio, dataFim)
   const [revisaoDrawerOpen, setRevisaoDrawerOpen] = useState(false)
   const [pendenciasModalOpen, setPendenciasModalOpen] = useState(false)
   const [revisaoModalOpen, setRevisaoModalOpen] = useState(false)
   const [detalhesModalOpen, setDetalhesModalOpen] = useState(false)
   const [pacienteDetalhes, setPacienteDetalhes] = useState<string | null>(null)
-
-  // Lógica de negócio: percentual de pacientes conciliados em relação ao total
-  const pctProntas =
-    dados && dados.kpis.total_pacientes > 0
-      ? ((dados.kpis.pacientes_conciliados / dados.kpis.total_pacientes) * 100).toFixed(1)
-      : '0.0'
 
   const abrirDetalhes = (nomePaciente: string) => {
     setPacienteDetalhes(nomePaciente)
@@ -40,21 +36,8 @@ export default function CCOPage() {
   }
 
 
-  useEffect(() => {
-    setLoading(true)
-
-    // TODO: substituir por query real ao Supabase
-    // supabase.rpc('get_auditoria_assim', { data_inicio: dataInicio, data_fim: dataFim })
-    const timeout = setTimeout(() => {
-      setDados(mockCCOData)
-      setLoading(false)
-    }, 400)
-
-    return () => clearTimeout(timeout)
-  }, [dataInicio, dataFim])
-
   return (
-    <div className="space-y-8">
+    <div className="flex flex-col gap-8">
 
       {/* Header & Period Filter */}
       <div className="flex items-end justify-between gap-6">
@@ -83,34 +66,38 @@ export default function CCOPage() {
             sessoes_em_revisao: 0,
             total_sessoes: 0,
             evolucoes_pendentes: 0,
+            evolucoes_atrasadas: 0,
             total_pacientes_assim: 0,
             total_sessoes_assim: 0,
           }}
-          pctProntas={pctProntas}
           loading={loading}
-          onConciliadosClick={() => {}}
-          onPendentesClick={() => setPendenciasModalOpen(true)}
-          onRevisaoClick={() => setRevisaoModalOpen(true)}
         />
       </div>
 
-      {/* Pacientes com Pendências + Evoluções Pendentes */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+      {/* Ação Imediata & Acompanhamento & Ações Rápidas */}
+      <div className="grid grid-cols-1 md:grid-cols-[2fr_2fr_1fr] gap-6">
+        <AcaoImediata
+          pacientes={dados?.pacientesAcaoImediata ?? []}
+          loading={loading}
+          onPacienteClick={abrirDetalhes}
+        />
+        <Acompanhamento
+          pacientes={dados?.pacientesAcompanhamento ?? []}
+          loading={loading}
+          onPacienteClick={abrirDetalhes}
+        />
+        <AcoesRapidas />
+      </div>
+
+      {/* Pacientes com Pendências + Top 10 Terapeutas */}
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-6 items-stretch">
           <PacientesComPendencias
             pacientes={dados?.pacientesComPendencias ?? []}
-            sessoes={(() => {
-              const sessoes: CCOSessaoDetalhada[] = []
-              if (dados?.pacientesSessoes) {
-                Object.values(dados.pacientesSessoes).forEach(s => sessoes.push(...s))
-              }
-              return sessoes
-            })()}
             loading={loading}
             onPacienteClick={abrirDetalhes}
           />
-          <EvolucoesPendentes
-            evolucoes={dados?.evolucoesPendentes ?? []}
-            evolucoesPorTerapeuta={dados?.pacientesEvolucaoPendentePorTerapeuta ?? []}
+          <TopTerapeutasPendencias
+            terapeutas={dados?.topTerapeutasComPendencias ?? []}
             loading={loading}
           />
       </div>

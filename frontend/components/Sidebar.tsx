@@ -45,7 +45,7 @@ import { useTheme } from "@/contexts/ThemeContext"
 import { useImpersonation } from "@/contexts/ImpersonationContext"
 import { ImpersonationSelector } from "@/components/admin/ImpersonationSelector"
 import { ROLE_LABELS } from "@/constants/roleLabels"
-import { getRoleDefaultPermissions } from "@/lib/permissions/hasPermission"
+import { getRoleDefaultPermissions, codigosToRotas } from "@/lib/permissions/routes"
 import { getUsuarioPermissoes } from "@/services/permissoes.service"
 
 type Favorito = { label: string; path: string }
@@ -220,8 +220,7 @@ export default function Sidebar() {
         }
       }
 
-      const rotas = [...codigos].flatMap(c => CODIGO_PARA_ROTAS[c] ?? [])
-      if (!rotas.includes("/")) rotas.unshift("/")
+      const rotas = codigosToRotas(codigos)
 
       if (isMounted) {
         setAllowedPaths(rotas)

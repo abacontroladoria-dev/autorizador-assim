@@ -47,6 +47,7 @@ const CAMPOS_CENTRAL_AUTORIZACOES = `
     agendamentos,
 
     horario_autorizacao,
+    cancelado_por_nome,
     ultima_autorizacao_anterior
 `
 
@@ -228,10 +229,14 @@ function formatarNome(nome?: string) {
 
 useEffect(() => {
 
+  let cancelado = false
+
   async function carregarMachine() {
 
     const id =
       await getMachineId()
+
+    if (cancelado) return
 
     setMachineId(id)
 
@@ -239,6 +244,15 @@ useEffect(() => {
   }
 
   carregarMachine()
+
+  // Re-checa periodicamente para detectar o worker assim que ele sobe (ou cai),
+  // sem exigir refresh manual da página.
+  const interval = setInterval(carregarMachine, 5000)
+
+  return () => {
+    cancelado = true
+    clearInterval(interval)
+  }
 
 }, [])
 
@@ -285,11 +299,7 @@ async function carregarLista() {
   const dataFiltro = dataSelecionada
 
   let { data, error } = await supabase
-    .from('vw_central_autorizacoes')
-    .select(CAMPOS_CENTRAL_AUTORIZACOES)
-    .eq('data_atendimento', dataFiltro)
-    .eq('mostrar_na_tela', true)
-    .order('horario', { ascending: true })
+    .rpc('listar_central_autorizacoes', { p_data: dataFiltro })
 
   if (
     error &&
@@ -300,7 +310,7 @@ async function carregarLista() {
       .from('vw_central_autorizacoes')
       .select(CAMPOS_CENTRAL_AUTORIZACOES_LEGADO)
       .eq('data_atendimento', dataFiltro)
-      .order('horario', { ascending: true })
+      .eq('mostrar_na_tela', true)
 
     data = retry.data as typeof data
     error = retry.error
@@ -379,7 +389,8 @@ async function handleSolicitarLista(
     if (existente) {
 
       if (
-        existente.status === 'erro'
+          existente.status === 'erro' ||
+          existente.status === 'cancelado'
       ) {
 
 		await supabase
@@ -877,26 +888,40 @@ async function handleCancelarProcessamento(p: any) {
       return
     }
 
+    // Identifica quem está cancelando (para rastreio de autoria)
+    const { data: { user } } = await supabase.auth.getUser()
+    let nomeUsuario = user?.email ?? 'Desconhecido'
+    if (user) {
+      const { data: perfil } = await supabase
+        .from('usuarios')
+        .select('nome')
+        .eq('id', user.id)
+        .maybeSingle()
+      if (perfil?.nome) nomeUsuario = perfil.nome
+    }
+
     const { error } = await supabase
       .from('fila_autorizacoes')
       .update({
-        status: 'pendente',
+        status: 'cancelado',
+        cancelado_por_nome: nomeUsuario,
+        cancelado_em: new Date().toISOString(),
         updated_at: new Date().toISOString(),
       })
       .eq('id', existente.id)
       .eq('status', 'processando')
 
     if (error) {
-      toast.error('Erro ao cancelar processamento')
+      toast.error('Erro ao cancelar solicitação')
       return
     }
 
-    toast.success('Processamento cancelado — voltou para a fila')
+    toast.success('Solicitação cancelada')
 
     setListaDia(prev =>
       prev.map(item =>
         buildCardKey(item) === buildCardKey(p)
-          ? { ...item, status_final: 'pendente' }
+          ? { ...item, status_final: 'cancelado', cancelado_por_nome: nomeUsuario }
           : item
       )
     )
@@ -1044,7 +1069,8 @@ useEffect(() => {
               // ATUALIZA STATUS
               return {
                 ...item,
-                status_final: novo.status
+                status_final: novo.status,
+                cancelado_por_nome: novo.cancelado_por_nome ?? item.cancelado_por_nome
               }
             })
 
@@ -1093,7 +1119,7 @@ useEffect(() => {
             <span className="text-base">⚠</span>
 
             <span>
-              Worker offline — autorizações automáticas indisponíveis.
+              Worker não detectado neste computador — abra o sistema no PC onde o robô de autorização está instalado e em execução.
             </span>
           </div>
         )}
@@ -1419,6 +1445,15 @@ useEffect(() => {
         <span className="flex items-center gap-1 text-xs font-semibold text-red-800 bg-red-100 px-2 py-0.5 rounded-md">
           <span className="w-1.5 h-1.5 bg-red-500 rounded-full"></span>
           Erro
+        </span>
+      )}
+
+      {p.status_final === 'cancelado' && (
+        <span className="flex items-center gap-1 text-xs font-semibold text-slate-600 bg-slate-100 px-2 py-0.5 rounded-md">
+          <span className="w-1.5 h-1.5 bg-slate-400 rounded-full"></span>
+          {p.cancelado_por_nome
+            ? `Cancelada por: ${p.cancelado_por_nome}`
+            : 'Cancelada'}
         </span>
       )}
     </div>

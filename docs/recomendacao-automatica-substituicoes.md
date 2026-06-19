@@ -14,7 +14,7 @@ Sua função é apenas pré-selecionar o profissional mais indicado no modal de 
 
 Este documento complementa as regras definidas em:
 
-`cobertura-clinica.md`
+`central-terapeutas-substituicao.md`
 
 As regras de compatibilidade, elegibilidade e classificação dos profissionais continuam sendo definidas pelo documento principal.
 
@@ -32,7 +32,7 @@ Não existe conceito de substituição definitiva ou transferência permanente n
 
 ---
 
-# Profissionais Elegíveis
+## Profissionais Elegíveis
 
 Participam da recomendação automática apenas profissionais classificados como:
 
@@ -49,7 +49,7 @@ Eles continuam sendo exibidos no modal para análise manual do usuário.
 
 ---
 
-# Requisitos Obrigatórios
+## Requisitos Obrigatórios
 
 Para participar da recomendação automática o profissional deve:
 
@@ -64,7 +64,7 @@ O descumprimento de qualquer requisito elimina o profissional da recomendação 
 
 ---
 
-# Unidade
+## Unidade
 
 A recomendação automática considera apenas profissionais da mesma unidade da sessão analisada.
 
@@ -72,7 +72,7 @@ Profissionais de outras unidades não participam do cálculo da recomendação.
 
 ---
 
-# Compatibilidade Terapêutica
+## Compatibilidade Terapêutica
 
 A compatibilidade é determinada exclusivamente pela Terapia Real.
 
@@ -82,9 +82,19 @@ As regras de compatibilidade seguem exatamente o definido em:
 
 `central-terapeutas-substituicao.md`
 
+As compatibilidades especiais envolvendo:
+
+* Grupo ABA
+* Coordenador de Caso
+* Supervisão ABA
+
+também devem ser consideradas durante o cálculo da recomendação automática.
+
+Quando existirem múltiplos profissionais compatíveis, a recomendação continuará obedecendo os critérios de priorização definidos neste documento.
+
 ---
 
-# Critérios de Priorização
+## Critérios de Priorização
 
 Os profissionais elegíveis serão ordenados de acordo com os critérios abaixo.
 
@@ -144,7 +154,7 @@ Persistindo empate.
 
 Recebe prioridade o profissional que possui menor quantidade de sessões agendadas no dia da sessão analisada.
 
-### Exemplo
+Exemplo
 
 Profissionais:
 
@@ -181,7 +191,7 @@ Considerar apenas substituições realizadas em julho de 2026.
 
 A contagem de substituições deve ser atualizada imediatamente após a confirmação de uma nova substituição.
 
-### Exemplo
+Exemplo
 
 Situação atual:
 
@@ -207,7 +217,7 @@ Ordenar os profissionais pelo nome em ordem alfabética crescente.
 
 ---
 
-# Pré-seleção Automática
+## Pré-seleção Automática
 
 Após a aplicação dos critérios de priorização, o primeiro profissional da lista será considerado o candidato recomendado.
 
@@ -215,7 +225,7 @@ Este profissional deverá aparecer automaticamente selecionado no modal de subst
 
 ---
 
-# Ausência de Candidatos Elegíveis
+## Ausência de Candidatos Elegíveis
 
 Caso não exista nenhum profissional classificado como Livre:
 
@@ -225,7 +235,7 @@ Caso não exista nenhum profissional classificado como Livre:
 
 ---
 
-# Confirmação da Substituição
+## Confirmação da Substituição
 
 A recomendação automática não possui efeito operacional até que a substituição seja confirmada pelo usuário.
 
@@ -233,7 +243,7 @@ A confirmação é obrigatória para efetivar a alteração da sessão.
 
 ---
 
-# Registro de Auditoria
+## Registro de Auditoria
 
 Toda substituição confirmada deverá gerar registro histórico.
 
@@ -253,7 +263,7 @@ O registro deverá conter, no mínimo:
 
 ---
 
-# Estatísticas
+## Estatísticas
 
 As substituições confirmadas deverão alimentar os indicadores de distribuição utilizados pela recomendação automática.
 
@@ -268,7 +278,7 @@ Não devem ser contabilizados:
 
 ---
 
-# Objetivo da Distribuição
+## Objetivo da Distribuição
 
 A recomendação automática deve buscar simultaneamente:
 

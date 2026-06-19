@@ -1,11 +1,11 @@
 'use client'
 
-import { AlertTriangle, RefreshCw } from 'lucide-react'
+import { AlertCircle } from 'lucide-react'
 import type { CCOSessaoDetalhada } from './types'
-import TratativasBadges from './TratativasBadges'
 
 interface Props {
   sessao: CCOSessaoDetalhada
+  onAbrir?: (sessao: CCOSessaoDetalhada) => void
 }
 
 function formatData(iso: string): string {
@@ -16,83 +16,69 @@ function formatData(iso: string): string {
 function getTipoPendencia(sessao: CCOSessaoDetalhada): string {
   if (sessao.substituicao) return 'Substituição'
   if (sessao.glosa) return 'Glosa'
-  if (sessao.evolucaoStatus === 'PENDENTE') return 'Sem evolução'
+  if (sessao.evolucaoStatus === 'PENDENTE') return 'Evolução não registrada'
   return 'Pendência'
 }
 
-function getTipoColor(tipo: string): string {
-  switch (tipo) {
-    case 'Substituição':
-      return 'bg-blue-50 border-blue-200'
-    case 'Glosa':
-      return 'bg-red-50 border-red-200'
-    case 'Sem evolução':
-      return 'bg-amber-50 border-amber-200'
-    default:
-      return 'bg-amber-50 border-amber-200'
-  }
+function getDiasAtraso(data: string): number {
+  const hoje = new Date()
+  const dataSessao = new Date(data)
+  const diasAtraso = Math.floor((hoje.getTime() - dataSessao.getTime()) / (1000 * 60 * 60 * 24))
+  return Math.max(0, diasAtraso)
 }
 
-function getTipoIcon(tipo: string) {
-  switch (tipo) {
-    case 'Substituição':
-      return <RefreshCw size={16} className="text-blue-600" />
-    case 'Glosa':
-      return <AlertTriangle size={16} className="text-red-600" />
-    case 'Sem evolução':
-      return <AlertTriangle size={16} className="text-amber-600" />
-    default:
-      return <AlertTriangle size={16} className="text-amber-600" />
-  }
-}
-
-export default function PacientePendenciasCard({ sessao }: Props) {
+export default function PacientePendenciasCard({ sessao, onAbrir }: Props) {
   const tipo = getTipoPendencia(sessao)
-  const tipoColor = getTipoColor(tipo)
+  const diasAtraso = getDiasAtraso(sessao.data)
 
   return (
-    <div className={`border-l-4 rounded-lg p-5 backdrop-blur-sm ${tipoColor}`}>
-      <div className="flex items-start justify-between mb-4">
-        <div>
-          <p className="font-bold text-foreground text-base">{formatData(sessao.data)} · {sessao.horario}</p>
-          <p className="text-sm text-foreground/70 mt-1 font-medium">{sessao.terapia}</p>
-        </div>
+    <div className="border border-border rounded-lg p-4 hover:border-foreground/30 transition-colors">
+      {/* Data e Hora + Dias de Atraso */}
+      <div className="flex items-baseline justify-between gap-4 mb-4">
+        <p className="text-sm font-medium text-foreground/70">
+          {formatData(sessao.data)} • {sessao.horario}
+        </p>
+        {diasAtraso > 0 && (
+          <p className="text-xs font-semibold text-amber-600 shrink-0">
+            {diasAtraso} {diasAtraso === 1 ? 'dia' : 'dias'}
+          </p>
+        )}
       </div>
 
-      <div className="flex items-center gap-2.5 mb-4 py-2">
-        {getTipoIcon(tipo)}
-        <span className="text-sm font-semibold text-foreground">{tipo}</span>
-      </div>
+      {/* Especialidade */}
+      <p className="text-sm font-semibold text-foreground mb-3">{sessao.terapia}</p>
 
+      {/* Tipo de Problema */}
+      <p className="text-xs text-foreground/70 mb-4">{tipo}</p>
+
+      {/* Profissional */}
       {sessao.profissional && (
-        <div className="mb-3 pt-3 border-t border-current border-opacity-15">
-          <p className="text-xs font-semibold text-foreground/60 uppercase tracking-wide mb-1">Profissional</p>
-          <p className="text-sm font-semibold text-foreground">{sessao.profissional}</p>
-        </div>
+        <p className="text-xs text-foreground/70 mb-4">
+          <span className="font-medium">Profissional:</span> <span className="text-foreground">{sessao.profissional}</span>
+        </p>
       )}
 
+      {/* Substituição */}
       {sessao.substituicao && (
-        <div className="space-y-3 mb-3 pt-3 border-t border-current border-opacity-15 text-sm">
-          <div>
-            <p className="text-xs font-semibold text-foreground/60 uppercase tracking-wide mb-1">Original</p>
-            <p className="font-semibold text-foreground">{sessao.substituicao.original}</p>
-          </div>
-          <div>
-            <p className="text-xs font-semibold text-foreground/60 uppercase tracking-wide mb-1">Substituto</p>
-            <p className="font-semibold text-foreground">{sessao.substituicao.substituto}</p>
+        <div className="bg-red-50 border border-red-200 rounded-lg p-3 mb-4">
+          <div className="flex items-start gap-3">
+            <AlertCircle size={16} className="text-red-600 shrink-0 mt-0.5" />
+            <div className="text-xs space-y-2 flex-1">
+              <p className="text-red-900 font-medium">Sessão com substituição</p>
+              <p className="text-red-700"><span className="font-medium">Original:</span> {sessao.substituicao.original}</p>
+              <p className="text-red-700"><span className="font-medium">Substituto:</span> {sessao.substituicao.substituto}</p>
+            </div>
           </div>
         </div>
       )}
 
-      {(sessao.substituicao || sessao.glosa || (sessao.tratativas && sessao.tratativas.length > 0)) && (
-        <div className="pt-3 border-t border-current border-opacity-15">
-          <TratativasBadges
-            substituicao={sessao.substituicao}
-            glosa={sessao.glosa}
-            tratativas={sessao.tratativas}
-          />
-        </div>
-      )}
+      {/* CTA */}
+      <button
+        onClick={() => onAbrir?.(sessao)}
+        className="text-xs font-medium text-amber-600 hover:text-amber-700 transition-colors mt-4 pt-4 border-t border-border w-full text-left"
+      >
+        Abrir detalhes
+      </button>
     </div>
   )
 }

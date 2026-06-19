@@ -1,8 +1,8 @@
 import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
-import { supabaseService } from '@/lib/supabase/service'
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit'
+import { getRoleDefaultPermissions, codigosToRotas } from '@/lib/permissions/routes'
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next()
@@ -43,7 +43,7 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   // Rotas públicas
-  const publicRoutes = ['/login', '/definir-senha', '/auth/callback', '/disponibilidade-terapeuta/login', '/sem-permissao']
+  const publicRoutes = ['/login', '/definir-senha', '/auth/callback', '/disponibilidade-terapeuta/login', '/disponibilidade-terapeuta', '/sem-permissao', '/tv']
 
   const isPublicRoute = publicRoutes.some(
     (route) => pathname === route || pathname.startsWith(route + '/')
@@ -55,7 +55,7 @@ export async function proxy(request: NextRequest) {
 
   if (user && pathname === '/login') {
     // Verifica se ainda precisa configurar antes de enviar ao dashboard
-    const { data: p } = await supabaseService
+    const { data: p } = await supabase
       .from('usuarios')
       .select('primeiro_acesso, username, ativo')
       .eq('id', user.id)
@@ -76,14 +76,14 @@ export async function proxy(request: NextRequest) {
     return response
   }
 
-  let { data: perfil, error: perfilError } = await supabaseService
+  let { data: perfil, error: perfilError } = await supabase
     .from('usuarios')
     .select('role, ativo, primeiro_acesso, username')
     .eq('id', user.id)
     .maybeSingle()
 
   if (!perfil && user.email) {
-    const { data: fallback } = await supabaseService
+    const { data: fallback } = await supabase
       .from('usuarios')
       .select('role, ativo, primeiro_acesso, username')
       .eq('email', user.email)
@@ -101,23 +101,36 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(new URL('/definir-senha', request.url))
   }
 
-  const role = perfil?.role
+  const role = perfil?.role ?? ''
 
-  const roleRoutes: Record<string, string[]> = {
-    admin: ['*'],
-    diretoria: ['/', '/solicitacao', '/guias', '/financeiro', '/cronograma'],
-    recepcao: ['/', '/solicitacao', '/cronograma/solicitacoes'],
-    terapeutico: ['/', '/terapeutas'],
-    faturamento: ['/', '/guias'],
-    autorizacao: ['/', '/auditoria-assim'],
-    disponibilidade_terapeuta: ['/disponibilidade-terapeuta'],
+  // Admin acessa tudo.
+  if (role === 'admin') {
+    return response
   }
 
-  const allowedRoutes = roleRoutes[role] || []
+  // Deriva as rotas permitidas do mesmo modelo do Sidebar:
+  // defaults do role + overrides individuais (usuarios_permissoes).
+  // A RLS permite o usuário ler as próprias linhas.
+  const codigos = new Set(getRoleDefaultPermissions(role))
 
-  const hasAccess =
-    allowedRoutes.includes('*') ||
-    allowedRoutes.some((route) => pathname === route || pathname.startsWith(route + '/'))
+  const { data: overrides } = await supabase
+    .from('usuarios_permissoes')
+    .select('permissao_codigo, permitido')
+    .eq('usuario_id', user.id)
+
+  for (const o of overrides ?? []) {
+    if (o.permitido) {
+      codigos.add(o.permissao_codigo)
+    } else {
+      codigos.delete(o.permissao_codigo)
+    }
+  }
+
+  const allowedRoutes = codigosToRotas(codigos)
+
+  const hasAccess = allowedRoutes.some(
+    (route) => pathname === route || pathname.startsWith(route + '/')
+  )
 
   if (!hasAccess) {
     return NextResponse.redirect(new URL('/sem-permissao', request.url))
@@ -127,5 +140,5 @@ export async function proxy(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!api|_next/static|_next/image|favicon.ico).*)'],
+  matcher: ['/((?!api|_next|favicon|logo|icon|manifest|.+\\..+$).*)'],
 }

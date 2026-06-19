@@ -131,15 +131,15 @@ Exemplos:
 
 Background:
 
-#F8FAFC
+# F8FAFC
 
 ou
 
-#F1F5F9
+# F1F5F9
 
 Borda:
 
-#E2E8F0
+# E2E8F0
 
 ---
 
@@ -148,10 +148,10 @@ Borda:
 Estado normal:
 
 Texto:
-#334155
+# 334155
 
 Ícones:
-#64748B
+# 64748B
 
 ---
 
@@ -159,15 +159,15 @@ Texto:
 
 Background:
 
-#DBEAFE
+# DBEAFE
 
 Texto:
 
-#1D4ED8
+# 1D4ED8
 
 Ícone:
 
-#2563EB
+# 2563EB
 
 Border radius deve permanecer igual ao atual.
 

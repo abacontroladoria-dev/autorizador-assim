@@ -58,6 +58,7 @@ BEGIN
    AND sa.source = 'assim'
   WHERE a.data_sessao BETWEEN p_data_inicio AND p_data_fim
     AND a.orphaned_at IS NULL
+    AND a.paciente_nome NOT IN ('Ainda não selecionado', 'Horário Admiistrativo')
   ORDER BY a.data_sessao, a.hora_inicio, a.paciente_nome;
 END;
 $$;

@@ -1,6 +1,6 @@
 'use client'
 
-import { AlertCircle, AlertTriangle, Ban, Calendar, CheckCircle2, RefreshCw, UserX, XCircle } from 'lucide-react'
+import { AlertCircle, AlertTriangle, Ban, Calendar, CheckCircle2, RefreshCw, UserX, XCircle, Ticket } from 'lucide-react'
 import type { KpisAuditoriaAssim } from './types'
 
 type Props = {
@@ -85,6 +85,19 @@ export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, 
       icon: CheckCircle2,
     },
     {
+      key: 'tokens',
+      situacao: 'TOKENS',
+      title: 'Com Token',
+      value: kpis?.tokens ?? 0,
+      tone: 'text-indigo-600',
+      iconTone: 'bg-indigo-50 text-indigo-600',
+      barTone: 'bg-indigo-500',
+      borderActive: 'border-indigo-400',
+      hoverBorder: 'hover:border-indigo-300',
+      bgActive: 'bg-indigo-50/60',
+      icon: Ticket,
+    },
+    {
       key: 'glosas',
       situacao: 'GLOSA',
       title: 'Glosas',
@@ -147,7 +160,7 @@ export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, 
         totalFiltrados={totalFiltrados}
         onFilter={() => onFilter('')}
       />
-      <div className="grid grid-cols-2 gap-2 xl:grid-cols-8 flex-1">
+      <div className="grid grid-cols-2 gap-2 xl:grid-cols-9 flex-1">
         {cards.map((card) => (
           <KpiCard
             key={card.key}

@@ -5,7 +5,7 @@ import toast from 'react-hot-toast'
 import { useHeader } from '@/contexts/HeaderContext'
 import AdminSummaryCards from './AdminSummaryCards'
 import AdminUsersTable from './AdminUsersTable'
-import AdminMachinesTable from './AdminMachinesTable'
+import AdminMachinesTable, { isMachineOnline } from './AdminMachinesTable'
 import {
   changeUserRole,
   deleteUser,
@@ -71,13 +71,19 @@ export default function AdminPageShell({
       setMachines(loadedMachines)
     }
     load()
+
+    // Atualiza periodicamente para refletir o heartbeat das máquinas (last_seen)
+    const interval = setInterval(async () => {
+      setMachines(await getAdminMachines())
+    }, 30000)
+    return () => clearInterval(interval)
   }, [])
 
   const totals = useMemo(() => {
     const activeUsers = users.filter((user) => user.ativo).length
     const inactiveUsers = users.length - activeUsers
     const onlineMachines = machines.filter(
-      (machine) => machine.ativa === true
+      (machine) => isMachineOnline(machine.last_seen)
     ).length
     const offlineMachines = machines.length - onlineMachines
 

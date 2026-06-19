@@ -125,10 +125,13 @@ async function parseTITAResponse(
     return []
   }
 
-  const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase().trim())
+  const normalizeHeader = (h: string) =>
+    h.toLowerCase().trim().normalize("NFD").replace(/[̀-ͯ]/g, "")
+  const headers = parseCSVLine(lines[0]).map(normalizeHeader)
   const sessions: TITASession[] = []
 
-  console.log(`[cco-sync-tita-sessions] CSV headers detected: ${headers.join(", ")}`)
+  console.log(`[cco-sync-tita-sessions] CSV headers (raw): ${parseCSVLine(lines[0]).join(", ")}`)
+  console.log(`[cco-sync-tita-sessions] CSV headers (normalized): ${headers.join(", ")}`)
 
   for (let i = 1; i < lines.length; i++) {
     const values = parseCSVLine(lines[i])
@@ -171,9 +174,10 @@ async function parseTITAResponse(
       if (header === "observações da sala") session.justificativa = value || null
 
       // Tratativa info (CCO-010: headers confirmados pelo TITA csv_grade_profissionais)
+      // Headers são normalizados (acentos removidos) para compatibilidade com diferentes encodings CSV
       if (header === "possui tratativa") session.possui_tratativa = value.toLowerCase() === "sim"
       if (header === "nome profissional tratativa") session.profissional_tratativa = value || null
-      if (header === "criação tratativa") session.data_tratativa = normalizeDate(value)
+      if (header === "criacao tratativa") session.data_tratativa = normalizeDate(value)
       if (header === "id profissional tratativa") session.id_profissional_tratativa = value ? parseInt(value) : undefined
       if (header === "origem tratativa") session.origem_tratativa = value || null
     }
@@ -205,11 +209,10 @@ async function syncTITASessions(
 ): Promise<number> {
   console.log("[cco-sync-tita-sessions] Fetching TITA CSV...")
 
-  // Get today's date - optimized to fetch only today's sessions
-  // This reduces API load and ensures faster response times
   const today = new Date()
   const dateFormat = (d: Date) => d.toISOString().split("T")[0]
-  const dataInicio = dateFormat(today)
+  const tenDaysAgo = new Date(today.getTime() - 10 * 24 * 60 * 60 * 1000)
+  const dataInicio = dateFormat(tenDaysAgo)
   const dataFim = dateFormat(today)
   const unidade = 280
 
@@ -217,7 +220,7 @@ async function syncTITASessions(
   console.log(`[cco-sync-tita-sessions] Requesting UNIT FILTER: unidade=${unidade}`)
 
   const controller = new AbortController()
-  const timeoutId = setTimeout(() => controller.abort(), 50000) // 50s timeout
+  const timeoutId = setTimeout(() => controller.abort(), 90000) // 90s timeout
 
   let response: Response
   try {
@@ -286,6 +289,12 @@ async function syncTITASessions(
 
   if (sessions.length > 0) {
     console.log(`[cco-sync-tita-sessions] Sample: ${JSON.stringify(sessions[0])}`)
+    // DEBUG: Show all sessions with tratativa (profissional_tratativa set)
+    const comTratativa = sessions.filter(s => s.profissional_tratativa)
+    console.log(`[cco-sync-tita-sessions] Sessions with profissional_tratativa: ${comTratativa.length}`)
+    if (comTratativa.length > 0) {
+      console.log(`[cco-sync-tita-sessions] First one with tratativa: ${JSON.stringify(comTratativa[0])}`)
+    }
   }
 
   // Prepare UPSERT rows

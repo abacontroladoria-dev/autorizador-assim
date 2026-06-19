@@ -11,6 +11,7 @@
 ## O que foi criado
 
 ### 1. Schema Isolado
+
 - **Schema**: `cco` — completamente isolado de tabelas legadas (`public.*`)
 - **Princípio**: Sidecar Architecture — leitura sem escrita nas fontes
 
@@ -28,6 +29,7 @@
 ### 3. Índices (14 no total)
 
 **cco.atendimentos** (6 índices)
+
 - `idx_sessions_session_key` — UNIQUE, chave de conciliação
 - `idx_sessions_data_sessao` — range queries por data
 - `idx_sessions_tita_id` — join com agenda (partial)
@@ -36,13 +38,16 @@
 - `idx_sessions_profissional` — rastreamento por profissional
 
 **cco.session_authorizations** (2 índices)
+
 - `idx_auth_session_key` — join com atendimentos
 - `idx_auth_status` — filtros por status
 
 **cco.session_substitutions** (1 índice)
+
 - `idx_sub_session_key` — join com atendimentos
 
 **cco.occurrences** (5 índices)
+
 - `idx_occ_session_key` — join com atendimentos
 - `idx_occ_tipo_severity` — filtros combinados
 - `idx_occ_created_at` — ordenação DESC
@@ -50,14 +55,17 @@
 - `idx_occ_receita_risco` — **parcial** — receita em risco (CRITICAL status)
 
 **cco.dashboard_snapshot** (1 índice)
+
 - `idx_snapshot_data_ref` — busca por data
 
 **cco.processing_logs** (1 índice)
+
 - `idx_logs_job_name` — auditoria por job
 
 ### 4. Retenção
 
 **Job de retenção (a registrar manualmente em pg_cron)**:
+
 ```sql
 -- Executar diariamente às 01:00 UTC
 DELETE FROM cco.occurrences 
@@ -65,6 +73,7 @@ WHERE resolved_at < now() - interval '90 days'
 ```
 
 Comando para registrar (executar manualmente no Supabase SQL Editor):
+
 ```sql
 SELECT cron.schedule(
   'cco-retention-90d',
@@ -156,6 +165,7 @@ DROP SCHEMA cco CASCADE;
 ### Sobre session_key
 
 A chave é gerada como:
+
 ```
 sha256(
   unaccent(lower(trim(paciente_nome))) 
@@ -169,6 +179,7 @@ Esta sintaxe será implementada nos jobs da **Fase 2** (nas Edge Functions).
 ### Sobre fingerprint
 
 A fingerprint em `cco.occurrences` garante idempotência:
+
 ```
 sha256(session_key || tipo || date_trunc('day', data_sessao))
 ```

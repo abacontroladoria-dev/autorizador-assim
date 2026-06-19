@@ -2,6 +2,14 @@
 
 import { AdminMachine } from './AdminPageShell'
 
+// Worker envia heartbeat a cada 30s; toleramos 3 batidas perdidas antes de marcar offline
+export const ONLINE_THRESHOLD_MS = 90 * 1000
+
+export function isMachineOnline(lastSeen?: string | null) {
+  if (!lastSeen) return false
+  return Date.now() - new Date(lastSeen).getTime() < ONLINE_THRESHOLD_MS
+}
+
 function formatLastSeen(lastSeen?: string | null) {
   if (!lastSeen) return '—'
   const diff = Date.now() - new Date(lastSeen).getTime()
@@ -56,6 +64,7 @@ export default function AdminMachinesTable({
               machines.map((machine) => {
                 const isLoading = loadingId === machine.id
                 const ativa = machine.ativa ?? false
+                const online = isMachineOnline(machine.last_seen)
 
                 return (
                   <tr key={machine.id} className="border-b border-slate-100">
@@ -72,15 +81,27 @@ export default function AdminMachinesTable({
                       {formatLastSeen(machine.last_seen)}
                     </td>
                     <td className="px-4 py-3">
-                      <span
-                        className={`inline-flex rounded-xl px-3 py-1 text-xs font-semibold ${
-                          ativa
-                            ? 'bg-emerald-100 text-emerald-700'
-                            : 'bg-slate-100 text-slate-500'
-                        }`}
-                      >
-                        {ativa ? 'Ativa' : 'Inativa'}
-                      </span>
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`inline-flex items-center gap-1.5 rounded-xl px-3 py-1 text-xs font-semibold ${
+                            online
+                              ? 'bg-emerald-100 text-emerald-700'
+                              : 'bg-rose-100 text-rose-700'
+                          }`}
+                        >
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${
+                              online ? 'bg-emerald-500' : 'bg-rose-500'
+                            }`}
+                          />
+                          {online ? 'Online' : 'Offline'}
+                        </span>
+                        {!ativa && (
+                          <span className="inline-flex rounded-xl bg-amber-100 px-2.5 py-1 text-xs font-semibold text-amber-700">
+                            Pausada
+                          </span>
+                        )}
+                      </div>
                     </td>
                     <td className="px-4 py-3">
                       <button

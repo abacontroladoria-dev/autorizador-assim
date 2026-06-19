@@ -19,7 +19,7 @@ Este documento trata exclusivamente do armazenamento, consulta e utilização do
 
 Este documento complementa:
 
-* `cobertura-clinica.md`
+* `central-terapeutas-substituicao.md`
 * `recomendacao-automatica-substituicoes.md`
 
 As regras de compatibilidade e recomendação automática são definidas nos documentos próprios.

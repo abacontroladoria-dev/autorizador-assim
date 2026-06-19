@@ -1,28 +1,9 @@
 import { getSupabaseClient } from '@/lib/supabase/client'
 
-const roleDefaults: Record<string, string[]> = {
-  admin: [
-    'dashboard', 'atendimentos', 'gestao', 'cronograma',
-    'escala_terapeutica', 'agenda_terapeutica', 'salas',
-    'guias_digitais', 'auditoria_assim', 'usuarios', 'permissoes', 'cco',
-    'cronograma_solicitacoes', 'ocupacao_clinica',
-  ],
-  diretoria: [
-    'dashboard', 'atendimentos', 'gestao', 'cronograma',
-    'escala_terapeutica', 'agenda_terapeutica', 'salas',
-    'guias_digitais', 'auditoria_assim', 'cco',
-    'cronograma_solicitacoes', 'ocupacao_clinica',
-  ],
-  recepcao: ['dashboard', 'atendimentos', 'gestao', 'cronograma', 'auditoria_assim', 'cronograma_solicitacoes'],
-  autorizacao: ['dashboard', 'cronograma', 'agenda_terapeutica', 'salas', 'auditoria_assim'],
-  terapeutico: ['dashboard', 'escala_terapeutica', 'salas', 'agenda_terapeutica'],
-  faturamento: ['dashboard', 'guias_digitais', 'cronograma', 'agenda_terapeutica', 'salas', 'cco'],
-  rp: ['dashboard', 'escala_terapeutica'],
-}
-
-export function getRoleDefaultPermissions(role: string): string[] {
-  return roleDefaults[role] ?? []
-}
+// Fonte única de verdade movida para ./routes (módulo puro, sem supabase),
+// compartilhada com o proxy server-side. Re-exportado aqui por compatibilidade.
+export { roleDefaults, getRoleDefaultPermissions } from './routes'
+import { getRoleDefaultPermissions } from './routes'
 
 export async function hasPermission(userId: string, permissaoCodigo: string): Promise<boolean> {
   const supabase = getSupabaseClient()

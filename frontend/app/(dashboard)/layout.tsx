@@ -11,7 +11,7 @@ import {
   useHeader,
 } from '@/contexts/HeaderContext'
 import { ThemeProvider } from '@/contexts/ThemeContext'
-import { ImpersonationProvider } from '@/contexts/ImpersonationContext'
+import { ImpersonationProvider, useImpersonation } from '@/contexts/ImpersonationContext'
 
 const supabase = getSupabaseClient()
 
@@ -71,9 +71,16 @@ function DashboardShellContent({
   children: React.ReactNode
 }) {
   const { title, subtitle } = useHeader()
+  const { isImpersonating } = useImpersonation()
 
   return (
-    <>
+    // pt-16 só quando a ImpersonationBar (fixed top) está visível; caso contrário
+    // o conteúdo encosta no topo (sem espaço morto).
+    <div
+      className={`ml-64 flex flex-col h-screen ${
+        isImpersonating ? 'pt-16' : ''
+      }`}
+    >
       {/* HEADER — só exibe quando há título */}
       {title && (
         <header className="h-20 bg-card border-b border-border flex items-center px-6 shrink-0">
@@ -84,10 +91,12 @@ function DashboardShellContent({
         </header>
       )}
 
-      {/* PAGE */}
-      <main className="flex-1 p-6 overflow-auto">
+      {/* PAGE — min-h-0 obrigatório: em flex-col, flex-1 sem min-h-0 ainda
+          pode transbordar o pai, impedindo o overflow-auto de criar um scroll
+          container real (e quebrando o position:sticky do SidePanel). */}
+      <main className="flex-1 min-h-0 p-6 overflow-auto">
         {children}
       </main>
-    </>
+    </div>
   )
 }

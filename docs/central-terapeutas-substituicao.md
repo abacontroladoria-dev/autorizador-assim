@@ -37,15 +37,48 @@ As seguintes terapias são consideradas equivalentes para substituição:
 * Aplicador ABA (EF)
 * Aplicador ABA (AE)
 * Aplicador ABA (PS)
+* Aplicador ABA (HS)
 * Aplicador ABA (SF)
 
 Profissionais dessas terapias podem substituir uns aos outros.
 
+---
+
 ### Coordenador de Caso
 
-O Coordenador de Caso não faz parte do grupo principal de substituição.
+Um profissional com Terapia Real **Coordenador de Caso** poderá ser substituído por:
 
-Ele somente poderá ser considerado quando não existir nenhum profissional livre pertencente ao Grupo ABA.
+* Coordenador de Caso
+* Aplicador ABA (EF)
+* Aplicador ABA (PS)
+* Supervisão ABA
+
+---
+
+### Coordenador de Caso como Substituto
+
+Um profissional com Terapia Real **Coordenador de Caso** poderá substituir:
+
+* Aplicador ABA (EF)
+* Aplicador ABA (AE)
+* Aplicador ABA (PS)
+* Aplicador ABA (HS)
+* Aplicador ABA (SF)
+
+---
+
+### Supervisão ABA
+
+Um profissional com Terapia Real **Supervisão ABA** poderá substituir:
+
+* Coordenador de Caso
+* Aplicador ABA (EF)
+* Aplicador ABA (AE)
+* Aplicador ABA (PS)
+* Aplicador ABA (HS)
+* Aplicador ABA (SF)
+
+---
 
 ### Demais Terapias
 
@@ -86,15 +119,13 @@ Um profissional somente pode ser removido da lista quando:
 * não possuir compatibilidade com a terapia requerida;
 * não possuir permissão para atuar na unidade analisada.
 
-Profissionais ocupados devem continuar aparecendo na lista.
-
 Profissionais livres devem continuar aparecendo na lista.
+
+Profissionais ocupados devem continuar aparecendo na lista.
 
 Profissionais classificados como "não trabalha hoje" devem continuar aparecendo na lista.
 
 ---
-
-## Recomendação Automática
 
 ## Recomendação Automática
 
