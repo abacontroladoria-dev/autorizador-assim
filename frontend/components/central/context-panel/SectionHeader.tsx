@@ -11,10 +11,10 @@ export default function SectionHeader({ icon: Icon, title, count, action }: Prop
   return (
     <div className="flex items-center gap-2 mb-3">
       <Icon className="size-3.5 text-muted-foreground" />
-      <h3 className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider flex-1">
+      <h3 className="text-xs font-medium text-muted-foreground flex-1">
         {title}
         {count !== undefined && (
-          <span className="ml-1.5 text-muted-foreground/40">{count}</span>
+          <span className="ml-1.5 text-muted-foreground/45 font-normal tabular-nums">{count}</span>
         )}
       </h3>
       {action}

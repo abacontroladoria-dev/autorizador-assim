@@ -45,9 +45,12 @@ export default function InternalNotesCard() {
         </div>
       )}
 
-      {/* Composer */}
       <div className="rounded-xl border border-amber-200/70 bg-amber-50/50 overflow-hidden">
+        <label htmlFor="internal-note-draft" className="sr-only">
+          Escreva uma nota interna
+        </label>
         <textarea
+          id="internal-note-draft"
           value={draft}
           onChange={e => setDraft(e.target.value)}
           placeholder="Nota para a equipe (não visível ao contato)..."
@@ -60,6 +63,7 @@ export default function InternalNotesCard() {
             Visível apenas para a equipe
           </span>
           <button
+            aria-label="Enviar nota"
             disabled={!draft.trim()}
             className="p-1.5 rounded-lg text-amber-600 hover:bg-amber-100 disabled:opacity-25 disabled:cursor-not-allowed transition-colors"
           >

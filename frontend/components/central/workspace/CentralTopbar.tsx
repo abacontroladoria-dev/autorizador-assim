@@ -1,31 +1,42 @@
 'use client'
 
 import Link from 'next/link'
-import { ArrowLeft, Search } from 'lucide-react'
+import { ArrowLeft, Search, Menu } from 'lucide-react'
 
-export default function CentralTopbar() {
+interface Props {
+  onOpenSidebar: () => void
+}
+
+export default function CentralTopbar({ onOpenSidebar }: Props) {
   return (
     <header
-      style={{ backgroundColor: 'oklch(0.17 0.015 232)' }}
-      className="h-12 shrink-0 flex items-center px-4 gap-4 border-b border-white/[0.08] z-50"
+      className="bg-central-topbar h-12 shrink-0 flex items-center px-4 gap-3 border-b border-border z-50"
     >
+      <button
+        aria-label="Abrir lista de conversas"
+        onClick={onOpenSidebar}
+        className="lg:hidden min-w-11 min-h-11 flex items-center justify-center text-muted-foreground hover:text-foreground transition-colors -ml-2"
+      >
+        <Menu className="size-5" />
+      </button>
+
       <Link
         href="/"
-        className="flex items-center gap-1.5 text-white/50 hover:text-white/80 transition-colors text-sm"
+        className="hidden lg:flex items-center gap-1.5 text-muted-foreground hover:text-foreground transition-colors text-sm"
       >
         <ArrowLeft className="size-4" />
-        <span className="hidden sm:inline">Pulsar</span>
+        <span>Pulsar</span>
       </Link>
 
-      <div className="w-px h-5 bg-white/[0.12]" />
+      <div className="hidden lg:block w-px h-5 bg-border" />
 
-      <span className="text-white/85 text-sm font-medium">Central de Atendimento</span>
+      <h1 className="text-foreground text-sm font-medium truncate">Central de Atendimento</h1>
 
       <div className="ml-auto flex items-center gap-2">
-        <button className="flex items-center gap-2 text-white/40 hover:text-white/70 bg-white/[0.06] hover:bg-white/[0.10] border border-white/[0.08] rounded-lg px-3 py-1.5 text-xs transition-all">
+        <button className="hidden md:flex items-center gap-2 text-muted-foreground hover:text-foreground bg-muted hover:bg-muted/70 border border-border rounded-lg px-3 py-1.5 text-xs transition-all">
           <Search className="size-3.5" />
-          <span className="hidden md:inline">Buscar conversas...</span>
-          <kbd className="hidden md:inline text-white/25 text-[10px] ml-1 font-mono">⌘K</kbd>
+          <span>Buscar conversas...</span>
+          <kbd className="text-muted-foreground/60 text-[10px] ml-1 font-mono">⌘K</kbd>
         </button>
 
         <div className="size-8 rounded-full bg-brand flex items-center justify-center text-white text-xs font-semibold cursor-pointer select-none">

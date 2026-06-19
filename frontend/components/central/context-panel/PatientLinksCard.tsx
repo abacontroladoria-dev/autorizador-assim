@@ -11,7 +11,7 @@ interface Patient {
 }
 
 const MOCK_PATIENTS: Patient[] = [
-  { id: '1', name: 'Lucas Silva',   age: '7 anos', relation: 'Filho', initials: 'LS', palette: 'bg-violet-100 text-violet-600' },
+  { id: '1', name: 'Lucas Silva',   age: '7 anos', relation: 'Filho', initials: 'LS', palette: 'bg-emerald-100 text-emerald-700' },
   { id: '2', name: 'Beatriz Silva', age: '5 anos', relation: 'Filha', initials: 'BS', palette: 'bg-sky-100 text-sky-600'    },
 ]
 
