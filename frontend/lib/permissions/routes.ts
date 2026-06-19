@@ -11,16 +11,18 @@ export const roleDefaults: Record<string, string[]> = {
     'escala_terapeutica', 'agenda_terapeutica', 'salas',
     'guias_digitais', 'auditoria_assim', 'usuarios', 'permissoes', 'cco',
     'autorizacoes', 'preauditoria', 'outros_convenios',
+    'cronograma_solicitacoes', 'ocupacao_clinica',
   ],
   diretoria: [
     'dashboard', 'atendimentos', 'gestao', 'cronograma',
     'escala_terapeutica', 'agenda_terapeutica', 'salas',
     'guias_digitais', 'auditoria_assim', 'cco',
     'preauditoria', 'outros_convenios',
+    'cronograma_solicitacoes', 'ocupacao_clinica',
   ],
   recepcao: [
     'dashboard', 'atendimentos', 'gestao', 'cronograma', 'auditoria_assim',
-    'autorizacoes', 'outros_convenios',
+    'autorizacoes', 'outros_convenios', 'cronograma_solicitacoes',
   ],
   autorizacao: [
     'dashboard', 'cronograma', 'agenda_terapeutica', 'salas', 'auditoria_assim',
@@ -53,6 +55,8 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   autorizacoes: ['/autorizacoes'],
   preauditoria: ['/preauditoria'],
   outros_convenios: ['/outros-convenios'],
+  cronograma_solicitacoes: ['/cronograma/solicitacoes'],
+  ocupacao_clinica: ['/cronograma/ocupacao'],
 }
 
 // Converte um conjunto de códigos de permissão em rotas permitidas,

@@ -16,9 +16,23 @@ import {
   Star,
   KeyRound,
   BarChart3,
+  CalendarPlus,
+  Database,
+  LogOut,
+  TrendingUp,
+  UserCheck,
+  UserPlus,
+  Zap,
+  Clock,
+  XCircle,
+  AlertTriangle,
+  CalendarOff,
+  BookOpen,
+  Settings,
+  Lightbulb,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { getFunctionHeaders, getFunctionUrl } from "@/lib/supabase/functions"
 import toast from "react-hot-toast"
@@ -36,6 +50,23 @@ import { getUsuarioPermissoes } from "@/services/permissoes.service"
 
 type Favorito = { label: string; path: string }
 
+const CODIGO_PARA_ROTAS: Record<string, string[]> = {
+  dashboard: ["/"],
+  atendimentos: ["/solicitar"],
+  gestao: ["/central-pacientes"],
+  cronograma: ["/agenda/pacientes"],
+  escala_terapeutica: ["/central-terapeutas"],
+  agenda_terapeutica: ["/agenda/terapeutas"],
+  salas: ["/agenda/salas"],
+  guias_digitais: ["/guias-digitais"],
+  auditoria_assim: ["/auditoria-assim"],
+  usuarios: ["/admin"],
+  permissoes: ["/admin/permissoes"],
+  cco: ["/cco"],
+  cronograma_solicitacoes: ["/cronograma/solicitacoes"],
+  ocupacao_clinica: ["/cronograma/ocupacao"],
+}
+
 const pathIconMap: Record<string, any> = {
   "/": LayoutDashboard,
   "/solicitar": PlusCircle,
@@ -49,11 +80,26 @@ const pathIconMap: Record<string, any> = {
   "/cco": BarChart3,
   "/admin": ShieldCheck,
   "/admin/permissoes": KeyRound,
+  "/cronograma/solicitacoes?tab=simulacao": UserPlus,
+  "/cronograma/solicitacoes?tab=saida": LogOut,
+  "/cronograma/solicitacoes?tab=ocup-prof": TrendingUp,
+  "/cronograma/solicitacoes?tab=ocup-pac": TrendingUp,
+  "/cronograma/solicitacoes?tab=novo-cron": CalendarPlus,
+  "/cronograma/solicitacoes?tab=banco": Database,
+  "/cronograma/ocupacao?tab=vagas": TrendingUp,
+  "/cronograma/ocupacao?tab=fila": Clock,
+  "/cronograma/ocupacao?tab=recusados": XCircle,
+  "/cronograma/ocupacao?tab=inviavel": AlertTriangle,
+  "/cronograma/ocupacao?tab=gaps": CalendarOff,
+  "/cronograma/ocupacao?tab=inconsistencias": AlertTriangle,
+  "/cronograma/ocupacao?tab=guia": BookOpen,
+  "/cronograma/ocupacao?tab=config": Settings,
 }
 
 export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = getSupabaseClient()
   const { theme } = useTheme()
   const { isImpersonating, impersonatedTarget, canImpersonate } = useImpersonation()
@@ -97,8 +143,16 @@ export default function Sidebar() {
   }
 
   function isActive(path: string) {
+    const [rawPart, queryPart] = path.split("?")
+    const pathPart = rawPart.replace(/\/$/, "") || "/"
     const current = pathname.replace(/\/$/, "") || "/"
-    return current === path
+    if (current !== pathPart) return false
+    if (!queryPart) return true
+    const expected = new URLSearchParams(queryPart)
+    for (const [k, v] of expected) {
+      if (searchParams.get(k) !== v) return false
+    }
+    return true
   }
 
   async function handleLogout() {
@@ -109,7 +163,8 @@ export default function Sidebar() {
 
   function canAccess(path: string) {
     if (!role) return false
-    return allowedPaths.includes(path)
+    const barePath = path.split("?")[0]
+    return allowedPaths.includes(barePath)
   }
 
   useEffect(() => {
@@ -426,6 +481,22 @@ export default function Sidebar() {
               {canAccess("/guias-digitais") && (
                 <MenuItem label="Guias Digitais" icon={FileText} path="/guias-digitais" />
               )}
+            </SidebarGroup>
+          )}
+
+          {/* Alterações de Cronograma */}
+          {(canAccess("/cronograma/solicitacoes") || canAccess("/cronograma/ocupacao")) && (
+            <SidebarGroup title="Alterações de Cronograma" icon={Lightbulb}>
+              {canAccess("/cronograma/ocupacao") && <MenuItem label="Ocp. Clínica" icon={TrendingUp} path="/cronograma/ocupacao?tab=vagas" />}
+              {canAccess("/cronograma/solicitacoes") && <MenuItem label="Ocp. Profissional" icon={TrendingUp} path="/cronograma/solicitacoes?tab=ocup-prof" />}
+              {canAccess("/cronograma/solicitacoes") && <MenuItem label="Ocp. Paciente" icon={TrendingUp} path="/cronograma/solicitacoes?tab=ocup-pac" />}
+              {canAccess("/cronograma/solicitacoes") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/solicitacoes?tab=saida" />}
+              {canAccess("/cronograma/ocupacao") && <MenuItem label="Aceites e Recusas" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
+              {canAccess("/cronograma/solicitacoes") && <MenuItem label="Novo Cronograma" icon={CalendarPlus} path="/cronograma/solicitacoes?tab=novo-cron" />}
+              {canAccess("/cronograma/solicitacoes") && <MenuItem label="Simular Contratação" icon={UserPlus} path="/cronograma/solicitacoes?tab=simulacao" />}
+              {canAccess("/cronograma/ocupacao") && <MenuItem label="Laudo e Oferta" icon={CalendarOff} path="/cronograma/ocupacao?tab=gaps" />}
+              {canAccess("/cronograma/ocupacao") && <MenuItem label="Despadronizados" icon={AlertTriangle} path="/cronograma/ocupacao?tab=inconsistencias" />}
+              {canAccess("/cronograma/ocupacao") && <MenuItem label="Guia" icon={BookOpen} path="/cronograma/ocupacao?tab=guia" />}
             </SidebarGroup>
           )}
 
