@@ -31,7 +31,7 @@ import { useTheme } from "@/contexts/ThemeContext"
 import { useImpersonation } from "@/contexts/ImpersonationContext"
 import { ImpersonationSelector } from "@/components/admin/ImpersonationSelector"
 import { ROLE_LABELS } from "@/constants/roleLabels"
-import { getRoleDefaultPermissions } from "@/lib/permissions/hasPermission"
+import { getRoleDefaultPermissions, codigosToRotas } from "@/lib/permissions/routes"
 import { getUsuarioPermissoes } from "@/services/permissoes.service"
 
 type Favorito = { label: string; path: string }
@@ -107,84 +107,6 @@ export default function Sidebar() {
     router.replace("/login")
   }
 
-  const CODIGO_PARA_ROTAS: Record<string, string[]> = {
-    dashboard: ["/"],
-    atendimentos: ["/solicitar"],
-    gestao: ["/central-pacientes"],
-    cronograma: ["/agenda/pacientes"],
-    escala_terapeutica: ["/central-terapeutas"],
-    agenda_terapeutica: ["/agenda/terapeutas"],
-    salas: ["/agenda/salas"],
-    guias_digitais: ["/guias-digitais"],
-    auditoria_assim: ["/auditoria-assim"],
-    usuarios: ["/admin"],
-    permissoes: ["/admin/permissoes"],
-    cco: ["/cco"],
-  }
-
-  const permissions = {
-    admin: [
-      "/",
-      "/solicitar",
-      "/central-pacientes",
-      "/central-terapeutas",
-      "/agenda/pacientes",
-      "/agenda/terapeutas",
-      "/agenda/salas",
-      "/guias-digitais",
-      "/financeiro",
-      "/admin",
-      "/admin/permissoes",
-      "/auditoria-assim",
-      "/cco",
-    ],
-    diretoria: [
-      "/",
-      "/solicitar",
-      "/central-pacientes",
-      "/central-terapeutas",
-      "/agenda/pacientes",
-      "/agenda/terapeutas",
-      "/agenda/salas",
-      "/guias-digitais",
-      "/financeiro",
-      "/auditoria-assim",
-      "/cco",
-    ],
-    recepcao: [
-      "/",
-      "/solicitar",
-      "/central-pacientes",
-      "/agenda/pacientes",
-      "/auditoria-assim",
-    ],
-    autorizacao: [
-      "/",
-      "/agenda/pacientes",
-      "/agenda/terapeutas",
-      "/agenda/salas",
-      "/auditoria-assim",
-    ],
-    terapeutico: [
-      "/",
-      "/central-terapeutas",
-      "/agenda/salas",
-      "/agenda/terapeutas",
-    ],
-    faturamento: [
-      "/",
-      "/guias-digitais",
-      "/agenda/pacientes",
-      "/agenda/terapeutas",
-      "/agenda/salas",
-      "/cco",
-    ],
-    rp: [
-      "/",
-      "/central-terapeutas",
-    ],
-  }
-
   function canAccess(path: string) {
     if (!role) return false
     return allowedPaths.includes(path)
@@ -243,8 +165,7 @@ export default function Sidebar() {
         }
       }
 
-      const rotas = [...codigos].flatMap(c => CODIGO_PARA_ROTAS[c] ?? [])
-      if (!rotas.includes("/")) rotas.unshift("/")
+      const rotas = codigosToRotas(codigos)
 
       if (isMounted) {
         setAllowedPaths(rotas)

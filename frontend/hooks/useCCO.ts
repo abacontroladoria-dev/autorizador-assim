@@ -243,7 +243,7 @@ function buildCCOData(rows: CCOAtendimentoRow[], hoje: string, dataFim: string):
     const [sy, sm, sd] = row.data_tratativa.split('-').map(Number)
     const dias = Math.floor((dataFimMs - new Date(sy, sm - 1, sd).getTime()) / 86_400_000)
     const atual = ultimaEvolucaoPorTerapeuta[t]
-    if (atual === undefined || dias < atual) {
+    if (atual == null || dias < atual) {
       ultimaEvolucaoPorTerapeuta[t] = dias
     }
   }

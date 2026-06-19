@@ -299,11 +299,7 @@ async function carregarLista() {
   const dataFiltro = dataSelecionada
 
   let { data, error } = await supabase
-    .from('vw_central_autorizacoes')
-    .select(CAMPOS_CENTRAL_AUTORIZACOES)
-    .eq('data_atendimento', dataFiltro)
-    .eq('mostrar_na_tela', true)
-    .order('horario', { ascending: true })
+    .rpc('listar_central_autorizacoes', { p_data: dataFiltro })
 
   if (
     error &&
@@ -314,7 +310,7 @@ async function carregarLista() {
       .from('vw_central_autorizacoes')
       .select(CAMPOS_CENTRAL_AUTORIZACOES_LEGADO)
       .eq('data_atendimento', dataFiltro)
-      .order('horario', { ascending: true })
+      .eq('mostrar_na_tela', true)
 
     data = retry.data as typeof data
     error = retry.error
