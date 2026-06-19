@@ -67,7 +67,7 @@ interface Props {
   onApiFetch: () => Promise<void>
 }
 
-const card: React.CSSProperties = { background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", boxShadow: "0 1px 4px rgba(0,0,0,.06)", padding: "16px" }
+const card: React.CSSProperties = { background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", boxShadow: "0 1px 4px rgba(0,0,0,.06)", padding: "16px" }
 
 export function GuiaTab({ apiFetch, apiErr, onApiFetch }: Props) {
   const { cfg, sCfg } = useCronogramaData()
@@ -81,13 +81,13 @@ export function GuiaTab({ apiFetch, apiErr, onApiFetch }: Props) {
         <div style={{ fontWeight: 900, color: B.navy, fontSize: "16px", marginBottom: "12px" }}>🗺️ Fluxo de Trabalho</div>
         <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
           {FLUXO.map(f => (
-            <div key={f.step} style={{ display: "flex", gap: "12px", alignItems: "flex-start", padding: "10px 12px", background: "#fafafa", borderRadius: "10px", border: "1px solid #f0f0f0" }}>
+            <div key={f.step} style={{ display: "flex", gap: "12px", alignItems: "flex-start", padding: "10px 12px", background: "var(--card)", borderRadius: "10px", border: "1px solid var(--border)" }}>
               <div style={{ flexShrink: 0, width: "24px", height: "24px", borderRadius: "50%", background: B.blue, color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: 800 }}>
                 {f.step}
               </div>
               <div>
                 <div style={{ fontWeight: 700, fontSize: "13px", color: B.navy, marginBottom: "2px" }}>{f.icon} {f.label}</div>
-                <div style={{ fontSize: "12px", color: "#6b7280", lineHeight: "1.5" }}>{f.desc}</div>
+                <div style={{ fontSize: "12px", color: "var(--muted-foreground)", lineHeight: "1.5" }}>{f.desc}</div>
               </div>
             </div>
           ))}
@@ -101,16 +101,16 @@ export function GuiaTab({ apiFetch, apiErr, onApiFetch }: Props) {
             <span style={{ fontSize: "18px" }}>{m.icon}</span>
             <div style={{ fontWeight: 900, color: m.cor, fontSize: "15px" }}>{m.grupo}</div>
           </div>
-          <div style={{ fontSize: "12px", color: "#374151", lineHeight: "1.6", marginBottom: "12px", padding: "8px 10px", background: m.corLt, borderRadius: "8px" }}>
+          <div style={{ fontSize: "12px", color: "var(--card-foreground)", lineHeight: "1.6", marginBottom: "12px", padding: "8px 10px", background: m.corLt, borderRadius: "8px" }}>
             {m.desc}
           </div>
           <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
             {m.abas.map(a => (
-              <div key={a.nome} style={{ display: "flex", gap: "10px", padding: "10px 12px", background: "#fafafa", borderRadius: "10px", border: "1px solid #f0f0f0" }}>
+              <div key={a.nome} style={{ display: "flex", gap: "10px", padding: "10px 12px", background: "var(--card)", borderRadius: "10px", border: "1px solid var(--border)" }}>
                 <span style={{ fontSize: "16px", flexShrink: 0 }}>{a.icon}</span>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: "12px", color: B.navy, marginBottom: "3px" }}>{a.nome}</div>
-                  <div style={{ fontSize: "12px", color: "#6b7280", lineHeight: "1.5" }}>{a.desc}</div>
+                  <div style={{ fontSize: "12px", color: "var(--muted-foreground)", lineHeight: "1.5" }}>{a.desc}</div>
                 </div>
               </div>
             ))}
@@ -129,7 +129,7 @@ export function GuiaTab({ apiFetch, apiErr, onApiFetch }: Props) {
                 <span style={{ fontSize: "18px" }}>{ic}</span>
                 <div>
                   <div style={{ fontWeight: 700, fontSize: "13px", color: s.color }}>{lb}</div>
-                  <div style={{ fontSize: "12px", color: "#6b7280" }}>{d}</div>
+                  <div style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>{d}</div>
                 </div>
               </div>
             )
@@ -140,16 +140,16 @@ export function GuiaTab({ apiFetch, apiErr, onApiFetch }: Props) {
       {/* Legenda Regras */}
       <div style={card}>
         <div style={{ fontWeight: 900, color: B.navy, fontSize: "15px", marginBottom: "4px" }}>📖 Como surgiu cada sugestão (Regras)</div>
-        <div style={{ fontSize: "12px", color: "#9ca3af", marginBottom: "12px" }}>Exibida no badge "Regra" de cada card em Aumentar Ocupação (Clínica).</div>
+        <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "12px" }}>Exibida no badge "Regra" de cada card em Aumentar Ocupação (Clínica).</div>
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
           {REGRAS_LEGENDA.map(({ r, c, title, desc }) => (
-            <div key={r} style={{ display: "flex", gap: "12px", padding: "12px", background: "#fafafa", borderRadius: "10px", border: "1px solid #f0f0f0" }}>
+            <div key={r} style={{ display: "flex", gap: "12px", padding: "12px", background: "var(--card)", borderRadius: "10px", border: "1px solid var(--border)" }}>
               <div style={{ flexShrink: 0, paddingTop: "1px" }}>
                 <span style={{ background: c, color: "white", borderRadius: "8px", padding: "3px 9px", fontSize: "11px", fontWeight: 700, whiteSpace: "nowrap", display: "inline-block" }}>{r}</span>
               </div>
               <div>
                 <div style={{ fontWeight: 700, fontSize: "13px", color: B.navy, marginBottom: "3px" }}>{title}</div>
-                <div style={{ fontSize: "12px", color: "#6b7280", lineHeight: "1.6" }}>{desc}</div>
+                <div style={{ fontSize: "12px", color: "var(--muted-foreground)", lineHeight: "1.6" }}>{desc}</div>
               </div>
             </div>
           ))}
@@ -169,7 +169,7 @@ export function GuiaTab({ apiFetch, apiErr, onApiFetch }: Props) {
               <span style={{ flexShrink: 0, background: color, color: "white", borderRadius: "8px", padding: "3px 8px", fontSize: "11px", fontWeight: 800, height: "fit-content" }}>{code}</span>
               <div>
                 <div style={{ fontWeight: 700, fontSize: "13px", color, marginBottom: "3px" }}>{title}</div>
-                <div style={{ fontSize: "12px", color: "#6b7280", lineHeight: "1.6" }}>{desc}</div>
+                <div style={{ fontSize: "12px", color: "var(--muted-foreground)", lineHeight: "1.6" }}>{desc}</div>
               </div>
             </div>
           ))}
@@ -179,7 +179,7 @@ export function GuiaTab({ apiFetch, apiErr, onApiFetch }: Props) {
       {/* Convênios e elegibilidade AE/HS */}
       <div style={card}>
         <div style={{ fontWeight: 900, color: B.navy, fontSize: "15px", marginBottom: "12px" }}>💳 Convênios e Elegibilidade AE/HS</div>
-        <div style={{ fontSize: "12px", color: "#6b7280", lineHeight: "1.6", marginBottom: "10px" }}>
+        <div style={{ fontSize: "12px", color: "var(--muted-foreground)", lineHeight: "1.6", marginBottom: "10px" }}>
           Alguns convênios permitem Aplicador ABA em Escola/Casa (AE) e Habilidades Sociais (HS) simultaneamente com a sessão clínica. Isso afeta as sugestões complementares (R3).
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
@@ -189,9 +189,9 @@ export function GuiaTab({ apiFetch, apiErr, onApiFetch }: Props) {
             { conv: "Particular",     elegivel: false, obs: "Inelegível para AE e HS." },
             { conv: "SulAmérica, Bradesco, Porto Seguro, Unimed, Amil, Leve Saúde", elegivel: true, obs: "Elegíveis para AE/HS." },
           ].map(({ conv, elegivel, obs }) => (
-            <div key={conv} style={{ display: "flex", gap: "10px", padding: "8px 12px", background: elegivel ? B.limeLt : "#f8fafc", borderRadius: "8px", border: `1px solid ${elegivel ? B.lime : "#e5e7eb"}` }}>
-              <span style={{ fontSize: "12px", fontWeight: 700, flexShrink: 0, color: elegivel ? "#4a6e20" : "#6b7280" }}>{elegivel ? "✅" : "❌"} {conv}</span>
-              <span style={{ fontSize: "11px", color: "#6b7280" }}>{obs}</span>
+            <div key={conv} style={{ display: "flex", gap: "10px", padding: "8px 12px", background: elegivel ? B.limeLt : "var(--muted)", borderRadius: "8px", border: `1px solid ${elegivel ? B.lime : "var(--border)"}` }}>
+              <span style={{ fontSize: "12px", fontWeight: 700, flexShrink: 0, color: elegivel ? "#4a6e20" : "var(--muted-foreground)" }}>{elegivel ? "✅" : "❌"} {conv}</span>
+              <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>{obs}</span>
             </div>
           ))}
         </div>
@@ -200,7 +200,7 @@ export function GuiaTab({ apiFetch, apiErr, onApiFetch }: Props) {
       {/* Terapia Ação × Terapia Exibição */}
       <div style={card}>
         <div style={{ fontWeight: 900, color: B.navy, fontSize: "15px", marginBottom: "4px" }}>🏷️ Terapia Ação × Terapia Exibição</div>
-        <div style={{ fontSize: "12px", color: "#6b7280", lineHeight: "1.6", marginBottom: "12px" }}>
+        <div style={{ fontSize: "12px", color: "var(--muted-foreground)", lineHeight: "1.6", marginBottom: "12px" }}>
           A "Terapia Ação" é o código interno da sessão (coluna <strong>Terapia</strong> do CSV). A "Terapia Exibição" é o nome que aparece para famílias e relatórios (coluna <strong>Terapia Exibição</strong>). Os IDs são permanentes — nomes podem ser renomeados pelo gestor sem quebrar as regras. A aba <em>Despadronizados</em> detecta automaticamente inconsistências.
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
@@ -208,7 +208,7 @@ export function GuiaTab({ apiFetch, apiErr, onApiFetch }: Props) {
           {/* Grupo 1 */}
           <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "10px", padding: "12px 14px" }}>
             <div style={{ fontWeight: 700, fontSize: "12px", color: "#1d4ed8", marginBottom: "6px" }}>Grupo 1 — Exibição sempre = "Psicologia ABA" (ID 2271)</div>
-            <div style={{ fontSize: "11px", color: "#374151", display: "flex", flexWrap: "wrap", gap: "4px" }}>
+            <div style={{ fontSize: "11px", color: "var(--card-foreground)", display: "flex", flexWrap: "wrap", gap: "4px" }}>
               {["Aplicador ABA (EF) · 2269", "Aplicador ABA (PS) · 2317", "Aplicador ABA Casa · 2262",
                 "Aplicador ABA Escola · 2261", "Coordenador de Caso · 2248", "Supervisão ABA · 2353", "Aplicador ABA (SF) · 2263"].map(t => (
                 <span key={t} style={{ background: "#dbeafe", borderRadius: "6px", padding: "2px 7px" }}>{t}</span>
@@ -219,7 +219,7 @@ export function GuiaTab({ apiFetch, apiErr, onApiFetch }: Props) {
           {/* Grupo 2 */}
           <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "10px", padding: "12px 14px" }}>
             <div style={{ fontWeight: 700, fontSize: "12px", color: "#15803d", marginBottom: "6px" }}>Grupo 2 — Exibição idêntica à Ação (sem campo separado)</div>
-            <div style={{ fontSize: "11px", color: "#374151", display: "flex", flexWrap: "wrap", gap: "4px" }}>
+            <div style={{ fontSize: "11px", color: "var(--card-foreground)", display: "flex", flexWrap: "wrap", gap: "4px" }}>
               {["Fonoaudiologia · 2250", "Fisioterapia Aquática · 2249", "Fisioterapia · 2258",
                 "Terapia Ocupacional · 2255", "Psicomotricidade · 2253", "Psicopedagogia · 2254",
                 "Musicoterapia · 2251", "Psicologia · 2259", "Terapia Alimentar · 2274",
@@ -235,7 +235,7 @@ export function GuiaTab({ apiFetch, apiErr, onApiFetch }: Props) {
             <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px" }}>
               <div>
                 <span style={{ fontWeight: 700 }}>Aplicador ABA (AE) · ID 2260</span>
-                <div style={{ color: "#374151", marginTop: "2px", paddingLeft: "8px", borderLeft: "3px solid #c4b5fd" }}>
+                <div style={{ color: "var(--card-foreground)", marginTop: "2px", paddingLeft: "8px", borderLeft: "3px solid #c4b5fd" }}>
                   Laudo "Arteterapia" &gt; 0 → exibe <strong>"Arteterapia (Psicologia ABA)"</strong> (ID 2578)<br/>
                   Sem laudo → exibe <strong>"Psicologia ABA"</strong> (ID 2271)<br/>
                   <span style={{ color: "#dc2626" }}>ASSIM: só permitido com laudo Arteterapia &gt; 1 (exibição = 2578, nunca 2271)</span><br/>
@@ -244,7 +244,7 @@ export function GuiaTab({ apiFetch, apiErr, onApiFetch }: Props) {
               </div>
               <div>
                 <span style={{ fontWeight: 700 }}>Aplicador ABA (HS) · ID 2283</span>
-                <div style={{ color: "#374151", marginTop: "2px", paddingLeft: "8px", borderLeft: "3px solid #c4b5fd" }}>
+                <div style={{ color: "var(--card-foreground)", marginTop: "2px", paddingLeft: "8px", borderLeft: "3px solid #c4b5fd" }}>
                   Laudo "Habilidades Sociais" &gt; 0 → exibe <strong>"Habilidades Sociais (Psicologia ABA)"</strong> (ID 2654)<br/>
                   Sem laudo → exibe <strong>"Psicologia ABA"</strong> (ID 2271)<br/>
                   <span style={{ color: "#dc2626" }}>ASSIM: só permitido com laudo Habilidades Sociais &gt; 1 (exibição = 2654, nunca 2271)</span><br/>
@@ -260,7 +260,7 @@ export function GuiaTab({ apiFetch, apiErr, onApiFetch }: Props) {
       {/* API TitaTherapy */}
       <div style={card}>
         <div style={{ fontWeight: 800, color: B.navy, marginBottom: "4px", fontSize: "14px" }}>🔌 Token da API TitaTherapy</div>
-        <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "8px" }}>
+        <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "8px" }}>
           Semana de referência automática: <strong>{refWeek.label}</strong>. CORS pode bloquear chamadas diretas do browser — use upload manual se necessário.
         </div>
         <input
@@ -268,10 +268,10 @@ export function GuiaTab({ apiFetch, apiErr, onApiFetch }: Props) {
           onChange={e => sCfg({ ...cfg, apiToken: e.target.value })}
           placeholder="Cole aqui seu X-INTEGRACAO-TOKEN"
           type="password"
-          style={{ border: "1px solid #d1d5db", borderRadius: "8px", padding: "8px 12px", fontSize: "13px", width: "100%", fontFamily: "monospace", boxSizing: "border-box", marginBottom: "10px" }}
+          style={{ border: "1px solid var(--border)", borderRadius: "8px", padding: "8px 12px", fontSize: "13px", width: "100%", fontFamily: "monospace", boxSizing: "border-box", marginBottom: "10px" }}
         />
-        <div style={{ display: "flex", alignItems: "center", gap: "10px", background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: "10px", padding: "12px 14px", flexWrap: "wrap" }}>
-          <span style={{ fontSize: "12px", color: "#6b7280", fontWeight: 700 }}>Próxima referência:</span>
+        <div style={{ display: "flex", alignItems: "center", gap: "10px", background: "var(--muted)", border: "1px solid var(--border)", borderRadius: "10px", padding: "12px 14px", flexWrap: "wrap" }}>
+          <span style={{ fontSize: "12px", color: "var(--muted-foreground)", fontWeight: 700 }}>Próxima referência:</span>
           <span style={{ fontSize: "13px", fontWeight: 800, color: B.blue }}>{refWeek.label}</span>
           <button onClick={onApiFetch} disabled={apiFetch}
             style={{ fontSize: "11px", padding: "4px 10px", borderRadius: "8px", background: B.blue, color: "white", border: "none", cursor: apiFetch ? "default" : "pointer", fontFamily: "inherit", fontWeight: 700, opacity: apiFetch ? 0.7 : 1 }}>

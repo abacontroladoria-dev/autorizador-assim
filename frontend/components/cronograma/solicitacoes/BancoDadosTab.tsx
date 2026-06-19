@@ -17,8 +17,8 @@ interface EstadoStyle { bg: string; c: string; label: string }
 interface StatusStyle { bg: string; c: string }
 
 const ESTADO_S: Record<EstadoKey, EstadoStyle> = {
-  sem_csv:      { bg: "#f3f4f6", c: "#6b7280",  label: "CSV não carregado" },
-  sem_slot:     { bg: "#f3f4f6", c: "#6b7280",  label: "Sem sessão definida" },
+  sem_csv:      { bg: "var(--muted)", c: "var(--muted-foreground)",  label: "CSV não carregado" },
+  sem_slot:     { bg: "var(--muted)", c: "var(--muted-foreground)",  label: "Sem sessão definida" },
   conflito:     { bg: "#fef2f2", c: "#dc2626",  label: "Conflito! Vaga dada a outro" },
   agendado:     { bg: B.limeLt,  c: "#4a6e20",  label: "Já agendado no CSV" },
   aguardando_ok:{ bg: B.blueLt,  c: B.blue,     label: "Aguardando, vaga disponível" },
@@ -26,11 +26,11 @@ const ESTADO_S: Record<EstadoKey, EstadoStyle> = {
 }
 
 const STATUS_S: Record<string, StatusStyle> = {
-  pendente:    { bg: "#f3f4f6", c: "#6b7280" },
+  pendente:    { bg: "var(--muted)", c: "var(--muted-foreground)" },
   aguardando:  { bg: B.blueLt,  c: B.blue },
   resolvido:   { bg: B.limeLt,  c: "#4a6e20" },
   recusado:    { bg: "#fef2f2", c: "#dc2626" },
-  sem_solucao: { bg: "#f3f4f6", c: "#9ca3af" },
+  sem_solucao: { bg: "var(--muted)", c: "var(--muted-foreground)" },
 }
 
 interface CruzadoItem {
@@ -230,7 +230,7 @@ export function BancoDadosTab({ cRows, statusMap, persistStatus }: Props) {
               const borderColor =
                 c.estado === "conflito" ? "#fca5a5"
                   : c.estado === "agendado" ? `${B.lime}88`
-                    : "#e5e7eb"
+                    : "var(--border)"
 
               return (
                 <div

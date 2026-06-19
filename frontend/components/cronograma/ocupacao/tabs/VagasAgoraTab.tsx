@@ -47,8 +47,8 @@ export function VagasAgoraTab({ res, waMap, onWA, onInv, onCron }: Props) {
 
   const hasFilter = fPac || fProf || fUnid || fEsp || fPr || fWa
 
-  const inputSt: React.CSSProperties = { border: "1px solid #d1d5db", borderRadius: "8px", padding: "6px 12px", fontSize: "13px", fontFamily: "inherit" }
-  const selSt: React.CSSProperties = { ...inputSt, background: "white" }
+  const inputSt: React.CSSProperties = { border: "1px solid var(--border)", borderRadius: "8px", padding: "6px 12px", fontSize: "13px", fontFamily: "inherit" }
+  const selSt: React.CSSProperties = { ...inputSt, background: "var(--card)" }
 
   const filaEspera = res?.filaEspera ?? []
 
@@ -72,7 +72,7 @@ export function VagasAgoraTab({ res, waMap, onWA, onInv, onCron }: Props) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
       {/* Filtros */}
-      <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", boxShadow: "0 1px 4px rgba(0,0,0,.06)", padding: "14px" }}>
+      <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", boxShadow: "0 1px 4px rgba(0,0,0,.06)", padding: "14px" }}>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "center" }}>
           <input value={fPac} onChange={e => setFPac(e.target.value)} placeholder="🔍 Buscar paciente..." style={{ ...inputSt, flex: "1", minWidth: "150px" }} />
           <input value={fProf} onChange={e => setFProf(e.target.value)} placeholder="👤 Buscar profissional..." style={{ ...inputSt, flex: "1", minWidth: "160px" }} />
@@ -96,11 +96,11 @@ export function VagasAgoraTab({ res, waMap, onWA, onInv, onCron }: Props) {
           </select>
           {hasFilter && (
             <button onClick={() => { setFPac(""); setFProf(""); setFUnid(""); setFEsp(""); setFPr(""); setFWa("") }}
-              style={{ fontSize: "12px", color: "#9ca3af", background: "none", border: "none", cursor: "pointer" }}>
+              style={{ fontSize: "12px", color: "var(--muted-foreground)", background: "none", border: "none", cursor: "pointer" }}>
               ✕ Limpar
             </button>
           )}
-          {res && <div style={{ fontSize: "12px", color: "#9ca3af", marginLeft: "auto" }}>{vFilt.length} resultado(s)</div>}
+          {res && <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginLeft: "auto" }}>{vFilt.length} resultado(s)</div>}
         </div>
       </div>
 
@@ -140,7 +140,7 @@ export function VagasAgoraTab({ res, waMap, onWA, onInv, onCron }: Props) {
           <>
             <button
               onClick={() => setLivreOpen(o => !o)}
-              style={{ display: "flex", alignItems: "center", gap: "8px", background: B.blueLt, border: `1px solid ${B.blue}44`, borderRadius: "12px", padding: "10px 14px", cursor: "pointer", textAlign: "left", fontFamily: "inherit", width: "100%" }}
+              style={{ display: "flex", alignItems: "center", gap: "8px", background: "var(--cron-active-bg)", border: `1px solid ${B.blue}44`, borderRadius: "12px", padding: "10px 14px", cursor: "pointer", textAlign: "left", fontFamily: "inherit", width: "100%" }}
             >
               <span style={{ fontSize: "12px", color: B.blue, fontWeight: 700, flex: 1 }}>
                 📅 Ocupar Sessão Totalmente Livre · {livre.length}
@@ -170,24 +170,24 @@ export function VagasAgoraTab({ res, waMap, onWA, onInv, onCron }: Props) {
       </button>
 
       {filaOpen && slotQueue.length === 0 && res && (
-        <div style={{ background: "white", borderRadius: "12px", border: "1px dashed #fed7aa", padding: "20px 24px", textAlign: "center" }}>
+        <div style={{ background: "var(--card)", borderRadius: "12px", border: "1px dashed #fed7aa", padding: "20px 24px", textAlign: "center" }}>
           <div style={{ fontSize: "28px", marginBottom: "6px" }}>🔢</div>
           <div style={{ color: B.orange, fontSize: "13px", fontWeight: 600 }}>Nenhuma vaga com múltiplos candidatos</div>
-          <div style={{ color: "#9ca3af", fontSize: "12px", marginTop: "4px" }}>Quando mais de um paciente concorre pela mesma vaga, o próximo da fila aparece aqui. Se o 1° recusar, o próximo sobe automaticamente.</div>
+          <div style={{ color: "var(--muted-foreground)", fontSize: "12px", marginTop: "4px" }}>Quando mais de um paciente concorre pela mesma vaga, o próximo da fila aparece aqui. Se o 1° recusar, o próximo sobe automaticamente.</div>
         </div>
       )}
 
       {filaOpen && slotQueue.map(({ tP, prof, dia, hora, unidade, primary, queue }, gi) => (
-        <div key={gi} style={{ background: "white", border: `1px solid ${B.orange}33`, borderRadius: "14px", overflow: "hidden" }}>
+        <div key={gi} style={{ background: "var(--card)", border: `1px solid ${B.orange}33`, borderRadius: "14px", overflow: "hidden" }}>
           {/* Cabeçalho da vaga */}
           <div style={{ background: B.orangeLt, padding: "8px 14px", display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
             <span style={{ fontWeight: 700, fontSize: "12px", color: B.orange }}>{tP}</span>
-            <span style={{ color: "#9ca3af", fontSize: "11px" }}>·</span>
-            <span style={{ fontSize: "12px", color: "#6b7280" }}>{fmtName(prof)}</span>
-            <span style={{ color: "#9ca3af", fontSize: "11px" }}>·</span>
+            <span style={{ color: "var(--muted-foreground)", fontSize: "11px" }}>·</span>
+            <span style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>{fmtName(prof)}</span>
+            <span style={{ color: "var(--muted-foreground)", fontSize: "11px" }}>·</span>
             <span style={{ fontSize: "12px", fontWeight: 700, color: B.navy }}>{dia} {hora}</span>
-            <span style={{ color: "#9ca3af", fontSize: "11px" }}>·</span>
-            <span style={{ fontSize: "11px", color: "#6b7280" }}>{unidade}</span>
+            <span style={{ color: "var(--muted-foreground)", fontSize: "11px" }}>·</span>
+            <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>{unidade}</span>
           </div>
 
           {/* Lista de candidatos */}
@@ -207,7 +207,7 @@ export function VagasAgoraTab({ res, waMap, onWA, onInv, onCron }: Props) {
             {queue.map((s, qi) => (
               <div key={qi} style={{ display: "flex", alignItems: "center", gap: "8px", padding: "7px 14px", borderBottom: qi < queue.length - 1 ? `1px solid ${B.orange}22` : undefined, opacity: 0.85 }}>
                 <span style={{ fontSize: "11px", fontWeight: 800, color: B.orange, minWidth: "20px" }}>{qi + 2}°</span>
-                <span style={{ flex: 1, fontWeight: 600, fontSize: "13px", color: "#374151" }}>{s.pac}</span>
+                <span style={{ flex: 1, fontWeight: 600, fontSize: "13px", color: "var(--card-foreground)" }}>{s.pac}</span>
                 <PBadge prio={s.prio} />
                 <span style={{ fontSize: "10px", color: B.orange, background: B.orangeLt, borderRadius: "999px", padding: "2px 8px", fontWeight: 600 }}>na fila</span>
               </div>
@@ -234,20 +234,20 @@ export function VagasAgoraTab({ res, waMap, onWA, onInv, onCron }: Props) {
 function SectionHeader({ label, count, color }: { label: string; count: number; color: string }) {
   return (
     <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-      <div style={{ flex: 1, height: "1px", background: "#e5e7eb" }} />
-      <span style={{ fontSize: "11px", fontWeight: 700, color, background: "white", padding: "2px 10px", border: `1px solid ${color}33`, borderRadius: "999px" }}>
+      <div style={{ flex: 1, height: "1px", background: "var(--border)" }} />
+      <span style={{ fontSize: "11px", fontWeight: 700, color, background: "var(--card)", padding: "2px 10px", border: `1px solid ${color}33`, borderRadius: "999px" }}>
         {label} · {count}
       </span>
-      <div style={{ flex: 1, height: "1px", background: "#e5e7eb" }} />
+      <div style={{ flex: 1, height: "1px", background: "var(--border)" }} />
     </div>
   )
 }
 
 function Empty({ icon, text }: { icon: string; text: string }) {
   return (
-    <div style={{ background: "white", borderRadius: "14px", border: "2px dashed #e5e7eb", padding: "32px 24px", textAlign: "center" }}>
+    <div style={{ background: "var(--card)", borderRadius: "14px", border: "2px dashed var(--border)", padding: "32px 24px", textAlign: "center" }}>
       <div style={{ fontSize: "40px", marginBottom: "8px" }}>{icon}</div>
-      <div style={{ color: "#9ca3af", fontSize: "14px" }}>{text}</div>
+      <div style={{ color: "var(--muted-foreground)", fontSize: "14px" }}>{text}</div>
     </div>
   )
 }

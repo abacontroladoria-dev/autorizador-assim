@@ -167,14 +167,14 @@ function CronViewModal({ pac, conv, cRows, items, onClose }: CronViewModalProps)
     >
       <div style={{ background: "var(--color-card, white)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", width: "100%", maxWidth: "820px" }}>
         {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "18px 20px 14px", borderBottom: "1px solid #e5e7eb" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "18px 20px 14px", borderBottom: "1px solid var(--border)" }}>
           <div>
             <div style={{ fontWeight: 900, fontSize: "15px" }}>{pac}</div>
-            {conv && <div style={{ fontSize: "11px", color: "#9ca3af", marginTop: "2px" }}>{conv}</div>}
+            {conv && <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "2px" }}>{conv}</div>}
           </div>
           <button
             onClick={onClose}
-            style={{ padding: "4px 10px", borderRadius: "8px", border: "1px solid #e5e7eb", background: "#f3f4f6", cursor: "pointer", fontSize: "13px", fontFamily: "inherit" }}
+            style={{ padding: "4px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--muted)", cursor: "pointer", fontSize: "13px", fontFamily: "inherit" }}
           >
             ✕ Fechar
           </button>
@@ -183,7 +183,7 @@ function CronViewModal({ pac, conv, cRows, items, onClose }: CronViewModalProps)
         {/* Grade */}
         <div style={{ padding: "16px 20px", overflowX: "auto" }}>
           {dias.length === 0 ? (
-            <div style={{ textAlign: "center", color: "#9ca3af", fontSize: "13px", padding: "24px 0" }}>
+            <div style={{ textAlign: "center", color: "var(--muted-foreground)", fontSize: "13px", padding: "24px 0" }}>
               Nenhuma sessão agendada encontrada no CSV.
             </div>
           ) : (
@@ -191,7 +191,7 @@ function CronViewModal({ pac, conv, cRows, items, onClose }: CronViewModalProps)
               <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "320px" }}>
                 <thead>
                   <tr>
-                    <th style={{ width: "48px", paddingBottom: "6px", textAlign: "right", paddingRight: "8px", fontSize: "11px", color: "#9ca3af", fontWeight: 400 }}>Hora</th>
+                    <th style={{ width: "48px", paddingBottom: "6px", textAlign: "right", paddingRight: "8px", fontSize: "11px", color: "var(--muted-foreground)", fontWeight: 400 }}>Hora</th>
                     {dias.map(d => (
                       <th key={d} style={{ minWidth: "120px", paddingBottom: "6px", textAlign: "center", fontSize: "13px", color: B.navy, fontWeight: 800 }}>
                         {d.replace("-feira", "")}
@@ -201,7 +201,7 @@ function CronViewModal({ pac, conv, cRows, items, onClose }: CronViewModalProps)
                 </thead>
                 <tbody>
                   {horasGrid.map(hora => (
-                    <tr key={hora} style={{ borderTop: "1px solid #f1f5f9" }}>
+                    <tr key={hora} style={{ borderTop: "1px solid var(--border)" }}>
                       <td style={{ textAlign: "right", paddingRight: "8px", verticalAlign: "top", paddingTop: "6px", fontFamily: "monospace", fontSize: "13px", fontWeight: 800, color: B.navy }}>{hora}</td>
                       {dias.map(d => {
                         const cells = cMap[`${d}|||${hora}`] || []
@@ -213,12 +213,12 @@ function CronViewModal({ pac, conv, cRows, items, onClose }: CronViewModalProps)
                                   <span style={{ fontSize: "10px", color: "#dc2626", fontStyle: "italic" }}>slot vazio</span>
                                 </div>
                               ) : (
-                                <div key={ci} style={{ background: s.flagged ? "#fef9c3" : "#f8fafc", border: `1px solid ${s.flagged ? "#f59e0b" : "#e2e8f0"}`, borderRadius: "8px", padding: "6px 8px", marginBottom: "2px", minHeight: "58px", display: "flex", flexDirection: "column", gap: "2px" }}>
-                                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#1f2937", lineHeight: "1.3" }}>{s.terapia}</div>
+                                <div key={ci} style={{ background: s.flagged ? "#fef9c3" : "var(--muted)", border: `1px solid ${s.flagged ? "#f59e0b" : "var(--border)"}`, borderRadius: "8px", padding: "6px 8px", marginBottom: "2px", minHeight: "58px", display: "flex", flexDirection: "column", gap: "2px" }}>
+                                  <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--card-foreground)", lineHeight: "1.3" }}>{s.terapia}</div>
                                   {s.terapiaExib && s.terapiaExib !== "—" && s.terapiaExib !== s.terapia && (
-                                    <div style={{ fontSize: "10px", color: s.flagged ? "#dc2626" : "#6b7280", lineHeight: "1.2" }}>({s.terapiaExib})</div>
+                                    <div style={{ fontSize: "10px", color: s.flagged ? "#dc2626" : "var(--muted-foreground)", lineHeight: "1.2" }}>({s.terapiaExib})</div>
                                   )}
-                                  <div style={{ fontSize: "10px", color: "#6b7280" }}>{fmtName(s.prof)}</div>
+                                  <div style={{ fontSize: "10px", color: "var(--muted-foreground)" }}>{fmtName(s.prof)}</div>
                                   {s.flagged && <div style={{ fontSize: "9px", fontWeight: 700, color: "#92400e", marginTop: "auto" }}>⚠</div>}
                                 </div>
                               )
@@ -333,10 +333,10 @@ function ProfViewModal({ prof, cRows, onClose }: ProfViewModalProps) {
       <div style={{ background: "var(--color-card, white)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", width: "100%", maxWidth: "900px" }}>
 
         {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "18px 20px 14px", borderBottom: "1px solid #e5e7eb" }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "18px 20px 14px", borderBottom: "1px solid var(--border)" }}>
           <div>
             <div style={{ fontWeight: 900, fontSize: "15px" }}>{fmtName(prof)}</div>
-            <div style={{ fontSize: "11px", color: "#9ca3af", marginTop: "2px" }}>Agenda semanal completa</div>
+            <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "2px" }}>Agenda semanal completa</div>
             {erros.length > 0 && (
               <div style={{ fontSize: "11px", color: "#dc2626", marginTop: "4px", fontWeight: 700 }}>
                 ⚠ {erros.length} {erros.length === 1 ? "slot fora" : "slots fora"} da unidade do turno (agendados e livres) — marcados em vermelho
@@ -345,7 +345,7 @@ function ProfViewModal({ prof, cRows, onClose }: ProfViewModalProps) {
           </div>
           <button
             onClick={onClose}
-            style={{ padding: "4px 10px", borderRadius: "8px", border: "1px solid #e5e7eb", background: "#f3f4f6", cursor: "pointer", fontSize: "13px", fontFamily: "inherit" }}
+            style={{ padding: "4px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--muted)", cursor: "pointer", fontSize: "13px", fontFamily: "inherit" }}
           >
             ✕ Fechar
           </button>
@@ -354,7 +354,7 @@ function ProfViewModal({ prof, cRows, onClose }: ProfViewModalProps) {
         {/* Grade semanal */}
         <div style={{ padding: "16px 20px", overflowX: "auto" }}>
           {sessoes.length === 0 ? (
-            <div style={{ textAlign: "center", color: "#9ca3af", fontSize: "13px", padding: "24px 0" }}>
+            <div style={{ textAlign: "center", color: "var(--muted-foreground)", fontSize: "13px", padding: "24px 0" }}>
               Nenhum slot encontrado no CSV para este profissional.
             </div>
           ) : (
@@ -362,7 +362,7 @@ function ProfViewModal({ prof, cRows, onClose }: ProfViewModalProps) {
               <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "420px" }}>
                 <thead>
                   <tr>
-                    <th style={{ width: "52px", paddingBottom: "6px", textAlign: "right", paddingRight: "10px", fontSize: "11px", color: "#9ca3af", fontWeight: 400 }}>Hora</th>
+                    <th style={{ width: "52px", paddingBottom: "6px", textAlign: "right", paddingRight: "10px", fontSize: "11px", color: "var(--muted-foreground)", fontWeight: 400 }}>Hora</th>
                     {dias.map(d => (
                       <th key={d} style={{ minWidth: "140px", paddingBottom: "6px", textAlign: "center", fontSize: "13px", color: B.navy, fontWeight: 800 }}>
                         {d.replace("-feira", "")}
@@ -372,7 +372,7 @@ function ProfViewModal({ prof, cRows, onClose }: ProfViewModalProps) {
                 </thead>
                 <tbody>
                   {horas.map(hora => (
-                    <tr key={hora} style={{ borderTop: "1px solid #f1f5f9" }}>
+                    <tr key={hora} style={{ borderTop: "1px solid var(--border)" }}>
                       <td style={{ textAlign: "right", paddingRight: "10px", verticalAlign: "top", paddingTop: "6px", fontFamily: "monospace", fontSize: "13px", fontWeight: 800, color: B.navy }}>
                         {hora}
                       </td>
@@ -389,8 +389,8 @@ function ProfViewModal({ prof, cRows, onClose }: ProfViewModalProps) {
                                   <div
                                     key={ci}
                                     style={{
-                                      background: flagged ? "#fef2f2" : "#f9fafb",
-                                      border: `1px dashed ${flagged ? "#fca5a5" : "#d1d5db"}`,
+                                      background: flagged ? "#fef2f2" : "var(--muted)",
+                                      border: `1px dashed ${flagged ? "#fca5a5" : "var(--border)"}`,
                                       borderRadius: "8px",
                                       padding: "6px 8px",
                                       marginBottom: "2px",
@@ -400,13 +400,13 @@ function ProfViewModal({ prof, cRows, onClose }: ProfViewModalProps) {
                                       gap: "2px",
                                     }}
                                   >
-                                    <div style={{ fontSize: "10px", fontWeight: 600, color: flagged ? "#dc2626" : "#9ca3af", fontStyle: "italic" }}>
+                                    <div style={{ fontSize: "10px", fontWeight: 600, color: flagged ? "#dc2626" : "var(--muted-foreground)", fontStyle: "italic" }}>
                                       Livre
                                     </div>
                                     <div style={{
                                       fontSize: "10px",
                                       fontWeight: 700,
-                                      color: flagged ? "#dc2626" : (badge?.c ?? "#9ca3af"),
+                                      color: flagged ? "#dc2626" : (badge?.c ?? "var(--muted-foreground)"),
                                       marginTop: "auto",
                                       display: "flex",
                                       alignItems: "center",
@@ -422,8 +422,8 @@ function ProfViewModal({ prof, cRows, onClose }: ProfViewModalProps) {
                                 <div
                                   key={ci}
                                   style={{
-                                    background: flagged ? "#fef2f2" : (badge?.bg ?? "#f8fafc"),
-                                    border: `1px solid ${flagged ? "#fca5a5" : (badge?.border ?? "#e2e8f0")}`,
+                                    background: flagged ? "#fef2f2" : (badge?.bg ?? "var(--muted)"),
+                                    border: `1px solid ${flagged ? "#fca5a5" : (badge?.border ?? "var(--border)")}`,
                                     borderRadius: "8px",
                                     padding: "6px 8px",
                                     marginBottom: "2px",
@@ -433,16 +433,16 @@ function ProfViewModal({ prof, cRows, onClose }: ProfViewModalProps) {
                                     gap: "2px",
                                   }}
                                 >
-                                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#1f2937", lineHeight: "1.3" }}>
+                                  <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--card-foreground)", lineHeight: "1.3" }}>
                                     {fmtName(s.pac)}
                                   </div>
-                                  <div style={{ fontSize: "10px", color: "#6b7280", lineHeight: "1.2" }}>
+                                  <div style={{ fontSize: "10px", color: "var(--muted-foreground)", lineHeight: "1.2" }}>
                                     {s.terapia}
                                   </div>
                                   <div style={{
                                     fontSize: "10px",
                                     fontWeight: 700,
-                                    color: flagged ? "#dc2626" : (badge?.c ?? "#6b7280"),
+                                    color: flagged ? "#dc2626" : (badge?.c ?? "var(--muted-foreground)"),
                                     marginTop: "auto",
                                     display: "flex",
                                     alignItems: "center",
@@ -558,9 +558,9 @@ export function InconsistenciasTab({ items, cRows }: Props) {
             style={{
               padding: "6px 14px", borderRadius: "999px", fontSize: "12px", fontWeight: 700,
               cursor: "pointer",
-              border: subTab === t.key ? `2px solid ${B.navy}` : "2px solid #e5e7eb",
-              background: subTab === t.key ? B.navy : "#f3f4f6",
-              color: subTab === t.key ? "white" : "#374151",
+              border: subTab === t.key ? `2px solid ${B.navy}` : "2px solid var(--border)",
+              background: subTab === t.key ? B.navy : "var(--muted)",
+              color: subTab === t.key ? "white" : "var(--card-foreground)",
               fontFamily: "inherit",
             }}
           >
@@ -580,7 +580,7 @@ export function InconsistenciasTab({ items, cRows }: Props) {
               placeholder="Buscar paciente ou profissional..."
               style={{
                 flex: "1 1 220px", padding: "7px 12px",
-                border: "1px solid #d1d5db", borderRadius: "9px",
+                border: "1px solid var(--border)", borderRadius: "9px",
                 fontSize: "12px", fontFamily: "inherit",
                 background: "var(--color-card, white)", color: "inherit",
               }}
@@ -589,7 +589,7 @@ export function InconsistenciasTab({ items, cRows }: Props) {
               value={filtroTipo}
               onChange={e => setFiltroTipo(e.target.value as IncTipo | "")}
               style={{
-                padding: "7px 12px", border: "1px solid #d1d5db", borderRadius: "9px",
+                padding: "7px 12px", border: "1px solid var(--border)", borderRadius: "9px",
                 fontSize: "12px", fontFamily: "inherit",
                 background: "var(--color-card, white)", color: "inherit",
               }}
@@ -628,7 +628,7 @@ export function InconsistenciasTab({ items, cRows }: Props) {
 
           {/* Lista */}
           {filtered.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "40px 16px", color: "#9ca3af", fontSize: "13px" }}>
+            <div style={{ textAlign: "center", padding: "40px 16px", color: "var(--muted-foreground)", fontSize: "13px" }}>
               {inconsistencias.length === 0
                 ? "Nenhuma regra ferida detectada. Carregue CSV e laudos para analisar."
                 : "Nenhum resultado para o filtro selecionado."}
@@ -658,16 +658,16 @@ export function InconsistenciasTab({ items, cRows }: Props) {
                       {/* Info */}
                       <div style={{ flex: "1 1 160px" }}>
                         <div style={{ fontWeight: 700, fontSize: "13px" }}>{abrevNome(item.pac)}</div>
-                        <div style={{ fontSize: "11px", color: "#6b7280", marginTop: "1px" }}>
+                        <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "1px" }}>
                           {item.dia} {item.hora} · {item.terapia}
                         </div>
                         {item.conv && (
-                          <div style={{ fontSize: "10px", color: "#9ca3af" }}>{item.conv}</div>
+                          <div style={{ fontSize: "10px", color: "var(--muted-foreground)" }}>{item.conv}</div>
                         )}
                       </div>
 
                       {/* Detalhe */}
-                      <div style={{ flex: "2 1 200px", fontSize: "12px", color: "#374151", alignSelf: "center" }}>
+                      <div style={{ flex: "2 1 200px", fontSize: "12px", color: "var(--card-foreground)", alignSelf: "center" }}>
                         {item.detalhe}
                         {item.terapiaExibAtual && (
                           <div style={{ marginTop: "3px", fontSize: "11px" }}>
@@ -687,8 +687,8 @@ export function InconsistenciasTab({ items, cRows }: Props) {
                           }}
                           style={{
                             padding: "5px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 700,
-                            cursor: "pointer", border: "1px solid #d1d5db",
-                            background: "var(--color-card, white)", color: "#374151",
+                            cursor: "pointer", border: "1px solid var(--border)",
+                            background: "var(--color-card, white)", color: "var(--card-foreground)",
                             fontFamily: "inherit", whiteSpace: "nowrap",
                           }}
                         >
@@ -701,8 +701,8 @@ export function InconsistenciasTab({ items, cRows }: Props) {
                           }}
                           style={{
                             padding: "5px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 700,
-                            cursor: "pointer", border: "1px solid #d1d5db",
-                            background: isExpanded ? "#f3f4f6" : "var(--color-card, white)", color: "#374151",
+                            cursor: "pointer", border: "1px solid var(--border)",
+                            background: isExpanded ? "var(--muted)" : "var(--color-card, white)", color: "var(--card-foreground)",
                             fontFamily: "inherit", whiteSpace: "nowrap",
                           }}
                         >
@@ -721,9 +721,9 @@ export function InconsistenciasTab({ items, cRows }: Props) {
                           rows={2}
                           style={{
                             flex: 1, padding: "7px 10px",
-                            border: "1px solid #d1d5db", borderRadius: "8px",
+                            border: "1px solid var(--border)", borderRadius: "8px",
                             fontSize: "12px", fontFamily: "inherit",
-                            resize: "none", background: "white",
+                            resize: "none", background: "var(--card)",
                           }}
                         />
                         <button
@@ -754,7 +754,7 @@ export function InconsistenciasTab({ items, cRows }: Props) {
       {subTab === "exc" && (
         <>
           {excList.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "40px 16px", color: "#9ca3af", fontSize: "13px" }}>
+            <div style={{ textAlign: "center", padding: "40px 16px", color: "var(--muted-foreground)", fontSize: "13px" }}>
               Nenhuma exceção registrada ainda.
             </div>
           ) : (
@@ -765,7 +765,7 @@ export function InconsistenciasTab({ items, cRows }: Props) {
                   <div
                     key={item.id}
                     style={{
-                      border: "1px solid #e5e7eb", borderRadius: "12px",
+                      border: "1px solid var(--border)", borderRadius: "12px",
                       background: "var(--color-card, white)",
                       padding: "10px 14px", display: "flex", gap: "10px",
                       alignItems: "flex-start", flexWrap: "wrap",
@@ -782,14 +782,14 @@ export function InconsistenciasTab({ items, cRows }: Props) {
 
                     <div style={{ flex: "1 1 160px" }}>
                       <div style={{ fontWeight: 700, fontSize: "13px" }}>{abrevNome(item.pac)}</div>
-                      <div style={{ fontSize: "11px", color: "#6b7280", marginTop: "1px" }}>
+                      <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "1px" }}>
                         {item.dia} {item.hora} · {item.terapia}
                       </div>
                     </div>
 
                     <div style={{ flex: "2 1 200px" }}>
-                      <div style={{ fontSize: "12px", color: "#374151", fontStyle: "italic" }}>"{exc.obs}"</div>
-                      <div style={{ fontSize: "10px", color: "#9ca3af", marginTop: "3px" }}>
+                      <div style={{ fontSize: "12px", color: "var(--card-foreground)", fontStyle: "italic" }}>"{exc.obs}"</div>
+                      <div style={{ fontSize: "10px", color: "var(--muted-foreground)", marginTop: "3px" }}>
                         {new Date(exc.confirmedAt).toLocaleDateString("pt-BR")}
                       </div>
                     </div>
@@ -799,8 +799,8 @@ export function InconsistenciasTab({ items, cRows }: Props) {
                         onClick={() => setViewItem(item)}
                         style={{
                           padding: "5px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 700,
-                          cursor: "pointer", border: "1px solid #d1d5db",
-                          background: "var(--color-card, white)", color: "#374151",
+                          cursor: "pointer", border: "1px solid var(--border)",
+                          background: "var(--color-card, white)", color: "var(--card-foreground)",
                           fontFamily: "inherit", whiteSpace: "nowrap",
                         }}
                       >

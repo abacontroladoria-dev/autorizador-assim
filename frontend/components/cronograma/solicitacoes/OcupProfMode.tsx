@@ -40,7 +40,7 @@ const REGRA_META: Record<Regra, { label: string; bg: string; c: string; border: 
 
 const STATUS_META: Record<Status, { label: string; bg: string; c: string }> = {
   acompanhamento: { label: "Em Acompanhamento", bg: B.blueLt,  c: B.blue    },
-  inviavel:       { label: "Inviável",           bg: "#f3f4f6", c: "#6b7280" },
+  inviavel:       { label: "Inviável",           bg: "var(--muted)", c: "var(--muted-foreground)" },
 }
 
 // ─── Interfaces ───────────────────────────────────────────────────────────────
@@ -166,8 +166,8 @@ function AgendaModal({ item, cRows, onClose, currentSt, onAceitar, onDesfazer }:
 
   const cSt = (tipo: string) => {
     if (tipo === "proposta") return { bg: B.limeLt, bd: B.lime,     label: "Proposta" }
-    if (tipo === "admin")   return { bg: "#f3f4f6", bd: "#d1d5db", label: null }
-    return                         { bg: "#f8fafc", bd: "#e2e8f0", label: null }
+    if (tipo === "admin")   return { bg: "var(--muted)", bd: "var(--border)", label: null }
+    return                         { bg: "var(--muted)", bd: "var(--border)", label: null }
   }
 
   return createPortal(
@@ -175,10 +175,10 @@ function AgendaModal({ item, cRows, onClose, currentSt, onAceitar, onDesfazer }:
       style={{ position: "fixed", inset: 0, zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.55)", padding: "12px" }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div style={{ background: "white", borderRadius: "18px", boxShadow: "0 24px 80px rgba(0,0,0,.22)", width: "96vw", maxWidth: "960px", maxHeight: "92vh", display: "flex", flexDirection: "column" }}>
+      <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 24px 80px rgba(0,0,0,.22)", width: "96vw", maxWidth: "960px", maxHeight: "92vh", display: "flex", flexDirection: "column" }}>
 
         {/* Header */}
-        <div style={{ padding: "14px 20px", borderBottom: "1px solid #f0f0f0", background: "#fafafa", borderRadius: "18px 18px 0 0", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "8px" }}>
+        <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", background: "var(--card)", borderRadius: "18px 18px 0 0", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: "8px" }}>
           <div style={{ display: "flex", flexDirection: "column", gap: "5px" }}>
             <span style={{ fontWeight: 900, fontSize: "15px", color: B.navy }}>{fmtName(pac)}</span>
             <div style={{ display: "flex", gap: "5px", flexWrap: "wrap" }}>
@@ -189,12 +189,12 @@ function AgendaModal({ item, cRows, onClose, currentSt, onAceitar, onDesfazer }:
               </span>
             </div>
           </div>
-          <button onClick={onClose} style={{ width: "30px", height: "30px", borderRadius: "50%", border: "none", background: "#f3f4f6", cursor: "pointer", fontSize: "16px", color: "#6b7280" }}>×</button>
+          <button onClick={onClose} style={{ width: "30px", height: "30px", borderRadius: "50%", border: "none", background: "var(--muted)", cursor: "pointer", fontSize: "16px", color: "var(--muted-foreground)" }}>×</button>
         </div>
 
         {/* Seletor de sessões complementares (R3) */}
         {vComp.length > 0 && (
-          <div style={{ padding: "10px 20px", borderBottom: "1px solid #f0f0f0", background: "#fafff7", display: "flex", flexDirection: "column", gap: "8px" }}>
+          <div style={{ padding: "10px 20px", borderBottom: "1px solid var(--border)", background: "#fafff7", display: "flex", flexDirection: "column", gap: "8px" }}>
             {vComp.map(v => {
               const alts = vCompAlts[v.hora] || [v]
               const idx  = selIdx[v.hora] ?? 0
@@ -211,9 +211,9 @@ function AgendaModal({ item, cRows, onClose, currentSt, onAceitar, onDesfazer }:
                         style={{
                           padding: "4px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 700,
                           cursor: "pointer", fontFamily: "inherit", border: "1px solid",
-                          background: i === idx ? B.navy : "#f3f4f6",
-                          color: i === idx ? "white" : "#374151",
-                          borderColor: i === idx ? B.navy : "#d1d5db",
+                          background: i === idx ? B.navy : "var(--muted)",
+                          color: i === idx ? "white" : "var(--card-foreground)",
+                          borderColor: i === idx ? B.navy : "var(--border)",
                         }}
                       >
                         {alt.tP} · {fmtName(alt.prof)}
@@ -228,11 +228,11 @@ function AgendaModal({ item, cRows, onClose, currentSt, onAceitar, onDesfazer }:
         )}
 
         {/* Legenda */}
-        <div style={{ padding: "8px 20px 0", display: "flex", gap: "10px", fontSize: "10px", color: "#9ca3af", flexWrap: "wrap" }}>
+        <div style={{ padding: "8px 20px 0", display: "flex", gap: "10px", fontSize: "10px", color: "var(--muted-foreground)", flexWrap: "wrap" }}>
           {[
             { bg: B.limeLt, bd: B.lime,     label: "Sessão proposta" },
-            { bg: "#f8fafc", bd: "#e2e8f0", label: "Existente" },
-            { bg: "#f3f4f6", bd: "#d1d5db", label: "Administrativo" },
+            { bg: "var(--muted)", bd: "var(--border)", label: "Existente" },
+            { bg: "var(--muted)", bd: "var(--border)", label: "Administrativo" },
           ].map(({ bg, bd, label }) => (
             <span key={label} style={{ display: "flex", alignItems: "center", gap: "4px" }}>
               <span style={{ display: "inline-block", width: "10px", height: "10px", borderRadius: "3px", background: bg, border: `1px solid ${bd}` }} />
@@ -244,12 +244,12 @@ function AgendaModal({ item, cRows, onClose, currentSt, onAceitar, onDesfazer }:
         {/* Grade */}
         <div style={{ flex: 1, overflow: "auto", padding: "12px 20px 20px" }}>
           {!horas.length ? (
-            <div style={{ textAlign: "center", color: "#9ca3af", padding: "32px" }}>Nenhuma sessão encontrada.</div>
+            <div style={{ textAlign: "center", color: "var(--muted-foreground)", padding: "32px" }}>Nenhuma sessão encontrada.</div>
           ) : (
             <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "400px" }}>
               <thead>
                 <tr>
-                  <th style={{ width: "52px", paddingBottom: "8px", textAlign: "right", paddingRight: "10px", fontSize: "12px", color: "#9ca3af", fontWeight: 400 }}>Hora</th>
+                  <th style={{ width: "52px", paddingBottom: "8px", textAlign: "right", paddingRight: "10px", fontSize: "12px", color: "var(--muted-foreground)", fontWeight: 400 }}>Hora</th>
                   {dias.map(d => (
                     <th key={d} style={{ minWidth: "130px", paddingBottom: "8px", textAlign: "center", fontSize: "13px", color: d === slot.dia ? B.purple : B.navy, fontWeight: 800 }}>
                       <div>
@@ -263,7 +263,7 @@ function AgendaModal({ item, cRows, onClose, currentSt, onAceitar, onDesfazer }:
               </thead>
               <tbody>
                 {horas.map(hora => (
-                  <tr key={hora} style={{ borderTop: "1px solid #f1f5f9" }}>
+                  <tr key={hora} style={{ borderTop: "1px solid var(--border)" }}>
                     <td style={{ textAlign: "right", paddingRight: "10px", verticalAlign: "top", paddingTop: "8px", fontFamily: "monospace", fontSize: "14px", fontWeight: 800, color: hora === slot.hora ? B.purple : B.navy }}>
                       {hora}
                     </td>
@@ -275,9 +275,9 @@ function AgendaModal({ item, cRows, onClose, currentSt, onAceitar, onDesfazer }:
                             const cs = cSt(c.tipo)
                             return (
                               <div key={ci} style={{ background: cs.bg, border: `1px solid ${cs.bd}`, borderRadius: "9px", padding: "7px 9px", height: "100%", boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "2px" }}>
-                                <div style={{ fontSize: "12px", fontWeight: 700, color: "#1f2937", lineHeight: "1.3" }}>{c.tP}</div>
-                                {c.tE && <div style={{ fontSize: "10px", color: "#9ca3af", fontStyle: "italic" }}>({c.tE})</div>}
-                                <div style={{ fontSize: "11px", color: "#6b7280" }}>{fmtName(c.prof)}</div>
+                                <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--card-foreground)", lineHeight: "1.3" }}>{c.tP}</div>
+                                {c.tE && <div style={{ fontSize: "10px", color: "var(--muted-foreground)", fontStyle: "italic" }}>({c.tE})</div>}
+                                <div style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>{fmtName(c.prof)}</div>
                                 {shouldShowSessionUnit(unitMeta, d, hora) && c.unidade && c.unidade !== "Desconhecida" && (
                                   <div style={{ fontSize: "10px", fontWeight: 800, color: B.blue, background: B.blueLt, border: `1px solid ${B.blue}33`, borderRadius: "999px", padding: "1px 6px", width: "fit-content" }}>
                                     {unidadeBadgeText(c.unidade)}
@@ -298,7 +298,7 @@ function AgendaModal({ item, cRows, onClose, currentSt, onAceitar, onDesfazer }:
         </div>
 
         {/* Footer com Aceitar / Desfazer / Fechar */}
-        <div style={{ padding: "12px 20px", borderTop: "1px solid #f0f0f0", background: "#fafafa", borderRadius: "0 0 18px 18px", display: "flex", justifyContent: "flex-end", gap: "8px" }}>
+        <div style={{ padding: "12px 20px", borderTop: "1px solid var(--border)", background: "var(--card)", borderRadius: "0 0 18px 18px", display: "flex", justifyContent: "flex-end", gap: "8px" }}>
           {currentSt !== "acompanhamento" && (
             <button
               onClick={() => { onAceitar(); onClose() }}
@@ -308,11 +308,11 @@ function AgendaModal({ item, cRows, onClose, currentSt, onAceitar, onDesfazer }:
             </button>
           )}
           {currentSt === "acompanhamento" && (
-            <button onClick={onDesfazer} style={btnStyle("#f3f4f6", "#6b7280", "#e5e7eb")}>
+            <button onClick={onDesfazer} style={btnStyle("var(--muted)", "var(--muted-foreground)", "var(--border)")}>
               Desfazer
             </button>
           )}
-          <button onClick={onClose} style={btnStyle("#f3f4f6", "#374151", "#e5e7eb")}>Fechar</button>
+          <button onClick={onClose} style={btnStyle("var(--muted)", "var(--card-foreground)", "var(--border)")}>Fechar</button>
         </div>
       </div>
     </div>,
@@ -364,11 +364,11 @@ function ProfAgendaGrid({ prof, cRows, resultados }: { prof: string; cRows: CsvR
   if (!allHoras.length || !activeDias.length) return null
 
   return (
-    <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "16px", marginBottom: "16px" }}>
+    <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px", marginBottom: "16px" }}>
       <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>
         Agenda do profissional
       </div>
-      <div style={{ fontSize: "12px", color: "#9ca3af", marginBottom: "10px" }}>
+      <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "10px" }}>
         Sessões agendadas e vagas livres desta semana
       </div>
 
@@ -376,11 +376,11 @@ function ProfAgendaGrid({ prof, cRows, resultados }: { prof: string; cRows: CsvR
         {[
           { bg: "#22c55e", label: "Agendado" },
           { bg: "#fef3c7", bd: "#fbbf24", label: "Livre — com candidatos" },
-          { bg: "#e5e7eb", label: "Livre — sem candidatos" },
+          { bg: "var(--border)", label: "Livre — sem candidatos" },
         ].map(({ bg, bd, label }) => (
           <div key={label} style={{ display: "flex", alignItems: "center", gap: "5px" }}>
             <div style={{ width: "11px", height: "11px", borderRadius: "3px", background: bg, border: bd ? `1px solid ${bd}` : undefined }} />
-            <span style={{ fontSize: "11px", color: "#6b7280" }}>{label}</span>
+            <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>{label}</span>
           </div>
         ))}
       </div>
@@ -393,7 +393,7 @@ function ProfAgendaGrid({ prof, cRows, resultados }: { prof: string; cRows: CsvR
           </colgroup>
           <thead>
             <tr>
-              <th style={{ padding: "4px 6px", borderBottom: "2px solid #e5e7eb" }} />
+              <th style={{ padding: "4px 6px", borderBottom: "2px solid var(--border)" }} />
               {activeDias.map(d => (
                 <th key={d} style={{ padding: "6px 8px", textAlign: "center", fontWeight: 800, fontSize: "13px", color: B.navy, borderBottom: `2px solid ${B.navy}` }}>
                   {DIA_ABR[d] ?? d}
@@ -405,8 +405,8 @@ function ProfAgendaGrid({ prof, cRows, resultados }: { prof: string; cRows: CsvR
             {allHoras.map(hora => {
               const isSep = hora === "13:00"
               return (
-                <tr key={hora} style={{ borderTop: isSep ? "2px solid #d1d5db" : "1px solid #f3f4f6" }}>
-                  <td style={{ padding: "2px 6px", color: "#9ca3af", fontSize: "10px", fontWeight: 500, height: "40px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                <tr key={hora} style={{ borderTop: isSep ? "2px solid var(--border)" : "1px solid var(--border)" }}>
+                  <td style={{ padding: "2px 6px", color: "var(--muted-foreground)", fontSize: "10px", fontWeight: 500, height: "40px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
                     {hora}
                   </td>
                   {activeDias.map(d => {
@@ -441,7 +441,7 @@ function ProfAgendaGrid({ prof, cRows, resultados }: { prof: string; cRows: CsvR
                       }
                       return (
                         <td key={d} style={{ padding: "2px 4px", verticalAlign: "middle" }}>
-                          <div style={{ background: "#e5e7eb", borderRadius: "8px", height: "36px" }} />
+                          <div style={{ background: "var(--border)", borderRadius: "8px", height: "36px" }} />
                         </td>
                       )
                     }
@@ -696,7 +696,7 @@ export function OcupProfMode({ cRows, lRows, cfg }: Props) {
     }
     return Object.entries(counts)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([name, value]) => ({ name, value, fill: PRIO_COLORS[name] || "#9ca3af" }))
+      .map(([name, value]) => ({ name, value, fill: PRIO_COLORS[name] || "var(--muted-foreground)" }))
   }, [filtrados])
 
   const regraChartData = useMemo(() => {
@@ -709,7 +709,7 @@ export function OcupProfMode({ cRows, lRows, cfg }: Props) {
     }
     return Object.entries(counts)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([name, value]) => ({ name, value, fill: REGRA_COLORS[name] || "#9ca3af" }))
+      .map(([name, value]) => ({ name, value, fill: REGRA_COLORS[name] || "var(--muted-foreground)" }))
   }, [filtrados])
 
   function selectProf(p: string) {
@@ -723,15 +723,15 @@ export function OcupProfMode({ cRows, lRows, cfg }: Props) {
         {/* ── Coluna esquerda ─────────────────────────────────────────────────── */}
         <div style={{ flexShrink: 0, width: "340px", display: "flex", flexDirection: "column", gap: "12px" }}>
 
-          <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "16px" }}>
+          <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px" }}>
             <div style={{ fontWeight: 800, color: B.navy, fontSize: "15px", marginBottom: "4px" }}>
               Aumentar Ocupação — Profissional
             </div>
-            <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "14px" }}>
+            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "14px" }}>
               Selecione o profissional e encontre pacientes que encaixam nas sessões livres.
             </div>
 
-            <div style={{ fontSize: "11px", fontWeight: 700, color: "#6b7280", marginBottom: "6px" }}>Profissional</div>
+            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", marginBottom: "6px" }}>Profissional</div>
             <div ref={comboRef} style={{ position: "relative" }}>
               <input
                 type="text"
@@ -740,12 +740,12 @@ export function OcupProfMode({ cRows, lRows, cfg }: Props) {
                 onFocus={() => setDropOpen(true)}
                 onBlur={() => setTimeout(() => setDropOpen(false), 150)}
                 placeholder="Buscar profissional..."
-                style={{ width: "100%", boxSizing: "border-box", border: "1px solid #d1d5db", borderRadius: "9px", padding: "8px 12px", fontSize: "13px", fontFamily: "inherit", outline: "none", background: "var(--color-card, white)", color: "inherit" }}
+                style={{ width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: "9px", padding: "8px 12px", fontSize: "13px", fontFamily: "inherit", outline: "none", background: "var(--color-card, white)", color: "inherit" }}
               />
               {dropOpen && filteredProfs.length > 0 && (
-                <div style={{ position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, zIndex: 50, background: "white", border: "1px solid #d1d5db", borderRadius: "10px", boxShadow: "0 4px 16px rgba(0,0,0,.08)", maxHeight: "200px", overflowY: "auto" }}>
+                <div style={{ position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, zIndex: 50, background: "var(--card)", border: "1px solid var(--border)", borderRadius: "10px", boxShadow: "0 4px 16px rgba(0,0,0,.08)", maxHeight: "200px", overflowY: "auto" }}>
                   {filteredProfs.map(p => (
-                    <button key={p} onMouseDown={() => selectProf(p)} style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: p === prof ? "#f3f4f6" : "none", border: "none", fontSize: "12px", cursor: "pointer", color: p === prof ? B.navy : "#374151", fontWeight: p === prof ? 700 : 400, fontFamily: "inherit" }}>
+                    <button key={p} onMouseDown={() => selectProf(p)} style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: p === prof ? "var(--muted)" : "none", border: "none", fontSize: "12px", cursor: "pointer", color: p === prof ? B.navy : "var(--card-foreground)", fontWeight: p === prof ? 700 : 400, fontFamily: "inherit" }}>
                       {p}
                     </button>
                   ))}
@@ -756,15 +756,15 @@ export function OcupProfMode({ cRows, lRows, cfg }: Props) {
             {prof && resultados.length > 0 && (
               <div style={{ marginTop: "14px", display: "flex", flexDirection: "column", gap: "8px" }}>
                 <div>
-                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#6b7280", marginBottom: "4px" }}>Especialidade</div>
-                  <select value={filtEsp} onChange={e => setFiltEsp(e.target.value)} style={{ width: "100%", boxSizing: "border-box", border: "1px solid #d1d5db", borderRadius: "8px", padding: "7px 10px", fontSize: "12px", fontFamily: "inherit", background: "var(--color-card, white)", color: "inherit" }}>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", marginBottom: "4px" }}>Especialidade</div>
+                  <select value={filtEsp} onChange={e => setFiltEsp(e.target.value)} style={{ width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: "8px", padding: "7px 10px", fontSize: "12px", fontFamily: "inherit", background: "var(--color-card, white)", color: "inherit" }}>
                     <option value="">Todas</option>
                     {espsDisp.map(e => <option key={e} value={e}>{e}</option>)}
                   </select>
                 </div>
                 <div>
-                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#6b7280", marginBottom: "4px" }}>Dia</div>
-                  <select value={filtDia} onChange={e => setFiltDia(e.target.value)} style={{ width: "100%", boxSizing: "border-box", border: "1px solid #d1d5db", borderRadius: "8px", padding: "7px 10px", fontSize: "12px", fontFamily: "inherit", background: "var(--color-card, white)", color: "inherit" }}>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", marginBottom: "4px" }}>Dia</div>
+                  <select value={filtDia} onChange={e => setFiltDia(e.target.value)} style={{ width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: "8px", padding: "7px 10px", fontSize: "12px", fontFamily: "inherit", background: "var(--color-card, white)", color: "inherit" }}>
                     <option value="">Todos</option>
                     {diasDisp.map(d => <option key={d} value={d}>{d.replace("-feira", "")}</option>)}
                   </select>
@@ -774,16 +774,16 @@ export function OcupProfMode({ cRows, lRows, cfg }: Props) {
           </div>
 
           {prof && (
-            <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "16px" }}>
+            <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px" }}>
               <div style={{ fontWeight: 800, color: B.navy, fontSize: "13px", marginBottom: "10px" }}>Resumo</div>
               <div style={{ display: "flex", flexDirection: "column", gap: "7px" }}>
                 {[
                   { label: "Sessões livres",      value: totalSessoes, color: B.navy },
-                  { label: "Pacientes elegíveis", value: totalPacs,    color: totalPacs > 0 ? "#16a34a" : "#9ca3af" },
-                  { label: "Em Acompanhamento",   value: totalAcomp,   color: totalAcomp > 0 ? B.blue : "#9ca3af" },
+                  { label: "Pacientes elegíveis", value: totalPacs,    color: totalPacs > 0 ? "#16a34a" : "var(--muted-foreground)" },
+                  { label: "Em Acompanhamento",   value: totalAcomp,   color: totalAcomp > 0 ? B.blue : "var(--muted-foreground)" },
                 ].map(({ label, value, color }) => (
                   <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: "12px", color: "#6b7280" }}>{label}</span>
+                    <span style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>{label}</span>
                     <span style={{ fontSize: "14px", fontWeight: 800, color }}>{value}</span>
                   </div>
                 ))}
@@ -792,7 +792,7 @@ export function OcupProfMode({ cRows, lRows, cfg }: Props) {
               {/* Donut: Prioridade */}
               {prioChartData.length > 0 && (
                 <div style={{ marginTop: "16px" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#9ca3af", letterSpacing: "0.05em", marginBottom: "6px" }}>PRIORIDADE</div>
+                  <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.05em", marginBottom: "6px" }}>PRIORIDADE</div>
                   <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                     <div style={{ width: "100px", height: "100px", flexShrink: 0 }}>
                       <ResponsiveContainer width="100%" height="100%">
@@ -808,8 +808,8 @@ export function OcupProfMode({ cRows, lRows, cfg }: Props) {
                       {prioChartData.map(d => (
                         <div key={d.name} style={{ display: "flex", alignItems: "center", gap: "5px" }}>
                           <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: d.fill, flexShrink: 0 }} />
-                          <span style={{ fontSize: "11px", color: "#6b7280" }}>{d.name}</span>
-                          <span style={{ fontSize: "11px", fontWeight: 700, color: "#374151", marginLeft: "auto" }}>{d.value}</span>
+                          <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>{d.name}</span>
+                          <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--card-foreground)", marginLeft: "auto" }}>{d.value}</span>
                         </div>
                       ))}
                     </div>
@@ -820,7 +820,7 @@ export function OcupProfMode({ cRows, lRows, cfg }: Props) {
               {/* Donut: Regra */}
               {regraChartData.length > 0 && (
                 <div style={{ marginTop: "14px" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#9ca3af", letterSpacing: "0.05em", marginBottom: "6px" }}>REGRA</div>
+                  <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.05em", marginBottom: "6px" }}>REGRA</div>
                   <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
                     <div style={{ width: "100px", height: "100px", flexShrink: 0 }}>
                       <ResponsiveContainer width="100%" height="100%">
@@ -836,8 +836,8 @@ export function OcupProfMode({ cRows, lRows, cfg }: Props) {
                       {regraChartData.map(d => (
                         <div key={d.name} style={{ display: "flex", alignItems: "center", gap: "5px" }}>
                           <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: d.fill, flexShrink: 0 }} />
-                          <span style={{ fontSize: "11px", color: "#6b7280" }}>{d.name}</span>
-                          <span style={{ fontSize: "11px", fontWeight: 700, color: "#374151", marginLeft: "auto" }}>{d.value}</span>
+                          <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>{d.name}</span>
+                          <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--card-foreground)", marginLeft: "auto" }}>{d.value}</span>
                         </div>
                       ))}
                     </div>
@@ -846,23 +846,23 @@ export function OcupProfMode({ cRows, lRows, cfg }: Props) {
               )}
 
               <div style={{ marginTop: "16px", display: "flex", flexDirection: "column", gap: "6px" }}>
-                <div style={{ fontSize: "10px", fontWeight: 700, color: "#9ca3af", letterSpacing: "0.05em" }}>LEGENDA DE REGRAS</div>
+                <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.05em" }}>LEGENDA DE REGRAS</div>
                 {(Object.entries(REGRA_META) as [Regra, typeof REGRA_META[Regra]][]).map(([k, m]) => (
                   <div key={k} style={{ display: "flex", alignItems: "flex-start", gap: "7px" }}>
                     <span style={{ padding: "1px 6px", borderRadius: "5px", fontSize: "10px", fontWeight: 800, background: m.bg, color: m.c, border: `1px solid ${m.border}`, flexShrink: 0, marginTop: "1px" }}>
                       {m.label}
                     </span>
-                    <span style={{ fontSize: "10px", color: "#6b7280", lineHeight: "1.4" }}>{m.desc}</span>
+                    <span style={{ fontSize: "10px", color: "var(--muted-foreground)", lineHeight: "1.4" }}>{m.desc}</span>
                   </div>
                 ))}
               </div>
 
               <div style={{ marginTop: "14px", display: "flex", flexDirection: "column", gap: "5px" }}>
-                <div style={{ fontSize: "10px", fontWeight: 700, color: "#9ca3af", letterSpacing: "0.05em" }}>LEGENDA DE PRIORIDADE</div>
+                <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.05em" }}>LEGENDA DE PRIORIDADE</div>
                 {(Object.entries(PRIO_META) as [string, typeof PRIO_META[1]][]).map(([k, m]) => (
                   <div key={k} style={{ display: "flex", alignItems: "center", gap: "7px" }}>
                     <span style={{ padding: "1px 7px", borderRadius: "5px", fontSize: "10px", fontWeight: 800, background: m.bg, color: m.c, border: `1px solid ${m.border}`, flexShrink: 0 }}>{m.short}</span>
-                    <span style={{ fontSize: "10px", color: "#6b7280" }}>{m.label}</span>
+                    <span style={{ fontSize: "10px", color: "var(--muted-foreground)" }}>{m.label}</span>
                   </div>
                 ))}
               </div>
@@ -873,16 +873,16 @@ export function OcupProfMode({ cRows, lRows, cfg }: Props) {
         {/* ── Coluna direita: Resultados ───────────────────────────────────────── */}
         <div style={{ flex: 1, minWidth: 0 }}>
           {!prof && (
-            <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "48px 24px", textAlign: "center" }}>
+            <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "48px 24px", textAlign: "center" }}>
               <div style={{ fontSize: "32px", marginBottom: "10px" }}>👤</div>
-              <div style={{ fontWeight: 700, fontSize: "14px", color: "#374151", marginBottom: "4px" }}>Selecione um profissional</div>
-              <div style={{ fontSize: "12px", color: "#9ca3af" }}>As sessões livres e os pacientes elegíveis aparecerão aqui.</div>
+              <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--card-foreground)", marginBottom: "4px" }}>Selecione um profissional</div>
+              <div style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>As sessões livres e os pacientes elegíveis aparecerão aqui.</div>
             </div>
           )}
           {prof && profSessoes.length === 0 && (
-            <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "32px 24px", textAlign: "center" }}>
+            <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "32px 24px", textAlign: "center" }}>
               <div style={{ fontSize: "13px", color: "#ef4444", fontWeight: 700, marginBottom: "4px" }}>Nenhuma sessão livre encontrada</div>
-              <div style={{ fontSize: "11px", color: "#9ca3af" }}>Verifique se o CSV está carregado e se o profissional possui sessões com status "Livre".</div>
+              <div style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>Verifique se o CSV está carregado e se o profissional possui sessões com status "Livre".</div>
             </div>
           )}
 
@@ -892,8 +892,8 @@ export function OcupProfMode({ cRows, lRows, cfg }: Props) {
           )}
 
           {prof && profSessoes.length > 0 && filtrados.length === 0 && (
-            <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "24px", textAlign: "center" }}>
-              <div style={{ fontSize: "12px", color: "#9ca3af" }}>Nenhum resultado para o filtro selecionado.</div>
+            <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "24px", textAlign: "center" }}>
+              <div style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>Nenhum resultado para o filtro selecionado.</div>
             </div>
           )}
           {filtrados.length > 0 && (() => {
@@ -946,26 +946,26 @@ function SessaoCard({
   const nCands = slot.cands.length
 
   return (
-    <div style={{ background: "white", borderRadius: "12px", border: "1px solid #e5e7eb", overflow: "hidden" }}>
+    <div style={{ background: "var(--card)", borderRadius: "12px", border: "1px solid var(--border)", overflow: "hidden" }}>
       <button
         onClick={() => setExpanded(x => !x)}
-        style={{ display: "flex", alignItems: "center", gap: "10px", width: "100%", padding: "10px 14px", background: "#f8fafc", border: "none", cursor: "pointer", textAlign: "left", fontFamily: "inherit", borderBottom: expanded ? "1px solid #f1f5f9" : "none" }}
+        style={{ display: "flex", alignItems: "center", gap: "10px", width: "100%", padding: "10px 14px", background: "var(--muted)", border: "none", cursor: "pointer", textAlign: "left", fontFamily: "inherit", borderBottom: expanded ? "1px solid var(--border)" : "none" }}
       >
         <span style={{ fontFamily: "monospace", fontWeight: 800, fontSize: "14px", color: B.navy, flexShrink: 0 }}>{slot.hora}</span>
-        <span style={{ fontWeight: 700, fontSize: "12px", color: "#374151", flex: 1 }}>
+        <span style={{ fontWeight: 700, fontSize: "12px", color: "var(--card-foreground)", flex: 1 }}>
           {slot.terapia}
-          <span style={{ fontWeight: 400, color: "#9ca3af", marginLeft: "6px" }}>· {slot.unidade}</span>
+          <span style={{ fontWeight: 400, color: "var(--muted-foreground)", marginLeft: "6px" }}>· {slot.unidade}</span>
         </span>
-        <span style={{ fontSize: "11px", fontWeight: 700, flexShrink: 0, color: nCands > 0 ? "#16a34a" : "#9ca3af" }}>
+        <span style={{ fontSize: "11px", fontWeight: 700, flexShrink: 0, color: nCands > 0 ? "#16a34a" : "var(--muted-foreground)" }}>
           {nCands > 0 ? `${nCands} paciente${nCands > 1 ? "s" : ""}` : "sem pacientes"}
         </span>
-        <span style={{ fontSize: "10px", color: "#9ca3af", marginLeft: "4px" }}>{expanded ? "▲" : "▼"}</span>
+        <span style={{ fontSize: "10px", color: "var(--muted-foreground)", marginLeft: "4px" }}>{expanded ? "▲" : "▼"}</span>
       </button>
 
       {expanded && (
         <div style={{ padding: "10px 12px", display: "flex", flexDirection: "column", gap: "6px" }}>
           {nCands === 0 ? (
-            <div style={{ fontSize: "11px", color: "#9ca3af", padding: "8px 4px", fontStyle: "italic" }}>
+            <div style={{ fontSize: "11px", color: "var(--muted-foreground)", padding: "8px 4px", fontStyle: "italic" }}>
               Nenhum paciente elegível para esta sessão.
             </div>
           ) : slot.cands.map((c, ci) => (
@@ -995,9 +995,9 @@ function PacCard({
 
   return (
     <div style={{
-      border: `1px solid ${st ? B.blue + "44" : "#e5e7eb"}`,
+      border: `1px solid ${st ? B.blue + "44" : "var(--border)"}`,
       borderRadius: "10px", padding: "10px 12px",
-      background: st ? "#f8fafc" : "white",
+      background: st ? "var(--muted)" : "var(--card)",
       display: "flex", gap: "10px", alignItems: "flex-start", flexWrap: "wrap",
     }}>
       <div style={{ flex: "1 1 180px" }}>
@@ -1011,14 +1011,14 @@ function PacCard({
           {stM && <span style={{ padding: "1px 7px", borderRadius: "5px", fontSize: "10px", fontWeight: 700, background: stM.bg, color: stM.c }}>{stM.label}</span>}
         </div>
 
-        <div style={{ fontWeight: 700, fontSize: "13px", color: "#1f2937" }}>{fmtName(c.pac)}</div>
+        <div style={{ fontWeight: 700, fontSize: "13px", color: "var(--card-foreground)" }}>{fmtName(c.pac)}</div>
 
-        <div style={{ fontSize: "11px", color: "#6b7280", marginTop: "2px" }}>
+        <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "2px" }}>
           Autorizado: <strong>{c.aut}</strong> · Ofertado: <strong>{c.of}</strong> · <span style={{ color: "#dc2626", fontWeight: 700 }}>Diferença: −{c.dif}</span>
         </div>
 
         {c.sessNoDia.length > 0 && (
-          <div style={{ fontSize: "10px", color: "#9ca3af", marginTop: "2px" }}>
+          <div style={{ fontSize: "10px", color: "var(--muted-foreground)", marginTop: "2px" }}>
             Já neste dia: {c.sessNoDia.join(", ")}
           </div>
         )}
@@ -1036,7 +1036,7 @@ function PacCard({
       <div style={{ display: "flex", gap: "5px", alignItems: "center", flexWrap: "wrap", flexShrink: 0, alignSelf: "center" }}>
         <button
           onClick={() => onVer({ pac: c.pac, slot, vComp: c.vComp, vCompAlts: c.vCompAlts })}
-          style={btnStyle("#f3f4f6", "#374151", "#e5e7eb")}
+          style={btnStyle("var(--muted)", "var(--card-foreground)", "var(--border)")}
         >
           🗓 Ver
         </button>
@@ -1048,7 +1048,7 @@ function PacCard({
         )}
 
         {st === "inviavel" && (
-          <button onClick={() => setSt(c.pac, slot.dia, slot.hora, null)} style={btnStyle("#f3f4f6", "#6b7280", "#e5e7eb")}>
+          <button onClick={() => setSt(c.pac, slot.dia, slot.hora, null)} style={btnStyle("var(--muted)", "var(--muted-foreground)", "var(--border)")}>
             Desfazer
           </button>
         )}

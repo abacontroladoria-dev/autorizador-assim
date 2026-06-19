@@ -58,26 +58,26 @@ const E_CORES: Record<string, string> = {
   e4: B.purple,
   e5: "#f97316",
   e6: "#8b5cf6",
-  e7: "#6b7280",
+  e7: "var(--muted-foreground)",
 }
 
 const STMAP: Record<string, { label: string; bg: string; c: string }> = {
-  pendente:    { label: "Pendente",      bg: "#f3f4f6", c: "#6b7280" },
+  pendente:    { label: "Pendente",      bg: "var(--muted)", c: "var(--muted-foreground)" },
   aguardando:  { label: "Em Acompanhamento",   bg: B.blueLt,  c: B.blue },
   resolvido:   { label: "Resolvido",          bg: B.limeLt,  c: "#4a6e20" },
   recusado:    { label: "Recusado",           bg: "#fef2f2", c: "#dc2626" },
-  sem_solucao: { label: "Sem solução",        bg: "#f3f4f6", c: "#6b7280" },
+  sem_solucao: { label: "Sem solução",        bg: "var(--muted)", c: "var(--muted-foreground)" },
 }
 
 type CellTipo = "afetada" | "proposta" | "removida" | "admin" | "exist" | "supervisao"
 
 function cellStyle(tipo: CellTipo) {
-  if (tipo === "afetada")    return { bg: "#fef2f2", bd: "#fca5a5", label: "Removida", lc: "#dc2626", tc: "#1f2937", sc: "#6b7280" }
-  if (tipo === "proposta")   return { bg: B.limeLt,  bd: B.lime,   label: "Proposta",  lc: "#4a6e20", tc: "#1f2937", sc: "#6b7280" }
-  if (tipo === "removida")   return { bg: "#fef2f2", bd: "#fca5a5", label: "Removida", lc: "#dc2626", tc: "#1f2937", sc: "#6b7280" }
-  if (tipo === "supervisao") return { bg: "#1e293b", bd: "#0f172a", label: null,        lc: null,      tc: "#f1f5f9", sc: "#94a3b8" }
+  if (tipo === "afetada")    return { bg: "#fef2f2", bd: "#fca5a5", label: "Removida", lc: "#dc2626", tc: "var(--card-foreground)", sc: "var(--muted-foreground)" }
+  if (tipo === "proposta")   return { bg: B.limeLt,  bd: B.lime,   label: "Proposta",  lc: "#4a6e20", tc: "var(--card-foreground)", sc: "var(--muted-foreground)" }
+  if (tipo === "removida")   return { bg: "#fef2f2", bd: "#fca5a5", label: "Removida", lc: "#dc2626", tc: "var(--card-foreground)", sc: "var(--muted-foreground)" }
+  if (tipo === "supervisao") return { bg: "#1e293b", bd: "#0f172a", label: null,        lc: null,      tc: "var(--muted)", sc: "#94a3b8" }
   /* admin e exist — mesma cor cinza */
-  return                            { bg: "#f8fafc", bd: "#e2e8f0", label: null,        lc: null,      tc: "#1f2937", sc: "#6b7280" }
+  return                            { bg: "var(--muted)", bd: "var(--border)", label: null,        lc: null,      tc: "var(--card-foreground)", sc: "var(--muted-foreground)" }
 }
 
 // ─── INFO TIP ─────────────────────────────────────────────────────────────────
@@ -183,7 +183,7 @@ function AgendaGrid({
     <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "320px" }}>
       <thead>
         <tr>
-          <th style={{ width: "48px", paddingBottom: "6px", textAlign: "right", paddingRight: "8px", fontSize: "11px", color: "#9ca3af", fontWeight: 400 }}>Hora</th>
+          <th style={{ width: "48px", paddingBottom: "6px", textAlign: "right", paddingRight: "8px", fontSize: "11px", color: "var(--muted-foreground)", fontWeight: 400 }}>Hora</th>
           {dias.map(d => (
             <th key={d} style={{ minWidth: "120px", paddingBottom: "6px", textAlign: "center", fontSize: "13px", color: B.navy, fontWeight: 800 }}>
               <div>{d.replace("-feira", "")}</div>
@@ -194,7 +194,7 @@ function AgendaGrid({
       </thead>
       <tbody>
         {horasGrid.map(hora => (
-          <tr key={hora} style={{ borderTop: "1px solid #f1f5f9" }}>
+          <tr key={hora} style={{ borderTop: "1px solid var(--border)" }}>
             <td style={{ textAlign: "right", paddingRight: "8px", verticalAlign: "top", paddingTop: "6px", fontFamily: "monospace", fontSize: "13px", fontWeight: 800, color: B.navy }}>{hora}</td>
             {dias.map(d => {
               const cells = cMap[`${d}|||${hora}`] || []
@@ -205,9 +205,9 @@ function AgendaGrid({
                     const isIncons = inconsMap.has(`${d}|||${hora}|||${c.prof}`)
                     return (
                       <div key={ci} style={{ background: isIncons ? "#fffbeb" : cs.bg, border: `1px solid ${isIncons ? "#fbbf24" : cs.bd}`, borderRadius: "8px", padding: "6px 8px", marginBottom: "2px", minHeight: "58px", display: "flex", flexDirection: "column", gap: "2px" }}>
-                        <div style={{ fontSize: "11px", fontWeight: 700, color: isIncons ? "#1f2937" : cs.tc, lineHeight: "1.3" }}>{c.tP}</div>
-                        {c.tE && <div style={{ fontSize: "10px", color: isIncons ? "#9ca3af" : cs.sc, lineHeight: "1.2" }}>({c.tE})</div>}
-                        <div style={{ fontSize: "10px", color: isIncons ? "#6b7280" : cs.sc }}>{fmtName(c.prof)}</div>
+                        <div style={{ fontSize: "11px", fontWeight: 700, color: isIncons ? "var(--card-foreground)" : cs.tc, lineHeight: "1.3" }}>{c.tP}</div>
+                        {c.tE && <div style={{ fontSize: "10px", color: isIncons ? "var(--muted-foreground)" : cs.sc, lineHeight: "1.2" }}>({c.tE})</div>}
+                        <div style={{ fontSize: "10px", color: isIncons ? "var(--muted-foreground)" : cs.sc }}>{fmtName(c.prof)}</div>
                         {shouldShowSessionUnit(unitMeta, d, hora) && c.unidade && c.unidade !== "Desconhecida" && (
                           <div style={{ fontSize: "9px", fontWeight: 800, color: B.blue, background: B.blueLt, border: `1px solid ${B.blue}33`, borderRadius: "999px", padding: "1px 5px", width: "fit-content" }}>
                             🏥 {unidadeBadgeText(c.unidade)}
@@ -386,7 +386,7 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
       className="fixed inset-0 z-[60] flex items-center justify-center bg-black/55 p-3"
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div className="bg-white rounded-[18px] shadow-[0_24px_80px_rgba(0,0,0,.22)] w-[96vw] max-w-[1200px] max-h-[94vh] flex flex-col">
+      <div className="bg-card rounded-[18px] shadow-[0_24px_80px_rgba(0,0,0,.22)] w-[96vw] max-w-[1200px] max-h-[94vh] flex flex-col">
 
         {/* Header */}
         <div className="px-5 py-[14px] border-b border-gray-100 bg-gray-50 rounded-t-[18px]">
@@ -398,8 +398,8 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
                   onClick={() => onSessionTabChange?.(i)}
                   style={{
                     padding: "4px 11px", borderRadius: "999px", fontSize: "11px", fontWeight: 700, cursor: "pointer",
-                    background: sessionTabIdx === i ? "#fef2f2" : "#f3f4f6",
-                    color: sessionTabIdx === i ? "#dc2626" : "#6b7280",
+                    background: sessionTabIdx === i ? "#fef2f2" : "var(--muted)",
+                    color: sessionTabIdx === i ? "#dc2626" : "var(--muted-foreground)",
                     border: sessionTabIdx === i ? "1.5px solid #fca5a5" : "1.5px solid #e5e7eb",
                   }}
                 >
@@ -455,14 +455,14 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
                     onClick={() => { if (tem) { setESel(key); setOpSel(0) } }}
                     style={{
                       marginBottom: "6px", borderRadius: "10px",
-                      border: `2px solid ${eSel === key ? cor + "99" : isE5orE7 ? "#fde68a" : "#e5e7eb"}`,
+                      border: `2px solid ${eSel === key ? cor + "99" : isE5orE7 ? "#fde68a" : "var(--border)"}`,
                       padding: "8px 10px",
-                      background: eSel === key ? cor + "11" : isE5orE7 ? "#fffbeb" : "white",
+                      background: eSel === key ? cor + "11" : isE5orE7 ? "#fffbeb" : "var(--card)",
                       cursor: tem ? "pointer" : "default",
                       opacity: tem ? 1 : 0.45,
                     }}
                   >
-                    <div style={{ fontWeight: 700, fontSize: "11px", color: tem ? B.navy : "#9ca3af", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "4px" }}>
+                    <div style={{ fontWeight: 700, fontSize: "11px", color: tem ? B.navy : "var(--muted-foreground)", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "4px" }}>
                       <span className="flex items-start" style={{ lineHeight: 1.3 }}>{title}<InfoTip text={E_TIPS[tipKey] || ""} /></span>
                       {!tem && <span style={{ color: "#dc2626", fontSize: "10px", flexShrink: 0 }}>sem vaga</span>}
                       {isE5orE7 && tem && <span style={{ color: "#92400e", fontSize: "9px", flexShrink: 0 }}>risco recusa</span>}
@@ -474,9 +474,9 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
                         <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
                           {e2.opcoes.map((op, i) => (
                             <button key={i} onClick={e => { e.stopPropagation(); setOpSel(i) }}
-                              style={{ textAlign: "left", padding: "6px 8px", borderRadius: "7px", border: `1px solid ${opSel === i ? cor : cor + "44"}`, background: opSel === i ? cor + "22" : "white", cursor: "pointer", fontSize: "10px", color: "#374151" }}>
+                              style={{ textAlign: "left", padding: "6px 8px", borderRadius: "7px", border: `1px solid ${opSel === i ? cor : cor + "44"}`, background: opSel === i ? cor + "22" : "var(--card)", cursor: "pointer", fontSize: "10px", color: "var(--card-foreground)" }}>
                               {op.movimentos.map((m, mi) => (
-                                <div key={mi} style={{ fontWeight: mi === 0 ? 700 : 400, color: mi === 0 ? "#1f2937" : "#6b7280" }}>
+                                <div key={mi} style={{ fontWeight: mi === 0 ? 700 : 400, color: mi === 0 ? "var(--card-foreground)" : "var(--muted-foreground)" }}>
                                   {m.paraTerapia !== afetada.terapia ? `${m.paraTerapia} → ` : ""}{fmtName(m.paraProf)} · {m.paraDia !== afetada.dia ? m.paraDia + " " : ""}{m.paraHora}
                                 </div>
                               ))}
@@ -488,7 +488,7 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
                         <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
                           {e5.opcoes.map((op, i) => (
                             <button key={i} onClick={e => { e.stopPropagation(); setOpSel(i) }}
-                              style={{ textAlign: "left", padding: "6px 8px", borderRadius: "7px", border: `1px solid ${opSel === i ? cor : cor + "44"}`, background: opSel === i ? cor + "22" : "white", cursor: "pointer", fontSize: "10px", color: "#374151" }}>
+                              style={{ textAlign: "left", padding: "6px 8px", borderRadius: "7px", border: `1px solid ${opSel === i ? cor : cor + "44"}`, background: opSel === i ? cor + "22" : "var(--card)", cursor: "pointer", fontSize: "10px", color: "var(--card-foreground)" }}>
                               {op.movimentos.map((m, mi) => (
                                 <div key={mi}>{fmtName(m.paraProf)} · {m.paraDia !== afetada.dia ? m.paraDia + " " : ""}{m.paraHora}</div>
                               ))}
@@ -505,7 +505,7 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
                           <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
                             {strat.opcoes.map((op, i) => (
                               <button key={i} onClick={e => { e.stopPropagation(); setOpSel(i) }}
-                                style={{ textAlign: "left", padding: "6px 8px", borderRadius: "7px", border: `1px solid ${opSel === i ? cor : cor + "44"}`, background: opSel === i ? cor + "22" : "white", cursor: "pointer", fontSize: "10px", color: "#374151" }}>
+                                style={{ textAlign: "left", padding: "6px 8px", borderRadius: "7px", border: `1px solid ${opSel === i ? cor : cor + "44"}`, background: opSel === i ? cor + "22" : "var(--card)", cursor: "pointer", fontSize: "10px", color: "var(--card-foreground)" }}>
                                 <div style={{ fontWeight: 700 }}>{op.diaOrigem.replace("-feira", "")} → {op.diaDestino.replace("-feira", "")}</div>
                                 {op.profissionaisAlterados.length > 0 && (
                                   <div style={{ fontSize: "9px", color: "#c2410c", marginTop: "2px" }}>Troca: {op.profissionaisAlterados.map(fmtName).join(", ")}</div>
@@ -522,9 +522,9 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
                         <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
                           {strat.opcoes.map((op, i) => (
                             <button key={i} onClick={e => { e.stopPropagation(); setOpSel(i) }}
-                              style={{ textAlign: "left", padding: "6px 8px", borderRadius: "7px", border: `1px solid ${opSel === i ? cor : cor + "44"}`, background: opSel === i ? cor + "22" : "white", cursor: "pointer", fontSize: "11px", fontWeight: opSel === i ? 700 : 400, color: "#374151" }}>
+                              style={{ textAlign: "left", padding: "6px 8px", borderRadius: "7px", border: `1px solid ${opSel === i ? cor : cor + "44"}`, background: opSel === i ? cor + "22" : "var(--card)", cursor: "pointer", fontSize: "11px", fontWeight: opSel === i ? 700 : 400, color: "var(--card-foreground)" }}>
                               <div style={{ fontWeight: 700 }}>{fmtName(op.prof)}</div>
-                              <div style={{ color: "#6b7280" }}>{op.dia !== afetada.dia ? op.dia + " " : ""}{op.hora} · {op.unidade}</div>
+                              <div style={{ color: "var(--muted-foreground)" }}>{op.dia !== afetada.dia ? op.dia + " " : ""}{op.hora} · {op.unidade}</div>
                             </button>
                           ))}
                         </div>
@@ -551,12 +551,12 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
               )}
 
               <div style={{ marginTop: "10px" }}>
-                <div style={{ fontSize: "11px", fontWeight: 700, color: "#6b7280", marginBottom: "3px" }}>Observação</div>
+                <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", marginBottom: "3px" }}>Observação</div>
                 <textarea
                   value={obs}
                   onChange={e => setObs(e.target.value)}
                   placeholder="Ex: WA enviado em xx/xx..."
-                  style={{ width: "100%", height: "54px", border: "1px solid #d1d5db", borderRadius: "7px", padding: "5px 7px", fontSize: "11px", fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }}
+                  style={{ width: "100%", height: "54px", border: "1px solid var(--border)", borderRadius: "7px", padding: "5px 7px", fontSize: "11px", fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }}
                 />
               </div>
             </div>
@@ -578,7 +578,7 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
 
                 {/* Grade ANTES */}
                 <div style={{ marginBottom: "4px" }}>
-                  <div style={{ fontSize: "11px", fontWeight: 800, color: "#6b7280", marginBottom: "6px", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                  <div style={{ fontSize: "11px", fontWeight: 800, color: "var(--muted-foreground)", marginBottom: "6px", textTransform: "uppercase", letterSpacing: "0.05em" }}>
                     Atual
                   </div>
                   {sessPac.length === 0
@@ -591,11 +591,11 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
                 {opcSel && movimentos.length > 0 && (
                   <div style={{ marginTop: "16px" }}>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
-                      <div style={{ flex: 1, height: "1px", background: "#e5e7eb" }} />
+                      <div style={{ flex: 1, height: "1px", background: "var(--border)" }} />
                       <div style={{ fontSize: "11px", fontWeight: 800, color: B.navy, textTransform: "uppercase", letterSpacing: "0.05em", display: "flex", alignItems: "center", gap: "4px" }}>
                         ↓ Proposta
                       </div>
-                      <div style={{ flex: 1, height: "1px", background: "#e5e7eb" }} />
+                      <div style={{ flex: 1, height: "1px", background: "var(--border)" }} />
                     </div>
                     <AgendaGrid cMap={cMapDepois} dias={diasDepois} pacUnidade={pacUnidade} inconsistencias={[]} />
                   </div>
@@ -609,16 +609,16 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
           {(st === "pendente" || st === "recusado") && (
             <>
               <button onClick={() => save("aguardando")} disabled={!opcSel} style={{ padding: "7px 12px", borderRadius: "9px", border: "none", background: opcSel ? "#16a34a" : "#86efac", color: "white", fontWeight: 700, fontSize: "11px", cursor: opcSel ? "pointer" : "not-allowed" }}>Aceitar (→ Acompanhamento)</button>
-              <button onClick={() => save("sem_solucao")} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid #e5e7eb", background: "#f3f4f6", color: "#6b7280", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>⛔ Inviável</button>
+              <button onClick={() => save("sem_solucao")} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid var(--border)", background: "var(--muted)", color: "var(--muted-foreground)", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>⛔ Inviável</button>
             </>
           )}
           {st === "aguardando" && (
             <>
-              <button onClick={() => save("sem_solucao")} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid #e5e7eb", background: "#f3f4f6", color: "#6b7280", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>⛔ Inviável</button>
-              <button onClick={() => save("pendente")} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid #e5e7eb", background: "white", color: "#6b7280", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>Cancelar</button>
+              <button onClick={() => save("sem_solucao")} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid var(--border)", background: "var(--muted)", color: "var(--muted-foreground)", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>⛔ Inviável</button>
+              <button onClick={() => save("pendente")} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid var(--border)", background: "var(--card)", color: "var(--muted-foreground)", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>Cancelar</button>
             </>
           )}
-          <button onClick={onClose} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid #e5e7eb", background: "white", color: "#6b7280", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>Fechar</button>
+          <button onClick={onClose} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid var(--border)", background: "var(--card)", color: "var(--muted-foreground)", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>Fechar</button>
         </div>
       </div>
     </div>

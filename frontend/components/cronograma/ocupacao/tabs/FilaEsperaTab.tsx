@@ -31,9 +31,9 @@ export function FilaEsperaTab({ res, waMap, onWA, onInv, onCron }: Props) {
 
 function Empty({ icon, text }: { icon: string; text: string }) {
   return (
-    <div style={{ background: "white", borderRadius: "14px", border: "2px dashed #e5e7eb", padding: "32px 24px", textAlign: "center" }}>
+    <div style={{ background: "var(--card)", borderRadius: "14px", border: "2px dashed var(--border)", padding: "32px 24px", textAlign: "center" }}>
       <div style={{ fontSize: "40px", marginBottom: "8px" }}>{icon}</div>
-      <div style={{ color: "#9ca3af", fontSize: "14px" }}>{text}</div>
+      <div style={{ color: "var(--muted-foreground)", fontSize: "14px" }}>{text}</div>
     </div>
   )
 }

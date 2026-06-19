@@ -21,7 +21,7 @@ const WA_ST: Record<string, { lbl: string; bg: string; color: string }> = {
   aguardando: { lbl: "⏳ Aguardando WA",  bg: B.blueLt,  color: B.blue   },
   aceito:     { lbl: "✅ Aceito",         bg: B.limeLt,  color: "#5a8a30" },
   recusado:   { lbl: "❌ Recusado",       bg: "#fef2f2", color: "#dc2626" },
-  inviavel:   { lbl: "⛔ Inviável",       bg: "#f3f4f6", color: "#6b7280" },
+  inviavel:   { lbl: "⛔ Inviável",       bg: "var(--muted)", color: "var(--muted-foreground)" },
 }
 
 export interface SugCardProps {
@@ -41,8 +41,8 @@ export function SugCard({ s, waStatus, onWA, onInv, onCron, fila = false }: SugC
 
   const tipoColor = isGrupo ? B.purple : B.blue
   const tipoBg    = isGrupo ? B.purpleLt : B.blueLt
-  const cardBd    = confirming ? B.lime : isGrupo ? `${B.purple}33` : "#e5e7eb"
-  const cardBg    = isGrupo ? B.purpleLt : "white"
+  const cardBd    = confirming ? B.lime : isGrupo ? `${B.purple}33` : "var(--border)"
+  const cardBg    = isGrupo ? B.purpleLt : "var(--card)"
 
   const wa = WA_ST[waStatus ?? ""] ?? WA_ST[""]
 
@@ -55,7 +55,7 @@ export function SugCard({ s, waStatus, onWA, onInv, onCron, fila = false }: SugC
             <span style={{ background: tipoBg, color: tipoColor, border: `1px solid ${tipoColor}33`, borderRadius: "999px", padding: "2px 8px", fontSize: "11px", fontWeight: 700 }}>
               {isGrupo ? "👥 Montar Grupo" : "📅 Ocupar Vaga Livre"}
             </span>
-            <span style={{ background: "#f3f4f6", color: "#6b7280", borderRadius: "999px", padding: "2px 7px", fontSize: "11px", fontWeight: 500 }}>
+            <span style={{ background: "var(--muted)", color: "var(--muted-foreground)", borderRadius: "999px", padding: "2px 7px", fontSize: "11px", fontWeight: 500 }}>
               {REGRA_LABEL[s.regra] ?? s.regra}
             </span>
             <PBadge prio={s.prio} />
@@ -90,7 +90,7 @@ export function SugCard({ s, waStatus, onWA, onInv, onCron, fila = false }: SugC
                 </button>
               )}
               {!waStatus && (
-                <button onClick={() => onInv(s)} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer" }}>
+                <button onClick={() => onInv(s)} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}>
                   ⛔ Inviável
                 </button>
               )}
@@ -101,35 +101,35 @@ export function SugCard({ s, waStatus, onWA, onInv, onCron, fila = false }: SugC
         {/* ── Grid de detalhes ── */}
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 24px", fontSize: "12px" }}>
           <div>
-            <div style={{ color: "#9ca3af" }}>Paciente</div>
+            <div style={{ color: "var(--muted-foreground)" }}>Paciente</div>
             <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px" }}>{s.pac}</div>
           </div>
           <div>
-            <div style={{ color: "#9ca3af" }}>Profissional</div>
-            <div style={{ color: "#374151" }}>{fmtName(s.prof)}</div>
+            <div style={{ color: "var(--muted-foreground)" }}>Profissional</div>
+            <div style={{ color: "var(--card-foreground)" }}>{fmtName(s.prof)}</div>
           </div>
           <div>
-            <div style={{ color: "#9ca3af" }}>Terapia (Exibição)</div>
-            <div style={{ color: "#374151" }}>{s.tP}{s.esp && s.esp !== s.tP ? ` (${s.esp})` : ""}</div>
+            <div style={{ color: "var(--muted-foreground)" }}>Terapia (Exibição)</div>
+            <div style={{ color: "var(--card-foreground)" }}>{s.tP}{s.esp && s.esp !== s.tP ? ` (${s.esp})` : ""}</div>
           </div>
           <div>
-            <div style={{ color: "#9ca3af" }}>Unidade</div>
-            <div style={{ color: "#374151" }}>{s.unidade}</div>
+            <div style={{ color: "var(--muted-foreground)" }}>Unidade</div>
+            <div style={{ color: "var(--card-foreground)" }}>{s.unidade}</div>
           </div>
           <div>
-            <div style={{ color: "#9ca3af" }}>Dia / Hora</div>
+            <div style={{ color: "var(--muted-foreground)" }}>Dia / Hora</div>
             <div style={{ fontWeight: 700, color: B.navy }}>{s.dia} {s.hora}</div>
           </div>
           <div>
-            <div style={{ color: "#9ca3af" }}>Gap / Convênio</div>
-            <div style={{ color: "#374151" }}>{s.gap > 0 ? `+${s.gap}x` : "—"} · {s.conv || "—"}</div>
+            <div style={{ color: "var(--muted-foreground)" }}>Gap / Convênio</div>
+            <div style={{ color: "var(--card-foreground)" }}>{s.gap > 0 ? `+${s.gap}x` : "—"} · {s.conv || "—"}</div>
           </div>
           {s.colegas !== "—" && (() => {
             const membros = s.colegas.split(", ").filter(Boolean)
             const total = membros.length + 1
             return (
               <div style={{ gridColumn: "1/3" }}>
-                <div style={{ color: "#9ca3af", display: "flex", alignItems: "center", gap: "6px" }}>
+                <div style={{ color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: "6px" }}>
                   Grupo na sessão
                   <span style={{ background: B.purpleLt, color: B.purple, border: `1px solid ${B.purple}33`, borderRadius: "999px", padding: "0 7px", fontSize: "11px", fontWeight: 700 }}>
                     {total} pessoas
@@ -142,8 +142,8 @@ export function SugCard({ s, waStatus, onWA, onInv, onCron, fila = false }: SugC
                       {m}
                     </div>
                   ))}
-                  <div style={{ fontSize: "12px", color: "#9ca3af", fontStyle: "italic", display: "flex", gap: "6px", alignItems: "baseline" }}>
-                    <span style={{ fontSize: "10px", fontWeight: 800, color: "#9ca3af", minWidth: "14px" }}>{total}.</span>
+                  <div style={{ fontSize: "12px", color: "var(--muted-foreground)", fontStyle: "italic", display: "flex", gap: "6px", alignItems: "baseline" }}>
+                    <span style={{ fontSize: "10px", fontWeight: 800, color: "var(--muted-foreground)", minWidth: "14px" }}>{total}.</span>
                     {s.pac} <span style={{ fontSize: "10px" }}>(este paciente)</span>
                   </div>
                 </div>
@@ -152,7 +152,7 @@ export function SugCard({ s, waStatus, onWA, onInv, onCron, fila = false }: SugC
           })()}
           {s.vComp && s.vComp !== "—" && (
             <div style={{ gridColumn: "1/3" }}>
-              <div style={{ color: "#9ca3af" }}>
+              <div style={{ color: "var(--muted-foreground)" }}>
                 {isR4 ? "⟳ Remanejamento" : s.regra?.startsWith("Foco") ? "Atenção para oferta" : "Vaga complementar (R3 — oferecer junto)"}
               </div>
               <div style={{ color: B.orange, fontWeight: 600 }}>{s.vComp}</div>
@@ -167,11 +167,11 @@ export function SugCard({ s, waStatus, onWA, onInv, onCron, fila = false }: SugC
           style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.4)", padding: "16px" }}
           onClick={e => { if (e.target === e.currentTarget) setConfirming(false) }}
         >
-          <div style={{ background: "white", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "400px", width: "100%", padding: "24px" }}>
+          <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "400px", width: "100%", padding: "24px" }}>
             <div style={{ fontWeight: 900, fontSize: "17px", color: B.navy, marginBottom: "4px" }}>
               Aceitar e enviar para Acompanhamento
             </div>
-            <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "16px" }}>
+            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "16px" }}>
               A vaga ficará reservada e aparecerá em Acompanhamento → Aguardando Resposta.
             </div>
 
@@ -180,20 +180,20 @@ export function SugCard({ s, waStatus, onWA, onInv, onCron, fila = false }: SugC
               <div style={{ fontWeight: 800, fontSize: "14px", color: B.navy, marginBottom: "6px" }}>{s.pac}</div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px", fontSize: "12px" }}>
                 <div>
-                  <div style={{ color: "#9ca3af", fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Terapia</div>
-                  <div style={{ fontWeight: 600, color: "#374151" }}>{s.tP}</div>
+                  <div style={{ color: "var(--muted-foreground)", fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Terapia</div>
+                  <div style={{ fontWeight: 600, color: "var(--card-foreground)" }}>{s.tP}</div>
                 </div>
                 <div>
-                  <div style={{ color: "#9ca3af", fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Profissional</div>
-                  <div style={{ fontWeight: 600, color: "#374151" }}>{fmtName(s.prof)}</div>
+                  <div style={{ color: "var(--muted-foreground)", fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Profissional</div>
+                  <div style={{ fontWeight: 600, color: "var(--card-foreground)" }}>{fmtName(s.prof)}</div>
                 </div>
                 <div>
-                  <div style={{ color: "#9ca3af", fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Dia / Hora</div>
+                  <div style={{ color: "var(--muted-foreground)", fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Dia / Hora</div>
                   <div style={{ fontWeight: 700, color: B.navy }}>{s.dia} {s.hora}</div>
                 </div>
                 <div>
-                  <div style={{ color: "#9ca3af", fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Unidade</div>
-                  <div style={{ fontWeight: 600, color: "#374151" }}>{s.unidade}</div>
+                  <div style={{ color: "var(--muted-foreground)", fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Unidade</div>
+                  <div style={{ fontWeight: 600, color: "var(--card-foreground)" }}>{s.unidade}</div>
                 </div>
               </div>
             </div>
@@ -207,7 +207,7 @@ export function SugCard({ s, waStatus, onWA, onInv, onCron, fila = false }: SugC
               </button>
               <button
                 onClick={() => setConfirming(false)}
-                style={{ flex: 1, padding: "10px 16px", borderRadius: "10px", background: "#f3f4f6", color: "#374151", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: "13px" }}
+                style={{ flex: 1, padding: "10px 16px", borderRadius: "10px", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: "13px" }}
               >
                 Cancelar
               </button>

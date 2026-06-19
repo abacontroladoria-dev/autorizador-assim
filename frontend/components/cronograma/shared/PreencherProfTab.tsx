@@ -46,7 +46,7 @@ const WA_S: Record<LocalWaStatus, { bg: string; c: string; l: string }> = {
   aguardando: { bg: B.blueLt, c: B.blue, l: "Aguardando WA" },
   aceito: { bg: B.limeLt, c: "#4a6e20", l: "Aceito" },
   recusado: { bg: "#fef2f2", c: "#dc2626", l: "Recusado" },
-  inviavel: { bg: "#f3f4f6", c: "#6b7280", l: "Inviável" },
+  inviavel: { bg: "var(--muted)", c: "var(--muted-foreground)", l: "Inviável" },
 }
 
 // ─── Pure helpers (defined outside to be stable across renders) ───────────────
@@ -122,8 +122,8 @@ function PacPreencherModal({ pac, proposta, cRows, waStatus, onStatus, onClose }
 
   const cSt = (tipo: string) => {
     if (tipo === "proposta") return { bg: B.limeLt, bd: B.lime, label: "Nova sessão", lc: B.purple }
-    if (tipo === "admin") return { bg: "#f3f4f6", bd: "#d1d5db", label: null, lc: null }
-    return { bg: "#f8fafc", bd: "#e2e8f0", label: null, lc: null }
+    if (tipo === "admin") return { bg: "var(--muted)", bd: "var(--border)", label: null, lc: null }
+    return { bg: "var(--muted)", bd: "var(--border)", label: null, lc: null }
   }
 
   const ws = waStatus as LocalWaStatus | null
@@ -132,8 +132,8 @@ function PacPreencherModal({ pac, proposta, cRows, waStatus, onStatus, onClose }
   return (
     <div style={{ position: "fixed", inset: 0, zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.55)", padding: 12 }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div style={{ background: "white", borderRadius: 18, boxShadow: "0 24px 80px rgba(0,0,0,.22)", width: "96vw", maxWidth: 960, maxHeight: "92vh", display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: "14px 20px", borderBottom: "1px solid #f0f0f0", background: "#fafafa", borderRadius: "18px 18px 0 0", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
+      <div style={{ background: "var(--card)", borderRadius: 18, boxShadow: "0 24px 80px rgba(0,0,0,.22)", width: "96vw", maxWidth: 960, maxHeight: "92vh", display: "flex", flexDirection: "column" }}>
+        <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", background: "var(--card)", borderRadius: "18px 18px 0 0", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
           <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
             <span style={{ fontWeight: 900, fontSize: 15, color: B.navy }}>{pac}</span>
             <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
@@ -146,21 +146,21 @@ function PacPreencherModal({ pac, proposta, cRows, waStatus, onStatus, onClose }
               {wsS && <span style={{ background: wsS.bg, color: wsS.c, borderRadius: 999, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{wsS.l}</span>}
             </div>
           </div>
-          <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: "50%", border: "none", background: "#f3f4f6", cursor: "pointer", fontSize: 16, color: "#6b7280", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+          <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: "50%", border: "none", background: "var(--muted)", cursor: "pointer", fontSize: 16, color: "var(--muted-foreground)", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
         </div>
 
         <div style={{ flex: 1, overflow: "auto", padding: 14 }}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 8, fontSize: 10, color: "#9ca3af", flexWrap: "wrap" }}>
+          <div style={{ display: "flex", gap: 8, marginBottom: 8, fontSize: 10, color: "var(--muted-foreground)", flexWrap: "wrap" }}>
             <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: B.limeLt, border: `1px solid ${B.lime}` }} /> Nova sessão proposta</span>
-            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "#f8fafc", border: "1px solid #e2e8f0" }} /> Existente</span>
-            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "#f3f4f6", border: "1px solid #d1d5db" }} /> Administrativo</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "var(--muted)", border: "1px solid var(--border)" }} /> Existente</span>
+            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "var(--muted)", border: "1px solid var(--border)" }} /> Administrativo</span>
           </div>
           {!horasGrid.length ? (
-            <div style={{ textAlign: "center", color: "#9ca3af", padding: 32 }}>Nenhuma sessão encontrada.</div>
+            <div style={{ textAlign: "center", color: "var(--muted-foreground)", padding: 32 }}>Nenhuma sessão encontrada.</div>
           ) : (
             <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 400 }}>
               <thead><tr>
-                <th style={{ width: 52, paddingBottom: 8, textAlign: "right", paddingRight: 10, fontSize: 12, color: "#9ca3af", fontWeight: 400 }}>Hora</th>
+                <th style={{ width: 52, paddingBottom: 8, textAlign: "right", paddingRight: 10, fontSize: 12, color: "var(--muted-foreground)", fontWeight: 400 }}>Hora</th>
                 {diasComSess.map(d => (
                   <th key={d} style={{ minWidth: 130, paddingBottom: 8, textAlign: "center", fontSize: 13, color: d === proposta.dia ? B.purple : B.navy, fontWeight: 800 }}>
                     <div>{d.replace("-feira", "")} {d === proposta.dia && <span style={{ fontSize: 10, background: B.limeLt, color: "#4a6e20", borderRadius: 4, padding: "1px 4px", marginLeft: 2 }}>nova</span>}</div>
@@ -170,7 +170,7 @@ function PacPreencherModal({ pac, proposta, cRows, waStatus, onStatus, onClose }
               </tr></thead>
               <tbody>
                 {horasGrid.map(hora => (
-                  <tr key={hora} style={{ borderTop: "1px solid #f1f5f9" }}>
+                  <tr key={hora} style={{ borderTop: "1px solid var(--border)" }}>
                     <td style={{ textAlign: "right", paddingRight: 10, verticalAlign: "top", paddingTop: 8, fontFamily: "monospace", fontSize: 15, fontWeight: 800, color: hora === proposta.hora ? B.purple : B.navy }}>{hora}</td>
                     {diasComSess.map(d => {
                       const cells = cMap[`${d}|||${hora}`] || []
@@ -180,8 +180,8 @@ function PacPreencherModal({ pac, proposta, cRows, waStatus, onStatus, onClose }
                             const cs = cSt(c.tipo)
                             return (
                               <div key={ci} style={{ background: cs.bg, border: `1px solid ${cs.bd}`, borderRadius: 9, padding: "7px 9px", marginBottom: 3, minHeight: 58, display: "flex", flexDirection: "column", gap: 2 }}>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: "#1f2937", lineHeight: 1.3 }}>{c.tP}</div>
-                                <div style={{ fontSize: 11, color: "#6b7280" }}>{fmtName(c.prof)}</div>
+                                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--card-foreground)", lineHeight: 1.3 }}>{c.tP}</div>
+                                <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{fmtName(c.prof)}</div>
                                 {shouldShowSessionUnit(unitMeta, d, hora) && c.unidade && c.unidade !== "Desconhecida" && (
                                   <div style={{ fontSize: 10, fontWeight: 800, color: B.blue, background: B.blueLt, border: `1px solid ${B.blue}33`, borderRadius: 999, padding: "1px 6px", width: "fit-content" }}>
                                     {unidadeBadgeText(c.unidade)}
@@ -201,16 +201,16 @@ function PacPreencherModal({ pac, proposta, cRows, waStatus, onStatus, onClose }
           )}
         </div>
 
-        <div style={{ padding: "10px 20px", borderTop: "1px solid #f0f0f0", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", background: "#fafafa", borderRadius: "0 0 18px 18px" }}>
-          <div style={{ flex: 1, fontSize: 11, color: "#9ca3af" }}>Cronograma atual + sessão proposta em verde.</div>
+        <div style={{ padding: "10px 20px", borderTop: "1px solid var(--border)", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", background: "var(--card)", borderRadius: "0 0 18px 18px" }}>
+          <div style={{ flex: 1, fontSize: 11, color: "var(--muted-foreground)" }}>Cronograma atual + sessão proposta em verde.</div>
           {!ws && <button onClick={() => onStatus("aguardando")} style={{ padding: "7px 13px", borderRadius: 9, border: "none", background: B.blue, color: "white", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Oferecer via WA</button>}
           {ws === "aguardando" && <>
-            <button onClick={() => onStatus(null)} style={{ padding: "7px 12px", borderRadius: 9, border: "1px solid #e5e7eb", background: "white", color: "#6b7280", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Desfazer envio</button>
+            <button onClick={() => onStatus(null)} style={{ padding: "7px 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--card)", color: "var(--muted-foreground)", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Desfazer envio</button>
             <button onClick={() => onStatus("aceito")} style={{ padding: "7px 12px", borderRadius: 9, border: "none", background: "#16a34a", color: "white", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Aceito</button>
             <button onClick={() => onStatus("recusado")} style={{ padding: "7px 12px", borderRadius: 9, border: "1px solid #fca5a5", background: "#fef2f2", color: "#dc2626", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Recusado</button>
-            <button onClick={() => onStatus("inviavel")} style={{ padding: "7px 12px", borderRadius: 9, border: "1px solid #e5e7eb", background: "#f3f4f6", color: "#6b7280", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Inviável</button>
+            <button onClick={() => onStatus("inviavel")} style={{ padding: "7px 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--muted)", color: "var(--muted-foreground)", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Inviável</button>
           </>}
-          <button onClick={onClose} style={{ padding: "7px 12px", borderRadius: 9, border: "1px solid #e5e7eb", background: "white", color: "#6b7280", fontWeight: 600, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Fechar</button>
+          <button onClick={onClose} style={{ padding: "7px 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--card)", color: "var(--muted-foreground)", fontWeight: 600, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Fechar</button>
         </div>
       </div>
     </div>
@@ -388,25 +388,25 @@ export function PreencherProfTab({ cRows, lRows, waMap: waMapProp, onWaChange, i
     const wsS = ws ? WA_S[ws] : null
     const proposta: PropostaItem = { prof: profKey || "Novo profissional", dia, hora, unidade, terapia, esp: TERAPIA_TO_ESP[terapia] || terapia, vCompSlots: c.vCompSlots || [] }
     return (
-      <div style={{ background: ws ? "#f8fafc" : "white", border: `1px solid ${ws ? B.blue + "44" : "#e5e7eb"}`, borderRadius: 10, padding: "9px 11px", display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
+      <div style={{ background: ws ? "var(--muted)" : "var(--card)", border: `1px solid ${ws ? B.blue + "44" : "var(--border)"}`, borderRadius: 10, padding: "9px 11px", display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 160px" }}>
-          <div style={{ fontWeight: 700, fontSize: 12, color: "#1f2937" }}>{c.pac}</div>
-          <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>Aut: <strong>{c.aut}</strong> · Of: <strong>{c.of}</strong> · <span style={{ color: "#dc2626", fontWeight: 700 }}>Gap −{c.gap}</span></div>
-          {c.tipo && <div style={{ fontSize: 10, color: c.rank === 0 ? "#4a6e20" : c.rank === 1 ? B.orange : "#6b7280", fontWeight: 700, marginTop: 1 }}>🎯 {c.tipo}</div>}
-          {c.sessD?.length > 0 && <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>Já neste dia: {c.sessD.join(", ")}</div>}
-          {!c.sessD?.length && c.diasUn && <div style={{ fontSize: 10, color: "#9ca3af", marginTop: 1 }}>Frequenta a unidade em: {c.diasUn}</div>}
+          <div style={{ fontWeight: 700, fontSize: 12, color: "var(--card-foreground)" }}>{c.pac}</div>
+          <div style={{ fontSize: 10, color: "var(--muted-foreground)", marginTop: 2 }}>Aut: <strong>{c.aut}</strong> · Of: <strong>{c.of}</strong> · <span style={{ color: "#dc2626", fontWeight: 700 }}>Gap −{c.gap}</span></div>
+          {c.tipo && <div style={{ fontSize: 10, color: c.rank === 0 ? "#4a6e20" : c.rank === 1 ? B.orange : "var(--muted-foreground)", fontWeight: 700, marginTop: 1 }}>🎯 {c.tipo}</div>}
+          {c.sessD?.length > 0 && <div style={{ fontSize: 10, color: "var(--muted-foreground)", marginTop: 1 }}>Já neste dia: {c.sessD.join(", ")}</div>}
+          {!c.sessD?.length && c.diasUn && <div style={{ fontSize: 10, color: "var(--muted-foreground)", marginTop: 1 }}>Frequenta a unidade em: {c.diasUn}</div>}
           {c.vComp && <div style={{ fontSize: 10, color: "#4a6e20", marginTop: 1, fontWeight: 700 }}>Oferecer junto: {c.vComp}</div>}
           {c.conflito && <div style={{ fontSize: 10, color: B.orange, marginTop: 1 }}>Conflito: {c.conflito}</div>}
         </div>
         <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap", flexShrink: 0 }}>
           {wsS && <span style={{ background: wsS.bg, color: wsS.c, borderRadius: 999, padding: "2px 8px", fontSize: 10, fontWeight: 700 }}>{wsS.l}</span>}
-          <button onClick={() => setModalItem({ pac: c.pac, proposta })} style={{ padding: "4px 9px", borderRadius: 7, background: "#f3f4f6", color: B.navy, border: "1px solid #e5e7eb", fontSize: 10, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>Ver</button>
+          <button onClick={() => setModalItem({ pac: c.pac, proposta })} style={{ padding: "4px 9px", borderRadius: 7, background: "var(--muted)", color: B.navy, border: "1px solid var(--border)", fontSize: 10, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>Ver</button>
           {!ws && <button onClick={() => setWst(c.pac, dia, hora, profKey, "aguardando")} style={{ padding: "4px 9px", borderRadius: 7, background: B.blue, color: "white", border: "none", fontSize: 10, cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>Oferecer via WA</button>}
           {ws === "aguardando" && <>
-            <button onClick={() => setWst(c.pac, dia, hora, profKey, null)} style={{ padding: "4px 7px", borderRadius: 7, background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>Desfazer envio</button>
+            <button onClick={() => setWst(c.pac, dia, hora, profKey, null)} style={{ padding: "4px 7px", borderRadius: 7, background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>Desfazer envio</button>
             <button onClick={() => setWst(c.pac, dia, hora, profKey, "aceito")} style={{ padding: "4px 7px", borderRadius: 7, background: "#16a34a", color: "white", border: "none", fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>Aceito</button>
             <button onClick={() => setWst(c.pac, dia, hora, profKey, "recusado")} style={{ padding: "4px 7px", borderRadius: 7, background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>Recusado</button>
-            <button onClick={() => setWst(c.pac, dia, hora, profKey, "inviavel")} style={{ padding: "4px 7px", borderRadius: 7, background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>Inviável</button>
+            <button onClick={() => setWst(c.pac, dia, hora, profKey, "inviavel")} style={{ padding: "4px 7px", borderRadius: 7, background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>Inviável</button>
           </>}
         </div>
       </div>
@@ -585,15 +585,15 @@ export function PreencherProfTab({ cRows, lRows, waMap: waMapProp, onWaChange, i
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
 
       {/* Mode / filters card */}
-      <div style={{ background: "white", borderRadius: 14, border: "1px solid #e5e7eb", padding: "14px 16px" }}>
+      <div style={{ background: "var(--card)", borderRadius: 14, border: "1px solid var(--border)", padding: "14px 16px" }}>
         <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
           <span style={{ fontWeight: 800, color: B.navy, fontSize: 15 }}>
             {mode === "sim" ? "Simulação de Novo Prestador" : mode === "paciente" ? "Aumentar Ocupação (Paciente)" : "Aumentar Ocupação (Profissional)"}
           </span>
           {!fixedMode && (
-            <div style={{ marginLeft: "auto", display: "flex", gap: 4, background: "#f3f4f6", borderRadius: 10, padding: 3 }}>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 4, background: "var(--muted)", borderRadius: 10, padding: 3 }}>
               {(["prof", "sim", "paciente"] as const).map(m => (
-                <button key={m} onClick={() => setMode(m)} style={{ padding: "5px 12px", borderRadius: 8, border: "none", background: mode === m ? B.navy : "transparent", color: mode === m ? "white" : "#6b7280", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
+                <button key={m} onClick={() => setMode(m)} style={{ padding: "5px 12px", borderRadius: 8, border: "none", background: mode === m ? B.navy : "transparent", color: mode === m ? "white" : "var(--muted-foreground)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
                   {m === "prof" ? "Profissional" : m === "sim" ? "Simulação" : "Paciente"}
                 </button>
               ))}
@@ -601,30 +601,30 @@ export function PreencherProfTab({ cRows, lRows, waMap: waMapProp, onWaChange, i
           )}
         </div>
 
-        <div style={{ fontSize: 11, color: "#6b7280", background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 9, padding: "7px 10px", marginBottom: 10 }}>
+        <div style={{ fontSize: 11, color: "var(--muted-foreground)", background: "var(--muted)", border: "1px solid var(--border)", borderRadius: 9, padding: "7px 10px", marginBottom: 10 }}>
           ⓘ Bloqueio temporário ativo: Djinane Ferreira Da Silva e Ana Carolina Mendes França não aparecem como vagas ofertáveis enquanto ainda constarem livres no CSV.
         </div>
 
         {/* Prof mode */}
         {mode === "prof" && <>
-          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>Selecione a profissional para ver seus slots Livres e os candidatos elegíveis.</div>
+          <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 10 }}>Selecione a profissional para ver seus slots Livres e os candidatos elegíveis.</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: "1 1 240px" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#6b7280" }}>Profissional</span>
-              <select value={fpProf} onChange={e => { setFpProf(e.target.value); setFpEsp(""); setFpDia("") }} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "7px 11px", fontSize: 13, fontFamily: "inherit" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)" }}>Profissional</span>
+              <select value={fpProf} onChange={e => { setFpProf(e.target.value); setFpEsp(""); setFpDia("") }} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "7px 11px", fontSize: 13, fontFamily: "inherit" }}>
                 <option value="">Selecionar...</option>
                 {todosProfs.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
             {fpProf && espsDisp.length > 0 && <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#6b7280" }}>Especialidade</span>
-              <select value={fpEsp} onChange={e => setFpEsp(e.target.value)} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "7px 11px", fontSize: 13, fontFamily: "inherit" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)" }}>Especialidade</span>
+              <select value={fpEsp} onChange={e => setFpEsp(e.target.value)} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "7px 11px", fontSize: 13, fontFamily: "inherit" }}>
                 <option value="">Todas</option>{espsDisp.map(e => <option key={e} value={e}>{e}</option>)}
               </select>
             </div>}
             {fpProf && diasDisp.length > 0 && <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#6b7280" }}>Dia</span>
-              <select value={fpDia} onChange={e => setFpDia(e.target.value)} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "7px 11px", fontSize: 13, fontFamily: "inherit" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)" }}>Dia</span>
+              <select value={fpDia} onChange={e => setFpDia(e.target.value)} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "7px 11px", fontSize: 13, fontFamily: "inherit" }}>
                 <option value="">Todos</option>{diasDisp.map(d => <option key={d} value={d}>{d.replace("-feira", "")}</option>)}
               </select>
             </div>}
@@ -634,22 +634,22 @@ export function PreencherProfTab({ cRows, lRows, waMap: waMapProp, onWaChange, i
 
         {/* Sim mode */}
         {mode === "sim" && <>
-          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>Simule um novo profissional por terapia, dia e turno. A recomendação pode combinar unidades por turno quando isso aumenta ocupação, respeitando a restrição geográfica de Padre Miguel.<InfoTip text="A simulação considera pacientes com Autorizado > Ofertado, adjacência no mesmo dia/unidade, turno clínico compatível e ausência de conflito no horário." /></div>
+          <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 10 }}>Simule um novo profissional por terapia, dia e turno. A recomendação pode combinar unidades por turno quando isso aumenta ocupação, respeitando a restrição geográfica de Padre Miguel.<InfoTip text="A simulação considera pacientes com Autorizado > Ofertado, adjacência no mesmo dia/unidade, turno clínico compatível e ausência de conflito no horário." /></div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: "1 1 280px" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#6b7280" }}>Especialidade <InfoTip text="Digite parte do nome da terapia e escolha uma opção da lista." /></span>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)" }}>Especialidade <InfoTip text="Digite parte do nome da terapia e escolha uma opção da lista." /></span>
               <input list="preencher-esp-options" value={simEsp} onChange={e => { setSimEsp(e.target.value); setSimUnid("") }}
                 onBlur={() => { const match = espOptions.find(e => e.toLowerCase() === simEsp.trim().toLowerCase()); if (match) setSimEsp(match) }}
                 placeholder="Digite para pesquisar e selecione da lista..."
-                style={{ border: `1px solid ${simEspValida ? "#d1d5db" : "#fca5a5"}`, borderRadius: 8, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", background: simEspValida ? "white" : "#fff7f7" }} />
+                style={{ border: `1px solid ${simEspValida ? "var(--border)" : "#fca5a5"}`, borderRadius: 8, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", background: simEspValida ? "var(--card)" : "#fff7f7" }} />
               <datalist id="preencher-esp-options">{espOptions.map(e => <option key={e} value={e} />)}</datalist>
               {!simEspValida && <span style={{ fontSize: 11, fontWeight: 700, color: "#dc2626" }}>Selecione uma especialidade válida da lista.</span>}
             </div>
           </div>
-          <div style={{ marginTop: 12, background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: 12, padding: "10px 12px" }}>
+          <div style={{ marginTop: 12, background: "var(--muted)", border: "1px solid var(--border)", borderRadius: 12, padding: "10px 12px" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
               <span style={{ fontSize: 12, fontWeight: 800, color: B.navy }}>Dias e turnos afetados <InfoTip text="Marque manhã, tarde ou dia inteiro. A recomendação avalia cada período separadamente." /></span>
-              <button onClick={toggleSimTodos} style={{ padding: "4px 10px", borderRadius: 8, border: "1px solid #cbd5e1", background: "white", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Todos</button>
+              <button onClick={toggleSimTodos} style={{ padding: "4px 10px", borderRadius: 8, border: "1px solid #cbd5e1", background: "var(--card)", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Todos</button>
             </div>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10 }}>
               {(DIAS_UTIL as readonly string[]).map(d => (
@@ -657,10 +657,10 @@ export function PreencherProfTab({ cRows, lRows, waMap: waMapProp, onWaChange, i
                   <span style={{ fontSize: 12, fontWeight: 800, color: B.navy }}>{d.replace("-feira", "")}</span>
                   <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
                     {(["manha", "tarde"] as const).map(t => (
-                      <button key={t} onClick={() => toggleSimTurno(d, t)} style={{ height: 32, padding: "0 10px", borderRadius: 9, border: `1px solid ${simDT?.[d]?.[t] ? B.blue : "#d1d5db"}`, background: simDT?.[d]?.[t] ? B.blueLt : "white", color: simDT?.[d]?.[t] ? B.blue : "#6b7280", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{turnoNome[t]}</button>
+                      <button key={t} onClick={() => toggleSimTurno(d, t)} style={{ height: 32, padding: "0 10px", borderRadius: 9, border: `1px solid ${simDT?.[d]?.[t] ? B.blue : "var(--border)"}`, background: simDT?.[d]?.[t] ? B.blueLt : "var(--card)", color: simDT?.[d]?.[t] ? B.blue : "var(--muted-foreground)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{turnoNome[t]}</button>
                     ))}
                   </div>
-                  <button onClick={() => toggleSimDiaInteiro(d)} style={{ height: 30, padding: "0 10px", borderRadius: 9, border: "1px solid #d1d5db", background: "white", color: "#6b7280", fontSize: 11, cursor: "pointer", fontFamily: "inherit", width: "fit-content" }}>Dia inteiro</button>
+                  <button onClick={() => toggleSimDiaInteiro(d)} style={{ height: 30, padding: "0 10px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--card)", color: "var(--muted-foreground)", fontSize: 11, cursor: "pointer", fontFamily: "inherit", width: "fit-content" }}>Dia inteiro</button>
                 </div>
               ))}
             </div>
@@ -670,25 +670,25 @@ export function PreencherProfTab({ cRows, lRows, waMap: waMapProp, onWaChange, i
 
         {/* Paciente mode */}
         {mode === "paciente" && <>
-          <div style={{ fontSize: 12, color: "#6b7280", marginBottom: 10 }}>Selecione um paciente para completar as terapias autorizadas em laudo. A busca prioriza acréscimos nas extremidades e mostra remanejamentos simples quando precisa abrir o horário.</div>
+          <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 10 }}>Selecione um paciente para completar as terapias autorizadas em laudo. A busca prioriza acréscimos nas extremidades e mostra remanejamentos simples quando precisa abrir o horário.</div>
           <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
             <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: "1 1 280px" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#6b7280" }}>Paciente com gap</span>
-              <select value={pacSel} onChange={e => { setPacSel(e.target.value); setPacEsp("") }} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "7px 11px", fontSize: 13, fontFamily: "inherit" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)" }}>Paciente com gap</span>
+              <select value={pacSel} onChange={e => { setPacSel(e.target.value); setPacEsp("") }} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "7px 11px", fontSize: 13, fontFamily: "inherit" }}>
                 <option value="">Selecionar paciente...</option>
                 {pacsComGap.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
             {pacSel && gapsPaciente.length > 0 && <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: "1 1 220px" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "#6b7280" }}>Especialidade autorizada pendente</span>
-              <select value={pacEspAtiva} onChange={e => setPacEsp(e.target.value)} style={{ border: "1px solid #d1d5db", borderRadius: 8, padding: "7px 11px", fontSize: 13, fontFamily: "inherit" }}>
+              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)" }}>Especialidade autorizada pendente</span>
+              <select value={pacEspAtiva} onChange={e => setPacEsp(e.target.value)} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "7px 11px", fontSize: 13, fontFamily: "inherit" }}>
                 {gapsPaciente.map(g => <option key={g.esp} value={g.esp}>{g.esp} | gap {g.gap} (aut {g.aut}, of {g.of})</option>)}
               </select>
             </div>}
           </div>
           {pacSel && <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
             {gapsPaciente.map(g => (
-              <span key={g.esp} style={{ background: g.esp === pacEspAtiva ? B.blueLt : "#f8fafc", color: g.esp === pacEspAtiva ? B.blue : "#6b7280", border: `1px solid ${g.esp === pacEspAtiva ? B.blue + "44" : "#e5e7eb"}`, borderRadius: 999, padding: "3px 9px", fontSize: 11, fontWeight: 700 }}>
+              <span key={g.esp} style={{ background: g.esp === pacEspAtiva ? B.blueLt : "var(--muted)", color: g.esp === pacEspAtiva ? B.blue : "var(--muted-foreground)", border: `1px solid ${g.esp === pacEspAtiva ? B.blue + "44" : "var(--border)"}`, borderRadius: 999, padding: "3px 9px", fontSize: 11, fontWeight: 700 }}>
                 {g.esp}: faltam {g.gap}
               </span>
             ))}
@@ -705,23 +705,23 @@ export function PreencherProfTab({ cRows, lRows, waMap: waMapProp, onWaChange, i
             { n: slotFilt.filter(s => s.cands.some(c => c.rank === 2)).length, l: "novo dia válido", c: B.blue, tip: "Horários livres que podem compor novo comparecimento com pelo menos mais uma sessão útil." },
             { n: slotFilt.filter(s => s.cands.length === 0).length, l: "sem candidato", c: "#f97316", tip: "Horários livres sem paciente elegível após regras de gap, turno, adjacência, conflito e reserva WA." },
           ].map(({ n, l, c, tip }) => (
-            <div key={l} style={{ flex: "1 1 110px", background: "white", borderRadius: 12, border: `1px solid ${c}33`, padding: 12, textAlign: "center" }}>
+            <div key={l} style={{ flex: "1 1 110px", background: "var(--card)", borderRadius: 12, border: `1px solid ${c}33`, padding: 12, textAlign: "center" }}>
               <div style={{ fontSize: 26, fontWeight: 900, color: c }}>{n}</div>
-              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{l}<InfoTip text={tip} /></div>
+              <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 2 }}>{l}<InfoTip text={tip} /></div>
             </div>
           ))}
         </div>
         {diasDisp.filter(d => !fpDia || fpDia === d).map(dia => {
           const sD = slotFilt.filter(s => s.dia === dia); if (!sD.length) return null
           return (
-            <div key={dia} style={{ background: "white", borderRadius: 14, border: "1px solid #e5e7eb", overflow: "hidden" }}>
-              <div style={{ padding: "11px 16px", background: "#f8fafc", borderBottom: "1px solid #f0f0f0", display: "flex", alignItems: "center", gap: 8 }}>
+            <div key={dia} style={{ background: "var(--card)", borderRadius: 14, border: "1px solid var(--border)", overflow: "hidden" }}>
+              <div style={{ padding: "11px 16px", background: "var(--muted)", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8 }}>
                 <span style={{ fontWeight: 800, color: B.navy, fontSize: 14 }}>{dia.replace("-feira", "")}</span>
-                <span style={{ fontSize: 11, color: "#6b7280" }}>{sD[0]?.unidade}</span>
-                <span style={{ marginLeft: "auto", fontSize: 11, color: "#6b7280" }}>{sD.length} slot(s) · {sD.filter(s => s.cands.length > 0).length} com candidato</span>
+                <span style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{sD[0]?.unidade}</span>
+                <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--muted-foreground)" }}>{sD.length} slot(s) · {sD.filter(s => s.cands.length > 0).length} com candidato</span>
               </div>
               {sD.map((s, si) => (
-                <div key={si} style={{ padding: "12px 16px", borderBottom: "1px solid #f9fafb", display: "flex", gap: 12, flexWrap: "wrap", background: s.cands.length > 0 ? "white" : "#fafafa" }}>
+                <div key={si} style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", gap: 12, flexWrap: "wrap", background: s.cands.length > 0 ? "var(--card)" : "var(--muted)" }}>
                   <div style={{ flexShrink: 0, width: 110 }}>
                     <div style={{ fontFamily: "monospace", fontSize: 18, fontWeight: 900, color: B.navy }}>{s.hora}</div>
                     <span style={{ background: "#e0f2fe", color: "#0369a1", borderRadius: 5, padding: "2px 6px", fontSize: 10, fontWeight: 600 }}>{s.esp}</span>
@@ -731,7 +731,7 @@ export function PreencherProfTab({ cRows, lRows, waMap: waMapProp, onWaChange, i
                     <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4, minWidth: 240 }}>
                       {s.cands.map((c, ci) => <CandCard key={ci} c={c} dia={s.dia} hora={s.hora} unidade={s.unidade} terapia={s.terapia} profKey={fpProf} />)}
                     </div>
-                  ) : <div style={{ flex: 1, display: "flex", alignItems: "center", color: "#9ca3af", fontSize: 12, fontStyle: "italic" }}>Nenhum paciente elegível neste dia/unidade/horário.</div>}
+                  ) : <div style={{ flex: 1, display: "flex", alignItems: "center", color: "var(--muted-foreground)", fontSize: 12, fontStyle: "italic" }}>Nenhum paciente elegível neste dia/unidade/horário.</div>}
                 </div>
               ))}
             </div>
@@ -741,42 +741,42 @@ export function PreencherProfTab({ cRows, lRows, waMap: waMapProp, onWaChange, i
 
       {/* SIM MODE results */}
       {mode === "sim" && cRows.length > 0 && simEspValida && simPeriodos.length > 0 && <>
-        <div style={{ background: "white", borderRadius: 14, border: "1px solid #e5e7eb", padding: 16 }}>
+        <div style={{ background: "var(--card)", borderRadius: 14, border: "1px solid var(--border)", padding: 16 }}>
           <div style={{ fontWeight: 800, color: B.navy, fontSize: 13, marginBottom: 10 }}>Qual combinação aproveita melhor {simEsp}? <InfoTip text="O card recomendado pode variar a unidade por turno. Se Padre Miguel for escolhido em um turno, o sistema não mistura com outra unidade no outro turno do mesmo dia." /></div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-            <button onClick={() => setSimUnid("")} style={{ flex: "1 1 180px", padding: 12, borderRadius: 12, border: `2px solid ${!simUnid ? B.blue : "#e5e7eb"}`, background: !simUnid ? B.blueLt : "white", cursor: "pointer", textAlign: "center", fontFamily: "inherit" }}>
-              <div style={{ fontSize: 11, fontWeight: 800, color: "#6b7280" }}>⭐ Recomendado inteligente</div>
+            <button onClick={() => setSimUnid("")} style={{ flex: "1 1 180px", padding: 12, borderRadius: 12, border: `2px solid ${!simUnid ? B.blue : "var(--border)"}`, background: !simUnid ? B.blueLt : "var(--card)", cursor: "pointer", textAlign: "center", fontFamily: "inherit" }}>
+              <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted-foreground)" }}>⭐ Recomendado inteligente</div>
               <div style={{ fontSize: 22, fontWeight: 900, color: !simUnid ? B.blue : B.navy, marginTop: 2 }}>{planoStats.nPac}</div>
-              <div style={{ fontSize: 10, color: "#9ca3af" }}>pacientes · ~{planoStats.sessTotal} sessões</div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "#374151", marginTop: 4 }}>{planoRecomendado.map(p => `${p.dia.replace("-feira", "")} ${turnoNome[p.turno as "manha" | "tarde"] || p.turno}: ${p.unid}`).join(" · ")}</div>
+              <div style={{ fontSize: 10, color: "var(--muted-foreground)" }}>pacientes · ~{planoStats.sessTotal} sessões</div>
+              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--card-foreground)", marginTop: 4 }}>{planoRecomendado.map(p => `${p.dia.replace("-feira", "")} ${turnoNome[p.turno as "manha" | "tarde"] || p.turno}: ${p.unid}`).join(" · ")}</div>
             </button>
             {unitRank.map((u, i) => (
-              <button key={u.unid} onClick={() => setSimUnid(simUnid === u.unid ? "" : u.unid)} style={{ flex: "1 1 130px", padding: 12, borderRadius: 12, border: `2px solid ${simUnid === u.unid ? B.blue : "#e5e7eb"}`, background: simUnid === u.unid ? B.blueLt : "white", cursor: "pointer", textAlign: "center", fontFamily: "inherit" }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "#6b7280" }}>{i === 0 ? "Unidade fixa forte" : u.unid}</div>
+              <button key={u.unid} onClick={() => setSimUnid(simUnid === u.unid ? "" : u.unid)} style={{ flex: "1 1 130px", padding: 12, borderRadius: 12, border: `2px solid ${simUnid === u.unid ? B.blue : "var(--border)"}`, background: simUnid === u.unid ? B.blueLt : "var(--card)", cursor: "pointer", textAlign: "center", fontFamily: "inherit" }}>
+                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)" }}>{i === 0 ? "Unidade fixa forte" : u.unid}</div>
                 <div style={{ fontSize: 22, fontWeight: 900, color: simUnid === u.unid ? B.blue : B.navy, marginTop: 2 }}>{u.nPac}</div>
-                <div style={{ fontSize: 10, color: "#9ca3af" }}>pacientes · ~{u.sessTotal} sessões</div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "#374151", marginTop: 2 }}>{u.unid}</div>
+                <div style={{ fontSize: 10, color: "var(--muted-foreground)" }}>pacientes · ~{u.sessTotal} sessões</div>
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--card-foreground)", marginTop: 2 }}>{u.unid}</div>
               </button>
             ))}
           </div>
-          <div style={{ fontSize: 11, color: "#9ca3af", background: "#f8fafc", borderRadius: 8, padding: "7px 10px" }}>
+          <div style={{ fontSize: 11, color: "var(--muted-foreground)", background: "var(--muted)", borderRadius: 8, padding: "7px 10px" }}>
             <strong>Pacientes</strong> = quem tem gap em {simEsp}, já frequenta a unidade no dia/turno avaliado e possui sessão adjacente sem conflito. <strong>Sessões</strong> = soma dos encaixes possíveis. <InfoTip text="A contagem de sessões pode ser maior que a de pacientes porque um mesmo paciente pode caber em mais de um horário." />
           </div>
         </div>
-        <div style={{ background: "white", borderRadius: 14, border: "1px solid #e5e7eb", overflow: "hidden" }}>
-          <div style={{ padding: "11px 16px", background: "#f8fafc", borderBottom: "1px solid #f0f0f0", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ background: "var(--card)", borderRadius: 14, border: "1px solid var(--border)", overflow: "hidden" }}>
+          <div style={{ padding: "11px 16px", background: "var(--muted)", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span style={{ fontWeight: 800, color: B.navy, fontSize: 14 }}>{simUnid ? `Unidade fixa: ${simUnid}` : "Plano recomendado inteligente"}</span>
-            <span style={{ fontSize: 11, color: "#6b7280", marginLeft: "auto" }}>{simSlots.length} sessão(ões) com candidatos <InfoTip text="Cada bloco mostra dia, turno, unidade sugerida e horários com pacientes elegíveis." /></span>
+            <span style={{ fontSize: 11, color: "var(--muted-foreground)", marginLeft: "auto" }}>{simSlots.length} sessão(ões) com candidatos <InfoTip text="Cada bloco mostra dia, turno, unidade sugerida e horários com pacientes elegíveis." /></span>
           </div>
-          {!simSlots.length ? <div style={{ padding: 24, textAlign: "center", color: "#9ca3af", fontSize: 13 }}>Nenhuma sessão com candidatos nesta combinação.</div>
+          {!simSlots.length ? <div style={{ padding: 24, textAlign: "center", color: "var(--muted-foreground)", fontSize: 13 }}>Nenhuma sessão com candidatos nesta combinação.</div>
             : simSlots.map((s, si) => {
               const terapiaSim = (ESP_CLINICO[simEsp] || [simEsp]).filter(t => !EXCLUIR_OCUP.has(t))[0] || simEsp
               return (
-                <div key={`${s.dia}-${s.turno}-${s.unid}-${s.hora}-${si}`} style={{ padding: "12px 16px", borderBottom: "1px solid #f9fafb", display: "flex", gap: 12, flexWrap: "wrap" }}>
+                <div key={`${s.dia}-${s.turno}-${s.unid}-${s.hora}-${si}`} style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", gap: 12, flexWrap: "wrap" }}>
                   <div style={{ flexShrink: 0, width: 150 }}>
                     <div style={{ fontSize: 11, fontWeight: 800, color: B.blue, marginBottom: 2 }}>{s.dia.replace("-feira", "")} · {turnoNome[s.turno as "manha" | "tarde"] || s.turno}</div>
                     <div style={{ fontFamily: "monospace", fontSize: 18, fontWeight: 900, color: B.navy }}>{s.hora}</div>
-                    <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>{s.unid} · {s.cands.length} candidato(s)</div>
+                    <div style={{ fontSize: 10, color: "var(--muted-foreground)", marginTop: 2 }}>{s.unid} · {s.cands.length} candidato(s)</div>
                   </div>
                   <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4, minWidth: 240 }}>
                     {s.cands.map((c, ci) => <CandCard key={ci} c={c} dia={s.dia} hora={s.hora} unidade={s.unid} terapia={terapiaSim} profKey={`sim:${s.dia}:${s.unid}`} />)}
@@ -796,26 +796,26 @@ export function PreencherProfTab({ cRows, lRows, waMap: waMapProp, onWaChange, i
             { n: pacienteSlots.filter(s => s.rank === 1).length, l: "remanejamentos", c: B.orange, tip: "Casos em que o paciente já tem outra terapia naquele horário e existe alternativa simples para mover a sessão atual." },
             { n: pacienteSlots.filter(s => s.rank === 2).length, l: "novo dia conjunto", c: B.blue, tip: "Novo dia aceito somente quando há outra sessão complementar autorizada para ofertar junto." },
           ].map(({ n, l, c, tip }) => (
-            <div key={l} style={{ flex: "1 1 130px", background: "white", borderRadius: 12, border: `1px solid ${c}33`, padding: 12, textAlign: "center" }}>
+            <div key={l} style={{ flex: "1 1 130px", background: "var(--card)", borderRadius: 12, border: `1px solid ${c}33`, padding: 12, textAlign: "center" }}>
               <div style={{ fontSize: 26, fontWeight: 900, color: c }}>{n}</div>
-              <div style={{ fontSize: 11, color: "#6b7280", marginTop: 2 }}>{l}<InfoTip text={tip} /></div>
+              <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 2 }}>{l}<InfoTip text={tip} /></div>
             </div>
           ))}
         </div>
-        <div style={{ background: "white", borderRadius: 14, border: "1px solid #e5e7eb", overflow: "hidden" }}>
-          <div style={{ padding: "11px 16px", background: "#f8fafc", borderBottom: "1px solid #f0f0f0", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+        <div style={{ background: "var(--card)", borderRadius: 14, border: "1px solid var(--border)", overflow: "hidden" }}>
+          <div style={{ padding: "11px 16px", background: "var(--muted)", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
             <span style={{ fontWeight: 800, color: B.navy, fontSize: 14 }}>{pacEspAtiva || "Especialidade"}</span>
-            <span style={{ fontSize: 11, color: "#6b7280" }}>{pacSel}</span>
-            <span style={{ fontSize: 11, color: "#6b7280", marginLeft: "auto" }}>{pacienteSlots.length} sugestão(ões)</span>
+            <span style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{pacSel}</span>
+            <span style={{ fontSize: 11, color: "var(--muted-foreground)", marginLeft: "auto" }}>{pacienteSlots.length} sugestão(ões)</span>
           </div>
-          {!pacienteSlots.length ? <div style={{ padding: 24, textAlign: "center", color: "#9ca3af", fontSize: 13 }}>Nenhuma vaga elegível para este paciente/especialidade com as regras atuais.</div>
+          {!pacienteSlots.length ? <div style={{ padding: 24, textAlign: "center", color: "var(--muted-foreground)", fontSize: 13 }}>Nenhuma vaga elegível para este paciente/especialidade com as regras atuais.</div>
             : pacienteSlots.map((s, si) => (
-              <div key={`${s.prof}-${s.dia}-${s.hora}-${si}`} style={{ padding: "12px 16px", borderBottom: "1px solid #f9fafb", display: "flex", gap: 12, flexWrap: "wrap", background: s.rank === 1 ? B.orangeLt : "white" }}>
+              <div key={`${s.prof}-${s.dia}-${s.hora}-${si}`} style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", gap: 12, flexWrap: "wrap", background: s.rank === 1 ? B.orangeLt : "var(--card)" }}>
                 <div style={{ flexShrink: 0, width: 150 }}>
                   <div style={{ fontSize: 11, fontWeight: 800, color: s.rank === 1 ? B.orange : s.rank === 2 ? B.blue : "#4a6e20", marginBottom: 2 }}>{s.tipo}</div>
                   <div style={{ fontFamily: "monospace", fontSize: 18, fontWeight: 900, color: B.navy }}>{s.hora}</div>
-                  <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>{s.dia.replace("-feira", "")} · {s.unidade}</div>
-                  <div style={{ fontSize: 10, color: "#6b7280", marginTop: 2 }}>{fmtName(s.prof)}</div>
+                  <div style={{ fontSize: 10, color: "var(--muted-foreground)", marginTop: 2 }}>{s.dia.replace("-feira", "")} · {s.unidade}</div>
+                  <div style={{ fontSize: 10, color: "var(--muted-foreground)", marginTop: 2 }}>{fmtName(s.prof)}</div>
                 </div>
                 <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4, minWidth: 240 }}>
                   {s.cands.map((c, ci) => <CandCard key={ci} c={c} dia={s.dia} hora={s.hora} unidade={s.unidade} terapia={s.terapia} profKey={s.prof} />)}

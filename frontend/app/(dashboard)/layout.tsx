@@ -53,11 +53,9 @@ export default function DashboardLayout({
             <Suspense fallback={null}>
               <Sidebar />
             </Suspense>
-            <div className="ml-64 flex flex-col min-h-screen pt-16">
-              <DashboardShellContent>
-                {children}
-              </DashboardShellContent>
-            </div>
+            <DashboardShellContent>
+              {children}
+            </DashboardShellContent>
           </div>
         </HeaderProvider>
       </ThemeProvider>
