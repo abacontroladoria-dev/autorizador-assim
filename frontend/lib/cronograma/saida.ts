@@ -418,6 +418,7 @@ export function buildSaidaAnalise(
   lRows: LaudoRow[],
   profSaindo: string,
   reservados: Set<string>,
+  outrasAfetadasMesmoDia?: AfetadaItem[],
 ): AnaliseResult {
   const { pac, terapia, dia, hora, unidade } = afetada
 
@@ -444,14 +445,29 @@ export function buildSaidaAnalise(
 
   // 2. Validações no dia de ORIGEM (R5.1 + R2.1)
   const sessDiaClin = sessPac.filter(s => s.dia === dia && !s.isAdmin)
-  const hDia = [...new Set(sessDiaClin.map(s => pm(s.hora)))].sort((a, b) => (a ?? 0) - (b ?? 0)) as (number | null)[]
   const pmAfet = pm(hora)
-  const hSem = hDia.filter(h => h !== pmAfet) as number[]
-  let buracoSiRemover = false
-  const min2Violation = hSem.length < 2
-  for (let i = 1; i < hSem.length; i++) {
-    if (hSem[i] - hSem[i - 1] !== 40) { buracoSiRemover = true; break }
+
+  // Conjunto de TODAS as horas afetadas no mesmo dia (esta + outras do mesmo profissional saindo)
+  const pmTodasAfet = new Set<number>()
+  if (pmAfet !== null) pmTodasAfet.add(pmAfet)
+  for (const af of outrasAfetadasMesmoDia ?? []) {
+    if (af.dia === dia) { const p = pm(af.hora); if (p !== null) pmTodasAfet.add(p) }
   }
+
+  // R5.1: usa TODAS as sessões do dia (qualquer sessão preenche o slot, não só as clínicas)
+  // e remove TODAS as afetadas — evita falso-positivo quando duas sessões consecutivas saem juntas
+  const hDiaTodas = [...new Set(sessPac.filter(s => s.dia === dia).map(s => pm(s.hora)))]
+    .filter((h): h is number => h !== null)
+    .sort((a, b) => a - b)
+  const hSemTodas = hDiaTodas.filter(h => !pmTodasAfet.has(h))
+  let buracoSiRemover = false
+  for (let i = 1; i < hSemTodas.length; i++) {
+    if (hSemTodas[i] - hSemTodas[i - 1] !== 40) { buracoSiRemover = true; break }
+  }
+
+  // R2.1: conta TODAS as sessões do dia (inclusive Coord. de Caso, Supervisão ABA)
+  // pois todas implicam presença do paciente na clínica
+  const min2Violation = hSemTodas.length < 2
 
   // 3. Laudos do paciente
   const laudosPac = (lRows || []).filter(l => String(l["Paciente"] || "").trim() === pac)

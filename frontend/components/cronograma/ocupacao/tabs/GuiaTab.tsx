@@ -197,6 +197,66 @@ export function GuiaTab({ apiFetch, apiErr, onApiFetch }: Props) {
         </div>
       </div>
 
+      {/* Terapia Ação × Terapia Exibição */}
+      <div style={card}>
+        <div style={{ fontWeight: 900, color: B.navy, fontSize: "15px", marginBottom: "4px" }}>🏷️ Terapia Ação × Terapia Exibição</div>
+        <div style={{ fontSize: "12px", color: "#6b7280", lineHeight: "1.6", marginBottom: "12px" }}>
+          A "Terapia Ação" é o código interno da sessão (coluna <strong>Terapia</strong> do CSV). A "Terapia Exibição" é o nome que aparece para famílias e relatórios (coluna <strong>Terapia Exibição</strong>). Os IDs são permanentes — nomes podem ser renomeados pelo gestor sem quebrar as regras. A aba <em>Despadronizados</em> detecta automaticamente inconsistências.
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+
+          {/* Grupo 1 */}
+          <div style={{ background: "#eff6ff", border: "1px solid #bfdbfe", borderRadius: "10px", padding: "12px 14px" }}>
+            <div style={{ fontWeight: 700, fontSize: "12px", color: "#1d4ed8", marginBottom: "6px" }}>Grupo 1 — Exibição sempre = "Psicologia ABA" (ID 2271)</div>
+            <div style={{ fontSize: "11px", color: "#374151", display: "flex", flexWrap: "wrap", gap: "4px" }}>
+              {["Aplicador ABA (EF) · 2269", "Aplicador ABA (PS) · 2317", "Aplicador ABA Casa · 2262",
+                "Aplicador ABA Escola · 2261", "Coordenador de Caso · 2248", "Supervisão ABA · 2353", "Aplicador ABA (SF) · 2263"].map(t => (
+                <span key={t} style={{ background: "#dbeafe", borderRadius: "6px", padding: "2px 7px" }}>{t}</span>
+              ))}
+            </div>
+          </div>
+
+          {/* Grupo 2 */}
+          <div style={{ background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "10px", padding: "12px 14px" }}>
+            <div style={{ fontWeight: 700, fontSize: "12px", color: "#15803d", marginBottom: "6px" }}>Grupo 2 — Exibição idêntica à Ação (sem campo separado)</div>
+            <div style={{ fontSize: "11px", color: "#374151", display: "flex", flexWrap: "wrap", gap: "4px" }}>
+              {["Fonoaudiologia · 2250", "Fisioterapia Aquática · 2249", "Fisioterapia · 2258",
+                "Terapia Ocupacional · 2255", "Psicomotricidade · 2253", "Psicopedagogia · 2254",
+                "Musicoterapia · 2251", "Psicologia · 2259", "Terapia Alimentar · 2274",
+                "Equoterapia · 2267", "Aplicador Suporte · 2331"].map(t => (
+                <span key={t} style={{ background: "#dcfce7", borderRadius: "6px", padding: "2px 7px" }}>{t}</span>
+              ))}
+            </div>
+          </div>
+
+          {/* Grupo 3 */}
+          <div style={{ background: "#faf5ff", border: "1px solid #e9d5ff", borderRadius: "10px", padding: "12px 14px" }}>
+            <div style={{ fontWeight: 700, fontSize: "12px", color: "#7e22ce", marginBottom: "8px" }}>Grupo 3 — Exibição depende de laudo e convênio</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "12px" }}>
+              <div>
+                <span style={{ fontWeight: 700 }}>Aplicador ABA (AE) · ID 2260</span>
+                <div style={{ color: "#374151", marginTop: "2px", paddingLeft: "8px", borderLeft: "3px solid #c4b5fd" }}>
+                  Laudo "Arteterapia" &gt; 0 → exibe <strong>"Arteterapia (Psicologia ABA)"</strong> (ID 2578)<br/>
+                  Sem laudo → exibe <strong>"Psicologia ABA"</strong> (ID 2271)<br/>
+                  <span style={{ color: "#dc2626" }}>ASSIM: só permitido com laudo Arteterapia &gt; 1 (exibição = 2578, nunca 2271)</span><br/>
+                  <span style={{ color: "#dc2626" }}>GRATUIDADE: nunca permitido</span>
+                </div>
+              </div>
+              <div>
+                <span style={{ fontWeight: 700 }}>Aplicador ABA (HS) · ID 2283</span>
+                <div style={{ color: "#374151", marginTop: "2px", paddingLeft: "8px", borderLeft: "3px solid #c4b5fd" }}>
+                  Laudo "Habilidades Sociais" &gt; 0 → exibe <strong>"Habilidades Sociais (Psicologia ABA)"</strong> (ID 2654)<br/>
+                  Sem laudo → exibe <strong>"Psicologia ABA"</strong> (ID 2271)<br/>
+                  <span style={{ color: "#dc2626" }}>ASSIM: só permitido com laudo Habilidades Sociais &gt; 1 (exibição = 2654, nunca 2271)</span><br/>
+                  <span style={{ color: "#dc2626" }}>GRATUIDADE: nunca permitido</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+
       {/* API TitaTherapy */}
       <div style={card}>
         <div style={{ fontWeight: 800, color: B.navy, marginBottom: "4px", fontSize: "14px" }}>🔌 Token da API TitaTherapy</div>

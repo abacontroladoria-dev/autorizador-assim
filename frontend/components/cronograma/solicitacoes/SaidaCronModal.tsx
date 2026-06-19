@@ -2,7 +2,7 @@
 
 import { useState, useRef } from "react"
 import { createPortal } from "react-dom"
-import { B, DIAS_LIST, DIAS_ORD, HORAS_GRID, UNID_COR } from "@/lib/cronograma/constants"
+import { B, DIAS_LIST, DIAS_ORD, HORAS_GRID, UNID_COR, ABA_EXIB_PSICO_NAMES, EXIB_ID, EXIB_NOME, TERAPIA_ID } from "@/lib/cronograma/constants"
 import { fmtName, buildCronoUnitMeta, shouldShowSessionUnit, unidadeBadgeText } from "@/lib/cronograma/helpers"
 import { UnitHeaderBadges, CronoGlobalUnitBadge } from "@/components/cronograma/ui/UnitBadges"
 import type {
@@ -167,13 +167,11 @@ function AgendaGrid({
   dias,
   pacUnidade,
   inconsistencias,
-  modoWA,
 }: {
   cMap: Record<string, CellEntry[]>
   dias: string[]
   pacUnidade: string | null
   inconsistencias: { dia: string; sessao: SessPacItem; unidCorreta: string }[]
-  modoWA: boolean
 }) {
   const horasGrid = HORAS_GRID.filter(h => dias.some(d => cMap[`${d}|||${h}`]?.length))
   if (!horasGrid.length) return <div className="text-center text-gray-400 py-4 text-xs">Nenhuma sessão.</div>
@@ -204,7 +202,7 @@ function AgendaGrid({
                 <td key={d} style={{ padding: "2px", verticalAlign: "top" }}>
                   {cells.map((c, ci) => {
                     const cs = cellStyle(c.tipo)
-                    const isIncons = !modoWA && inconsMap.has(`${d}|||${hora}|||${c.prof}`)
+                    const isIncons = inconsMap.has(`${d}|||${hora}|||${c.prof}`)
                     return (
                       <div key={ci} style={{ background: isIncons ? "#fffbeb" : cs.bg, border: `1px solid ${isIncons ? "#fbbf24" : cs.bd}`, borderRadius: "8px", padding: "6px 8px", marginBottom: "2px", minHeight: "58px", display: "flex", flexDirection: "column", gap: "2px" }}>
                         <div style={{ fontSize: "11px", fontWeight: 700, color: isIncons ? "#1f2937" : cs.tc, lineHeight: "1.3" }}>{c.tP}</div>
@@ -240,7 +238,6 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
   const [eSel, setESel] = useState<string | null>(statusAtual?.estrategiaSel ?? defaultE)
   const [opSel, setOpSel] = useState<number>(statusAtual?.opcaoSel ?? 0)
   const [obs, setObs] = useState(statusAtual?.obs ?? "")
-  const [modoWA, setModoWA] = useState(false)
 
   const st = statusAtual?.status ?? "pendente"
   const stS = STMAP[st] ?? STMAP.pendente
@@ -294,18 +291,26 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
   for (const s of sessPac) {
     if (s.terapiaExib) sessPacExib.set(`${s.dia}|||${s.hora}|||${s.terapia}`, s.terapiaExib)
   }
-  const ABA_EXIB_TERAPIAS = new Set([
-    "Aplicador ABA (PS)", "Aplicador ABA (SF)", "Aplicador ABA (AV)",
-    "Aplicador ABA (EF)", "Coordenador de Caso", "Supervisão ABA",
-    "Aplicador ABA (HS)", "Aplicador ABA (AE)",
-  ])
 
-  const extraDepois = movimentos.map(m => ({
-    dia: m.paraDia, hora: m.paraHora, tP: m.paraTerapia, prof: m.paraProf,
-    tipo: "proposta" as CellTipo, unidade: m.paraUnidade,
-    tE: sessPacExib.get(`${m.deDia}|||${m.deHora}|||${m.deTerapia}`)
-      ?? (ABA_EXIB_TERAPIAS.has(m.paraTerapia) ? "Psicologia ABA" : undefined),
-  }))
+  // IDs dos Grupos 3 (AE e HS) para cálculo de tE sem depender de nome
+  const ID_AE = 2260, ID_HS = 2283
+
+  const extraDepois = movimentos.map(m => {
+    let tE: string | undefined
+    if (m.paraTerapia === m.deTerapia) {
+      // Mesma terapia movida (E2/E5/E6/E7): herda tE da sessão original
+      tE = sessPacExib.get(`${m.deDia}|||${m.deHora}|||${m.deTerapia}`)
+        ?? (ABA_EXIB_PSICO_NAMES.has(m.paraTerapia) ? EXIB_NOME[EXIB_ID.PSICOLOGIA_ABA] : undefined)
+    } else {
+      // Terapia diferente no slot (E4): tE calculado da NOVA terapia, nunca da removida
+      const paraId = TERAPIA_ID[m.paraTerapia]
+      if (ABA_EXIB_PSICO_NAMES.has(m.paraTerapia)) tE = EXIB_NOME[EXIB_ID.PSICOLOGIA_ABA]
+      else if (paraId === ID_AE || paraId === ID_HS) tE = EXIB_NOME[EXIB_ID.PSICOLOGIA_ABA]
+      // Grupo 2 (Fono, Fisio, TO, etc.): tE = undefined (exibição = ação)
+    }
+    if (tE === m.paraTerapia) tE = undefined
+    return { dia: m.paraDia, hora: m.paraHora, tP: m.paraTerapia, prof: m.paraProf, tipo: "proposta" as CellTipo, unidade: m.paraUnidade, tE }
+  })
 
   const afetadasGrid = todasAfetadas && todasAfetadas.length > 1 ? todasAfetadas : afetada
 
@@ -426,13 +431,10 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
                 ))}
                 {buracoSiRemover && <span style={{ background: "#fff7ed", color: "#c2410c", borderRadius: "999px", padding: "2px 9px", fontWeight: 600 }}>Cria buraco</span>}
                 {min2Violation && <span style={{ background: "#fff7ed", color: "#c2410c", borderRadius: "999px", padding: "2px 9px", fontWeight: 600 }}>Ficaria com menos de 2 sessões</span>}
-                {!modoWA && inconsistencias.length > 0 && <span style={{ background: "#fff7ed", color: "#92400e", borderRadius: "999px", padding: "2px 9px", fontWeight: 600 }}>{inconsistencias.length} sessão(ões) unidade errada</span>}
+                {inconsistencias.length > 0 && <span style={{ background: "#fff7ed", color: "#92400e", borderRadius: "999px", padding: "2px 9px", fontWeight: 600 }}>{inconsistencias.length} sessão(ões) unidade errada</span>}
               </div>
             </div>
             <div className="flex gap-[5px] items-center shrink-0">
-              <button onClick={() => setModoWA(x => !x)} style={{ padding: "5px 10px", borderRadius: "8px", border: `1px solid ${modoWA ? "#22c55e" : "#e5e7eb"}`, background: modoWA ? "#f0fdf4" : "white", color: modoWA ? "#16a34a" : "#6b7280", fontSize: "11px", fontWeight: 600, cursor: "pointer" }}>
-                {modoWA ? "WA ON" : "WA OFF"}
-              </button>
               <button onClick={onClose} className="w-[30px] h-[30px] rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition-colors text-base">×</button>
             </div>
           </div>
@@ -442,7 +444,6 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
         <div className="flex flex-1 min-h-0 overflow-hidden">
 
           {/* Left panel — estratégias */}
-          {!modoWA && (
             <div className="w-[300px] shrink-0 border-r border-gray-100 overflow-auto" style={{ padding: "12px 10px" }}>
 
               {estrategiaCards.map(({ key, tem, title, tipKey }) => {
@@ -559,12 +560,9 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
                 />
               </div>
             </div>
-          )}
 
           {/* Right panel — grades Antes / Depois */}
           <div className="flex-1 overflow-auto p-3">
-            {!modoWA && (
-              <>
                 {/* Legenda */}
                 <div className="flex gap-3 mb-2 text-[10px] text-gray-400 flex-wrap">
                   {(["Removida", "Proposta", "Existente", "Supervisão ABA"] as const).map((l, i) => {
@@ -585,7 +583,7 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
                   </div>
                   {sessPac.length === 0
                     ? <div className="text-center text-gray-400 py-4 text-xs">Nenhuma sessão encontrada.</div>
-                    : <AgendaGrid cMap={cMapAntes} dias={diasBase} pacUnidade={pacUnidade} inconsistencias={inconsistencias} modoWA={modoWA} />
+                    : <AgendaGrid cMap={cMapAntes} dias={diasBase} pacUnidade={pacUnidade} inconsistencias={inconsistencias} />
                   }
                 </div>
 
@@ -599,11 +597,9 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
                       </div>
                       <div style={{ flex: 1, height: "1px", background: "#e5e7eb" }} />
                     </div>
-                    <AgendaGrid cMap={cMapDepois} dias={diasDepois} pacUnidade={pacUnidade} inconsistencias={[]} modoWA={modoWA} />
+                    <AgendaGrid cMap={cMapDepois} dias={diasDepois} pacUnidade={pacUnidade} inconsistencias={[]} />
                   </div>
                 )}
-              </>
-            )}
           </div>
         </div>
 

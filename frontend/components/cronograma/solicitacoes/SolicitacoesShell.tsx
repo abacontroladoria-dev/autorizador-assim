@@ -4,7 +4,9 @@ import { useSearchParams, useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { SK_SAIDA } from "@/lib/cronograma/constants"
 import { SaidaProfMode } from "./SaidaProfMode"
+import { OcupProfMode } from "./OcupProfMode"
 import { PreencherProfTab } from "@/components/cronograma/shared/PreencherProfTab"
+import { OcupPacMode } from "./OcupPacMode"
 import { NovoCronogramaTab } from "@/components/cronograma/shared/NovoCronogramaTab"
 import { BancoDadosTab } from "./BancoDadosTab"
 import type { CsvRow, LaudoRow, DispRow, StatusMap, CfgState } from "@/types/cronograma"
@@ -74,11 +76,11 @@ function TabContent({
   }
 
   if (tab === "ocup-prof") {
-    return <PreencherProfTab cRows={cRows} lRows={lRows} initialMode="prof" fixedMode />
+    return <OcupProfMode cRows={cRows} lRows={lRows} cfg={cfg} />
   }
 
   if (tab === "ocup-pac") {
-    return <PreencherProfTab cRows={cRows} lRows={lRows} initialMode="paciente" fixedMode />
+    return <OcupPacMode cRows={cRows} lRows={lRows} cfg={cfg} />
   }
 
   if (tab === "novo-cron") {

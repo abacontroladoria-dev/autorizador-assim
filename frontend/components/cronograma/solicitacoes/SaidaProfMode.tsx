@@ -236,6 +236,31 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
     }
   }, [results])
 
+  // Garantidos ou Dependentes — agrupa estratégias por nível de confirmação necessária
+  const garantidoData = useMemo(() => {
+    if (!results || results.length === 0) return null
+    let verde = 0, amarelo = 0, azul = 0, vermelho = 0, sem = 0
+    for (const item of results) {
+      const a = item.analise
+      if      (a.e1 || a.e2)     verde++
+      else if (a.e3 || a.e6)     amarelo++
+      else if (a.e4.length)      azul++
+      else if (a.e5 || a.e7)     vermelho++
+      else                       sem++
+    }
+    const total = verde + amarelo + azul + vermelho + sem
+    return {
+      total,
+      slices: [
+        { name: "100% garantido",                          est: "#1, #2", value: verde,    color: "#16a34a" },
+        { name: "Depende do aceite da família",             est: "#3, #6", value: amarelo,  color: "#d97706" },
+        { name: "Depende dos prazos da Autorização",        est: "#4",     value: azul,     color: "#2563eb" },
+        { name: "Depende do aval terapêutico e da família", est: "#5, #7", value: vermelho, color: "#dc2626" },
+        { name: "Sem solução",                              est: "—",      value: sem,      color: "#9ca3af" },
+      ].filter(d => d.value > 0),
+    }
+  }, [results])
+
   // Sessões sem solução → hipótese novo profissional
   const semSolucaoItems = useMemo(() =>
     results ? results.filter(r => r.analise.semSolucao) : []
@@ -447,6 +472,37 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
 
     let cFict = 0, cExcl = 0, cSelDT = 0, cSeen = 0, cOk = 0, cErr = 0
 
+    // Pré-passo: coleta todas as afetadas por paciente+dia para detectar buracos corretamente
+    // quando múltiplas sessões consecutivas do mesmo profissional são removidas juntas
+    const afetadasPorPacDia: Record<string, AfetadaItem[]> = {}
+    {
+      const seenPre = new Set<string>()
+      for (const r of agendRows) {
+        const nome = String(r["Nome Favorecido"] || "")
+        if (r.Profissional !== prof || !nome || PACIENTES_FICTICIOS.has(nome)) continue
+        if (EXCLUIR_OCUP.has(String(r.Terapia || ""))) continue
+        const dia = String(r["Dia da Semana"] || "")
+        const turno = getTurno(String(r.HI_str || ""))
+        if (!selDT.has(`${dia}|||${turno}`)) continue
+        const hora = normHora(String(r.HI_str || ""))
+        const k = `${nome}|||${dia}|||${hora}|||${r.Terapia}`
+        if (seenPre.has(k)) continue
+        seenPre.add(k)
+        const pacDia = `${nome}|||${dia}`
+        if (!afetadasPorPacDia[pacDia]) afetadasPorPacDia[pacDia] = []
+        afetadasPorPacDia[pacDia].push({
+          pac: nome,
+          terapia: String(r.Terapia || ""),
+          terapiaExib: String(r["Terapia Exibição"] || r["Terapia Exibicao"] || "") || undefined,
+          dia,
+          hora,
+          unidade: String(r.Unidade || ""),
+          prof: String(r.Profissional || ""),
+          conv: String(r["Convênio"] || ""),
+        })
+      }
+    }
+
     for (const r of agendRows) {
       const nome = String(r["Nome Favorecido"] || "")
       if (r.Profissional !== prof || !nome || PACIENTES_FICTICIOS.has(nome)) { if (r.Profissional === prof) cFict++; continue }
@@ -472,7 +528,9 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       }
 
       try {
-        const analise = buildSaidaAnalise(afetada, cRows, lRows, prof, allRes)
+        const outrasAfetadasMesmoDia = (afetadasPorPacDia[`${nome}|||${dia}`] ?? [])
+          .filter(af => !(af.hora === hora && af.terapia === String(r.Terapia || "")))
+        const analise = buildSaidaAnalise(afetada, cRows, lRows, prof, allRes, outrasAfetadasMesmoDia)
 
         // Reservar slots da melhor estratégia disponível (em ordem de prioridade)
         if (analise.e1?.opcoes[0]) {
@@ -593,7 +651,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       <div className="flex gap-4">
 
         {/* Card formulário */}
-        <div style={{ flex: 1, background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "16px" }}>
+        <div style={{ flexShrink: 0, width: "360px", background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "16px" }}>
           <div style={{ fontWeight: 800, color: B.navy, marginBottom: "6px", fontSize: "15px" }}>
             Saída de Profissional — Horário(s) Específico(s)
           </div>
@@ -700,49 +758,100 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
           </button>
         </div>
 
-        {/* Card Distribuição (mesmo alinhamento: 280px, mesma altura via stretch padrão) */}
-        <div style={{ flex: "0 0 280px", background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "16px", display: "flex", flexDirection: "column" }}>
-          <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>
-            Distribuição
-          </div>
-          {!donutData ? (
-            <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px" }}>
-              <div style={{ width: "52px", height: "52px", borderRadius: "50%", border: "7px solid #e5e7eb" }} />
-              <div style={{ fontSize: "11px", color: "#9ca3af", textAlign: "center", lineHeight: 1.5 }}>
-                {results === null
-                  ? <>Execute &quot;Analisar Impacto&quot;<br />para ver o resumo</>
-                  : <span style={{ color: "#ef4444" }}>Nenhuma sessão clínica encontrada para este profissional. Verifique o console (F12) para detalhes.</span>
-                }
-              </div>
+        {/* ── Coluna direita: Distribuição + Garantidos ou Dependentes ─────────── */}
+        <div style={{ display: "flex", flexDirection: "row", gap: "12px", flex: 1, minWidth: 0 }}>
+
+          {/* Card Distribuição */}
+          <div style={{ flex: 1, minWidth: 0, background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "16px", display: "flex", flexDirection: "column" }}>
+            <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>
+              Distribuição
             </div>
-          ) : (
-            <>
-              <div style={{ fontSize: "11px", color: "#9ca3af", marginBottom: "6px" }}>
-                {donutData.total} sessão(ões) afetada(s)
+            {!donutData ? (
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px" }}>
+                <div style={{ width: "52px", height: "52px", borderRadius: "50%", border: "7px solid #e5e7eb" }} />
+                <div style={{ fontSize: "11px", color: "#9ca3af", textAlign: "center", lineHeight: 1.5 }}>
+                  {results === null
+                    ? <>Execute &quot;Analisar Impacto&quot;<br />para ver o resumo</>
+                    : <span style={{ color: "#ef4444" }}>Nenhuma sessão clínica encontrada para este profissional. Verifique o console (F12) para detalhes.</span>
+                  }
+                </div>
               </div>
-              <ResponsiveContainer width="100%" height={140}>
-                <PieChart>
-                  <Pie data={donutData.slices} cx="50%" cy="50%" innerRadius={42} outerRadius={65} dataKey="value" strokeWidth={0}>
-                    {donutData.slices.map((s, i) => <Cell key={i} fill={s.color} />)}
-                  </Pie>
-                  <Tooltip formatter={(val, name) => [val ?? 0, name]} contentStyle={{ fontSize: "11px", borderRadius: "8px", border: "1px solid #e5e7eb", padding: "4px 8px" }} />
-                </PieChart>
-              </ResponsiveContainer>
-              <div style={{ display: "flex", flexDirection: "column", gap: "5px", marginTop: "4px" }}>
-                {donutData.slices.map((s, i) => (
-                  <div key={i} style={{ display: "flex", alignItems: "center", gap: "7px" }}>
-                    <div style={{ width: "10px", height: "10px", borderRadius: "3px", background: s.color, flexShrink: 0 }} />
-                    <div style={{ fontSize: "11px", color: "#374151", flex: 1 }}>
-                      <span style={{ fontWeight: 700 }}>{s.name}</span> {s.label}
+            ) : (
+              <>
+                <div style={{ fontSize: "12px", color: "#9ca3af", marginBottom: "6px" }}>
+                  {donutData.total} sessão(ões) afetada(s)
+                </div>
+                <ResponsiveContainer width="100%" height={200}>
+                  <PieChart>
+                    <Pie data={donutData.slices} cx="50%" cy="50%" innerRadius={58} outerRadius={82} dataKey="value" strokeWidth={0}>
+                      {donutData.slices.map((s, i) => <Cell key={i} fill={s.color} />)}
+                    </Pie>
+                    <Tooltip formatter={(val, name) => [val ?? 0, name]} contentStyle={{ fontSize: "11px", borderRadius: "8px", border: "1px solid #e5e7eb", padding: "4px 8px" }} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div style={{ display: "flex", flexDirection: "column", gap: "7px", marginTop: "6px" }}>
+                  {donutData.slices.map((s, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                      <div style={{ width: "12px", height: "12px", borderRadius: "3px", background: s.color, flexShrink: 0 }} />
+                      <div style={{ fontSize: "13px", color: "#374151", flex: 1 }}>
+                        <span style={{ fontWeight: 700 }}>{s.name}</span> {s.label}
+                      </div>
+                      <div style={{ fontSize: "13px", fontWeight: 700, color: B.navy, whiteSpace: "nowrap" }}>
+                        {s.value} <span style={{ fontWeight: 400, color: "#9ca3af" }}>({Math.round(s.value / donutData.total * 100)}%)</span>
+                      </div>
                     </div>
-                    <div style={{ fontSize: "11px", fontWeight: 700, color: B.navy, whiteSpace: "nowrap" }}>
-                      {s.value} <span style={{ fontWeight: 400, color: "#9ca3af" }}>({Math.round(s.value / donutData.total * 100)}%)</span>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
+          {/* Card Garantidos ou Dependentes */}
+          <div style={{ flex: 1, minWidth: 0, background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "16px", display: "flex", flexDirection: "column" }}>
+            <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>
+              Garantidos ou Dependentes
+            </div>
+            {!garantidoData ? (
+              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px" }}>
+                <div style={{ width: "52px", height: "52px", borderRadius: "50%", border: "7px solid #e5e7eb" }} />
+                <div style={{ fontSize: "11px", color: "#9ca3af", textAlign: "center", lineHeight: 1.5 }}>
+                  {results === null
+                    ? <>Execute &quot;Analisar Impacto&quot;<br />para ver o resumo</>
+                    : <span style={{ color: "#ef4444" }}>Nenhuma sessão clínica encontrada.</span>
+                  }
+                </div>
               </div>
-            </>
-          )}
+            ) : (
+              <>
+                <div style={{ fontSize: "12px", color: "#9ca3af", marginBottom: "6px" }}>
+                  {garantidoData.total} sessão(ões) afetada(s)
+                </div>
+                <ResponsiveContainer width="100%" height={200}>
+                  <PieChart>
+                    <Pie data={garantidoData.slices} cx="50%" cy="50%" innerRadius={58} outerRadius={82} dataKey="value" strokeWidth={0}>
+                      {garantidoData.slices.map((s, i) => <Cell key={i} fill={s.color} />)}
+                    </Pie>
+                    <Tooltip formatter={(val, name) => [val ?? 0, name]} contentStyle={{ fontSize: "12px", borderRadius: "8px", border: "1px solid #e5e7eb", padding: "4px 8px" }} />
+                  </PieChart>
+                </ResponsiveContainer>
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "8px" }}>
+                  {garantidoData.slices.map((s, i) => (
+                    <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: "8px" }}>
+                      <div style={{ width: "12px", height: "12px", borderRadius: "3px", background: s.color, flexShrink: 0, marginTop: "2px" }} />
+                      <div style={{ fontSize: "13px", color: "#374151", flex: 1, lineHeight: "1.4" }}>
+                        {s.name}
+                        <span style={{ display: "block", fontSize: "12px", color: "#9ca3af" }}>{s.est}</span>
+                      </div>
+                      <div style={{ fontSize: "13px", fontWeight: 700, color: B.navy, whiteSpace: "nowrap" }}>
+                        {s.value} <span style={{ fontWeight: 400, color: "#9ca3af" }}>({Math.round(s.value / garantidoData.total * 100)}%)</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
+
         </div>
 
       </div>

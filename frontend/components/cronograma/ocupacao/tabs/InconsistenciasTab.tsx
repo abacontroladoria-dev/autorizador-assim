@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { createPortal } from "react-dom"
 import { B, HORAS_GRID } from "@/lib/cronograma/constants"
-import { pm, fm, fmtName } from "@/lib/cronograma/helpers"
+import { pm, fm, fmtName, getTurno } from "@/lib/cronograma/helpers"
 import type { IncItem, IncTipo } from "@/lib/cronograma/inconsistencias"
 import type { CsvRow } from "@/types/cronograma"
 
@@ -12,21 +12,23 @@ const SK = "cron_excecoes_v1"
 type Excecao = { obs: string; confirmedAt: number }
 
 const TIPO_LABEL: Record<IncTipo, string> = {
-  unidade_turno: "Unidade no Turno",
-  buraco:        "Buraco entre Sessões",
-  min_sessoes:   "Menos de 2 Sessões/Dia",
-  exibicao_aba:  "Exibição ABA",
-  exibicao_hs:   "Exibição HS",
-  exibicao_ae:   "Exibição AE / ASSIM",
+  unidade_turno:      "Unidade no Turno (Pac.)",
+  buraco:             "Buraco entre Sessões",
+  min_sessoes:        "Menos de 2 Sessões/Dia",
+  exibicao_aba:       "Exibição ABA",
+  exibicao_hs:        "Exibição HS",
+  exibicao_ae:        "Exibição AE / ASSIM / Gratuidade",
+  prof_unidade_turno: "Unidade no Turno (Prof.)",
 }
 
 const TIPO_COLOR: Record<IncTipo, { bg: string; c: string; border: string }> = {
-  unidade_turno: { bg: "#fff7ed", c: "#c2410c", border: "#fed7aa" },
-  buraco:        { bg: "#fef2f2", c: "#dc2626", border: "#fca5a5" },
-  min_sessoes:   { bg: "#fffbeb", c: "#b45309", border: "#fde68a" },
-  exibicao_aba:  { bg: "#f0f9ff", c: "#0369a1", border: "#bae6fd" },
-  exibicao_hs:   { bg: "#faf5ff", c: "#7e22ce", border: "#e9d5ff" },
-  exibicao_ae:   { bg: "#fdf4ff", c: "#86198f", border: "#f0abfc" },
+  unidade_turno:      { bg: "#fff7ed", c: "#c2410c", border: "#fed7aa" },
+  buraco:             { bg: "#fef2f2", c: "#dc2626", border: "#fca5a5" },
+  min_sessoes:        { bg: "#fffbeb", c: "#b45309", border: "#fde68a" },
+  exibicao_aba:       { bg: "#f0f9ff", c: "#0369a1", border: "#bae6fd" },
+  exibicao_hs:        { bg: "#faf5ff", c: "#7e22ce", border: "#e9d5ff" },
+  exibicao_ae:        { bg: "#fdf4ff", c: "#86198f", border: "#f0abfc" },
+  prof_unidade_turno: { bg: "#f0fdfa", c: "#0f766e", border: "#99f6e4" },
 }
 
 const DIAS_ORDER = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira"]
@@ -248,6 +250,237 @@ function CronViewModal({ pac, conv, cRows, items, onClose }: CronViewModalProps)
   )
 }
 
+// ─── Modal de Cronograma do Profissional ──────────────────────────────────────
+
+interface ProfViewModalProps {
+  prof: string
+  cRows: CsvRow[]
+  onClose: () => void
+}
+
+const UNID_BADGE: Record<string, { bg: string; c: string; border: string }> = {
+  Realengo:      { bg: "#dbeafe", c: "#1e40af", border: "#93c5fd" },
+  Fazendinha:    { bg: "#f3e8ff", c: "#6b21a8", border: "#d8b4fe" },
+  "Padre Miguel":{ bg: "#fef3c7", c: "#92400e", border: "#fcd34d" },
+}
+
+function ProfViewModal({ prof, cRows, onClose }: ProfViewModalProps) {
+  // Todos os slots do profissional (agendado + livre)
+  const sessoes = useMemo(() => {
+    return cRows
+      .filter(r => String(r["Profissional"] || "").trim() === prof)
+      .map(r => {
+        const rawStatus = String(r["Status do Agendamento"] || "").trim().toLowerCase()
+        return {
+          dia:       String(r["Dia da Semana"] || "").trim(),
+          hora:      String(r["HI_str"] || String(r["Hora Inicial"] || "").slice(0, 5) || "").trim(),
+          pac:       String(r["Nome Favorecido"] || "").trim(),
+          terapia:   String(r["Terapia"] || "").trim(),
+          unidade:   String((r as Record<string, unknown>)["Unidade"] || "").trim(),
+          livre:     rawStatus === "livre",
+          agendado:  rawStatus === "agendado",
+        }
+      })
+      .filter(s => s.livre || s.agendado)
+  }, [prof, cRows])
+
+  // Maioria de unidade por dia+turno (sobre todos os slots, inclusive livres)
+  const mainUnidade = useMemo(() => {
+    const map: Record<string, Record<string, number>> = {}
+    for (const s of sessoes) {
+      if (!s.unidade) continue
+      const k = `${s.dia}|||${getTurno(s.hora)}`
+      if (!map[k]) map[k] = {}
+      map[k][s.unidade] = (map[k][s.unidade] || 0) + 1
+    }
+    const result: Record<string, string> = {}
+    for (const [k, cnt] of Object.entries(map)) {
+      result[k] = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0]?.[0] ?? ""
+    }
+    return result
+  }, [sessoes])
+
+  const dias  = DIAS_ORDER.filter(d => sessoes.some(s => s.dia === d))
+  const horas = HORAS_GRID.filter(h => sessoes.some(s => s.hora === h))
+
+  const cMap = useMemo(() => {
+    const m: Record<string, typeof sessoes> = {}
+    for (const s of sessoes) {
+      const k = `${s.dia}|||${s.hora}`
+      if (!m[k]) m[k] = []
+      m[k].push(s)
+    }
+    return m
+  }, [sessoes])
+
+  // Erros: qualquer slot (agendado ou livre) na unidade errada
+  const erros = useMemo(() => {
+    const out: { dia: string; hora: string; unidade: string; mainU: string; livre: boolean }[] = []
+    for (const s of sessoes) {
+      const mainU = mainUnidade[`${s.dia}|||${getTurno(s.hora)}`] ?? ""
+      if (mainU && s.unidade && s.unidade !== mainU) {
+        out.push({ dia: s.dia, hora: s.hora, unidade: s.unidade, mainU, livre: s.livre })
+      }
+    }
+    return out
+  }, [sessoes, mainUnidade])
+
+  return createPortal(
+    <div
+      style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", background: "rgba(0,0,0,.45)", padding: "24px 16px", overflowY: "auto" }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div style={{ background: "var(--color-card, white)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", width: "100%", maxWidth: "900px" }}>
+
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "18px 20px 14px", borderBottom: "1px solid #e5e7eb" }}>
+          <div>
+            <div style={{ fontWeight: 900, fontSize: "15px" }}>{fmtName(prof)}</div>
+            <div style={{ fontSize: "11px", color: "#9ca3af", marginTop: "2px" }}>Agenda semanal completa</div>
+            {erros.length > 0 && (
+              <div style={{ fontSize: "11px", color: "#dc2626", marginTop: "4px", fontWeight: 700 }}>
+                ⚠ {erros.length} {erros.length === 1 ? "slot fora" : "slots fora"} da unidade do turno (agendados e livres) — marcados em vermelho
+              </div>
+            )}
+          </div>
+          <button
+            onClick={onClose}
+            style={{ padding: "4px 10px", borderRadius: "8px", border: "1px solid #e5e7eb", background: "#f3f4f6", cursor: "pointer", fontSize: "13px", fontFamily: "inherit" }}
+          >
+            ✕ Fechar
+          </button>
+        </div>
+
+        {/* Grade semanal */}
+        <div style={{ padding: "16px 20px", overflowX: "auto" }}>
+          {sessoes.length === 0 ? (
+            <div style={{ textAlign: "center", color: "#9ca3af", fontSize: "13px", padding: "24px 0" }}>
+              Nenhum slot encontrado no CSV para este profissional.
+            </div>
+          ) : (
+            <>
+              <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "420px" }}>
+                <thead>
+                  <tr>
+                    <th style={{ width: "52px", paddingBottom: "6px", textAlign: "right", paddingRight: "10px", fontSize: "11px", color: "#9ca3af", fontWeight: 400 }}>Hora</th>
+                    {dias.map(d => (
+                      <th key={d} style={{ minWidth: "140px", paddingBottom: "6px", textAlign: "center", fontSize: "13px", color: B.navy, fontWeight: 800 }}>
+                        {d.replace("-feira", "")}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {horas.map(hora => (
+                    <tr key={hora} style={{ borderTop: "1px solid #f1f5f9" }}>
+                      <td style={{ textAlign: "right", paddingRight: "10px", verticalAlign: "top", paddingTop: "6px", fontFamily: "monospace", fontSize: "13px", fontWeight: 800, color: B.navy }}>
+                        {hora}
+                      </td>
+                      {dias.map(d => {
+                        const cells = cMap[`${d}|||${hora}`] || []
+                        return (
+                          <td key={d} style={{ padding: "2px", verticalAlign: "top" }}>
+                            {cells.map((s, ci) => {
+                              const mainU = mainUnidade[`${s.dia}|||${getTurno(s.hora)}`] ?? ""
+                              const flagged = !!mainU && !!s.unidade && s.unidade !== mainU
+                              const badge = UNID_BADGE[s.unidade]
+                              if (s.livre) {
+                                return (
+                                  <div
+                                    key={ci}
+                                    style={{
+                                      background: flagged ? "#fef2f2" : "#f9fafb",
+                                      border: `1px dashed ${flagged ? "#fca5a5" : "#d1d5db"}`,
+                                      borderRadius: "8px",
+                                      padding: "6px 8px",
+                                      marginBottom: "2px",
+                                      minHeight: "52px",
+                                      display: "flex",
+                                      flexDirection: "column",
+                                      gap: "2px",
+                                    }}
+                                  >
+                                    <div style={{ fontSize: "10px", fontWeight: 600, color: flagged ? "#dc2626" : "#9ca3af", fontStyle: "italic" }}>
+                                      Livre
+                                    </div>
+                                    <div style={{
+                                      fontSize: "10px",
+                                      fontWeight: 700,
+                                      color: flagged ? "#dc2626" : (badge?.c ?? "#9ca3af"),
+                                      marginTop: "auto",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "3px",
+                                    }}>
+                                      {flagged && <span>⚠</span>}
+                                      {s.unidade || "—"}
+                                    </div>
+                                  </div>
+                                )
+                              }
+                              return (
+                                <div
+                                  key={ci}
+                                  style={{
+                                    background: flagged ? "#fef2f2" : (badge?.bg ?? "#f8fafc"),
+                                    border: `1px solid ${flagged ? "#fca5a5" : (badge?.border ?? "#e2e8f0")}`,
+                                    borderRadius: "8px",
+                                    padding: "6px 8px",
+                                    marginBottom: "2px",
+                                    minHeight: "60px",
+                                    display: "flex",
+                                    flexDirection: "column",
+                                    gap: "2px",
+                                  }}
+                                >
+                                  <div style={{ fontSize: "11px", fontWeight: 700, color: "#1f2937", lineHeight: "1.3" }}>
+                                    {fmtName(s.pac)}
+                                  </div>
+                                  <div style={{ fontSize: "10px", color: "#6b7280", lineHeight: "1.2" }}>
+                                    {s.terapia}
+                                  </div>
+                                  <div style={{
+                                    fontSize: "10px",
+                                    fontWeight: 700,
+                                    color: flagged ? "#dc2626" : (badge?.c ?? "#6b7280"),
+                                    marginTop: "auto",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    gap: "3px",
+                                  }}>
+                                    {flagged && <span>⚠</span>}
+                                    {s.unidade}
+                                  </div>
+                                </div>
+                              )
+                            })}
+                          </td>
+                        )
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+
+              {/* Resumo das violações */}
+              {erros.length > 0 && (
+                <div style={{ marginTop: "14px", display: "flex", flexDirection: "column", gap: "4px" }}>
+                  {erros.map((e, i) => (
+                    <div key={i} style={{ fontSize: "11px", color: "#dc2626", background: "#fef2f2", borderRadius: "6px", padding: "5px 10px", border: "1px solid #fca5a5" }}>
+                      ⚠ {e.dia.replace("-feira", "")} {e.hora} ({e.livre ? "livre" : "agendado"}) — unidade <strong>{e.unidade}</strong>, mas maioria do turno está em <strong>{e.mainU}</strong>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+    </div>,
+    document.body
+  )
+}
+
 // ─── Main Tab ─────────────────────────────────────────────────────────────────
 
 export function InconsistenciasTab({ items, cRows }: Props) {
@@ -258,6 +491,7 @@ export function InconsistenciasTab({ items, cRows }: Props) {
   const [busca, setBusca] = useState("")
   const [filtroTipo, setFiltroTipo] = useState<IncTipo | "">("")
   const [viewItem, setViewItem] = useState<IncItem | null>(null)
+  const [viewProfItem, setViewProfItem] = useState<IncItem | null>(null)
 
   useEffect(() => {
     try {
@@ -447,7 +681,10 @@ export function InconsistenciasTab({ items, cRows }: Props) {
                       {/* Botões */}
                       <div style={{ display: "flex", gap: "6px", alignSelf: "center", flexWrap: "wrap" }}>
                         <button
-                          onClick={() => setViewItem(item)}
+                          onClick={() => {
+                            if (item.tipo === "prof_unidade_turno") setViewProfItem(item)
+                            else setViewItem(item)
+                          }}
                           style={{
                             padding: "5px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 700,
                             cursor: "pointer", border: "1px solid #d1d5db",
@@ -597,6 +834,15 @@ export function InconsistenciasTab({ items, cRows }: Props) {
           cRows={cRows}
           items={items}
           onClose={() => setViewItem(null)}
+        />
+      )}
+
+      {/* ── Modal Ver Cronograma do Profissional ─────────────────────── */}
+      {viewProfItem && (
+        <ProfViewModal
+          prof={viewProfItem.prof}
+          cRows={cRows}
+          onClose={() => setViewProfItem(null)}
         />
       )}
     </div>

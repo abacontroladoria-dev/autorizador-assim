@@ -1,16 +1,21 @@
 import { pm, getTurno, isLaudoComAlta } from "./helpers"
-import { EXCLUIR_OCUP, PACS_ADMIN } from "./constants"
+import {
+  EXCLUIR_OCUP, PACS_ADMIN,
+  ABA_EXIB_PSICO_NAMES, EXIB_ID, EXIB_NOME, TERAPIA_ID,
+  AE_LAUDO_ESP, HS_LAUDO_ESP,
+} from "./constants"
 import type { CsvRow, LaudoRow } from "@/types/cronograma"
 
 // ─── TIPOS ────────────────────────────────────────────────────────────────────
 
 export type IncTipo =
-  | "unidade_turno"   // unidades diferentes no mesmo turno
-  | "buraco"          // intervalo ≠ 40 min entre sessões consecutivas
-  | "min_sessoes"     // apenas 1 sessão clínica no dia (não Particular)
-  | "exibicao_aba"    // PS/SF/AV/EF/Coord/Superv sem "Psicologia ABA"
-  | "exibicao_hs"     // HS terapiaExib incorreta (ou ASSIM com HS)
-  | "exibicao_ae"     // AE terapiaExib incorreta (ou ASSIM com AE/SF)
+  | "unidade_turno"      // paciente em unidades diferentes no mesmo turno
+  | "buraco"             // intervalo ≠ 40 min entre sessões consecutivas
+  | "min_sessoes"        // apenas 1 sessão clínica no dia (não Particular)
+  | "exibicao_aba"       // PS/SF/AV/EF/Coord/Superv sem "Psicologia ABA"
+  | "exibicao_hs"        // HS terapiaExib incorreta (ou ASSIM com HS)
+  | "exibicao_ae"        // AE terapiaExib incorreta (ou ASSIM com AE/SF)
+  | "prof_unidade_turno" // profissional em unidades diferentes no mesmo turno
 
 export interface IncItem {
   id: string
@@ -28,21 +33,18 @@ export interface IncItem {
 
 // ─── CONSTANTES ───────────────────────────────────────────────────────────────
 
-// Terapias que DEVEM ter terapiaExib = "Psicologia ABA" (sem exceções especiais)
-const ABA_BASE = new Set([
-  "Aplicador ABA (PS)", "Aplicador ABA (SF)", "Aplicador ABA (AV)",
-  "Aplicador ABA (EF)", "Coordenador de Caso", "Supervisão ABA",
-])
-
 // Terapias que NÃO são sessões clínicas do paciente (excluir de buraco/min_sessoes)
 const ADMIN_ONLY = new Set([
   "Supervisão ABA", "Coordenador de Caso", "Visita Guiada", "Triagem",
   "Avaliação Neuropsicológica", "Avaliação de Repertório",
 ])
 
-// Especialidade no laudo que indica autorização para AE
-// (confirmar com usuário — user informou "Arteterapia")
-const AE_LAUDO_ESP = "Arteterapia"
+// Nomes derivados de TERAPIA_ID — ao renomear, atualize apenas TERAPIA_ID em constants.ts
+const ID_SF = 2263
+const ID_AE = 2260
+const ID_HS = 2283
+const AE_NOME = (Object.entries(TERAPIA_ID) as [string, number][]).find(([, id]) => id === ID_AE)?.[0] ?? "Aplicador ABA (AE)"
+const HS_NOME = (Object.entries(TERAPIA_ID) as [string, number][]).find(([, id]) => id === ID_HS)?.[0] ?? "Aplicador ABA (HS)"
 
 // ─── ALGORITMO PRINCIPAL ──────────────────────────────────────────────────────
 
@@ -197,39 +199,65 @@ export function detectarInconsistencias(cRows: CsvRow[], lRows: LaudoRow[]): Inc
     }
   }
 
-  // ── R4/R5/R6: Regras de terapiaExib e ASSIM ───────────────────────────────
+  // ── R4/R5/R6: Regras de terapiaExib, ASSIM e Gratuidade ─────────────────────
   for (const s of sessoes) {
     const isAssim = s.conv.toLowerCase().includes("assim")
+    const isGratuidade = s.conv.toLowerCase().includes("gratuidade")
 
-    // R4 — ABA_BASE deve ter "Psicologia ABA"
-    // SF+ASSIM é tratado em R6 — evita double-flag
-    if (ABA_BASE.has(s.terapia) && !(isAssim && s.terapia === "Aplicador ABA (SF)")) {
-      if (s.terapiaExib !== "Psicologia ABA") {
+    // R4 — Grupo 1 ABA → sempre Psicologia ABA (IDs: 2269/2317/2262/2261/2248/2353/2263)
+    // SF+ASSIM é excluído aqui e tratado separadamente abaixo
+    if (ABA_EXIB_PSICO_NAMES.has(s.terapia) && !(isAssim && TERAPIA_ID[s.terapia] === ID_SF)) {
+      const esperado = EXIB_NOME[EXIB_ID.PSICOLOGIA_ABA]
+      if (s.terapiaExib !== esperado) {
         items.push({
           id: mkId(s.pac, s.dia, s.hora, s.terapia, "exibicao_aba"),
           tipo: "exibicao_aba",
           pac: s.pac, conv: s.conv, dia: s.dia, hora: s.hora,
           prof: s.prof, terapia: s.terapia,
-          terapiaExibAtual: s.terapiaExib || "(vazio)", terapiaExibEsperada: "Psicologia ABA",
-          detalhe: `"${s.terapia}" deve exibir "Psicologia ABA"`,
+          terapiaExibAtual: s.terapiaExib || "(vazio)", terapiaExibEsperada: esperado,
+          detalhe: `"${s.terapia}" deve exibir "${esperado}"`,
         })
       }
     }
 
-    // R5 — HS
-    if (s.terapia === "Aplicador ABA (HS)") {
-      if (isAssim) {
+    // R5 — HS (ID 2283)
+    if (s.terapia === HS_NOME) {
+      const hsQtd = laudoQtd[`${s.pac}|||${HS_LAUDO_ESP}`] ?? 0
+      if (isGratuidade) {
         items.push({
           id: mkId(s.pac, s.dia, s.hora, s.terapia, "exibicao_hs"),
           tipo: "exibicao_hs",
           pac: s.pac, conv: s.conv, dia: s.dia, hora: s.hora,
           prof: s.prof, terapia: s.terapia,
           terapiaExibAtual: s.terapiaExib, terapiaExibEsperada: "—",
-          detalhe: `Convênio ASSIM não permite Aplicador ABA (HS)`,
+          detalhe: "Convênio Gratuidade não permite Aplicador ABA (HS)",
         })
+      } else if (isAssim) {
+        if (hsQtd > 1) {
+          // ASSIM com laudo HS > 1: permitido, mas exibição deve ser específica
+          const esperado = EXIB_NOME[EXIB_ID.HS_ABA]
+          if (s.terapiaExib !== esperado) {
+            items.push({
+              id: mkId(s.pac, s.dia, s.hora, s.terapia, "exibicao_hs"),
+              tipo: "exibicao_hs",
+              pac: s.pac, conv: s.conv, dia: s.dia, hora: s.hora,
+              prof: s.prof, terapia: s.terapia,
+              terapiaExibAtual: s.terapiaExib || "(vazio)", terapiaExibEsperada: esperado,
+              detalhe: `ASSIM com laudo "${HS_LAUDO_ESP}" (${hsQtd}x) — exibição deve ser "${esperado}"`,
+            })
+          }
+        } else {
+          items.push({
+            id: mkId(s.pac, s.dia, s.hora, s.terapia, "exibicao_hs"),
+            tipo: "exibicao_hs",
+            pac: s.pac, conv: s.conv, dia: s.dia, hora: s.hora,
+            prof: s.prof, terapia: s.terapia,
+            terapiaExibAtual: s.terapiaExib, terapiaExibEsperada: "—",
+            detalhe: `Convênio ASSIM não permite HS — laudo "${HS_LAUDO_ESP}" precisa de qtd > 1`,
+          })
+        }
       } else {
-        const hsQtd = laudoQtd[`${s.pac}|||Habilidades Sociais`] ?? 0
-        const esperado = hsQtd > 1 ? "(Habilidades Sociais (Psicologia ABA))" : "Psicologia ABA"
+        const esperado = hsQtd > 0 ? EXIB_NOME[EXIB_ID.HS_ABA] : EXIB_NOME[EXIB_ID.PSICOLOGIA_ABA]
         if (s.terapiaExib !== esperado) {
           items.push({
             id: mkId(s.pac, s.dia, s.hora, s.terapia, "exibicao_hs"),
@@ -237,28 +265,52 @@ export function detectarInconsistencias(cRows: CsvRow[], lRows: LaudoRow[]): Inc
             pac: s.pac, conv: s.conv, dia: s.dia, hora: s.hora,
             prof: s.prof, terapia: s.terapia,
             terapiaExibAtual: s.terapiaExib || "(vazio)", terapiaExibEsperada: esperado,
-            detalhe: hsQtd > 1
-              ? `HS autorizado (${hsQtd}x) — exibição deve ser "(Habilidades Sociais (Psicologia ABA))"`
-              : `HS sem laudo vigente — exibição deve ser "Psicologia ABA"`,
+            detalhe: hsQtd > 0
+              ? `HS com laudo "${HS_LAUDO_ESP}" (${hsQtd}x) — exibição deve ser "${esperado}"`
+              : `HS sem laudo "${HS_LAUDO_ESP}" vigente — exibição deve ser "${esperado}"`,
           })
         }
       }
     }
 
-    // R6 — AE
-    if (s.terapia === "Aplicador ABA (AE)") {
-      if (isAssim) {
+    // R6 — AE (ID 2260)
+    if (s.terapia === AE_NOME) {
+      const aeQtd = laudoQtd[`${s.pac}|||${AE_LAUDO_ESP}`] ?? 0
+      if (isGratuidade) {
         items.push({
           id: mkId(s.pac, s.dia, s.hora, s.terapia, "exibicao_ae"),
           tipo: "exibicao_ae",
           pac: s.pac, conv: s.conv, dia: s.dia, hora: s.hora,
           prof: s.prof, terapia: s.terapia,
           terapiaExibAtual: s.terapiaExib, terapiaExibEsperada: "—",
-          detalhe: `Convênio ASSIM não permite Aplicador ABA (AE)`,
+          detalhe: "Convênio Gratuidade não permite Aplicador ABA (AE)",
         })
+      } else if (isAssim) {
+        if (aeQtd > 1) {
+          // ASSIM com laudo AE > 1: permitido, mas exibição deve ser específica
+          const esperado = EXIB_NOME[EXIB_ID.ARTETERAPIA_ABA]
+          if (s.terapiaExib !== esperado) {
+            items.push({
+              id: mkId(s.pac, s.dia, s.hora, s.terapia, "exibicao_ae"),
+              tipo: "exibicao_ae",
+              pac: s.pac, conv: s.conv, dia: s.dia, hora: s.hora,
+              prof: s.prof, terapia: s.terapia,
+              terapiaExibAtual: s.terapiaExib || "(vazio)", terapiaExibEsperada: esperado,
+              detalhe: `ASSIM com laudo "${AE_LAUDO_ESP}" (${aeQtd}x) — exibição deve ser "${esperado}"`,
+            })
+          }
+        } else {
+          items.push({
+            id: mkId(s.pac, s.dia, s.hora, s.terapia, "exibicao_ae"),
+            tipo: "exibicao_ae",
+            pac: s.pac, conv: s.conv, dia: s.dia, hora: s.hora,
+            prof: s.prof, terapia: s.terapia,
+            terapiaExibAtual: s.terapiaExib, terapiaExibEsperada: "—",
+            detalhe: `Convênio ASSIM não permite AE — laudo "${AE_LAUDO_ESP}" precisa de qtd > 1`,
+          })
+        }
       } else {
-        const aeAutorizado = (laudoQtd[`${s.pac}|||${AE_LAUDO_ESP}`] ?? 0) > 0
-        const esperado = aeAutorizado ? "Aplicador ABA (AE) (Psicologia ABA)" : "Psicologia ABA"
+        const esperado = aeQtd > 0 ? EXIB_NOME[EXIB_ID.ARTETERAPIA_ABA] : EXIB_NOME[EXIB_ID.PSICOLOGIA_ABA]
         if (s.terapiaExib !== esperado) {
           items.push({
             id: mkId(s.pac, s.dia, s.hora, s.terapia, "exibicao_ae"),
@@ -266,23 +318,81 @@ export function detectarInconsistencias(cRows: CsvRow[], lRows: LaudoRow[]): Inc
             pac: s.pac, conv: s.conv, dia: s.dia, hora: s.hora,
             prof: s.prof, terapia: s.terapia,
             terapiaExibAtual: s.terapiaExib || "(vazio)", terapiaExibEsperada: esperado,
-            detalhe: aeAutorizado
-              ? `AE autorizado no laudo — exibição deve ser "Aplicador ABA (AE) (Psicologia ABA)"`
-              : `AE sem laudo — exibição deve ser "Psicologia ABA"`,
+            detalhe: aeQtd > 0
+              ? `AE com laudo "${AE_LAUDO_ESP}" (${aeQtd}x) — exibição deve ser "${esperado}"`
+              : `AE sem laudo "${AE_LAUDO_ESP}" vigente — exibição deve ser "${esperado}"`,
           })
         }
       }
     }
 
-    // SF com ASSIM
-    if (s.terapia === "Aplicador ABA (SF)" && isAssim) {
+    // SF (ID 2263) com ASSIM: não permitido
+    if (TERAPIA_ID[s.terapia] === ID_SF && isAssim) {
       items.push({
         id: mkId(s.pac, s.dia, s.hora, s.terapia, "exibicao_ae"),
         tipo: "exibicao_ae",
         pac: s.pac, conv: s.conv, dia: s.dia, hora: s.hora,
         prof: s.prof, terapia: s.terapia,
         terapiaExibAtual: s.terapiaExib, terapiaExibEsperada: "—",
-        detalhe: `Convênio ASSIM não permite Aplicador ABA (SF)`,
+        detalhe: "Convênio ASSIM não permite Aplicador ABA (SF)",
+      })
+    }
+  }
+
+  // ── R8: Profissional em unidades diferentes no mesmo turno ────────────────────
+  interface SessProf {
+    prof: string; dia: string; hora: string; hMin: number
+    unidade: string; turno: "manhã" | "tarde"; pac: string; terapia: string
+  }
+  const sessoesProf: SessProf[] = []
+  for (const r of cRows) {
+    if (String(r["Status do Agendamento"] || "") !== "Agendado") continue
+    const prof = String(r["Profissional"] || "").trim()
+    if (!prof) continue
+    const pac = String(r["Nome Favorecido"] || "").trim()
+    if (!pac || PACS_ADMIN.has(pac)) continue
+    const hora = String(r["HI_str"] || String(r["Hora Inicial"] || "").slice(0, 5) || "")
+    const hMin = pm(hora) ?? -1
+    if (hMin < 0) continue
+    const unidade = String((r as Record<string, unknown>)["Unidade"] || "").trim()
+    if (!unidade || unidade === "AT Externo" || unidade === "Desconhecida") continue
+    sessoesProf.push({
+      prof,
+      dia: String(r["Dia da Semana"] || "").trim(),
+      hora, hMin, unidade,
+      turno: getTurno(hora),
+      pac, terapia: String(r["Terapia"] || "").trim(),
+    })
+  }
+
+  const byProfDiaTurno = new Map<string, SessProf[]>()
+  for (const s of sessoesProf) {
+    const k = `${s.prof}|||${s.dia}|||${s.turno}`
+    if (!byProfDiaTurno.has(k)) byProfDiaTurno.set(k, [])
+    byProfDiaTurno.get(k)!.push(s)
+  }
+
+  for (const group of byProfDiaTurno.values()) {
+    const unidades = new Set(group.map(s => s.unidade))
+    if (unidades.size <= 1) continue
+    // Unidade majoritária = referência
+    const cnt: Record<string, number> = {}
+    for (const s of group) cnt[s.unidade] = (cnt[s.unidade] || 0) + 1
+    const mainU = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0][0]
+    for (const s of group) {
+      if (s.unidade === mainU) continue
+      items.push({
+        id: `${s.prof}|||${s.dia}|||${s.hora}|||${s.terapia}|||prof_unidade_turno`,
+        tipo: "prof_unidade_turno",
+        pac: s.pac,
+        conv: "",
+        dia: s.dia,
+        hora: s.hora,
+        prof: s.prof,
+        terapia: s.terapia,
+        terapiaExibAtual: s.unidade,
+        terapiaExibEsperada: mainU,
+        detalhe: `${s.prof} — ${s.turno}: agendado em "${s.unidade}" (${s.hora}) mas maioria em "${mainU}"`,
       })
     }
   }

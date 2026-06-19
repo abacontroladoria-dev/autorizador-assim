@@ -255,6 +255,73 @@ export function isProfBloqueadoTemp(prof: string): boolean {
 
 export const API_BASE = "https://apiv2.apptita.com.br/api"
 
+// ─── IDs DE TERAPIA (fonte de verdade — nomes podem mudar, IDs não) ──────────
+// Ao renomear uma terapia no sistema: atualize APENAS o lado esquerdo deste mapa.
+// Toda lógica de código deve operar por ID, nunca hardcodar nomes diretamente.
+export const TERAPIA_ID: Record<string, number> = {
+  // Grupo 1 — exibição sempre "Psicologia ABA" (EXIB_ID.PSICOLOGIA_ABA)
+  "Aplicador ABA (EF)":      2269,
+  "Aplicador ABA (PS)":      2317,
+  "Aplicador ABA Casa":      2262,
+  "Aplicador ABA Escola":    2261,
+  "Coordenador de Caso":     2248,
+  "Supervisão ABA":          2353,
+  "Aplicador ABA (SF)":      2263,
+  // Grupo 3 — exibição depende de laudo e convênio
+  "Aplicador ABA (AE)":      2260,
+  "Aplicador ABA (HS)":      2283,
+  // Grupo 2 — exibição idêntica à ação (sem tE separado)
+  "Aplicador Suporte":              2331,
+  "Apoio Operacional":              2280,
+  "Avaliação Neuropsicológica":     2268,
+  "Equoterapia":                    2267,
+  "Especialista Técnico de Área":   2281,
+  "Estágio":                        2277,
+  "Facilitador Técnico":            2278,
+  "Fisioterapia":                   2258,
+  "Fisioterapia Aquática":          2249,
+  "Fonoaudiologia":                 2250,
+  "Musicoterapia":                  2251,
+  "OFERECER CONSULTA NUTRIÇÃO":     2579,
+  "Operações Clínicas":             2279,
+  "Psicologia":                     2259,
+  "Psicomotricidade":               2253,
+  "Psicopedagogia":                 2254,
+  "Técnico Terapêutico Particular": 2289,
+  "Terapia Alimentar":              2274,
+  "Terapia Ocupacional":            2255,
+  "Triagem":                        2270,
+  "Visita Guiada":                  2604,
+}
+
+// IDs permanentes das terapias de exibição (o ID nunca muda, o nome pode)
+export const EXIB_ID = {
+  PSICOLOGIA_ABA:  2271,
+  ARTETERAPIA_ABA: 2578,
+  HS_ABA:          2654,
+} as const
+
+// Nomes atuais das terapias de exibição — único local a editar ao renomear
+export const EXIB_NOME: Record<number, string> = {
+  [2271]: "Psicologia ABA",
+  [2578]: "Arteterapia (Psicologia ABA)",
+  [2654]: "Habilidades Sociais (Psicologia ABA)",
+}
+
+// Grupo 1: IDs de ação → exibem sempre como EXIB_ID.PSICOLOGIA_ABA
+export const ABA_EXIB_PSICO_IDS = new Set([2269, 2317, 2262, 2261, 2248, 2353, 2263])
+
+// Versão por nome (derivada de TERAPIA_ID — não edite diretamente)
+export const ABA_EXIB_PSICO_NAMES = new Set(
+  (Object.entries(TERAPIA_ID) as [string, number][])
+    .filter(([, id]) => ABA_EXIB_PSICO_IDS.has(id))
+    .map(([name]) => name)
+)
+
+// Especialidades no laudo que habilitam AE e HS
+export const AE_LAUDO_ESP = "Arteterapia"
+export const HS_LAUDO_ESP = "Habilidades Sociais"
+
 // ─── LEGENDA DE REGRAS (fonte única — GuiaTab e ConfigTab) ────────────────────
 export const REGRAS_LEGENDA: Array<{ r: string; c: string; title: string; desc: string }> = [
   { r: "R1",            c: B.purple,   title: "Completar slot existente",        desc: "O musicoterapeuta já tem 1 ou 2 pacientes naquele horário e a capacidade (Dupla ou Trio) ainda não foi atingida. O script encontrou um paciente compatível — mesma faixa etária, nenhum agressivo no grupo — para completar. Ver coluna \"Referência\" para saber quem já está no slot." },
