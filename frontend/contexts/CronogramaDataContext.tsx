@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react"
-import { SK, SK_SAIDA, SK_PREENCHER, DEFAULT_MCAP } from "@/lib/cronograma/constants"
+import { SK, SK_SAIDA, SK_PREENCHER, DEFAULT_MCAP, buildSaidaKey, splitSaidaKey } from "@/lib/cronograma/constants"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import type { CsvRow, LaudoRow, DispRow, WaMap, RecItem, InvItem, CfgState, StatusMap, StatusEntry } from "@/types/cronograma"
 
@@ -131,6 +131,10 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
   const [statusMap, setStatusMap] = useState<StatusMap>({})
   const statusMapRef = useRef<StatusMap>({})
   statusMapRef.current = statusMap
+  // Prevents loadSaida from overwriting a fresher realtime update that landed mid-fetch
+  const hasRealtimeFiredRef = useRef(false)
+  // Keys currently being upserted — realtime merge skips these to preserve optimistic state
+  const pendingWriteKeys = useRef(new Set<string>())
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
   const hasSavedRef = useRef(false)
@@ -222,17 +226,23 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
         const faltantes = Object.keys(legacy).filter(k => !(k in remote))
         if (faltantes.length && user) {
           const nowIso = new Date().toISOString()
-          const rows = faltantes.map(k => {
-            const [paciente, dia, hora, terapia] = k.split("|||")
+          const rows = faltantes.flatMap(k => {
+            const parts = splitSaidaKey(k)
+            if (!parts) return []
             const entry = legacy[k]
-            return { paciente, dia, hora, terapia, status: entry.status, dados: entry, criado_por: user.id, atualizado_por: user.id, atualizado_em: nowIso }
+            return [{ ...parts, status: entry.status, dados: entry, criado_por: user.id, atualizado_por: user.id, atualizado_em: nowIso }]
           })
-          const { error: upErr } = await sb.from("saida_aceites").upsert(rows, { onConflict: "paciente,dia,hora,terapia" })
-          if (!upErr) for (const k of faltantes) remote[k] = legacy[k]
+          if (rows.length) {
+            const { error: upErr } = await sb.from("saida_aceites").upsert(rows, { onConflict: "paciente,dia,hora,terapia" })
+            if (!upErr) for (const k of faltantes) remote[k] = legacy[k]
+          }
         }
 
-        setStatusMap(remote)
-        try { localStorage.setItem(SK_SAIDA, JSON.stringify(remote)) } catch {}
+        // Se realtime já disparou durante este fetch, os dados dele são mais recentes — não sobrescrever
+        if (!hasRealtimeFiredRef.current) {
+          setStatusMap(remote)
+          try { localStorage.setItem(SK_SAIDA, JSON.stringify(remote)) } catch {}
+        }
       } catch {
         if (Object.keys(legacy).length) setStatusMap(legacy)
       }
@@ -255,7 +265,18 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
               .select("paciente,dia,hora,terapia,dados")
             if (error) return
             const m = statusMapFromRows((data ?? []) as SaidaRow[])
-            setStatusMap(m)
+            hasRealtimeFiredRef.current = true
+            // Merge server state, but keep optimistic values for keys with in-flight writes
+            setStatusMap(prev => {
+              const next: StatusMap = {}
+              for (const [k, v] of Object.entries(m)) {
+                next[k] = pendingWriteKeys.current.has(k) ? (prev[k] ?? v) : v
+              }
+              for (const k of pendingWriteKeys.current) {
+                if (!(k in next) && k in prev) next[k] = prev[k]
+              }
+              return next
+            })
             try { localStorage.setItem(SK_SAIDA, JSON.stringify(m)) } catch {}
           } catch {}
         }, 400)
@@ -303,6 +324,8 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
     const deletes = Object.keys(prev).filter(k => !(k in next))
     if (!upserts.length && !deletes.length) return
 
+    for (const k of upserts) pendingWriteKeys.current.add(k)
+
     ;(async () => {
       try {
         const sb = getSupabaseClient()
@@ -310,21 +333,29 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
         const nowIso = new Date().toISOString()
 
         if (upserts.length) {
-          const rows = upserts.map(k => {
-            const [paciente, dia, hora, terapia] = k.split("|||")
+          const rows = upserts.flatMap(k => {
+            const parts = splitSaidaKey(k)
+            if (!parts) return []
             const entry = next[k]
-            return { paciente, dia, hora, terapia, status: entry.status, dados: entry, atualizado_por: user?.id ?? null, atualizado_em: nowIso }
+            return [{ ...parts, status: entry.status, dados: entry, atualizado_por: user?.id ?? null, atualizado_em: nowIso }]
           })
           const { error } = await sb.from("saida_aceites").upsert(rows, { onConflict: "paciente,dia,hora,terapia" })
           if (error) throw error
         }
 
-        for (const k of deletes) {
-          const [paciente, dia, hora, terapia] = k.split("|||")
-          const { error } = await sb.from("saida_aceites").delete().match({ paciente, dia, hora, terapia })
-          if (error) throw error
+        if (deletes.length) {
+          const results = await Promise.all(
+            deletes.map(k => {
+              const parts = splitSaidaKey(k)
+              if (!parts) return Promise.resolve({ error: null })
+              return sb.from("saida_aceites").delete().match(parts)
+            })
+          )
+          const firstError = results.find(r => r.error)?.error
+          if (firstError) throw firstError
         }
 
+        saidaTableMissing = false
         setSaveError(null)
       } catch (e) {
         const msg = (e as Error).message || ""
@@ -334,6 +365,9 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
         } else {
           setSaveError(`Falha ao sincronizar saída: ${msg}`)
         }
+      } finally {
+        for (const k of upserts) pendingWriteKeys.current.delete(k)
+        for (const k of deletes) pendingWriteKeys.current.delete(k)
       }
     })()
   }, [])

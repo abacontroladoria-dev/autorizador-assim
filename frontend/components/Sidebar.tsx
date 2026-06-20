@@ -29,7 +29,7 @@ import {
   CalendarOff,
   BookOpen,
   Settings,
-  Lightbulb,
+  CalendarRange,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -484,9 +484,9 @@ export default function Sidebar() {
             </SidebarGroup>
           )}
 
-          {/* Alterações de Cronograma */}
+          {/* Cronograma */}
           {(canAccess("/cronograma/solicitacoes") || canAccess("/cronograma/ocupacao")) && (
-            <SidebarGroup title="Alterações de Cronograma" icon={Lightbulb}>
+            <SidebarGroup title="Cronograma" icon={CalendarRange}>
               {canAccess("/cronograma/solicitacoes") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/solicitacoes?tab=saida" />}
               {canAccess("/cronograma/ocupacao") && <MenuItem label="Aceites e Recusas" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
             </SidebarGroup>

@@ -155,7 +155,14 @@ export function BancoDadosTab({ cRows, statusMap, persistStatus }: Props) {
   }
 
   function limpar() {
-    if (window.confirm("Limpar TODOS os registros?")) persistStatus({})
+    if (
+      window.confirm(
+        "⚠️ Isso apagará TODOS os registros de saída da equipe no banco de dados.\n\nTodos os usuários perderão os dados.\n\nContinuar?",
+      ) &&
+      window.confirm("Confirma? Essa ação não pode ser desfeita.")
+    ) {
+      persistStatus({})
+    }
   }
 
   return (
@@ -168,7 +175,7 @@ export function BancoDadosTab({ cRows, statusMap, persistStatus }: Props) {
               Em Acompanhamento
             </div>
             <div className="text-[12px] text-muted-foreground mt-0.5">
-              Dados salvos neste navegador. {entries.length} registro(s).
+              Dados compartilhados com a equipe. {entries.length} registro(s).
             </div>
           </div>
           <div className="flex gap-1.5 flex-wrap">
