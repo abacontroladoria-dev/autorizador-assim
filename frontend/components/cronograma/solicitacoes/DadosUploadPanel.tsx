@@ -252,21 +252,11 @@ export function DadosUploadPanel({ cRows, lRows, dispRows, onCRows, onLRows, onD
           onClear={() => onLRows([])}
           parseFile={f => parseXlsx<LaudoRow>(f)}
         />
-        <ImportDropzone onImport={onImport} />
-        <Dropzone<DispRow>
-          label="Disponibilidade (Órbita)"
-          accept=".csv"
-          rows={dispRows}
-          rowLabel="pacientes"
-          onLoad={onDispRows}
-          onClear={() => onDispRows([])}
-          parseFile={f => parseCsv<DispRow>(f)}
-        />
       </div>
 
       {!allLoaded && (
         <p className="text-xs text-muted-foreground text-center">
-          Carregue a Grade e os Laudos para habilitar as análises. Disponibilidade e Importar Base são opcionais.
+          Carregue a Grade e os Laudos para habilitar as análises.
         </p>
       )}
     </div>

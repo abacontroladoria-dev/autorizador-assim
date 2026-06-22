@@ -660,10 +660,15 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
           </div>
 
           <div className="mb-3">
-            <div className="text-xs font-bold text-gray-500 mb-1">Profissional</div>
+            <label htmlFor="prof-search" className="text-xs font-bold text-gray-500 mb-1 block">Profissional</label>
             <div ref={comboRef} style={{ position: "relative", width: "340px" }}>
               <input
+                id="prof-search"
                 type="text"
+                role="combobox"
+                aria-autocomplete="list"
+                aria-expanded={dropOpen && filteredProfs.length > 0}
+                aria-controls="prof-search-list"
                 value={inputVal}
                 onChange={e => {
                   setInputVal(e.target.value)
@@ -678,14 +683,20 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                 style={{ outline: "none" }}
               />
               {dropOpen && filteredProfs.length > 0 && (
-                <div style={{
-                  position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, zIndex: 50,
-                  background: "var(--card)", border: "1px solid var(--border)", borderRadius: "10px",
-                  boxShadow: "0 4px 16px rgba(0,0,0,0.08)", maxHeight: "200px", overflowY: "auto",
-                }}>
+                <div
+                  id="prof-search-list"
+                  role="listbox"
+                  aria-label="Profissionais disponíveis"
+                  style={{
+                    position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, zIndex: 50,
+                    background: "var(--card)", border: "1px solid var(--border)", borderRadius: "10px",
+                    boxShadow: "0 4px 16px rgba(0,0,0,0.08)", maxHeight: "200px", overflowY: "auto",
+                  }}>
                   {filteredProfs.map(p => (
                     <button
                       key={p}
+                      role="option"
+                      aria-selected={p === prof}
                       onMouseDown={e => {
                         e.preventDefault()
                         setProf(p); setInputVal(p); setDropOpen(false); setSelDT(new Set()); setResults(null)
@@ -721,7 +732,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                 <span className="text-xs font-bold text-gray-500">Dias e turnos afetados</span>
                 <button
                   onClick={selectTodos}
-                  style={{ padding: "3px 10px", borderRadius: "7px", border: `1px solid ${B.navy}`, background: selDT.size === todosCount ? B.navy : "var(--card)", color: selDT.size === todosCount ? "white" : B.navy, fontSize: "11px", fontWeight: 700, cursor: "pointer" }}
+                  style={{ padding: "10px 14px", minHeight: "44px", borderRadius: "7px", border: `1px solid ${B.navy}`, background: selDT.size === todosCount ? B.navy : "var(--card)", color: selDT.size === todosCount ? "white" : B.navy, fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
                 >
                   Todos
                 </button>
@@ -737,7 +748,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                         <button
                           key={t}
                           onClick={() => toggleDT(d, t)}
-                          style={{ padding: "4px 12px", borderRadius: "8px", border: `1px solid ${sel ? B.blue : "var(--border)"}`, background: sel ? "var(--cron-active-bg)" : "var(--card)", color: sel ? B.blue : "var(--muted-foreground)", fontSize: "11px", fontWeight: sel ? 700 : 400, cursor: "pointer" }}
+                          style={{ padding: "10px 14px", minHeight: "44px", borderRadius: "8px", border: `1px solid ${sel ? B.blue : "var(--border)"}`, background: sel ? "var(--cron-active-bg)" : "var(--card)", color: sel ? B.blue : "var(--muted-foreground)", fontSize: "12px", fontWeight: sel ? 700 : 400, cursor: "pointer" }}
                         >
                           {t === "manhã" ? "Manhã" : "Tarde"}
                         </button>
@@ -944,9 +955,11 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                               if (sugs?.length) {
                                 return (
                                   <td key={d} style={{ padding: "2px 4px", verticalAlign: "middle" }}>
-                                    <div
+                                    <button
+                                      type="button"
                                       onClick={() => setSlotModal(chaveSlot)}
-                                      style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: "8px", minHeight: "36px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "3px 4px", gap: "1px", cursor: "pointer" }}
+                                      aria-label={`Ver ${sugs.length} candidato${sugs.length > 1 ? "s" : ""} para ${DIA_ABR[d] ?? d} ${slot}`}
+                                      style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: "8px", minHeight: "36px", width: "100%", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "3px 4px", gap: "1px", cursor: "pointer", fontFamily: "inherit" }}
                                     >
                                       <div style={{ fontWeight: 600, fontSize: "10px", color: "#92400e", lineHeight: 1.2 }}>
                                         {sugs.length} candidato{sugs.length > 1 ? "s" : ""}
@@ -954,7 +967,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                                       <div style={{ fontSize: "9px", color: "#d97706", fontWeight: 700 }}>
                                         ver
                                       </div>
-                                    </div>
+                                    </button>
                                   </td>
                                 )
                               }
@@ -1210,10 +1223,15 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", gap: "8px" }}>
                     <div style={{ fontWeight: 700, fontSize: "13px", color: "var(--card-foreground)" }}>{sessoes[0].pac}</div>
                     <button
-                      onClick={() => { setModalGroup(sessoes); const firstSolvable = sessoes.findIndex(r => !r.analise.semSolucao); setModalTabIdx(firstSolvable >= 0 ? firstSolvable : 0) }}
-                      style={{ padding: "6px 14px", borderRadius: "9px", background: B.navy, color: "white", border: "none", fontWeight: 700, fontSize: "11px", cursor: "pointer", flexShrink: 0 }}
+                      onClick={() => {
+                        if (!results) analisar()
+                        setModalGroup(sessoes)
+                        const firstSolvable = sessoes.findIndex(r => !r.analise.semSolucao)
+                        setModalTabIdx(firstSolvable >= 0 ? firstSolvable : 0)
+                      }}
+                      style={{ padding: "6px 14px", borderRadius: "9px", background: B.navy, color: "white", border: "none", fontWeight: 700, fontSize: "11px", cursor: "pointer", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" }}
                     >
-                      Ver
+                      Sugestão de Alteração
                     </button>
                   </div>
                   {sessoes.map((r, si) => {
@@ -1304,6 +1322,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                   </div>
                   <button
                     onClick={() => { setSlotModal(null); setScheduleModal(null) }}
+                    aria-label="Fechar"
                     className="w-[30px] h-[30px] rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition-colors text-base"
                   >
                     ×
@@ -1334,24 +1353,24 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                       <div style={{ display: "flex", gap: "5px", flexWrap: "wrap", justifyContent: "flex-end" }}>
                         <button
                           onClick={() => setScheduleModal({ slotKey: slotModal, candidato: c })}
-                          style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: B.blueLt, color: B.blue, border: `1px solid ${B.blue}33`, cursor: "pointer", fontWeight: 700 }}
+                          style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "9px", background: B.blueLt, color: B.blue, border: `1px solid ${B.blue}33`, cursor: "pointer", fontWeight: 700 }}
                         >
                           🗓 Ver
                         </button>
                         {!waStatus && (
                           <>
-                            <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "aguardando" }))} style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: "#f0fdf4", color: "#16a34a", border: "1px solid #86efac", cursor: "pointer", fontWeight: 700 }}>Aceitar (→ Acompanhamento)</button>
-                            <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "inviavel" }))} style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}>⛔ Inviável</button>
+                            <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "aguardando" }))} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "9px", background: "#f0fdf4", color: "#16a34a", border: "1px solid #86efac", cursor: "pointer", fontWeight: 700 }}>Aceitar (→ Acompanhamento)</button>
+                            <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "inviavel" }))} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "9px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}>⛔ Inviável</button>
                           </>
                         )}
                         {waStatus === "aguardando" && (
                           <>
-                            <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "inviavel" }))} style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}>⛔ Inviável</button>
-                            <button onClick={() => setCandidatoWA(p => { const n = { ...p }; delete n[cKey]; return n })} style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}>Cancelar</button>
+                            <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "inviavel" }))} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "9px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}>⛔ Inviável</button>
+                            <button onClick={() => setCandidatoWA(p => { const n = { ...p }; delete n[cKey]; return n })} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "9px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}>Cancelar</button>
                           </>
                         )}
                         {isDone && (
-                          <button onClick={() => setCandidatoWA(p => { const n = { ...p }; delete n[cKey]; return n })} style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}>Resetar</button>
+                          <button onClick={() => setCandidatoWA(p => { const n = { ...p }; delete n[cKey]; return n })} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "9px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}>Resetar</button>
                         )}
                       </div>
                     </div>
@@ -1404,6 +1423,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                   </div>
                   <button
                     onClick={() => setScheduleModal(null)}
+                    aria-label="Fechar"
                     className="w-[30px] h-[30px] rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition-colors text-base"
                   >
                     ×

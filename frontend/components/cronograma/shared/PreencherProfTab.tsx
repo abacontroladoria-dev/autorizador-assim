@@ -146,7 +146,7 @@ function PacPreencherModal({ pac, proposta, cRows, waStatus, onStatus, onClose }
               {wsS && <span style={{ background: wsS.bg, color: wsS.c, borderRadius: 999, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{wsS.l}</span>}
             </div>
           </div>
-          <button onClick={onClose} style={{ width: 30, height: 30, borderRadius: "50%", border: "none", background: "var(--muted)", cursor: "pointer", fontSize: 16, color: "var(--muted-foreground)", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+          <button onClick={onClose} aria-label="Fechar" style={{ width: 30, height: 30, borderRadius: "50%", border: "none", background: "var(--muted)", cursor: "pointer", fontSize: 16, color: "var(--muted-foreground)", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
         </div>
 
         <div style={{ flex: 1, overflow: "auto", padding: 14 }}>

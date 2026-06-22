@@ -435,7 +435,7 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
               </div>
             </div>
             <div className="flex gap-[5px] items-center shrink-0">
-              <button onClick={onClose} className="w-[30px] h-[30px] rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition-colors text-base">×</button>
+              <button onClick={onClose} aria-label="Fechar" className="w-[30px] h-[30px] rounded-full bg-gray-100 flex items-center justify-center text-gray-500 hover:bg-gray-200 transition-colors text-base">×</button>
             </div>
           </div>
         </div>

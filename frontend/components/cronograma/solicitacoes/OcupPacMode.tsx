@@ -517,7 +517,7 @@ function TodasSugestoesModal({
           </div>
           <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
             <CronoGlobalUnitBadge unit={unitMeta.globalUnit} />
-            <button onClick={onClose} style={{ width: "30px", height: "30px", borderRadius: "50%", border: "none", background: "var(--muted)", cursor: "pointer", fontSize: "16px", color: "var(--muted-foreground)" }}>×</button>
+            <button onClick={onClose} aria-label="Fechar" style={{ width: "30px", height: "30px", borderRadius: "50%", border: "none", background: "var(--muted)", cursor: "pointer", fontSize: "16px", color: "var(--muted-foreground)" }}>×</button>
           </div>
         </div>
 
@@ -763,11 +763,12 @@ const BUNDLE_STATUS_META = {
 }
 
 function AceitesPanel({
-  pac, aceites, onUpdate,
+  pac, aceites, onUpdate, onVerAll,
 }: {
   pac: string
   aceites: AceitePacBundle[]
   onUpdate: (updated: AceitePacBundle[]) => void
+  onVerAll: () => void
 }) {
   const pacAceites = aceites.filter(a => a.pac === pac)
   if (!pacAceites.length) return null
@@ -834,19 +835,26 @@ function AceitesPanel({
               {/* Ações do bundle */}
               <div style={{ display: "flex", gap: "5px", flexWrap: "wrap", borderTop: "1px solid var(--border)", paddingTop: "8px", alignItems: "center" }}>
                 <button
+                  onClick={() => onVerAll()}
+                  style={{ ...btnStyle("transparent", B.navy, B.navy), fontSize: "10px", fontWeight: 600, border: `1.5px solid ${B.navy}`, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
+                  Sugestão de Alteração
+                </button>
+                <button
                   onClick={() => updateBundle(bundle.id, { status: "confirmado" })}
-                  style={{ ...btnStyle(bundle.status === "confirmado" ? "#dcfce7" : "#f0fdf4", "#14532d", bundle.status === "confirmado" ? "#86efac" : "#bbf7d0"), fontSize: "10px" }}>
-                  ✓ Responsável Confirmou
+                  style={{ ...btnStyle(bundle.status === "confirmado" ? "#dcfce7" : "#f0fdf4", "#14532d", bundle.status === "confirmado" ? "#86efac" : "#bbf7d0"), fontSize: "11px", fontWeight: 600 }}>
+                  ✓ Confirmou
                 </button>
                 <button
                   onClick={() => updateBundle(bundle.id, { status: "recusado" })}
-                  style={{ ...btnStyle(bundle.status === "recusado" ? "#fee2e2" : "#fef2f2", "#7f1d1d", bundle.status === "recusado" ? "#fca5a5" : "#fecaca"), fontSize: "10px" }}>
+                  style={{ ...btnStyle(bundle.status === "recusado" ? "#fee2e2" : "#fef2f2", "#7f1d1d", bundle.status === "recusado" ? "#fca5a5" : "#fecaca"), fontSize: "11px", fontWeight: 600 }}>
                   ✗ Recusou
                 </button>
-                {bundle.status !== "pendente" && (
-                  <button onClick={() => updateBundle(bundle.id, { status: "pendente" })} style={{ ...btnStyle("var(--muted)", "var(--muted-foreground)", "var(--border)"), fontSize: "10px" }}>Desfazer</button>
-                )}
-                <button onClick={() => deleteBundle(bundle.id)} style={{ ...btnStyle("#fef2f2", "#dc2626", "#fca5a5"), fontSize: "10px", marginLeft: "auto" }}>Cancelar</button>
+                <div style={{ marginLeft: "auto", display: "flex", gap: "5px" }}>
+                  {bundle.status !== "pendente" && (
+                    <button onClick={() => updateBundle(bundle.id, { status: "pendente" })} style={{ ...btnStyle("var(--muted)", "var(--muted-foreground)", "var(--border)"), fontSize: "10px" }}>Desfazer</button>
+                  )}
+                  <button onClick={() => deleteBundle(bundle.id)} style={{ ...btnStyle("#fef2f2", "#dc2626", "#fca5a5"), fontSize: "10px" }}>Cancelar</button>
+                </div>
               </div>
             </div>
           )
@@ -1355,7 +1363,7 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
               })()}
 
               {/* Pedido 4: painel de aceites e recusas */}
-              <AceitesPanel pac={pac} aceites={aceites} onUpdate={persistAceites} />
+              <AceitesPanel pac={pac} aceites={aceites} onUpdate={persistAceites} onVerAll={() => setShowModal(true)} />
             </>
           )}
         </div>
@@ -1382,22 +1390,22 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
           style={{ position: "fixed", inset: 0, zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.4)", padding: "16px" }}
           onClick={e => { if (e.target === e.currentTarget) { setInvPending(null); setInvMotivo("") } }}
         >
-          <div style={{ background: "white", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "380px", width: "100%", padding: "20px" }}>
+          <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "380px", width: "100%", padding: "20px" }}>
             <div style={{ fontWeight: 900, fontSize: "17px", marginBottom: "4px" }}>⛔ Marcar como Inviável</div>
-            <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "10px" }}>Removido de TODAS as sugestões até tirado da lista.</div>
-            <div style={{ background: "#f8fafc", borderRadius: "10px", padding: "10px 12px", fontSize: "13px", fontWeight: 700, marginBottom: "10px" }}>{pac}</div>
+            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "10px" }}>Removido de TODAS as sugestões até tirado da lista.</div>
+            <div style={{ background: "var(--muted)", borderRadius: "10px", padding: "10px 12px", fontSize: "13px", fontWeight: 700, marginBottom: "10px" }}>{pac}</div>
             <textarea
               value={invMotivo}
               onChange={e => setInvMotivo(e.target.value)}
               placeholder="Motivo (ex: família faltando muito...)"
               rows={2}
-              style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: "10px", padding: "8px 12px", fontSize: "13px", fontFamily: "inherit", resize: "none", marginBottom: "14px", boxSizing: "border-box" }}
+              style={{ width: "100%", border: "1px solid var(--border)", borderRadius: "10px", padding: "8px 12px", fontSize: "13px", fontFamily: "inherit", resize: "none", marginBottom: "14px", boxSizing: "border-box" }}
             />
             <div style={{ display: "flex", gap: "8px" }}>
               <button onClick={confirmInv} style={{ padding: "8px 16px", borderRadius: "10px", background: B.navy, color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: "13px" }}>
                 Confirmar
               </button>
-              <button onClick={() => { setInvPending(null); setInvMotivo("") }} style={{ flex: 1, padding: "8px 16px", borderRadius: "10px", background: "#f3f4f6", color: "#374151", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+              <button onClick={() => { setInvPending(null); setInvMotivo("") }} style={{ flex: 1, padding: "8px 16px", borderRadius: "10px", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
                 Cancelar
               </button>
             </div>

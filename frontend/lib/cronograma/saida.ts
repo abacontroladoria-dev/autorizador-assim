@@ -346,7 +346,7 @@ function buildDiaMigracao(
     }
 
     const movimentos: MovimentoSessao[] = []
-    const profisionaisAlterados: string[] = []
+    const profissionaisAlterados: string[] = []
     let valido = true
 
     for (const sess of sessDiaOrigem) {
@@ -387,14 +387,14 @@ function buildDiaMigracao(
             paraDia: diaDestino, paraHora: sess.hora, paraTerapia: sess.terapia,
             paraProf: String(altRow.Profissional), paraUnidade: String(altRow.Unidade), profMudou: true,
           })
-          profisionaisAlterados.push(sess.prof)
+          profissionaisAlterados.push(sess.prof)
         }
       }
     }
 
     if (!valido) continue
 
-    const temAlteradoNaoAfetado = profisionaisAlterados.length > 0
+    const temAlteradoNaoAfetado = profissionaisAlterados.length > 0
     if (modo === "mantido" && temAlteradoNaoAfetado) continue
     if (modo === "alterado" && !temAlteradoNaoAfetado) continue
 

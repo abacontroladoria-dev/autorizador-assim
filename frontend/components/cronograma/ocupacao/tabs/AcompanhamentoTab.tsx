@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { B, SK_SAIDA, HORAS_GRID, DIAS_LIST } from "@/lib/cronograma/constants"
 import { waKey, fmtName } from "@/lib/cronograma/helpers"
 import { exportBase } from "@/lib/cronograma/xlsx"
@@ -25,7 +25,7 @@ type SlotStatus = "confirmado" | "recusado" | "inviavel"
 const SLOT_META: Record<SlotStatus, { label: string; bg: string; c: string; bd: string }> = {
   confirmado: { label: "Confirmou",  bg: "#dcfce7", c: "#14532d", bd: "#86efac" },
   recusado:   { label: "Recusou",    bg: "#fee2e2", c: "#7f1d1d", bd: "#fca5a5" },
-  inviavel:   { label: "Inviável",   bg: "#f3f4f6", c: "#6b7280", bd: "#e5e7eb" },
+  inviavel:   { label: "Inviável",   bg: "var(--muted)", c: "var(--muted-foreground)", bd: "var(--border)" },
 }
 interface AceitePacBundle {
   id: string; pac: string; ts: number; origem: "ocp-paciente"
@@ -317,7 +317,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
             )}
           </button>
         ))}
-        <button onClick={handleExportCSV} style={{ marginLeft: "auto", fontSize: "11px", padding: "6px 12px", borderRadius: "9px", background: "white", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer", fontWeight: 600 }}>
+        <button onClick={handleExportCSV} style={{ marginLeft: "auto", fontSize: "11px", padding: "6px 12px", borderRadius: "9px", background: "var(--card)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600 }}>
           ↓ Exportar CSV
         </button>
       </div>
@@ -353,6 +353,8 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
               <button
                 onClick={() => setOcupOpen(o => !o)}
+                aria-expanded={ocupOpen}
+                aria-controls="secao-ocup"
                 style={{ display: "flex", alignItems: "center", gap: "8px", background: "var(--cron-active-bg)", border: `1px solid ${B.blue}44`, borderRadius: "12px", padding: "10px 14px", cursor: "pointer", textAlign: "left", fontFamily: "inherit", width: "100%" }}
               >
                 <span style={{ fontSize: "12px", color: B.blue, fontWeight: 700, flex: 1 }}>
@@ -360,7 +362,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
                 </span>
                 <span style={{ fontSize: "11px", color: B.blue }}>{ocupOpen ? "▲ Recolher" : "▼ Expandir"}</span>
               </button>
-              {ocupOpen && aguardandoOcup.map(({ key, pac, prof, dia, hora, sug }) => (
+              <div id="secao-ocup">{ocupOpen && aguardandoOcup.map(({ key, pac, prof, dia, hora, sug }) => (
                 <OcupItem key={key}
                   pac={pac} prof={prof} dia={dia} hora={hora}
                   esp={sug?.esp} unidade={sug?.unidade} tP={sug?.tP} conv={sug?.conv}
@@ -370,7 +372,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
                   onCancelar={() => handleOcupCancelar(key)}
                   onVer={() => sug && onCron(sug)}
                 />
-              ))}
+              ))}</div>
             </div>
           )}
 
@@ -379,6 +381,8 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
               <button
                 onClick={() => setOcupProfOpen(o => !o)}
+                aria-expanded={ocupProfOpen}
+                aria-controls="secao-ocup-prof"
                 style={{ display: "flex", alignItems: "center", gap: "8px", background: B.orangeLt, border: `1px solid ${B.orange}44`, borderRadius: "12px", padding: "10px 14px", cursor: "pointer", textAlign: "left", fontFamily: "inherit", width: "100%" }}
               >
                 <span style={{ fontSize: "12px", color: B.orange, fontWeight: 700, flex: 1 }}>
@@ -386,7 +390,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
                 </span>
                 <span style={{ fontSize: "11px", color: B.orange }}>{ocupProfOpen ? "▲ Recolher" : "▼ Expandir"}</span>
               </button>
-              {ocupProfOpen && aguardandoProfItems.map(([key]) => {
+              <div id="secao-ocup-prof">{ocupProfOpen && aguardandoProfItems.map(([key]) => {
                 const [pac, prof, dia, hora] = key.split("|||")
                 return (
                   <ProfItem key={key} pac={pac} prof={prof} dia={dia} hora={hora}
@@ -396,7 +400,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
                     onCancelar={() => handleProfCancelar(key)}
                   />
                 )
-              })}
+              })}</div>
             </div>
           )}
 
@@ -405,6 +409,8 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
               <button
                 onClick={() => setOcupPacOpen(o => !o)}
+                aria-expanded={ocupPacOpen}
+                aria-controls="secao-ocup-pac"
                 style={{ display: "flex", alignItems: "center", gap: "8px", background: B.limeLt, border: `1px solid ${B.lime}88`, borderRadius: "12px", padding: "10px 14px", cursor: "pointer", textAlign: "left", fontFamily: "inherit", width: "100%" }}
               >
                 <span style={{ fontSize: "12px", color: "#4d7c0f", fontWeight: 700, flex: 1 }}>
@@ -412,14 +418,14 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
                 </span>
                 <span style={{ fontSize: "11px", color: "#4d7c0f" }}>{ocupPacOpen ? "▲ Recolher" : "▼ Expandir"}</span>
               </button>
-              {ocupPacOpen && aguardandoPacBundles.map(bundle => (
+              <div id="secao-ocup-pac">{ocupPacOpen && aguardandoPacBundles.map(bundle => (
                 <PacBundleItem key={bundle.id} bundle={bundle} cRows={cRows}
                   onCancelar={() => handlePacCancelar(bundle.id)}
                   onSlotStatus={(slotKey, st) => handlePacSlotStatus(bundle.id, slotKey, st)}
                   onSlotRemove={(slotKey) => handlePacSlotRemove(bundle.id, slotKey)}
                   onBulkStatus={(st) => handlePacBulkStatus(bundle.id, st)}
                 />
-              ))}
+              ))}</div>
             </div>
           )}
 
@@ -428,6 +434,8 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
               <button
                 onClick={() => setSaidaOpen(o => !o)}
+                aria-expanded={saidaOpen}
+                aria-controls="secao-saida"
                 style={{ display: "flex", alignItems: "center", gap: "8px", background: "var(--muted)", border: `1px solid ${B.purple}44`, borderRadius: "12px", padding: "10px 14px", cursor: "pointer", textAlign: "left", fontFamily: "inherit", width: "100%" }}
               >
                 <span style={{ fontSize: "12px", color: B.purple, fontWeight: 700, flex: 1 }}>
@@ -435,7 +443,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
                 </span>
                 <span style={{ fontSize: "11px", color: B.purple }}>{saidaOpen ? "▲ Recolher" : "▼ Expandir"}</span>
               </button>
-              {saidaOpen && aguardandoSaidaItems.map(([key, val]) => {
+              <div id="secao-saida">{saidaOpen && aguardandoSaidaItems.map(([key, val]) => {
                 const [pac, dia, hora, terapia] = key.split("|||")
                 const [profRes, diaRes, horaRes] = (val.slotReservado || "|||").split("|||")
                 return (
@@ -448,7 +456,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
                     onCancelar={() => handleSaidaCancelar(key)}
                   />
                 )
-              })}
+              })}</div>
             </div>
           )}
         </div>
@@ -470,65 +478,97 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
 
       {/* Modal Inviável (waMap items) */}
       {invModalPac && (
-        <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.4)", padding: "16px" }}
-          onClick={e => { if (e.target === e.currentTarget) { setInvModalPac(null); setInvMotivo("") } }}>
-          <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "380px", width: "100%", padding: "20px" }}>
-            <div style={{ fontWeight: 900, fontSize: "17px", marginBottom: "4px" }}>⛔ Marcar como Inviável</div>
-            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "10px" }}>Removido de TODAS as sugestões até tirado da lista.</div>
-            <div style={{ background: "var(--muted)", borderRadius: "10px", padding: "10px 12px", fontSize: "13px", fontWeight: 700, marginBottom: "10px" }}>{invModalPac}</div>
-            <textarea value={invMotivo} onChange={e => setInvMotivo(e.target.value)} placeholder="Motivo (ex: família faltando muito...)" rows={2}
-              style={{ width: "100%", border: "1px solid var(--border)", borderRadius: "10px", padding: "8px 12px", fontSize: "13px", fontFamily: "inherit", resize: "none", marginBottom: "14px", boxSizing: "border-box" }} />
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button onClick={confirmarInviavel} style={{ padding: "8px 16px", borderRadius: "10px", background: B.navy, color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: "13px" }}>
-                Confirmar
-              </button>
-              <button onClick={() => { setInvModalPac(null); setInvMotivo("") }} style={{ flex: 1, padding: "8px 16px", borderRadius: "10px", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
-                Cancelar
-              </button>
-            </div>
-          </div>
-        </div>
+        <InviavelModal
+          pac={invModalPac}
+          motivo={invMotivo}
+          onMotivoChange={setInvMotivo}
+          onConfirmar={confirmarInviavel}
+          onClose={() => { setInvModalPac(null); setInvMotivo("") }}
+        />
       )}
+    </div>
+  )
+}
+
+function InviavelModal({ pac, motivo, onMotivoChange, onConfirmar, onClose }: {
+  pac: string; motivo: string
+  onMotivoChange: (v: string) => void
+  onConfirmar: () => void
+  onClose: () => void
+}) {
+  const firstBtnRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    firstBtnRef.current?.focus()
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [onClose])
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="inv-modal-title"
+      style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.4)", padding: "16px" }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "380px", width: "100%", padding: "20px" }}>
+        <div id="inv-modal-title" style={{ fontWeight: 900, fontSize: "17px", marginBottom: "4px" }}>⛔ Marcar como Inviável</div>
+        <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "10px" }}>Removido de TODAS as sugestões até tirado da lista.</div>
+        <div style={{ background: "var(--muted)", borderRadius: "10px", padding: "10px 12px", fontSize: "13px", fontWeight: 700, marginBottom: "10px" }}>{pac}</div>
+        <label htmlFor="inv-motivo" style={{ fontSize: "11px", color: "var(--muted-foreground)", display: "block", marginBottom: "4px" }}>Motivo (opcional)</label>
+        <textarea id="inv-motivo" value={motivo} onChange={e => onMotivoChange(e.target.value)} placeholder="ex: família faltando muito..." rows={2}
+          style={{ width: "100%", border: "1px solid var(--border)", borderRadius: "10px", padding: "8px 12px", fontSize: "13px", fontFamily: "inherit", resize: "none", marginBottom: "14px", boxSizing: "border-box" }} />
+        <div style={{ display: "flex", gap: "8px" }}>
+          <button ref={firstBtnRef} onClick={onConfirmar} style={{ padding: "8px 16px", borderRadius: "10px", background: B.navy, color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: "13px" }}>
+            Confirmar
+          </button>
+          <button onClick={onClose} style={{ flex: 1, padding: "8px 16px", borderRadius: "10px", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+            Cancelar
+          </button>
+        </div>
+      </div>
     </div>
   )
 }
 
 function ConfirmadosTab({ conf, onRemove }: { conf: ConfItem[]; onRemove: (i: number) => void }) {
   return (
-    <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", boxShadow: "0 1px 4px rgba(0,0,0,.06)", padding: "16px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px", paddingBottom: "12px", borderBottom: "1px solid #f0f0f0", flexWrap: "wrap", gap: "8px" }}>
+    <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", boxShadow: "0 1px 4px rgba(0,0,0,.06)", padding: "16px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px", paddingBottom: "12px", borderBottom: "1px solid var(--border)", flexWrap: "wrap", gap: "8px" }}>
         <span style={{ fontWeight: 800, color: B.navy }}>✅ Confirmados</span>
-        <span style={{ fontSize: "12px", color: "#9ca3af" }}>{conf.length} registros · 💾</span>
+        <span style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>{conf.length} registros · 💾</span>
       </div>
       {!conf.length ? (
-        <div style={{ borderRadius: "10px", border: "2px dashed #e5e7eb", padding: "24px", textAlign: "center" }}>
+        <div style={{ borderRadius: "10px", border: "2px dashed var(--border)", padding: "24px", textAlign: "center" }}>
           <div style={{ fontSize: "32px", marginBottom: "6px" }}>📭</div>
-          <div style={{ color: "#9ca3af", fontSize: "13px" }}>Nenhuma confirmação registrada</div>
+          <div style={{ color: "var(--muted-foreground)", fontSize: "13px" }}>Nenhuma confirmação registrada</div>
         </div>
       ) : (
         <div style={{ overflowX: "auto" }}>
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
-            <thead style={{ background: "#f8fafc" }}>
+            <thead style={{ background: "var(--muted)" }}>
               <tr>
                 {["Paciente", "Profissional", "Especialidade", "Dia", "Hora", "Origem", "Registrado", ""].map(h => (
-                  <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontSize: "11px", fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".05em" }}>{h}</th>
+                  <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em" }}>{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {conf.map((c, i) => (
-                <tr key={i} style={{ borderTop: "1px solid #f0f0f0" }}>
+                <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
                   <td style={{ padding: "8px 12px", fontWeight: 700, color: B.navy }}>{c.pac}</td>
-                  <td style={{ padding: "8px 12px", color: "#6b7280", fontSize: "12px" }}>{fmtName(c.prof)}</td>
+                  <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontSize: "12px" }}>{fmtName(c.prof)}</td>
                   <td style={{ padding: "8px 12px" }}>
                     <span style={{ background: "#dcfce7", color: "#14532d", borderRadius: "999px", padding: "2px 8px", fontSize: "11px" }}>{c.esp || "—"}</span>
                   </td>
-                  <td style={{ padding: "8px 12px", color: "#6b7280", fontSize: "12px" }}>{c.dia}</td>
+                  <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontSize: "12px" }}>{c.dia}</td>
                   <td style={{ padding: "8px 12px", fontWeight: 700, fontSize: "12px" }}>{c.hora}</td>
                   <td style={{ padding: "8px 12px" }}>
                     <span style={{ background: B.limeLt, color: "#4d7c0f", borderRadius: "999px", padding: "2px 8px", fontSize: "11px", border: `1px solid ${B.lime}88` }}>{c.origem}</span>
                   </td>
-                  <td style={{ padding: "8px 12px", color: "#9ca3af", fontSize: "11px" }}>{c.registradoEm}</td>
+                  <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontSize: "11px" }}>{c.registradoEm}</td>
                   <td style={{ padding: "8px 12px" }}>
                     <button onClick={() => onRemove(i)} style={{ fontSize: "11px", color: "#16a34a", background: "none", border: "none", cursor: "pointer" }}>remover</button>
                   </td>
@@ -558,23 +598,14 @@ function ProfItem({
       <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-start", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontWeight: 800, fontSize: "13px", color: B.navy }}>{pac}</div>
-          <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px" }}>{prof}</div>
+          <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginTop: "2px" }}>{prof}</div>
           <div style={{ fontSize: "12px", fontWeight: 700, color: B.navy, marginTop: "2px" }}>{dia} {hora}</div>
         </div>
-        <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
-          <button onClick={onConfirmar} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0", cursor: "pointer", fontWeight: 700 }}>
-            Responsável Confirmou
-          </button>
-          <button onClick={onRecusar} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", cursor: "pointer", fontWeight: 700 }}>
-            Recusou
-          </button>
-          <button onClick={onInviavel} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer", fontWeight: 700 }}>
-            Inviável
-          </button>
-          <button onClick={onCancelar} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "white", color: "#9ca3af", border: "1px solid #e5e7eb", cursor: "pointer" }}
-            title="Desfaz o aceite — volta como sugestão em Aumentar Ocupação (Profissional)">
-            Cancelar
-          </button>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px" }}>
+          <button onClick={onConfirmar} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#16a34a", color: "white", border: "none", cursor: "pointer", fontWeight: 700 }}>✓ Confirmou</button>
+          <button onClick={onInviavel} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600 }}>Inviável</button>
+          <button onClick={onRecusar} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#dc2626", color: "white", border: "none", cursor: "pointer", fontWeight: 700 }}>✗ Recusou</button>
+          <button onClick={onCancelar} style={{ fontSize: "12px", padding: "10px 12px", minHeight: "44px", borderRadius: "8px", background: "transparent", color: "var(--muted-foreground)", border: "none", cursor: "pointer" }} title="Desfaz o aceite — volta como sugestão em Aumentar Ocupação (Profissional)">Cancelar</button>
         </div>
       </div>
     </div>
@@ -596,10 +627,10 @@ function PacBundleItem({
   const slotStatus = bundle.slotStatus ?? {}
 
   const smBtn = (bg: string, c: string, bd: string, active?: boolean) => ({
-    fontSize: "10px", padding: "2px 7px", borderRadius: "6px", cursor: "pointer",
+    fontSize: "11px", padding: "6px 10px", minHeight: "36px", borderRadius: "6px", cursor: "pointer",
     whiteSpace: "nowrap" as const, fontFamily: "inherit",
-    background: active ? bg : "#f9fafb", color: active ? c : "#9ca3af",
-    border: `1px solid ${active ? bd : "#e5e7eb"}`, fontWeight: active ? 700 : 500,
+    background: active ? bg : "var(--muted)", color: active ? c : "var(--muted-foreground)",
+    border: `1px solid ${active ? bd : "var(--border)"}`, fontWeight: active ? 700 : 500,
   })
 
   return (
@@ -611,9 +642,9 @@ function PacBundleItem({
           <span style={{ background: B.limeLt, color: "#4d7c0f", border: `1px solid ${B.lime}88`, borderRadius: "999px", padding: "2px 8px", fontSize: "10px", fontWeight: 700 }}>
             👤 Aumentar Ocupação (Paciente)
           </span>
-          <span style={{ fontSize: "11px", color: "#6b7280" }}>{dt}</span>
+          <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>{dt}</span>
         </div>
-        <button onClick={() => setShowVer(true)} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "white", color: B.blue, border: `1px solid ${B.blue}33`, cursor: "pointer", fontWeight: 600, fontFamily: "inherit" }}>
+        <button onClick={() => setShowVer(true)} style={{ fontSize: "12px", padding: "10px 12px", minHeight: "44px", borderRadius: "8px", background: "var(--card)", color: B.blue, border: `1px solid ${B.blue}33`, cursor: "pointer", fontWeight: 600, fontFamily: "inherit" }}>
           🗓 Ver
         </button>
       </div>
@@ -626,15 +657,15 @@ function PacBundleItem({
           const slotKey = `${s.dia}|||${s.hora}`
           const st = slotStatus[slotKey] as SlotStatus | undefined
           const meta = st ? SLOT_META[st] : null
-          const rowBg = st === "confirmado" ? "#f0fdf4" : st === "recusado" ? "#fff1f2" : st === "inviavel" ? "#f9fafb" : "white"
-          const rowBd = st === "confirmado" ? "#86efac" : st === "recusado" ? "#fca5a5" : st === "inviavel" ? "#e5e7eb" : "#d1fae5"
+          const rowBg = st === "confirmado" ? "#f0fdf4" : st === "recusado" ? "#fff1f2" : st === "inviavel" ? "var(--muted)" : "var(--card)"
+          const rowBd = st === "confirmado" ? "#86efac" : st === "recusado" ? "#fca5a5" : st === "inviavel" ? "var(--border)" : "#d1fae5"
           return (
             <div key={slotKey} style={{ background: rowBg, borderRadius: "8px", padding: "6px 10px", border: `1px solid ${rowBd}`, opacity: st === "inviavel" ? 0.7 : 1 }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <span style={{ fontWeight: 700, fontSize: "12px", color: B.navy }}>{s.dia.replace("-feira", "")} {s.hora}</span>
-                  <span style={{ fontSize: "11px", color: "#374151", marginLeft: "6px" }}>{s.tP}</span>
-                  <span style={{ fontSize: "11px", color: "#9ca3af", marginLeft: "4px" }}>· {fmtName(s.prof)}</span>
+                  <span style={{ fontSize: "11px", color: "var(--card-foreground)", marginLeft: "6px" }}>{s.tP}</span>
+                  <span style={{ fontSize: "11px", color: "var(--muted-foreground)", marginLeft: "4px" }}>· {fmtName(s.prof)}</span>
                   {meta && (
                     <span style={{ marginLeft: "8px", fontSize: "9px", fontWeight: 800, padding: "1px 5px", borderRadius: "4px", background: meta.bg, color: meta.c, border: `1px solid ${meta.bd}` }}>
                       {meta.label}
@@ -647,7 +678,7 @@ function PacBundleItem({
                   <button onClick={() => onSlotStatus(slotKey, st === "recusado" ? null : "recusado")}
                     style={smBtn("#fee2e2", "#7f1d1d", "#fca5a5", st === "recusado")}>✗ Recusou</button>
                   <button onClick={() => onSlotStatus(slotKey, st === "inviavel" ? null : "inviavel")}
-                    style={smBtn("#f3f4f6", "#6b7280", "#e5e7eb", st === "inviavel")}>⛔ Inviável</button>
+                    style={smBtn("var(--muted)", "var(--muted-foreground)", "var(--border)", st === "inviavel")}>⛔ Inviável</button>
                   <button onClick={() => onSlotRemove(slotKey)}
                     style={{ ...smBtn("#fef2f2", "#dc2626", "#fca5a5"), color: "#dc2626", background: "#fef2f2", border: "1px solid #fca5a5" }}>× Cancelar</button>
                 </div>
@@ -658,21 +689,14 @@ function PacBundleItem({
       </div>
 
       {/* Ações em lote */}
-      <div style={{ display: "flex", gap: "4px", flexWrap: "wrap", borderTop: "1px solid #d1fae5", paddingTop: "8px", alignItems: "center" }}>
-        <span style={{ fontSize: "10px", color: "#6b7280", fontWeight: 600, marginRight: "2px" }}>Tudo:</span>
-        <button onClick={() => onBulkStatus("confirmado")} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>
-          ✓ Responsável confirmou tudo
-        </button>
-        <button onClick={() => onBulkStatus("recusado")} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>
-          ✗ Responsável recusou tudo
-        </button>
-        <button onClick={() => onBulkStatus("inviavel")} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer", fontWeight: 600, fontFamily: "inherit" }}>
-          ⛔ Tudo inviável
-        </button>
-        <button onClick={onCancelar} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "white", color: "#9ca3af", border: "1px solid #e5e7eb", cursor: "pointer", fontFamily: "inherit", marginLeft: "auto" }}
-          title="Remove este lote da lista">
-          Cancelar tudo
-        </button>
+      <div style={{ borderTop: "1px solid #d1fae5", paddingTop: "8px" }}>
+        <span style={{ fontSize: "10px", color: "var(--muted-foreground)", fontWeight: 600, display: "block", marginBottom: "4px" }}>Tudo:</span>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px" }}>
+          <button onClick={() => onBulkStatus("confirmado")} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#16a34a", color: "white", border: "none", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>✓ Confirmou tudo</button>
+          <button onClick={() => onBulkStatus("inviavel")}   style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600, fontFamily: "inherit" }}>Inviável</button>
+          <button onClick={() => onBulkStatus("recusado")}   style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#dc2626", color: "white", border: "none", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>✗ Recusou tudo</button>
+          <button onClick={onCancelar} style={{ fontSize: "12px", padding: "10px 12px", minHeight: "44px", borderRadius: "8px", background: "transparent", color: "var(--muted-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit" }} title="Remove este lote da lista">Cancelar tudo</button>
+        </div>
       </div>
 
       {showVer && (
@@ -716,12 +740,12 @@ function PacVerModal({ pac, cRows, bundle, onClose }: {
   )
 
   function cellBg(st: "exist" | "pendente" | SlotStatus) {
-    if (st === "exist")      return "#f8fafc"
+    if (st === "exist")      return "var(--muted)"
     if (st === "pendente")   return B.limeLt
     return SLOT_META[st].bg
   }
   function cellBd(st: "exist" | "pendente" | SlotStatus) {
-    if (st === "exist")      return "#e2e8f0"
+    if (st === "exist")      return "var(--border)"
     if (st === "pendente")   return B.lime
     return SLOT_META[st].bd
   }
@@ -739,29 +763,29 @@ function PacVerModal({ pac, cRows, bundle, onClose }: {
       style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)", padding: "12px" }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div style={{ background: "white", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "880px", width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+      <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "880px", width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
 
         {/* Cabeçalho */}
-        <div style={{ padding: "14px 20px", borderBottom: "1px solid #f0f0f0", display: "flex", justifyContent: "space-between", alignItems: "flex-start", background: "#fafafa", borderRadius: "18px 18px 0 0" }}>
+        <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "flex-start", background: "var(--muted)", borderRadius: "18px 18px 0 0" }}>
           <div>
             <div style={{ fontWeight: 800, fontSize: "15px", color: B.navy }}>🗓 {pac}</div>
-            <div style={{ fontSize: "11px", color: "#9ca3af", marginTop: "2px" }}>Agenda existente + propostas enviadas para acompanhamento</div>
+            <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "2px" }}>Agenda existente + propostas enviadas para acompanhamento</div>
             <div style={{ display: "flex", gap: "10px", marginTop: "6px", flexWrap: "wrap" }}>
               {([["exist", "Existente"], ["pendente", "Proposta"], ["confirmado", "Confirmou"], ["recusado", "Recusou"], ["inviavel", "Inviável"]] as [string, string][]).map(([k, lbl]) => (
-                <span key={k} style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "10px", color: "#6b7280" }}>
+                <span key={k} style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "10px", color: "var(--muted-foreground)" }}>
                   <span style={{ display: "inline-block", width: "9px", height: "9px", borderRadius: "2px", background: cellBg(k as any), border: `1px solid ${cellBd(k as any)}` }} />
                   {lbl}
                 </span>
               ))}
             </div>
           </div>
-          <button onClick={onClose} style={{ width: "30px", height: "30px", borderRadius: "50%", border: "none", background: "#f3f4f6", cursor: "pointer", fontSize: "18px", color: "#6b7280", flexShrink: 0 }}>×</button>
+          <button onClick={onClose} aria-label="Fechar" style={{ width: "30px", height: "30px", borderRadius: "50%", border: "none", background: "var(--muted)", cursor: "pointer", fontSize: "18px", color: "var(--muted-foreground)", flexShrink: 0 }}>×</button>
         </div>
 
         {/* Grid */}
         <div style={{ overflow: "auto", padding: "16px" }}>
           {!activeHoras.length ? (
-            <div style={{ textAlign: "center", color: "#9ca3af", padding: "32px" }}>Nenhuma sessão encontrada.</div>
+            <div style={{ textAlign: "center", color: "var(--muted-foreground)", padding: "32px" }}>Nenhuma sessão encontrada.</div>
           ) : (
             <table style={{ borderCollapse: "collapse", width: "100%", tableLayout: "fixed", minWidth: `${52 + DIAS_UTIL.length * 130}px` }}>
               <colgroup>
@@ -770,7 +794,7 @@ function PacVerModal({ pac, cRows, bundle, onClose }: {
               </colgroup>
               <thead>
                 <tr>
-                  <th style={{ paddingBottom: "8px", textAlign: "right", paddingRight: "8px", fontSize: "11px", color: "#9ca3af", fontWeight: 400 }}>Hora</th>
+                  <th style={{ paddingBottom: "8px", textAlign: "right", paddingRight: "8px", fontSize: "11px", color: "var(--muted-foreground)", fontWeight: 400 }}>Hora</th>
                   {DIAS_UTIL.map(d => (
                     <th key={d} style={{ paddingBottom: "8px", textAlign: "center", fontSize: "13px", color: B.navy, fontWeight: 800 }}>
                       {DIAS_ABR[d] ?? d}
@@ -780,7 +804,7 @@ function PacVerModal({ pac, cRows, bundle, onClose }: {
               </thead>
               <tbody>
                 {activeHoras.map(hora => (
-                  <tr key={hora} style={{ borderTop: hora === "13:00" ? "2px solid #d1d5db" : "1px solid #f1f5f9" }}>
+                  <tr key={hora} style={{ borderTop: hora === "13:00" ? "2px solid var(--border)" : "1px solid var(--border)" }}>
                     <td style={{ textAlign: "right", paddingRight: "8px", verticalAlign: "top", paddingTop: "6px", fontFamily: "monospace", fontSize: "13px", fontWeight: 800, color: B.navy }}>{hora}</td>
                     {DIAS_UTIL.map(d => {
                       const k = `${d}|||${hora}`
@@ -790,14 +814,14 @@ function PacVerModal({ pac, cRows, bundle, onClose }: {
                         <td key={d} style={{ padding: "2px", verticalAlign: "top" }}>
                           {exists.map((e, i) => (
                             <div key={i} style={{ background: cellBg("exist"), border: `1px solid ${cellBd("exist")}`, borderRadius: "7px", padding: "4px 7px", marginBottom: "2px" }}>
-                              <div title={e.tP} style={{ fontSize: "10px", fontWeight: 700, color: "#1f2937", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.tP}</div>
-                              <div title={e.prof} style={{ fontSize: "9px", color: "#6b7280", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{fmtName(e.prof)}</div>
+                              <div title={e.tP} style={{ fontSize: "10px", fontWeight: 700, color: "var(--card-foreground)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{e.tP}</div>
+                              <div title={e.prof} style={{ fontSize: "9px", color: "var(--muted-foreground)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{fmtName(e.prof)}</div>
                             </div>
                           ))}
                           {bp && (
                             <div style={{ background: cellBg(bp.st), border: `1px solid ${cellBd(bp.st)}`, borderRadius: "7px", padding: "4px 7px" }}>
-                              <div title={bp.sessao.tP} style={{ fontSize: "10px", fontWeight: 700, color: "#1f2937", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{bp.sessao.tP}</div>
-                              <div title={bp.sessao.prof} style={{ fontSize: "9px", color: "#6b7280", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{fmtName(bp.sessao.prof)}</div>
+                              <div title={bp.sessao.tP} style={{ fontSize: "10px", fontWeight: 700, color: "var(--card-foreground)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{bp.sessao.tP}</div>
+                              <div title={bp.sessao.prof} style={{ fontSize: "9px", color: "var(--muted-foreground)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{fmtName(bp.sessao.prof)}</div>
                               <div style={{ fontSize: "9px", fontWeight: 700, color: cellLabelColor(bp.st), marginTop: "2px" }}>{cellLabel(bp.st)}</div>
                             </div>
                           )}
@@ -833,24 +857,15 @@ function SaidaItem({
       <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-start", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontWeight: 800, fontSize: "13px", color: B.navy }}>{pac}</div>
-          <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px" }}>{terapia} · {dia} {hora}</div>
+          <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginTop: "2px" }}>{terapia} · {dia} {hora}</div>
           {profRes && <div style={{ fontSize: "12px", fontWeight: 700, color: B.navy, marginTop: "2px" }}>→ {profRes} · {diaRes} {horaRes}</div>}
-          {obs && <div style={{ fontSize: "11px", color: "#9ca3af", marginTop: "2px", fontStyle: "italic" }}>"{obs}"</div>}
+          {obs && <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "2px", fontStyle: "italic" }}>"{obs}"</div>}
         </div>
-        <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
-          <button onClick={onConfirmar} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0", cursor: "pointer", fontWeight: 700 }}>
-            Responsável Confirmou
-          </button>
-          <button onClick={onRecusar} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", cursor: "pointer", fontWeight: 700 }}>
-            Recusou
-          </button>
-          <button onClick={onInviavel} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer", fontWeight: 700 }}>
-            Inviável
-          </button>
-          <button onClick={onCancelar} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "white", color: "#9ca3af", border: "1px solid #e5e7eb", cursor: "pointer" }}
-            title="Remove o item do acompanhamento">
-            Cancelar
-          </button>
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px" }}>
+          <button onClick={onConfirmar} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#16a34a", color: "white", border: "none", cursor: "pointer", fontWeight: 700 }}>✓ Confirmou</button>
+          <button onClick={onInviavel} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600 }}>Inviável</button>
+          <button onClick={onRecusar} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#dc2626", color: "white", border: "none", cursor: "pointer", fontWeight: 700 }}>✗ Recusou</button>
+          <button onClick={onCancelar} style={{ fontSize: "12px", padding: "10px 12px", minHeight: "44px", borderRadius: "8px", background: "transparent", color: "var(--muted-foreground)", border: "none", cursor: "pointer" }} title="Remove o item do acompanhamento">Cancelar</button>
         </div>
       </div>
     </div>
@@ -883,23 +898,16 @@ function OcupItem({
             {dia} {hora}{unidade ? ` · ${unidade}` : ""}{conv ? ` · ${conv}` : ""}
           </div>
         </div>
-        <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
-          <button onClick={onVer} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: "var(--card)", color: B.blue, border: `1px solid ${B.blue}33`, cursor: "pointer" }}>
+        <div style={{ display: "flex", flexDirection: "column", gap: "6px", alignItems: "flex-end" }}>
+          <button onClick={onVer} style={{ fontSize: "12px", padding: "10px 12px", minHeight: "44px", borderRadius: "8px", background: "var(--card)", color: B.blue, border: `1px solid ${B.blue}33`, cursor: "pointer", alignSelf: "flex-start" }}>
             🗓 Ver
           </button>
-          <button onClick={onAceito} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0", cursor: "pointer", fontWeight: 700 }}>
-            Responsável Confirmou
-          </button>
-          <button onClick={onRecusado} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", cursor: "pointer", fontWeight: 700 }}>
-            Recusou
-          </button>
-          <button onClick={onInviavel} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 700 }}>
-            Inviável
-          </button>
-          <button onClick={onCancelar} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "var(--card)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}
-            title="Desfaz o aceite — volta como sugestão não trabalhada em Aumentar Ocupação (Clínica)">
-            Cancelar
-          </button>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px" }}>
+            <button onClick={onAceito}   style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#16a34a", color: "white", border: "none", cursor: "pointer", fontWeight: 700 }}>✓ Confirmou</button>
+            <button onClick={onInviavel} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600 }}>Inviável</button>
+            <button onClick={onRecusado} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#dc2626", color: "white", border: "none", cursor: "pointer", fontWeight: 700 }}>✗ Recusou</button>
+            <button onClick={onCancelar} style={{ fontSize: "12px", padding: "10px 12px", minHeight: "44px", borderRadius: "8px", background: "transparent", color: "var(--muted-foreground)", border: "none", cursor: "pointer" }} title="Desfaz o aceite — volta como sugestão não trabalhada em Aumentar Ocupação (Clínica)">Cancelar</button>
+          </div>
         </div>
       </div>
     </div>

@@ -189,7 +189,7 @@ function AgendaModal({ item, cRows, onClose, currentSt, onAceitar, onDesfazer }:
               </span>
             </div>
           </div>
-          <button onClick={onClose} style={{ width: "30px", height: "30px", borderRadius: "50%", border: "none", background: "var(--muted)", cursor: "pointer", fontSize: "16px", color: "var(--muted-foreground)" }}>×</button>
+          <button onClick={onClose} aria-label="Fechar" style={{ width: "30px", height: "30px", borderRadius: "50%", border: "none", background: "var(--muted)", cursor: "pointer", fontSize: "16px", color: "var(--muted-foreground)" }}>×</button>
         </div>
 
         {/* Seletor de sessões complementares (R3) */}

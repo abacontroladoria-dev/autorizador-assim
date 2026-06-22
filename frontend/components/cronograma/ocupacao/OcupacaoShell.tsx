@@ -152,13 +152,14 @@ export function OcupacaoShell() {
           {err && <span style={{ fontSize: "12px", color: "#dc2626" }}>{err}</span>}
           {savedAt && !saveError && <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>💾 {savedAt}</span>}
           {saveError && (
-            <span
-              style={{ background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: "999px", padding: "3px 10px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
+            <button
+              type="button"
+              style={{ background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: "999px", padding: "3px 10px", fontSize: "12px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
               onClick={clearSaveError}
-              title="Clique para fechar"
+              aria-label={`Erro ao salvar: ${saveError}. Clique para fechar`}
             >
               ⚠️ {saveError}
-            </span>
+            </button>
           )}
         </div>
       )}
