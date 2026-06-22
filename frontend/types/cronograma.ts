@@ -99,6 +99,10 @@ export interface StatusEntry {
   slotReservado?: string | null
   /** Date.now() timestamp */
   atualizadoEm?: number
+  /** Snapshot da sessão afetada — persistido para exibição em AcompanhamentoTab */
+  afetada?: AfetadaItem
+  /** Snapshot da agenda do paciente — persistido para exibição em AcompanhamentoTab */
+  sessPac?: SessPacItem[]
 }
 
 // ─── SUGESTÃO (saída do runAlgorithm) ────────────────────────────────────────

@@ -7,7 +7,8 @@ import { exportBase } from "@/lib/cronograma/xlsx"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 import { RecusadosTab } from "./RecusadosTab"
 import { InviavelTab } from "./InviavelTab"
-import type { AlgorithmResult, Sugestao, WaMap, WaStatus, StatusMap, CsvRow } from "@/types/cronograma"
+import type { AlgorithmResult, Sugestao, WaMap, WaStatus, StatusMap, CsvRow, OpcaoEstrategia, MovimentoSessao, AfetadaItem, SessPacItem, AnaliseResult, StatusEntry, OpcaoSwap, OpcaoDiaMigracao } from "@/types/cronograma"
+import { SaidaCronModal } from "@/components/cronograma/solicitacoes/SaidaCronModal"
 
 const SK_PROF = "aba_v8"
 const SK_PAC_BUNDLES = "aba_ocup_pac_aceites_v1"
@@ -450,6 +451,10 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
                   <SaidaItem key={key}
                     pac={pac} dia={dia} hora={hora} terapia={terapia}
                     profRes={profRes} diaRes={diaRes} horaRes={horaRes} obs={val.obs}
+                    estrategiaSel={val.estrategiaSel}
+                    opcao={val.opcao}
+                    movimentos={val.movimentos}
+                    statusEntry={val}
                     onConfirmar={() => handleSaidaConfirmar(key)}
                     onRecusar={() => handleSaidaRecusar(key)}
                     onInviavel={() => handleSaidaInviavel(key)}
@@ -839,33 +844,220 @@ function PacVerModal({ pac, cRows, bundle, onClose }: {
   )
 }
 
+function buildReadOnlyAnalise(entry: StatusEntry): AnaliseResult {
+  const { estrategiaSel, opcaoSel = 0, opcao, movimentos, sessPac: sp = [], afetada } = entry
+  const pacUnidade = afetada?.unidade && afetada.unidade !== "Desconhecida"
+    ? afetada.unidade
+    : (sp.find(s => s.unidade && s.unidade !== "Desconhecida")?.unidade ?? null)
+
+  const simpleOpcoes: OpcaoEstrategia[] = opcao ? [opcao] : []
+  const swapOpcoes: OpcaoSwap[] = movimentos?.length
+    ? [{ movimentos, profissionaisAlterados: [] }]
+    : []
+  const diaOpcoes: OpcaoDiaMigracao[] = movimentos?.length
+    ? [{ diaOrigem: movimentos[0].deDia, diaDestino: movimentos[0].paraDia, movimentos, profissionaisAlterados: [] }]
+    : []
+
+  const e1 = estrategiaSel === "e1" && simpleOpcoes.length ? { tipo: "e1" as const, label: "#1 Mesma terapia, mesmo horário", opcoes: simpleOpcoes } : null
+  const e2 = estrategiaSel === "e2" && swapOpcoes.length ? { tipo: "e2" as const, label: "#2 Qt. de Terapias: mantido. Posições: alterado. Profissionais: mantido.", opcoes: swapOpcoes } : null
+  const e3 = estrategiaSel === "e3" && simpleOpcoes.length ? { tipo: "e3" as const, label: "#3 Mesma terapia, horário adjacente", opcoes: simpleOpcoes } : null
+  const e4 = estrategiaSel?.startsWith("e4_") && simpleOpcoes.length
+    ? [{ tipo: "e4" as const, label: `#4 Outra terapia — ${opcao?.terapia ?? ""}`, esp: opcao?.terapia ?? "", opcoes: simpleOpcoes }]
+    : []
+  const e5 = estrategiaSel === "e5" && swapOpcoes.length ? { tipo: "e5" as const, label: "#5 Qt. de Terapias: mantido. Posições: alterado. Profissionais: alterado.", opcoes: swapOpcoes } : null
+  const e6 = estrategiaSel === "e6" && diaOpcoes.length ? { tipo: "e6" as const, label: "#6 Alterar dia de tratamento, mesmos profissionais.", opcoes: diaOpcoes } : null
+  const e7 = estrategiaSel === "e7" && diaOpcoes.length ? { tipo: "e7" as const, label: "#7 Alterar dia de tratamento, profissionais diferentes.", opcoes: diaOpcoes } : null
+
+  return {
+    sessPac: sp, sessDiaClin: [], buracoSiRemover: false, min2Violation: false,
+    pacTurno: "manhã", pacUnidade, inconsistencias: [],
+    e1, e2, e3, e4, e5, e6, e7, semSolucao: false,
+  }
+}
+
+const E_LABELS_SAIDA: Record<string, string> = {
+  e1: "E1 · Substituição Direta", e2: "E2 · Rearranjo Interno", e3: "E3 · Novo Horário",
+  e4: "E4 · Autorização Pendente", e5: "E5 · Reposição Cruzada",
+  e6: "E6 · Migração de Dia", e7: "E7 · Migração com Troca",
+}
+const E_TIPS_SAIDA: Record<string, string> = {
+  e1: "Outro profissional assume a mesma terapia, no mesmo dia e horário. Sem mudança na rotina do paciente.",
+  e2: "As sessões existentes do paciente são reposicionadas entre si — os terapeutas ficam, mas trocam de horário.",
+  e3: "A terapia continua com outro profissional em dia/horário diferente, respeitando o turno e evitando lacunas.",
+  e4: "O horário vago é preenchido com outra terapia que o paciente tem autorização pendente. A terapia perdida fica sem reposição.",
+  e5: "Reposição cruzada possível, mas com troca de pelo menos um terapeuta existente. Risco de recusa pela família.",
+  e6: "Todas as sessões do dia afetado migram para um novo dia, com os mesmos terapeutas.",
+  e7: "Todas as sessões do dia afetado migram para um novo dia, mas pelo menos um terapeuta precisa ser trocado.",
+}
+const E_CORES_SAIDA: Record<string, string> = {
+  e1: B.lime, e2: "#0ea5e9", e3: B.blue, e4: B.purple,
+  e5: "#f97316", e6: "#8b5cf6", e7: "#ec4899",
+}
+
 function SaidaItem({
   pac, dia, hora, terapia, profRes, diaRes, horaRes, obs,
+  estrategiaSel, opcao, movimentos, statusEntry,
   onConfirmar, onRecusar, onInviavel, onCancelar,
 }: {
   pac: string; dia: string; hora: string; terapia: string
   profRes?: string; diaRes?: string; horaRes?: string; obs?: string
+  estrategiaSel?: string | null
+  opcao?: OpcaoEstrategia | null
+  movimentos?: MovimentoSessao[] | null
+  statusEntry?: StatusEntry
   onConfirmar: () => void; onRecusar: () => void; onInviavel: () => void; onCancelar: () => void
 }) {
+  const [showVer, setShowVer] = useState(false)
+  const hasDetails = !!(estrategiaSel || opcao || statusEntry?.afetada)
+
   return (
-    <div style={{ background: "#f5f3ff", border: `1px solid ${B.purple}33`, borderRadius: "12px", padding: "10px 14px" }}>
-      <div style={{ marginBottom: "6px" }}>
-        <span style={{ background: "#f5f3ff", color: B.purple, border: `1px solid ${B.purple}44`, borderRadius: "999px", padding: "2px 8px", fontSize: "10px", fontWeight: 700 }}>
-          🚪 Saída de Profissional
-        </span>
-      </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-start", justifyContent: "space-between" }}>
-        <div>
+    <div style={{ background: "#f5f3ff", border: `1px solid ${B.purple}33`, borderRadius: "12px", padding: "12px 16px" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center", justifyContent: "space-between" }}>
+
+        {/* Coluna de informação — badge + dados */}
+        <div style={{ flex: 1, minWidth: "160px", display: "flex", flexDirection: "column", gap: "2px" }}>
+          <span style={{ background: "#f5f3ff", color: B.purple, border: `1px solid ${B.purple}44`, borderRadius: "999px", padding: "2px 8px", fontSize: "10px", fontWeight: 700, width: "fit-content", marginBottom: "4px" }}>
+            🚪 Saída de Profissional
+          </span>
           <div style={{ fontWeight: 800, fontSize: "13px", color: B.navy }}>{pac}</div>
-          <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginTop: "2px" }}>{terapia} · {dia} {hora}</div>
-          {profRes && <div style={{ fontSize: "12px", fontWeight: 700, color: B.navy, marginTop: "2px" }}>→ {profRes} · {diaRes} {horaRes}</div>}
-          {obs && <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "2px", fontStyle: "italic" }}>"{obs}"</div>}
+          <div style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>{terapia} · {dia} {hora}</div>
+          {profRes && <div style={{ fontSize: "12px", fontWeight: 700, color: B.navy }}>→ {profRes} · {diaRes} {horaRes}</div>}
+          {obs && <div style={{ fontSize: "11px", color: "var(--muted-foreground)", fontStyle: "italic" }}>"{obs}"</div>}
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px" }}>
-          <button onClick={onConfirmar} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#16a34a", color: "white", border: "none", cursor: "pointer", fontWeight: 700 }}>✓ Confirmou</button>
-          <button onClick={onInviavel} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600 }}>Inviável</button>
-          <button onClick={onRecusar} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#dc2626", color: "white", border: "none", cursor: "pointer", fontWeight: 700 }}>✗ Recusou</button>
-          <button onClick={onCancelar} style={{ fontSize: "12px", padding: "10px 12px", minHeight: "44px", borderRadius: "8px", background: "transparent", color: "var(--muted-foreground)", border: "none", cursor: "pointer" }} title="Remove o item do acompanhamento">Cancelar</button>
+
+        {/* Grid de ações — 3 colunas: Ver | Confirmou/Recusou | Inviável/Cancelar */}
+        <div style={{ display: "grid", gridTemplateColumns: hasDetails ? "auto auto auto" : "auto auto", gap: "4px", flexShrink: 0 }}>
+          {hasDetails && (
+            <button onClick={() => setShowVer(true)} style={{
+              gridRow: "span 2",
+              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "4px",
+              fontSize: "11px", padding: "8px 12px", borderRadius: "8px",
+              background: `${B.purple}12`, color: B.purple, border: `1px solid ${B.purple}44`,
+              cursor: "pointer", fontFamily: "inherit", fontWeight: 700, lineHeight: 1.3, textAlign: "center",
+            }}>
+              <span style={{ fontSize: "15px" }}>📋</span>
+              <span>Ver<br />detalhes</span>
+            </button>
+          )}
+          <button onClick={onConfirmar} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#16a34a", color: "white", border: "none", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>✓ Confirmou</button>
+          <button onClick={onInviavel}  style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#fffbeb", color: "#92400e", border: "1px solid #fde68a", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>Inviável</button>
+          <button onClick={onRecusar}   style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#dc2626", color: "white", border: "none", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>✗ Recusou</button>
+          <button onClick={onCancelar}  style={{ fontSize: "12px", padding: "10px 12px", minHeight: "44px", borderRadius: "8px", background: "transparent", color: B.purple, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 500 }} title="Remove o item do acompanhamento">Cancelar</button>
+        </div>
+      </div>
+      {showVer && statusEntry?.afetada && (
+        <SaidaCronModal
+          pac={pac}
+          afetada={statusEntry.afetada}
+          analise={buildReadOnlyAnalise(statusEntry)}
+          statusAtual={statusEntry}
+          readOnly
+          onClose={() => setShowVer(false)}
+          onStatus={() => {}}
+        />
+      )}
+      {showVer && !statusEntry?.afetada && (
+        <SaidaVerModal pac={pac} dia={dia} hora={hora} terapia={terapia}
+          estrategiaSel={estrategiaSel} opcao={opcao} movimentos={movimentos} obs={obs}
+          onClose={() => setShowVer(false)} />
+      )}
+    </div>
+  )
+}
+
+function SaidaVerModal({ pac, dia, hora, terapia, estrategiaSel, opcao, movimentos, obs, onClose }: {
+  pac: string; dia: string; hora: string; terapia: string
+  estrategiaSel?: string | null
+  opcao?: OpcaoEstrategia | null
+  movimentos?: MovimentoSessao[] | null
+  obs?: string
+  onClose: () => void
+}) {
+  const closeRef = useRef<HTMLButtonElement>(null)
+  useEffect(() => {
+    closeRef.current?.focus()
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose() }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [onClose])
+
+  const eColor = estrategiaSel ? (E_CORES_SAIDA[estrategiaSel] ?? B.purple) : B.purple
+  const eLabel = estrategiaSel ? (E_LABELS_SAIDA[estrategiaSel] ?? estrategiaSel.toUpperCase()) : null
+  const eTip   = estrategiaSel ? (E_TIPS_SAIDA[estrategiaSel] ?? null) : null
+
+  return (
+    <div role="dialog" aria-modal="true" aria-labelledby="saida-ver-title"
+      style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)", padding: "16px" }}
+      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+    >
+      <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "520px", width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+
+        <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "flex-start", background: "var(--muted)", borderRadius: "18px 18px 0 0" }}>
+          <div>
+            <div id="saida-ver-title" style={{ fontWeight: 800, fontSize: "15px", color: B.navy }}>📋 {pac}</div>
+            <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "2px" }}>Detalhes da substituição</div>
+          </div>
+          <button ref={closeRef} onClick={onClose} aria-label="Fechar"
+            style={{ width: "30px", height: "30px", borderRadius: "50%", border: "none", background: "var(--muted)", cursor: "pointer", fontSize: "18px", color: "var(--muted-foreground)", flexShrink: 0 }}>×</button>
+        </div>
+
+        <div style={{ overflow: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: "14px" }}>
+
+          <div>
+            <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: "6px" }}>Sessão afetada</div>
+            <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: "10px", padding: "10px 14px" }}>
+              <div style={{ fontWeight: 700, fontSize: "13px", color: "#7f1d1d" }}>{terapia}</div>
+              <div style={{ fontSize: "12px", color: "#991b1b", marginTop: "2px" }}>{dia} · {hora}</div>
+            </div>
+          </div>
+
+          {eLabel && (
+            <div>
+              <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: "6px" }}>Estratégia selecionada</div>
+              <div style={{ background: "var(--card)", border: `1px solid ${eColor}33`, borderRadius: "10px", padding: "10px 14px" }}>
+                <span style={{ background: `${eColor}22`, color: eColor, borderRadius: "999px", padding: "2px 10px", fontSize: "11px", fontWeight: 800 }}>{eLabel}</span>
+                {eTip && <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginTop: "8px" }}>{eTip}</div>}
+              </div>
+            </div>
+          )}
+
+          {opcao && (
+            <div>
+              <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: "6px" }}>Solução adotada</div>
+              <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: "10px", padding: "10px 14px" }}>
+                <div style={{ fontWeight: 700, fontSize: "13px", color: "#14532d" }}>{fmtName(opcao.prof)}</div>
+                <div style={{ fontSize: "12px", color: "#166534", marginTop: "2px" }}>{opcao.terapia} · {opcao.dia} {opcao.hora}</div>
+                {opcao.unidade && <div style={{ fontSize: "11px", color: "#166534", marginTop: "2px" }}>{opcao.unidade}</div>}
+              </div>
+            </div>
+          )}
+
+          {movimentos && movimentos.length > 0 && (
+            <div>
+              <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: "6px" }}>Movimentos ({movimentos.length})</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
+                {movimentos.map((m, i) => (
+                  <div key={i} style={{ background: "var(--muted)", border: "1px solid var(--border)", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }}>
+                    <div style={{ color: "var(--card-foreground)", fontWeight: 600 }}>{m.deTerapia}</div>
+                    <div style={{ color: "var(--muted-foreground)", marginTop: "2px" }}>
+                      {m.deDia} {m.deHora} → {m.paraDia} {m.paraHora}
+                      {m.profMudou && <span style={{ color: B.orange, fontWeight: 700, marginLeft: "6px" }}>· trocou prof</span>}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {obs && (
+            <div>
+              <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: "6px" }}>Observação</div>
+              <div style={{ background: "var(--muted)", border: "1px solid var(--border)", borderRadius: "10px", padding: "10px 14px", fontSize: "12px", color: "var(--card-foreground)", fontStyle: "italic" }}>
+                "{obs}"
+              </div>
+            </div>
+          )}
+
         </div>
       </div>
     </div>

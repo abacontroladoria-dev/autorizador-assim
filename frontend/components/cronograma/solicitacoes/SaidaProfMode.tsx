@@ -8,7 +8,7 @@ import { slotValidoParaPaciente } from "@/lib/cronograma/candidatos"
 import { buildSaidaAnalise } from "@/lib/cronograma/saida"
 import { SaidaCronModal } from "./SaidaCronModal"
 import type {
-  AfetadaItem, CsvRow, LaudoRow, OpcaoEstrategia, ResultItem, StatusEntry, StatusMap, StatusSaida, MovimentoSessao, CfgState,
+  AfetadaItem, CsvRow, LaudoRow, OpcaoEstrategia, ResultItem, SessPacItem, StatusEntry, StatusMap, StatusSaida, MovimentoSessao, CfgState,
 } from "@/types/cronograma"
 
 // ─── CONSTANTES ───────────────────────────────────────────────────────────────
@@ -65,6 +65,7 @@ interface StatusPayload {
   movimentos?: MovimentoSessao[] | null
   obs: string
   slotReservado: string | null
+  sessPac?: SessPacItem[]
 }
 
 // ─── ESTILOS DE STATUS ────────────────────────────────────────────────────────
@@ -590,7 +591,13 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
     const slotRes = (status === "recusado" || status === "sem_solucao") ? null : (payload.slotReservado ?? null)
     persistStatus({
       ...statusMap,
-      [key]: { status, obs: payload.obs || "", estrategiaSel: payload.estrategiaSel, opcaoSel: payload.opcaoSel, opcao: payload.opcao, movimentos: payload.movimentos ?? null, slotReservado: slotRes, atualizadoEm: Date.now() },
+      [key]: {
+        status, obs: payload.obs || "",
+        estrategiaSel: payload.estrategiaSel, opcaoSel: payload.opcaoSel,
+        opcao: payload.opcao, movimentos: payload.movimentos ?? null,
+        slotReservado: slotRes, atualizadoEm: Date.now(),
+        ...(status === "aguardando" ? { afetada, sessPac: payload.sessPac } : {}),
+      },
     })
   }
 

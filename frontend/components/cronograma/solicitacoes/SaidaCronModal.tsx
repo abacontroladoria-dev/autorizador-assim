@@ -24,6 +24,7 @@ interface StatusPayload {
   movimentos: MovimentoSessao[] | null
   obs: string
   slotReservado: string | null
+  sessPac?: SessPacItem[]
 }
 
 interface Props {
@@ -37,6 +38,7 @@ interface Props {
   sessionTabIdx?: number
   onSessionTabChange?: (i: number) => void
   todasAfetadas?: AfetadaItem[]
+  readOnly?: boolean
 }
 
 // ─── HELPERS DE ESTILO ────────────────────────────────────────────────────────
@@ -230,7 +232,7 @@ function AgendaGrid({
 
 // ─── MODAL ────────────────────────────────────────────────────────────────────
 
-export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, onStatus, sessionTabs, sessionTabIdx, onSessionTabChange, todasAfetadas }: Props) {
+export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, onStatus, sessionTabs, sessionTabIdx, onSessionTabChange, todasAfetadas, readOnly = false }: Props) {
   const { sessPac, buracoSiRemover, min2Violation, pacUnidade, inconsistencias,
     e1, e2, e3, e4, e5, e6, e7, semSolucao } = analise
 
@@ -375,6 +377,7 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
       movimentos: (eAt?.kind === "swap" || eAt?.kind === "dia") ? movimentos : null,
       obs,
       slotReservado: isAtivo ? buildSlotReservado() : null,
+      sessPac: analise.sessPac,
     })
     onClose()
   }
@@ -452,19 +455,19 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
                 return (
                   <div
                     key={key}
-                    onClick={() => { if (tem) { setESel(key); setOpSel(0) } }}
+                    onClick={() => { if (tem && !readOnly) { setESel(key); setOpSel(0) } }}
                     style={{
                       marginBottom: "6px", borderRadius: "10px",
                       border: `2px solid ${eSel === key ? cor + "99" : isE5orE7 ? "#fde68a" : "var(--border)"}`,
                       padding: "8px 10px",
                       background: eSel === key ? cor + "11" : isE5orE7 ? "#fffbeb" : "var(--card)",
-                      cursor: tem ? "pointer" : "default",
+                      cursor: (tem && !readOnly) ? "pointer" : "default",
                       opacity: tem ? 1 : 0.45,
                     }}
                   >
                     <div style={{ fontWeight: 700, fontSize: "11px", color: tem ? B.navy : "var(--muted-foreground)", display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "4px" }}>
                       <span className="flex items-start" style={{ lineHeight: 1.3 }}>{title}<InfoTip text={E_TIPS[tipKey] || ""} /></span>
-                      {!tem && <span style={{ color: "#dc2626", fontSize: "10px", flexShrink: 0 }}>sem vaga</span>}
+                      {!tem && !readOnly && <span style={{ color: "#dc2626", fontSize: "10px", flexShrink: 0 }}>sem vaga</span>}
                       {isE5orE7 && tem && <span style={{ color: "#92400e", fontSize: "9px", flexShrink: 0 }}>risco recusa</span>}
                     </div>
 
@@ -473,7 +476,7 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
                       if (key === "e2" && e2) return (
                         <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
                           {e2.opcoes.map((op, i) => (
-                            <button key={i} onClick={e => { e.stopPropagation(); setOpSel(i) }}
+                            <button key={i} onClick={e => { e.stopPropagation(); if (!readOnly) setOpSel(i) }}
                               style={{ textAlign: "left", padding: "6px 8px", borderRadius: "7px", border: `1px solid ${opSel === i ? cor : cor + "44"}`, background: opSel === i ? cor + "22" : "var(--card)", cursor: "pointer", fontSize: "10px", color: "var(--card-foreground)" }}>
                               {op.movimentos.map((m, mi) => (
                                 <div key={mi} style={{ fontWeight: mi === 0 ? 700 : 400, color: mi === 0 ? "var(--card-foreground)" : "var(--muted-foreground)" }}>
@@ -487,7 +490,7 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
                       if (key === "e5" && e5) return (
                         <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
                           {e5.opcoes.map((op, i) => (
-                            <button key={i} onClick={e => { e.stopPropagation(); setOpSel(i) }}
+                            <button key={i} onClick={e => { e.stopPropagation(); if (!readOnly) setOpSel(i) }}
                               style={{ textAlign: "left", padding: "6px 8px", borderRadius: "7px", border: `1px solid ${opSel === i ? cor : cor + "44"}`, background: opSel === i ? cor + "22" : "var(--card)", cursor: "pointer", fontSize: "10px", color: "var(--card-foreground)" }}>
                               {op.movimentos.map((m, mi) => (
                                 <div key={mi}>{fmtName(m.paraProf)} · {m.paraDia !== afetada.dia ? m.paraDia + " " : ""}{m.paraHora}</div>
@@ -504,7 +507,7 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
                         return (
                           <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
                             {strat.opcoes.map((op, i) => (
-                              <button key={i} onClick={e => { e.stopPropagation(); setOpSel(i) }}
+                              <button key={i} onClick={e => { e.stopPropagation(); if (!readOnly) setOpSel(i) }}
                                 style={{ textAlign: "left", padding: "6px 8px", borderRadius: "7px", border: `1px solid ${opSel === i ? cor : cor + "44"}`, background: opSel === i ? cor + "22" : "var(--card)", cursor: "pointer", fontSize: "10px", color: "var(--card-foreground)" }}>
                                 <div style={{ fontWeight: 700 }}>{op.diaOrigem.replace("-feira", "")} → {op.diaDestino.replace("-feira", "")}</div>
                                 {op.profissionaisAlterados.length > 0 && (
@@ -521,7 +524,7 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
                       return (
                         <div style={{ marginTop: "8px", display: "flex", flexDirection: "column", gap: "4px" }}>
                           {strat.opcoes.map((op, i) => (
-                            <button key={i} onClick={e => { e.stopPropagation(); setOpSel(i) }}
+                            <button key={i} onClick={e => { e.stopPropagation(); if (!readOnly) setOpSel(i) }}
                               style={{ textAlign: "left", padding: "6px 8px", borderRadius: "7px", border: `1px solid ${opSel === i ? cor : cor + "44"}`, background: opSel === i ? cor + "22" : "var(--card)", cursor: "pointer", fontSize: "11px", fontWeight: opSel === i ? 700 : 400, color: "var(--card-foreground)" }}>
                               <div style={{ fontWeight: 700 }}>{fmtName(op.prof)}</div>
                               <div style={{ color: "var(--muted-foreground)" }}>{op.dia !== afetada.dia ? op.dia + " " : ""}{op.hora} · {op.unidade}</div>
@@ -554,9 +557,10 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
                 <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", marginBottom: "3px" }}>Observação</div>
                 <textarea
                   value={obs}
-                  onChange={e => setObs(e.target.value)}
+                  onChange={e => { if (!readOnly) setObs(e.target.value) }}
+                  readOnly={readOnly}
                   placeholder="Ex: WA enviado em xx/xx..."
-                  style={{ width: "100%", height: "54px", border: "1px solid var(--border)", borderRadius: "7px", padding: "5px 7px", fontSize: "11px", fontFamily: "inherit", resize: "vertical", boxSizing: "border-box" }}
+                  style={{ width: "100%", height: "54px", border: "1px solid var(--border)", borderRadius: "7px", padding: "5px 7px", fontSize: "11px", fontFamily: "inherit", resize: readOnly ? "none" : "vertical", boxSizing: "border-box", background: readOnly ? "var(--muted)" : undefined }}
                 />
               </div>
             </div>
@@ -606,13 +610,13 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
         {/* Footer */}
         <div className="px-5 py-[10px] border-t border-gray-100 flex gap-[6px] flex-wrap items-center bg-gray-50 rounded-b-[18px]">
           <div className="flex-1 text-[11px] text-gray-400 truncate">{descricaoProposta()}</div>
-          {(st === "pendente" || st === "recusado") && (
+          {!readOnly && (st === "pendente" || st === "recusado") && (
             <>
               <button onClick={() => save("aguardando")} disabled={!opcSel} style={{ padding: "7px 12px", borderRadius: "9px", border: "none", background: opcSel ? "#16a34a" : "#86efac", color: "white", fontWeight: 700, fontSize: "11px", cursor: opcSel ? "pointer" : "not-allowed" }}>Aceitar (→ Acompanhamento)</button>
               <button onClick={() => save("sem_solucao")} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid var(--border)", background: "var(--muted)", color: "var(--muted-foreground)", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>⛔ Inviável</button>
             </>
           )}
-          {st === "aguardando" && (
+          {!readOnly && st === "aguardando" && (
             <>
               <button onClick={() => save("sem_solucao")} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid var(--border)", background: "var(--muted)", color: "var(--muted-foreground)", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>⛔ Inviável</button>
               <button onClick={() => save("pendente")} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid var(--border)", background: "var(--card)", color: "var(--muted-foreground)", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>Cancelar</button>

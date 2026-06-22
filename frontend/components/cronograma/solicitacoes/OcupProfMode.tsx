@@ -800,7 +800,7 @@ export function OcupProfMode({ cRows, lRows, cfg }: Props) {
                           <Pie data={prioChartData} cx="50%" cy="50%" innerRadius={28} outerRadius={44} dataKey="value" paddingAngle={2}>
                             {prioChartData.map((d, i) => <Cell key={i} fill={d.fill} />)}
                           </Pie>
-                          <Tooltip formatter={(v: number, n: string) => [v, n]} />
+                          <Tooltip formatter={(v, n) => [v ?? 0, n]} />
                         </PieChart>
                       </ResponsiveContainer>
                     </div>
@@ -828,7 +828,7 @@ export function OcupProfMode({ cRows, lRows, cfg }: Props) {
                           <Pie data={regraChartData} cx="50%" cy="50%" innerRadius={28} outerRadius={44} dataKey="value" paddingAngle={2}>
                             {regraChartData.map((d, i) => <Cell key={i} fill={d.fill} />)}
                           </Pie>
-                          <Tooltip formatter={(v: number, n: string) => [v, n]} />
+                          <Tooltip formatter={(v, n) => [v ?? 0, n]} />
                         </PieChart>
                       </ResponsiveContainer>
                     </div>
