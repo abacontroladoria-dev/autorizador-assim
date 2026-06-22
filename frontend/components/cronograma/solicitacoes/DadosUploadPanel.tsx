@@ -74,8 +74,8 @@ function Dropzone<T>({ label, accept, rows, rowLabel, onLoad, onClear, parseFile
 
   return (
     <div
-      className={`relative flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-5 text-center transition-colors cursor-pointer select-none
-        ${dragging ? "border-primary bg-primary/5" : loaded ? "border-green-400 bg-green-50 dark:bg-green-950/20" : "border-border bg-card hover:border-primary/50 hover:bg-muted/40"}`}
+      className={`relative flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-4 py-4 min-h-[88px] text-center transition-colors cursor-pointer select-none
+        ${dragging ? "border-primary bg-primary/5" : loaded ? "border-green-400 bg-green-50 dark:bg-green-950/20" : "border-border bg-card hover:border-[#2A92C0]/40 hover:bg-muted/40"}`}
       onClick={() => !loaded && inputRef.current?.click()}
       onDragOver={e => { e.preventDefault(); setDragging(true) }}
       onDragLeave={() => setDragging(false)}
@@ -224,16 +224,17 @@ function GradeDbLoader({ rows, onLoad, onClear }: GradeDbLoaderProps) {
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-xl border-2 border-border bg-card px-4 py-4">
+    <div className="flex flex-col gap-2.5 rounded-xl border border-border bg-card px-4 py-4 min-h-[88px] justify-center">
       <div className="flex items-center gap-1.5">
-        <DatabaseZap size={15} className="text-muted-foreground shrink-0" />
+        <DatabaseZap size={14} className="shrink-0" style={{ color: "#2A92C0" }} />
         <p className="text-sm font-semibold text-foreground">Grade de Profissionais</p>
       </div>
       <p className="text-xs text-muted-foreground">{rw.label}</p>
       <button
         onClick={carregar}
         disabled={loading}
-        className="w-full rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+        className="w-full rounded-lg px-3 py-2 text-xs font-semibold text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+        style={{ background: "#2A92C0", minHeight: "34px" }}
       >
         {loading ? "Buscando..." : "Carregar grade"}
       </button>

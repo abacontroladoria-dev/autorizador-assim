@@ -661,13 +661,18 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
   return (
     <div className="flex flex-col gap-3">
 
-      {/* ── Linha 1: Formulário (flex-1) + Distribuição (280px) ─────────────── */}
-      <div className="flex gap-4">
+      {/* ── Linha 1: Formulário + Distribuição + Garantidos ─────────────────── */}
+      <div style={{ display: "grid", gridTemplateColumns: "380px 1fr 1fr", gap: "12px" }}>
 
         {/* Card formulário */}
-        <div style={{ flexShrink: 0, width: "360px", background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px" }}>
-          <div style={{ fontWeight: 800, color: B.navy, marginBottom: "6px", fontSize: "15px" }}>
-            Saída de Profissional — Horário(s) Específico(s)
+        <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px" }}>
+          <div style={{ marginBottom: "6px" }}>
+            <div style={{ fontWeight: 800, color: B.navy, fontSize: "15px", lineHeight: 1.3 }}>
+              Saída de Profissional
+            </div>
+            <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "2px" }}>
+              Horário(s) Específico(s)
+            </div>
           </div>
           <div className="text-xs text-gray-500 mb-3">
             Selecione o profissional e os dias/turnos afetados. Cada vaga é oferecida a apenas um paciente.
@@ -675,7 +680,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
 
           <div className="mb-3">
             <label htmlFor="prof-search" className="text-xs font-bold text-gray-500 mb-1 block">Profissional</label>
-            <div ref={comboRef} style={{ position: "relative", width: "340px" }}>
+            <div ref={comboRef} style={{ position: "relative" }}>
               <input
                 id="prof-search"
                 type="text"
@@ -777,23 +782,22 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
           <button
             onClick={analisar}
             disabled={!canAnalyze}
-            style={{ marginTop: "14px", padding: "8px 20px", borderRadius: "10px", background: canAnalyze ? B.navy : `${B.navy}55`, color: "white", border: "none", fontWeight: 800, fontSize: "13px", cursor: canAnalyze ? "pointer" : "not-allowed" }}
+            style={{ marginTop: "14px", padding: "0 20px", minHeight: "44px", borderRadius: "10px", background: canAnalyze ? B.navy : `${B.navy}55`, color: "white", border: "none", fontWeight: 800, fontSize: "13px", cursor: canAnalyze ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center" }}
           >
             Analisar Impacto
           </button>
         </div>
 
-        {/* ── Coluna direita: Distribuição + Garantidos ou Dependentes ─────────── */}
-        <div style={{ display: "flex", flexDirection: "row", gap: "12px", flex: 1, minWidth: 0 }}>
-
-          {/* Card Distribuição */}
-          <div style={{ flex: 1, minWidth: 0, background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px", display: "flex", flexDirection: "column" }}>
+        {/* Card Distribuição */}
+        <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px", display: "flex", flexDirection: "column" }}>
             <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>
               Distribuição
             </div>
             {!donutData ? (
               <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px" }}>
-                <div style={{ width: "52px", height: "52px", borderRadius: "50%", border: "7px solid var(--border)" }} />
+                <svg width="56" height="56" viewBox="0 0 56 56" fill="none" aria-hidden="true">
+                  <circle cx="28" cy="28" r="20" strokeWidth="7" stroke="var(--border)" strokeDasharray="5 4" fill="none" opacity="0.6" />
+                </svg>
                 <div style={{ fontSize: "11px", color: "var(--muted-foreground)", textAlign: "center", lineHeight: 1.5 }}>
                   {results === null
                     ? <>Execute &quot;Analisar Impacto&quot;<br />para ver o resumo</>
@@ -831,14 +835,16 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
             )}
           </div>
 
-          {/* Card Garantidos ou Dependentes */}
-          <div style={{ flex: 1, minWidth: 0, background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px", display: "flex", flexDirection: "column" }}>
+        {/* Card Garantidos ou Dependentes */}
+        <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px", display: "flex", flexDirection: "column" }}>
             <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>
               Garantidos ou Dependentes
             </div>
             {!garantidoData ? (
               <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px" }}>
-                <div style={{ width: "52px", height: "52px", borderRadius: "50%", border: "7px solid var(--border)" }} />
+                <svg width="56" height="56" viewBox="0 0 56 56" fill="none" aria-hidden="true">
+                  <circle cx="28" cy="28" r="20" strokeWidth="7" stroke="var(--border)" strokeDasharray="5 4" fill="none" opacity="0.6" />
+                </svg>
                 <div style={{ fontSize: "11px", color: "var(--muted-foreground)", textAlign: "center", lineHeight: 1.5 }}>
                   {results === null
                     ? <>Execute &quot;Analisar Impacto&quot;<br />para ver o resumo</>
@@ -875,8 +881,6 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                 </div>
               </>
             )}
-          </div>
-
         </div>
 
       </div>

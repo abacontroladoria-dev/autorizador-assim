@@ -3,6 +3,7 @@
 import { useSearchParams, useRouter } from "next/navigation"
 import { useEffect } from "react"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
+import { useHeader } from "@/contexts/HeaderContext"
 import { SaidaProfMode } from "./SaidaProfMode"
 import { OcupProfMode } from "./OcupProfMode"
 import { PreencherProfTab } from "@/components/cronograma/shared/PreencherProfTab"
@@ -36,6 +37,11 @@ export function SolicitacoesShell({ cRows, lRows, dispRows, cfg }: ShellProps) {
 
   // StatusMap da Saída de Profissional — compartilhado entre a equipe via backend (saida_aceites)
   const { statusMap, persistStatus } = useCronogramaData()
+  const { setHeader } = useHeader()
+
+  useEffect(() => {
+    setHeader("Saída de Profissional", "Análise de impacto e redistribuição de sessões")
+  }, [setHeader])
 
   useEffect(() => {
     if (!raw) router.replace("/cronograma/solicitacoes?tab=saida")
@@ -55,7 +61,8 @@ function TabContent({
     return (
       <>
         {cRows.length === 0 && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/20 p-3 text-sm text-amber-700 dark:text-amber-400">
+          <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/80 dark:bg-amber-950/20 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
             Carregue o CSV da grade para usar esta ferramenta.
           </div>
         )}
