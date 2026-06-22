@@ -291,6 +291,8 @@ export interface RecItem {
 export interface InvItem {
   paciente: string
   motivo: string
+  dia?: string
+  hora?: string
   registradoEm: string
 }
 

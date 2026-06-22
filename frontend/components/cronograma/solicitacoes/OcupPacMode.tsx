@@ -12,6 +12,7 @@ import {
   shouldShowSessionUnit, unidadeBadgeText,
 } from "@/lib/cronograma/helpers"
 import { UnitHeaderBadges, CronoGlobalUnitBadge } from "@/components/cronograma/ui/UnitBadges"
+import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 import type { CsvRow, LaudoRow, CfgState } from "@/types/cronograma"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -332,16 +333,27 @@ interface TodasSugestoesModalProps {
   onClose: () => void
   estrategia: Estrategia; setEstrategia: (e: Estrategia) => void
   onAceitar: (bundle: { sessoes: AceiteSessao[] }) => void
+  onInviavel: (s: Sugestao) => void
 }
 
 function TodasSugestoesModal({
   pac, cRows, sugestoes, pacGaps, stOf, setSt, onClose,
-  estrategia, setEstrategia, onAceitar,
+  estrategia, setEstrategia, onAceitar, onInviavel,
 }: TodasSugestoesModalProps) {
   const [selIdx, setSelIdx]       = useState<Record<string, Record<string, number>>>({})
   const [profSelIdx, setProfSelIdx] = useState<Record<string, number>>({})
-  // Pedido 4: checkboxes para seleção em lote
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(
+    () => new Set(sugestoes.filter(s => stOf(s) !== "inviavel").map(s => s.id))
+  )
+
+  // Itens selecionados excluindo os que foram marcados inviável após a abertura do modal
+  const effectiveSelected = useMemo(
+    () => new Set([...selectedIds].filter(id => {
+      const s = sugestoes.find(x => x.id === id)
+      return s && stOf(s) !== "inviavel"
+    })),
+    [selectedIds, sugestoes, stOf]
+  )
 
   function toggleSelected(id: string) {
     setSelectedIds(prev => {
@@ -364,9 +376,8 @@ function TodasSugestoesModal({
     })
   }
 
-  // Pedido 4: montar o bundle com as sessões da seleção atual
   function handleAceitar() {
-    const toAccept = sugestoes.filter(s => selectedIds.has(s.id) && stOf(s) !== "inviavel")
+    const toAccept = sugestoes.filter(s => effectiveSelected.has(s.id))
     if (!toAccept.length) return
     const sessoes: AceiteSessao[] = []
     for (const s of toAccept) {
@@ -417,14 +428,14 @@ function TodasSugestoesModal({
   // Passo 1: registrar todos os slots principais — garantia de prioridade
   const mainSlots = new Set<string>()
   for (const s of sugestoes) {
-    if (stOf(s) === "inviavel") continue
+    if (stOf(s) === "inviavel" || !effectiveSelected.has(s.id)) continue
     mainSlots.add(`${s.dia}|||${s.hora}`)
   }
 
   // Passo 2: adicionar entradas principais ao cMap
   for (const s of sugestoes) {
     const st = stOf(s)
-    if (st === "inviavel") continue
+    if (st === "inviavel" || !effectiveSelected.has(s.id)) continue
     const tipo: CellInfo["tipo"] = st === "acompanhamento" ? "aceito" : "proposta"
     const ae = getActiveEntry(s)
     const kP = `${s.dia}|||${s.hora}`
@@ -438,7 +449,7 @@ function TodasSugestoesModal({
   const seenSlot = new Set<string>(mainSlots)
   for (const s of sugestoes) {
     const st = stOf(s)
-    if (st === "inviavel") continue
+    if (st === "inviavel" || !effectiveSelected.has(s.id)) continue
     const tipo: CellInfo["tipo"] = st === "acompanhamento" ? "aceito" : "proposta"
     const activeVComps = getActiveVComps(s)
     for (const vc of activeVComps) {
@@ -487,10 +498,7 @@ function TodasSugestoesModal({
     "dia-novo": { label: "Dia novo",  bg: "#faf5ff", c: "#7e22ce", border: "#e9d5ff" },
   }
 
-  const selectedCount = [...selectedIds].filter(id => {
-    const s = sugestoes.find(x => x.id === id)
-    return s && stOf(s) !== "inviavel"
-  }).length
+  const selectedCount = effectiveSelected.size
 
   return createPortal(
     <div
@@ -583,7 +591,7 @@ function TodasSugestoesModal({
                         const ae       = getActiveEntry(s)
                         const allProfs = [{ tP: s.tP, prof: s.prof, unidade: s.unidade }, ...s.profAlts]
                         const isInv    = st === "inviavel"
-                        const isChk    = selectedIds.has(s.id) && !isInv
+                        const isChk    = effectiveSelected.has(s.id)
                         return (
                           <div key={s.id} style={{
                             border: `1px solid ${isChk ? B.blue + "77" : isInv ? "#e5e7eb" : "#e5e7eb"}`,
@@ -645,10 +653,7 @@ function TodasSugestoesModal({
                             <div style={{ display: "flex", gap: "3px", flexWrap: "wrap", marginTop: "2px" }}>
                               {!isInv && (
                                 <button
-                                  onClick={() => {
-                                    setSt(s, "inviavel")
-                                    setSelectedIds(prev => { const n = new Set(prev); n.delete(s.id); return n })
-                                  }}
+                                  onClick={() => onInviavel(s)}
                                   style={{ ...btnStyle("#fef2f2", "#dc2626", "#fca5a5"), fontSize: "9px" }}>
                                   ⛔ Inviável
                                 </button>
@@ -712,15 +717,15 @@ function TodasSugestoesModal({
                         const cells = cMap[`${d}|||${hora}`] || []
                         return (
                           <td key={d} style={{ padding: "2px", verticalAlign: "top", height: "1px" }}>
+                            <div style={{ height: "100%", display: "flex", flexDirection: "column", gap: "2px" }}>
                             {cells.map((c, ci) => {
                               const cs    = cSt(c.tipo)
                               const isDark = c.tipo === "supervDesloc"
                               return (
-                                <div key={ci} style={{ background: cs.bg, border: `1px solid ${cs.bd}`, borderRadius: "7px", padding: "5px 7px", height: "100%", boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "2px" }}>
-                                  <div style={{ fontSize: "10px", fontWeight: 700, color: isDark ? "white" : "#1f2937", lineHeight: "1.3" }}>{c.tP}</div>
+                                <div key={ci} style={{ background: cs.bg, border: `1px solid ${cs.bd}`, borderRadius: "7px", padding: "5px 7px", flex: 1, boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "2px" }}>
+                                  <div title={c.tP} style={{ fontSize: "10px", fontWeight: 700, color: isDark ? "white" : "#1f2937", lineHeight: "1.3", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.tP}</div>
                                   {c.tE && <div style={{ fontSize: "8px", color: "#9ca3af", fontStyle: "italic" }}>({c.tE})</div>}
-                                  <div style={{ fontSize: "9px", color: isDark ? "#d1d5db" : "#6b7280" }}>{fmtName(c.prof)}</div>
-                                  {/* Pedido 1: destino do deslocamento */}
+                                  <div title={fmtName(c.prof)} style={{ fontSize: "9px", color: isDark ? "#d1d5db" : "#6b7280", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{fmtName(c.prof)}</div>
                                   {isDark && (
                                     <div style={{ fontSize: "9px", fontWeight: 700, color: "#fbbf24", marginTop: "auto" }}>
                                       {c.target ? `→ ${c.target}` : "→ verificar"}
@@ -732,6 +737,7 @@ function TodasSugestoesModal({
                                 </div>
                               )
                             })}
+                            </div>
                           </td>
                         )
                       })}
@@ -1003,6 +1009,18 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
   const [aceites, setAceites]   = useState<AceitePacBundle[]>(() => {
     try { return JSON.parse(localStorage.getItem(SK_ACEITES) || "[]") } catch { return [] }
   })
+  const { sInv, inv } = useCronogramaData()
+  const [invPending, setInvPending] = useState<Sugestao | null>(null)
+  const [invMotivo, setInvMotivo]   = useState("")
+
+  function openInvModal(s: Sugestao) { setInvPending(s); setInvMotivo("") }
+  function confirmInv() {
+    if (!invPending) return
+    setSt(invPending, "inviavel")
+    sInv([...inv, { paciente: pac, motivo: invMotivo, registradoEm: new Date().toLocaleDateString("pt-BR") }])
+    setInvPending(null)
+    setInvMotivo("")
+  }
 
   function persistStatus(m: Record<string, Status>) {
     setStatusMap(m)
@@ -1327,6 +1345,7 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
                             stOf={stOf}
                             setSt={setSt}
                             limitReached={false}
+                            onInviavel={openInvModal}
                           />
                         ))}
                       </div>
@@ -1354,7 +1373,36 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
           estrategia={estrategia}
           setEstrategia={setEstrategia}
           onAceitar={handleAceitar}
+          onInviavel={openInvModal}
         />
+      )}
+
+      {invPending && (
+        <div
+          style={{ position: "fixed", inset: 0, zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.4)", padding: "16px" }}
+          onClick={e => { if (e.target === e.currentTarget) { setInvPending(null); setInvMotivo("") } }}
+        >
+          <div style={{ background: "white", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "380px", width: "100%", padding: "20px" }}>
+            <div style={{ fontWeight: 900, fontSize: "17px", marginBottom: "4px" }}>⛔ Marcar como Inviável</div>
+            <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "10px" }}>Removido de TODAS as sugestões até tirado da lista.</div>
+            <div style={{ background: "#f8fafc", borderRadius: "10px", padding: "10px 12px", fontSize: "13px", fontWeight: 700, marginBottom: "10px" }}>{pac}</div>
+            <textarea
+              value={invMotivo}
+              onChange={e => setInvMotivo(e.target.value)}
+              placeholder="Motivo (ex: família faltando muito...)"
+              rows={2}
+              style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: "10px", padding: "8px 12px", fontSize: "13px", fontFamily: "inherit", resize: "none", marginBottom: "14px", boxSizing: "border-box" }}
+            />
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button onClick={confirmInv} style={{ padding: "8px 16px", borderRadius: "10px", background: B.navy, color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: "13px" }}>
+                Confirmar
+              </button>
+              <button onClick={() => { setInvPending(null); setInvMotivo("") }} style={{ flex: 1, padding: "8px 16px", borderRadius: "10px", background: "#f3f4f6", color: "#374151", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </>
   )
@@ -1363,12 +1411,13 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
 // ─── SugestaoCard ─────────────────────────────────────────────────────────────
 
 function SugestaoCard({
-  sugestao, stOf, setSt, limitReached,
+  sugestao, stOf, setSt, limitReached, onInviavel,
 }: {
   sugestao: Sugestao
   stOf: (s: Sugestao) => Status | null
   setSt: (s: Sugestao, st: Status | null) => void
   limitReached: boolean
+  onInviavel: (s: Sugestao) => void
 }) {
   const st  = stOf(sugestao)
   const stM = st ? STATUS_META[st] : null
@@ -1415,7 +1464,7 @@ function SugestaoCard({
 
       <div style={{ display: "flex", gap: "5px", alignItems: "center", flexWrap: "wrap", flexShrink: 0, alignSelf: "center" }}>
         {!st && (
-          <button onClick={() => setSt(sugestao, "inviavel")} style={btnStyle("#fef2f2", "#dc2626", "#fca5a5")}>
+          <button onClick={() => onInviavel(sugestao)} style={btnStyle("#fef2f2", "#dc2626", "#fca5a5")}>
             ⛔ Inviável
           </button>
         )}

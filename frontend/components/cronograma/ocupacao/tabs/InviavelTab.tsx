@@ -32,8 +32,8 @@ export function InviavelTab({ inv, onRemove, onExport }: Props) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
             <thead style={{ background: "#f8fafc" }}>
               <tr>
-                {["Paciente", "Motivo", "Registrado", ""].map(h => (
-                  <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontSize: "11px", fontWeight: 700, color: "#9ca3af", textTransform: "uppercase" }}>{h}</th>
+                {["Paciente", "Motivo", "Dia", "Hora", "Registrado", ""].map(h => (
+                  <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontSize: "11px", fontWeight: 700, color: "#9ca3af", textTransform: "uppercase", letterSpacing: ".05em" }}>{h}</th>
                 ))}
               </tr>
             </thead>
@@ -42,6 +42,8 @@ export function InviavelTab({ inv, onRemove, onExport }: Props) {
                 <tr key={i} style={{ borderTop: "1px solid #f0f0f0" }}>
                   <td style={{ padding: "8px 12px", fontWeight: 700, color: B.navy }}>{iv.paciente}</td>
                   <td style={{ padding: "8px 12px", color: "#6b7280" }}>{iv.motivo}</td>
+                  <td style={{ padding: "8px 12px", color: "#6b7280", fontSize: "12px" }}>{iv.dia ?? "—"}</td>
+                  <td style={{ padding: "8px 12px", fontWeight: 700, fontSize: "12px" }}>{iv.hora ?? "—"}</td>
                   <td style={{ padding: "8px 12px", color: "#9ca3af", fontSize: "11px" }}>{iv.registradoEm}</td>
                   <td style={{ padding: "8px 12px" }}>
                     <button onClick={() => onRemove(i)} style={{ fontSize: "11px", color: "#6b7280", background: "none", border: "none", cursor: "pointer" }}>remover</button>
