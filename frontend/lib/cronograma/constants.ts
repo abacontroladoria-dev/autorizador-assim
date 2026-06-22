@@ -19,6 +19,7 @@ export const TERAPIA_TO_ESP: Record<string, string> = {
   "Aplicador ABA (PS)": "Psicologia ABA",
   "Aplicador ABA (AV)": "Psicologia ABA",
   "Aplicador ABA (EF)": "Psicologia ABA",
+  "Coordenador de Caso": "Psicologia ABA",
   "Aplicador ABA (HS)": "Habilidades Sociais",
   "Fonoaudiologia": "Fonoaudiologia",
   "Psicopedagogia": "Psicopedagogia",

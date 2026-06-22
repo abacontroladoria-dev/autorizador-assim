@@ -1,8 +1,13 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import React, { startTransition, useEffect, useMemo, useRef, useState } from "react"
+import { RotateCcw } from "lucide-react"
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
 import { B, DIAS_UTIL, EXCLUIR_OCUP, isProfBloqueadoTemp, TERAPIA_TO_ESP } from "@/lib/cronograma/constants"
+
+// Coordenador de Caso tem pacientes reais e precisa de redistribuição na Saída.
+// EXCLUIR_OCUP é mantido inalterado nos demais módulos (ocupação, algoritmo, etc.)
+const EXCLUIR_SAIDA = new Set([...EXCLUIR_OCUP].filter(t => t !== "Coordenador de Caso"))
 import { fmtName, getTurno, gPrio, pm } from "@/lib/cronograma/helpers"
 import { slotValidoParaPaciente } from "@/lib/cronograma/candidatos"
 import { buildSaidaAnalise } from "@/lib/cronograma/saida"
@@ -129,6 +134,14 @@ const DONUT_NAME_TO_KEY: Record<string, string> = {
   "#5": "e5", "#6": "e6", "#7": "e7", "—": "sem",
 }
 
+const COBERTURA_FILTER_MAP: Record<string, (r: ResultItem) => boolean> = {
+  verde:    r => !!(r.analise.e1 || r.analise.e2),
+  amarelo:  r => !!(r.analise.e3 || r.analise.e6),
+  azul:     r => r.analise.e4.length > 0,
+  vermelho: r => !!(r.analise.e5 || r.analise.e7),
+  sem:      r => !!r.analise.semSolucao,
+}
+
 // ─── COMPONENTE ───────────────────────────────────────────────────────────────
 
 export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: Props) {
@@ -143,7 +156,23 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
   const [scheduleModal, setScheduleModal] = useState<ScheduleModalState | null>(null)
   const [candidatoWA, setCandidatoWA] = useState<Record<string, CandidatoWA>>({})
   const [estrategiaFiltro, setEstrategiaFiltro] = useState<Set<string>>(new Set())
+  const [coberturaFiltro, setCoberturaFiltro] = useState<string | null>(null)
   const comboRef = useRef<HTMLDivElement>(null)
+
+  function limparTudo() {
+    setProf("")
+    setInputVal("")
+    setDropOpen(false)
+    setSelDT(new Set())
+    setResults(null)
+    setModalGroup(null)
+    setModalTabIdx(0)
+    setSlotModal(null)
+    setScheduleModal(null)
+    setCandidatoWA({})
+    setEstrategiaFiltro(new Set())
+    setCoberturaFiltro(null)
+  }
 
   useEffect(() => {
     function onMouseDown(e: MouseEvent) {
@@ -180,7 +209,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       countAgend++
       const nome = String(r["Nome Favorecido"] || "")
       if (!nome || PACIENTES_FICTICIOS.has(nome)) { countFict++; continue }
-      if (EXCLUIR_OCUP.has(String(r.Terapia || ""))) { countExcl++; continue }
+      if (EXCLUIR_SAIDA.has(String(r.Terapia || ""))) { countExcl++; continue }
       const dia = String(r["Dia da Semana"] || "")
       if (!(DIAS_UTIL as readonly string[]).includes(dia)) { countDia++; continue }
       countOk++
@@ -250,17 +279,35 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       else                       sem++
     }
     const total = verde + amarelo + azul + vermelho + sem
+    const cobPct = total > 0 ? Math.round((total - sem) / total * 100) : 0
     return {
       total,
+      cobPct,
       slices: [
-        { name: "100% garantido",                          est: "#1, #2", value: verde,    color: "#16a34a" },
-        { name: "Depende do aceite da família",             est: "#3, #6", value: amarelo,  color: "#d97706" },
-        { name: "Depende dos prazos da Autorização",        est: "#4",     value: azul,     color: "#2563eb" },
-        { name: "Depende do aval terapêutico e da família", est: "#5, #7", value: vermelho, color: "#dc2626" },
-        { name: "Sem solução",                              est: "—",      value: sem,      color: "var(--muted-foreground)" },
+        { name: "100% garantido",                          filterKey: "verde",    value: verde,    color: "#16a34a" },
+        { name: "Depende dos prazos da Autorização",        filterKey: "azul",     value: azul,     color: "#2563eb" },
+        { name: "Depende do aceite da família",             filterKey: "amarelo",  value: amarelo,  color: "#d97706" },
+        { name: "Depende do aval terapêutico e da família", filterKey: "vermelho", value: vermelho, color: "#dc2626" },
+        { name: "Sem solução",                              filterKey: "sem",      value: sem,      color: "#94a3b8" },
       ].filter(d => d.value > 0),
     }
   }, [results])
+
+  // KPIs do resumo de impacto
+  const resumoKpi = useMemo(() => {
+    if (!results || results.length === 0) return null
+    const pacientes = new Set(results.map(r => r.afetada.pac)).size
+    const sessoes = results.length
+    let resolvidos = 0, pendentes = 0, recusado = 0
+    for (const r of results) {
+      const key = `${r.afetada.pac}|||${r.afetada.dia}|||${r.afetada.hora}|||${r.afetada.terapia}`
+      const status = statusMap[key]?.status ?? "pendente"
+      if (status === "resolvido")     resolvidos++
+      else if (status === "recusado") recusado++
+      else                             pendentes++
+    }
+    return { pacientes, sessoes, resolvidos, pendentes, recusado }
+  }, [results, statusMap])
 
   // Sessões sem solução → hipótese novo profissional
   const semSolucaoItems = useMemo(() =>
@@ -456,6 +503,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       return n
     })
     setResults(null)
+    setCoberturaFiltro(null)
   }
 
   function selectTodos() {
@@ -488,7 +536,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       for (const r of agendRows) {
         const nome = String(r["Nome Favorecido"] || "")
         if (r.Profissional !== prof || !nome || PACIENTES_FICTICIOS.has(nome)) continue
-        if (EXCLUIR_OCUP.has(String(r.Terapia || ""))) continue
+        if (EXCLUIR_SAIDA.has(String(r.Terapia || ""))) continue
         const dia = String(r["Dia da Semana"] || "")
         const turno = getTurno(String(r.HI_str || ""))
         if (!selDT.has(`${dia}|||${turno}`)) continue
@@ -514,7 +562,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
     for (const r of agendRows) {
       const nome = String(r["Nome Favorecido"] || "")
       if (r.Profissional !== prof || !nome || PACIENTES_FICTICIOS.has(nome)) { if (r.Profissional === prof) cFict++; continue }
-      if (EXCLUIR_OCUP.has(String(r.Terapia || ""))) { cExcl++; continue }
+      if (EXCLUIR_SAIDA.has(String(r.Terapia || ""))) { cExcl++; continue }
       const dia = String(r["Dia da Semana"] || "")
       const turno = getTurno(String(r.HI_str || ""))
       if (!selDT.has(`${dia}|||${turno}`)) { cSelDT++; continue }
@@ -589,8 +637,11 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
         : 3
       return pri(a) - pri(b)
     })
-    setResults(res)
-    setEstrategiaFiltro(new Set())
+    startTransition(() => {
+      setResults(res)
+      setEstrategiaFiltro(new Set())
+      setCoberturaFiltro(null)
+    })
   }
 
   function handleStatus(afetada: AfetadaItem, status: StatusSaida, payload: StatusPayload) {
@@ -630,19 +681,38 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
   }, [results])
 
   const filteredPacGroups = useMemo(() => {
-    if (estrategiaFiltro.size === 0) return pacGroups
-    return pacGroups
-      .map(g => g.filter(r => {
-        for (const key of estrategiaFiltro) {
-          const pred = ESTRATEGIA_FILTER_MAP[key]
-          if (pred?.(r)) return true
-        }
-        return false
-      }))
-      .filter(g => g.length > 0)
-  }, [pacGroups, estrategiaFiltro])
+    let groups = pacGroups
+    if (estrategiaFiltro.size > 0) {
+      groups = groups
+        .map(g => g.filter(r => {
+          for (const key of estrategiaFiltro) {
+            const pred = ESTRATEGIA_FILTER_MAP[key]
+            if (pred?.(r)) return true
+          }
+          return false
+        }))
+        .filter(g => g.length > 0)
+    }
+    if (coberturaFiltro) {
+      const pred = COBERTURA_FILTER_MAP[coberturaFiltro]
+      if (pred) {
+        groups = groups
+          .map(g => g.filter(pred))
+          .filter(g => g.length > 0)
+      }
+    }
+    return groups
+  }, [pacGroups, estrategiaFiltro, coberturaFiltro])
 
   const canAnalyze = !!prof && selDT.size > 0 && cRows.length > 0
+
+  // Auto-analisa ao mudar seleção de turnos
+  useEffect(() => {
+    if (!canAnalyze) return
+    const t = setTimeout(analisar, 0)
+    return () => clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selDT])
 
   // Derivados das sugestões para os slots livres
   const aConfirmarCount = Object.keys(sugestoesPorSlot).length
@@ -661,25 +731,39 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
   return (
     <div className="flex flex-col gap-3">
 
-      {/* ── Linha 1: Formulário + Distribuição + Garantidos ─────────────────── */}
-      <div style={{ display: "grid", gridTemplateColumns: "380px 1fr 1fr", gap: "12px" }}>
+      {/* ── Linha 1: Formulário + Resumo/Estratégias/Cobertura ──────────────── */}
+      <div style={{ display: "grid", gridTemplateColumns: "380px 1fr", gap: "12px" }}>
 
         {/* Card formulário */}
-        <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px" }}>
-          <div style={{ marginBottom: "6px" }}>
-            <div style={{ fontWeight: 800, color: B.navy, fontSize: "15px", lineHeight: 1.3 }}>
-              Saída de Profissional
-            </div>
-            <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "2px" }}>
-              Horário(s) Específico(s)
-            </div>
-          </div>
-          <div className="text-xs text-gray-500 mb-3">
-            Selecione o profissional e os dias/turnos afetados. Cada vaga é oferecida a apenas um paciente.
-          </div>
+        <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "20px", display: "flex", flexDirection: "column", gap: "14px" }}>
 
-          <div className="mb-3">
-            <label htmlFor="prof-search" className="text-xs font-bold text-gray-500 mb-1 block">Profissional</label>
+          {/* Seletor de profissional */}
+          <div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "10px" }}>
+              <label htmlFor="prof-search" style={{ fontSize: "14px", fontWeight: 700, color: B.navy, margin: 0, cursor: "default" }}>
+                Profissional
+              </label>
+              {(prof || results) && (
+                <button
+                  onClick={limparTudo}
+                  title="Limpar análise"
+                  className="animate-in fade-in zoom-in-90 duration-200 active:scale-95"
+                  style={{
+                    display: "flex", alignItems: "center", gap: "5px",
+                    padding: "4px 10px", borderRadius: "999px",
+                    border: "1px solid var(--border)", background: "transparent",
+                    color: "var(--muted-foreground)", fontSize: "11px", fontWeight: 600,
+                    cursor: "pointer",
+                    transition: "color 150ms ease-out, border-color 150ms ease-out, background 150ms ease-out",
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.color = "#dc2626"; e.currentTarget.style.borderColor = "#fca5a5"; e.currentTarget.style.background = "#fef2f2" }}
+                  onMouseLeave={e => { e.currentTarget.style.color = "var(--muted-foreground)"; e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.background = "transparent" }}
+                >
+                  <RotateCcw size={10} />
+                  Limpar
+                </button>
+              )}
+            </div>
             <div ref={comboRef} style={{ position: "relative" }}>
               <input
                 id="prof-search"
@@ -698,18 +782,20 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                 }}
                 onFocus={() => setDropOpen(true)}
                 placeholder="Buscar profissional..."
-                className="w-full border border-input rounded-lg px-3 py-2 text-sm bg-card text-foreground"
-                style={{ outline: "none" }}
+                style={{ outline: "none", width: "100%", border: "1px solid var(--border)", borderRadius: "10px", padding: "10px 12px", fontSize: "13px", background: "var(--card)", color: "var(--foreground)", transition: "border-color 150ms ease-out, box-shadow 150ms ease-out" }}
+                onFocusCapture={e => { e.currentTarget.style.borderColor = B.blue; e.currentTarget.style.boxShadow = `0 0 0 3px ${B.blue}22` }}
+                onBlurCapture={e => { e.currentTarget.style.borderColor = "var(--border)"; e.currentTarget.style.boxShadow = "none" }}
               />
               {dropOpen && filteredProfs.length > 0 && (
                 <div
                   id="prof-search-list"
                   role="listbox"
                   aria-label="Profissionais disponíveis"
+                  className="animate-in fade-in zoom-in-95 slide-in-from-top-1 duration-150"
                   style={{
-                    position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, zIndex: 50,
+                    position: "absolute", top: "calc(100% + 4px)", left: 0, right: 0, zIndex: 50,
                     background: "var(--card)", border: "1px solid var(--border)", borderRadius: "10px",
-                    boxShadow: "0 4px 16px rgba(0,0,0,0.08)", maxHeight: "200px", overflowY: "auto",
+                    boxShadow: "0 8px 24px rgba(0,0,0,0.10)", maxHeight: "200px", overflowY: "auto",
                   }}>
                   {filteredProfs.map(p => (
                     <button
@@ -722,9 +808,10 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                       }}
                       style={{
                         display: "block", width: "100%", textAlign: "left",
-                        padding: "8px 12px", background: p === prof ? "var(--muted)" : "none",
+                        padding: "9px 12px", background: p === prof ? B.navyLt : "none",
                         border: "none", fontSize: "13px", cursor: "pointer",
                         color: p === prof ? B.navy : "var(--card-foreground)", fontWeight: p === prof ? 700 : 400,
+                        transition: "background 120ms ease-out",
                       }}
                       onMouseEnter={e => { if (p !== prof) e.currentTarget.style.background = "var(--muted)" }}
                       onMouseLeave={e => { if (p !== prof) e.currentTarget.style.background = "none" }}
@@ -737,150 +824,284 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
             </div>
           </div>
 
+          {/* Erro: sem sessões */}
           {prof && Object.keys(profDT).length === 0 && (
-            <div style={{ fontSize: "11px", color: "#ef4444", background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: "8px", padding: "8px 12px", marginBottom: "4px" }}>
-              Nenhuma sessão clínica encontrada para este profissional no CSV carregado.
-              Possíveis causas: nome diferente no CSV, sessões com status diferente de &quot;Agendado&quot;, ou todas as sessões são administrativas.
-              Abra o console (F12) e selecione este profissional novamente para ver o diagnóstico.
+            <div className="animate-in fade-in slide-in-from-top-1 duration-200" style={{ fontSize: "11px", color: "#dc2626", background: "#fef2f2", border: "1px solid #fecaca", borderRadius: "8px", padding: "10px 12px", lineHeight: 1.5 }}>
+              Nenhuma sessão clínica encontrada. Verifique se o nome está exatamente como no CSV ou abra o console (F12) para detalhes.
             </div>
           )}
 
+          {/* Dias e turnos */}
           {prof && Object.keys(profDT).length > 0 && (
-            <div>
-              <div className="flex items-center gap-3 mb-2">
-                <span className="text-xs font-bold text-gray-500">Dias e turnos afetados</span>
+            <div className="animate-in fade-in slide-in-from-bottom-2 duration-200">
+              <div className="flex items-center justify-between mb-3">
+                <span style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: "0.07em" }}>
+                  Dias e turnos afetados
+                </span>
                 <button
                   onClick={selectTodos}
-                  style={{ padding: "10px 14px", minHeight: "44px", borderRadius: "7px", border: `1px solid ${B.navy}`, background: selDT.size === todosCount ? B.navy : "var(--card)", color: selDT.size === todosCount ? "white" : B.navy, fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
+                  style={{
+                    padding: "5px 12px", borderRadius: "999px",
+                    border: `1.5px solid ${selDT.size === todosCount ? B.navy : "var(--border)"}`,
+                    background: selDT.size === todosCount ? B.navy : "transparent",
+                    color: selDT.size === todosCount ? "white" : "var(--muted-foreground)",
+                    fontSize: "11px", fontWeight: 700, cursor: "pointer",
+                    transition: "all 150ms ease-out",
+                  }}
                 >
                   Todos
                 </button>
               </div>
-              <div className="flex flex-col gap-[5px]">
-                {DIAS_UTIL.filter(d => profDT[d]).map(d => (
-                  <div key={d} className="flex items-center gap-[6px]">
-                    <span className="text-xs text-gray-700 w-20 font-medium">{d.replace("-feira", "")}</span>
-                    {(["manhã", "tarde"] as const).filter(t => profDT[d]?.has(t)).map(t => {
-                      const k = `${d}|||${t}`
-                      const sel = selDT.has(k)
-                      return (
-                        <button
-                          key={t}
-                          onClick={() => toggleDT(d, t)}
-                          style={{ padding: "10px 14px", minHeight: "44px", borderRadius: "8px", border: `1px solid ${sel ? B.blue : "var(--border)"}`, background: sel ? "var(--cron-active-bg)" : "var(--card)", color: sel ? B.blue : "var(--muted-foreground)", fontSize: "12px", fontWeight: sel ? 700 : 400, cursor: "pointer" }}
-                        >
-                          {t === "manhã" ? "Manhã" : "Tarde"}
-                        </button>
-                      )
-                    })}
+              <div className="flex flex-col gap-2">
+                {DIAS_UTIL.filter(d => profDT[d]).map((d, i) => (
+                  <div key={d} className="flex items-center gap-2" style={{ animationDelay: `${i * 25}ms` }}>
+                    <span style={{ fontSize: "12px", color: "var(--muted-foreground)", width: "72px", fontWeight: 500, flexShrink: 0 }}>
+                      {d.replace("-feira", "")}
+                    </span>
+                    <div className="flex gap-1.5">
+                      {(["manhã", "tarde"] as const).filter(t => profDT[d]?.has(t)).map(t => {
+                        const k = `${d}|||${t}`
+                        const sel = selDT.has(k)
+                        return (
+                          <button
+                            key={t}
+                            onClick={() => toggleDT(d, t)}
+                            className="active:scale-95"
+                            style={{
+                              padding: "6px 14px", borderRadius: "999px",
+                              border: `1.5px solid ${sel ? B.blue : "var(--border)"}`,
+                              background: sel ? B.blueLt : "transparent",
+                              color: sel ? B.blue : "var(--muted-foreground)",
+                              fontSize: "12px", fontWeight: sel ? 700 : 500, cursor: "pointer",
+                              transition: "all 150ms ease-out",
+                            }}
+                          >
+                            {t === "manhã" ? "Manhã" : "Tarde"}
+                          </button>
+                        )
+                      })}
+                    </div>
                   </div>
                 ))}
               </div>
             </div>
           )}
 
-          <button
-            onClick={analisar}
-            disabled={!canAnalyze}
-            style={{ marginTop: "14px", padding: "0 20px", minHeight: "44px", borderRadius: "10px", background: canAnalyze ? B.navy : `${B.navy}55`, color: "white", border: "none", fontWeight: 800, fontSize: "13px", cursor: canAnalyze ? "pointer" : "not-allowed", display: "inline-flex", alignItems: "center" }}
-          >
-            Analisar Impacto
-          </button>
         </div>
 
-        {/* Card Distribuição */}
-        <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px", display: "flex", flexDirection: "column" }}>
-            <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>
-              Distribuição
+        {/* Card Resumo + Estratégias + Cobertura */}
+        <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "20px", display: "flex", flexDirection: "column", gap: "16px" }}>
+
+          {/* Resumo do impacto */}
+          <div>
+            <div style={{ fontWeight: 700, color: B.navy, fontSize: "14px", marginBottom: "12px" }}>
+              Resumo do impacto
             </div>
-            {!donutData ? (
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px" }}>
-                <svg width="56" height="56" viewBox="0 0 56 56" fill="none" aria-hidden="true">
+            {!resumoKpi ? (
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px", padding: "20px 0" }}>
+                <svg width="48" height="48" viewBox="0 0 56 56" fill="none" aria-hidden="true">
                   <circle cx="28" cy="28" r="20" strokeWidth="7" stroke="var(--border)" strokeDasharray="5 4" fill="none" opacity="0.6" />
                 </svg>
                 <div style={{ fontSize: "11px", color: "var(--muted-foreground)", textAlign: "center", lineHeight: 1.5 }}>
-                  {results === null
-                    ? <>Execute &quot;Analisar Impacto&quot;<br />para ver o resumo</>
-                    : <span style={{ color: "#ef4444" }}>Nenhuma sessão clínica encontrada para este profissional. Verifique o console (F12) para detalhes.</span>
-                  }
+                  Execute &quot;Analisar Impacto&quot;<br />para ver o resumo
                 </div>
               </div>
             ) : (
-              <>
-                <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "6px" }}>
-                  {donutData.total} sessão(ões) afetada(s)
-                </div>
-                <ResponsiveContainer width="100%" height={200}>
-                  <PieChart>
-                    <Pie data={donutData.slices} cx="50%" cy="50%" innerRadius={58} outerRadius={82} dataKey="value" strokeWidth={0}>
-                      {donutData.slices.map((s, i) => <Cell key={i} fill={s.color} />)}
-                    </Pie>
-                    <Tooltip formatter={(val, name) => [val ?? 0, name]} contentStyle={{ fontSize: "11px", borderRadius: "8px", border: "1px solid var(--border)", padding: "4px 8px" }} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div style={{ display: "flex", flexDirection: "column", gap: "7px", marginTop: "6px" }}>
-                  {donutData.slices.map((s, i) => (
-                    <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                      <div style={{ width: "12px", height: "12px", borderRadius: "3px", background: s.color, flexShrink: 0 }} />
-                      <div style={{ fontSize: "13px", color: "var(--card-foreground)", flex: 1 }}>
-                        <span style={{ fontWeight: 700 }}>{s.name}</span> {s.label}
-                      </div>
-                      <div style={{ fontSize: "13px", fontWeight: 700, color: B.navy, whiteSpace: "nowrap" }}>
-                        {s.value} <span style={{ fontWeight: 400, color: "var(--muted-foreground)" }}>({Math.round(s.value / donutData.total * 100)}%)</span>
-                      </div>
+              <div style={{ display: "flex", gap: "10px" }}>
+                {([
+                  { label: "Pacientes",  value: resumoKpi.pacientes,  color: "#3b5bdb" },
+                  { label: "Sessões",    value: resumoKpi.sessoes,    color: "#7048e8" },
+                  { label: "Resolvidos", value: resumoKpi.resolvidos, color: "#2f9e44" },
+                  { label: "Pendentes",  value: resumoKpi.pendentes,  color: "#f08c00" },
+                  { label: "Recusado",   value: resumoKpi.recusado,   color: "#92400e" },
+                ] as const).map(k => (
+                  <div key={k.label} style={{
+                    flex: 1, background: "var(--muted)", borderRadius: "10px",
+                    border: "1px solid var(--border)", padding: "12px 14px",
+                    display: "flex", flexDirection: "column", gap: "4px",
+                  }}>
+                    <div style={{ fontSize: "26px", fontWeight: 800, color: k.color, lineHeight: 1 }}>
+                      {k.value}
                     </div>
-                  ))}
-                </div>
-              </>
+                    <div style={{ fontSize: "12px", color: "var(--muted-foreground)", fontWeight: 500 }}>
+                      {k.label}
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
 
-        {/* Card Garantidos ou Dependentes */}
-        <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px", display: "flex", flexDirection: "column" }}>
-            <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>
-              Garantidos ou Dependentes
-            </div>
-            {!garantidoData ? (
-              <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px" }}>
-                <svg width="56" height="56" viewBox="0 0 56 56" fill="none" aria-hidden="true">
-                  <circle cx="28" cy="28" r="20" strokeWidth="7" stroke="var(--border)" strokeDasharray="5 4" fill="none" opacity="0.6" />
-                </svg>
-                <div style={{ fontSize: "11px", color: "var(--muted-foreground)", textAlign: "center", lineHeight: 1.5 }}>
-                  {results === null
-                    ? <>Execute &quot;Analisar Impacto&quot;<br />para ver o resumo</>
-                    : <span style={{ color: "#ef4444" }}>Nenhuma sessão clínica encontrada.</span>
-                  }
-                </div>
-              </div>
-            ) : (
-              <>
-                <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "6px" }}>
-                  {garantidoData.total} sessão(ões) afetada(s)
-                </div>
-                <ResponsiveContainer width="100%" height={200}>
-                  <PieChart>
-                    <Pie data={garantidoData.slices} cx="50%" cy="50%" innerRadius={58} outerRadius={82} dataKey="value" strokeWidth={0}>
-                      {garantidoData.slices.map((s, i) => <Cell key={i} fill={s.color} />)}
-                    </Pie>
-                    <Tooltip formatter={(val, name) => [val ?? 0, name]} contentStyle={{ fontSize: "12px", borderRadius: "8px", border: "1px solid var(--border)", padding: "4px 8px" }} />
-                  </PieChart>
-                </ResponsiveContainer>
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "8px" }}>
-                  {garantidoData.slices.map((s, i) => (
-                    <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: "8px" }}>
-                      <div style={{ width: "12px", height: "12px", borderRadius: "3px", background: s.color, flexShrink: 0, marginTop: "2px" }} />
-                      <div style={{ fontSize: "13px", color: "var(--card-foreground)", flex: 1, lineHeight: "1.4" }}>
-                        {s.name}
-                        <span style={{ display: "block", fontSize: "12px", color: "var(--muted-foreground)" }}>{s.est}</span>
-                      </div>
-                      <div style={{ fontSize: "13px", fontWeight: 700, color: B.navy, whiteSpace: "nowrap" }}>
-                        {s.value} <span style={{ fontWeight: 400, color: "var(--muted-foreground)" }}>({Math.round(s.value / garantidoData.total * 100)}%)</span>
-                      </div>
+          {/* Divisor + Estratégias e Cobertura — só quando há dados */}
+          {resumoKpi && (
+            <>
+              <div style={{ borderTop: "1px solid var(--border)" }} />
+              <div style={{ display: "flex", gap: "0", alignItems: "stretch" }}>
+
+                {/* Estratégias */}
+                <div style={{ flex: "0 0 auto", display: "flex", flexDirection: "column", paddingRight: "12px" }}>
+                  <div style={{ fontWeight: 700, color: B.navy, fontSize: "13px", marginBottom: "2px" }}>
+                    Estratégias
+                  </div>
+                  {!donutData ? (
+                    <div style={{ fontSize: "11px", color: "var(--muted-foreground)", padding: "12px 0" }}>
+                      {results === null ? <>Execute &quot;Analisar Impacto&quot;</> : <span style={{ color: "#ef4444" }}>Nenhuma sessão encontrada.</span>}
                     </div>
-                  ))}
+                  ) : (
+                    <>
+                      <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "10px" }}>
+                        {donutData.total} sessão(ões) afetada(s)
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "auto auto auto", gap: "5px 8px", alignItems: "center", width: "fit-content" }}>
+                        {donutData.slices.map((s, i) => (
+                          <React.Fragment key={i}>
+                            <div style={{
+                              minWidth: "32px", height: "20px", borderRadius: "4px", background: s.color,
+                              display: "flex", alignItems: "center", justifyContent: "center",
+                              padding: "0 4px",
+                            }}>
+                              <span style={{ fontSize: "11px", fontWeight: 800, color: "#fff", lineHeight: 1 }}>{s.name}</span>
+                            </div>
+                            <div style={{ fontSize: "13px", color: "var(--card-foreground)" }}>
+                              {s.label}
+                            </div>
+                            <div style={{ fontSize: "13px", fontWeight: 700, color: B.navy, whiteSpace: "nowrap", textAlign: "right" }}>
+                              {s.value} <span style={{ fontWeight: 400, color: "var(--muted-foreground)" }}>({Math.round(s.value / donutData.total * 100)}%)</span>
+                            </div>
+                          </React.Fragment>
+                        ))}
+                      </div>
+                    </>
+                  )}
                 </div>
-              </>
-            )}
+
+                {/* Divisor vertical */}
+                <div style={{ width: "1px", background: "var(--border)", flexShrink: 0 }} />
+
+                {/* Cobertura — Gauge semicircular + lista clicável */}
+                <div style={{ flex: 1, display: "flex", flexDirection: "column", paddingLeft: "12px" }}>
+                  <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "2px" }}>
+                    <div style={{ fontWeight: 700, color: B.navy, fontSize: "13px" }}>Cobertura</div>
+                    {coberturaFiltro && (
+                      <button
+                        onClick={() => setCoberturaFiltro(null)}
+                        style={{ fontSize: "10px", color: B.blue, background: B.blueLt, border: "none", borderRadius: "4px", padding: "1px 6px", cursor: "pointer", fontWeight: 600 }}
+                      >
+                        limpar filtro ×
+                      </button>
+                    )}
+                  </div>
+                  {!garantidoData ? (
+                    <div style={{ fontSize: "11px", color: "var(--muted-foreground)", padding: "12px 0" }}>
+                      {results === null ? <>Execute &quot;Analisar Impacto&quot;</> : <span style={{ color: "#ef4444" }}>Nenhuma sessão encontrada.</span>}
+                    </div>
+                  ) : (
+                    <>
+                      <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "10px" }}>
+                        {garantidoData.total} sessão(ões) afetada(s)
+                      </div>
+                      <div style={{ display: "flex", gap: "16px", alignItems: "flex-start", flexWrap: "wrap" }}>
+
+                        {/* Gauge semicircular — multi-segmento */}
+                        <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "center", width: "120px" }}>
+                          {(() => {
+                            const R = 72
+                            const circ = Math.PI * R
+                            const pct = garantidoData.cobPct
+                            const GAP = 1.5
+                            let cum = 0
+                            const segs = garantidoData.slices.map(s => {
+                              const frac = s.value / garantidoData.total
+                              const seg = { color: s.color, skip: cum * circ, fill: Math.max(0, frac * circ - GAP) }
+                              cum += frac
+                              return seg
+                            })
+                            return (
+                              <svg viewBox="0 0 200 112" width="120" height="70" aria-label={`${pct}% cobertura`}>
+                                {/* Track de fundo */}
+                                <circle
+                                  cx={100} cy={108} r={R}
+                                  fill="none"
+                                  stroke="var(--border)"
+                                  strokeWidth={16}
+                                  strokeDasharray={`${circ} ${circ}`}
+                                  strokeLinecap="butt"
+                                  transform="rotate(180, 100, 108)"
+                                />
+                                {/* Segmentos coloridos */}
+                                {segs.map((seg, i) => seg.fill > 0 && (
+                                  <circle
+                                    key={i}
+                                    cx={100} cy={108} r={R}
+                                    fill="none"
+                                    stroke={seg.color}
+                                    strokeWidth={16}
+                                    strokeDasharray={`0 ${seg.skip} ${seg.fill} ${circ * 2}`}
+                                    strokeLinecap="butt"
+                                    transform="rotate(180, 100, 108)"
+                                  />
+                                ))}
+                                <text x={100} y={86} textAnchor="middle" fontSize={26} fontWeight="800" style={{ fill: B.navy }}>
+                                  {pct}%
+                                </text>
+                              </svg>
+                            )
+                          })()}
+                          <div style={{ fontSize: "10px", color: "var(--muted-foreground)", textAlign: "center", lineHeight: "1.4", marginTop: "2px" }}>
+                            com cobertura<br />ou solução
+                          </div>
+                        </div>
+
+                        {/* Lista clicável de categorias */}
+                        <div style={{ flex: 1, minWidth: "160px", display: "flex", flexDirection: "column", gap: "2px" }}>
+                          {garantidoData.slices.map((s, i) => {
+                            const isActive = coberturaFiltro === s.filterKey
+                            const pct = Math.round(s.value / garantidoData.total * 100)
+                            return (
+                              <button
+                                key={i}
+                                onClick={() => setCoberturaFiltro(isActive ? null : s.filterKey)}
+                                style={{
+                                  display: "grid",
+                                  gridTemplateColumns: "12px 1fr auto",
+                                  gap: "0 8px",
+                                  alignItems: "center",
+                                  padding: "5px 8px",
+                                  borderRadius: "7px",
+                                  border: `1.5px solid ${isActive ? s.color : "transparent"}`,
+                                  background: isActive ? `${s.color}18` : "transparent",
+                                  cursor: "pointer",
+                                  textAlign: "left",
+                                  transition: "background 120ms ease, border-color 120ms ease",
+                                  width: "100%",
+                                }}
+                                onMouseEnter={e => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = "var(--muted)" }}
+                                onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = "transparent" }}
+                              >
+                                <div style={{ width: "12px", height: "12px", borderRadius: "3px", background: s.color, flexShrink: 0 }} />
+                                <div style={{ fontSize: "12px", color: "var(--card-foreground)", lineHeight: "1.3", textAlign: "left" }}>
+                                  {s.name}
+                                </div>
+                                <div style={{ fontSize: "12px", fontWeight: 700, color: B.navy, whiteSpace: "nowrap" }}>
+                                  {s.value}
+                                  <span style={{ fontWeight: 400, color: "var(--muted-foreground)", marginLeft: "3px" }}>
+                                    ({pct}%)
+                                  </span>
+                                </div>
+                              </button>
+                            )
+                          })}
+                        </div>
+
+                      </div>
+                    </>
+                  )}
+                </div>
+
+              </div>
+            </>
+          )}
+
         </div>
 
       </div>
@@ -902,7 +1123,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
 
               {/* Agenda do novo profissional */}
               <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px" }}>
-                <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>
+                <div style={{ fontWeight: 700, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>
                   Agenda do novo profissional
                 </div>
                 <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "10px" }}>
@@ -1008,7 +1229,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
 
               {/* Carga semanal */}
               <div style={{ minWidth: "240px", background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px" }}>
-                <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>Carga semanal</div>
+                <div style={{ fontWeight: 700, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>Carga semanal</div>
                 <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginBottom: "6px" }}>Novo profissional</div>
 
                 <div style={{ position: "relative" }}>
@@ -1077,7 +1298,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
 
               {/* Ocupação por dia */}
               <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px" }}>
-                <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>Ocupação por dia</div>
+                <div style={{ fontWeight: 700, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>Ocupação por dia</div>
                 <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginBottom: "12px" }}>Novo profissional</div>
                 <table style={{ borderCollapse: "collapse", fontSize: "12px" }}>
                   <thead>
@@ -1120,7 +1341,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
 
               {/* Ocupação por especialidade */}
               <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px" }}>
-                <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>Ocupação por especialidade</div>
+                <div style={{ fontWeight: 700, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>Ocupação por especialidade</div>
                 <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginBottom: "12px" }}>Novo profissional</div>
                 <table style={{ borderCollapse: "collapse", fontSize: "12px" }}>
                   <thead>
@@ -1165,7 +1386,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       {results && (
         <div className="bg-card rounded-[14px] border border-border p-4">
           <div className="flex justify-between items-start mb-3 flex-wrap gap-2">
-            <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px" }}>
+            <div style={{ fontWeight: 700, color: B.navy, fontSize: "14px" }}>
               {estrategiaFiltro.size > 0
                 ? `${filteredPacGroups.length} paciente(s) · ${filteredPacGroups.reduce((s, g) => s + g.length, 0)} sessão(ões) filtrados`
                 : `${pacGroups.length} paciente(s) afetado(s) · ${results.length} sessão(ões)`}
@@ -1331,7 +1552,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
               <div className="px-5 py-[14px] border-b border-gray-100 bg-gray-50">
                 <div className="flex justify-between items-start gap-3">
                   <div>
-                    <div style={{ fontWeight: 900, fontSize: "15px", color: B.navy }}>
+                    <div style={{ fontWeight: 700, fontSize: "15px", color: B.navy }}>
                       Candidatos - {DIA_ABR[slotDia] ?? slotDia} {slotHora}
                     </div>
                     <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "3px" }}>
@@ -1422,7 +1643,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
               <div className="px-5 py-4 border-b border-gray-100 bg-[var(--card)]">
                 <div className="flex justify-between items-start gap-3">
                   <div>
-                    <div style={{ fontWeight: 800, fontSize: "16px", color: B.navy }}>🗓 Cronograma — {c.pac}</div>
+                    <div style={{ fontWeight: 700, fontSize: "16px", color: B.navy }}>🗓 Cronograma — {c.pac}</div>
                     <div className="flex gap-[6px] flex-wrap mt-[5px]">
                       <span style={{ background: B.blueLt, color: B.blue, border: `1px solid ${B.blue}33`, borderRadius: "999px", padding: "2px 10px", fontSize: "11px", fontWeight: 800 }}>
                         Convênio: {c.conv || "—"}

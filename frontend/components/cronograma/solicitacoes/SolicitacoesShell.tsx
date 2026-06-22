@@ -61,9 +61,30 @@ function TabContent({
     return (
       <>
         {cRows.length === 0 && (
-          <div className="flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50/80 dark:bg-amber-950/20 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-            <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" className="shrink-0" aria-hidden="true"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-            Carregue o CSV da grade para usar esta ferramenta.
+          <div
+            className="animate-in fade-in slide-in-from-top-2 duration-300 flex items-center gap-3"
+            style={{
+              padding: "11px 16px",
+              borderRadius: "10px",
+              border: "1.5px dashed #fbbf24",
+              background: "#fffbeb",
+            }}
+          >
+            {/* Ícone upload — pulsa 3× para chamar atenção, depois para */}
+            <div
+              className="shrink-0"
+              style={{ color: "#d97706", animation: "pulse 2s ease-in-out 3" }}
+              aria-hidden="true"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+            <p style={{ fontSize: "12px", color: "#78350f", margin: 0, lineHeight: 1.5 }}>
+              Selecione o <strong style={{ fontWeight: 700 }}>arquivo de Laudos</strong> no cabeçalho para habilitar a análise de impacto.
+            </p>
           </div>
         )}
         <SaidaProfMode cRows={cRows} lRows={lRows} cfg={cfg} statusMap={statusMap} persistStatus={persistStatus} />
