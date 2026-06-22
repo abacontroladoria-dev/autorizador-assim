@@ -12,15 +12,18 @@
 O design atual de `cco.atendimentos` usa `session_key` como chave determinística baseada em **paciente + data + hora**. Isso cria um **problema fundamental de rastreabilidade** quando sessões são remarcadas em TITA:
 
 ### O Problema em Uma Frase
+
 **Quando um operador remarca uma sessão em TITA, a chave de conciliação muda, criando uma "nova" sessão com zero histórico, enquanto a sessão anterior fica órfã com ocorrências que apontam para um `session_key` que não existe mais.**
 
 ### Impactos Imediatos
+
 1. **FK Constraint Violation** — Ocorrências antigas apontam para `session_key` deletado
 2. **Perda de Histórico de Autorização** — Nova sessão começa do zero
 3. **Duplicidade em Transições** — Até 2 `session_key` para mesma sessão durante remarcação
 4. **Reprocessamento Inseguro** — Reprocessar histórico de TITA cria multiplicidade de versões
 
 ### Risco Quantificado
+
 - **% de sessões remarcadas/mês**: ~5-8% (baseado em padrões comportamentais típicos)
 - **% de sessões deletadas**: ~1-2% (cancelamentos e erros operacionais)
 - **Ocorrências órfãs por mês**: ~150-250 registros (se não mitigado)
@@ -174,6 +177,7 @@ CREATE TABLE cco.session_substitutions (
 ```
 
 **Problema**: Constraint `ON DELETE RESTRICT` significa:
+
 - Se você tenta `DELETE FROM cco.atendimentos WHERE session_key='abc123'` e existem ocorrências com `session_key='abc123'`
 - **A operação FALHA** com erro de constraint
 - **abc123 fica preso** — nunca pode ser deletado sem deletar manualmente as ocorrências
@@ -186,11 +190,13 @@ CREATE TABLE cco.session_substitutions (
 #### Taxa de Remarcações (Estimativa)
 
 Baseado em padrões operacionais de clínicas:
+
 - **Remarcações diárias**: ~5-8% das sessões agendadas
 - **Deletações**: ~1-2% (cancelamentos, erros)
 - **Sessões por dia**: ~200-400 (baseado em escala de PULSAR)
 
 **Cálculo**:
+
 ```
 Remarcações/mês = 0.06 (avg) × 300 (sessões/dia) × 25 (dias úteis)
                 = 450 remarcações/mês
@@ -205,6 +211,7 @@ Sem mitigação, após 6 meses:
 #### Impacto no Dashboard
 
 Se FK é `RESTRICT` e ocorrência aponta para session_key deletado:
+
 ```sql
 -- Dashboard tenta contar ocorrências ativas:
 SELECT COUNT(*) FROM cco.occurrences WHERE resolved_at IS NULL;
@@ -229,6 +236,7 @@ WHERE o.resolved_at IS NULL;
 O `tita_agendamento_id` (ID que TITA mantém) é o verdadeiro identificador único. Mas o schema usa `session_key` (derivado de nome+data+hora).
 
 **Mapping Perdido**:
+
 ```sql
 -- Schema atual:
 cco.atendimentos(
@@ -445,6 +453,7 @@ INSERT INTO cco.session_mutations (
 ```
 
 **Benefícios**:
+
 - ✅ Rastreia que abc123 → def456 (auditoria)
 - ✅ Permite consolidação de histórico
 - ✅ Identifica órfãos para limpeza
@@ -593,6 +602,7 @@ VALUES (found.rows, 'occurrences_orphaned', 'retention-policy', now());
 ```
 
 **Cronograma**:
+
 - 01:00 UTC: Retenção de resolvidas (90 dias)
 - 02:00 UTC: Limpeza de órfãs (30 dias)
 - 03:00 UTC: Consolidação de histórico (verifica inconsistências)
@@ -699,17 +709,20 @@ WHERE deleted_at IS NULL AND resolved_at IS NULL;
 ### Fase 2-B (Pós-Atual)
 
 **Sprint 1** (1-2 semanas):
+
 - [ ] Criar tabela `cco.session_mutations`
 - [ ] Criar tabela `cco.orphaned_sessions`
 - [ ] Modifica Job 1 para detectar remarcações
 - [ ] Adicionar colunas: `orphaned_at`, `copied_from_session_key`
 
 **Sprint 2** (1-2 semanas):
+
 - [ ] Criar `cco.session_consolidation_log`
 - [ ] Engine (Fase 3): detectar mutations, copiar autorizações
 - [ ] Testes: verify histórico consolidado
 
 **Sprint 3** (1 semana):
+
 - [ ] Revisar FKs: `RESTRICT` → `SET NULL` (data migration)
 - [ ] Implementar soft-delete logic
 - [ ] Retention job: 3 camadas
@@ -766,18 +779,22 @@ ORDER BY executed_at DESC;
 ## 12. Conclusões
 
 ### Status Atual
+
 🚨 **CRÍTICO**: O design atual cria:
+
 1. Órfãs não rastreáveis
 2. Perda de histórico de autorização
 3. Inconsistência de contagem no dashboard
 4. Possibilidade de multiplicidade (2+ versions ativas)
 
 ### Risco Não Mitigado
+
 - **% de dados corrompidos em 6 meses**: ~5-10% (orphans acumulados)
 - **Confiabilidade do dashboard**: ⚠️ MODERADA (contagens inconsistentes)
 - **Auditoria**: ⚠️ QUEBRADA (não rastreia remarcações)
 
 ### Recomendação Executiva
+
 **Implementar Solução Hybrid em 2 sprints ANTES de Fase 3 (Motor de Conciliação)**:
 
 1. **Adição de 3 tabelas** (`session_mutations`, `orphaned_sessions`, `consolidation_log`)

@@ -60,6 +60,7 @@
 **Destination**: `cco.atendimentos`
 
 **Logic**:
+
 1. Fetch CSV grade from TITA API
 2. Parse CSV → extract sessions (paciente_nome, data_sessao, hora_inicio, etc.)
 3. Compute `session_key = sha256(unaccent_lower(paciente_nome) || data_sessao || hora_inicio)`
@@ -70,6 +71,7 @@
 **Idempotency**: UPSERT by UNIQUE (session_key) + ON CONFLICT clause
 
 **Errors**:
+
 - TITA API unreachable → logged, retry on next interval
 - Parse error → skip malformed rows, continue
 - DB error → logged and returned as 500
@@ -85,6 +87,7 @@
 **Destination**: `cco.session_authorizations` with `source='assim'`
 
 **Logic**:
+
 1. Fetch all records from `autorizacoes_assim`
 2. For each record: build `session_key` from (paciente_nome, data_sessao, hora_sessao)
 3. Map ASSIM status → `authorization_status` (LIBERADA, PENDENTE, GLOSA, CANCELADA, SEM_SOLICITACAO)
@@ -92,6 +95,7 @@
 5. Log to `cco.processing_logs`
 
 **Key Decisions**:
+
 - `source='assim'` ensures separation from Job 3 (source='fila')
 - UPSERT by composite `(session_key, source)` prevents race conditions
 - Status mapping: handles various format variations in legacy data
@@ -109,6 +113,7 @@
 **Destination**: `cco.session_authorizations` with `source='fila'`
 
 **Logic**:
+
 1. Fetch all records from `fila_autorizacoes`
 2. For each record: build `session_key` from (paciente_nome, data_sessao, hora_sessao)
 3. Map fila status → `authorization_status`
@@ -116,6 +121,7 @@
 5. Log to `cco.processing_logs`
 
 **Key Decisions**:
+
 - Separate from Job 2 (different source, different table)
 - Tracks "pending" state of authorization requests
 - Maps status: PENDENTE, CONCLUIDO, CANCELADA, REJEITADA
@@ -133,6 +139,7 @@
 **Destination**: `cco.session_substitutions`
 
 **Logic**:
+
 1. Fetch all records from `controle_terapeutico`
 2. Filter for records with status='falta' or status='substituto' (ignore 'presente')
 3. For each: build `session_key` from (paciente_nome, data_sessao, hora_sessao)
@@ -141,6 +148,7 @@
 6. Log to `cco.processing_logs`
 
 **Key Decisions**:
+
 - Only syncs "falta" and "substituto" records (skips "presente")
 - Longer schedule (15 min) because changes are less frequent
 - Source of truth for FALTA_TERAPEUTA and SUBSTITUICAO occurrence rules
@@ -154,6 +162,7 @@
 ### `cco-shared/logger.ts`
 
 **Functions**:
+
 - `JobLogger` class: logs job execution (start, end, status, error, row count)
 - `normalizePatientName()`: unaccent + lowercase + trim
 - `normalizeTime()`: convert to HH:MM
@@ -162,6 +171,7 @@
 - `buildSessionKey()`: compute deterministic session_key
 
 **Pattern**:
+
 ```typescript
 const logger = new JobLogger("job-name")
 try {
@@ -191,6 +201,7 @@ try {
 ```
 
 **Why staggered offsets?**
+
 - Prevents thundering herd (all jobs at :00)
 - Distributes database load evenly
 - Rate-limits TITA API (max 12 calls/hour per job)
@@ -201,18 +212,22 @@ try {
 ## Error Handling
 
 ### Network Errors
+
 - TITA API unreachable → logged with status "error", retry next interval
 - Edge Function endpoint not found → retry with backoff
 - Database connection error → logged, job fails gracefully
 
 ### Data Errors
+
 - Malformed CSV from TITA → skip rows, continue processing
 - Missing required fields (paciente_nome, data_sessao, hora_inicio) → skip, log warning
 - Session_key computation failure → skip row, continue
 - UPSERT fails (DB constraint) → entire batch rolls back, logged
 
 ### Logging
+
 All jobs write to `cco.processing_logs`:
+
 - `job_name`: identifier (cco-sync-tita-sessions, etc.)
 - `started_at`: timestamp when job started
 - `finished_at`: timestamp when job ended (NULL if error)
@@ -225,6 +240,7 @@ All jobs write to `cco.processing_logs`:
 ## Idempotency Guarantees
 
 ### UPSERT Pattern
+
 ```typescript
 await supabase
   .from("cco.atendimentos")
@@ -233,11 +249,13 @@ await supabase
 ```
 
 **Safe re-execution**:
+
 - Job 1 runs twice in 5 min → second UPSERT updates existing rows, no duplicates
 - Network failure, retry → UPSERT idempotent, same effect as first attempt
 - Manual re-run → same result, no data corruption
 
 ### Composite Keys
+
 - Jobs 2 & 3 use `(session_key, source)` as unique key
 - Prevents one source overwriting another (ASSIM vs fila)
 - Each source has independent UPSERT path
@@ -268,11 +286,13 @@ await supabase
 - [ ] Apply migration: `20260608000002_cco_cron_jobs.sql`
 
 - [ ] Verify cron jobs registered:
+
   ```sql
   SELECT jobname, schedule, command FROM cron.job WHERE jobname LIKE 'cco-%';
   ```
 
 - [ ] Test each job manually:
+
   ```bash
   curl -X POST https://<supabase-url>/functions/v1/cco-sync-tita-sessions \
     -H "Authorization: Bearer <service-role-key>" \
@@ -281,6 +301,7 @@ await supabase
   ```
 
 - [ ] Monitor logs:
+
   ```sql
   SELECT * FROM cco.processing_logs ORDER BY started_at DESC LIMIT 10;
   ```
@@ -311,6 +332,7 @@ supabase/migrations/
 ## Next Phase
 
 **Fase 3** will implement the conciliation engine:
+
 - Read materialized data from `cco.*` tables
 - Apply 7 business rules
 - Generate occurrences in `cco.occurrences`

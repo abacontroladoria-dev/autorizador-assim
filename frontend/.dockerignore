@@ -1,0 +1,27 @@
+# Environment files - never bake secrets into the image
+.env
+.env.local
+.env.*.local
+.env.production
+.env.development
+
+# Build output
+.next/
+
+# Dependencies - reinstalled during docker build
+node_modules/
+
+# Dev/tool files
+.git/
+.gitignore
+*.md
+Dockerfile
+.dockerignore
+
+# Editor
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

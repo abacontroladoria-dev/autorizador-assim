@@ -48,6 +48,7 @@ SELECT jobname, schedule, command FROM cron.job WHERE jobname LIKE 'cco-%' ORDER
 ```
 
 **Expected output**:
+
 ```
 jobname                          | schedule                               | command
 ---------------------------------|----------------------------------------|----------
@@ -71,6 +72,7 @@ curl -X POST https://<SUPABASE_URL>/functions/v1/cco-sync-tita-sessions \
 ```
 
 **Expected response**:
+
 ```json
 {
   "ok": true,
@@ -80,6 +82,7 @@ curl -X POST https://<SUPABASE_URL>/functions/v1/cco-sync-tita-sessions \
 ```
 
 **Validate in database**:
+
 ```sql
 SELECT COUNT(*) as count FROM cco.atendimentos;
 SELECT * FROM cco.processing_logs WHERE job_name = 'cco-sync-tita-sessions' ORDER BY started_at DESC LIMIT 1;
@@ -97,6 +100,7 @@ curl -X POST https://<SUPABASE_URL>/functions/v1/cco-sync-assim-authorizations \
 ```
 
 **Expected response**:
+
 ```json
 {
   "ok": true,
@@ -106,6 +110,7 @@ curl -X POST https://<SUPABASE_URL>/functions/v1/cco-sync-assim-authorizations \
 ```
 
 **Validate**:
+
 ```sql
 SELECT COUNT(*) as count FROM cco.session_authorizations WHERE source = 'assim';
 SELECT authorization_status, COUNT(*) FROM cco.session_authorizations WHERE source = 'assim' GROUP BY authorization_status;
@@ -123,6 +128,7 @@ curl -X POST https://<SUPABASE_URL>/functions/v1/cco-sync-authorization-queue \
 ```
 
 **Expected response**:
+
 ```json
 {
   "ok": true,
@@ -132,6 +138,7 @@ curl -X POST https://<SUPABASE_URL>/functions/v1/cco-sync-authorization-queue \
 ```
 
 **Validate**:
+
 ```sql
 SELECT COUNT(*) as count FROM cco.session_authorizations WHERE source = 'fila';
 SELECT authorization_status, COUNT(*) FROM cco.session_authorizations WHERE source = 'fila' GROUP BY authorization_status;
@@ -149,6 +156,7 @@ curl -X POST https://<SUPABASE_URL>/functions/v1/cco-sync-therapist-control \
 ```
 
 **Expected response**:
+
 ```json
 {
   "ok": true,
@@ -158,6 +166,7 @@ curl -X POST https://<SUPABASE_URL>/functions/v1/cco-sync-therapist-control \
 ```
 
 **Validate**:
+
 ```sql
 SELECT COUNT(*) as count FROM cco.session_substitutions;
 SELECT status_ct, COUNT(*) FROM cco.session_substitutions GROUP BY status_ct;
@@ -188,6 +197,7 @@ curl -X POST https://<SUPABASE_URL>/functions/v1/cco-sync-tita-sessions \
 ```
 
 **Validate no duplicates**:
+
 ```sql
 SELECT COUNT(DISTINCT session_key) as unique_sessions, COUNT(*) as total_rows 
 FROM cco.atendimentos;
@@ -214,6 +224,7 @@ wait
 ```
 
 **Validate no corruption**:
+
 ```sql
 -- Each source should have exactly one row per session_key
 SELECT session_key, source, COUNT(*) as cnt 
@@ -307,6 +318,7 @@ ORDER BY job_name;
 ```
 
 **Acceptance criteria**:
+
 - Avg execution time < 20 seconds
 - Max execution time < 30 seconds
 - No job blocking others
@@ -339,6 +351,7 @@ LIMIT 10;
 ```
 
 **Validate each log entry**:
+
 - [ ] `job_name` is not null
 - [ ] `started_at` is a valid timestamp
 - [ ] `finished_at` is after `started_at` (for success)
@@ -361,6 +374,7 @@ LIMIT 1;
 ```
 
 **Validate**:
+
 - [ ] Error is logged with clear message
 - [ ] `finished_at` is set
 - [ ] `rows_processed` is null or 0
@@ -392,6 +406,7 @@ SELECT
 ```
 
 **Acceptance criteria**:
+
 - [ ] Sessions count > 0
 - [ ] with_auth < sessions (not all sessions have authorization)
 - [ ] with_subs < sessions (not all sessions have substitution)
@@ -418,6 +433,7 @@ SELECT
 ## Rollback Plan (If Needed)
 
 ### Rollback Cron Jobs
+
 ```sql
 SELECT cron.unschedule('cco-sync-tita-sessions');
 SELECT cron.unschedule('cco-sync-assim-authorizations');
@@ -426,6 +442,7 @@ SELECT cron.unschedule('cco-sync-therapist-control');
 ```
 
 ### Delete Edge Functions
+
 ```bash
 supabase functions delete cco-sync-tita-sessions
 supabase functions delete cco-sync-assim-authorizations
@@ -434,6 +451,7 @@ supabase functions delete cco-sync-therapist-control
 ```
 
 ### Clear CCO Data (Optional)
+
 ```sql
 DELETE FROM cco.session_authorizations;
 DELETE FROM cco.session_substitutions;
@@ -446,6 +464,7 @@ DELETE FROM cco.processing_logs;
 ## Next Phase
 
 After all acceptance criteria are met, proceed to **Fase 3** (Conciliation Engine):
+
 - Implement business rule logic
 - Generate occurrences
 - Update dashboard snapshot

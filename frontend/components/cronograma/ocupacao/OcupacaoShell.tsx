@@ -150,7 +150,7 @@ export function OcupacaoShell() {
           )}
           {load && <span style={{ fontSize: "12px", color: B.blue }}>⏳ Processando...</span>}
           {err && <span style={{ fontSize: "12px", color: "#dc2626" }}>{err}</span>}
-          {savedAt && !saveError && <span style={{ fontSize: "11px", color: "#9ca3af" }}>💾 {savedAt}</span>}
+          {savedAt && !saveError && <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>💾 {savedAt}</span>}
           {saveError && (
             <span
               style={{ background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: "999px", padding: "3px 10px", fontSize: "12px", fontWeight: 700, cursor: "pointer" }}
@@ -181,12 +181,12 @@ export function OcupacaoShell() {
       {cRec && (
         <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.4)", padding: "16px" }}
           onClick={e => { if (e.target === e.currentTarget) setCRec(null) }}>
-          <div style={{ background: "white", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "380px", width: "100%", padding: "20px" }}>
+          <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "380px", width: "100%", padding: "20px" }}>
             <div style={{ fontWeight: 900, fontSize: "17px", marginBottom: "4px" }}>❌ Registrar Recusa</div>
-            <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "14px" }}>Esta combinação não será sugerida novamente.</div>
+            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "14px" }}>Esta combinação não será sugerida novamente.</div>
             <div style={{ background: "#fef2f2", borderRadius: "10px", padding: "12px", fontSize: "13px", marginBottom: "14px" }}>
-              <div><span style={{ color: "#9ca3af", fontSize: "11px" }}>Paciente</span><br /><strong>{cRec.pac}</strong></div>
-              <div style={{ marginTop: "6px" }}><span style={{ color: "#9ca3af", fontSize: "11px" }}>Sessão</span><br />{cRec.dia} {cRec.hora} · {cRec.unidade}</div>
+              <div><span style={{ color: "var(--muted-foreground)", fontSize: "11px" }}>Paciente</span><br /><strong>{cRec.pac}</strong></div>
+              <div style={{ marginTop: "6px" }}><span style={{ color: "var(--muted-foreground)", fontSize: "11px" }}>Sessão</span><br />{cRec.dia} {cRec.hora} · {cRec.unidade}</div>
             </div>
             <div style={{ display: "flex", gap: "8px" }}>
               <button onClick={() => {
@@ -195,7 +195,7 @@ export function OcupacaoShell() {
               }} style={{ padding: "8px 16px", borderRadius: "10px", background: B.orange, color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: "13px" }}>
                 Confirmar Recusa
               </button>
-              <button onClick={() => setCRec(null)} style={{ flex: 1, padding: "8px 16px", borderRadius: "10px", background: "#f3f4f6", color: "#374151", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+              <button onClick={() => setCRec(null)} style={{ flex: 1, padding: "8px 16px", borderRadius: "10px", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
                 Cancelar
               </button>
             </div>
@@ -207,12 +207,12 @@ export function OcupacaoShell() {
       {cInv && (
         <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.4)", padding: "16px" }}
           onClick={e => { if (e.target === e.currentTarget) { setCInv(null); setMotInv("") } }}>
-          <div style={{ background: "white", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "380px", width: "100%", padding: "20px" }}>
+          <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "380px", width: "100%", padding: "20px" }}>
             <div style={{ fontWeight: 900, fontSize: "17px", marginBottom: "4px" }}>⛔ Marcar como Inviável</div>
-            <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "14px" }}>Removido de TODAS as sugestões até tirado da lista.</div>
-            <div style={{ background: "#f8fafc", borderRadius: "10px", padding: "12px", fontSize: "13px", fontWeight: 700, marginBottom: "10px" }}>{cInv.pac}</div>
+            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "14px" }}>Removido de TODAS as sugestões até tirado da lista.</div>
+            <div style={{ background: "var(--muted)", borderRadius: "10px", padding: "12px", fontSize: "13px", fontWeight: 700, marginBottom: "10px" }}>{cInv.pac}</div>
             <textarea value={motInv} onChange={e => setMotInv(e.target.value)} placeholder="Motivo (ex: família faltando muito...)" rows={2}
-              style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: "10px", padding: "8px 12px", fontSize: "13px", fontFamily: "inherit", resize: "none", marginBottom: "14px", boxSizing: "border-box" }} />
+              style={{ width: "100%", border: "1px solid var(--border)", borderRadius: "10px", padding: "8px 12px", fontSize: "13px", fontFamily: "inherit", resize: "none", marginBottom: "14px", boxSizing: "border-box" }} />
             <div style={{ display: "flex", gap: "8px" }}>
               <button onClick={() => {
                 const nextWa = Object.fromEntries(Object.entries(waMap).filter(([k]) => !k.startsWith(`${cInv.pac}|||`)))
@@ -222,7 +222,7 @@ export function OcupacaoShell() {
               }} style={{ padding: "8px 16px", borderRadius: "10px", background: B.navy, color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: "13px" }}>
                 Confirmar
               </button>
-              <button onClick={() => { setCInv(null); setMotInv("") }} style={{ flex: 1, padding: "8px 16px", borderRadius: "10px", background: "#f3f4f6", color: "#374151", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+              <button onClick={() => { setCInv(null); setMotInv("") }} style={{ flex: 1, padding: "8px 16px", borderRadius: "10px", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
                 Cancelar
               </button>
             </div>

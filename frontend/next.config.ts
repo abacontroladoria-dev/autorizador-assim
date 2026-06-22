@@ -1,9 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  output: 'standalone',
   trailingSlash: true,
   allowedDevOrigins: ['192.168.0.241'],
-  turbopack: {},
 
   async headers() {
     return [
@@ -33,7 +33,7 @@ const nextConfig: NextConfig = {
           // Content Security Policy - strict
           {
             key: 'Content-Security-Policy',
-            value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self' https://wmugemamnqxjfpxrlwes.supabase.co wss://wmugemamnqxjfpxrlwes.supabase.co; frame-ancestors 'none';",
+            value: "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self' https://wmugemamnqxjfpxrlwes.supabase.co wss://wmugemamnqxjfpxrlwes.supabase.co http://127.0.0.1:3010 http://localhost:3010; frame-ancestors 'none';",
           },
           // Permissions Policy (formerly Feature Policy)
           {

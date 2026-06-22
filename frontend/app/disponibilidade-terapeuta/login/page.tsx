@@ -204,13 +204,13 @@ export default function LoginDisponibilidadePage() {
       {/* ── Branding ── */}
       <div className="imp-branding flex flex-col items-center gap-5 z-10 pt-2 pb-20 w-full">
         <div
-          className="w-25 h-25 bg-white flex items-center justify-center"
+          className="w-24 h-24 bg-white flex items-center justify-center"
           style={{ borderRadius: '26px', boxShadow: '0 12px 32px rgba(0,0,0,0.22)' }}
         >
           <img
             src="/logo-universo-aba.png"
             alt="Universo ABA"
-            className="w-21 h-21 object-contain"
+            className="w-20 h-20 object-contain"
           />
         </div>
 

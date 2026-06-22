@@ -25,6 +25,7 @@
 Há **6 documentos** neste pacote. Comece por onde faz sentido para seu papel:
 
 ### 👔 Para C-Suite / Product
+
 ```
 1. Leia: SESSOES_MUTANTES_RESUMO_EXECUTIVO.md (5 min)
 2. Veja: SESSOES_MUTANTES_DIAGRAMA.md > Risk Matrix (5 min)
@@ -32,6 +33,7 @@ Há **6 documentos** neste pacote. Comece por onde faz sentido para seu papel:
 ```
 
 ### 👨‍💼 Para Tech Lead
+
 ```
 1. Leia: SESSOES_MUTANTES_RESUMO_EXECUTIVO.md (5 min)
 2. Leia: SESSOES_MUTANTES_PROXIMOS_PASSOS.md (15 min)
@@ -40,6 +42,7 @@ Há **6 documentos** neste pacote. Comece por onde faz sentido para seu papel:
 ```
 
 ### 👨‍💻 Para Developers
+
 ```
 1. Veja: SESSOES_MUTANTES_DIAGRAMA.md (25 min)
 2. Estude: SESSOES_MUTANTES_ROADMAP_IMPLEMENTACAO.md (45 min)
@@ -48,6 +51,7 @@ Há **6 documentos** neste pacote. Comece por onde faz sentido para seu papel:
 ```
 
 ### 👨‍🔬 Para Arquitetos
+
 ```
 1. Leia: ANALISE_SESSOES_MUTANTES.md (60 min)
 2. Valide: Schema DDL (ROADMAP > Sprint 1)
@@ -56,6 +60,7 @@ Há **6 documentos** neste pacote. Comece por onde faz sentido para seu papel:
 ```
 
 ### 🧪 Para QA/Testers
+
 ```
 1. Veja: SESSOES_MUTANTES_DIAGRAMA.md > Cenários A-C (20 min)
 2. Estude: SESSOES_MUTANTES_ROADMAP_IMPLEMENTACAO.md > Sprint 4 (20 min)
@@ -68,6 +73,7 @@ Há **6 documentos** neste pacote. Comece por onde faz sentido para seu papel:
 ## 📄 Descrição dos Documentos
 
 ### 1. **SESSOES_MUTANTES_RESUMO_EXECUTIVO.md** ⭐
+
    **Tamanho**: 2 páginas  
    **Tempo**: 5-10 min  
    **Para**: Todos  
@@ -75,6 +81,7 @@ Há **6 documentos** neste pacote. Comece por onde faz sentido para seu papel:
    **Comece AQUI**
 
 ### 2. **ANALISE_SESSOES_MUTANTES.md** 📖
+
    **Tamanho**: 50+ páginas  
    **Tempo**: 60-90 min  
    **Para**: Arquitetos, revisor crítico  
@@ -82,6 +89,7 @@ Há **6 documentos** neste pacote. Comece por onde faz sentido para seu papel:
    **Para entender TUDO**
 
 ### 3. **SESSOES_MUTANTES_DIAGRAMA.md** 🎨
+
    **Tamanho**: 20 páginas  
    **Tempo**: 15-25 min  
    **Para**: Todos (visual learning)  
@@ -89,6 +97,7 @@ Há **6 documentos** neste pacote. Comece por onde faz sentido para seu papel:
    **Para comunicação com não-técnicos**
 
 ### 4. **SESSOES_MUTANTES_DIAGNOSTICO.sql** 🔍
+
    **Tamanho**: 400+ linhas SQL  
    **Tempo**: 5 min (skim) / 30 min (run)  
    **Para**: DBAs, Data Engineers  
@@ -96,6 +105,7 @@ Há **6 documentos** neste pacote. Comece por onde faz sentido para seu papel:
    **Para auditar estado ATUAL**
 
 ### 5. **SESSOES_MUTANTES_ROADMAP_IMPLEMENTACAO.md** 🛣️
+
    **Tamanho**: 30 páginas  
    **Tempo**: 30-45 min  
    **Para**: Tech Lead, Developers  
@@ -103,6 +113,7 @@ Há **6 documentos** neste pacote. Comece por onde faz sentido para seu papel:
    **Para IMPLEMENTAR a solução**
 
 ### 6. **SESSOES_MUTANTES_PROXIMOS_PASSOS.md** ⚡
+
    **Tamanho**: 15 páginas  
    **Tempo**: 10-15 min  
    **Para**: Tech Lead, Product, QA, DevOps  
@@ -110,6 +121,7 @@ Há **6 documentos** neste pacote. Comece por onde faz sentido para seu papel:
    **Para COMEÇAR já**
 
 ### 7. **SESSOES_MUTANTES_INDEX.md** 📇
+
    **Tamanho**: 10 páginas  
    **Tempo**: 5 min  
    **Para**: Navegação  
@@ -135,28 +147,33 @@ Há **6 documentos** neste pacote. Comece por onde faz sentido para seu papel:
 ## ⚡ Ações Imediatas
 
 **Hoje (2026-06-08)**:
+
 - [ ] Tech Lead: Leia RESUMO_EXECUTIVO
 - [ ] Tech Lead: Compartilhe com stakeholders
 - [ ] Equipe: Leia DIAGRAMA
 
 **Amanhã (2026-06-09)**:
+
 - [ ] Tech Lead: Agende kick-off meeting (segunda 10:00)
 - [ ] DBA: Execute DIAGNOSTICO.sql seção 1 (orphan audit)
 - [ ] Product: Aprove inclusão de Fase 2-B no roadmap
 
 **Segunda (2026-06-10)**:
+
 - [ ] Kick-off meeting (10:00)
 - [ ] Revisão de design (ANALISE > Seção 6)
 - [ ] Aprovação final
 - [ ] Designação de developer
 
 **Semana de 10-14**:
+
 - [ ] Sprint 1: Schema DDL
 - [ ] Sprint 2: Job 1 mutations
 - [ ] Sprint 3: Engine consolidation
 - [ ] Sprint 4: Testing
 
 **Antes de Fase 3**:
+
 - [ ] Fase 2-B estável em produção
 - [ ] Diagnostico validando zero orphans
 - [ ] Fase 3 pode começar
@@ -166,23 +183,29 @@ Há **6 documentos** neste pacote. Comece por onde faz sentido para seu papel:
 ## 🔑 Key Concepts
 
 **Session Mutation**: Mudança em data/hora/profissional de sessão em TITA
+
 - Exemplo: João Silva 08/06 14:00 → João Silva 09/06 14:00
 
 **Session Key**: Hash determinístico da sessão
+
 - Atual: `sha256(paciente_nome || data_sessao || hora_inicio)`
 - MUDA quando data/hora mudam (PROBLEMA!)
 
 **Orphaned Session**: Sessão deletada de TITA mas ainda em `cco.atendimentos`
+
 - Causa: Job 1 não deleta, apenas insere/atualiza
 
 **FK Constraint Violation**: Ocorrência aponta para session_key que não existe
+
 - Cenário: abc123 deletado de atendimentos, mas occurrences.session_key='abc123' ainda referencia
 
 **History Consolidation**: Copiar autorizações de sessão antiga para nova
+
 - Sem: def456 perde contexto de abc123
 - Com: def456 herda histórico com rastreamento
 
 **Soft Delete**: Marcar como deletado (orphaned_at) em vez de realmente deletar
+
 - Benefício: Auditoria preservada
 - Limpeza: 30 dias depois com hard-delete
 

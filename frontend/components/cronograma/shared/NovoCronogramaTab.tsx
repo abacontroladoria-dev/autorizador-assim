@@ -100,9 +100,9 @@ export function NovoCronogramaTab({ cRows, lRows, dispRows }: Props) {
                   onClick={() => setUnidade(u)}
                   className="flex-1 py-2 px-1 rounded-lg border text-[12px] font-sans transition-colors"
                   style={{
-                    border: `1px solid ${unidade === u ? B.blue : "#d1d5db"}`,
+                    border: `1px solid ${unidade === u ? B.blue : "var(--border)"}`,
                     background: unidade === u ? B.blueLt : "transparent",
-                    color: unidade === u ? B.blue : "#374151",
+                    color: unidade === u ? B.blue : "var(--card-foreground)",
                     fontWeight: unidade === u ? 700 : 400,
                     cursor: "pointer",
                   }}
@@ -246,14 +246,14 @@ function GradePanel({
         <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "500px" }}>
           <thead>
             <tr>
-              <th style={{ width: "60px", textAlign: "right", paddingRight: "14px", paddingBottom: "10px", fontSize: "13px", color: "#9ca3af", fontWeight: 500 }}>
+              <th style={{ width: "60px", textAlign: "right", paddingRight: "14px", paddingBottom: "10px", fontSize: "13px", color: "var(--muted-foreground)", fontWeight: 500 }}>
                 Hora
               </th>
               {diasResult.map(d => (
                 <th key={d} style={{ minWidth: "160px", paddingBottom: "10px", textAlign: "center", fontSize: "15px", color: B.navy, fontWeight: 800 }}>
                   {d.replace("-feira", "")}
                   {result.availWindows[d] && (
-                    <div style={{ fontSize: "11px", fontWeight: 400, color: "#9ca3af", marginTop: "2px" }}>
+                    <div style={{ fontSize: "11px", fontWeight: 400, color: "var(--muted-foreground)", marginTop: "2px" }}>
                       {fm(result.availWindows[d].inicio)}–{fm(result.availWindows[d].fim)}
                     </div>
                   )}
@@ -271,7 +271,7 @@ function GradePanel({
               })
               if (!rowData.some(c => c.inWin || c.sess)) return null
               return (
-                <tr key={hora} style={{ borderTop: "1px solid #f1f5f9" }}>
+                <tr key={hora} style={{ borderTop: "1px solid var(--border)" }}>
                   <td style={{ textAlign: "right", paddingRight: "14px", verticalAlign: "middle", fontFamily: "monospace", fontSize: "16px", fontWeight: 800, color: B.navy, letterSpacing: "-0.5px", paddingTop: "4px", paddingBottom: "4px" }}>
                     {hora}
                   </td>
@@ -294,11 +294,11 @@ function GradePanel({
                         >
                           {sess && (
                             <>
-                              <div style={{ fontSize: "13px", fontWeight: 700, color: "#1f2937", lineHeight: "1.3" }}>{sess.tP}</div>
+                              <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--card-foreground)", lineHeight: "1.3" }}>{sess.tP}</div>
                               {sess.esp !== sess.tP && (
-                                <div style={{ fontSize: "10px", color: "#9ca3af" }}>({sess.esp})</div>
+                                <div style={{ fontSize: "10px", color: "var(--muted-foreground)" }}>({sess.esp})</div>
                               )}
-                              <div style={{ fontSize: "11px", color: "#6b7280", marginTop: "3px" }}>{fmtName(sess.prof)}</div>
+                              <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "3px" }}>{fmtName(sess.prof)}</div>
                               <div style={{ fontSize: "11px", fontWeight: 700, color: sc!.tx, marginTop: "auto", paddingTop: "4px" }}>✦ Novo</div>
                             </>
                           )}
@@ -323,7 +323,7 @@ function LaudoTable({ espRows, result }: { espRows: string[]; result: NovoCronog
         📋 Laudo — Solicitado × Autorizado × Ofertado
       </div>
       <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
-        <thead style={{ background: "#f8fafc" }}>
+        <thead style={{ background: "var(--muted)" }}>
           <tr>
             {["Especialidade", "Solicitado (Laudo)", "Autorizado (Convênio)", "Ofertado (Novo Crono)"].map(h => (
               <th
@@ -333,7 +333,7 @@ function LaudoTable({ espRows, result }: { espRows: string[]; result: NovoCronog
                   padding: "8px 12px",
                   fontSize: "11px",
                   fontWeight: 700,
-                  color: "#9ca3af",
+                  color: "var(--muted-foreground)",
                   textTransform: "uppercase",
                   letterSpacing: ".05em",
                 }}
@@ -351,17 +351,17 @@ function LaudoTable({ espRows, result }: { espRows: string[]; result: NovoCronog
             const ok = aut > 0 && of_ >= aut
             const partial = of_ > 0 && of_ < aut
             const none = aut > 0 && of_ === 0
-            const ofC = ok ? "#4a6e20" : partial ? B.orange : none ? "#dc2626" : "#6b7280"
-            const ofBg = ok ? B.limeLt : partial ? B.orangeLt : none ? "#fef2f2" : "#f8fafc"
+            const ofC = ok ? "#4a6e20" : partial ? B.orange : none ? "#dc2626" : "var(--muted-foreground)"
+            const ofBg = ok ? B.limeLt : partial ? B.orangeLt : none ? "#fef2f2" : "var(--muted)"
             return (
-              <tr key={esp} style={{ borderTop: "1px solid #f0f0f0" }}>
+              <tr key={esp} style={{ borderTop: "1px solid var(--border)" }}>
                 <td style={{ padding: "9px 12px" }}>
                   <span style={{ background: B.blueLt, color: B.blue, borderRadius: "999px", padding: "2px 8px", fontSize: "11px", fontWeight: 600 }}>
                     {esp}
                   </span>
-                  {!vigente && <span style={{ marginLeft: "6px", fontSize: "10px", color: "#9ca3af" }}>vencido</span>}
+                  {!vigente && <span style={{ marginLeft: "6px", fontSize: "10px", color: "var(--muted-foreground)" }}>vencido</span>}
                 </td>
-                <td style={{ padding: "9px 12px", color: "#6b7280", textAlign: "center" }}>{sol || "—"}</td>
+                <td style={{ padding: "9px 12px", color: "var(--muted-foreground)", textAlign: "center" }}>{sol || "—"}</td>
                 <td style={{ padding: "9px 12px", textAlign: "center", fontWeight: 700, color: B.navy }}>{aut || "—"}</td>
                 <td style={{ padding: "9px 12px", textAlign: "center" }}>
                   <span style={{ fontWeight: 800, color: ofC, background: ofBg, borderRadius: "999px", padding: "3px 12px" }}>
@@ -385,7 +385,7 @@ function RegrasPanel() {
       </div>
       <div className="flex flex-col gap-1.5">
         {REGRAS_NOVO_CRON.map((r, i) => (
-          <div key={i} className="flex gap-3 p-2.5 rounded-lg text-[12px]" style={{ background: "#fafafa", border: "1px solid #f0f0f0" }}>
+          <div key={i} className="flex gap-3 p-2.5 rounded-lg text-[12px]" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
             <span className="text-base shrink-0">{r.icon}</span>
             <div>
               <div className="font-bold mb-0.5" style={{ color: B.navy }}>{r.title}</div>

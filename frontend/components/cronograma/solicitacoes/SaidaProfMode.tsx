@@ -70,19 +70,19 @@ interface StatusPayload {
 // ─── ESTILOS DE STATUS ────────────────────────────────────────────────────────
 
 const ST_S: Record<string, { bg: string; c: string; l: string }> = {
-  pendente:    { bg: "#f3f4f6", c: "#6b7280",  l: "Pendente" },
+  pendente:    { bg: "var(--muted)", c: "var(--muted-foreground)",  l: "Pendente" },
   aguardando:  { bg: B.blueLt,  c: B.blue,     l: "Em Acompanhamento" },
   resolvido:   { bg: B.limeLt,  c: "#4a6e20",  l: "Resolvido" },
   recusado:    { bg: "#fef2f2", c: "#dc2626",  l: "Recusado" },
-  sem_solucao: { bg: "#f3f4f6", c: "#6b7280",  l: "Sem solução" },
+  sem_solucao: { bg: "var(--muted)", c: "var(--muted-foreground)",  l: "Sem solução" },
 }
 
 const BD: Record<string, string> = {
-  pendente:    "#e5e7eb",
+  pendente:    "var(--border)",
   aguardando:  `${B.blue}66`,
   resolvido:   `${B.lime}88`,
   recusado:    "#fca5a5",
-  sem_solucao: "#e5e7eb",
+  sem_solucao: "var(--border)",
 }
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
@@ -100,7 +100,7 @@ function normHora(t: string | null | undefined): string {
 function pctBadge(pct: number): { bg: string; color: string } {
   if (pct >= 85) return { bg: "#dcfce7", color: "#166534" }
   if (pct >= 60) return { bg: B.blueLt, color: B.blue }
-  return { bg: "#f3f4f6", color: "#6b7280" }
+  return { bg: "var(--muted)", color: "var(--muted-foreground)" }
 }
 
 function fmtPacAgenda(full: string): string {
@@ -230,8 +230,8 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
         { name: "#4", label: "Outra terapia, mesmo horário",       value: n4,  color: B.purple },
         { name: "#5", label: "Posições alteradas, prof. trocados", value: n5,  color: "#f97316" },
         { name: "#6", label: "Alterar dia, mesmos profissionais",  value: n6,  color: "#8b5cf6" },
-        { name: "#7", label: "Alterar dia, prof. diferentes",      value: n7,  color: "#6b7280" },
-        { name: "—",  label: "Sem solução",                    value: sem, color: "#d1d5db" },
+        { name: "#7", label: "Alterar dia, prof. diferentes",      value: n7,  color: "var(--muted-foreground)" },
+        { name: "—",  label: "Sem solução",                    value: sem, color: "var(--border)" },
       ].filter(d => d.value > 0),
     }
   }, [results])
@@ -256,7 +256,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
         { name: "Depende do aceite da família",             est: "#3, #6", value: amarelo,  color: "#d97706" },
         { name: "Depende dos prazos da Autorização",        est: "#4",     value: azul,     color: "#2563eb" },
         { name: "Depende do aval terapêutico e da família", est: "#5, #7", value: vermelho, color: "#dc2626" },
-        { name: "Sem solução",                              est: "—",      value: sem,      color: "#9ca3af" },
+        { name: "Sem solução",                              est: "—",      value: sem,      color: "var(--muted-foreground)" },
       ].filter(d => d.value > 0),
     }
   }, [results])
@@ -651,7 +651,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       <div className="flex gap-4">
 
         {/* Card formulário */}
-        <div style={{ flexShrink: 0, width: "360px", background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "16px" }}>
+        <div style={{ flexShrink: 0, width: "360px", background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px" }}>
           <div style={{ fontWeight: 800, color: B.navy, marginBottom: "6px", fontSize: "15px" }}>
             Saída de Profissional — Horário(s) Específico(s)
           </div>
@@ -674,13 +674,13 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                 }}
                 onFocus={() => setDropOpen(true)}
                 placeholder="Buscar profissional..."
-                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm bg-white"
+                className="w-full border border-input rounded-lg px-3 py-2 text-sm bg-card text-foreground"
                 style={{ outline: "none" }}
               />
               {dropOpen && filteredProfs.length > 0 && (
                 <div style={{
                   position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, zIndex: 50,
-                  background: "white", border: "1px solid #d1d5db", borderRadius: "10px",
+                  background: "var(--card)", border: "1px solid var(--border)", borderRadius: "10px",
                   boxShadow: "0 4px 16px rgba(0,0,0,0.08)", maxHeight: "200px", overflowY: "auto",
                 }}>
                   {filteredProfs.map(p => (
@@ -692,11 +692,11 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                       }}
                       style={{
                         display: "block", width: "100%", textAlign: "left",
-                        padding: "8px 12px", background: p === prof ? "#f3f4f6" : "none",
+                        padding: "8px 12px", background: p === prof ? "var(--muted)" : "none",
                         border: "none", fontSize: "13px", cursor: "pointer",
-                        color: p === prof ? B.navy : "#374151", fontWeight: p === prof ? 700 : 400,
+                        color: p === prof ? B.navy : "var(--card-foreground)", fontWeight: p === prof ? 700 : 400,
                       }}
-                      onMouseEnter={e => { if (p !== prof) e.currentTarget.style.background = "#f9fafb" }}
+                      onMouseEnter={e => { if (p !== prof) e.currentTarget.style.background = "var(--muted)" }}
                       onMouseLeave={e => { if (p !== prof) e.currentTarget.style.background = "none" }}
                     >
                       {p}
@@ -721,7 +721,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                 <span className="text-xs font-bold text-gray-500">Dias e turnos afetados</span>
                 <button
                   onClick={selectTodos}
-                  style={{ padding: "3px 10px", borderRadius: "7px", border: `1px solid ${B.navy}`, background: selDT.size === todosCount ? B.navy : "white", color: selDT.size === todosCount ? "white" : B.navy, fontSize: "11px", fontWeight: 700, cursor: "pointer" }}
+                  style={{ padding: "3px 10px", borderRadius: "7px", border: `1px solid ${B.navy}`, background: selDT.size === todosCount ? B.navy : "var(--card)", color: selDT.size === todosCount ? "white" : B.navy, fontSize: "11px", fontWeight: 700, cursor: "pointer" }}
                 >
                   Todos
                 </button>
@@ -737,7 +737,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                         <button
                           key={t}
                           onClick={() => toggleDT(d, t)}
-                          style={{ padding: "4px 12px", borderRadius: "8px", border: `1px solid ${sel ? B.blue : "#d1d5db"}`, background: sel ? B.blueLt : "white", color: sel ? B.blue : "#6b7280", fontSize: "11px", fontWeight: sel ? 700 : 400, cursor: "pointer" }}
+                          style={{ padding: "4px 12px", borderRadius: "8px", border: `1px solid ${sel ? B.blue : "var(--border)"}`, background: sel ? "var(--cron-active-bg)" : "var(--card)", color: sel ? B.blue : "var(--muted-foreground)", fontSize: "11px", fontWeight: sel ? 700 : 400, cursor: "pointer" }}
                         >
                           {t === "manhã" ? "Manhã" : "Tarde"}
                         </button>
@@ -762,14 +762,14 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
         <div style={{ display: "flex", flexDirection: "row", gap: "12px", flex: 1, minWidth: 0 }}>
 
           {/* Card Distribuição */}
-          <div style={{ flex: 1, minWidth: 0, background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "16px", display: "flex", flexDirection: "column" }}>
+          <div style={{ flex: 1, minWidth: 0, background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px", display: "flex", flexDirection: "column" }}>
             <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>
               Distribuição
             </div>
             {!donutData ? (
               <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px" }}>
-                <div style={{ width: "52px", height: "52px", borderRadius: "50%", border: "7px solid #e5e7eb" }} />
-                <div style={{ fontSize: "11px", color: "#9ca3af", textAlign: "center", lineHeight: 1.5 }}>
+                <div style={{ width: "52px", height: "52px", borderRadius: "50%", border: "7px solid var(--border)" }} />
+                <div style={{ fontSize: "11px", color: "var(--muted-foreground)", textAlign: "center", lineHeight: 1.5 }}>
                   {results === null
                     ? <>Execute &quot;Analisar Impacto&quot;<br />para ver o resumo</>
                     : <span style={{ color: "#ef4444" }}>Nenhuma sessão clínica encontrada para este profissional. Verifique o console (F12) para detalhes.</span>
@@ -778,7 +778,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
               </div>
             ) : (
               <>
-                <div style={{ fontSize: "12px", color: "#9ca3af", marginBottom: "6px" }}>
+                <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "6px" }}>
                   {donutData.total} sessão(ões) afetada(s)
                 </div>
                 <ResponsiveContainer width="100%" height={200}>
@@ -786,18 +786,18 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                     <Pie data={donutData.slices} cx="50%" cy="50%" innerRadius={58} outerRadius={82} dataKey="value" strokeWidth={0}>
                       {donutData.slices.map((s, i) => <Cell key={i} fill={s.color} />)}
                     </Pie>
-                    <Tooltip formatter={(val, name) => [val ?? 0, name]} contentStyle={{ fontSize: "11px", borderRadius: "8px", border: "1px solid #e5e7eb", padding: "4px 8px" }} />
+                    <Tooltip formatter={(val, name) => [val ?? 0, name]} contentStyle={{ fontSize: "11px", borderRadius: "8px", border: "1px solid var(--border)", padding: "4px 8px" }} />
                   </PieChart>
                 </ResponsiveContainer>
                 <div style={{ display: "flex", flexDirection: "column", gap: "7px", marginTop: "6px" }}>
                   {donutData.slices.map((s, i) => (
                     <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                       <div style={{ width: "12px", height: "12px", borderRadius: "3px", background: s.color, flexShrink: 0 }} />
-                      <div style={{ fontSize: "13px", color: "#374151", flex: 1 }}>
+                      <div style={{ fontSize: "13px", color: "var(--card-foreground)", flex: 1 }}>
                         <span style={{ fontWeight: 700 }}>{s.name}</span> {s.label}
                       </div>
                       <div style={{ fontSize: "13px", fontWeight: 700, color: B.navy, whiteSpace: "nowrap" }}>
-                        {s.value} <span style={{ fontWeight: 400, color: "#9ca3af" }}>({Math.round(s.value / donutData.total * 100)}%)</span>
+                        {s.value} <span style={{ fontWeight: 400, color: "var(--muted-foreground)" }}>({Math.round(s.value / donutData.total * 100)}%)</span>
                       </div>
                     </div>
                   ))}
@@ -807,14 +807,14 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
           </div>
 
           {/* Card Garantidos ou Dependentes */}
-          <div style={{ flex: 1, minWidth: 0, background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "16px", display: "flex", flexDirection: "column" }}>
+          <div style={{ flex: 1, minWidth: 0, background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px", display: "flex", flexDirection: "column" }}>
             <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>
               Garantidos ou Dependentes
             </div>
             {!garantidoData ? (
               <div style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "10px" }}>
-                <div style={{ width: "52px", height: "52px", borderRadius: "50%", border: "7px solid #e5e7eb" }} />
-                <div style={{ fontSize: "11px", color: "#9ca3af", textAlign: "center", lineHeight: 1.5 }}>
+                <div style={{ width: "52px", height: "52px", borderRadius: "50%", border: "7px solid var(--border)" }} />
+                <div style={{ fontSize: "11px", color: "var(--muted-foreground)", textAlign: "center", lineHeight: 1.5 }}>
                   {results === null
                     ? <>Execute &quot;Analisar Impacto&quot;<br />para ver o resumo</>
                     : <span style={{ color: "#ef4444" }}>Nenhuma sessão clínica encontrada.</span>
@@ -823,7 +823,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
               </div>
             ) : (
               <>
-                <div style={{ fontSize: "12px", color: "#9ca3af", marginBottom: "6px" }}>
+                <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "6px" }}>
                   {garantidoData.total} sessão(ões) afetada(s)
                 </div>
                 <ResponsiveContainer width="100%" height={200}>
@@ -831,19 +831,19 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                     <Pie data={garantidoData.slices} cx="50%" cy="50%" innerRadius={58} outerRadius={82} dataKey="value" strokeWidth={0}>
                       {garantidoData.slices.map((s, i) => <Cell key={i} fill={s.color} />)}
                     </Pie>
-                    <Tooltip formatter={(val, name) => [val ?? 0, name]} contentStyle={{ fontSize: "12px", borderRadius: "8px", border: "1px solid #e5e7eb", padding: "4px 8px" }} />
+                    <Tooltip formatter={(val, name) => [val ?? 0, name]} contentStyle={{ fontSize: "12px", borderRadius: "8px", border: "1px solid var(--border)", padding: "4px 8px" }} />
                   </PieChart>
                 </ResponsiveContainer>
                 <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginTop: "8px" }}>
                   {garantidoData.slices.map((s, i) => (
                     <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: "8px" }}>
                       <div style={{ width: "12px", height: "12px", borderRadius: "3px", background: s.color, flexShrink: 0, marginTop: "2px" }} />
-                      <div style={{ fontSize: "13px", color: "#374151", flex: 1, lineHeight: "1.4" }}>
+                      <div style={{ fontSize: "13px", color: "var(--card-foreground)", flex: 1, lineHeight: "1.4" }}>
                         {s.name}
-                        <span style={{ display: "block", fontSize: "12px", color: "#9ca3af" }}>{s.est}</span>
+                        <span style={{ display: "block", fontSize: "12px", color: "var(--muted-foreground)" }}>{s.est}</span>
                       </div>
                       <div style={{ fontSize: "13px", fontWeight: 700, color: B.navy, whiteSpace: "nowrap" }}>
-                        {s.value} <span style={{ fontWeight: 400, color: "#9ca3af" }}>({Math.round(s.value / garantidoData.total * 100)}%)</span>
+                        {s.value} <span style={{ fontWeight: 400, color: "var(--muted-foreground)" }}>({Math.round(s.value / garantidoData.total * 100)}%)</span>
                       </div>
                     </div>
                   ))}
@@ -872,26 +872,26 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
           <div style={{ display: "grid", gridTemplateColumns: "auto auto", gap: "12px", alignItems: "start" }}>
 
               {/* Agenda do novo profissional */}
-              <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "16px" }}>
+              <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px" }}>
                 <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>
                   Agenda do novo profissional
                 </div>
-                <div style={{ fontSize: "12px", color: "#9ca3af", marginBottom: "10px" }}>
+                <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "10px" }}>
                   Dias e turnos necessários para cobrir as sessões sem solução
                 </div>
 
                 <div style={{ display: "flex", gap: "12px", marginBottom: "10px", flexWrap: "wrap" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
                     <div style={{ width: "11px", height: "11px", borderRadius: "3px", background: "#22c55e" }} />
-                    <span style={{ fontSize: "11px", color: "#6b7280" }}>sessões confirmadas</span>
+                    <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>sessões confirmadas</span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
                     <div style={{ width: "11px", height: "11px", borderRadius: "3px", background: "#fbbf24" }} />
-                    <span style={{ fontSize: "11px", color: "#6b7280" }}>sessões a confirmar</span>
+                    <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>sessões a confirmar</span>
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
                     <div style={{ width: "11px", height: "11px", borderRadius: "3px", background: "#fca5a5" }} />
-                    <span style={{ fontSize: "11px", color: "#6b7280" }}>livre</span>
+                    <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>livre</span>
                   </div>
                 </div>
 
@@ -902,11 +902,11 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                   </colgroup>
                   <thead>
                     <tr>
-                      <th style={{ padding: "4px 6px", textAlign: "left", color: "#9ca3af", fontWeight: 600, borderBottom: "2px solid #e5e7eb", fontSize: "10px" }} />
+                      <th style={{ padding: "4px 6px", textAlign: "left", color: "var(--muted-foreground)", fontWeight: 600, borderBottom: "2px solid var(--border)", fontSize: "10px" }} />
                       {DIAS_UTIL.map(d => {
                         const isActive = novoProfData.dayWorkSlots[d] !== undefined
                         return (
-                          <th key={d} style={{ width: "90px", padding: "6px 8px", textAlign: "center", fontWeight: 700, borderBottom: isActive ? `2px solid ${B.navy}` : "2px solid #e5e7eb", fontSize: "13px", color: isActive ? B.navy : "#d1d5db" }}>
+                          <th key={d} style={{ width: "90px", padding: "6px 8px", textAlign: "center", fontWeight: 700, borderBottom: isActive ? `2px solid ${B.navy}` : "2px solid var(--border)", fontSize: "13px", color: isActive ? B.navy : "var(--border)" }}>
                             {DIA_ABR[d] ?? d}
                             {isActive && <div style={{ fontSize: "11px", fontWeight: 600, color: B.blue, marginTop: "3px" }}>a contratar</div>}
                           </th>
@@ -918,8 +918,8 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                     {novoProfData.displaySlots.map(slot => {
                       const isSeparator = slot === "13:00"
                       return (
-                        <tr key={slot} style={{ borderTop: isSeparator ? "2px solid #d1d5db" : "1px solid #f3f4f6" }}>
-                          <td style={{ padding: "2px 6px", color: "#9ca3af", fontSize: "10px", fontWeight: 500, height: "40px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
+                        <tr key={slot} style={{ borderTop: isSeparator ? "2px solid var(--border)" : "1px solid var(--border)" }}>
+                          <td style={{ padding: "2px 6px", color: "var(--muted-foreground)", fontSize: "10px", fontWeight: 500, height: "40px", verticalAlign: "middle", whiteSpace: "nowrap" }}>
                             {slot}
                           </td>
                           {DIAS_UTIL.map(d => {
@@ -976,9 +976,9 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
               </div>
 
               {/* Carga semanal */}
-              <div style={{ minWidth: "240px", background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "16px" }}>
+              <div style={{ minWidth: "240px", background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px" }}>
                 <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>Carga semanal</div>
-                <div style={{ fontSize: "11px", color: "#9ca3af", marginBottom: "6px" }}>Novo profissional</div>
+                <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginBottom: "6px" }}>Novo profissional</div>
 
                 <div style={{ position: "relative" }}>
                   <ResponsiveContainer width="100%" height={150}>
@@ -994,7 +994,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                       </Pie>
                       <Tooltip
                         formatter={(val, name) => [`${val ?? 0} slot(s)`, name]}
-                        contentStyle={{ fontSize: "11px", borderRadius: "8px", border: "1px solid #e5e7eb", padding: "4px 8px" }}
+                        contentStyle={{ fontSize: "11px", borderRadius: "8px", border: "1px solid var(--border)", padding: "4px 8px" }}
                       />
                     </PieChart>
                   </ResponsiveContainer>
@@ -1005,7 +1005,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                   </div>
                 </div>
 
-                <div style={{ display: "flex", justifyContent: "center", gap: "8px", fontSize: "11px", color: "#6b7280", marginBottom: "6px", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", justifyContent: "center", gap: "8px", fontSize: "11px", color: "var(--muted-foreground)", marginBottom: "6px", flexWrap: "wrap" }}>
                   {cargaSlicesExt.map((s, i) => (
                     <span key={i}>
                       <span style={{ color: s.color, fontWeight: 700 }}>●</span>{" "}
@@ -1014,10 +1014,10 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                   ))}
                 </div>
 
-                <div style={{ textAlign: "center", fontSize: "12px", color: "#6b7280", marginBottom: "2px" }}>
+                <div style={{ textAlign: "center", fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "2px" }}>
                   CH total: <strong style={{ color: B.navy }}>{fmtCh(novoProfData.chTotalMin)}</strong>
                 </div>
-                <div style={{ textAlign: "center", fontSize: "10px", color: "#9ca3af", marginBottom: "12px", lineHeight: 1.6 }}>
+                <div style={{ textAlign: "center", fontSize: "10px", color: "var(--muted-foreground)", marginBottom: "12px", lineHeight: 1.6 }}>
                   {novoProfData.turnInfo.includes("·") ? (
                     <>
                       {novoProfData.turnInfo.split("·")[0].trim()} ·<br />
@@ -1045,31 +1045,31 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
               </div>
 
               {/* Ocupação por dia */}
-              <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "16px" }}>
+              <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px" }}>
                 <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>Ocupação por dia</div>
-                <div style={{ fontSize: "11px", color: "#9ca3af", marginBottom: "12px" }}>Novo profissional</div>
+                <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginBottom: "12px" }}>Novo profissional</div>
                 <table style={{ borderCollapse: "collapse", fontSize: "12px" }}>
                   <thead>
-                    <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
-                      <th style={{ textAlign: "left", color: "#9ca3af", fontWeight: 600, paddingBottom: "7px", fontSize: "11px", minWidth: "44px", paddingRight: "12px" }}>Dia</th>
-                      <th style={{ textAlign: "left", color: "#9ca3af", fontWeight: 600, paddingBottom: "7px", fontSize: "11px", minWidth: "140px", paddingRight: "12px" }}>Unidade</th>
-                      <th style={{ textAlign: "center", color: "#9ca3af", fontWeight: 600, paddingBottom: "7px", fontSize: "11px", minWidth: "70px", paddingRight: "12px" }}>Sessões</th>
-                      <th style={{ textAlign: "center", color: "#9ca3af", fontWeight: 600, paddingBottom: "7px", fontSize: "11px", minWidth: "90px", paddingRight: "12px" }}>% ocup.</th>
-                      <th style={{ textAlign: "right", color: "#9ca3af", fontWeight: 600, paddingBottom: "7px", fontSize: "11px", minWidth: "60px" }}>Livre</th>
+                    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                      <th style={{ textAlign: "left", color: "var(--muted-foreground)", fontWeight: 600, paddingBottom: "7px", fontSize: "11px", minWidth: "44px", paddingRight: "12px" }}>Dia</th>
+                      <th style={{ textAlign: "left", color: "var(--muted-foreground)", fontWeight: 600, paddingBottom: "7px", fontSize: "11px", minWidth: "140px", paddingRight: "12px" }}>Unidade</th>
+                      <th style={{ textAlign: "center", color: "var(--muted-foreground)", fontWeight: 600, paddingBottom: "7px", fontSize: "11px", minWidth: "70px", paddingRight: "12px" }}>Sessões</th>
+                      <th style={{ textAlign: "center", color: "var(--muted-foreground)", fontWeight: 600, paddingBottom: "7px", fontSize: "11px", minWidth: "90px", paddingRight: "12px" }}>% ocup.</th>
+                      <th style={{ textAlign: "right", color: "var(--muted-foreground)", fontWeight: 600, paddingBottom: "7px", fontSize: "11px", minWidth: "60px" }}>Livre</th>
                     </tr>
                   </thead>
                   <tbody>
                     {novoProfData.ocupPorDia.map(row => {
                       const badge = pctBadge(row.pct)
                       return (
-                        <tr key={row.dia} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                          <td style={{ padding: "9px 6px 9px 0", fontWeight: 700, color: "#1f2937", fontSize: "13px", whiteSpace: "nowrap" }}>
+                        <tr key={row.dia} style={{ borderBottom: "1px solid var(--border)" }}>
+                          <td style={{ padding: "9px 6px 9px 0", fontWeight: 700, color: "var(--card-foreground)", fontSize: "13px", whiteSpace: "nowrap" }}>
                             {DIA_ABR[row.dia] ?? row.dia}
                           </td>
-                          <td style={{ padding: "9px 6px", color: "#374151", fontSize: "13px" }}>
+                          <td style={{ padding: "9px 6px", color: "var(--card-foreground)", fontSize: "13px" }}>
                             {row.unidades || "—"}
                           </td>
-                          <td style={{ padding: "9px 6px", textAlign: "center", fontWeight: 600, color: "#374151", fontSize: "13px" }}>
+                          <td style={{ padding: "9px 6px", textAlign: "center", fontWeight: 600, color: "var(--card-foreground)", fontSize: "13px" }}>
                             {row.count}/{row.totalSlots}
                           </td>
                           <td style={{ padding: "9px 6px", textAlign: "center" }}>
@@ -1088,27 +1088,27 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
               </div>
 
               {/* Ocupação por especialidade */}
-              <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "16px" }}>
+              <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px" }}>
                 <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px", marginBottom: "2px" }}>Ocupação por especialidade</div>
-                <div style={{ fontSize: "11px", color: "#9ca3af", marginBottom: "12px" }}>Novo profissional</div>
+                <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginBottom: "12px" }}>Novo profissional</div>
                 <table style={{ borderCollapse: "collapse", fontSize: "12px" }}>
                   <thead>
-                    <tr style={{ borderBottom: "1px solid #e5e7eb" }}>
-                      <th style={{ textAlign: "left", color: "#9ca3af", fontWeight: 600, paddingBottom: "7px", fontSize: "11px", minWidth: "180px", paddingRight: "12px" }}>Especialidade</th>
-                      <th style={{ textAlign: "center", color: "#9ca3af", fontWeight: 600, paddingBottom: "7px", fontSize: "11px", minWidth: "70px", paddingRight: "12px" }}>Sessões</th>
-                      <th style={{ textAlign: "center", color: "#9ca3af", fontWeight: 600, paddingBottom: "7px", fontSize: "11px", minWidth: "90px", paddingRight: "12px" }}>% ocup.</th>
-                      <th style={{ textAlign: "right", color: "#9ca3af", fontWeight: 600, paddingBottom: "7px", fontSize: "11px", minWidth: "60px" }}>Livre</th>
+                    <tr style={{ borderBottom: "1px solid var(--border)" }}>
+                      <th style={{ textAlign: "left", color: "var(--muted-foreground)", fontWeight: 600, paddingBottom: "7px", fontSize: "11px", minWidth: "180px", paddingRight: "12px" }}>Especialidade</th>
+                      <th style={{ textAlign: "center", color: "var(--muted-foreground)", fontWeight: 600, paddingBottom: "7px", fontSize: "11px", minWidth: "70px", paddingRight: "12px" }}>Sessões</th>
+                      <th style={{ textAlign: "center", color: "var(--muted-foreground)", fontWeight: 600, paddingBottom: "7px", fontSize: "11px", minWidth: "90px", paddingRight: "12px" }}>% ocup.</th>
+                      <th style={{ textAlign: "right", color: "var(--muted-foreground)", fontWeight: 600, paddingBottom: "7px", fontSize: "11px", minWidth: "60px" }}>Livre</th>
                     </tr>
                   </thead>
                   <tbody>
                     {novoProfData.ocupPorEsp.map(row => {
                       const badge = pctBadge(row.pct)
                       return (
-                        <tr key={row.esp} style={{ borderBottom: "1px solid #f3f4f6" }}>
-                          <td style={{ padding: "9px 6px 9px 0", fontWeight: 600, color: "#1f2937", fontSize: "13px" }}>
+                        <tr key={row.esp} style={{ borderBottom: "1px solid var(--border)" }}>
+                          <td style={{ padding: "9px 6px 9px 0", fontWeight: 600, color: "var(--card-foreground)", fontSize: "13px" }}>
                             {row.esp}
                           </td>
-                          <td style={{ padding: "9px 6px", textAlign: "center", fontWeight: 600, color: "#374151", fontSize: "13px" }}>
+                          <td style={{ padding: "9px 6px", textAlign: "center", fontWeight: 600, color: "var(--card-foreground)", fontSize: "13px" }}>
                             {row.count}/{row.totalSlots}
                           </td>
                           <td style={{ padding: "9px 6px", textAlign: "center" }}>
@@ -1132,7 +1132,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
 
       {/* ── Linha 3: Resultados ──────────────────────────────────────────────── */}
       {results && (
-        <div className="bg-white rounded-[14px] border border-gray-200 p-4">
+        <div className="bg-card rounded-[14px] border border-border p-4">
           <div className="flex justify-between items-start mb-3 flex-wrap gap-2">
             <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px" }}>
               {estrategiaFiltro.size > 0
@@ -1158,17 +1158,17 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                   const allKeys = donutData.slices.map(s => DONUT_NAME_TO_KEY[s.name]).filter(Boolean) as string[]
                   setEstrategiaFiltro(new Set(allKeys))
                 }}
-                style={{ padding: "3px 10px", borderRadius: "999px", fontSize: "11px", fontWeight: 700, cursor: "pointer", background: "#f3f4f6", color: "#374151", border: "1px solid #e5e7eb" }}
+                style={{ padding: "3px 10px", borderRadius: "999px", fontSize: "11px", fontWeight: 700, cursor: "pointer", background: "var(--muted)", color: "var(--card-foreground)", border: "1px solid var(--border)" }}
               >
                 Filtrar tudo
               </button>
               <button
                 onClick={() => setEstrategiaFiltro(new Set())}
-                style={{ padding: "3px 10px", borderRadius: "999px", fontSize: "11px", fontWeight: 700, cursor: "pointer", background: "#f3f4f6", color: "#374151", border: "1px solid #e5e7eb" }}
+                style={{ padding: "3px 10px", borderRadius: "999px", fontSize: "11px", fontWeight: 700, cursor: "pointer", background: "var(--muted)", color: "var(--card-foreground)", border: "1px solid var(--border)" }}
               >
                 Desmarcar tudo
               </button>
-              <div style={{ width: "1px", height: "18px", background: "#e5e7eb", margin: "0 2px" }} />
+              <div style={{ width: "1px", height: "18px", background: "var(--border)", margin: "0 2px" }} />
               {donutData.slices.map(slice => {
                 const key = DONUT_NAME_TO_KEY[slice.name]
                 if (!key) return null
@@ -1183,9 +1183,9 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                     }}
                     style={{
                       padding: "3px 10px", borderRadius: "999px", fontSize: "11px", fontWeight: 700, cursor: "pointer",
-                      background: active ? slice.color : "#f3f4f6",
-                      color: active ? "white" : "#374151",
-                      border: active ? `1px solid ${slice.color}` : "1px solid #e5e7eb",
+                      background: active ? slice.color : "var(--muted)",
+                      color: active ? "white" : "var(--card-foreground)",
+                      border: active ? `1px solid ${slice.color}` : "1px solid var(--border)",
                     }}
                   >
                     {slice.name} {slice.label} ({slice.value})
@@ -1203,12 +1203,12 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
             {filteredPacGroups.map((sessoes, gi) => {
               const hasProblem = sessoes.some(r => r.analise.buracoSiRemover || r.analise.semSolucao)
               const allResolvido = sessoes.every(r => getStatus(r.afetada).status === "resolvido")
-              const borderColor = hasProblem ? "#fca5a5" : allResolvido ? BD["resolvido"] : "#e5e7eb"
+              const borderColor = hasProblem ? "#fca5a5" : allResolvido ? BD["resolvido"] : "var(--border)"
 
               return (
-                <div key={gi} style={{ padding: "11px 13px", borderRadius: "12px", border: `1.5px solid ${borderColor}`, background: "white" }}>
+                <div key={gi} style={{ padding: "11px 13px", borderRadius: "12px", border: `1.5px solid ${borderColor}`, background: "var(--card)" }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", gap: "8px" }}>
-                    <div style={{ fontWeight: 700, fontSize: "13px", color: "#1f2937" }}>{sessoes[0].pac}</div>
+                    <div style={{ fontWeight: 700, fontSize: "13px", color: "var(--card-foreground)" }}>{sessoes[0].pac}</div>
                     <button
                       onClick={() => { setModalGroup(sessoes); const firstSolvable = sessoes.findIndex(r => !r.analise.semSolucao); setModalTabIdx(firstSolvable >= 0 ? firstSolvable : 0) }}
                       style={{ padding: "6px 14px", borderRadius: "9px", background: B.navy, color: "white", border: "none", fontWeight: 700, fontSize: "11px", cursor: "pointer", flexShrink: 0 }}
@@ -1222,12 +1222,12 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                     const { analise } = r
                     const showExib = r.afetada.terapiaExib && r.afetada.terapiaExib !== r.afetada.terapia
                     return (
-                      <div key={si} style={{ display: "flex", alignItems: "flex-start", gap: "10px", flexWrap: "wrap", paddingTop: si > 0 ? "8px" : "0", marginTop: si > 0 ? "8px" : "0", borderTop: si > 0 ? "1px solid #f3f4f6" : "none" }}>
+                      <div key={si} style={{ display: "flex", alignItems: "flex-start", gap: "10px", flexWrap: "wrap", paddingTop: si > 0 ? "8px" : "0", marginTop: si > 0 ? "8px" : "0", borderTop: si > 0 ? "1px solid var(--border)" : "none" }}>
                         <div style={{ flex: "1 1 220px" }}>
-                          <div style={{ fontSize: "12px", fontWeight: 700, color: "#1f2937", lineHeight: "1.3" }}>{r.afetada.terapia}</div>
-                          {showExib && <div style={{ fontSize: "11px", color: "#9ca3af" }}>({r.afetada.terapiaExib})</div>}
-                          <div style={{ fontSize: "11px", color: "#6b7280", marginTop: "1px" }}>{fmtName(r.afetada.prof)}</div>
-                          <div style={{ fontSize: "10px", color: "#9ca3af", marginTop: "1px" }}>{r.afetada.dia} {r.afetada.hora} · {r.afetada.conv || "—"}</div>
+                          <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--card-foreground)", lineHeight: "1.3" }}>{r.afetada.terapia}</div>
+                          {showExib && <div style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>({r.afetada.terapiaExib})</div>}
+                          <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "1px" }}>{fmtName(r.afetada.prof)}</div>
+                          <div style={{ fontSize: "10px", color: "var(--muted-foreground)", marginTop: "1px" }}>{r.afetada.dia} {r.afetada.hora} · {r.afetada.conv || "—"}</div>
                           <div className="flex gap-[3px] mt-[4px] flex-wrap items-center">
                             {analise.semSolucao && <span style={{ background: "#fef2f2", color: "#dc2626", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px", border: "1px solid #fca5a5" }}>Removida</span>}
                             {analise.buracoSiRemover && analise.semSolucao && <span style={{ background: "#fef2f2", color: "#dc2626", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px", border: "1px solid #fca5a5" }}>buraco</span>}
@@ -1238,7 +1238,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                             {analise.e4.length > 0 && <span style={{ background: B.purpleLt, color: B.purple, fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px" }}>#4 Outra terapia, mesmo horário{analise.e4.length > 1 ? ` (${analise.e4.length})` : ""}</span>}
                             {analise.e5 && <span style={{ background: "#fff7ed", color: "#c2410c", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px" }}>#5 Posições alteradas, prof. alterados</span>}
                             {analise.e6 && <span style={{ background: "#f5f3ff", color: "#6d28d9", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px" }}>#6 Alterar dia, prof. mantidos</span>}
-                            {analise.e7 && <span style={{ background: "#f3f4f6", color: "#374151", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px" }}>#7 Alterar dia, prof. alterados</span>}
+                            {analise.e7 && <span style={{ background: "var(--muted)", color: "var(--card-foreground)", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px" }}>#7 Alterar dia, prof. alterados</span>}
                             {analise.semSolucao && <span style={{ background: "#fef2f2", color: "#dc2626", fontSize: "9px", fontWeight: 700, borderRadius: "5px", padding: "1px 5px", border: "1px solid #fca5a5" }}>Sem solução</span>}
                           </div>
                           {st.opcao && (
@@ -1252,14 +1252,14 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                           <span style={{ background: stSt.bg, color: stSt.c, borderRadius: "999px", padding: "3px 9px", fontSize: "10px", fontWeight: 700, display: "inline-block", marginBottom: "3px" }}>
                             {stSt.l}
                           </span>
-                          {st.obs && <div style={{ fontSize: "10px", color: "#9ca3af", marginTop: "1px", fontStyle: "italic" }}>&quot;{st.obs}&quot;</div>}
+                          {st.obs && <div style={{ fontSize: "10px", color: "var(--muted-foreground)", marginTop: "1px", fontStyle: "italic" }}>&quot;{st.obs}&quot;</div>}
                         </div>
 
                         <div className="flex flex-col gap-[5px] items-end">
                           {st.status && st.status !== "pendente" && (
                             <button
                               onClick={() => persistStatus({ ...statusMap, [`${r.afetada.pac}|||${r.afetada.dia}|||${r.afetada.hora}|||${r.afetada.terapia}`]: { status: "pendente" } })}
-                              style={{ padding: "3px 9px", borderRadius: "7px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", fontSize: "10px", cursor: "pointer" }}
+                              style={{ padding: "3px 9px", borderRadius: "7px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", fontSize: "10px", cursor: "pointer" }}
                             >
                               Reset
                             </button>
@@ -1273,8 +1273,8 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
             })}
           </div>
 
-          <div style={{ marginTop: "12px", padding: "9px 13px", background: "#f8fafc", borderRadius: "9px", fontSize: "11px", color: "#9ca3af", lineHeight: 1.7 }}>
-            <strong style={{ color: "#374151" }}>Fluxo:</strong> Ver → escolher estratégia + opção → Aceitar (→ Acompanhamento) → Resolvido ou Recusado (libera para novo ciclo)
+          <div style={{ marginTop: "12px", padding: "9px 13px", background: "var(--muted)", borderRadius: "9px", fontSize: "11px", color: "var(--muted-foreground)", lineHeight: 1.7 }}>
+            <strong style={{ color: "var(--card-foreground)" }}>Fluxo:</strong> Ver → escolher estratégia + opção → Aceitar (→ Acompanhamento) → Resolvido ou Recusado (libera para novo ciclo)
           </div>
         </div>
       )}
@@ -1291,14 +1291,14 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
               }
             }}
           >
-            <div className="bg-white rounded-[18px] shadow-[0_24px_80px_rgba(0,0,0,.22)] w-[94vw] max-w-[760px] max-h-[88vh] flex flex-col overflow-hidden">
+            <div className="bg-card rounded-[18px] shadow-[0_24px_80px_rgba(0,0,0,.22)] w-[94vw] max-w-[760px] max-h-[88vh] flex flex-col overflow-hidden">
               <div className="px-5 py-[14px] border-b border-gray-100 bg-gray-50">
                 <div className="flex justify-between items-start gap-3">
                   <div>
                     <div style={{ fontWeight: 900, fontSize: "15px", color: B.navy }}>
                       Candidatos - {DIA_ABR[slotDia] ?? slotDia} {slotHora}
                     </div>
-                    <div style={{ fontSize: "11px", color: "#6b7280", marginTop: "3px" }}>
+                    <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "3px" }}>
                       Pacientes elegíveis, ordenados por prioridade de oferta.
                     </div>
                   </div>
@@ -1318,16 +1318,16 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                   const isDone = waStatus === "recusado" || waStatus === "inviavel"
 
                   return (
-                    <div key={`${c.pac}-${c.esp}-${i}`} style={{ border: "1px solid #e2e8f0", borderRadius: "12px", background: isDone ? "#f9fafb" : "#f8fafc", opacity: isDone ? 0.65 : 1, padding: "10px 12px", display: "flex", gap: "10px", alignItems: "flex-start", flexWrap: "wrap" }}>
+                    <div key={`${c.pac}-${c.esp}-${i}`} style={{ border: "1px solid var(--border)", borderRadius: "12px", background: isDone ? "var(--muted)" : "var(--muted)", opacity: isDone ? 0.65 : 1, padding: "10px 12px", display: "flex", gap: "10px", alignItems: "flex-start", flexWrap: "wrap" }}>
                       <div style={{ flex: "1 1 240px", minWidth: 0 }}>
-                        <div style={{ fontWeight: 800, color: "#1f2937", fontSize: "13px" }}>{c.pac}</div>
-                        <div style={{ fontSize: "11px", color: "#6b7280", marginTop: "3px" }}>
+                        <div style={{ fontWeight: 800, color: "var(--card-foreground)", fontSize: "13px" }}>{c.pac}</div>
+                        <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "3px" }}>
                           {c.esp} · {c.conv || "—"} · P{c.prio}
                         </div>
                         <div style={{ display: "flex", gap: "4px", marginTop: "6px", flexWrap: "wrap" }}>
                           {waStatus === "aguardando" && <span style={{ fontSize: "10px", background: B.blueLt, color: B.blue, borderRadius: "5px", padding: "2px 6px", fontWeight: 700 }}>Aguardando Resposta</span>}
                           {waStatus === "recusado" && <span style={{ fontSize: "10px", background: "#fef2f2", color: "#dc2626", borderRadius: "5px", padding: "2px 6px", fontWeight: 700 }}>Recusou</span>}
-                          {waStatus === "inviavel" && <span style={{ fontSize: "10px", background: "#f3f4f6", color: "#6b7280", borderRadius: "5px", padding: "2px 6px", fontWeight: 700 }}>Inviável</span>}
+                          {waStatus === "inviavel" && <span style={{ fontSize: "10px", background: "var(--muted)", color: "var(--muted-foreground)", borderRadius: "5px", padding: "2px 6px", fontWeight: 700 }}>Inviável</span>}
                         </div>
                       </div>
 
@@ -1341,17 +1341,17 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                         {!waStatus && (
                           <>
                             <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "aguardando" }))} style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: "#f0fdf4", color: "#16a34a", border: "1px solid #86efac", cursor: "pointer", fontWeight: 700 }}>Aceitar (→ Acompanhamento)</button>
-                            <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "inviavel" }))} style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer" }}>⛔ Inviável</button>
+                            <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "inviavel" }))} style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}>⛔ Inviável</button>
                           </>
                         )}
                         {waStatus === "aguardando" && (
                           <>
-                            <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "inviavel" }))} style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer" }}>⛔ Inviável</button>
-                            <button onClick={() => setCandidatoWA(p => { const n = { ...p }; delete n[cKey]; return n })} style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer" }}>Cancelar</button>
+                            <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "inviavel" }))} style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}>⛔ Inviável</button>
+                            <button onClick={() => setCandidatoWA(p => { const n = { ...p }; delete n[cKey]; return n })} style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}>Cancelar</button>
                           </>
                         )}
                         {isDone && (
-                          <button onClick={() => setCandidatoWA(p => { const n = { ...p }; delete n[cKey]; return n })} style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer" }}>Resetar</button>
+                          <button onClick={() => setCandidatoWA(p => { const n = { ...p }; delete n[cKey]; return n })} style={{ fontSize: "11px", padding: "6px 10px", borderRadius: "9px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}>Resetar</button>
                         )}
                       </div>
                     </div>
@@ -1381,8 +1381,8 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
             className="fixed inset-0 z-[70] flex items-center justify-center bg-black/60 p-3"
             onClick={e => { if (e.target === e.currentTarget) setScheduleModal(null) }}
           >
-            <div className="bg-white rounded-[18px] shadow-[0_20px_60px_rgba(0,0,0,.2)] w-[93vw] max-w-[980px] max-h-[93vh] flex flex-col overflow-hidden">
-              <div className="px-5 py-4 border-b border-gray-100 bg-[#fafafa]">
+            <div className="bg-card rounded-[18px] shadow-[0_20px_60px_rgba(0,0,0,.2)] w-[93vw] max-w-[980px] max-h-[93vh] flex flex-col overflow-hidden">
+              <div className="px-5 py-4 border-b border-gray-100 bg-[var(--card)]">
                 <div className="flex justify-between items-start gap-3">
                   <div>
                     <div style={{ fontWeight: 800, fontSize: "16px", color: B.navy }}>🗓 Cronograma — {c.pac}</div>
@@ -1391,13 +1391,13 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                         Convênio: {c.conv || "—"}
                       </span>
                     </div>
-                    <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", marginTop: "6px", fontSize: "12px", color: "#9ca3af" }}>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", marginTop: "6px", fontSize: "12px", color: "var(--muted-foreground)" }}>
                       <span>
                         <span style={{ display: "inline-block", width: "12px", height: "12px", borderRadius: "3px", background: B.limeLt, border: `1px solid ${B.lime}`, marginRight: "4px", verticalAlign: "middle" }} />
                         Verde = nova terapia sugerida
                       </span>
                       <span>
-                        <span style={{ display: "inline-block", width: "12px", height: "12px", borderRadius: "3px", background: "#f8fafc", border: "1px solid #e2e8f0", marginRight: "4px", verticalAlign: "middle" }} />
+                        <span style={{ display: "inline-block", width: "12px", height: "12px", borderRadius: "3px", background: "var(--muted)", border: "1px solid var(--border)", marginRight: "4px", verticalAlign: "middle" }} />
                         Cinza = existente
                       </span>
                     </div>
@@ -1415,7 +1415,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                 <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "520px" }}>
                   <thead>
                     <tr>
-                      <th style={{ width: "60px", paddingBottom: "10px", textAlign: "right", paddingRight: "14px", fontSize: "13px", color: "#9ca3af", fontWeight: 500 }}>Hora</th>
+                      <th style={{ width: "60px", paddingBottom: "10px", textAlign: "right", paddingRight: "14px", fontSize: "13px", color: "var(--muted-foreground)", fontWeight: 500 }}>Hora</th>
                       {diasSorted.map(d => (
                         <th key={d} style={{ minWidth: "155px", paddingBottom: "10px", textAlign: "center", fontSize: "15px", color: B.navy, fontWeight: 800 }}>
                           {d.replace("-feira", "")}
@@ -1425,7 +1425,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                   </thead>
                   <tbody>
                     {slotsGrid.map(s => (
-                      <tr key={s} style={{ borderTop: "1px solid #f1f5f9" }}>
+                      <tr key={s} style={{ borderTop: "1px solid var(--border)" }}>
                         <td style={{ textAlign: "right", paddingRight: "14px", verticalAlign: "top", paddingTop: "10px", fontFamily: "monospace", fontSize: "17px", fontWeight: 800, color: B.navy, letterSpacing: "-0.5px" }}>{s}</td>
                         {diasSorted.map(d => {
                           const sess = todasSessoes.filter(r => String(r["Dia da Semana"] || "") === d && normHora(String(r.HI_str || "")) === s)
@@ -1433,15 +1433,15 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                           return (
                             <td key={d} style={{ padding: "2px", verticalAlign: "top" }}>
                               {sess.map((r, ri) => (
-                                <div key={ri} style={{ background: "#f8fafc", border: "1px solid #e2e8f0", borderRadius: "10px", padding: "9px 11px", minHeight: "80px", display: "flex", flexDirection: "column", gap: "3px", marginBottom: "4px" }}>
-                                  <div style={{ fontSize: "13px", fontWeight: 700, color: "#1f2937", lineHeight: 1.3 }}>{String(r.Terapia || "")}</div>
-                                  <div style={{ fontSize: "12px", color: "#6b7280" }}>{fmtName(String(r.Profissional || ""))}</div>
+                                <div key={ri} style={{ background: "var(--muted)", border: "1px solid var(--border)", borderRadius: "10px", padding: "9px 11px", minHeight: "80px", display: "flex", flexDirection: "column", gap: "3px", marginBottom: "4px" }}>
+                                  <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--card-foreground)", lineHeight: 1.3 }}>{String(r.Terapia || "")}</div>
+                                  <div style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>{fmtName(String(r.Profissional || ""))}</div>
                                 </div>
                               ))}
                               {isNew && (
                                 <div style={{ background: B.limeLt, border: `1px solid ${B.lime}`, borderRadius: "10px", padding: "9px 11px", minHeight: "80px", display: "flex", flexDirection: "column", gap: "3px", marginBottom: "4px" }}>
-                                  <div style={{ fontSize: "13px", fontWeight: 700, color: "#1f2937", lineHeight: 1.3 }}>{c.esp}</div>
-                                  <div style={{ fontSize: "12px", color: "#6b7280" }}>Novo profissional</div>
+                                  <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--card-foreground)", lineHeight: 1.3 }}>{c.esp}</div>
+                                  <div style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>Novo profissional</div>
                                   <div style={{ fontSize: "12px", fontWeight: 700, color: B.purple, marginTop: "auto" }}>✦ Nova Terapia</div>
                                 </div>
                               )}

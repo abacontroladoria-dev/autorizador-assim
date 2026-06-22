@@ -1,8 +1,8 @@
 "use client"
 
 import { useSearchParams, useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
-import { SK_SAIDA } from "@/lib/cronograma/constants"
+import { useEffect } from "react"
+import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 import { SaidaProfMode } from "./SaidaProfMode"
 import { OcupProfMode } from "./OcupProfMode"
 import { PreencherProfTab } from "@/components/cronograma/shared/PreencherProfTab"
@@ -34,15 +34,8 @@ export function SolicitacoesShell({ cRows, lRows, dispRows, cfg }: ShellProps) {
   const raw = searchParams.get("tab")
   const activeTab: TabKey = raw && TABS.some(t => t.key === raw) ? (raw as TabKey) : "saida"
 
-  // StatusMap para Saída de Profissional e Banco de Dados (compartilhado entre tabs)
-  const [statusMap, setStatusMap] = useState<StatusMap>(() => {
-    try { return JSON.parse(localStorage.getItem(SK_SAIDA) || "{}") } catch { return {} }
-  })
-
-  const persistStatus = (map: StatusMap) => {
-    setStatusMap(map)
-    try { localStorage.setItem(SK_SAIDA, JSON.stringify(map)) } catch {}
-  }
+  // StatusMap da Saída de Profissional — compartilhado entre a equipe via backend (saida_aceites)
+  const { statusMap, persistStatus } = useCronogramaData()
 
   useEffect(() => {
     if (!raw) router.replace("/cronograma/solicitacoes?tab=saida")

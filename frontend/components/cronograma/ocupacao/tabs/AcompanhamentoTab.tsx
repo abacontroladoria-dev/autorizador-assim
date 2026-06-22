@@ -56,7 +56,7 @@ const ORIGEM_LABELS: Record<string, string> = {
 }
 
 export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onInv, onCron }: Props) {
-  const { cRows, rec, inv, waMap, sRec, sInv, sWa } = useCronogramaData()
+  const { cRows, rec, inv, waMap, statusMap, sRec, sInv, sWa, persistStatus } = useCronogramaData()
   const [sub, setSub] = useState<Sub>("aguardando")
   const [fOrigem, setFOrigem] = useState<Origem>("")
   const [ocupOpen, setOcupOpen] = useState(false)
@@ -65,14 +65,6 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
   const [ocupPacOpen, setOcupPacOpen] = useState(false)
   const [invModalPac, setInvModalPac] = useState<string | null>(null)
   const [invMotivo, setInvMotivo] = useState("")
-
-  const [statusMap, setStatusMap] = useState<StatusMap>(() => {
-    try { return JSON.parse(localStorage.getItem(SK_SAIDA) || "{}") } catch { return {} }
-  })
-  const persistStatus = (map: StatusMap) => {
-    setStatusMap(map)
-    try { localStorage.setItem(SK_SAIDA, JSON.stringify(map)) } catch {}
-  }
 
   const [profMap, setProfMap] = useState<Record<string, string>>(() => {
     try { return JSON.parse(localStorage.getItem(SK_PROF) || "{}") } catch { return {} }
@@ -99,6 +91,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
   }
 
   const hoje = () => new Date().toLocaleDateString("pt-BR")
+
 
   // waMap "aguardando" items — cross-reference with res for full details
   const aguardandoOcup = useMemo(() => {
@@ -306,17 +299,17 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
         {SUBS.map(s => (
           <button key={s.key} onClick={() => setSub(s.key)} style={{
             padding: "7px 14px", borderRadius: "10px",
-            border: `1px solid ${sub === s.key ? B.blue : "#e5e7eb"}`,
-            background: sub === s.key ? B.blueLt : "white",
-            color: sub === s.key ? B.blue : "#6b7280",
+            border: `1px solid ${sub === s.key ? B.blue : "var(--border)"}`,
+            background: sub === s.key ? "var(--cron-active-bg)" : "var(--card)",
+            color: sub === s.key ? B.blue : "var(--muted-foreground)",
             fontWeight: 700, fontSize: "12px", cursor: "pointer",
             display: "flex", alignItems: "center", gap: "6px",
           }}>
             {s.label}
             {s.count > 0 && (
               <span style={{
-                background: sub === s.key ? B.blue : "#e5e7eb",
-                color: sub === s.key ? "white" : "#6b7280",
+                background: sub === s.key ? B.blue : "var(--muted)",
+                color: sub === s.key ? "white" : "var(--muted-foreground)",
                 borderRadius: "999px", padding: "0 6px", fontSize: "11px", fontWeight: 800,
               }}>
                 {s.count}
@@ -334,13 +327,13 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
         <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
           {/* Filtro por origem */}
           <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "11px", color: "#6b7280", fontWeight: 600 }}>Filtrar por origem:</span>
+            <span style={{ fontSize: "11px", color: "var(--muted-foreground)", fontWeight: 600 }}>Filtrar por origem:</span>
             {(["", "ocupacao", "ocp-prof", "ocp-pac", "saida"] as Origem[]).map(o => (
               <button key={o} onClick={() => setFOrigem(o)} style={{
                 padding: "4px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 600,
-                border: `1px solid ${fOrigem === o ? B.blue : "#e5e7eb"}`,
-                background: fOrigem === o ? B.blueLt : "white",
-                color: fOrigem === o ? B.blue : "#6b7280",
+                border: `1px solid ${fOrigem === o ? B.blue : "var(--border)"}`,
+                background: fOrigem === o ? "var(--cron-active-bg)" : "var(--card)",
+                color: fOrigem === o ? B.blue : "var(--muted-foreground)",
                 cursor: "pointer",
               }}>
                 {o === "" ? "Todas origens" : ORIGEM_LABELS[o]}
@@ -349,9 +342,9 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
           </div>
 
           {aguardandoCount === 0 && (
-            <div style={{ background: "white", borderRadius: "14px", border: "2px dashed #e5e7eb", padding: "32px 24px", textAlign: "center" }}>
+            <div style={{ background: "var(--card)", borderRadius: "14px", border: "2px dashed var(--border)", padding: "32px 24px", textAlign: "center" }}>
               <div style={{ fontSize: "32px", marginBottom: "8px" }}>📬</div>
-              <div style={{ color: "#9ca3af", fontSize: "14px" }}>Nenhum item aguardando resposta</div>
+              <div style={{ color: "var(--muted-foreground)", fontSize: "14px" }}>Nenhum item aguardando resposta</div>
             </div>
           )}
 
@@ -360,7 +353,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
               <button
                 onClick={() => setOcupOpen(o => !o)}
-                style={{ display: "flex", alignItems: "center", gap: "8px", background: B.blueLt, border: `1px solid ${B.blue}44`, borderRadius: "12px", padding: "10px 14px", cursor: "pointer", textAlign: "left", fontFamily: "inherit", width: "100%" }}
+                style={{ display: "flex", alignItems: "center", gap: "8px", background: "var(--cron-active-bg)", border: `1px solid ${B.blue}44`, borderRadius: "12px", padding: "10px 14px", cursor: "pointer", textAlign: "left", fontFamily: "inherit", width: "100%" }}
               >
                 <span style={{ fontSize: "12px", color: B.blue, fontWeight: 700, flex: 1 }}>
                   📋 Aumentar Ocupação (Clínica) · {aguardandoOcup.length}
@@ -435,7 +428,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
               <button
                 onClick={() => setSaidaOpen(o => !o)}
-                style={{ display: "flex", alignItems: "center", gap: "8px", background: "#f5f3ff", border: `1px solid ${B.purple}44`, borderRadius: "12px", padding: "10px 14px", cursor: "pointer", textAlign: "left", fontFamily: "inherit", width: "100%" }}
+                style={{ display: "flex", alignItems: "center", gap: "8px", background: "var(--muted)", border: `1px solid ${B.purple}44`, borderRadius: "12px", padding: "10px 14px", cursor: "pointer", textAlign: "left", fontFamily: "inherit", width: "100%" }}
               >
                 <span style={{ fontSize: "12px", color: B.purple, fontWeight: 700, flex: 1 }}>
                   🚪 Saída de Profissional · {aguardandoSaidaCount}
@@ -479,17 +472,17 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
       {invModalPac && (
         <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.4)", padding: "16px" }}
           onClick={e => { if (e.target === e.currentTarget) { setInvModalPac(null); setInvMotivo("") } }}>
-          <div style={{ background: "white", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "380px", width: "100%", padding: "20px" }}>
+          <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "380px", width: "100%", padding: "20px" }}>
             <div style={{ fontWeight: 900, fontSize: "17px", marginBottom: "4px" }}>⛔ Marcar como Inviável</div>
-            <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "10px" }}>Removido de TODAS as sugestões até tirado da lista.</div>
-            <div style={{ background: "#f8fafc", borderRadius: "10px", padding: "10px 12px", fontSize: "13px", fontWeight: 700, marginBottom: "10px" }}>{invModalPac}</div>
+            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "10px" }}>Removido de TODAS as sugestões até tirado da lista.</div>
+            <div style={{ background: "var(--muted)", borderRadius: "10px", padding: "10px 12px", fontSize: "13px", fontWeight: 700, marginBottom: "10px" }}>{invModalPac}</div>
             <textarea value={invMotivo} onChange={e => setInvMotivo(e.target.value)} placeholder="Motivo (ex: família faltando muito...)" rows={2}
-              style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: "10px", padding: "8px 12px", fontSize: "13px", fontFamily: "inherit", resize: "none", marginBottom: "14px", boxSizing: "border-box" }} />
+              style={{ width: "100%", border: "1px solid var(--border)", borderRadius: "10px", padding: "8px 12px", fontSize: "13px", fontFamily: "inherit", resize: "none", marginBottom: "14px", boxSizing: "border-box" }} />
             <div style={{ display: "flex", gap: "8px" }}>
               <button onClick={confirmarInviavel} style={{ padding: "8px 16px", borderRadius: "10px", background: B.navy, color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: "13px" }}>
                 Confirmar
               </button>
-              <button onClick={() => { setInvModalPac(null); setInvMotivo("") }} style={{ flex: 1, padding: "8px 16px", borderRadius: "10px", background: "#f3f4f6", color: "#374151", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+              <button onClick={() => { setInvModalPac(null); setInvMotivo("") }} style={{ flex: 1, padding: "8px 16px", borderRadius: "10px", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
                 Cancelar
               </button>
             </div>
@@ -873,17 +866,17 @@ function OcupItem({
   onAceito: () => void; onRecusado: () => void; onInviavel: () => void; onCancelar: () => void; onVer: () => void
 }) {
   return (
-    <div style={{ background: B.blueLt, border: `1px solid ${B.blue}33`, borderRadius: "12px", padding: "10px 14px" }}>
+    <div style={{ background: "var(--cron-active-bg)", border: `1px solid ${B.blue}33`, borderRadius: "12px", padding: "10px 14px" }}>
       {/* Badge de origem */}
       <div style={{ marginBottom: "6px" }}>
-        <span style={{ background: B.blueLt, color: B.blue, border: `1px solid ${B.blue}44`, borderRadius: "999px", padding: "2px 8px", fontSize: "10px", fontWeight: 700 }}>
+        <span style={{ background: "var(--cron-active-bg)", color: B.blue, border: `1px solid ${B.blue}44`, borderRadius: "999px", padding: "2px 8px", fontSize: "10px", fontWeight: 700 }}>
           📋 Aumentar Ocupação (Clínica)
         </span>
       </div>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-start", justifyContent: "space-between" }}>
         <div>
           <div style={{ fontWeight: 800, fontSize: "13px", color: B.navy }}>{pac}</div>
-          <div style={{ fontSize: "12px", color: "#6b7280", marginTop: "2px" }}>
+          <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginTop: "2px" }}>
             {tP || esp || "—"} · {prof}
           </div>
           <div style={{ fontSize: "12px", fontWeight: 700, color: B.navy, marginTop: "2px" }}>
@@ -891,7 +884,7 @@ function OcupItem({
           </div>
         </div>
         <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
-          <button onClick={onVer} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: "white", color: B.blue, border: `1px solid ${B.blue}33`, cursor: "pointer" }}>
+          <button onClick={onVer} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: "var(--card)", color: B.blue, border: `1px solid ${B.blue}33`, cursor: "pointer" }}>
             🗓 Ver
           </button>
           <button onClick={onAceito} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "#f0fdf4", color: "#16a34a", border: "1px solid #bbf7d0", cursor: "pointer", fontWeight: 700 }}>
@@ -900,10 +893,10 @@ function OcupItem({
           <button onClick={onRecusado} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", cursor: "pointer", fontWeight: 700 }}>
             Recusou
           </button>
-          <button onClick={onInviavel} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "#f3f4f6", color: "#6b7280", border: "1px solid #e5e7eb", cursor: "pointer", fontWeight: 700 }}>
+          <button onClick={onInviavel} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 700 }}>
             Inviável
           </button>
-          <button onClick={onCancelar} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "white", color: "#9ca3af", border: "1px solid #e5e7eb", cursor: "pointer" }}
+          <button onClick={onCancelar} style={{ fontSize: "11px", padding: "4px 9px", borderRadius: "8px", background: "var(--card)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}
             title="Desfaz o aceite — volta como sugestão não trabalhada em Aumentar Ocupação (Clínica)">
             Cancelar
           </button>

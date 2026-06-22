@@ -1,6 +1,7 @@
 'use client'
 
 import { useState } from 'react'
+import { Eye, EyeOff } from 'lucide-react'
 import toast from 'react-hot-toast'
 import {
   Dialog,
@@ -26,6 +27,38 @@ function passwordStrength(p: string): { label: string; color: string; width: str
   if (score === 2) return { label: 'Média', color: 'bg-yellow-400', width: 'w-2/4' }
   if (score === 3) return { label: 'Boa', color: 'bg-blue-400', width: 'w-3/4' }
   return { label: 'Forte', color: 'bg-green-400', width: 'w-full' }
+}
+
+function PasswordInput({
+  placeholder,
+  value,
+  onChange,
+}: {
+  placeholder: string
+  value: string
+  onChange: (v: string) => void
+}) {
+  const [show, setShow] = useState(false)
+  return (
+    <div className="relative">
+      <input
+        type={show ? 'text' : 'password'}
+        placeholder={placeholder}
+        className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 pr-11 text-sm outline-none focus:border-[#3A8FB7] focus:ring-2 focus:ring-[#3A8FB7]/20"
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+      />
+      <button
+        type="button"
+        aria-label={show ? 'Ocultar senha' : 'Mostrar senha'}
+        onClick={() => setShow((v) => !v)}
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+        tabIndex={-1}
+      >
+        {show ? <EyeOff size={16} /> : <Eye size={16} />}
+      </button>
+    </div>
+  )
 }
 
 export default function ModalAlterarSenha({ open, onClose, email }: Props) {
@@ -63,7 +96,6 @@ export default function ModalAlterarSenha({ open, onClose, email }: Props) {
 
     setLoading(true)
 
-    // Re-autenticar com a senha atual
     const { error: signInError } = await supabase.auth.signInWithPassword({
       email,
       password: senhaAtual,
@@ -75,7 +107,6 @@ export default function ModalAlterarSenha({ open, onClose, email }: Props) {
       return
     }
 
-    // Atualizar para nova senha
     const { error: updateError } = await supabase.auth.updateUser({
       password: novaSenha,
     })
@@ -103,21 +134,17 @@ export default function ModalAlterarSenha({ open, onClose, email }: Props) {
           </DialogHeader>
 
           <div className="mt-6 space-y-4">
-            <input
-              type="password"
+            <PasswordInput
               placeholder="Senha atual"
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-[#3A8FB7] focus:ring-2 focus:ring-[#3A8FB7]/20"
               value={senhaAtual}
-              onChange={(e) => setSenhaAtual(e.target.value)}
+              onChange={setSenhaAtual}
             />
 
             <div>
-              <input
-                type="password"
+              <PasswordInput
                 placeholder="Nova senha"
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-[#3A8FB7] focus:ring-2 focus:ring-[#3A8FB7]/20"
                 value={novaSenha}
-                onChange={(e) => setNovaSenha(e.target.value)}
+                onChange={setNovaSenha}
               />
               {novaSenha.length > 0 && (
                 <div className="mt-2">
@@ -129,12 +156,10 @@ export default function ModalAlterarSenha({ open, onClose, email }: Props) {
               )}
             </div>
 
-            <input
-              type="password"
+            <PasswordInput
               placeholder="Confirmar nova senha"
-              className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-[#3A8FB7] focus:ring-2 focus:ring-[#3A8FB7]/20"
               value={confirmar}
-              onChange={(e) => setConfirmar(e.target.value)}
+              onChange={setConfirmar}
             />
 
             <button

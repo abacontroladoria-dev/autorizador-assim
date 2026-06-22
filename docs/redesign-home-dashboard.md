@@ -29,6 +29,7 @@ Inspirar-se em:
 - dashboards SaaS modernos
 
 Misturando:
+
 - visual clean
 - aspecto clínico leve
 - cards suaves
@@ -86,16 +87,19 @@ Modernizar o menu lateral mantendo simplicidade.
 ## Estrutura
 
 ATENDIMENTO
+
 - Home
 - Nova Solicitação
 - Controle de Pacientes
 - Controle de Terapeutas
 
 PROCESSOS
+
 - Guias Digitais
 - Auditoria ASSIM
 
 SISTEMA
+
 - Admin
 
 ## Visual
@@ -124,6 +128,7 @@ Subtítulo:
 "Monitoramento diário das unidades"
 
 Adicionar:
+
 - data atual
 - status operacional pequeno
 
@@ -236,6 +241,7 @@ Gráfico de barras simples.
 - responsivo
 
 Pode usar:
+
 - Recharts
 - Chart.js
 - ApexCharts

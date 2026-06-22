@@ -36,6 +36,7 @@ export function useAuditoriaAssim() {
     situacao: '',
     data: getHojeLocal(),
     tuss: '',
+    horario_bloco: '',
   })
 
   const filtersRef = useRef(filters)
@@ -90,21 +91,51 @@ export function useAuditoriaAssim() {
   // KPIs derivados client-side — elimina o 3º round-trip ao banco
   const kpis = useMemo((): KpisAuditoriaAssim | null => {
     if (loading) return null
-    const registros = rawDados.filter((d) => d.situacao !== 'FALTA' && d.situacao !== 'FALTA_TERAPEUTA')
-    const faltas = rawDados.filter((d) => d.situacao === 'FALTA')
-    const faltasTerapeuta = rawDados.filter((d) => d.situacao === 'FALTA_TERAPEUTA')
+
+    const dataFiltrada = rawDados.filter((item) => {
+      if (
+        filters.paciente &&
+        !item.paciente_nome?.toLowerCase().includes(filters.paciente.toLowerCase())
+      ) return false
+
+      if (filters.situacao) {
+        if (filters.situacao === 'TOKENS') {
+          if (!item.teve_token) return false
+        } else {
+          if (item.situacao !== filters.situacao) return false
+        }
+      }
+
+      if (
+        filters.tuss &&
+        !item.codigo_tuss?.toLowerCase().includes(filters.tuss.toLowerCase())
+      ) return false
+
+      if (filters.horario_bloco && item.hora_inicial) {
+        const [inicio, fim] = filters.horario_bloco.split('-')
+        if (item.hora_inicial < inicio || item.hora_inicial >= fim) return false
+      }
+
+      return true
+    })
+
+    const registros = dataFiltrada.filter((d) => d.situacao !== 'FALTA' && d.situacao !== 'FALTA_TERAPEUTA')
+    const faltas = dataFiltrada.filter((d) => d.situacao === 'FALTA')
+    const faltasTerapeuta = dataFiltrada.filter((d) => d.situacao === 'FALTA_TERAPEUTA')
+    const comToken = registros.filter((d) => d.teve_token === true).length
     return {
       total: registros.length,
       faltas: faltas.length,
       faltas_terapeuta: faltasTerapeuta.length,
-      liberadas: registros.filter((d) => d.situacao === 'LIBERADA').length,
+      liberadas: registros.filter((d) => d.situacao === 'LIBERADA').length - comToken,
       nao_solicitadas: registros.filter((d) => d.situacao === 'NAO_SOLICITADA').length,
       sincronizando: registros.filter((d) => d.situacao === 'SINCRONIZANDO').length,
       retorno_nao_confirmado: registros.filter((d) => d.situacao === 'RETORNO_NAO_CONFIRMADO' || d.situacao === 'AGUARDANDO_RETORNO').length,
       canceladas: registros.filter((d) => d.situacao === 'CANCELADA').length,
       glosas: registros.filter((d) => d.situacao === 'GLOSA').length,
+      tokens: comToken,
     }
-  }, [rawDados, loading])
+  }, [rawDados, loading, filters])
 
   useEffect(() => {
     carregarDados()
@@ -154,12 +185,23 @@ export function useAuditoriaAssim() {
         !item.paciente_nome?.toLowerCase().includes(filters.paciente.toLowerCase())
       ) return false
 
-      if (filters.situacao && item.situacao !== filters.situacao) return false
+      if (filters.situacao) {
+        if (filters.situacao === 'TOKENS') {
+          if (!item.teve_token) return false
+        } else {
+          if (item.situacao !== filters.situacao) return false
+        }
+      }
 
       if (
         filters.tuss &&
         !item.codigo_tuss?.toLowerCase().includes(filters.tuss.toLowerCase())
       ) return false
+
+      if (filters.horario_bloco && item.hora_inicial) {
+        const [inicio, fim] = filters.horario_bloco.split('-')
+        if (item.hora_inicial < inicio || item.hora_inicial >= fim) return false
+      }
 
       return true
     })
@@ -180,7 +222,7 @@ export function useAuditoriaAssim() {
       }
       return 0
     })
-  }, [rawDados, filters.paciente, filters.situacao, filters.tuss, sortKey, sortDir])
+  }, [rawDados, filters.paciente, filters.situacao, filters.tuss, filters.horario_bloco, sortKey, sortDir])
 
   const totalPaginas = useMemo(
     () => Math.max(1, Math.ceil(filtrados.length / PAGE_SIZE)),

@@ -75,7 +75,7 @@ const ESTRATEGIA_META: Record<Estrategia, {
 
 const STATUS_META: Record<Status, { label: string; bg: string; c: string }> = {
   acompanhamento: { label: "Em Acompanhamento", bg: B.blueLt,  c: B.blue    },
-  inviavel:       { label: "Inviável",           bg: "#f3f4f6", c: "#6b7280" },
+  inviavel:       { label: "Inviável",           bg: "var(--muted)", c: "var(--muted-foreground)" },
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -480,11 +480,11 @@ function TodasSugestoesModal({
   const unitMeta = buildCronoUnitMeta(dias, cMap)
 
   const cSt = (tipo: string) => {
-    if (tipo === "supervDesloc") return { bg: "#111827", bd: "#374151",  label: "↔ mover" }
+    if (tipo === "supervDesloc") return { bg: "var(--card-foreground)", bd: "var(--card-foreground)",  label: "↔ mover" }
     if (tipo === "aceito")       return { bg: B.blueLt,  bd: B.blue,    label: "Aceito"   }
     if (tipo === "proposta")     return { bg: B.limeLt,  bd: B.lime,    label: "Proposta" }
-    if (tipo === "admin")        return { bg: "#f3f4f6", bd: "#d1d5db", label: null }
-    return                              { bg: "#f8fafc", bd: "#e2e8f0", label: null }
+    if (tipo === "admin")        return { bg: "var(--muted)", bd: "var(--border)", label: null }
+    return                              { bg: "var(--muted)", bd: "var(--border)", label: null }
   }
 
   const byEsp: Record<string, Sugestao[]> = {}
@@ -505,25 +505,25 @@ function TodasSugestoesModal({
       style={{ position: "fixed", inset: 0, zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.55)", padding: "12px" }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div style={{ background: "white", borderRadius: "18px", boxShadow: "0 24px 80px rgba(0,0,0,.22)", width: "96vw", maxWidth: "1160px", maxHeight: "92vh", display: "flex", flexDirection: "column" }}>
+      <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 24px 80px rgba(0,0,0,.22)", width: "96vw", maxWidth: "1160px", maxHeight: "92vh", display: "flex", flexDirection: "column" }}>
 
         {/* Header */}
-        <div style={{ padding: "14px 20px", borderBottom: "1px solid #f0f0f0", background: "#fafafa", borderRadius: "18px 18px 0 0", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+        <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", background: "var(--card)", borderRadius: "18px 18px 0 0", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
           <div>
             <div style={{ fontWeight: 900, fontSize: "15px", color: B.navy }}>{fmtName(pac)}</div>
-            <div style={{ fontSize: "12px", color: "#9ca3af", marginTop: "2px" }}>
+            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginTop: "2px" }}>
               Agenda completa · {sugestoes.length} proposta{sugestoes.length !== 1 ? "s" : ""} disponíve{sugestoes.length !== 1 ? "is" : "l"}
             </div>
           </div>
           <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
             <CronoGlobalUnitBadge unit={unitMeta.globalUnit} />
-            <button onClick={onClose} style={{ width: "30px", height: "30px", borderRadius: "50%", border: "none", background: "#f3f4f6", cursor: "pointer", fontSize: "16px", color: "#6b7280" }}>×</button>
+            <button onClick={onClose} style={{ width: "30px", height: "30px", borderRadius: "50%", border: "none", background: "var(--muted)", cursor: "pointer", fontSize: "16px", color: "var(--muted-foreground)" }}>×</button>
           </div>
         </div>
 
         {/* Seletor de estratégia */}
-        <div style={{ padding: "10px 20px", borderBottom: "1px solid #f0f0f0", background: "#f8fafc", display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
-          <span style={{ fontSize: "11px", fontWeight: 700, color: "#6b7280", marginRight: "4px" }}>Estratégia:</span>
+        <div style={{ padding: "10px 20px", borderBottom: "1px solid var(--border)", background: "var(--muted)", display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+          <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", marginRight: "4px" }}>Estratégia:</span>
           {(["S1", "S2", "S3"] as Estrategia[]).map(s => {
             const m = ESTRATEGIA_META[s]
             const isActive = estrategia === s
@@ -535,13 +535,13 @@ function TodasSugestoesModal({
                 style={{
                   padding: "4px 12px", borderRadius: "8px", fontSize: "11px", fontWeight: 700,
                   cursor: m.disponivel ? "pointer" : "not-allowed", fontFamily: "inherit",
-                  border: `1px solid ${isActive ? m.border : "#e5e7eb"}`,
-                  background: isActive ? m.bg : "#f3f4f6",
-                  color: isActive ? m.c : "#9ca3af",
+                  border: `1px solid ${isActive ? m.border : "var(--border)"}`,
+                  background: isActive ? m.bg : "var(--muted)",
+                  color: isActive ? m.c : "var(--muted-foreground)",
                   opacity: m.disponivel ? 1 : 0.5,
                   display: "flex", alignItems: "center", gap: "5px",
                 }}>
-                <span style={{ padding: "1px 5px", borderRadius: "4px", fontSize: "10px", fontWeight: 800, background: isActive ? m.c : "#d1d5db", color: isActive ? "white" : "#6b7280" }}>{m.short}</span>
+                <span style={{ padding: "1px 5px", borderRadius: "4px", fontSize: "10px", fontWeight: 800, background: isActive ? m.c : "var(--border)", color: isActive ? "white" : "var(--muted-foreground)" }}>{m.short}</span>
                 {m.label}
                 {!m.disponivel && <span style={{ fontSize: "9px", background: "#fef3c7", color: "#92400e", border: "1px solid #fbbf24", borderRadius: "3px", padding: "0 4px" }}>Em breve</span>}
               </button>
@@ -553,15 +553,15 @@ function TodasSugestoesModal({
         <div style={{ flex: 1, display: "flex", overflow: "hidden", minHeight: 0 }}>
 
           {/* ── Esquerda: propostas ──────────────────────────────────────── */}
-          <div style={{ width: "480px", flexShrink: 0, borderRight: "2px solid #f1f5f9", display: "flex", flexDirection: "column", minHeight: 0 }}>
+          <div style={{ width: "480px", flexShrink: 0, borderRight: "2px solid var(--border)", display: "flex", flexDirection: "column", minHeight: 0 }}>
 
             {/* Legenda */}
-            <div style={{ padding: "6px 14px", borderBottom: "1px solid #f0f0f0", display: "flex", gap: "10px", fontSize: "10px", color: "#9ca3af", flexWrap: "wrap", flexShrink: 0 }}>
+            <div style={{ padding: "6px 14px", borderBottom: "1px solid var(--border)", display: "flex", gap: "10px", fontSize: "10px", color: "var(--muted-foreground)", flexWrap: "wrap", flexShrink: 0 }}>
               {[
-                { bg: "#f8fafc", bd: "#e2e8f0", label: "Existente" },
-                { bg: "#f3f4f6", bd: "#d1d5db", label: "Adm." },
+                { bg: "var(--muted)", bd: "var(--border)", label: "Existente" },
+                { bg: "var(--muted)", bd: "var(--border)", label: "Adm." },
                 { bg: B.limeLt,  bd: B.lime,    label: "Proposta" },
-                { bg: "#111827", bd: "#374151",  label: "Superv. deslocável" },
+                { bg: "var(--card-foreground)", bd: "var(--card-foreground)",  label: "Superv. deslocável" },
               ].map(({ bg, bd, label }) => (
                 <span key={label} style={{ display: "flex", alignItems: "center", gap: "3px" }}>
                   <span style={{ display: "inline-block", width: "9px", height: "9px", borderRadius: "2px", background: bg, border: `1px solid ${bd}` }} />
@@ -573,7 +573,7 @@ function TodasSugestoesModal({
             {/* Lista scrollável */}
             <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px" }}>
               {sugestoes.length === 0 ? (
-                <div style={{ textAlign: "center", color: "#9ca3af", padding: "20px", fontSize: "12px" }}>Nenhuma proposta gerada para esta estratégia.</div>
+                <div style={{ textAlign: "center", color: "var(--muted-foreground)", padding: "20px", fontSize: "12px" }}>Nenhuma proposta gerada para esta estratégia.</div>
               ) : Object.entries(byEsp).map(([esp, sugs]) => {
                 const gap = pacGaps.find(g => g.esp === esp)
                 return (
@@ -594,9 +594,9 @@ function TodasSugestoesModal({
                         const isChk    = effectiveSelected.has(s.id)
                         return (
                           <div key={s.id} style={{
-                            border: `1px solid ${isChk ? B.blue + "77" : isInv ? "#e5e7eb" : "#e5e7eb"}`,
+                            border: `1px solid ${isChk ? B.blue + "77" : isInv ? "var(--border)" : "var(--border)"}`,
                             borderRadius: "10px", padding: "8px 9px",
-                            background: isChk ? "#f0f7ff" : isInv ? "#fafafa" : "white",
+                            background: isChk ? "var(--muted)" : isInv ? "var(--card)" : "var(--card)",
                             opacity: isInv ? 0.55 : 1,
                             display: "flex", flexDirection: "column", gap: "3px",
                           }}>
@@ -614,18 +614,18 @@ function TodasSugestoesModal({
                             {/* Dia/hora */}
                             <div style={{ fontFamily: "monospace", fontWeight: 800, fontSize: "11px", color: B.navy }}>{s.dia.replace("-feira", "")} {s.hora}</div>
                             {/* Terapia */}
-                            <div style={{ fontSize: "10px", fontWeight: 700, color: "#1f2937" }}>{ae.tP}</div>
-                            <div style={{ fontSize: "9px", color: "#6b7280" }}>{fmtName(ae.prof)}</div>
+                            <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--card-foreground)" }}>{ae.tP}</div>
+                            <div style={{ fontSize: "9px", color: "var(--muted-foreground)" }}>{fmtName(ae.prof)}</div>
                             {/* Seletor de profissional — exclusivo (Pedido 3) */}
                             {allProfs.length > 1 && (
                               <div style={{ display: "flex", alignItems: "center", gap: "2px", flexWrap: "wrap" }}>
-                                <span style={{ fontSize: "8px", fontWeight: 700, color: "#6b7280" }}>Prof:</span>
+                                <span style={{ fontSize: "8px", fontWeight: 700, color: "var(--muted-foreground)" }}>Prof:</span>
                                 {allProfs.map((p, i) => {
                                   const isSel = (profSelIdx[s.id] ?? 0) === i
                                   return (
                                     <button key={i}
                                       onClick={() => setProfSelIdx(prev => ({ ...prev, [s.id]: i }))}
-                                      style={{ padding: "1px 5px", borderRadius: "4px", fontSize: "8px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid", background: isSel ? B.navy : "#f3f4f6", color: isSel ? "white" : "#374151", borderColor: isSel ? B.navy : "#d1d5db" }}>
+                                      style={{ padding: "1px 5px", borderRadius: "4px", fontSize: "8px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid", background: isSel ? B.navy : "var(--muted)", color: isSel ? "white" : "var(--card-foreground)", borderColor: isSel ? B.navy : "var(--border)" }}>
                                       {fmtName(p.prof)}
                                     </button>
                                   )
@@ -642,7 +642,7 @@ function TodasSugestoesModal({
                                   {alts.map((alt, i) => (
                                     <button key={i}
                                       onClick={() => setSelIdx(prev => ({ ...prev, [s.id]: { ...(prev[s.id] || {}), [v.hora]: i } }))}
-                                      style={{ padding: "1px 5px", borderRadius: "4px", fontSize: "8px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid", background: i === idx ? "#16a34a" : "#f3f4f6", color: i === idx ? "white" : "#374151", borderColor: i === idx ? "#16a34a" : "#d1d5db" }}>
+                                      style={{ padding: "1px 5px", borderRadius: "4px", fontSize: "8px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid", background: i === idx ? "#16a34a" : "var(--muted)", color: i === idx ? "white" : "var(--card-foreground)", borderColor: i === idx ? "#16a34a" : "var(--border)" }}>
                                       {alt.tP} · {fmtName(alt.prof)}
                                     </button>
                                   ))}
@@ -659,7 +659,7 @@ function TodasSugestoesModal({
                                 </button>
                               )}
                               {isInv && (
-                                <button onClick={() => setSt(s, null)} style={{ ...btnStyle("#f3f4f6", "#6b7280", "#e5e7eb"), fontSize: "9px" }}>Desfazer</button>
+                                <button onClick={() => setSt(s, null)} style={{ ...btnStyle("var(--muted)", "var(--muted-foreground)", "var(--border)"), fontSize: "9px" }}>Desfazer</button>
                               )}
                             </div>
                           </div>
@@ -672,13 +672,13 @@ function TodasSugestoesModal({
             </div>
 
             {/* Footer: Fechar + Aceitar selecionados */}
-            <div style={{ padding: "8px 14px", borderTop: "1px solid #f0f0f0", background: "#fafafa", borderRadius: "0 0 0 18px", flexShrink: 0, display: "flex", gap: "6px", alignItems: "center", justifyContent: "space-between" }}>
-              <button onClick={onClose} style={btnStyle("#f3f4f6", "#374151", "#e5e7eb")}>Fechar</button>
+            <div style={{ padding: "8px 14px", borderTop: "1px solid var(--border)", background: "var(--card)", borderRadius: "0 0 0 18px", flexShrink: 0, display: "flex", gap: "6px", alignItems: "center", justifyContent: "space-between" }}>
+              <button onClick={onClose} style={btnStyle("var(--muted)", "var(--card-foreground)", "var(--border)")}>Fechar</button>
               <button
                 disabled={selectedCount === 0}
                 onClick={handleAceitar}
                 style={{
-                  ...btnStyle(selectedCount > 0 ? B.navy : "#f3f4f6", selectedCount > 0 ? "white" : "#9ca3af", selectedCount > 0 ? B.navy : "#d1d5db"),
+                  ...btnStyle(selectedCount > 0 ? B.navy : "var(--muted)", selectedCount > 0 ? "white" : "var(--muted-foreground)", selectedCount > 0 ? B.navy : "var(--border)"),
                   opacity: selectedCount === 0 ? 0.5 : 1,
                 }}>
                 Aceitar ({selectedCount}) → Acomp.
@@ -689,7 +689,7 @@ function TodasSugestoesModal({
           {/* ── Direita: grade do cronograma ─────────────────────────────── */}
           <div style={{ flex: 1, overflowX: "auto", overflowY: "auto", padding: "10px 16px 16px" }}>
             {!horas.length ? (
-              <div style={{ textAlign: "center", color: "#9ca3af", padding: "20px" }}>Nenhuma sessão encontrada.</div>
+              <div style={{ textAlign: "center", color: "var(--muted-foreground)", padding: "20px" }}>Nenhuma sessão encontrada.</div>
             ) : (
               <table style={{ borderCollapse: "collapse", tableLayout: "fixed", minWidth: `${52 + dias.length * 110}px`, width: "100%" }}>
                 <colgroup>
@@ -698,7 +698,7 @@ function TodasSugestoesModal({
                 </colgroup>
                 <thead>
                   <tr>
-                    <th style={{ paddingBottom: "8px", textAlign: "right", paddingRight: "8px", fontSize: "11px", color: "#9ca3af", fontWeight: 400 }}>Hora</th>
+                    <th style={{ paddingBottom: "8px", textAlign: "right", paddingRight: "8px", fontSize: "11px", color: "var(--muted-foreground)", fontWeight: 400 }}>Hora</th>
                     {dias.map(d => (
                       <th key={d} style={{ paddingBottom: "8px", textAlign: "center", fontSize: "12px", color: B.navy, fontWeight: 800 }}>
                         <div>{d.replace("-feira", "")}</div>
@@ -709,7 +709,7 @@ function TodasSugestoesModal({
                 </thead>
                 <tbody>
                   {horas.map(hora => (
-                    <tr key={hora} style={{ borderTop: hora === "13:00" ? "2px solid #d1d5db" : "1px solid #f1f5f9" }}>
+                    <tr key={hora} style={{ borderTop: hora === "13:00" ? "2px solid var(--border)" : "1px solid var(--border)" }}>
                       <td style={{ textAlign: "right", paddingRight: "8px", verticalAlign: "top", paddingTop: "6px", fontFamily: "monospace", fontSize: "12px", fontWeight: 800, color: B.navy }}>
                         {hora}
                       </td>
@@ -722,10 +722,10 @@ function TodasSugestoesModal({
                               const cs    = cSt(c.tipo)
                               const isDark = c.tipo === "supervDesloc"
                               return (
-                                <div key={ci} style={{ background: cs.bg, border: `1px solid ${cs.bd}`, borderRadius: "7px", padding: "5px 7px", flex: 1, boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "2px" }}>
-                                  <div title={c.tP} style={{ fontSize: "10px", fontWeight: 700, color: isDark ? "white" : "#1f2937", lineHeight: "1.3", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{c.tP}</div>
-                                  {c.tE && <div style={{ fontSize: "8px", color: "#9ca3af", fontStyle: "italic" }}>({c.tE})</div>}
-                                  <div title={fmtName(c.prof)} style={{ fontSize: "9px", color: isDark ? "#d1d5db" : "#6b7280", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{fmtName(c.prof)}</div>
+                                <div key={ci} style={{ background: cs.bg, border: `1px solid ${cs.bd}`, borderRadius: "7px", padding: "5px 7px", height: "100%", boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "2px" }}>
+                                  <div style={{ fontSize: "10px", fontWeight: 700, color: isDark ? "white" : "var(--card-foreground)", lineHeight: "1.3" }}>{c.tP}</div>
+                                  {c.tE && <div style={{ fontSize: "8px", color: "var(--muted-foreground)", fontStyle: "italic" }}>({c.tE})</div>}
+                                  <div style={{ fontSize: "9px", color: isDark ? "var(--border)" : "var(--muted-foreground)" }}>{fmtName(c.prof)}</div>
                                   {isDark && (
                                     <div style={{ fontSize: "9px", fontWeight: 700, color: "#fbbf24", marginTop: "auto" }}>
                                       {c.target ? `→ ${c.target}` : "→ verificar"}
@@ -790,7 +790,7 @@ function AceitesPanel({
   }
 
   return (
-    <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "16px", marginTop: "16px" }}>
+    <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px", marginTop: "16px" }}>
       <div style={{ fontWeight: 800, color: B.navy, fontSize: "13px", marginBottom: "12px" }}>
         Aceites e Recusas — ocp. paciente
       </div>
@@ -800,15 +800,15 @@ function AceitesPanel({
           const d  = new Date(bundle.ts)
           const dateStr = `${d.getDate().toString().padStart(2, "0")}/${(d.getMonth() + 1).toString().padStart(2, "0")} ${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`
           return (
-            <div key={bundle.id} style={{ border: "1px solid #e5e7eb", borderRadius: "12px", padding: "12px", background: "#fafafa" }}>
+            <div key={bundle.id} style={{ border: "1px solid var(--border)", borderRadius: "12px", padding: "12px", background: "var(--card)" }}>
               {/* Bundle header */}
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
                 <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                  <span style={{ fontSize: "11px", fontWeight: 700, color: "#6b7280" }}>{dateStr}</span>
-                  <span style={{ fontSize: "10px", fontWeight: 600, color: "#9ca3af", background: "#f3f4f6", padding: "0 6px", borderRadius: "4px" }}>ocp. paciente</span>
+                  <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)" }}>{dateStr}</span>
+                  <span style={{ fontSize: "10px", fontWeight: 600, color: "var(--muted-foreground)", background: "var(--muted)", padding: "0 6px", borderRadius: "4px" }}>ocp. paciente</span>
                   <span style={{ padding: "1px 7px", borderRadius: "5px", fontSize: "9px", fontWeight: 800, background: sm.bg, color: sm.c, border: `1px solid ${sm.bd}` }}>{sm.label}</span>
                 </div>
-                <span style={{ fontSize: "11px", color: "#9ca3af", flexShrink: 0 }}>{bundle.sessoes.length} sessão(ões)</span>
+                <span style={{ fontSize: "11px", color: "var(--muted-foreground)", flexShrink: 0 }}>{bundle.sessoes.length} sessão(ões)</span>
               </div>
 
               {/* Sessões */}
@@ -817,13 +817,13 @@ function AceitesPanel({
                   const slotKey  = `${s.dia}|||${s.hora}`
                   const isInv    = bundle.inviavelSlots.includes(slotKey)
                   return (
-                    <div key={i} style={{ border: `1px solid ${isInv ? "#fca5a5" : "#e5e7eb"}`, borderRadius: "8px", padding: "7px 9px", background: isInv ? "#fff1f2" : "white", opacity: isInv ? 0.7 : 1 }}>
+                    <div key={i} style={{ border: `1px solid ${isInv ? "#fca5a5" : "var(--border)"}`, borderRadius: "8px", padding: "7px 9px", background: isInv ? "#fff1f2" : "var(--card)", opacity: isInv ? 0.7 : 1 }}>
                       <div style={{ fontFamily: "monospace", fontSize: "10px", fontWeight: 800, color: B.navy }}>{s.dia.replace("-feira", "")} {s.hora}</div>
-                      <div style={{ fontSize: "10px", fontWeight: 700, color: "#1f2937", marginTop: "2px" }}>{s.tP}</div>
-                      <div style={{ fontSize: "9px", color: "#6b7280" }}>{fmtName(s.prof)}</div>
+                      <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--card-foreground)", marginTop: "2px" }}>{s.tP}</div>
+                      <div style={{ fontSize: "9px", color: "var(--muted-foreground)" }}>{fmtName(s.prof)}</div>
                       <button
                         onClick={() => toggleInviavel(bundle.id, slotKey)}
-                        style={{ ...btnStyle(isInv ? "#f3f4f6" : "#fef2f2", isInv ? "#6b7280" : "#dc2626", isInv ? "#e5e7eb" : "#fca5a5"), fontSize: "8px", marginTop: "5px", width: "100%", textAlign: "center" }}>
+                        style={{ ...btnStyle(isInv ? "var(--muted)" : "#fef2f2", isInv ? "var(--muted-foreground)" : "#dc2626", isInv ? "var(--border)" : "#fca5a5"), fontSize: "8px", marginTop: "5px", width: "100%", textAlign: "center" }}>
                         {isInv ? "↩ Desfazer" : "⛔ Inviável"}
                       </button>
                     </div>
@@ -832,7 +832,7 @@ function AceitesPanel({
               </div>
 
               {/* Ações do bundle */}
-              <div style={{ display: "flex", gap: "5px", flexWrap: "wrap", borderTop: "1px solid #f0f0f0", paddingTop: "8px", alignItems: "center" }}>
+              <div style={{ display: "flex", gap: "5px", flexWrap: "wrap", borderTop: "1px solid var(--border)", paddingTop: "8px", alignItems: "center" }}>
                 <button
                   onClick={() => updateBundle(bundle.id, { status: "confirmado" })}
                   style={{ ...btnStyle(bundle.status === "confirmado" ? "#dcfce7" : "#f0fdf4", "#14532d", bundle.status === "confirmado" ? "#86efac" : "#bbf7d0"), fontSize: "10px" }}>
@@ -844,7 +844,7 @@ function AceitesPanel({
                   ✗ Recusou
                 </button>
                 {bundle.status !== "pendente" && (
-                  <button onClick={() => updateBundle(bundle.id, { status: "pendente" })} style={{ ...btnStyle("#f3f4f6", "#6b7280", "#e5e7eb"), fontSize: "10px" }}>Desfazer</button>
+                  <button onClick={() => updateBundle(bundle.id, { status: "pendente" })} style={{ ...btnStyle("var(--muted)", "var(--muted-foreground)", "var(--border)"), fontSize: "10px" }}>Desfazer</button>
                 )}
                 <button onClick={() => deleteBundle(bundle.id)} style={{ ...btnStyle("#fef2f2", "#dc2626", "#fca5a5"), fontSize: "10px", marginLeft: "auto" }}>Cancelar</button>
               </div>
@@ -889,12 +889,12 @@ function PacAgendaGrid({ pac, cRows, sugestoes, onVerAll }: { pac: string; cRows
   }, [sessionMap, sugMap])
 
   return (
-    <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "16px", marginBottom: "16px" }}>
+    <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px", marginBottom: "16px" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "2px" }}>
         <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px" }}>Agenda atual do paciente</div>
-        <button onClick={onVerAll} style={btnStyle("#f3f4f6", "#374151", "#e5e7eb")}>🗓 Ver aperfeiçoamentos</button>
+        <button onClick={onVerAll} style={btnStyle("var(--muted)", "var(--card-foreground)", "var(--border)")}>🗓 Ver aperfeiçoamentos</button>
       </div>
-      <div style={{ fontSize: "12px", color: "#9ca3af", marginBottom: "10px" }}>
+      <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "10px" }}>
         Sessões agendadas{sugestoes.length > 0 ? " + propostas destacadas" : ""}
       </div>
 
@@ -905,13 +905,13 @@ function PacAgendaGrid({ pac, cRows, sugestoes, onVerAll }: { pac: string; cRows
         ].map(({ bg, label, bd }: { bg: string; label: string; bd?: string }) => (
           <div key={label} style={{ display: "flex", alignItems: "center", gap: "5px" }}>
             <div style={{ width: "11px", height: "11px", borderRadius: "3px", background: bg, border: bd ? `1px solid ${bd}` : undefined }} />
-            <span style={{ fontSize: "11px", color: "#6b7280" }}>{label}</span>
+            <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>{label}</span>
           </div>
         ))}
       </div>
 
       {!allHoras.length && (
-        <div style={{ textAlign: "center", color: "#9ca3af", fontSize: "11px", padding: "16px 0" }}>Nenhuma sessão agendada.</div>
+        <div style={{ textAlign: "center", color: "var(--muted-foreground)", fontSize: "11px", padding: "16px 0" }}>Nenhuma sessão agendada.</div>
       )}
       <div style={{ overflowX: "auto" }}>
         <table style={{ borderCollapse: "collapse", tableLayout: "fixed", fontSize: "11px", width: `${48 + activeDias.length * 100}px` }}>
@@ -921,7 +921,7 @@ function PacAgendaGrid({ pac, cRows, sugestoes, onVerAll }: { pac: string; cRows
           </colgroup>
           <thead>
             <tr>
-              <th style={{ padding: "4px 6px", borderBottom: "2px solid #e5e7eb" }} />
+              <th style={{ padding: "4px 6px", borderBottom: "2px solid var(--border)" }} />
               {activeDias.map(d => (
                 <th key={d} style={{ padding: "6px 8px", textAlign: "center", fontWeight: 800, fontSize: "13px", color: B.navy, borderBottom: `2px solid ${B.navy}` }}>
                   {DIA_ABR[d] ?? d}
@@ -933,8 +933,8 @@ function PacAgendaGrid({ pac, cRows, sugestoes, onVerAll }: { pac: string; cRows
             {allHoras.map(hora => {
               const isSep = hora === "13:00"
               return (
-                <tr key={hora} style={{ borderTop: isSep ? "2px solid #d1d5db" : "1px solid #f3f4f6" }}>
-                  <td style={{ padding: "2px 6px", color: "#9ca3af", fontSize: "10px", fontWeight: 500, height: "40px", verticalAlign: "middle", whiteSpace: "nowrap" }}>{hora}</td>
+                <tr key={hora} style={{ borderTop: isSep ? "2px solid var(--border)" : "1px solid var(--border)" }}>
+                  <td style={{ padding: "2px 6px", color: "var(--muted-foreground)", fontSize: "10px", fontWeight: 500, height: "40px", verticalAlign: "middle", whiteSpace: "nowrap" }}>{hora}</td>
                   {activeDias.map(d => {
                     const k      = `${d}|||${hora}`
                     const sesses = sessionMap[k]
@@ -945,7 +945,7 @@ function PacAgendaGrid({ pac, cRows, sugestoes, onVerAll }: { pac: string; cRows
                     if (hasSupervConflict) {
                       return (
                         <td key={d} style={{ padding: "2px 4px", verticalAlign: "middle" }}>
-                          <div style={{ background: "#111827", borderRadius: "8px", minHeight: "36px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "4px 6px", gap: "2px" }}>
+                          <div style={{ background: "var(--card-foreground)", borderRadius: "8px", minHeight: "36px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "4px 6px", gap: "2px" }}>
                             <div style={{ fontWeight: 700, fontSize: "10px", lineHeight: 1.2, color: "white", textAlign: "center" }}>Superv. ABA</div>
                             <div style={{ fontSize: "9px", color: "#fbbf24", fontWeight: 700 }}>↔ deslocar</div>
                           </div>
@@ -1141,7 +1141,7 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
     for (const s of sugestoesLimitadas) counts[s.tipo] = (counts[s.tipo] || 0) + 1
     const TIPO_COLORS: Record<string, string> = { adjacente: "#0369a1", "dia-novo": "#7e22ce" }
     const TIPO_LABELS: Record<string, string> = { adjacente: "Adjacente", "dia-novo": "Dia novo" }
-    return Object.entries(counts).map(([t, v]) => ({ name: TIPO_LABELS[t] || t, value: v, fill: TIPO_COLORS[t] || "#9ca3af" }))
+    return Object.entries(counts).map(([t, v]) => ({ name: TIPO_LABELS[t] || t, value: v, fill: TIPO_COLORS[t] || "var(--muted-foreground)" }))
   }, [sugestoesLimitadas])
 
   function selectPac(p: string) { setPac(p); setInputVal(p); setDropOpen(false) }
@@ -1154,15 +1154,15 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
         <div style={{ flexShrink: 0, width: "340px", display: "flex", flexDirection: "column", gap: "12px" }}>
 
           {/* Seletor de paciente */}
-          <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "16px" }}>
+          <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px" }}>
             <div style={{ fontWeight: 800, color: B.navy, fontSize: "15px", marginBottom: "4px" }}>
               Aumentar Ocupação — Paciente
             </div>
-            <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "14px" }}>
+            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "14px" }}>
               Selecione um paciente com déficit de sessões e explore as estratégias disponíveis.
             </div>
 
-            <div style={{ fontSize: "11px", fontWeight: 700, color: "#6b7280", marginBottom: "6px" }}>Paciente</div>
+            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", marginBottom: "6px" }}>Paciente</div>
             <div style={{ position: "relative" }}>
               <input
                 type="text"
@@ -1171,13 +1171,13 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
                 onFocus={() => setDropOpen(true)}
                 onBlur={() => setTimeout(() => setDropOpen(false), 150)}
                 placeholder="Buscar paciente..."
-                style={{ width: "100%", boxSizing: "border-box", border: "1px solid #d1d5db", borderRadius: "9px", padding: "8px 12px", fontSize: "13px", fontFamily: "inherit", outline: "none", background: "var(--color-card, white)", color: "inherit" }}
+                style={{ width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: "9px", padding: "8px 12px", fontSize: "13px", fontFamily: "inherit", outline: "none", background: "var(--color-card, white)", color: "inherit" }}
               />
               {dropOpen && filteredPacs.length > 0 && (
-                <div style={{ position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, zIndex: 50, background: "white", border: "1px solid #d1d5db", borderRadius: "10px", boxShadow: "0 4px 16px rgba(0,0,0,.08)", maxHeight: "200px", overflowY: "auto" }}>
+                <div style={{ position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, zIndex: 50, background: "var(--card)", border: "1px solid var(--border)", borderRadius: "10px", boxShadow: "0 4px 16px rgba(0,0,0,.08)", maxHeight: "200px", overflowY: "auto" }}>
                   {filteredPacs.map(p => (
                     <button key={p} onMouseDown={() => selectPac(p)}
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: p === pac ? "#f3f4f6" : "none", border: "none", fontSize: "12px", cursor: "pointer", color: p === pac ? B.navy : "#374151", fontWeight: p === pac ? 700 : 400, fontFamily: "inherit" }}>
+                      style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: p === pac ? "var(--muted)" : "none", border: "none", fontSize: "12px", cursor: "pointer", color: p === pac ? B.navy : "var(--card-foreground)", fontWeight: p === pac ? 700 : 400, fontFamily: "inherit" }}>
                       {p}
                     </button>
                   ))}
@@ -1186,20 +1186,20 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
             </div>
 
             <div style={{ marginTop: "14px" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "#6b7280", marginBottom: "6px" }}>Limite de sessões adicionais</div>
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", marginBottom: "6px" }}>Limite de sessões adicionais</div>
               <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
                 {["sem limite", 1, 2, 3, 4, 5].map(v => {
                   const val = v === "sem limite" ? "" : v as number
                   const active = maxAdic === val
                   return (
                     <button key={String(v)} onClick={() => setMaxAdic(val)}
-                      style={{ padding: "4px 10px", borderRadius: "7px", fontSize: "11px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid", background: active ? B.navy : "#f3f4f6", color: active ? "white" : "#374151", borderColor: active ? B.navy : "#d1d5db" }}>
+                      style={{ padding: "4px 10px", borderRadius: "7px", fontSize: "11px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid", background: active ? B.navy : "var(--muted)", color: active ? "white" : "var(--card-foreground)", borderColor: active ? B.navy : "var(--border)" }}>
                       {v === "sem limite" ? "∞" : `+${v}`}
                     </button>
                   )
                 })}
               </div>
-              <div style={{ fontSize: "10px", color: "#9ca3af", marginTop: "5px" }}>
+              <div style={{ fontSize: "10px", color: "var(--muted-foreground)", marginTop: "5px" }}>
                 {maxAdic === "" ? "Sem restrição de quantidade." : `Máximo de ${maxAdic} sessão(ões) adicionais ao total atual.`}
               </div>
             </div>
@@ -1207,18 +1207,18 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
 
           {/* Resumo e gaps */}
           {pac && (
-            <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "16px" }}>
+            <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px" }}>
               <div style={{ fontWeight: 800, color: B.navy, fontSize: "13px", marginBottom: "10px" }}>Resumo</div>
               <div style={{ display: "flex", flexDirection: "column", gap: "7px", marginBottom: "14px" }}>
                 {[
                   { label: "Sessões atuais",        value: currentSlots,                color: B.navy },
-                  { label: "Terapias com déficit",   value: pacGaps.length,              color: pacGaps.length > 0 ? "#dc2626" : "#9ca3af" },
-                  { label: "Sugestões disponíveis",  value: sugestoesLimitadas.length,   color: sugestoesLimitadas.length > 0 ? "#16a34a" : "#9ca3af" },
-                  { label: "Em Acompanhamento",      value: totalAceitos,                color: totalAceitos > 0 ? B.blue : "#9ca3af" },
+                  { label: "Terapias com déficit",   value: pacGaps.length,              color: pacGaps.length > 0 ? "#dc2626" : "var(--muted-foreground)" },
+                  { label: "Sugestões disponíveis",  value: sugestoesLimitadas.length,   color: sugestoesLimitadas.length > 0 ? "#16a34a" : "var(--muted-foreground)" },
+                  { label: "Em Acompanhamento",      value: totalAceitos,                color: totalAceitos > 0 ? B.blue : "var(--muted-foreground)" },
                   ...(maxAdic !== "" ? [{ label: "Restam aceitar", value: Math.max(0, (maxAdic as number) - totalAceitos), color: totalAceitos >= (maxAdic as number) ? "#dc2626" : B.navy }] : []),
                 ].map(({ label, value, color }) => (
                   <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: "12px", color: "#6b7280" }}>{label}</span>
+                    <span style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>{label}</span>
                     <span style={{ fontSize: "14px", fontWeight: 800, color }}>{value}</span>
                   </div>
                 ))}
@@ -1226,12 +1226,12 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
 
               {pacGaps.length > 0 && (
                 <>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#9ca3af", letterSpacing: "0.05em", marginBottom: "6px" }}>DÉFICIT POR ESPECIALIDADE</div>
+                  <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.05em", marginBottom: "6px" }}>DÉFICIT POR ESPECIALIDADE</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: "5px", marginBottom: "14px" }}>
                     {pacGaps.map(g => (
                       <div key={g.esp} style={{ display: "flex", alignItems: "center", gap: "7px" }}>
-                        <div style={{ flex: 1, fontSize: "11px", color: "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.esp}</div>
-                        <span style={{ fontSize: "10px", color: "#9ca3af", flexShrink: 0 }}>{g.of}/{g.aut}</span>
+                        <div style={{ flex: 1, fontSize: "11px", color: "var(--card-foreground)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.esp}</div>
+                        <span style={{ fontSize: "10px", color: "var(--muted-foreground)", flexShrink: 0 }}>{g.of}/{g.aut}</span>
                         <span style={{ fontSize: "11px", fontWeight: 800, color: "#dc2626", flexShrink: 0 }}>−{g.dif}</span>
                       </div>
                     ))}
@@ -1241,7 +1241,7 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
 
               {gapChartData.length > 0 && (
                 <div style={{ marginBottom: "14px" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#9ca3af", letterSpacing: "0.05em", marginBottom: "6px" }}>DÉFICIT (gráfico)</div>
+                  <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.05em", marginBottom: "6px" }}>DÉFICIT (gráfico)</div>
                   <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                     <div style={{ width: "90px", height: "90px", flexShrink: 0 }}>
                       <ResponsiveContainer width="100%" height="100%">
@@ -1257,8 +1257,8 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
                       {gapChartData.map(d => (
                         <div key={d.name} style={{ display: "flex", alignItems: "center", gap: "5px" }}>
                           <div style={{ width: "7px", height: "7px", borderRadius: "50%", background: d.fill, flexShrink: 0 }} />
-                          <span style={{ fontSize: "10px", color: "#6b7280", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{d.name}</span>
-                          <span style={{ fontSize: "10px", fontWeight: 800, color: "#374151", flexShrink: 0 }}>{d.value}</span>
+                          <span style={{ fontSize: "10px", color: "var(--muted-foreground)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{d.name}</span>
+                          <span style={{ fontSize: "10px", fontWeight: 800, color: "var(--card-foreground)", flexShrink: 0 }}>{d.value}</span>
                         </div>
                       ))}
                     </div>
@@ -1268,7 +1268,7 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
 
               {tipoChartData.length > 0 && (
                 <div>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "#9ca3af", letterSpacing: "0.05em", marginBottom: "6px" }}>SUGESTÕES POR TIPO</div>
+                  <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.05em", marginBottom: "6px" }}>SUGESTÕES POR TIPO</div>
                   <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                     <div style={{ width: "90px", height: "90px", flexShrink: 0 }}>
                       <ResponsiveContainer width="100%" height="100%">
@@ -1284,8 +1284,8 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
                       {tipoChartData.map(d => (
                         <div key={d.name} style={{ display: "flex", alignItems: "center", gap: "5px" }}>
                           <div style={{ width: "7px", height: "7px", borderRadius: "50%", background: d.fill, flexShrink: 0 }} />
-                          <span style={{ fontSize: "10px", color: "#6b7280" }}>{d.name}</span>
-                          <span style={{ fontSize: "10px", fontWeight: 800, color: "#374151", marginLeft: "auto" }}>{d.value}</span>
+                          <span style={{ fontSize: "10px", color: "var(--muted-foreground)" }}>{d.name}</span>
+                          <span style={{ fontSize: "10px", fontWeight: 800, color: "var(--card-foreground)", marginLeft: "auto" }}>{d.value}</span>
                         </div>
                       ))}
                     </div>
@@ -1300,10 +1300,10 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
         <div style={{ flex: 1, minWidth: 0 }}>
 
           {!pac && (
-            <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "48px 24px", textAlign: "center" }}>
+            <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "48px 24px", textAlign: "center" }}>
               <div style={{ fontSize: "32px", marginBottom: "10px" }}>🧒</div>
-              <div style={{ fontWeight: 700, fontSize: "14px", color: "#374151", marginBottom: "4px" }}>Selecione um paciente</div>
-              <div style={{ fontSize: "12px", color: "#9ca3af" }}>Apenas pacientes com déficit de sessões autorizadas aparecem na lista.</div>
+              <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--card-foreground)", marginBottom: "4px" }}>Selecione um paciente</div>
+              <div style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>Apenas pacientes com déficit de sessões autorizadas aparecem na lista.</div>
             </div>
           )}
 
@@ -1312,14 +1312,14 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
               <PacAgendaGrid pac={pac} cRows={cRows} sugestoes={sugestoesLimitadas} onVerAll={() => setShowModal(true)} />
 
               {pacGaps.length === 0 && (
-                <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "24px", textAlign: "center" }}>
+                <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "24px", textAlign: "center" }}>
                   <div style={{ fontSize: "12px", color: "#16a34a", fontWeight: 700 }}>Nenhum déficit encontrado para este paciente.</div>
                 </div>
               )}
               {pacGaps.length > 0 && sugestoesLimitadas.length === 0 && (
-                <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "24px", textAlign: "center" }}>
+                <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "24px", textAlign: "center" }}>
                   <div style={{ fontSize: "12px", color: "#ef4444", fontWeight: 700, marginBottom: "4px" }}>Nenhuma vaga adjacente encontrada no turno do paciente.</div>
-                  <div style={{ fontSize: "11px", color: "#9ca3af" }}>Verifique se o CSV está carregado e se há vagas livres na grade.</div>
+                  <div style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>Verifique se o CSV está carregado e se há vagas livres na grade.</div>
                 </div>
               )}
               {sugestoesLimitadas.length > 0 && (() => {
@@ -1335,7 +1335,7 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
                       <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px", paddingBottom: "4px", borderBottom: `2px solid ${B.navy}22` }}>
                         <span style={{ fontWeight: 800, color: B.navy, fontSize: "14px" }}>{esp}</span>
                         {gap && <span style={{ fontSize: "11px", color: "#dc2626", fontWeight: 700 }}>−{gap.dif} ({gap.of}/{gap.aut})</span>}
-                        <span style={{ fontSize: "11px", color: "#9ca3af" }}>{sugs.length} vaga{sugs.length > 1 ? "s" : ""}</span>
+                        <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>{sugs.length} vaga{sugs.length > 1 ? "s" : ""}</span>
                       </div>
                       <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                         {sugs.map(s => (
@@ -1430,9 +1430,9 @@ function SugestaoCard({
 
   return (
     <div style={{
-      border: `1px solid ${st === "acompanhamento" ? B.blue + "44" : "#e5e7eb"}`,
+      border: `1px solid ${st === "acompanhamento" ? B.blue + "44" : "var(--border)"}`,
       borderRadius: "10px", padding: "10px 12px",
-      background: st === "acompanhamento" ? "#f8fafc" : "white",
+      background: st === "acompanhamento" ? "var(--muted)" : "var(--card)",
       display: "flex", gap: "10px", alignItems: "flex-start", flexWrap: "wrap",
     }}>
       <div style={{ flex: "1 1 180px" }}>
@@ -1446,10 +1446,10 @@ function SugestaoCard({
         <div style={{ fontWeight: 800, fontFamily: "monospace", fontSize: "14px", color: B.navy }}>
           {sugestao.dia.replace("-feira", "")} · {sugestao.hora}
         </div>
-        <div style={{ fontSize: "12px", fontWeight: 700, color: "#1f2937", marginTop: "1px" }}>{sugestao.tP}</div>
-        <div style={{ fontSize: "11px", color: "#6b7280", marginTop: "1px" }}>
+        <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--card-foreground)", marginTop: "1px" }}>{sugestao.tP}</div>
+        <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "1px" }}>
           {fmtName(sugestao.prof)}
-          <span style={{ color: "#9ca3af", marginLeft: "5px" }}>· {sugestao.unidade}</span>
+          <span style={{ color: "var(--muted-foreground)", marginLeft: "5px" }}>· {sugestao.unidade}</span>
         </div>
 
         {sugestao.vComp.length > 0 && (
@@ -1469,7 +1469,7 @@ function SugestaoCard({
           </button>
         )}
         {st === "inviavel" && (
-          <button onClick={() => setSt(sugestao, null)} style={btnStyle("#f3f4f6", "#6b7280", "#e5e7eb")}>
+          <button onClick={() => setSt(sugestao, null)} style={btnStyle("var(--muted)", "var(--muted-foreground)", "var(--border)")}>
             Desfazer
           </button>
         )}

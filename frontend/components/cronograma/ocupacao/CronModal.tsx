@@ -17,14 +17,14 @@ interface CronEntry {
 
 function CronCard({ tP, tE, prof, tipo, unidade, showUnidade = false }: CronEntry & { showUnidade?: boolean }) {
   const showExib = tE && tE !== tP
-  const bg = tipo === "novo" ? B.limeLt : tipo === "rem" ? B.orangeLt : "#f8fafc"
-  const bd = tipo === "novo" ? B.lime   : tipo === "rem" ? `${B.orange}88` : "#e2e8f0"
+  const bg = tipo === "novo" ? B.limeLt : tipo === "rem" ? B.orangeLt : "var(--muted)"
+  const bd = tipo === "novo" ? B.lime   : tipo === "rem" ? `${B.orange}88` : "var(--border)"
 
   return (
     <div style={{ background: bg, border: `1px solid ${bd}`, borderRadius: "10px", padding: "9px 11px", minHeight: "80px", display: "flex", flexDirection: "column", gap: "3px", marginBottom: "4px" }}>
-      <div style={{ fontSize: "13px", fontWeight: 700, color: "#1f2937", lineHeight: "1.3" }}>{tP}</div>
-      {showExib && <div style={{ fontSize: "11px", color: "#9ca3af" }}>({tE})</div>}
-      <div style={{ fontSize: "12px", color: "#6b7280" }}>{fmtName(prof)}</div>
+      <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--card-foreground)", lineHeight: "1.3" }}>{tP}</div>
+      {showExib && <div style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>({tE})</div>}
+      <div style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>{fmtName(prof)}</div>
       {showUnidade && unidade && unidade !== "Desconhecida" && (
         <div
           title="Unidade exibida porque este mesmo turno tem sessões em unidades diferentes."
@@ -126,10 +126,10 @@ export function CronModal({ pac, sugsDosPac, agendRows, onClose }: CronModalProp
       style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)", padding: "12px" }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div style={{ background: "white", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", display: "flex", flexDirection: "column", width: "93vw", maxWidth: "980px", maxHeight: "93vh" }}>
+      <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", display: "flex", flexDirection: "column", width: "93vw", maxWidth: "980px", maxHeight: "93vh" }}>
 
         {/* ── Cabeçalho ── */}
-        <div style={{ padding: "16px 20px", borderBottom: "1px solid #f0f0f0", background: "#fafafa", borderRadius: "18px 18px 0 0" }}>
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)", background: "var(--card)", borderRadius: "18px 18px 0 0" }}>
           <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between" }}>
             <div>
               <div style={{ fontWeight: 800, fontSize: "16px", color: B.navy }}>🗓 Cronograma — {pac}</div>
@@ -139,7 +139,7 @@ export function CronModal({ pac, sugsDosPac, agendRows, onClose }: CronModalProp
                 </span>
                 <CronoGlobalUnitBadge unit={unitMeta.globalUnit} />
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", marginTop: "6px", fontSize: "12px", color: "#9ca3af" }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", marginTop: "6px", fontSize: "12px", color: "var(--muted-foreground)" }}>
                 <span>
                   <span style={{ display: "inline-block", width: "12px", height: "12px", borderRadius: "3px", background: B.limeLt, border: `1px solid ${B.lime}`, marginRight: "4px", verticalAlign: "middle" }} />
                   Verde = nova terapia sugerida
@@ -149,14 +149,14 @@ export function CronModal({ pac, sugsDosPac, agendRows, onClose }: CronModalProp
                   Laranja = remanejada
                 </span>
                 <span>
-                  <span style={{ display: "inline-block", width: "12px", height: "12px", borderRadius: "3px", background: "#f8fafc", border: "1px solid #e2e8f0", marginRight: "4px", verticalAlign: "middle" }} />
+                  <span style={{ display: "inline-block", width: "12px", height: "12px", borderRadius: "3px", background: "var(--muted)", border: "1px solid var(--border)", marginRight: "4px", verticalAlign: "middle" }} />
                   Cinza = existente
                 </span>
               </div>
             </div>
             <button
               onClick={onClose}
-              style={{ width: "32px", height: "32px", borderRadius: "50%", border: "none", background: "#f3f4f6", cursor: "pointer", fontSize: "18px", color: "#6b7280", display: "flex", alignItems: "center", justifyContent: "center" }}
+              style={{ width: "32px", height: "32px", borderRadius: "50%", border: "none", background: "var(--muted)", cursor: "pointer", fontSize: "18px", color: "var(--muted-foreground)", display: "flex", alignItems: "center", justifyContent: "center" }}
             >
               ×
             </button>
@@ -166,12 +166,12 @@ export function CronModal({ pac, sugsDosPac, agendRows, onClose }: CronModalProp
         {/* ── Grid ── */}
         <div style={{ overflow: "auto", padding: "16px" }}>
           {!dias.length ? (
-            <div style={{ textAlign: "center", color: "#9ca3af", padding: "32px" }}>Nenhuma sessão encontrada no CSV.</div>
+            <div style={{ textAlign: "center", color: "var(--muted-foreground)", padding: "32px" }}>Nenhuma sessão encontrada no CSV.</div>
           ) : (
             <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "500px" }}>
               <thead>
                 <tr>
-                  <th style={{ width: "60px", paddingBottom: "10px", textAlign: "right", paddingRight: "14px", fontSize: "13px", color: "#9ca3af", fontWeight: 500 }}>Hora</th>
+                  <th style={{ width: "60px", paddingBottom: "10px", textAlign: "right", paddingRight: "14px", fontSize: "13px", color: "var(--muted-foreground)", fontWeight: 500 }}>Hora</th>
                   {dias.map(d => (
                     <th key={d} style={{ minWidth: "155px", paddingBottom: "10px", textAlign: "center", fontSize: "15px", color: B.navy, fontWeight: 800 }}>
                       <div>{d.replace("-feira", "")}</div>
@@ -185,7 +185,7 @@ export function CronModal({ pac, sugsDosPac, agendRows, onClose }: CronModalProp
                   const any = dias.some(d => cMap[`${d}|||${hora}`]?.length)
                   if (!any) return null
                   return (
-                    <tr key={hora} style={{ borderTop: "1px solid #f1f5f9" }}>
+                    <tr key={hora} style={{ borderTop: "1px solid var(--border)" }}>
                       <td style={{ textAlign: "right", paddingRight: "14px", verticalAlign: "top", paddingTop: "10px", fontFamily: "monospace", fontSize: "17px", fontWeight: 800, color: B.navy, letterSpacing: "-0.5px" }}>
                         {hora}
                       </td>

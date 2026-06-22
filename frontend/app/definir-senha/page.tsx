@@ -29,6 +29,25 @@ function DefinirSenhaContent() {
   const [showConfirm, setShowConfirm] = useState(false)
   const [loading, setLoading] = useState(false)
 
+  function normalizarParaUsername(nome: string): string {
+    return nome
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/\s+/g, '.')
+      .replace(/[^a-z0-9._-]/g, '')
+      .replace(/\.{2,}/g, '.')
+      .replace(/^[._-]+|[._-]+$/g, '')
+  }
+
+  async function preencherUsername(uid: string) {
+    const { data } = await supabase.from('usuarios').select('nome').eq('id', uid).maybeSingle()
+    const sugestao = normalizarParaUsername(data?.nome ?? '')
+    if (sugestao.length >= 3 && usernameRegex.test(sugestao)) {
+      setUsername(sugestao)
+    }
+  }
+
   useEffect(() => {
 
   supabase.auth.getSession().then(({ data }) => {
@@ -38,7 +57,7 @@ function DefinirSenhaContent() {
       data.session.user.email ??
       ''
     )
-
+    preencherUsername(data.session.user.id)
     setUserId(data.session.user.id)
     setExpired(false)
     setChecking(false)
@@ -72,12 +91,14 @@ function DefinirSenhaContent() {
       (event: AuthChangeEvent, session: Session | null) => {
         if (event === 'SIGNED_IN' && session) {
           setNome(session.user.user_metadata?.nome ?? session.user.email ?? '')
+          preencherUsername(session.user.id)
           setUserId(session.user.id)
           setExpired(false)
           setChecking(false)
         } else if (event === 'INITIAL_SESSION') {
           if (session) {
             setNome(session.user.user_metadata?.nome ?? session.user.email ?? '')
+            preencherUsername(session.user.id)
             setUserId(session.user.id)
             setChecking(false)
           } else if (!code) {
@@ -225,6 +246,7 @@ function DefinirSenhaContent() {
               </label>
               <input
                 type="text"
+                autoComplete="off"
                 value={username}
                 onChange={(e) => handleUsernameChange(e.target.value)}
                 placeholder="ex: joao.silva"

@@ -21,6 +21,8 @@ export type AuditoriaAssimItem = {
   possui_solicitacao: boolean | null
   observacao: string | null
   motivo_glosa: string | null
+  teve_token: boolean | null
+  token: string | null
 }
 
 export type KpisAuditoriaAssim = {
@@ -33,6 +35,7 @@ export type KpisAuditoriaAssim = {
   retorno_nao_confirmado: number
   canceladas: number
   glosas: number
+  tokens: number
 }
 
 export type AuditoriaFilters = {
@@ -40,4 +43,5 @@ export type AuditoriaFilters = {
   situacao: string
   data: string
   tuss: string
+  horario_bloco: string
 }

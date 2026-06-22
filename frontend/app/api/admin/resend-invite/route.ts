@@ -2,12 +2,6 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { supabaseService } from '@/lib/supabase/service'
-import { createClient } from '@supabase/supabase-js'
-
-const supabaseAdmin = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
 
 async function getCurrentUser(request: NextRequest) {
   const supabase = createServerClient(
@@ -69,11 +63,11 @@ export async function POST(request: NextRequest) {
     }
 
     const origin =
-      request.headers.get('origin') ??
       process.env.NEXT_PUBLIC_SITE_URL ??
+      request.headers.get('origin') ??
       'http://localhost:3000'
 
-    const { error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
+    const { error } = await supabaseService.auth.admin.inviteUserByEmail(email, {
       data: { nome, role },
       redirectTo: `${origin}/definir-senha`,
     })
