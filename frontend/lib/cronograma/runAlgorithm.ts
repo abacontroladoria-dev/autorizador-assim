@@ -521,6 +521,9 @@ export function runAlgorithm(
 
   // Deduplicação + slot único por paciente
   // slotDono: slotKey → pac que ficou com a vaga (para registrar "próximo na fila")
+  const confirmedSlots = new Set(
+    (config.confirmedItems ?? []).map(c => `${c.prof}|||${c.dia}|||${c.hora}`)
+  )
   const seen = new Set<string>()
   const slotDono = new Map<string, string>()
   const vagasAgora: Sugestao[] = []
@@ -532,6 +535,7 @@ export function runAlgorithm(
     if (config.isolarAssim && (s.prio === 3 || s.prio === 4)) { fila.push({ ...s, filaM: "ASSIM isolado" }); continue }
     if (s.mod === "Ocupação" || s.mod === "Foco Prof.") {
       const slotK = `${s.prof}|||${s.dia}|||${s.hora}`
+      if (confirmedSlots.has(slotK)) { fila.push({ ...s, filaM: "Slot já confirmado" }); continue }
       if (slotDono.has(slotK)) {
         fila.push({ ...s, filaM: `Próximo para: ${slotDono.get(slotK)}` })
         continue

@@ -413,12 +413,19 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       if (!diaUnidade[d] && item.afetada.unidade) diaUnidade[d] = item.afetada.unidade
     }
 
+    let confirmedSlotKeys = new Set<string>()
+    try {
+      const cItems: { dia: string; hora: string }[] = JSON.parse(localStorage.getItem("aba_confirmados_v1") || "[]")
+      confirmedSlotKeys = new Set(cItems.map(c => `${c.dia}|||${c.hora}`))
+    } catch {}
+
     const result: Record<string, CandidatoSlot[]> = {}
     for (const dia of novoProfData.dias) {
       const unidade = diaUnidade[dia] || null
       for (const slot of novoProfData.dayWorkSlots[dia]) {
         const chave = `${dia}|||${slot}`
         if ((novoProfData.agendaMap[chave] ?? []).length > 0) continue
+        if (confirmedSlotKeys.has(chave)) continue
         const ocupadosNoSlot = new Set(
           agendRows
             .filter(r => String(r["Dia da Semana"] || "") === dia && normHora(String(r.HI_str || "")) === slot)

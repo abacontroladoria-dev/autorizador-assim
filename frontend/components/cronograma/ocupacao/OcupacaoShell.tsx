@@ -57,7 +57,10 @@ export function OcupacaoShell() {
     setErr(null)
     const t = setTimeout(() => {
       try {
-        setRes(runAlgorithm(cRows, lRows, rec, inv, { ...cfg, waMap }))
+        const confirmedItems: { prof: string; dia: string; hora: string }[] = (() => {
+          try { return JSON.parse(localStorage.getItem("aba_confirmados_v1") || "[]") } catch { return [] }
+        })()
+        setRes(runAlgorithm(cRows, lRows, rec, inv, { ...cfg, waMap, confirmedItems }))
       } catch (e) {
         setErr(`Erro: ${(e as Error).message}`)
       } finally {

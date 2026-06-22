@@ -3,9 +3,10 @@
 import { useRef, useState } from "react"
 import Papa from "papaparse"
 import * as XLSX from "xlsx"
-import { Upload, CheckCircle2, X, FolderInput } from "lucide-react"
-import { pm, exU } from "@/lib/cronograma/helpers"
+import { Upload, CheckCircle2, X, FolderInput, DatabaseZap } from "lucide-react"
+import { pm, exU, getRefWeek } from "@/lib/cronograma/helpers"
 import { parseHistoricoXlsx } from "@/lib/cronograma/xlsx"
+import { buscarGradeComoCSVRows } from "@/lib/cronograma/gradeService"
 import type { CsvRow, LaudoRow, DispRow, RecItem, InvItem, WaMap } from "@/types/cronograma"
 
 interface Props {
@@ -177,6 +178,70 @@ function ImportDropzone({ onImport }: ImportDropzoneProps) {
   )
 }
 
+interface GradeDbLoaderProps {
+  rows: CsvRow[]
+  onLoad: (rows: CsvRow[]) => void
+  onClear: () => void
+}
+
+function GradeDbLoader({ rows, onLoad, onClear }: GradeDbLoaderProps) {
+  const [loading, setLoading] = useState(false)
+  const [error, setError]     = useState<string | null>(null)
+  const loaded = rows.length > 0
+  const rw = getRefWeek()
+
+  async function carregar() {
+    setLoading(true)
+    setError(null)
+    try {
+      const result = await buscarGradeComoCSVRows(rw.inicio, rw.fim)
+      if (result.length === 0) throw new Error("Nenhum registro encontrado para o período.")
+      onLoad(result)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : "Erro ao buscar dados.")
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  if (loaded) {
+    return (
+      <div className="relative flex items-center gap-3 rounded-xl border-2 border-green-400 bg-green-50 dark:bg-green-950/20 px-4 py-4">
+        <CheckCircle2 size={20} className="text-green-500 shrink-0" />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-green-700 dark:text-green-400">Grade de Profissionais</p>
+          <p className="text-xs text-green-600 dark:text-green-500">{rows.length} linhas · {rw.label}</p>
+        </div>
+        <button
+          onClick={onClear}
+          className="absolute top-2 right-2 text-muted-foreground hover:text-destructive transition-colors"
+          title="Limpar"
+        >
+          <X size={14} />
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border-2 border-border bg-card px-4 py-4">
+      <div className="flex items-center gap-1.5">
+        <DatabaseZap size={15} className="text-muted-foreground shrink-0" />
+        <p className="text-sm font-semibold text-foreground">Grade de Profissionais</p>
+      </div>
+      <p className="text-xs text-muted-foreground">{rw.label}</p>
+      <button
+        onClick={carregar}
+        disabled={loading}
+        className="w-full rounded-md bg-primary px-3 py-1.5 text-xs font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 transition-colors"
+      >
+        {loading ? "Buscando..." : "Carregar grade"}
+      </button>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
+  )
+}
+
 function parseCsv<T>(file: File): Promise<T[]> {
   return new Promise((resolve, reject) => {
     Papa.parse(file, {
@@ -234,14 +299,10 @@ export function DadosUploadPanel({ cRows, lRows, dispRows, onCRows, onLRows, onD
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
-        <Dropzone<CsvRow>
-          label="Grade de Profissionais"
-          accept=".csv"
+        <GradeDbLoader
           rows={cRows}
-          rowLabel="linhas"
           onLoad={onCRows}
           onClear={() => onCRows([])}
-          parseFile={parseCsvGrade}
         />
         <Dropzone<LaudoRow>
           label="Laudos / Autorizações"

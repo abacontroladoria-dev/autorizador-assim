@@ -173,6 +173,7 @@ export interface AlgorithmConfig {
   terapiasPrio?: string[]
   profsPrioExtras?: string[]
   isolarAssim?: boolean
+  confirmedItems?: { prof: string; dia: string; hora: string }[]
 }
 
 // ─── SAÍDA DE PROFISSIONAL — análise ─────────────────────────────────────────
