@@ -28,7 +28,7 @@ export default function PacienteResumoOperacional({
   resumo,
   statusGeral,
 }: Props) {
-  const motivosPendencias = []
+  const motivosPendencias: string[] = []
   if (resumo.pendentes > 0) motivosPendencias.push(`Sem evolução: ${resumo.pendentes}`)
   if (resumo.substituicoes > 0) motivosPendencias.push(`Substituição: ${resumo.substituicoes}`)
   if (resumo.glosas > 0) motivosPendencias.push(`Glosa: ${resumo.glosas}`)

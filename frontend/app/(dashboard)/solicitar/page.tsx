@@ -451,7 +451,7 @@ async function handleSolicitarLista(
     }
 
     // validação — apenas campos obrigatórios
-    const faltando = []
+    const faltando: string[] = []
     if (!p.matricula) faltando.push('Matrícula')
     // TUSS é obrigatório para ASSIM, mas pode faltar
     // CRM e Médico podem faltar (serão preenchidos manualmente no ASSIM)

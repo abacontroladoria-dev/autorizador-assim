@@ -11,7 +11,7 @@ export default function PulsarHubCard() {
   return (
     <Button
       type="button"
-      onClick={() => router.push("/hub")}
+      onClick={() => router.push("/connect")}
       aria-label="Entrar no Pulsar Connect"
       className="group relative h-full min-h-[112px] w-full overflow-hidden rounded-2xl bg-[linear-gradient(135deg,#21106c_0%,#4c1d95_48%,#6d28d9_100%)] bg-[length:180%_180%] p-0 text-left whitespace-normal shadow-[0_10px_24px_rgba(88,28,135,0.22)] transition-all duration-200 ease-out hover:scale-[1.01] hover:bg-[position:100%_50%] hover:shadow-[0_14px_30px_rgba(88,28,135,0.28)] active:scale-[0.985] active:brightness-95 motion-reduce:transition-none motion-reduce:hover:scale-100"
     >

@@ -16,6 +16,7 @@ import {
   Star,
   KeyRound,
   BarChart3,
+  Zap,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter } from "next/navigation"
@@ -49,6 +50,7 @@ const pathIconMap: Record<string, any> = {
   "/cco": BarChart3,
   "/admin": ShieldCheck,
   "/admin/permissoes": KeyRound,
+  "/connect": Zap,
 }
 
 export default function Sidebar() {
@@ -98,6 +100,8 @@ export default function Sidebar() {
 
   function isActive(path: string) {
     const current = pathname.replace(/\/$/, "") || "/"
+    // /connect and its sub-paths are all considered active for the Connect item
+    if (path === "/connect") return current === "/connect" || current.startsWith("/connect/")
     return current === path
   }
 
@@ -438,6 +442,10 @@ export default function Sidebar() {
               )}
             </SidebarGroup>
           )}
+
+          {/* Pulsar Connect — disponível para todos os usuários autenticados */}
+          <hr className="my-2 border-sidebar-border" />
+          <MenuItem label="Pulsar Connect" icon={Zap} path="/connect" />
 
         </nav>
 

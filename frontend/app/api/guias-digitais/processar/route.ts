@@ -65,7 +65,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    const results = []
+    const results: any[] = []
 
     for (const page of pages) {
       const guiaNumero = extractGuiaNumberFromPage(page.bytes)

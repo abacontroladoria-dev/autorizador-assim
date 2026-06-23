@@ -126,7 +126,7 @@ create table crm.deals (
   -- Origem e rastreamento
   source              text,
   source_campaign     text,
-  source_ref          text,
+  source_ref          jsonb,
 
   -- IA
   created_by_ai       boolean not null default false,
@@ -142,6 +142,21 @@ drop trigger if exists set_updated_at on crm.deals;
 create trigger set_updated_at
   before update on crm.deals
   for each row execute function public.set_updated_at();
+
+-- ============================================================================
+-- UNIQUE INDEX: previne duplicata de deals open para o mesmo contato
+--
+-- Proteção contra race condition:
+--   Dois webhooks simultâneos para o mesmo contato não criam dois deals.
+--   PostgreSQL garante atomicamente que apenas um deal 'open' por contato/org.
+--
+-- Índice parcial: apenas linhas com status='open' são indexadas.
+--   Permite múltiplos deals do mesmo contato com status='lost','won', etc.
+--   Permite reabertura: status='lost' → 'open' funciona (libera espaço).
+-- ============================================================================
+create unique index uq_open_deal_per_contact
+  on crm.deals(organization_id, contact_id)
+  where status = 'open';
 
 -- ============================================================================
 -- TABLE: crm.deal_activities
@@ -382,6 +397,19 @@ create trigger auto_create_deal_on_lead_contact
   for each row execute function crm.auto_create_deal_on_lead();
 
 -- ============================================================================
+-- INDEX: source_ref JSONB para queries estruturadas futuras
+--
+-- Permite buscas como:
+--   WHERE source_ref->>'utm_source' = 'google'
+--   WHERE source_ref @> '{"ad_platform":"meta"}'
+--
+-- GIN index otimiza essas queries em volume.
+-- ============================================================================
+create index if not exists idx_deals_source_ref_gin
+  on crm.deals
+  using gin(source_ref);
+
+-- ============================================================================
 -- ALTER TABLE: central.tag_definitions
 --
 -- Adiciona suporte a domain para separar tags de atendimento de tags comerciais.
@@ -394,7 +422,23 @@ alter table central.tag_definitions
   add column if not exists domain text default 'central'
   check (domain in ('central', 'crm', 'shared'));
 
--- Adicionar colunas de tags em crm.deals para suportar tagging comercial
+-- ============================================================================
+-- TAGS COMMERCIAIS: V1 implementação (TEXT[] simples, V2 normalizado)
+--
+-- Decisão arquitetural: manter tags como TEXT[] para V1.
+--
+-- Justificativa:
+--   * Simplicidade: sem tabela junction, sem JOIN em queries
+--   * Performance: adequada para volume V1 (centenas de deals)
+--   * Index GIN: suficiente para filtros de tags
+--
+-- Roadmap V2:
+--   * Migrar para tabela crm.deal_tags normalizada
+--   * Adicionar auditoria (created_by, created_at por tag)
+--   * Usar view para backcompat com queries TEXT[]
+--   * Considerar particionamento se volume > 100k deals
+-- ============================================================================
+
 alter table crm.deals
   add column if not exists tags text[] default '{}';
 
