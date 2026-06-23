@@ -26,58 +26,102 @@ function ninaAdmin() {
 
 export async function POST() {
   try {
+    console.log('[connect/session] 🌉 Bootstrapping Nina auth...');
+
     // ── 1. Validate Pulsar session ────────────────────────────────────────
     const pulsarClient = await createPulsarServerClient();
     const { data: { user: pulsarUser }, error: authErr } = await pulsarClient.auth.getUser();
 
     if (authErr || !pulsarUser?.email) {
+      console.error('[connect/session] ❌ Pulsar auth failed:', authErr?.message);
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
     const email = pulsarUser.email;
+    console.log('[connect/session] ✅ Pulsar user authenticated:', email);
+
     const admin = ninaAdmin();
+    console.log('[connect/session] 🔑 Nina admin client created');
 
     // ── 2. Find or create user in Nina's Supabase ─────────────────────────
-    const { data: listData } = await admin.auth.admin.listUsers({ perPage: 1000 });
+    console.log('[connect/session] 📋 Listing Nina users...');
+    const { data: listData, error: listErr } = await admin.auth.admin.listUsers({ perPage: 1000 });
+
+    if (listErr) {
+      console.error('[connect/session] ❌ Failed to list Nina users:', listErr);
+      return NextResponse.json({ error: 'Failed to list Nina users', detail: listErr.message }, { status: 500 });
+    }
+
     let ninaUser = listData?.users.find(u => u.email === email);
+    console.log('[connect/session] Found Nina user?', ninaUser ? { id: ninaUser.id, email: ninaUser.email } : 'NO - will create');
 
     if (!ninaUser) {
+      console.log('[connect/session] 🆕 Creating Nina user for:', email);
       const { data: created, error: createErr } = await admin.auth.admin.createUser({
         email,
         email_confirm: true,
         user_metadata: { full_name: pulsarUser.user_metadata?.full_name ?? '' },
       });
-      if (createErr || !created?.user) {
+
+      if (createErr) {
+        console.error('[connect/session] ❌ createUser error:', createErr);
         return NextResponse.json({ error: 'Failed to create Nina user', detail: createErr?.message }, { status: 500 });
       }
+
+      if (!created?.user) {
+        console.error('[connect/session] ❌ createUser returned no user');
+        return NextResponse.json({ error: 'Failed to create Nina user', detail: 'No user returned' }, { status: 500 });
+      }
+
       ninaUser = created.user;
+      console.log('[connect/session] ✅ Nina user created:', { id: ninaUser.id, email: ninaUser.email });
 
       // Bootstrap Nina configuration for first-time user.
       try {
+        console.log('[connect/session] 🔧 Initializing system for new user...');
         await admin.functions.invoke('initialize-system', {
           body: { user_id: ninaUser.id },
         });
+        console.log('[connect/session] ✅ System initialized');
       } catch (initErr) {
         // Non-fatal: the user can complete setup via the onboarding wizard.
-        console.warn('[connect/session] initialize-system failed:', initErr);
+        console.warn('[connect/session] ⚠️ initialize-system failed (non-fatal):', initErr);
       }
     }
 
     // ── 3. Create a Nina session for that user ────────────────────────────
     // admin.createSession() is available in @supabase/supabase-js >= 2.30.
+    console.log('[connect/session] 🔐 Creating session for Nina user:', ninaUser.id);
     const { data: sessionData, error: sessionErr } =
       await (admin.auth.admin as any).createSession({ user_id: ninaUser.id });
+
+    if (sessionErr) {
+      console.error('[connect/session] ❌ createSession error:', sessionErr);
+    }
+    if (!sessionData?.session) {
+      console.warn('[connect/session] ⚠️ createSession returned no session, falling back to OTP');
+    }
 
     if (sessionErr || !sessionData?.session) {
       // Fallback: generate a magic-link OTP and return the token for client
       // to exchange via ninaSupabase.auth.verifyOtp().
+      console.log('[connect/session] 📧 Generating magic link OTP for:', email);
       const { data: linkData, error: linkErr } = await admin.auth.admin.generateLink({
         type: 'magiclink',
         email,
       });
-      if (linkErr || !linkData) {
+
+      if (linkErr) {
+        console.error('[connect/session] ❌ generateLink error:', linkErr);
         return NextResponse.json({ error: 'Failed to generate Nina session', detail: linkErr?.message }, { status: 500 });
       }
+
+      if (!linkData) {
+        console.error('[connect/session] ❌ generateLink returned no data');
+        return NextResponse.json({ error: 'Failed to generate Nina session', detail: 'No link data' }, { status: 500 });
+      }
+
+      console.log('[connect/session] ✅ OTP generated');
       return NextResponse.json({
         strategy: 'otp',
         email,
@@ -85,6 +129,7 @@ export async function POST() {
       });
     }
 
+    console.log('[connect/session] ✅ Session created, returning tokens');
     return NextResponse.json({
       strategy: 'session',
       access_token: sessionData.session.access_token,
@@ -92,7 +137,8 @@ export async function POST() {
       expires_in: sessionData.session.expires_in,
     });
   } catch (err: any) {
-    console.error('[connect/session]', err);
+    console.error('[connect/session] 💥 Unexpected error:', err.message);
+    console.error('[connect/session] Stack:', err.stack);
     return NextResponse.json({ error: 'Internal server error', detail: err.message }, { status: 500 });
   }
 }
