@@ -13,7 +13,7 @@
 import React, { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { Toaster } from 'sonner';
-import { PulsarAuthProvider, useAuth } from './PulsarAuthProvider';
+import { AuthProvider, useAuth } from '@/hooks/nina/useAuth';
 import { CompanySettingsProvider } from '@/hooks/nina/useCompanySettings';
 
 // Nina page components
@@ -74,7 +74,7 @@ function NinaOutletWrapper() {
 export function ConnectApp() {
   return (
     <BrowserRouter basename="/connect">
-      <PulsarAuthProvider>
+      <AuthProvider>
         <CompanySettingsProvider>
           <Routes>
             {/* Public: redirect to home if accessed */}
@@ -97,7 +97,7 @@ export function ConnectApp() {
           </Routes>
           <Toaster position="top-right" richColors theme="dark" />
         </CompanySettingsProvider>
-      </PulsarAuthProvider>
+      </AuthProvider>
     </BrowserRouter>
   );
 }
