@@ -19,6 +19,10 @@ export const TERAPIA_TO_ESP: Record<string, string> = {
   "Aplicador ABA (PS)": "Psicologia ABA",
   "Aplicador ABA (AV)": "Psicologia ABA",
   "Aplicador ABA (EF)": "Psicologia ABA",
+  "Aplicador ABA (SF)": "Psicologia ABA",
+  "Aplicador ABA (AE)": "Psicologia ABA",
+  "Supervisão ABA":     "Psicologia ABA",
+  "Coordenador de Caso": "Psicologia ABA",
   "Aplicador ABA (HS)": "Habilidades Sociais",
   "Fonoaudiologia": "Fonoaudiologia",
   "Psicopedagogia": "Psicopedagogia",
@@ -70,7 +74,7 @@ export const ABA_EXT = new Set(["Aplicador ABA Casa", "Aplicador ABA Escola", "A
 
 export const PACS_ADMIN = new Set([
   "Ainda não selecionado", "Notificação Prévia", "Horário Administrativo",
-  "Horário Bloqueado", "Alinhamento Gracielle", "Alinhamento Amanda",
+  "Horário Bloqueado", "Alinhamento Sandra", "Alinhamento Gracielle", "Alinhamento Amanda",
   "Supervisora Fernanda Lima", "Supervisora Susane Vitória",
   "Supervisora Michelle Brasil", "Supervisor Severino Junior",
   "Supervisora Beatriz Paiva", "Fonoaudiologia", "Facilitador Técnico",
