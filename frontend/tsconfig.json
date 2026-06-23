@@ -14,7 +14,7 @@
     "jsx": "react-jsx",
     "incremental": true,
     "noImplicitAny": false,
-    "types": ["node", "react", "react-dom", "react-router-dom"],
+    "types": ["node", "react", "react-dom"],
     "plugins": [
       {
         "name": "next"
@@ -31,9 +31,12 @@
     "**/*.tsx",
     ".next/types/**/*.ts",
     ".next/dev/types/**/*.ts",
-    "**/*.mts",
-    "../nina-api-oficial/src/**/*.ts",
-    "../nina-api-oficial/src/**/*.tsx"
+    "**/*.mts"
   ],
-  "exclude": ["node_modules", "supabase"]
+  "ts-node": {
+    "compilerOptions": {
+      "noImplicitAny": false
+    }
+  },
+  "exclude": ["node_modules", "supabase", "../nina-api-oficial"]
 }

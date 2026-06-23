@@ -5,7 +5,6 @@ import { LayoutDashboard, MessageSquare, Users, Settings as SettingsIcon, LogOut
 import { useRouter, usePathname } from 'next/navigation'
 import { useCompanySettings } from '@/hooks/nina/useCompanySettings'
 import { useAuth } from '@/hooks/nina/useAuth'
-import { Sidebar, SidebarBody, SidebarLink, useSidebar } from '@/components/ui/sidebar'
 import Link from 'next/link'
 import { motion } from 'framer-motion'
 import { toast } from 'sonner'
@@ -55,13 +54,12 @@ const LogoIcon = () => {
   )
 }
 
-const SidebarContent = () => {
+const SidebarContent = ({ open }: { open: boolean }) => {
   const { companyName } = useCompanySettings()
   const { user, signOut } = useAuth()
   const pathname = usePathname()
   const router = useRouter()
   const currentPath = pathname.replace('/nina/', '') || 'dashboard'
-  const { open } = useSidebar()
 
   const links = menuItems.map(item => ({
     label: item.label,
@@ -100,13 +98,23 @@ const SidebarContent = () => {
         </div>
 
         <nav className="flex flex-col gap-1.5">
-          {links.map((link, idx) => (
-            <SidebarLink
-              key={idx}
-              link={link}
-              isActive={currentPath.startsWith(link.href.replace('/nina/', ''))}
-            />
-          ))}
+          {links.map((link, idx) => {
+            const isActive = currentPath.startsWith(link.href.replace('/nina/', ''))
+            return (
+              <Link
+                key={idx}
+                href={link.href}
+                className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                  isActive
+                    ? 'bg-primary text-primary-foreground'
+                    : 'text-foreground/60 hover:text-foreground hover:bg-secondary/50'
+                }`}
+              >
+                {link.icon}
+                {open && <span className="text-sm font-medium">{link.label}</span>}
+              </Link>
+            )
+          })}
         </nav>
       </div>
 
@@ -166,11 +174,9 @@ const AppSidebar: React.FC = () => {
   const [open, setOpen] = useState(true)
 
   return (
-    <Sidebar open={open} setOpen={setOpen}>
-      <SidebarBody className="justify-between gap-10 bg-card/50 backdrop-blur-xl border-r border-border/50">
-        <SidebarContent />
-      </SidebarBody>
-    </Sidebar>
+    <aside className={`${open ? 'w-64' : 'w-20'} h-full bg-card/50 backdrop-blur-xl border-r border-border/50 transition-all duration-300 flex flex-col justify-between gap-10 py-4`}>
+      <SidebarContent open={open} />
+    </aside>
   )
 }
 

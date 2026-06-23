@@ -7,8 +7,11 @@ import { OnboardingWizard } from '@/components/nina/OnboardingWizard'
 import { useOnboardingStatus } from '@/hooks/nina/useOnboardingStatus'
 import { useOnboarding } from '@/contexts/OnboardingContext'
 import { useAuth } from '@/hooks/nina/useAuth'
+import { AuthProvider } from '@/hooks/nina/useAuth'
+import { CompanySettingsProvider } from '@/hooks/nina/useCompanySettings'
+import { OnboardingProvider } from '@/contexts/OnboardingContext'
 
-export default function NinaLayout({
+function NinaLayoutContent({
   children,
 }: {
   children: React.ReactNode
@@ -70,5 +73,21 @@ export default function NinaLayout({
 
       <OnboardingWizard isOpen={showOnboarding} onClose={() => setShowOnboarding(false)} />
     </div>
+  )
+}
+
+export default function NinaLayout({
+  children,
+}: {
+  children: React.ReactNode
+}) {
+  return (
+    <AuthProvider>
+      <CompanySettingsProvider>
+        <OnboardingProvider>
+          <NinaLayoutContent>{children}</NinaLayoutContent>
+        </OnboardingProvider>
+      </CompanySettingsProvider>
+    </AuthProvider>
   )
 }
