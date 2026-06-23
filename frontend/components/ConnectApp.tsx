@@ -14,10 +14,7 @@ import React, { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { Toaster } from 'sonner';
 import { PulsarAuthProvider, useAuth } from './PulsarAuthProvider';
-
-// Nina context providers — resolved via webpack @nina alias
-// @ts-ignore
-import { CompanySettingsProvider } from '@nina/hooks/useCompanySettings';
+import { CompanySettingsProvider } from '@/hooks/nina/useCompanySettings';
 
 // Nina page components
 // @ts-ignore
