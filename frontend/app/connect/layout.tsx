@@ -37,15 +37,25 @@ function ConnectLayoutGuard({
   }, [])
 
   useEffect(() => {
+    console.log('[/connect/layout - Guard]', {
+      pathname,
+      mounted,
+      loading,
+      user: user ? { id: user.id, email: user.email } : null,
+      redirecting: !user && mounted && !loading,
+    });
+
     if (!mounted || loading) return
 
     if (!user) {
+      console.log('[/connect/layout] ⚠️ REDIRECTING TO /auth because user is null');
       router.push('/auth')
       return
     }
 
     // Redirect /connect to /connect/dashboard
     if (pathname === '/connect' || pathname === '/connect/') {
+      console.log('[/connect/layout] Redirecting /connect → /connect/dashboard');
       router.replace('/connect/dashboard')
       return
     }

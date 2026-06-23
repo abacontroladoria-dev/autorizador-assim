@@ -44,6 +44,13 @@ import Auth from '@nina/pages/Auth';
 function ProtectedConnectLayout() {
   const { user, loading } = useAuth();
 
+  // DEBUG: Log auth state
+  console.log('[ConnectApp/ProtectedConnectLayout]', {
+    user: user ? { id: user.id, email: user.email } : null,
+    loading,
+    redirecting: !user && !loading,
+  });
+
   if (loading) {
     return (
       <div className="flex h-full w-full items-center justify-center bg-background">
@@ -53,6 +60,7 @@ function ProtectedConnectLayout() {
   }
 
   if (!user) {
+    console.log('[ConnectApp] ⚠️ REDIRECTING TO /auth because user is null');
     return <Navigate to="/auth" replace />;
   }
 
@@ -76,6 +84,8 @@ function NinaOutletWrapper() {
 }
 
 export function ConnectApp() {
+  console.log('[ConnectApp] 🔴 ConnectApp SPA is rendering (React Router)');
+
   return (
     <BrowserRouter basename="/connect">
       <AuthProvider>
