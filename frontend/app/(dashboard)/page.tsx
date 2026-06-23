@@ -17,6 +17,7 @@ import { useHeader } from "@/contexts/HeaderContext"
 import KpiCard from "@/components/home/KpiCard"
 import FluxoOperacionalCard from "@/components/home/FluxoOperacional"
 import { buildSlotData, FluxoSlotPoint } from "@/components/home/FluxoOperacional/data"
+import PulsarHubCard from "@/components/dashboard/PulsarHubCard"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -200,7 +201,7 @@ export default function Home() {
 
       {/* ── 1. Header com saudação + atalhos ──────────────────────────── */}
       <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_6px_24px_-2px_rgba(0,0,0,0.08)] px-7 py-6">
-        <div className="flex items-center justify-between gap-8">
+        <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between xl:gap-8">
           <div className="min-w-0">
             <h1 className="text-2xl font-bold text-slate-800 leading-tight">
               {greeting()}, {nomeUsuario}! 👋
@@ -219,11 +220,15 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="shrink-0 grid grid-cols-2 gap-2">
-            <ShortcutButton href="/central-pacientes"  icon={Users}         label="Controle de Pacientes"  iconBg="bg-teal-50"   iconColor="text-teal-600"   accentHex="#0d9488" />
-            <ShortcutButton href="/central-terapeutas" icon={Stethoscope}   label="Controle de Terapeutas" iconBg="bg-blue-50"   iconColor="text-[#3A8FB7]" accentHex="#3A8FB7" />
-            <ShortcutButton href="/agenda/pacientes"   icon={Calendar}      label="Agenda Paciente"        iconBg="bg-purple-50" iconColor="text-purple-600" accentHex="#9333ea" />
-            <ShortcutButton href="/agenda/terapeutas"  icon={CalendarCheck} label="Agenda Terapeuta"       iconBg="bg-orange-50" iconColor="text-orange-500" accentHex="#f97316" />
+          <div className="ml-auto grid w-full grid-cols-1 gap-3 lg:grid-cols-[auto_minmax(220px,250px)] xl:w-auto">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <ShortcutButton href="/central-pacientes"  icon={Users}         label="Controle de Pacientes"  iconBg="bg-teal-50"   iconColor="text-teal-600"   accentHex="#0d9488" />
+              <ShortcutButton href="/central-terapeutas" icon={Stethoscope}   label="Controle de Terapeutas" iconBg="bg-blue-50"   iconColor="text-[#3A8FB7]" accentHex="#3A8FB7" />
+              <ShortcutButton href="/agenda/pacientes"   icon={Calendar}      label="Agenda Paciente"        iconBg="bg-purple-50" iconColor="text-purple-600" accentHex="#9333ea" />
+              <ShortcutButton href="/agenda/terapeutas"  icon={CalendarCheck} label="Agenda Terapeuta"       iconBg="bg-orange-50" iconColor="text-orange-500" accentHex="#f97316" />
+            </div>
+
+            <PulsarHubCard />
           </div>
         </div>
       </div>
@@ -302,4 +307,7 @@ function ShortcutButton({
     </Link>
   )
 }
+
+
+
 
