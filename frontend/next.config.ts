@@ -32,6 +32,21 @@ const nextConfig: NextConfig = {
       },
     });
 
+    // ── Nina @nina/hooks → frontend/hooks/nina redirect
+    //    Ensures all Nina components use Pulsar's hooks, not their own.
+    config.plugins.push({
+      apply(compiler: any) {
+        compiler.hooks.normalModuleFactory.tap('NinaHooksRedirect', (nmf: any) => {
+          nmf.hooks.beforeResolve.tap('NinaHooksRedirect', (data: any) => {
+            if (!data?.request?.startsWith('@nina/hooks/')) return;
+            // Redirect @nina/hooks/useAuth → frontend/hooks/nina/useAuth
+            const hookName = data.request.slice('@nina/hooks/'.length);
+            data.request = path.resolve(__dirname, `hooks/nina/${hookName}`).replace(/\\/g, '/');
+          });
+        });
+      },
+    });
+
     // ── Replace Nina's build-time globals (import.meta.env.VITE_NINA_*)
     //    with values from Pulsar's .env.local (NEXT_PUBLIC_NINA_*).
     //    These globals are also defined in nina-api-oficial/vite.config.ts for
