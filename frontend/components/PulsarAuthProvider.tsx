@@ -9,24 +9,32 @@
  *   ao invés de fazer login no Supabase Nina, fornecemos
  *   o usuário já autenticado do Pulsar.
  *
+ * Arquitetura:
+ *   - Cria um cliente Supabase Pulsar (não Nina)
+ *   - Monitora a sessão de autenticação do Pulsar via onAuthStateChange
+ *   - Fornece o usuário Pulsar através de AuthContext (compatível com Nina)
+ *   - Sem dependência em hooks ou providers da Nina
+ *
  * Fluxo:
  *   Pulsar user (authenticated)
  *     ↓
- *   PulsarAuthProvider wraps ConnectApp
+ *   PulsarAuthProvider cria cliente Supabase Pulsar
  *     ↓
- *   useAuth() returns Pulsar user (converted to Nina shape)
+ *   Monitora onAuthStateChange
  *     ↓
- *   Components render without redirect or extra auth
+ *   useAuth() returns Pulsar user via context
+ *     ↓
+ *   Components render sem redirect ou auth extra
  */
 
-import { createContext, useContext, ReactNode, useMemo } from 'react'
-import { User as SupabaseUser } from '@supabase/supabase-js'
-import { useAuth as usePulsarAuth } from '@/hooks/nina/useAuth'
+import { createContext, useContext, ReactNode, useState, useEffect } from 'react'
+import { User as SupabaseUser, Session } from '@supabase/supabase-js'
+import { createBrowserClient } from '@supabase/ssr'
 import { useRouter } from 'next/navigation'
 
 interface AuthContextType {
   user: SupabaseUser | null
-  session: null // Not used in Connect
+  session: Session | null
   loading: boolean
   signUp: (email: string, password: string, fullName?: string) => Promise<{ error: Error | null }>
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>
@@ -35,31 +43,39 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-/**
- * Convert Pulsar User to Supabase User shape
- * Pulsar's User object should be compatible, but we ensure
- * all expected fields exist
- */
-function convertPulsarUserToNinaUser(pulsarUser: SupabaseUser | null): SupabaseUser | null {
-  if (!pulsarUser) return null
-
-  // Return as-is; Pulsar user is already a valid Supabase User
-  // (it comes from Supabase, just a different instance)
-  return pulsarUser
-}
+// Cliente Supabase Pulsar (não Nina)
+const pulsarSupabase = createBrowserClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+)
 
 export const PulsarAuthProvider = ({ children }: { children: ReactNode }) => {
-  const { user: pulsarUser, loading: pulsarLoading } = usePulsarAuth()
+  const [user, setUser] = useState<SupabaseUser | null>(null)
+  const [session, setSession] = useState<Session | null>(null)
+  const [loading, setLoading] = useState(true)
   const router = useRouter()
 
-  // Convert Pulsar user to Nina-compatible shape
-  const user = useMemo(() => convertPulsarUserToNinaUser(pulsarUser), [pulsarUser])
+  // Monitor Pulsar auth state
+  useEffect(() => {
+    const { data: { subscription } } = pulsarSupabase.auth.onAuthStateChange(
+      (event, sess) => {
+        console.log('[PulsarAuthProvider] Auth state changed:', { event, hasUser: !!sess?.user })
+        setSession(sess)
+        setUser(sess?.user ?? null)
+        setLoading(false)
+      }
+    )
 
-  // No session for Connect (Pulsar handles it server-side)
-  const session = null
+    // Get current session
+    pulsarSupabase.auth.getSession().then(({ data: { session: sess } }) => {
+      console.log('[PulsarAuthProvider] Got session:', { hasSession: !!sess })
+      setSession(sess)
+      setUser(sess?.user ?? null)
+      setLoading(false)
+    })
 
-  // Not loading after initial Pulsar auth
-  const loading = pulsarLoading
+    return () => subscription.unsubscribe()
+  }, [])
 
   // Sign up: Not available in Connect (use Pulsar signup)
   const signUp = async (email: string, password: string, fullName?: string) => {
@@ -78,15 +94,10 @@ export const PulsarAuthProvider = ({ children }: { children: ReactNode }) => {
   // Sign out: Logout from Pulsar
   const signOut = async () => {
     try {
-      // Get Pulsar auth client and sign out
-      const { createClient } = await import('@supabase/supabase-js')
-      const pulsarClient = createClient(
-        process.env.NEXT_PUBLIC_SUPABASE_URL!,
-        process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-      )
-      await pulsarClient.auth.signOut()
-
-      // Redirect to Pulsar login
+      console.log('[PulsarAuthProvider] Signing out...')
+      await pulsarSupabase.auth.signOut()
+      setUser(null)
+      setSession(null)
       router.push('/auth')
     } catch (err) {
       console.error('[PulsarAuthProvider] signOut error:', err)
