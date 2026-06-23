@@ -12,6 +12,7 @@ const nextConfig: NextConfig = {
     ignoreBuildErrors: true,
     tsconfigPath: './tsconfig.json'
   },
+  turbopack: {},
 
   webpack(config, { webpack: wp }) {
     // ── Nina @/ alias: resolve @/foo → nina-api-oficial/src/foo when the
