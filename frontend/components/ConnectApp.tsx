@@ -2,22 +2,20 @@
 
 // ConnectApp — Pulsar Connect SPA entry point.
 //
-// Auth strategy (no service-role key required):
-//   - Nina's own AuthProvider manages session via localStorage.
-//   - Unauthenticated users are routed to /auth (Nina's login page).
-//   - After login, Nina navigates to /dashboard → we redirect that to /inbox.
-//   - Session persists across page loads; first-time users sign up once.
+// Auth strategy:
+//   - Uses Pulsar's authenticated user (already logged in)
+//   - PulsarAuthProvider converts Pulsar user to Nina-compatible shape
+//   - No extra login/signup needed; no localStorage; no Nina Supabase auth
+//   - Session managed server-side by Pulsar
 //
 // Routing: BrowserRouter(basename="/connect") scopes all paths under /connect.
 
 import React, { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom';
 import { Toaster } from 'sonner';
-import { ConnectLayout } from './ConnectLayout';
+import { PulsarAuthProvider, useAuth } from './PulsarAuthProvider';
 
 // Nina context providers — resolved via webpack @nina alias
-// @ts-ignore
-import { AuthProvider, useAuth } from '@nina/hooks/useAuth';
 // @ts-ignore
 import { CompanySettingsProvider } from '@nina/hooks/useCompanySettings';
 
@@ -36,20 +34,14 @@ import Scheduling from '@nina/components/Scheduling';
 import Settings from '@nina/components/Settings';
 // @ts-ignore
 import { OnboardingWizard } from '@nina/components/OnboardingWizard';
-// @ts-ignore
-import Auth from '@nina/pages/Auth';
 
-// Guards the ConnectLayout: unauthenticated users go to /auth.
-// Must be a descendant of AuthProvider.
+// ConnectLayout from local components
+import { ConnectLayout } from './ConnectLayout';
+
+// Guards the ConnectLayout: checks Pulsar user is authenticated.
+// Must be a descendant of PulsarAuthProvider.
 function ProtectedConnectLayout() {
   const { user, loading } = useAuth();
-
-  // DEBUG: Log auth state
-  console.log('[ConnectApp/ProtectedConnectLayout]', {
-    user: user ? { id: user.id, email: user.email } : null,
-    loading,
-    redirecting: !user && !loading,
-  });
 
   if (loading) {
     return (
@@ -60,7 +52,6 @@ function ProtectedConnectLayout() {
   }
 
   if (!user) {
-    console.log('[ConnectApp] ⚠️ REDIRECTING TO /auth because user is null');
     return <Navigate to="/auth" replace />;
   }
 
@@ -84,15 +75,13 @@ function NinaOutletWrapper() {
 }
 
 export function ConnectApp() {
-  console.log('[ConnectApp] 🔴 ConnectApp SPA is rendering (React Router)');
-
   return (
     <BrowserRouter basename="/connect">
-      <AuthProvider>
+      <PulsarAuthProvider>
         <CompanySettingsProvider>
           <Routes>
-            {/* Public: Nina login / sign-up */}
-            <Route path="/auth" element={<Auth />} />
+            {/* Public: redirect to home if accessed */}
+            <Route path="/auth" element={<Navigate to="/" replace />} />
 
             {/* Protected: ConnectLayout guards unauthenticated access */}
             <Route element={<ProtectedConnectLayout />}>
@@ -111,7 +100,7 @@ export function ConnectApp() {
           </Routes>
           <Toaster position="top-right" richColors theme="dark" />
         </CompanySettingsProvider>
-      </AuthProvider>
+      </PulsarAuthProvider>
     </BrowserRouter>
   );
 }
