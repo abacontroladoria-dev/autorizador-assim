@@ -2129,6 +2129,23 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
               "sem-laudo": "Sem autorização registrada",
             }
             const handleExport = () => {
+              // "Autorizado em" mais recente por paciente (DD/MM/YYYY)
+              const toSortable = (d: string) => {
+                const [dd, mm, yyyy] = d.split("/")
+                return yyyy && mm && dd ? `${yyyy}${mm}${dd}` : ""
+              }
+              const pacAutEmMap: Record<string, string> = {}
+              for (const l of lRows) {
+                const idFav = String(l["ID Favorecido"] ?? l["Id Favorecido"] ?? "").trim()
+                const p     = (idFav ? agendIdMap.get(idFav) : undefined) ?? String(l["Paciente"] || "").trim()
+                if (!p || PACS_ADMIN.has(p)) continue
+                const raw = String(l["Autorizado em"] || "").trim()
+                if (!raw) continue
+                if (!pacAutEmMap[p] || toSortable(raw) > toSortable(pacAutEmMap[p])) {
+                  pacAutEmMap[p] = raw
+                }
+              }
+
               const rows = todosPacs.map(p => {
                 const st = pacStatusMap[p]
                 let sobreoferta = ""
@@ -2144,10 +2161,11 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
                   "Convênio": pacConvMap[p] || "—",
                   "Situação": SITUACAO_LABEL[st] || "—",
                   "Sobreoferta": sobreoferta || "—",
+                  "Autorizado em": pacAutEmMap[p] || "—",
                 }
               })
               const ws = XLSX.utils.json_to_sheet(rows)
-              ws["!cols"] = [{ wch: 16 }, { wch: 40 }, { wch: 28 }, { wch: 30 }, { wch: 40 }]
+              ws["!cols"] = [{ wch: 16 }, { wch: 40 }, { wch: 28 }, { wch: 30 }, { wch: 40 }, { wch: 16 }]
               const wb = XLSX.utils.book_new()
               XLSX.utils.book_append_sheet(wb, ws, "Pacientes")
               XLSX.writeFile(wb, "relatorio_pacientes.xlsx")
@@ -2156,7 +2174,7 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
               <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
                 <div>
                   <div style={{ fontSize: "11px", fontWeight: 700, color: "#374151" }}>Relatório de Pacientes</div>
-                  <div style={{ fontSize: "10px", color: "#9ca3af", marginTop: "1px" }}>{todosPacs.length} pacientes · ID, Nome, Convênio, Situação</div>
+                  <div style={{ fontSize: "10px", color: "#9ca3af", marginTop: "1px" }}>{todosPacs.length} pacientes · ID, Nome, Convênio, Situação, Autorizado em</div>
                 </div>
                 <button
                   onClick={handleExport}
