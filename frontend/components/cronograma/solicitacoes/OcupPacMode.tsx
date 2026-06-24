@@ -118,23 +118,6 @@ function normalizeName(n: string): string {
     .trim()
 }
 
-// Resolve um nome bruto do lRows para o nome canônico do agend.
-// 1º tenta match exato (normalizado); 2º tenta prefixo: o nome do agend (≥ 2 palavras)
-// é prefixo do nome do lRows. Temporário — substituir por ID quando TI disponibilizar.
-function resolveAgendName(
-  pRaw: string,
-  exact: Map<string, string>,
-  byLen: string[]
-): string {
-  const norm = normalizeName(pRaw)
-  const e = exact.get(norm)
-  if (e) return e
-  for (const name of byLen) {
-    const nn = normalizeName(name)
-    if (nn.split(" ").length >= 2 && norm.startsWith(nn + " ")) return name
-  }
-  return pRaw
-}
 
 function adjHs(hora: string): string[] {
   const hi = pm(hora)
@@ -318,8 +301,13 @@ function buildSugestoes(
     const buildEntry = (esp: string): EspAlt | null => {
       const espRows = byEspRows[esp]
       const [primaryRow, ...altRows] = espRows
-      const profAlts = altRows.map(r => ({ tP: r.Terapia, prof: r.Profissional, unidade: rowUnid(r) }))
       const unid = rowUnid(primaryRow)
+      // Para dia-novo: restringe profAlts à mesma unidade do slot principal, pois os
+      // vComps são calculados com base em `unid`. Trocar para um profAlt de outra unidade
+      // causaria duas sessões consecutivas em unidades diferentes (viola R5.4).
+      const profAlts = altRows
+        .filter(r => !hasDay ? rowUnid(r) === unid : true)
+        .map(r => ({ tP: r.Terapia, prof: r.Profissional, unidade: rowUnid(r) }))
       if (!hasDay) {
         const seenComp = new Set<string>()
         const compRows: Array<{ tP: string; prof: string; hora: string }> = []
@@ -620,6 +608,9 @@ function TodasSugestoesModal({
     if (st === "inviavel") continue
     if (!selectedIds.has(s.id)) continue
     const tipo: CellInfo["tipo"] = st === "acompanhamento" ? "aceito" : "proposta"
+    // Usa a unidade do espAlt ativo, não a do defaultEntry (s.unidade), para evitar
+    // falso alerta de "unidades diferentes" quando o usuário troca de terapia.
+    const activeUnid = getActiveEspData(s).unidade
     const activeVComps = getActiveVComps(s)
     for (const vc of activeVComps) {
       if (isVCompExcluded(s.id, vc.hora)) continue
@@ -628,7 +619,7 @@ function TodasSugestoesModal({
       seenSlot.add(kC)
       if (!cMap[kC]) cMap[kC] = []
       if (!cMap[kC].some(x => x.tP === vc.tP && x.prof === vc.prof)) {
-        cMap[kC].push({ tP: vc.tP, tE: tExib(vc.tP), prof: vc.prof, tipo, unidade: s.unidade })
+        cMap[kC].push({ tP: vc.tP, tE: tExib(vc.tP), prof: vc.prof, tipo, unidade: activeUnid })
       }
     }
   }
@@ -713,7 +704,7 @@ function TodasSugestoesModal({
         {/* Header */}
         <div style={{ padding: "14px 20px", borderBottom: "1px solid #f0f0f0", background: "#fafafa", borderRadius: "18px 18px 0 0", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
           <div>
-            <div style={{ fontWeight: 900, fontSize: "15px", color: B.navy }}>{fmtName(pac)}</div>
+            <div style={{ fontWeight: 900, fontSize: "15px", color: B.navy }}>{pac}</div>
             <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "3px", flexWrap: "wrap" }}>
               <span style={{ fontSize: "12px", color: "#9ca3af" }}>
                 {(() => {
@@ -1648,19 +1639,8 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
     agend.filter(r => r["Nome Favorecido"] && !PACS_ADMIN.has(r["Nome Favorecido"]) && !EXCLUIR_GAPS.has(r.Terapia)),
     [agend])
 
-  // Mapa: nome normalizado → nome canônico (exato) do agend.
-  // Usado para casar nomes de lRows com nomes de agend sem depender de encoding idêntico.
-  const agendNormMap = useMemo(() => {
-    const m = new Map<string, string>()
-    for (const r of agend) {
-      const p = r["Nome Favorecido"]
-      if (p && !PACS_ADMIN.has(p)) m.set(normalizeName(p), p)
-    }
-    return m
-  }, [agend])
-
   // Lista de nomes canônicos do agend ordenados por comprimento decrescente.
-  // Usada como fallback de prefixo em resolveAgendName.
+  // Usada por agendMergeMap para encontrar o nome canônico mais curto.
   const agendNamesByLen = useMemo(() => {
     const s = new Set<string>()
     for (const r of agend) {
@@ -1692,6 +1672,21 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
     return m
   }, [agendNamesByLen])
 
+  // Mapa: "ID Favorecido" do lRows → nome canônico do agend.
+  // Substitui a junção por nome normalizado — mais confiável e independente de encoding.
+  const agendIdMap = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const r of agend) {
+      const id  = String(r["Id Favorecido"] ?? r["ID Favorecido"] ?? "").trim()
+      const rawP = r["Nome Favorecido"]
+      if (id && rawP && !PACS_ADMIN.has(rawP)) {
+        const p = agendMergeMap.get(rawP) ?? rawP
+        if (!m.has(id)) m.set(id, p)
+      }
+    }
+    return m
+  }, [agend, agendMergeMap])
+
   const gapMap = useMemo(() => {
     if (!cRows.length || !lRows.length) return {} as Record<string, { dif: number; aut: number; of: number }>
     const qtdOf: Record<string, number> = {}
@@ -1706,10 +1701,9 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
     const qtdAut: Record<string, number> = {}
     const altaSet = new Set<string>()
     for (const l of lRows) {
-      const pRaw = String(l["Paciente"] || "").trim()
-      const pRes = resolveAgendName(pRaw, agendNormMap, agendNamesByLen)
-      const p    = agendMergeMap.get(pRes) ?? pRes
-      const esp  = String(l["Especialidade"] || "").trim()
+      const idFav = String(l["ID Favorecido"] ?? l["Id Favorecido"] ?? "").trim()
+      const p     = (idFav ? agendIdMap.get(idFav) : undefined) ?? String(l["Paciente"] || "").trim()
+      const esp   = String(l["Especialidade"] || "").trim()
       if (!p || PACS_ADMIN.has(p) || !esp) continue
       if (isLaudoComAlta(l)) { altaSet.add(`${p}|||${esp}`); continue }
       const aut = parseFloat(String(l["Qtd autorizada"] || "0").replace(",", ".")) || 0
@@ -1725,7 +1719,7 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
       result[k] = { dif, aut, of: of_ }
     }
     return result
-  }, [cRows, lRows, agend, agendNormMap, agendNamesByLen, agendMergeMap])
+  }, [cRows, lRows, agend, agendIdMap, agendMergeMap])
 
   const todosPacs = useMemo(() => {
     const pacs = new Set<string>()
@@ -1741,9 +1735,8 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
     // Detecta quem tem QUALQUER laudo com Qtd > 0 (independe de Situação).
     const temLaudo = new Set<string>()
     for (const l of lRows) {
-      const pRaw = String(l["Paciente"] || "").trim()
-      const pRes = resolveAgendName(pRaw, agendNormMap, agendNamesByLen)
-      const p    = agendMergeMap.get(pRes) ?? pRes
+      const idFav = String(l["ID Favorecido"] ?? l["Id Favorecido"] ?? "").trim()
+      const p     = (idFav ? agendIdMap.get(idFav) : undefined) ?? String(l["Paciente"] || "").trim()
       if (!p || PACS_ADMIN.has(p)) continue
       const aut = parseFloat(String(l["Qtd autorizada"] || "0").replace(",", ".")) || 0
       if (aut > 0) temLaudo.add(p)
@@ -1766,7 +1759,7 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
       else                             result[p] = "em-dia"
     }
     return result
-  }, [gapMap, todosPacs, lRows, agendNormMap, agendNamesByLen, agendMergeMap])
+  }, [gapMap, todosPacs, lRows, agendIdMap])
 
   const pacIdMap = useMemo(() => {
     const normalize = (s: string) => s.toLowerCase().replace(/[\s_]+/g, "")
@@ -1869,13 +1862,6 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
   // Todas as especialidades do paciente (com déficit, zeradas ou sobreofertadas)
   const pacAllEsp = useMemo((): GapInfo[] => {
     if (!pac) return []
-    if (pac.toLowerCase().includes("pietro")) {
-      console.log("[DEBUG pacAllEsp] pac =", JSON.stringify(pac))
-      console.log("[DEBUG pacAllEsp] agendNormMap keys (Pietro):", [...agendNormMap.entries()].filter(([k]) => k.includes("pietro")).map(([k,v]) => `${k} → ${v}`))
-      console.log("[DEBUG pacAllEsp] agendMergeMap (Pietro):", [...agendMergeMap.entries()].filter(([k]) => k.toLowerCase().includes("pietro")).map(([k,v]) => `${k} → ${v}`))
-      const pietroLRows = lRows.filter(l => String(l["Paciente"] || "").toLowerCase().includes("pietro"))
-      console.log("[DEBUG pacAllEsp] lRows Pietro rows:", pietroLRows.map(l => ({ pac: l["Paciente"], esp: l["Especialidade"], aut: l["Qtd autorizada"] })))
-    }
     const qtdOf: Record<string, number> = {}
     for (const r of agend) {
       const rawP = r["Nome Favorecido"]
@@ -1887,12 +1873,8 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
     const qtdAut: Record<string, number> = {}
     const altaSet = new Set<string>()
     for (const l of lRows) {
-      const pRaw = String(l["Paciente"] || "").trim()
-      const pRes = resolveAgendName(pRaw, agendNormMap, agendNamesByLen)
-      const p    = agendMergeMap.get(pRes) ?? pRes
-      if (pac.toLowerCase().includes("pietro") && pRaw.toLowerCase().includes("pietro")) {
-        console.log("[DEBUG pacAllEsp lRows]", JSON.stringify(pRaw), "→ pRes:", JSON.stringify(pRes), "→ p:", JSON.stringify(p), "=== pac?", p === pac)
-      }
+      const idFav = String(l["ID Favorecido"] ?? l["Id Favorecido"] ?? "").trim()
+      const p     = (idFav ? agendIdMap.get(idFav) : undefined) ?? String(l["Paciente"] || "").trim()
       if (p !== pac) continue
       const esp = String(l["Especialidade"] || "").trim()
       if (!esp) continue
@@ -1905,7 +1887,7 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
     return Object.entries(qtdAut)
       .map(([esp, aut]) => ({ esp, aut, of: qtdOf[esp] || 0, dif: Math.round((aut - (qtdOf[esp] || 0)) * 10) / 10 }))
       .sort((a, b) => b.dif - a.dif)
-  }, [pac, agend, lRows, agendNormMap, agendNamesByLen, agendMergeMap])
+  }, [pac, agend, lRows, agendIdMap, agendMergeMap])
 
   const sugestoes = useMemo(() => {
     if (!pac || estrategia !== "S1") return [] as Sugestao[]
