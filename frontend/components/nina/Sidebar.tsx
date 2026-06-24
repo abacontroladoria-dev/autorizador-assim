@@ -1,169 +1,109 @@
 'use client'
 
 import React, { useState } from 'react'
-import { LayoutDashboard, MessageSquare, Users, Settings as SettingsIcon, LogOut, ShieldCheck, Calendar, Kanban } from 'lucide-react'
-import { useRouter, usePathname } from 'next/navigation'
-import { useCompanySettings } from '@/hooks/nina/useCompanySettings'
+import { MessageSquare, Users, LayoutDashboard, Kanban, Calendar, Settings as SettingsIcon, LogOut, ArrowLeft, ChevronLeft } from 'lucide-react'
+import { usePathname } from 'next/navigation'
 import { useAuth } from '@/hooks/nina/useAuth'
 import Link from 'next/link'
-import { motion } from 'framer-motion'
 import { toast } from 'sonner'
 
 const menuItems = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'pipeline', label: 'Pipeline', icon: Kanban },
-  { id: 'chat', label: 'Chat Ao Vivo', icon: MessageSquare },
-  { id: 'contacts', label: 'Contatos', icon: Users },
-  { id: 'scheduling', label: 'Agendamentos', icon: Calendar },
-  { id: 'team', label: 'Equipe', icon: ShieldCheck },
-  { id: 'settings', label: 'Configurações', icon: SettingsIcon },
+  { id: 'crm',       label: 'Dashboard',     icon: LayoutDashboard },
+  { id: 'inbox',     label: 'Inbox',         icon: MessageSquare },
+  { id: 'contacts',  label: 'Contatos',      icon: Users },
+  { id: 'pipeline',  label: 'Pipeline',      icon: Kanban },
+  { id: 'analytics', label: 'Agendamentos',  icon: Calendar },
+  { id: 'settings',  label: 'Configurações', icon: SettingsIcon },
 ]
 
-const Logo = ({ companyName }: { companyName: string }) => {
-  return (
-    <Link href="/nina/dashboard" className="flex items-center space-x-3 py-1">
-      <div className="relative w-10 h-10 flex items-center justify-center flex-shrink-0">
-        <div className="absolute inset-0 bg-primary/20 blur-lg rounded-full" />
-        <div className="relative w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-lg shadow-primary/20 p-1.5">
-          <img src="/assets/icon-via.png" alt="Logo" className="w-full h-full object-contain" />
-        </div>
-      </div>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ duration: 0.2 }}
-        className="flex flex-col overflow-hidden"
-      >
-        <span className="font-bold text-lg tracking-tight text-foreground whitespace-nowrap">{companyName || 'Minha Empresa'}</span>
-        <span className="text-[10px] uppercase tracking-wider text-primary font-semibold">Workspace</span>
-      </motion.div>
-    </Link>
-  )
-}
-
-const LogoIcon = () => {
-  return (
-    <Link href="/nina/dashboard" className="flex items-center py-1">
-      <div className="relative w-10 h-10 flex items-center justify-center flex-shrink-0">
-        <div className="absolute inset-0 bg-primary/20 blur-lg rounded-full" />
-        <div className="relative w-10 h-10 rounded-xl bg-gradient-to-br from-primary to-accent flex items-center justify-center shadow-lg shadow-primary/20 p-1.5">
-          <img src="/assets/icon-via.png" alt="Logo" className="w-full h-full object-contain" />
-        </div>
-      </div>
-    </Link>
-  )
-}
-
-const SidebarContent = ({ open }: { open: boolean }) => {
-  const { companyName } = useCompanySettings()
+const SidebarContent = ({ collapsed }: { collapsed: boolean }) => {
   const { user, signOut } = useAuth()
   const pathname = usePathname()
-  const router = useRouter()
-  const currentPath = pathname.replace('/nina/', '') || 'dashboard'
-
-  const links = menuItems.map(item => ({
-    label: item.label,
-    href: `/nina/${item.id}`,
-    icon: <item.icon className="h-5 w-5" />,
-  }))
+  const currentPath = pathname.replace('/connect/', '')
 
   const handleLogout = async () => {
     try {
       await signOut()
       toast.success('Logout realizado com sucesso')
-      router.push('/auth')
-    } catch (error) {
+      window.location.href = '/auth'
+    } catch {
       toast.error('Erro ao fazer logout')
     }
   }
 
   const getUserInitials = () => {
     if (!user?.email) return 'US'
-    const email = user.email
-    return email.substring(0, 2).toUpperCase()
+    return user.email.substring(0, 2).toUpperCase()
   }
 
-  const getDisplayName = () => {
-    if (user?.user_metadata?.full_name) {
-      return user.user_metadata.full_name
-    }
-    return 'Usuário'
-  }
+  const getDisplayName = () =>
+    user?.user_metadata?.full_name || 'Usuário'
 
   return (
     <>
-      <div className="flex flex-col flex-1 overflow-y-auto overflow-x-hidden">
-        <div className="mb-6">
-          {open ? <Logo companyName={companyName} /> : <LogoIcon />}
-        </div>
-
-        <nav className="flex flex-col gap-1.5">
-          {links.map((link, idx) => {
-            const isActive = currentPath.startsWith(link.href.replace('/nina/', ''))
+      {/* Nav items */}
+      <div className="flex flex-col flex-1 overflow-y-auto overflow-x-hidden px-2">
+        <nav className="flex flex-col gap-0.5">
+          {menuItems.map((item) => {
+            const isActive = currentPath.startsWith(item.id)
             return (
               <Link
-                key={idx}
-                href={link.href}
-                className={`flex items-center gap-3 px-4 py-3 rounded-lg transition-colors ${
+                key={item.id}
+                href={`/connect/${item.id}`}
+                title={collapsed ? item.label : undefined}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors ${
                   isActive
-                    ? 'bg-primary text-primary-foreground'
-                    : 'text-foreground/60 hover:text-foreground hover:bg-secondary/50'
+                    ? 'bg-slate-800 text-white'
+                    : 'text-slate-400 hover:text-slate-100 hover:bg-slate-800/60'
                 }`}
               >
-                {link.icon}
-                {open && <span className="text-sm font-medium">{link.label}</span>}
+                <item.icon className="h-5 w-5 shrink-0" />
+                {!collapsed && (
+                  <span className="text-sm font-medium truncate">{item.label}</span>
+                )}
               </Link>
             )
           })}
         </nav>
       </div>
 
-      {open && (
-        <motion.div
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          transition={{ duration: 0.3 }}
-          className="py-4 flex justify-center"
+      {/* Voltar ao Pulsar */}
+      <div className="px-2">
+        <button
+          onClick={() => (window.location.href = '/')}
+          title={collapsed ? 'Voltar ao Pulsar' : undefined}
+          className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-colors w-full text-slate-500 hover:text-slate-100 hover:bg-slate-800/60"
         >
-          <img
-            src="/assets/logo-via-white.png"
-            alt="VIA"
-            className="h-6 opacity-60 hover:opacity-100 transition-opacity"
-          />
-        </motion.div>
-      )}
+          <ArrowLeft className="w-5 h-5 shrink-0" />
+          {!collapsed && (
+            <span className="text-sm font-medium">Voltar ao Pulsar</span>
+          )}
+        </button>
+      </div>
 
-      <div className="border-t border-border/50 pt-4">
-        <div className="flex items-center gap-3 p-2 rounded-xl hover:bg-secondary/50 transition-colors cursor-pointer group">
-          <div className="w-9 h-9 rounded-full bg-gradient-to-tr from-primary/20 to-secondary flex items-center justify-center text-xs font-bold text-primary border border-border ring-2 ring-transparent group-hover:ring-primary/20 transition-all flex-shrink-0">
+      {/* User footer */}
+      <div className="border-t border-slate-800 pt-3 px-2">
+        <div className="flex items-center gap-3 p-2 rounded-xl hover:bg-slate-800/60 transition-colors cursor-pointer group">
+          <div className="w-9 h-9 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-200 border border-slate-600 shrink-0">
             {getUserInitials()}
           </div>
-          <motion.div
-            animate={{
-              display: open ? "block" : "none",
-              opacity: open ? 1 : 0,
-            }}
-            transition={{ duration: 0.2 }}
-            className="flex-1 overflow-hidden"
+          {!collapsed && (
+            <div className="flex-1 overflow-hidden">
+              <p className="text-sm font-medium text-slate-100 whitespace-nowrap">
+                {getDisplayName()}
+              </p>
+              <p className="text-xs text-slate-500 truncate">
+                {user?.email || 'email@example.com'}
+              </p>
+            </div>
+          )}
+          <button
+            onClick={handleLogout}
+            className="p-1.5 rounded-lg hover:bg-red-500/10 transition-colors"
+            title="Sair"
           >
-            <p className="text-sm font-medium text-foreground group-hover:text-foreground whitespace-nowrap">{getDisplayName()}</p>
-            <p className="text-xs text-muted-foreground truncate">{user?.email || 'email@example.com'}</p>
-          </motion.div>
-          <motion.div
-            animate={{
-              display: open ? "block" : "none",
-              opacity: open ? 1 : 0,
-            }}
-            transition={{ duration: 0.2 }}
-          >
-            <button
-              onClick={handleLogout}
-              className="p-1.5 rounded-lg hover:bg-destructive/10 transition-colors"
-              title="Sair"
-            >
-              <LogOut className="w-4 h-4 text-muted-foreground hover:text-destructive transition-colors" />
-            </button>
-          </motion.div>
+            <LogOut className="w-4 h-4 text-slate-500 hover:text-red-400 transition-colors" />
+          </button>
         </div>
       </div>
     </>
@@ -171,11 +111,36 @@ const SidebarContent = ({ open }: { open: boolean }) => {
 }
 
 const AppSidebar: React.FC = () => {
-  const [open, setOpen] = useState(true)
+  const [collapsed, setCollapsed] = useState(false)
 
   return (
-    <aside className={`${open ? 'w-64' : 'w-20'} h-full bg-card/50 backdrop-blur-xl border-r border-border/50 transition-all duration-300 flex flex-col justify-between gap-10 py-4`}>
-      <SidebarContent open={open} />
+    <aside
+      className={`relative h-full bg-slate-950 border-r border-slate-800 flex flex-col justify-between gap-6 py-4 transition-all duration-300 ${
+        collapsed ? 'w-16' : 'w-64'
+      }`}
+    >
+      {/* Logo */}
+      <div className="h-20 flex items-center justify-center px-4 border-b border-slate-800 shrink-0">
+        <img
+          src="/logo-universo-aba.png"
+          className={`object-contain transition-all duration-300 ${collapsed ? 'h-10 w-10' : 'h-20'}`}
+        />
+      </div>
+
+      <SidebarContent collapsed={collapsed} />
+
+      {/* Collapse toggle */}
+      <button
+        onClick={() => setCollapsed((prev) => !prev)}
+        className="absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 rounded-full bg-slate-900 border border-slate-700 flex items-center justify-center hover:bg-slate-800 transition-colors shadow-md z-9999"
+        title={collapsed ? 'Expandir menu' : 'Ocultar menu'}
+      >
+        <ChevronLeft
+          className={`w-3 h-3 text-slate-400 transition-transform duration-300 ${
+            collapsed ? 'rotate-180' : ''
+          }`}
+        />
+      </button>
     </aside>
   )
 }
