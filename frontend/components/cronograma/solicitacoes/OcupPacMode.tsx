@@ -161,6 +161,7 @@ function buildSugestoes(
   agendClin: CsvRow[],
   cRows: CsvRow[],
   gapMap: Record<string, { dif: number; aut: number; of: number }>,
+  aceites: AceitePacBundle[] = [],
 ): Sugestao[] {
   const pacClinRows = agendClin.filter(r => r["Nome Favorecido"] === pac)
   const clinPuras   = pacClinRows.filter(r => !ABA_EXT_NAMES.has(r.Terapia))
@@ -191,6 +192,15 @@ function buildSugestoes(
     if (!canonical) continue
     if (!dayHours[d]) dayHours[d] = new Set()
     dayHours[d].add(canonical)
+  }
+  // Vagas comprometidas: sessões aguardando ou confirmadas que ainda não estão no agend
+  for (const bundle of aceites) {
+    if (bundle.pac !== pac) continue
+    if (bundle.status !== "pendente" && bundle.status !== "confirmado") continue
+    for (const s of bundle.sessoes) {
+      if (!dayHours[s.dia]) dayHours[s.dia] = new Set()
+      dayHours[s.dia].add(s.hora)
+    }
   }
 
   // Apenas sessões clínicas (excl. EXCLUIR_OCUP) — usado para adjacência e hasDay
@@ -470,6 +480,7 @@ function TodasSugestoesModal({
   const [acaoMotivo, setAcaoMotivo]   = useState("")
   // Recusar todas as sessões de um dia (confirmação)
   const [pendingRecusarDia, setPendingRecusarDia] = useState<{ dia: string; sessoes: AceiteSessao[]; dayIds: string[] } | null>(null)
+  const [motivoRecusarDia, setMotivoRecusarDia]   = useState("")
   // Confirmação de aceitar em lote
   const [confirmingAceitar, setConfirmingAceitar] = useState(false)
   // vComps excluídos individualmente: { sugestaoId: Set<hora> }
@@ -1230,31 +1241,44 @@ function TodasSugestoesModal({
     {pendingRecusarDia && (
       <div
         style={{ position: "fixed", inset: 0, zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.45)", padding: "16px" }}
-        onClick={e => { if (e.target === e.currentTarget) setPendingRecusarDia(null) }}
+        onClick={e => { if (e.target === e.currentTarget) { setMotivoRecusarDia(""); setPendingRecusarDia(null) } }}
       >
         <div style={{ background: "white", borderRadius: "16px", boxShadow: "0 20px 60px rgba(0,0,0,.25)", maxWidth: "380px", width: "100%", padding: "22px" }}>
           <div style={{ fontWeight: 900, fontSize: "16px", color: "#dc2626", marginBottom: "4px" }}>✗ Recusar todas de {pendingRecusarDia.dia.replace("-feira", "")}</div>
           <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "14px" }}>
-            {pendingRecusarDia.sessoes.length} sessão(ões) serão registradas como recusadas em Aceites e Recusas.
+            {pendingRecusarDia.sessoes.length} sessão(ões) serão registradas individualmente como recusadas em Aceites e Recusas.
           </div>
-          <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: "10px", padding: "10px 13px", marginBottom: "16px", maxHeight: "160px", overflowY: "auto" }}>
+          <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: "10px", padding: "10px 13px", marginBottom: "14px", maxHeight: "160px", overflowY: "auto" }}>
             {pendingRecusarDia.sessoes.map((s, i) => (
               <div key={i} style={{ fontSize: "11px", fontWeight: 700, color: "#374151", padding: "2px 0" }}>
                 <span style={{ fontFamily: "monospace", color: "#dc2626", marginRight: "6px" }}>{s.hora}</span>{s.tP} · {fmtName(s.prof)}
               </div>
             ))}
           </div>
+          <textarea
+            value={motivoRecusarDia}
+            onChange={e => setMotivoRecusarDia(e.target.value)}
+            placeholder="Justificativa (opcional) — será repetida em cada sessão recusada"
+            rows={3}
+            style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: "10px", padding: "8px 12px", fontSize: "12px", fontFamily: "inherit", resize: "none", marginBottom: "16px", boxSizing: "border-box" }}
+          />
           <div style={{ display: "flex", gap: "8px" }}>
             <button
               onClick={() => {
-                onAcaoDireta(pendingRecusarDia.sessoes, "recusado")
+                const motivo = motivoRecusarDia.trim() || undefined
+                for (const sessao of pendingRecusarDia.sessoes) {
+                  onAcaoDireta([sessao], "recusado", motivo)
+                }
                 setSelectedIds(prev => { const n = new Set(prev); pendingRecusarDia.dayIds.forEach(id => n.delete(id)); return n })
+                setMotivoRecusarDia("")
                 setPendingRecusarDia(null)
               }}
               style={{ flex: 1, padding: "10px 14px", borderRadius: "10px", background: "#dc2626", color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: "13px" }}>
               Confirmar recusa
             </button>
-            <button onClick={() => setPendingRecusarDia(null)} style={{ flex: 1, padding: "10px 14px", borderRadius: "10px", background: "#f3f4f6", color: "#374151", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+            <button
+              onClick={() => { setMotivoRecusarDia(""); setPendingRecusarDia(null) }}
+              style={{ flex: 1, padding: "10px 14px", borderRadius: "10px", background: "#f3f4f6", color: "#374151", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
               Cancelar
             </button>
           </div>
@@ -1360,10 +1384,10 @@ function AceitesPanel({
                 <span style={{ fontSize: "11px", color: "#9ca3af", flexShrink: 0 }}>{bundle.sessoes.length} sessão(ões)</span>
               </div>
 
-              {/* Motivo (bundles inviáveis) */}
-              {bundle.status === "inviavel" && bundle.motivo && (
+              {/* Motivo (bundles recusados ou inviáveis) */}
+              {(bundle.status === "inviavel" || bundle.status === "recusado") && bundle.motivo && (
                 <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: "8px", padding: "7px 10px", marginBottom: "10px", fontSize: "11px", color: "#6b7280" }}>
-                  <span style={{ fontWeight: 700 }}>Motivo: </span>{bundle.motivo}
+                  <span style={{ fontWeight: 700 }}>Justificativa: </span>{bundle.motivo}
                 </div>
               )}
 
@@ -1891,8 +1915,8 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
 
   const sugestoes = useMemo(() => {
     if (!pac || estrategia !== "S1") return [] as Sugestao[]
-    return buildSugestoes(pac, agend, agendClin, cRows, gapMap)
-  }, [pac, estrategia, agend, agendClin, cRows, gapMap])
+    return buildSugestoes(pac, agend, agendClin, cRows, gapMap, aceites)
+  }, [pac, estrategia, agend, agendClin, cRows, gapMap, aceites])
 
   useEffect(() => {
     if (!pac) return
