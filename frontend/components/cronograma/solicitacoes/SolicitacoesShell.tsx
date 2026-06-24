@@ -9,6 +9,7 @@ import { PreencherProfTab } from "@/components/cronograma/shared/PreencherProfTa
 import { OcupPacMode } from "./OcupPacMode"
 import { NovoCronogramaTab } from "@/components/cronograma/shared/NovoCronogramaTab"
 import { BancoDadosTab } from "./BancoDadosTab"
+import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 import type { CsvRow, LaudoRow, DispRow, StatusMap, CfgState } from "@/types/cronograma"
 
 const TABS = [
@@ -56,6 +57,7 @@ export function SolicitacoesShell({ cRows, lRows, dispRows, cfg }: ShellProps) {
 function TabContent({
   tab, cRows, lRows, dispRows, cfg, statusMap, persistStatus,
 }: { tab: TabKey; statusMap: StatusMap; persistStatus: (m: StatusMap) => void } & ShellProps) {
+  const { rec, inv, sRec, sInv } = useCronogramaData()
   const label = TABS.find(t => t.key === tab)?.label ?? tab
 
   if (tab === "saida") {
@@ -80,7 +82,7 @@ function TabContent({
   }
 
   if (tab === "ocup-pac") {
-    return <OcupPacMode cRows={cRows} lRows={lRows} cfg={cfg} />
+    return <OcupPacMode cRows={cRows} lRows={lRows} cfg={cfg} rec={rec} inv={inv} sRec={sRec} sInv={sInv} />
   }
 
   if (tab === "novo-cron") {

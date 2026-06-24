@@ -13,7 +13,7 @@ import {
   shouldShowSessionUnit, unidadeBadgeText,
 } from "@/lib/cronograma/helpers"
 import { UnitHeaderBadges, CronoGlobalUnitBadge } from "@/components/cronograma/ui/UnitBadges"
-import type { CsvRow, LaudoRow, CfgState } from "@/types/cronograma"
+import type { CsvRow, LaudoRow, CfgState, RecItem, InvItem } from "@/types/cronograma"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1581,9 +1581,17 @@ function PacAgendaGrid({ pac, cRows, sugestoes, onVerAll }: { pac: string; cRows
 
 // ─── OcupPacMode ──────────────────────────────────────────────────────────────
 
-interface Props { cRows: CsvRow[]; lRows: LaudoRow[]; cfg: CfgState }
+interface Props {
+  cRows: CsvRow[]
+  lRows: LaudoRow[]
+  cfg: CfgState
+  rec?: RecItem[]
+  inv?: InvItem[]
+  sRec?: (rec: RecItem[]) => void
+  sInv?: (inv: InvItem[]) => void
+}
 
-export function OcupPacMode({ cRows, lRows, cfg }: Props) {
+export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGlobal = [], sRec, sInv }: Props) {
   const [pac, setPac]           = useState("")
   const [inputVal, setInputVal] = useState("")
   const [dropOpen, setDropOpen] = useState(false)
@@ -1646,6 +1654,29 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
       motivo,
     }
     persistAceites([...aceites, bundle])
+
+    // Espelha em "Aceites e Recusas" (contexto global)
+    if (status === "recusado" && sRec) {
+      const registradoEm = new Date().toLocaleDateString("pt-BR")
+      const newItems: RecItem[] = sessoes.map(s => ({
+        paciente: pac,
+        profissional: s.prof,
+        especialidade: s.tP,
+        unidade: s.unidade,
+        dia: s.dia,
+        hora: s.hora,
+        registradoEm,
+      }))
+      sRec([...recGlobal, ...newItems])
+    }
+
+    if (status === "inviavel" && sInv && !invGlobal.some(x => x.paciente === pac)) {
+      sInv([...invGlobal, {
+        paciente: pac,
+        motivo: motivo || "",
+        registradoEm: new Date().toLocaleDateString("pt-BR"),
+      }])
+    }
   }
 
   const stKey = (sugestao: Sugestao) => `${pac}|||${sugestao.id}`
