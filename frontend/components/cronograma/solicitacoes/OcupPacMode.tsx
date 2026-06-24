@@ -93,6 +93,8 @@ const ABA_EXT_NAMES = new Set(["Aplicador ABA Casa", "Aplicador ABA Escola", "Ap
 const EXCLUIR_GAPS  = new Set([
   "Aplicador ABA Casa", "Aplicador ABA Escola", "Aplicador ABA Escola/Casa",
 ])
+// Terapias vedadas para ASSIM Saúde, salvo exceção judicial LIMINAR com gap > 0
+const ASSIM_RESTR_TERAPIAS = new Set(["Fisioterapia Aquática", "Equoterapia"])
 const SK         = "aba_ocup_pac_status_v1"
 const SK_ACEITES = "aba_ocup_pac_aceites_v1"
 const DIAS_UTIL  = DIAS_LIST.slice(0, 5)
@@ -162,6 +164,8 @@ function buildSugestoes(
   cRows: CsvRow[],
   gapMap: Record<string, { dif: number; aut: number; of: number }>,
   aceites: AceitePacBundle[] = [],
+  conv = "",
+  isLiminar = false,
 ): Sugestao[] {
   const pacClinRows = agendClin.filter(r => r["Nome Favorecido"] === pac)
   const clinPuras   = pacClinRows.filter(r => !ABA_EXT_NAMES.has(r.Terapia))
@@ -244,6 +248,7 @@ function buildSugestoes(
   const proposedOf: Record<string, number> = {}
   const effDif = (e: string, extra = 0) => (espDif[e] ?? 0) - (proposedOf[e] ?? 0) - extra
 
+  const isAssimSaude = /assim/i.test(conv)
   const seenFree = new Set<string>()
   const allFreeRows: Array<CsvRow & { _hMin: number; _hora: string }> = []
   for (const r of cRows) {
@@ -252,6 +257,8 @@ function buildSugestoes(
     if (EXCLUIR_OCUP.has(r.Terapia)) continue
     const esp = TERAPIA_TO_ESP[r.Terapia]
     if (!esp || !espDif[esp]) continue
+    // ASSIM Saúde: Fisioterapia Aquática e Equoterapia só se o paciente for LIMINAR (gap > 0 já garantido pelo check acima)
+    if (isAssimSaude && ASSIM_RESTR_TERAPIAS.has(r.Terapia) && !isLiminar) continue
     if (pacUnidades.size > 0 && !pacUnidades.has(rowUnid(r))) continue
     const h = hMin(r)
     if (!isTurnoOk(h)) continue
@@ -702,7 +709,12 @@ function TodasSugestoesModal({
       if (esp) selectedByEsp[esp] = (selectedByEsp[esp] || 0) + 1
     }
   }
-  const hasExcesso = pacAllEsp.some(g => (g.of + (selectedByEsp[g.esp] || 0)) > g.aut)
+  const isDeficitSobre = pacAllEsp.some(g => g.of > g.aut)
+  const hasExcesso = pacAllEsp.some(g => {
+    const sel = selectedByEsp[g.esp] || 0
+    if (isDeficitSobre) return sel > 0 && (g.of + sel) > g.aut
+    return (g.of + sel) > g.aut
+  })
 
   return createPortal(
     <>
@@ -1946,8 +1958,10 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
 
   const sugestoes = useMemo(() => {
     if (!pac || estrategia !== "S1") return [] as Sugestao[]
-    return buildSugestoes(pac, agend, agendClin, cRows, gapMap, aceites)
-  }, [pac, estrategia, agend, agendClin, cRows, gapMap, aceites])
+    const conv      = pacConvMap[pac] || ""
+    const isLiminar = /LIMINAR/i.test(cfg.judicialMap?.[pac] || "")
+    return buildSugestoes(pac, agend, agendClin, cRows, gapMap, aceites, conv, isLiminar)
+  }, [pac, estrategia, agend, agendClin, cRows, gapMap, aceites, pacConvMap, cfg.judicialMap])
 
   useEffect(() => {
     if (!pac) return
@@ -2161,18 +2175,68 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
             }
             const handleExport = () => {
               // "Autorizado em" mais recente por paciente (DD/MM/YYYY)
-              const toSortable = (d: string) => {
-                const [dd, mm, yyyy] = d.split("/")
-                return yyyy && mm && dd ? `${yyyy}${mm}${dd}` : ""
+              const excelSerialToDateStr = (serial: number): string => {
+                const d = new Date((serial - 25569) * 86400 * 1000)
+                const dd = d.getUTCDate().toString().padStart(2, "0")
+                const mm = (d.getUTCMonth() + 1).toString().padStart(2, "0")
+                return `${dd}/${mm}/${d.getUTCFullYear()}`
               }
+              // Converte qualquer formato de data para DD/MM/YYYY normalizado.
+              // Suporta: serial Excel, DD/MM/YY, DD/MM/YYYY, YYYY-MM-DD, DD-MM-YY, DD-MM-YYYY.
+              const normalizeDate = (raw: string): string => {
+                const n = Number(raw)
+                if (!isNaN(n) && n > 1000) return excelSerialToDateStr(n)
+                // Separador "/"
+                const sp = raw.split("/")
+                if (sp.length === 3) {
+                  let [a, b, c] = sp.map(s => s.trim())
+                  if (c.length === 2) c = `20${c}`
+                  // YYYY/MM/DD → reordena
+                  if (a.length === 4) return `${b.padStart(2,"0")}/${c.padStart(2,"0")}/${a}`
+                  return `${a.padStart(2,"0")}/${b.padStart(2,"0")}/${c}`
+                }
+                // Separador "-"
+                const sd = raw.split("-")
+                if (sd.length === 3) {
+                  let [a, b, c] = sd.map(s => s.trim())
+                  if (c.length === 2) c = `20${c}`
+                  // YYYY-MM-DD (ISO) → reordena para DD/MM/YYYY
+                  if (a.length === 4) return `${b.padStart(2,"0")}/${c.padStart(2,"0")}/${a}`
+                  return `${a.padStart(2,"0")}/${b.padStart(2,"0")}/${c}`
+                }
+                return raw
+              }
+              // Retorna string "YYYYMMDD" para comparação lexicográfica; "" se inválido.
+              const toSortable = (d: string) => {
+                const parts = d.split("/")
+                if (parts.length !== 3) return ""
+                let [dd, mm, yyyy] = parts.map(s => s.trim())
+                if (yyyy.length === 2) yyyy = `20${yyyy}`
+                if (yyyy.length !== 4) return ""
+                return `${yyyy}${mm.padStart(2,"0")}${dd.padStart(2,"0")}`
+              }
+              // Sortable de hoje — descarta datas futuras (podem surgir de conversão errada)
+              const _now = new Date()
+              const todaySortable = `${_now.getFullYear()}${String(_now.getMonth()+1).padStart(2,"0")}${String(_now.getDate()).padStart(2,"0")}`
+              // Mapa nome normalizado → nome canônico (para resolver variações de grafia em lRows)
+              const normNameMap: Record<string, string> = {}
+              for (const p of todosPacs) normNameMap[normalizeName(p)] = p
               const pacAutEmMap: Record<string, string> = {}
               for (const l of lRows) {
-                const idFav = String(l["ID Favorecido"] ?? l["Id Favorecido"] ?? "").trim()
-                const p     = (idFav ? agendIdMap.get(idFav) : undefined) ?? String(l["Paciente"] || "").trim()
+                const idFav = String(l["ID Favorecido"] ?? l["Id Favorecido"] ?? "").trim().replace(/\.0$/, "")
+                const rawPac = String(l["Paciente"] || "").trim()
+                const p = (idFav ? agendIdMap.get(idFav) : undefined)
+                  ?? normNameMap[normalizeName(rawPac)]
+                  ?? agendMergeMap.get(rawPac)
+                  ?? rawPac
                 if (!p || PACS_ADMIN.has(p)) continue
-                const raw = String(l["Autorizado em"] || "").trim()
+                // Tenta o campo em variações de capitalização
+                const autRaw = l["Autorizado em"] ?? l["Autorizado Em"] ?? l["autorizado em"]
+                const raw = normalizeDate(String(autRaw || "").trim())
                 if (!raw) continue
-                if (!pacAutEmMap[p] || toSortable(raw) > toSortable(pacAutEmMap[p])) {
+                const s = toSortable(raw)
+                if (!s || s > todaySortable) continue   // descarta datas futuras ou inválidas
+                if (!pacAutEmMap[p] || s > toSortable(pacAutEmMap[p])) {
                   pacAutEmMap[p] = raw
                 }
               }
@@ -2192,11 +2256,10 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
                   "Convênio": pacConvMap[p] || "—",
                   "Situação": SITUACAO_LABEL[st] || "—",
                   "Sobreoferta": sobreoferta || "—",
-                  "Autorizado em": pacAutEmMap[p] || "—",
                 }
               })
               const ws = XLSX.utils.json_to_sheet(rows)
-              ws["!cols"] = [{ wch: 16 }, { wch: 40 }, { wch: 28 }, { wch: 30 }, { wch: 40 }, { wch: 16 }]
+              ws["!cols"] = [{ wch: 16 }, { wch: 40 }, { wch: 28 }, { wch: 30 }, { wch: 40 }]
               const wb = XLSX.utils.book_new()
               XLSX.utils.book_append_sheet(wb, ws, "Pacientes")
               XLSX.writeFile(wb, "relatorio_pacientes.xlsx")
@@ -2205,7 +2268,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
               <div style={{ background: "white", borderRadius: "14px", border: "1px solid #e5e7eb", padding: "12px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
                 <div>
                   <div style={{ fontSize: "11px", fontWeight: 700, color: "#374151" }}>Relatório de Pacientes</div>
-                  <div style={{ fontSize: "10px", color: "#9ca3af", marginTop: "1px" }}>{todosPacs.length} pacientes · ID, Nome, Convênio, Situação, Autorizado em</div>
+                  <div style={{ fontSize: "10px", color: "#9ca3af", marginTop: "1px" }}>{todosPacs.length} pacientes · ID, Nome, Convênio, Situação, Sobreoferta</div>
                 </div>
                 <button
                   onClick={handleExport}
