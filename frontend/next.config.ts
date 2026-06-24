@@ -1,51 +1,16 @@
 import type { NextConfig } from "next";
 import path from "path";
 
-const ninaRoot = path.resolve(__dirname, "../nina-api-oficial/src").replace(/\\/g, '/');
-
 const nextConfig: NextConfig = {
   output: 'standalone',
   trailingSlash: true,
   allowedDevOrigins: ['192.168.0.241'],
   typescript: {
-    // Ignore TypeScript errors in ninaapioficial
-    ignoreBuildErrors: true,
     tsconfigPath: './tsconfig.json'
   },
   turbopack: {},
 
   webpack(config, { webpack: wp }) {
-    // ── Nina @/ alias: resolve @/foo → nina-api-oficial/src/foo when the
-    //    importing file lives inside nina-api-oficial/ (contextual alias).
-    //    Pulsar's own @/ alias (set by Next.js via tsconfig paths) is untouched.
-    config.plugins.push({
-      apply(compiler: any) {
-        compiler.hooks.normalModuleFactory.tap('NinaAliasPlugin', (nmf: any) => {
-          nmf.hooks.beforeResolve.tap('NinaAliasPlugin', (data: any) => {
-            if (!data?.request?.startsWith('@/')) return;
-            if (data.context?.includes('nina-api-oficial')) {
-              // path.join uses OS separators; normalize to forward-slashes for webpack.
-              data.request = path.join(ninaRoot, data.request.slice(2)).replace(/\\/g, '/');
-            }
-          });
-        });
-      },
-    });
-
-    // ── Nina @nina/hooks → frontend/hooks/nina redirect
-    //    Ensures all Nina components use Pulsar's hooks, not their own.
-    config.plugins.push({
-      apply(compiler: any) {
-        compiler.hooks.normalModuleFactory.tap('NinaHooksRedirect', (nmf: any) => {
-          nmf.hooks.beforeResolve.tap('NinaHooksRedirect', (data: any) => {
-            if (!data?.request?.startsWith('@nina/hooks/')) return;
-            // Redirect @nina/hooks/useAuth → frontend/hooks/nina/useAuth
-            const hookName = data.request.slice('@nina/hooks/'.length);
-            data.request = path.resolve(__dirname, `hooks/nina/${hookName}`).replace(/\\/g, '/');
-          });
-        });
-      },
-    });
 
     // ── Replace Nina's build-time globals (import.meta.env.VITE_NINA_*)
     //    with values from Pulsar's .env.local (NEXT_PUBLIC_NINA_*).
@@ -66,14 +31,6 @@ const nextConfig: NextConfig = {
         'import.meta.env.SSR': 'false',
       })
     );
-
-    // ── @nina alias: used in Pulsar files to import from Nina's src.
-    //    e.g. import Dashboard from '@nina/components/Dashboard'
-    // DISABLED: Using local refactored components in frontend/components/nina/ instead
-    // config.resolve.alias = {
-    //   ...config.resolve.alias,
-    //   '@nina': ninaRoot,
-    // };
 
     // ── Module resolution for Nina files: nina-api-oficial/ is a sibling of
     //    frontend/, so webpack's default node_modules traversal never reaches

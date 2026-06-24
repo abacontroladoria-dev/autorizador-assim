@@ -87,7 +87,7 @@ const ChatInterface: React.FC = () => {
   }
 
   return (
-    <div className="flex h-full bg-slate-950 rounded-tl-2xl overflow-hidden border-t border-l border-slate-800/50 shadow-2xl">
+    <div className="flex h-full bg-slate-950 overflow-hidden">
       <div className="w-80 lg:w-96 border-r border-slate-800 flex flex-col bg-slate-900/50 backdrop-blur-md z-20 flex-shrink-0">
         <div className="p-4 border-b border-slate-800/50">
           <h2 className="text-lg font-bold text-white mb-4 px-1">Chats Ativos</h2>

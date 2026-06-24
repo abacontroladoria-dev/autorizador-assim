@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { createBrowserClient } from '@supabase/ssr'
+import { getSupabaseClient } from '@/lib/supabase/client'
 import { useAuth } from './useAuth'
 
 export interface OnboardingStep {
@@ -26,11 +26,6 @@ export interface OnboardingStatus {
 }
 
 const WIZARD_SEEN_KEY = 'onboarding_wizard_seen'
-
-const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
 
 export function useOnboardingStatus(): OnboardingStatus {
   const { user } = useAuth()
@@ -99,6 +94,7 @@ export function useOnboardingStatus(): OnboardingStatus {
     }
 
     setLoading(true)
+    const supabase = getSupabaseClient()
     try {
       const { data: roleData } = await supabase
         .from('user_roles')

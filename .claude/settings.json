@@ -11,7 +11,9 @@
       "Bash(find \"c:\\\\\\\\Users\\\\\\\\UNIVERSO\\\\\\\\projeto_automacao\\\\\\\\sistema-pulsar\\\\\\\\frontend\\\\\\\\components\" -type d)",
       "Bash(ls -la \"c:\\\\\\\\Users\\\\\\\\UNIVERSO\\\\\\\\projeto_automacao\\\\\\\\sistema-pulsar\\\\\\\\frontend\\\\\\\\lib\")",
       "Bash(find \"c:\\\\\\\\Users\\\\\\\\UNIVERSO\\\\\\\\projeto_automacao\\\\\\\\sistema-pulsar\\\\\\\\frontend\\\\\\\\app\" -name \"page.tsx\")",
-      "Bash(gh pr *)"
+      "Bash(gh pr *)",
+      "PowerShell(npm run build 2>&1)",
+      "PowerShell(tail -n 30)"
     ]
   }
 }

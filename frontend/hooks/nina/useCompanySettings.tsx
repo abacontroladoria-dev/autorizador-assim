@@ -1,7 +1,7 @@
 'use client'
 
 import React, { createContext, useContext, useEffect, useState } from 'react'
-import { createBrowserClient } from '@supabase/ssr'
+import { getSupabaseClient } from '@/lib/supabase/client'
 import { useAuth } from './useAuth'
 
 interface CompanySettings {
@@ -13,11 +13,6 @@ interface CompanySettings {
 }
 
 const CompanySettingsContext = createContext<CompanySettings | undefined>(undefined)
-
-const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
 
 export const CompanySettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [companyName, setCompanyName] = useState('')
@@ -34,6 +29,7 @@ export const CompanySettingsProvider: React.FC<{ children: React.ReactNode }> = 
 
     try {
       setLoading(true)
+      const supabase = getSupabaseClient()
 
       const { data: roleData } = await supabase
         .from('user_roles')
@@ -43,22 +39,24 @@ export const CompanySettingsProvider: React.FC<{ children: React.ReactNode }> = 
 
       setIsAdmin(roleData?.role === 'admin')
 
-      const { data: viewData, error } = await (supabase as any)
-        .from('nina_settings_public')
-        .select('company_name, sdr_name')
-        .limit(1)
-        .maybeSingle()
-      const data = viewData as { company_name?: string; sdr_name?: string } | null
+      try {
+        const { data: viewData, error } = await (supabase as any)
+          .from('nina_settings_public')
+          .select('company_name, sdr_name')
+          .limit(1)
+          .maybeSingle()
+        const data = viewData as { company_name?: string; sdr_name?: string } | null
 
-      if (error && error.code !== 'PGRST116') {
-        console.error('[useCompanySettings] Query error:', error)
-        throw error
-      }
-
-      if (data) {
-        setCompanyName(data.company_name || 'Sua Empresa')
-        setSdrName(data.sdr_name || 'Agente')
-      } else {
+        if (data) {
+          setCompanyName(data.company_name || 'Sua Empresa')
+          setSdrName(data.sdr_name || 'Agente')
+        } else {
+          setCompanyName('Sua Empresa')
+          setSdrName('Agente')
+        }
+      } catch (dbError) {
+        // nina_settings_public table/view may not exist yet
+        // Use default values
         setCompanyName('Sua Empresa')
         setSdrName('Agente')
       }

@@ -1,8 +1,8 @@
 'use client'
 
-import { useState, useEffect, createContext, useContext, ReactNode } from 'react'
+import { createContext, useContext, ReactNode } from 'react'
 import { User, Session } from '@supabase/supabase-js'
-import { createBrowserClient } from '@supabase/ssr'
+import { getSupabaseClient } from '@/lib/supabase/client'
 
 interface AuthContextType {
   user: User | null
@@ -15,77 +15,40 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined)
 
-const supabase = createBrowserClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-)
-
-export const AuthProvider = ({ children }: { children: ReactNode }) => {
-  const [user, setUser] = useState<User | null>(null)
-  const [session, setSession] = useState<Session | null>(null)
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange(
-      (event, session) => {
-        setSession(session)
-        setUser(session?.user ?? null)
-        setLoading(false)
-      }
-    )
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session)
-      setUser(session?.user ?? null)
-      setLoading(false)
-    })
-
-    return () => subscription.unsubscribe()
-  }, [])
-
+export const AuthProvider = ({
+  user,
+  session,
+  children,
+}: {
+  user: User | null
+  session: Session | null
+  children: ReactNode
+}) => {
   const signUp = async (email: string, password: string, fullName?: string) => {
-    const redirectUrl = typeof window !== 'undefined' ? `${window.location.origin}/nina/dashboard` : ''
-
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        emailRedirectTo: redirectUrl,
-        data: {
-          full_name: fullName || '',
-        },
-      },
-    })
-
-    if (!error && data.user) {
-      try {
-        await supabase.functions.invoke('initialize-system', {
-          body: { user_id: data.user.id },
-        })
-        console.log('System initialized for new user')
-      } catch (initError) {
-        console.error('Error initializing system:', initError)
-      }
-    }
-
-    return { error: error as Error | null }
+    // Sign up is disabled for Nina — use Pulsar auth
+    return { error: new Error('Use o login do Pulsar') as Error | null }
   }
 
   const signIn = async (email: string, password: string) => {
-    const { error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    })
-
-    return { error: error as Error | null }
+    // Sign in is disabled for Nina — use Pulsar auth
+    return { error: new Error('Use o login do Pulsar') as Error | null }
   }
 
   const signOut = async () => {
-    await supabase.auth.signOut()
+    await getSupabaseClient().auth.signOut()
   }
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, signUp, signIn, signOut }}>
+    <AuthContext.Provider
+      value={{
+        user,
+        session,
+        loading: false,
+        signUp,
+        signIn,
+        signOut,
+      }}
+    >
       {children}
     </AuthContext.Provider>
   )

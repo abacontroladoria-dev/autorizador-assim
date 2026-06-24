@@ -2,9 +2,6 @@
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
-/* Include Nina (Pulsar Connect) source files in Tailwind class scanning. */
-@source "../../nina-api-oficial/src/**/*.{ts,tsx}";
-
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {

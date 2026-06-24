@@ -18,7 +18,7 @@ import {
   ChevronDown,
   ChevronUp
 } from 'lucide-react'
-import { createBrowserClient } from '@supabase/ssr'
+import { getSupabaseClient } from '@/lib/supabase/client'
 
 interface ValidationResult {
   component: string
@@ -67,14 +67,10 @@ export const SystemHealthCard: React.FC = () => {
   const [loading, setLoading] = useState(true)
   const [expanded, setExpanded] = useState(false)
 
-  const supabase = createBrowserClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-  )
-
   const fetchHealth = useCallback(async () => {
     setLoading(true)
     try {
+      const supabase = getSupabaseClient()
       const { data, error } = await supabase.functions.invoke('validate-setup')
 
       if (error) throw error
@@ -84,7 +80,7 @@ export const SystemHealthCard: React.FC = () => {
     } finally {
       setLoading(false)
     }
-  }, [supabase])
+  }, [])
 
   useEffect(() => {
     fetchHealth()
