@@ -124,6 +124,8 @@ async function sincronizarGrade(
     id_sala:                    toInt(g.id_sala),
     sala:                       g.sala                 ?? null,
     observacoes_sala:           g.observacoes_sala     ?? null,
+    paciente_nome:              g.nome_favorecido      ?? g.paciente_nome   ?? null,
+    convenio_nome:              g.convenio             ?? g.convenio_nome   ?? null,
     raw_json:                   g,
     updated_at:                 new Date().toISOString(),
   }))

@@ -3,9 +3,10 @@
 import { useRef, useState } from "react"
 import Papa from "papaparse"
 import * as XLSX from "xlsx"
-import { Upload, CheckCircle2, X, FolderInput } from "lucide-react"
-import { pm, exU } from "@/lib/cronograma/helpers"
+import { Upload, CheckCircle2, X, FolderInput, DatabaseZap } from "lucide-react"
+import { pm, exU, getRefWeek } from "@/lib/cronograma/helpers"
 import { parseHistoricoXlsx } from "@/lib/cronograma/xlsx"
+import { buscarGradeComoCSVRows } from "@/lib/cronograma/gradeService"
 import type { CsvRow, LaudoRow, DispRow, RecItem, InvItem, WaMap } from "@/types/cronograma"
 
 interface Props {
@@ -26,9 +27,10 @@ interface DropzoneProps<T> {
   onLoad: (rows: T[]) => void
   onClear: () => void
   parseFile: (file: File) => Promise<T[]>
+  actionLabel?: string
 }
 
-function Dropzone<T>({ label, accept, rows, rowLabel, onLoad, onClear, parseFile }: DropzoneProps<T>) {
+function Dropzone<T>({ label, accept, rows, rowLabel, onLoad, onClear, parseFile, actionLabel }: DropzoneProps<T>) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -73,9 +75,10 @@ function Dropzone<T>({ label, accept, rows, rowLabel, onLoad, onClear, parseFile
 
   return (
     <div
-      className={`relative flex flex-col items-center justify-center gap-2 rounded-xl border-2 border-dashed px-4 py-5 text-center transition-colors cursor-pointer select-none
-        ${dragging ? "border-primary bg-primary/5" : loaded ? "border-green-400 bg-green-50 dark:bg-green-950/20" : "border-border bg-card hover:border-primary/50 hover:bg-muted/40"}`}
-      onClick={() => !loaded && inputRef.current?.click()}
+      className={`relative flex flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-4 py-4 min-h-[120px] text-center transition-colors select-none
+        ${!loaded && !loading ? "cursor-pointer" : ""}
+        ${dragging ? "border-primary bg-primary/5" : loaded ? "border-green-400 bg-green-50 dark:bg-green-950/20" : "border-border bg-card hover:border-[#2A92C0]/40 hover:bg-muted/40"}`}
+      onClick={() => !loaded && !loading && inputRef.current?.click()}
       onDragOver={e => { e.preventDefault(); setDragging(true) }}
       onDragLeave={() => setDragging(false)}
       onDrop={onDrop}
@@ -103,10 +106,24 @@ function Dropzone<T>({ label, accept, rows, rowLabel, onLoad, onClear, parseFile
           <Upload size={20} className="text-muted-foreground shrink-0" />
           <div className="space-y-0.5">
             <p className="text-sm font-semibold text-foreground">{label}</p>
-            <p className="text-xs text-muted-foreground">{accept.includes("csv") ? "Arquivo CSV" : "Arquivo XLSX"}</p>
+            <p className="text-xs text-muted-foreground">Arraste ou clique para selecionar</p>
           </div>
-          {loading && <p className="text-xs text-primary animate-pulse">Processando...</p>}
-          {error && <p className="text-xs text-destructive">{error}</p>}
+          {loading ? (
+            <p className="text-xs text-primary animate-pulse">Processando...</p>
+          ) : (
+            <>
+              {actionLabel && (
+                <button
+                  onClick={e => { e.stopPropagation(); inputRef.current?.click() }}
+                  className="mt-1 rounded-lg px-3 py-1.5 text-xs font-semibold text-white transition-opacity hover:opacity-90"
+                  style={{ background: "#2A92C0" }}
+                >
+                  {actionLabel}
+                </button>
+              )}
+              {error && <p className="text-xs text-destructive">{error}</p>}
+            </>
+          )}
         </>
       )}
     </div>
@@ -177,6 +194,54 @@ function ImportDropzone({ onImport }: ImportDropzoneProps) {
   )
 }
 
+interface GradeStatusCardProps {
+  rows: CsvRow[]
+  loading: boolean
+  error: string | null
+  onClear: () => void
+}
+
+function GradeStatusCard({ rows, loading, error, onClear }: GradeStatusCardProps) {
+  const rw = getRefWeek()
+  const loaded = rows.length > 0
+
+  if (loaded) {
+    return (
+      <div className="relative flex items-center gap-3 rounded-xl border-2 border-green-400 bg-green-50 dark:bg-green-950/20 px-4 py-4 min-h-[120px]">
+        <CheckCircle2 size={20} className="text-green-500 shrink-0" />
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-green-700 dark:text-green-400">Grade de Profissionais</p>
+          <p className="text-xs text-green-600 dark:text-green-500">{rows.length} horários · {rw.label}</p>
+        </div>
+        <button
+          onClick={onClear}
+          className="absolute top-2 right-2 text-muted-foreground hover:text-destructive transition-colors"
+          title="Limpar"
+        >
+          <X size={14} />
+        </button>
+      </div>
+    )
+  }
+
+  return (
+    <div className="flex flex-col gap-2 rounded-xl border border-border bg-card px-4 py-4 min-h-[120px] justify-center">
+      <div className="flex items-center gap-1.5">
+        <DatabaseZap size={14} className="shrink-0 text-muted-foreground" />
+        <p className="text-sm font-semibold text-foreground">Grade de Profissionais</p>
+      </div>
+      <p className="text-xs text-muted-foreground">{rw.label}</p>
+      {loading ? (
+        <p className="text-xs text-primary animate-pulse">Carregando grade...</p>
+      ) : error ? (
+        <p className="text-xs text-destructive">{error}</p>
+      ) : (
+        <p className="text-xs text-muted-foreground italic">Aguardando upload do laudo</p>
+      )}
+    </div>
+  )
+}
+
 function parseCsv<T>(file: File): Promise<T[]> {
   return new Promise((resolve, reject) => {
     Papa.parse(file, {
@@ -229,44 +294,50 @@ function parseXlsx<T>(file: File): Promise<T[]> {
 }
 
 export function DadosUploadPanel({ cRows, lRows, dispRows, onCRows, onLRows, onDispRows, onImport }: Props) {
+  const [gradeLoading, setGradeLoading] = useState(false)
+  const [gradeError, setGradeError] = useState<string | null>(null)
+  const rw = getRefWeek()
   const allLoaded = cRows.length > 0 && lRows.length > 0
+
+  async function handleLaudosLoaded(rows: LaudoRow[]) {
+    onLRows(rows)
+    setGradeLoading(true)
+    setGradeError(null)
+    try {
+      const gradeResult = await buscarGradeComoCSVRows(rw.inicio, rw.fim)
+      if (gradeResult.length === 0) throw new Error("Nenhum registro encontrado para o período.")
+      onCRows(gradeResult)
+    } catch (e: unknown) {
+      setGradeError(e instanceof Error ? e.message : "Erro ao buscar grade.")
+    } finally {
+      setGradeLoading(false)
+    }
+  }
 
   return (
     <div className="space-y-3">
       <div className="grid grid-cols-2 gap-3">
-        <Dropzone<CsvRow>
-          label="Grade de Profissionais"
-          accept=".csv"
+        <GradeStatusCard
           rows={cRows}
-          rowLabel="linhas"
-          onLoad={onCRows}
-          onClear={() => onCRows([])}
-          parseFile={parseCsvGrade}
+          loading={gradeLoading}
+          error={gradeError}
+          onClear={() => { onCRows([]); setGradeError(null) }}
         />
         <Dropzone<LaudoRow>
           label="Laudos / Autorizações"
           accept=".xlsx,.xls"
           rows={lRows}
           rowLabel="laudos"
-          onLoad={onLRows}
+          onLoad={handleLaudosLoaded}
           onClear={() => onLRows([])}
           parseFile={f => parseXlsx<LaudoRow>(f)}
-        />
-        <ImportDropzone onImport={onImport} />
-        <Dropzone<DispRow>
-          label="Disponibilidade (Órbita)"
-          accept=".csv"
-          rows={dispRows}
-          rowLabel="pacientes"
-          onLoad={onDispRows}
-          onClear={() => onDispRows([])}
-          parseFile={f => parseCsv<DispRow>(f)}
+          actionLabel="Selecionar arquivo XLSX"
         />
       </div>
 
-      {!allLoaded && (
+      {!allLoaded && !gradeLoading && lRows.length === 0 && (
         <p className="text-xs text-muted-foreground text-center">
-          Carregue a Grade e os Laudos para habilitar as análises. Disponibilidade e Importar Base são opcionais.
+          Selecione o arquivo de Laudos para iniciar a análise.
         </p>
       )}
     </div>

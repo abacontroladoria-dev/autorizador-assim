@@ -1,22 +1,22 @@
 "use client"
 
 import { useSearchParams, useRouter } from "next/navigation"
-import { useEffect, useState } from "react"
-import { SK_SAIDA } from "@/lib/cronograma/constants"
+import { useEffect } from "react"
+import { useCronogramaData } from "@/contexts/CronogramaDataContext"
+import { useHeader } from "@/contexts/HeaderContext"
 import { SaidaProfMode } from "./SaidaProfMode"
 import { OcupProfMode } from "./OcupProfMode"
 import { PreencherProfTab } from "@/components/cronograma/shared/PreencherProfTab"
 import { OcupPacMode } from "./OcupPacMode"
 import { NovoCronogramaTab } from "@/components/cronograma/shared/NovoCronogramaTab"
 import { BancoDadosTab } from "./BancoDadosTab"
-import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 import type { CsvRow, LaudoRow, DispRow, StatusMap, CfgState } from "@/types/cronograma"
 
 const TABS = [
   { key: "simulacao",  label: "Simulação de Novo Prestador" },
   { key: "saida",      label: "Saída de Profissional" },
   { key: "ocup-prof",  label: "Aumentar Ocupação (Profissional)" },
-  { key: "ocup-pac",   label: "Aumentar Ocupação (Paciente)" },
+  { key: "ocup-pac",   label: "Ocupação · Paciente" },
   { key: "novo-cron",  label: "Novo Cronograma" },
 ] as const
 
@@ -35,15 +35,21 @@ export function SolicitacoesShell({ cRows, lRows, dispRows, cfg }: ShellProps) {
   const raw = searchParams.get("tab")
   const activeTab: TabKey = raw && TABS.some(t => t.key === raw) ? (raw as TabKey) : "saida"
 
-  // StatusMap para Saída de Profissional e Banco de Dados (compartilhado entre tabs)
-  const [statusMap, setStatusMap] = useState<StatusMap>(() => {
-    try { return JSON.parse(localStorage.getItem(SK_SAIDA) || "{}") } catch { return {} }
-  })
+  // StatusMap da Saída de Profissional — compartilhado entre a equipe via backend (saida_aceites)
+  const { statusMap, persistStatus } = useCronogramaData()
+  const { setHeader } = useHeader()
 
-  const persistStatus = (map: StatusMap) => {
-    setStatusMap(map)
-    try { localStorage.setItem(SK_SAIDA, JSON.stringify(map)) } catch {}
-  }
+  useEffect(() => {
+    const tab = TABS.find(t => t.key === activeTab)
+    const subtitles: Record<string, string> = {
+      "saida":      "Análise de impacto e redistribuição de sessões",
+      "ocup-prof":  "Aumente a ocupação de sessões por profissional",
+      "ocup-pac":   "Aumente a ocupação de sessões por paciente",
+      "simulacao":  "Simulação de novo prestador",
+      "novo-cron":  "Criação de novo cronograma",
+    }
+    setHeader(tab?.label ?? "Cronograma", subtitles[activeTab] ?? "")
+  }, [activeTab, setHeader])
 
   useEffect(() => {
     if (!raw) router.replace("/cronograma/solicitacoes?tab=saida")
@@ -64,8 +70,30 @@ function TabContent({
     return (
       <>
         {cRows.length === 0 && (
-          <div className="rounded-xl border border-amber-200 bg-amber-50 dark:bg-amber-950/20 p-3 text-sm text-amber-700 dark:text-amber-400">
-            Carregue o CSV da grade para usar esta ferramenta.
+          <div
+            className="animate-in fade-in slide-in-from-top-2 duration-300 flex items-center gap-3"
+            style={{
+              padding: "11px 16px",
+              borderRadius: "10px",
+              border: "1.5px dashed #fbbf24",
+              background: "#fffbeb",
+            }}
+          >
+            {/* Ícone upload — pulsa 3× para chamar atenção, depois para */}
+            <div
+              className="shrink-0"
+              style={{ color: "#d97706", animation: "pulse 2s ease-in-out 3" }}
+              aria-hidden="true"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+            </div>
+            <p style={{ fontSize: "12px", color: "#78350f", margin: 0, lineHeight: 1.5 }}>
+              Selecione o <strong style={{ fontWeight: 700 }}>arquivo de Laudos</strong> no cabeçalho para habilitar a análise de impacto.
+            </p>
           </div>
         )}
         <SaidaProfMode cRows={cRows} lRows={lRows} cfg={cfg} statusMap={statusMap} persistStatus={persistStatus} />

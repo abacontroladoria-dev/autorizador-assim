@@ -233,6 +233,16 @@ export function splitWaKey(k: string): { pac: string; prof: string; dia: string;
   return { pac: p[0] || "", prof: p[1] || "", dia: p[p.length - 2] || "", hora: p[p.length - 1] || "" }
 }
 
+export function buildSaidaKey(paciente: string, dia: string, hora: string, terapia: string): string {
+  return `${paciente}|||${dia}|||${hora}|||${terapia}`
+}
+
+export function splitSaidaKey(k: string): { paciente: string; dia: string; hora: string; terapia: string } | null {
+  const p = String(k || "").split("|||")
+  if (p.length !== 4) return null
+  return { paciente: p[0], dia: p[1], hora: p[2], terapia: p[3] }
+}
+
 export function reservaSlotKey(prof: string, dia: string, hora: string): string {
   return `${prof || ""}|||${dia || ""}|||${hora || ""}`
 }

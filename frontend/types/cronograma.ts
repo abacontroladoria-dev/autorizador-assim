@@ -99,6 +99,10 @@ export interface StatusEntry {
   slotReservado?: string | null
   /** Date.now() timestamp */
   atualizadoEm?: number
+  /** Snapshot da sessão afetada — persistido para exibição em AcompanhamentoTab */
+  afetada?: AfetadaItem
+  /** Snapshot da agenda do paciente — persistido para exibição em AcompanhamentoTab */
+  sessPac?: SessPacItem[]
 }
 
 // ─── SUGESTÃO (saída do runAlgorithm) ────────────────────────────────────────
@@ -169,6 +173,7 @@ export interface AlgorithmConfig {
   terapiasPrio?: string[]
   profsPrioExtras?: string[]
   isolarAssim?: boolean
+  confirmedItems?: { prof: string; dia: string; hora: string }[]
 }
 
 // ─── SAÍDA DE PROFISSIONAL — análise ─────────────────────────────────────────
@@ -291,6 +296,8 @@ export interface RecItem {
 export interface InvItem {
   paciente: string
   motivo: string
+  dia?: string
+  hora?: string
   registradoEm: string
 }
 
