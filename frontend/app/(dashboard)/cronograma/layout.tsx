@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { usePathname } from "next/navigation"
 import * as XLSX from "xlsx"
 import { CronogramaDataProvider, useCronogramaData } from "@/contexts/CronogramaDataContext"
 import { useHeader } from "@/contexts/HeaderContext"
@@ -29,6 +30,9 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
   const { setRightContent } = useHeader()
   const [uploading, setUploading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const pathname = usePathname()
+  // Páginas que gerenciam rightContent por conta própria (não precisam do badge de Laudos no header)
+  const isOcupacaoPage = !!pathname?.includes('/ocupacao')
 
   const handleLaudosFile = useCallback(async (file: File) => {
     const rw = getRefWeek()
@@ -55,6 +59,7 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
   }, [setCRows, setLRows])
 
   useEffect(() => {
+    if (isOcupacaoPage) return  // OcupacaoProfShell gerencia rightContent nessa aba
     setRightContent(
       <CronogramaUploadBadges
         cRows={cRows}
@@ -66,7 +71,7 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
       />
     )
     return () => setRightContent(null)
-  }, [cRows, lRows, uploading, uploadError, handleLaudosFile, handleClear, setRightContent])
+  }, [cRows, lRows, uploading, uploadError, handleLaudosFile, handleClear, setRightContent, isOcupacaoPage])
 
   return <div>{children}</div>
 }

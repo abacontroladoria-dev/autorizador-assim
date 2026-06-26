@@ -1,7 +1,9 @@
 "use client"
 
+import { useState } from "react"
 import { B } from "@/lib/cronograma/constants"
 import { fmtName } from "@/lib/cronograma/helpers"
+import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
 import type { InvItem, RecItem, WaMap } from "@/types/cronograma"
 
 interface Props {
@@ -13,7 +15,9 @@ interface Props {
 }
 
 export function RecusadosTab({ rec, onRemove, onExport }: Props) {
+  const [removIdx, setRemovIdx] = useState<number | null>(null)
   return (
+    <>
     <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", boxShadow: "0 1px 4px rgba(0,0,0,.06)", padding: "16px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px", paddingBottom: "12px", borderBottom: "1px solid var(--border)", flexWrap: "wrap", gap: "8px" }}>
         <span style={{ fontWeight: 800, color: B.navy }}>❌ Recusados pela Família</span>
@@ -33,7 +37,7 @@ export function RecusadosTab({ rec, onRemove, onExport }: Props) {
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
             <thead style={{ background: "var(--muted)" }}>
               <tr>
-                {["Paciente", "Profissional", "Especialidade", "Unidade", "Dia", "Hora", "Registrado", ""].map(h => (
+                {["Paciente", "Profissional", "Especialidade", "Unidade", "Dia", "Hora", "Registrado", "Obs", ""].map(h => (
                   <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em" }}>{h}</th>
                 ))}
               </tr>
@@ -50,8 +54,11 @@ export function RecusadosTab({ rec, onRemove, onExport }: Props) {
                   <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontSize: "12px" }}>{r.dia}</td>
                   <td style={{ padding: "8px 12px", fontWeight: 700, fontSize: "12px" }}>{r.hora}</td>
                   <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontSize: "11px" }}>{r.registradoEm}</td>
+                  <td style={{ padding: "8px 12px", maxWidth: "180px", fontSize: "12px", color: "var(--muted-foreground)", fontStyle: r.obs ? "italic" : "normal" }}>
+                    {r.obs ? `"${r.obs}"` : "—"}
+                  </td>
                   <td style={{ padding: "8px 12px" }}>
-                    <button onClick={() => onRemove(i)} style={{ fontSize: "11px", color: "#dc2626", background: "none", border: "none", cursor: "pointer" }}>remover</button>
+                    <button onClick={() => setRemovIdx(i)} style={{ fontSize: "11px", color: "#dc2626", background: "none", border: "none", cursor: "pointer" }}>remover</button>
                   </td>
                 </tr>
               ))}
@@ -60,6 +67,17 @@ export function RecusadosTab({ rec, onRemove, onExport }: Props) {
         </div>
       )}
     </div>
+    {removIdx !== null && (
+      <ConfirmDialog
+        title="Remover registro?"
+        description="O registro será removido da lista de recusados."
+        confirmLabel="Remover"
+        confirmColor="#dc2626"
+        onConfirm={() => { onRemove(removIdx); setRemovIdx(null) }}
+        onCancel={() => setRemovIdx(null)}
+      />
+    )}
+    </>
   )
 }
 

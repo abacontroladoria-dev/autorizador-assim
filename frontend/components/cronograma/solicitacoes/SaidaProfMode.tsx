@@ -157,6 +157,9 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
   const [candidatoWA, setCandidatoWA] = useState<Record<string, CandidatoWA>>({})
   const [estrategiaFiltro, setEstrategiaFiltro] = useState<Set<string>>(new Set())
   const [coberturaFiltro, setCoberturaFiltro] = useState<string | null>(null)
+  const [showSS, setShowSS] = useState(true)
+  const [showE4, setShowE4] = useState(true)
+  const [showAC, setShowAC] = useState(true)
   const comboRef = useRef<HTMLDivElement>(null)
 
   function limparTudo() {
@@ -284,11 +287,16 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       total,
       cobPct,
       slices: [
-        { name: "100% garantido",                          filterKey: "verde",    value: verde,    color: "#16a34a" },
-        { name: "Depende dos prazos da Autorização",        filterKey: "azul",     value: azul,     color: "#2563eb" },
-        { name: "Depende do aceite da família",             filterKey: "amarelo",  value: amarelo,  color: "#d97706" },
-        { name: "Depende do aval terapêutico e da família", filterKey: "vermelho", value: vermelho, color: "#dc2626" },
-        { name: "Sem solução",                              filterKey: "sem",      value: sem,      color: "#94a3b8" },
+        { name: "100% garantido",                          filterKey: "verde",    value: verde,    color: "#16a34a",
+          tags: [{ label: "#1", bg: B.limeLt, c: "#4a6e20" }, { label: "#2", bg: "#e0f2fe", c: "#0369a1" }] },
+        { name: "Depende dos prazos da Autorização",        filterKey: "azul",     value: azul,     color: "#2563eb",
+          tags: [{ label: "#4", bg: B.purpleLt, c: B.purple }] },
+        { name: "Depende do aceite da família",             filterKey: "amarelo",  value: amarelo,  color: "#d97706",
+          tags: [{ label: "#3", bg: B.blueLt, c: B.blue }, { label: "#6", bg: "#f5f3ff", c: "#6d28d9" }] },
+        { name: "Depende do aval terapêutico e da família", filterKey: "vermelho", value: vermelho, color: "#dc2626",
+          tags: [{ label: "#5", bg: "#fff7ed", c: "#c2410c" }, { label: "#7", bg: "var(--muted)", c: "var(--card-foreground)" }] },
+        { name: "Sem solução",                              filterKey: "sem",      value: sem,      color: "#94a3b8",
+          tags: [] },
       ].filter(d => d.value > 0),
     }
   }, [results])
@@ -314,6 +322,15 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
     results ? results.filter(r => r.analise.semSolucao) : []
   , [results])
 
+  // Sessões cuja melhor estratégia é E4 "Outra terapia, mesmo horário".
+  // Fallback se não houver contratação em tempo hábil; se houver, novo prof cobre e mantém a terapia original.
+  const e4Items = useMemo(() =>
+    results ? results.filter(r =>
+      !r.analise.e1 && !r.analise.e2 && !r.analise.e3 && !r.analise.e6 &&
+      r.analise.e4.length > 0
+    ) : []
+  , [results])
+
   const novoProfData = useMemo(() => {
     if (!semSolucaoItems.length) return null
 
@@ -323,13 +340,13 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       if (!byDay[d]) byDay[d] = []
       byDay[d].push(item.afetada)
     }
-    const dias = DIAS_UTIL.filter(d => byDay[d])
+    const diasSS = DIAS_UTIL.filter(d => byDay[d])
     const total = semSolucaoItems.length
 
-    // Slots de trabalho por dia (apenas turnos que têm sessões)
+    // Slots de trabalho por dia (apenas turnos que têm sessões sem solução)
     const dayWorkSlots: Record<string, Set<string>> = {}
     let totalSlots = 0
-    for (const d of dias) {
+    for (const d of diasSS) {
       const items = byDay[d]
       const hasManha = items.some(af => MANHA_SLOTS.has(normHora(af.hora)))
       const hasTarde = items.some(af => TARDE_SLOTS.has(normHora(af.hora)))
@@ -339,7 +356,31 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       dayWorkSlots[d] = slots
     }
 
-    const livreSlots = Math.max(0, totalSlots - total)
+    // Expande dayWorkSlots com dias/turnos das sessões E4 e constrói e4AgendaMap
+    const e4AgendaMap: Record<string, AfetadaItem[]> = {}
+    for (const item of e4Items) {
+      const d = item.afetada.dia
+      const hora = normHora(item.afetada.hora)
+      const isManha = MANHA_SLOTS.has(hora)
+      if (!dayWorkSlots[d]) {
+        const slots = new Set<string>()
+        if (isManha) { for (const s of MANHA_SLOTS) slots.add(s); totalSlots += 6 }
+        else          { for (const s of TARDE_SLOTS) slots.add(s); totalSlots += 7 }
+        dayWorkSlots[d] = slots
+      } else {
+        const ex = dayWorkSlots[d]
+        const hasM = [...ex].some(s => MANHA_SLOTS.has(s))
+        const hasT = [...ex].some(s => TARDE_SLOTS.has(s))
+        if (isManha && !hasM) { for (const s of MANHA_SLOTS) ex.add(s); totalSlots += 6 }
+        if (!isManha && !hasT) { for (const s of TARDE_SLOTS) ex.add(s); totalSlots += 7 }
+      }
+      const k = `${d}|||${hora}`
+      if (!e4AgendaMap[k]) e4AgendaMap[k] = []
+      e4AgendaMap[k].push(item.afetada)
+    }
+    const e4Total = e4Items.length
+
+    const livreSlots = Math.max(0, totalSlots - total - e4Total)
     const ocupPct = totalSlots > 0 ? (total / totalSlots) * 100 : 0
 
     const cargaSlices = [
@@ -354,6 +395,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       agendaMap[k].push(item.afetada)
     }
 
+    const dias = DIAS_UTIL.filter(d => dayWorkSlots[d])
     const displaySlots = ALL_SLOTS.filter(s => dias.some(d => dayWorkSlots[d].has(s)))
 
     const anyManha = dias.some(d => [...dayWorkSlots[d]].some(s => MANHA_SLOTS.has(s)))
@@ -389,14 +431,15 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       }))
 
     return {
-      total, totalSlots, livreSlots, ocupPct,
+      total, e4Total, totalSlots, livreSlots, ocupPct,
       chOcupMin: total * 40,
+      chE4Min: e4Total * 40,
       chLivreMin: livreSlots * 40,
       chTotalMin: totalSlots * 40,
-      dias, cargaSlices, agendaMap, displaySlots, dayWorkSlots, turnInfo,
+      dias, cargaSlices, agendaMap, e4AgendaMap, displaySlots, dayWorkSlots, turnInfo,
       ocupPorDia, ocupPorEsp,
     }
-  }, [semSolucaoItems])
+  }, [semSolucaoItems, e4Items])
 
   // Candidatos para slots livres do novo profissional.
   // A validação R2.1 + R5.1 usa slotValidoParaPaciente de candidatos.ts,
@@ -472,6 +515,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       for (const slot of novoProfData.dayWorkSlots[dia]) {
         const chave = `${dia}|||${slot}`
         if ((novoProfData.agendaMap[chave] ?? []).length > 0) continue
+        if ((novoProfData.e4AgendaMap[chave] ?? []).length > 0) continue
         if (confirmedSlotKeys.has(chave)) continue
         const ocupadosNoSlot = new Set(
           agendRows
@@ -718,12 +762,13 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
   const aConfirmarCount = Object.keys(sugestoesPorSlot).length
   const livresCount = Math.max(0, (novoProfData?.livreSlots ?? 0) - aConfirmarCount)
   const ocupPctExt = novoProfData
-    ? Math.min(100, ((novoProfData.total + aConfirmarCount) / novoProfData.totalSlots) * 100)
+    ? Math.min(100, ((novoProfData.total + novoProfData.e4Total + aConfirmarCount) / novoProfData.totalSlots) * 100)
     : 0
   const cargaSlicesExt = novoProfData ? [
-    { name: "Confirmadas", value: novoProfData.total, color: "#22c55e" },
-    { name: "A confirmar", value: aConfirmarCount,    color: "#fbbf24" },
-    { name: "Livre",       value: livresCount,         color: "#f87171" },
+    { name: "Sem solução",                  value: novoProfData.total,   color: "#22c55e" },
+    { name: "Outra terapia, mesmo horário", value: novoProfData.e4Total, color: B.purple },
+    { name: "A confirmar",                  value: aConfirmarCount,       color: "#fbbf24" },
+    { name: "Livre",                        value: livresCount,            color: "#f87171" },
   ].filter(s => s.value > 0) : []
 
   // ─── RENDER ─────────────────────────────────────────────────────────────────
@@ -1079,8 +1124,11 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                                 onMouseLeave={e => { if (!isActive) (e.currentTarget as HTMLButtonElement).style.background = "transparent" }}
                               >
                                 <div style={{ width: "12px", height: "12px", borderRadius: "3px", background: s.color, flexShrink: 0 }} />
-                                <div style={{ fontSize: "12px", color: "var(--card-foreground)", lineHeight: "1.3", textAlign: "left" }}>
-                                  {s.name}
+                                <div style={{ fontSize: "12px", color: "var(--card-foreground)", lineHeight: "1.3", textAlign: "left", display: "flex", alignItems: "center", gap: "5px", flexWrap: "wrap" }}>
+                                  <span>{s.name}</span>
+                                  {s.tags.map(t => (
+                                    <span key={t.label} style={{ background: t.bg, color: t.c, fontSize: "9px", fontWeight: 700, borderRadius: "4px", padding: "0px 4px", flexShrink: 0 }}>{t.label}</span>
+                                  ))}
                                 </div>
                                 <div style={{ fontSize: "12px", fontWeight: 700, color: B.navy, whiteSpace: "nowrap" }}>
                                   {s.value}
@@ -1130,11 +1178,45 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                   Dias e turnos necessários para cobrir as sessões sem solução
                 </div>
 
+                {/* Filtros de visualização — cada categoria é toggle independente */}
+                <div style={{ display: "flex", gap: "5px", marginBottom: "10px", flexWrap: "wrap" }}>
+                  {([
+                    { active: showSS, toggle: () => setShowSS(v => !v), color: "#22c55e", label: "Sem solução" },
+                    { active: showE4, toggle: () => setShowE4(v => !v), color: B.purple,   label: "Outra terapia" },
+                    { active: showAC, toggle: () => setShowAC(v => !v), color: "#d97706",  label: "A confirmar" },
+                  ]).map(opt => (
+                    <button
+                      key={opt.label}
+                      onClick={opt.toggle}
+                      style={{
+                        display: "flex", alignItems: "center", gap: "5px",
+                        fontSize: "10px", fontWeight: 600,
+                        padding: "3px 10px", borderRadius: "999px",
+                        border: `1.5px solid ${opt.active ? opt.color : "var(--border)"}`,
+                        background: opt.active ? `${opt.color}18` : "transparent",
+                        color: opt.active ? opt.color : "var(--muted-foreground)",
+                        cursor: "pointer", fontFamily: "inherit",
+                        transition: "all 120ms ease",
+                        textDecoration: opt.active ? "none" : "line-through",
+                      }}
+                    >
+                      <div style={{ width: "8px", height: "8px", borderRadius: "50%", background: opt.active ? opt.color : "var(--border)", flexShrink: 0 }} />
+                      {opt.label}
+                    </button>
+                  ))}
+                </div>
+
                 <div style={{ display: "flex", gap: "12px", marginBottom: "10px", flexWrap: "wrap" }}>
                   <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
                     <div style={{ width: "11px", height: "11px", borderRadius: "3px", background: "#22c55e" }} />
-                    <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>sessões confirmadas</span>
+                    <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>Sem solução</span>
                   </div>
+                  {novoProfData.e4Total > 0 && (
+                    <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+                      <div style={{ width: "11px", height: "11px", borderRadius: "3px", background: B.purple }} />
+                      <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>Outra terapia, mesmo horário</span>
+                    </div>
+                  )}
                   <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
                     <div style={{ width: "11px", height: "11px", borderRadius: "3px", background: "#fbbf24" }} />
                     <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>sessões a confirmar</span>
@@ -1176,7 +1258,15 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                             const items = novoProfData.agendaMap[`${d}|||${slot}`] ?? []
                             const isWorking = novoProfData.dayWorkSlots[d]?.has(slot) ?? false
 
+                            const e4its = novoProfData.e4AgendaMap[`${d}|||${slot}`] ?? []
                             if (items.length > 0) {
+                              if (!showSS) {
+                                return (
+                                  <td key={d} style={{ padding: "2px 4px", verticalAlign: "middle" }}>
+                                    <div style={{ background: "#fca5a5", borderRadius: "8px", height: "36px" }} />
+                                  </td>
+                                )
+                              }
                               return (
                                 <td key={d} style={{ padding: "2px 4px", verticalAlign: "middle" }}>
                                   <div style={{ background: "#22c55e", borderRadius: "8px", minHeight: "36px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "white", textAlign: "center", padding: "4px 6px", gap: "2px" }}>
@@ -1188,10 +1278,29 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                                   </div>
                                 </td>
                               )
+                            } else if (e4its.length > 0) {
+                              if (!showE4) {
+                                return (
+                                  <td key={d} style={{ padding: "2px 4px", verticalAlign: "middle" }}>
+                                    <div style={{ background: "#fca5a5", borderRadius: "8px", height: "36px" }} />
+                                  </td>
+                                )
+                              }
+                              return (
+                                <td key={d} style={{ padding: "2px 4px", verticalAlign: "middle" }}>
+                                  <div style={{ background: B.purple, borderRadius: "8px", minHeight: "36px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", color: "white", textAlign: "center", padding: "4px 6px", gap: "2px" }}>
+                                    {e4its.map((it, idx) => (
+                                      <div key={idx} style={{ fontWeight: 700, fontSize: idx === 0 ? "12px" : "10px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", width: "100%", lineHeight: 1.2, opacity: idx > 0 ? 0.9 : 1 }}>
+                                        {fmtPacAgenda(it.pac)}
+                                      </div>
+                                    ))}
+                                  </div>
+                                </td>
+                              )
                             } else if (isWorking) {
                               const chaveSlot = `${d}|||${slot}`
                               const sugs = sugestoesPorSlot[chaveSlot]
-                              if (sugs?.length) {
+                              if (sugs?.length && showAC) {
                                 return (
                                   <td key={d} style={{ padding: "2px 4px", verticalAlign: "middle" }}>
                                     <button
@@ -1281,8 +1390,14 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                 <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
                   <div style={{ background: "#f0fdf4", borderRadius: "10px", padding: "8px 12px" }}>
                     <div style={{ fontSize: "18px", fontWeight: 800, color: "#166534", lineHeight: 1 }}>{fmtCh(novoProfData.chOcupMin)}</div>
-                    <div style={{ fontSize: "11px", color: "#22c55e", marginTop: "3px" }}>confirmadas</div>
+                    <div style={{ fontSize: "11px", color: "#22c55e", marginTop: "3px" }}>Sem solução</div>
                   </div>
+                  {novoProfData.e4Total > 0 && (
+                    <div style={{ background: B.purpleLt, borderRadius: "10px", padding: "8px 12px" }}>
+                      <div style={{ fontSize: "18px", fontWeight: 800, color: B.purple, lineHeight: 1 }}>{fmtCh(novoProfData.chE4Min)}</div>
+                      <div style={{ fontSize: "11px", color: B.purple, marginTop: "3px" }}>Outra terapia, mesmo horário</div>
+                    </div>
+                  )}
                   {aConfirmarCount > 0 && (
                     <div style={{ background: "#fffbeb", borderRadius: "10px", padding: "8px 12px" }}>
                       <div style={{ fontSize: "18px", fontWeight: 800, color: "#d97706", lineHeight: 1 }}>{fmtCh(aConfirmarCount * 40)}</div>

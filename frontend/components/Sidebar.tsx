@@ -50,23 +50,6 @@ import { getUsuarioPermissoes } from "@/services/permissoes.service"
 
 type Favorito = { label: string; path: string }
 
-const CODIGO_PARA_ROTAS: Record<string, string[]> = {
-  dashboard: ["/"],
-  atendimentos: ["/solicitar"],
-  gestao: ["/central-pacientes"],
-  cronograma: ["/agenda/pacientes"],
-  escala_terapeutica: ["/central-terapeutas"],
-  agenda_terapeutica: ["/agenda/terapeutas"],
-  salas: ["/agenda/salas"],
-  guias_digitais: ["/guias-digitais"],
-  auditoria_assim: ["/auditoria-assim"],
-  usuarios: ["/admin"],
-  permissoes: ["/admin/permissoes"],
-  cco: ["/cco"],
-  cronograma_solicitacoes: ["/cronograma/solicitacoes"],
-  ocupacao_clinica: ["/cronograma/ocupacao"],
-}
-
 const pathIconMap: Record<string, any> = {
   "/": LayoutDashboard,
   "/solicitar": PlusCircle,
@@ -94,6 +77,7 @@ const pathIconMap: Record<string, any> = {
   "/cronograma/ocupacao?tab=inconsistencias": AlertTriangle,
   "/cronograma/ocupacao?tab=guia": BookOpen,
   "/cronograma/ocupacao?tab=config": Settings,
+  "/cronograma/indicadores": BarChart3,
 }
 
 export default function Sidebar() {
@@ -489,6 +473,13 @@ export default function Sidebar() {
             <SidebarGroup title="Cronograma" icon={CalendarRange}>
               {canAccess("/cronograma/solicitacoes") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/solicitacoes?tab=saida" />}
               {canAccess("/cronograma/ocupacao") && <MenuItem label="Aceites e Recusas" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
+            </SidebarGroup>
+          )}
+
+          {/* Indicadores */}
+          {canAccess("/cronograma/indicadores") && (
+            <SidebarGroup title="Indicadores" icon={TrendingUp}>
+              <MenuItem label="Ocupação de Profissionais" icon={BarChart3} path="/cronograma/indicadores" />
             </SidebarGroup>
           )}
 

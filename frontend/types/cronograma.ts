@@ -57,6 +57,8 @@ export interface CsvRowProcessada extends CsvRow {
   Unidade: string
   HI: number | null
   HI_str: string
+  HF?: number | null
+  HF_str?: string
   [key: string]: string | number | null | undefined
 }
 
@@ -90,6 +92,8 @@ export interface OpcaoEstrategia {
 export interface StatusEntry {
   status: StatusSaida
   obs?: string
+  /** Texto registrado na confirmação/recusa/inviabilidade (Confirmou/Recusou = opcional; Inviável = obrigatório) */
+  obsAceite?: string
   estrategiaSel?: string | null
   opcaoSel?: number
   opcao?: OpcaoEstrategia | null
@@ -291,6 +295,7 @@ export interface RecItem {
   dia: string
   hora: string
   registradoEm: string
+  obs?: string
 }
 
 export interface InvItem {

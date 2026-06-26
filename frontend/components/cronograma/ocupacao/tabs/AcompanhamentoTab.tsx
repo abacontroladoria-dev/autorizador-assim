@@ -9,6 +9,7 @@ import { RecusadosTab } from "./RecusadosTab"
 import { InviavelTab } from "./InviavelTab"
 import type { AlgorithmResult, Sugestao, WaMap, WaStatus, StatusMap, CsvRow, OpcaoEstrategia, MovimentoSessao, AfetadaItem, SessPacItem, AnaliseResult, StatusEntry, OpcaoSwap, OpcaoDiaMigracao } from "@/types/cronograma"
 import { SaidaCronModal } from "@/components/cronograma/solicitacoes/SaidaCronModal"
+import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
 
 const SK_PROF = "aba_v8"
 const SK_PAC_BUNDLES = "aba_ocup_pac_aceites_v1"
@@ -17,6 +18,7 @@ const SK_CONF = "aba_confirmados_v1"
 interface ConfItem {
   pac: string; prof: string; esp: string; unidade: string
   dia: string; hora: string; origem: string; registradoEm: string
+  obs?: string
 }
 
 interface AceiteSessao {
@@ -229,28 +231,28 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
       sInv([...inv, ...bundle.sessoes.map(s => ({ paciente: bundle.pac, motivo: s.tP, dia: s.dia, hora: s.hora, registradoEm: d }))])
   }
 
-  function handleSaidaConfirmar(key: string) {
+  function handleSaidaConfirmar(key: string, obsAceite?: string) {
     const val = statusMap[key]
     if (!val) return
-    persistStatus({ ...statusMap, [key]: { ...val, status: "resolvido" as any, atualizadoEm: Date.now() } })
+    persistStatus({ ...statusMap, [key]: { ...val, status: "resolvido" as any, obsAceite, atualizadoEm: Date.now() } })
     const [pac, dia, hora, terapia] = key.split("|||")
     const [profRes, diaRes, horaRes] = (val.slotReservado || "|||").split("|||")
-    persistConf([...conf, { pac, prof: profRes || "", esp: terapia, unidade: "", dia: diaRes || dia, hora: horaRes || hora, origem: "Saída Profissional", registradoEm: hoje() }])
+    persistConf([...conf, { pac, prof: profRes || "", esp: terapia, unidade: "", dia: diaRes || dia, hora: horaRes || hora, origem: "Saída Profissional", registradoEm: hoje(), obs: obsAceite }])
   }
-  function handleSaidaRecusar(key: string) {
+  function handleSaidaRecusar(key: string, obsAceite?: string) {
     const val = statusMap[key]
     if (!val) return
-    persistStatus({ ...statusMap, [key]: { ...val, status: "recusado" as any, slotReservado: null, atualizadoEm: Date.now() } })
+    persistStatus({ ...statusMap, [key]: { ...val, status: "recusado" as any, obsAceite, slotReservado: null, atualizadoEm: Date.now() } })
     const [pac, dia, hora, terapia] = key.split("|||")
     const [profRes] = (val.slotReservado || "|||").split("|||")
-    sRec([...rec, { paciente: pac, profissional: profRes || "", especialidade: terapia, unidade: "", dia, hora, registradoEm: hoje() }])
+    sRec([...rec, { paciente: pac, profissional: profRes || "", especialidade: terapia, unidade: "", dia, hora, registradoEm: hoje(), obs: obsAceite }])
   }
-  function handleSaidaInviavel(key: string) {
+  function handleSaidaInviavel(key: string, obsAceite: string) {
     const val = statusMap[key]
     if (!val) return
-    persistStatus({ ...statusMap, [key]: { ...val, status: "sem_solucao" as any, atualizadoEm: Date.now() } })
-    const [pac, dia, hora, terapia] = key.split("|||")
-    sInv([...inv, { paciente: pac, motivo: `${terapia} (Saída Profissional)`, dia, hora, registradoEm: hoje() }])
+    persistStatus({ ...statusMap, [key]: { ...val, status: "sem_solucao" as any, obsAceite, atualizadoEm: Date.now() } })
+    const [pac, dia, hora] = key.split("|||")
+    sInv([...inv, { paciente: pac, motivo: obsAceite, dia, hora, registradoEm: hoje() }])
   }
   function handleSaidaCancelar(key: string) {
     const next = { ...statusMap }
@@ -455,9 +457,9 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
                     opcao={val.opcao}
                     movimentos={val.movimentos}
                     statusEntry={val}
-                    onConfirmar={() => handleSaidaConfirmar(key)}
-                    onRecusar={() => handleSaidaRecusar(key)}
-                    onInviavel={() => handleSaidaInviavel(key)}
+                    onConfirmar={(obs) => handleSaidaConfirmar(key, obs)}
+                    onRecusar={(obs) => handleSaidaRecusar(key, obs)}
+                    onInviavel={(obs) => handleSaidaInviavel(key, obs)}
                     onCancelar={() => handleSaidaCancelar(key)}
                   />
                 )
@@ -539,7 +541,9 @@ function InviavelModal({ pac, motivo, onMotivoChange, onConfirmar, onClose }: {
 }
 
 function ConfirmadosTab({ conf, onRemove }: { conf: ConfItem[]; onRemove: (i: number) => void }) {
+  const [removIdx, setRemovIdx] = useState<number | null>(null)
   return (
+    <>
     <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", boxShadow: "0 1px 4px rgba(0,0,0,.06)", padding: "16px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px", paddingBottom: "12px", borderBottom: "1px solid var(--border)", flexWrap: "wrap", gap: "8px" }}>
         <span style={{ fontWeight: 800, color: B.navy }}>✅ Confirmados</span>
@@ -555,7 +559,7 @@ function ConfirmadosTab({ conf, onRemove }: { conf: ConfItem[]; onRemove: (i: nu
           <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
             <thead style={{ background: "var(--muted)" }}>
               <tr>
-                {["Paciente", "Profissional", "Especialidade", "Dia", "Hora", "Origem", "Registrado", ""].map(h => (
+                {["Paciente", "Profissional", "Especialidade", "Dia", "Hora", "Origem", "Registrado", "Obs", ""].map(h => (
                   <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em" }}>{h}</th>
                 ))}
               </tr>
@@ -574,8 +578,11 @@ function ConfirmadosTab({ conf, onRemove }: { conf: ConfItem[]; onRemove: (i: nu
                     <span style={{ background: B.limeLt, color: "#4d7c0f", borderRadius: "999px", padding: "2px 8px", fontSize: "11px", border: `1px solid ${B.lime}88` }}>{c.origem}</span>
                   </td>
                   <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontSize: "11px" }}>{c.registradoEm}</td>
+                  <td style={{ padding: "8px 12px", maxWidth: "180px", fontSize: "12px", color: "var(--muted-foreground)", fontStyle: c.obs ? "italic" : "normal" }}>
+                    {c.obs ? `"${c.obs}"` : "—"}
+                  </td>
                   <td style={{ padding: "8px 12px" }}>
-                    <button onClick={() => onRemove(i)} style={{ fontSize: "11px", color: "#16a34a", background: "none", border: "none", cursor: "pointer" }}>remover</button>
+                    <button onClick={() => setRemovIdx(i)} style={{ fontSize: "11px", color: "#16a34a", background: "none", border: "none", cursor: "pointer" }}>remover</button>
                   </td>
                 </tr>
               ))}
@@ -584,6 +591,17 @@ function ConfirmadosTab({ conf, onRemove }: { conf: ConfItem[]; onRemove: (i: nu
         </div>
       )}
     </div>
+    {removIdx !== null && (
+      <ConfirmDialog
+        title="Remover registro?"
+        description="O registro será removido da lista de confirmados."
+        confirmLabel="Remover"
+        confirmColor="#dc2626"
+        onConfirm={() => { onRemove(removIdx); setRemovIdx(null) }}
+        onCancel={() => setRemovIdx(null)}
+      />
+    )}
+    </>
   )
 }
 
@@ -905,12 +923,17 @@ function SaidaItem({
   opcao?: OpcaoEstrategia | null
   movimentos?: MovimentoSessao[] | null
   statusEntry?: StatusEntry
-  onConfirmar: () => void; onRecusar: () => void; onInviavel: () => void; onCancelar: () => void
+  onConfirmar: (obs?: string) => void
+  onRecusar: (obs?: string) => void
+  onInviavel: (obs: string) => void
+  onCancelar: () => void
 }) {
   const [showVer, setShowVer] = useState(false)
+  const [dialog, setDialog] = useState<"confirmar" | "recusar" | "inviavel" | null>(null)
   const hasDetails = !!(estrategiaSel || opcao || statusEntry?.afetada)
 
   return (
+    <>
     <div style={{ background: "#f5f3ff", border: `1px solid ${B.purple}33`, borderRadius: "12px", padding: "12px 16px" }}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center", justifyContent: "space-between" }}>
 
@@ -939,9 +962,9 @@ function SaidaItem({
               <span>Ver<br />detalhes</span>
             </button>
           )}
-          <button onClick={onConfirmar} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#16a34a", color: "white", border: "none", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>✓ Confirmou</button>
-          <button onClick={onInviavel}  style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#fffbeb", color: "#92400e", border: "1px solid #fde68a", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>Inviável</button>
-          <button onClick={onRecusar}   style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#dc2626", color: "white", border: "none", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>✗ Recusou</button>
+          <button onClick={() => setDialog("confirmar")} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#16a34a", color: "white", border: "none", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>✓ Confirmou</button>
+          <button onClick={() => setDialog("inviavel")}  style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#fffbeb", color: "#92400e", border: "1px solid #fde68a", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>Inviável</button>
+          <button onClick={() => setDialog("recusar")}   style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#dc2626", color: "white", border: "none", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>✗ Recusou</button>
           <button onClick={onCancelar}  style={{ fontSize: "12px", padding: "10px 12px", minHeight: "44px", borderRadius: "8px", background: "transparent", color: B.purple, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 500 }} title="Remove o item do acompanhamento">Cancelar</button>
         </div>
       </div>
@@ -962,6 +985,42 @@ function SaidaItem({
           onClose={() => setShowVer(false)} />
       )}
     </div>
+
+    {dialog === "confirmar" && (
+      <ConfirmDialog
+        title="Confirmar que aceitou?"
+        obsLabel="Observação (opcional)"
+        obsPlaceholder="Ex.: combinado por WhatsApp..."
+        confirmLabel="Confirmou"
+        confirmColor="#16a34a"
+        onConfirm={(o) => { onConfirmar(o || undefined); setDialog(null) }}
+        onCancel={() => setDialog(null)}
+      />
+    )}
+    {dialog === "recusar" && (
+      <ConfirmDialog
+        title="Confirmar que recusou?"
+        obsLabel="Observação (opcional)"
+        obsPlaceholder="Ex.: não aceita mudança de horário..."
+        confirmLabel="Recusou"
+        confirmColor="#dc2626"
+        onConfirm={(o) => { onRecusar(o || undefined); setDialog(null) }}
+        onCancel={() => setDialog(null)}
+      />
+    )}
+    {dialog === "inviavel" && (
+      <ConfirmDialog
+        title="Marcar como Inviável"
+        obsLabel="Motivo"
+        obsRequired
+        obsPlaceholder="Descreva o motivo da inviabilidade..."
+        confirmLabel="Confirmar Inviável"
+        confirmColor="#b45309"
+        onConfirm={(o) => { onInviavel(o); setDialog(null) }}
+        onCancel={() => setDialog(null)}
+      />
+    )}
+    </>
   )
 }
 

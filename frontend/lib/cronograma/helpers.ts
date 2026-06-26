@@ -185,6 +185,45 @@ export function waKey(s: Sugestao): string {
   return `${s.pac}|||${s.prof}|||${s.dia}|||${s.hora}`
 }
 
+// ─── FORMATAÇÃO OCUPAÇÃO ─────────────────────────────────────────────────────
+
+export function fmtH(h: number | string): string {
+  const n = Number(h) || 0
+  let horas = Math.floor(n)
+  let mins = Math.round((n - horas) * 60)
+  if (mins >= 60) { horas += Math.floor(mins / 60); mins = mins % 60 }
+  return `${horas}h${String(mins).padStart(2, "0")}`
+}
+
+export function fmtNumBR(v: unknown, casas = 1): string {
+  if (v === null || v === undefined || Number.isNaN(Number(v))) return "—"
+  return Number(v).toLocaleString("pt-BR", {
+    minimumFractionDigits: casas,
+    maximumFractionDigits: casas,
+  })
+}
+
+export function fmtHDec(h: number | string, casas = 2): string {
+  return `${fmtNumBR(Number(h) || 0, casas)}h`
+}
+
+export function fmtPctOcup(v: number | null | undefined): string {
+  return v === null || v === undefined
+    ? "—"
+    : `${(v * 100).toFixed(2).replace(".", ",")}%`
+}
+
+export function hhmm(min: number | null | undefined): string {
+  if (min === null || min === undefined || Number.isNaN(min)) return "—"
+  const h = String(Math.floor(min / 60)).padStart(2, "0")
+  const m = String(Math.round(min % 60)).padStart(2, "0")
+  return `${h}:${m}`
+}
+
+export function cleanTxt(v: unknown): string {
+  return String(v ?? "").replace(/\s+/g, " ").trim()
+}
+
 // ─── SEMANA DE REFERÊNCIA ─────────────────────────────────────────────────────
 
 export function getRefWeek(): { inicio: string; fim: string; label: string } {

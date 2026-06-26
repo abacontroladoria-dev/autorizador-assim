@@ -1,6 +1,8 @@
 "use client"
 
+import { useState } from "react"
 import { B } from "@/lib/cronograma/constants"
+import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
 import type { InvItem, RecItem, WaMap } from "@/types/cronograma"
 
 interface Props {
@@ -12,7 +14,9 @@ interface Props {
 }
 
 export function InviavelTab({ inv, onRemove, onExport }: Props) {
+  const [removIdx, setRemovIdx] = useState<number | null>(null)
   return (
+    <>
     <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", boxShadow: "0 1px 4px rgba(0,0,0,.06)", padding: "16px" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px", paddingBottom: "12px", borderBottom: "1px solid var(--border)", flexWrap: "wrap", gap: "8px" }}>
         <span style={{ fontWeight: 800, color: B.navy }}>⛔ Inviáveis</span>
@@ -41,10 +45,10 @@ export function InviavelTab({ inv, onRemove, onExport }: Props) {
               {inv.map((iv, i) => (
                 <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
                   <td style={{ padding: "8px 12px", fontWeight: 700, color: B.navy }}>{iv.paciente}</td>
-                  <td style={{ padding: "8px 12px", color: "var(--muted-foreground)" }}>{iv.motivo}</td>
+                  <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontStyle: "italic" }}>{iv.motivo}</td>
                   <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontSize: "11px" }}>{iv.registradoEm}</td>
                   <td style={{ padding: "8px 12px" }}>
-                    <button onClick={() => onRemove(i)} style={{ fontSize: "11px", color: "var(--muted-foreground)", background: "none", border: "none", cursor: "pointer" }}>remover</button>
+                    <button onClick={() => setRemovIdx(i)} style={{ fontSize: "11px", color: "var(--muted-foreground)", background: "none", border: "none", cursor: "pointer" }}>remover</button>
                   </td>
                 </tr>
               ))}
@@ -53,6 +57,17 @@ export function InviavelTab({ inv, onRemove, onExport }: Props) {
         </div>
       )}
     </div>
+    {removIdx !== null && (
+      <ConfirmDialog
+        title="Remover registro?"
+        description="O registro será removido da lista de inviáveis."
+        confirmLabel="Remover"
+        confirmColor="#dc2626"
+        onConfirm={() => { onRemove(removIdx); setRemovIdx(null) }}
+        onCancel={() => setRemovIdx(null)}
+      />
+    )}
+    </>
   )
 }
 

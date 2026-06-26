@@ -8,6 +8,7 @@ import { getRefWeek, waKey } from "@/lib/cronograma/helpers"
 import { runAlgorithm } from "@/lib/cronograma/runAlgorithm"
 import { exportBase } from "@/lib/cronograma/xlsx"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
+import { useHeader } from "@/contexts/HeaderContext"
 import { VagasAgoraTab } from "./tabs/VagasAgoraTab"
 import { GapsTab } from "./tabs/GapsTab"
 import { GuiaTab } from "./tabs/GuiaTab"
@@ -27,6 +28,14 @@ const TABS = [
 
 type TabKey = (typeof TABS)[number]["key"]
 
+const TAB_HEADERS: Record<TabKey, { title: string; subtitle: string }> = {
+  vagas:           { title: "Aumentar Ocupação (Clínica)",   subtitle: "Sugestões de novos agendamentos para vagas ociosas" },
+  acompanhamento:  { title: "Aceites e Recusas",             subtitle: "Acompanhamento de sugestões e redistribuições" },
+  gaps:            { title: "Diferença: Laudo e Oferta",     subtitle: "Comparativo entre laudos autorizados e sessões ofertadas" },
+  inconsistencias: { title: "Inconsistências e Exceções",    subtitle: "Registros com divergências ou exceções no cronograma" },
+  guia:            { title: "Guia do Cronograma",            subtitle: "" },
+}
+
 export function OcupacaoShell() {
   const { cRows, lRows, rec, inv, waMap, cfg, savedAt, saveError, clearSaveError, sRec, sInv, sWa, setCRows } = useCronogramaData()
 
@@ -34,6 +43,14 @@ export function OcupacaoShell() {
   const router = useRouter()
   const rawTab = searchParams.get("tab")
   const activeTab: TabKey = rawTab && TABS.some(t => t.key === rawTab) ? (rawTab as TabKey) : "vagas"
+
+  const { setHeader } = useHeader()
+
+  useEffect(() => {
+    const h = TAB_HEADERS[activeTab]
+    setHeader(h.title, h.subtitle)
+    return () => setHeader("", "")
+  }, [activeTab, setHeader])
 
   const [res, setRes] = useState<AlgorithmResult | null>(null)
   const [load, setLoad] = useState(false)
