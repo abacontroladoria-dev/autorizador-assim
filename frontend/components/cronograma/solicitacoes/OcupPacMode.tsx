@@ -504,6 +504,18 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     return () => document.removeEventListener("mousedown", close)
   }, [expandedProfCardId])
 
+  // Seletor inline de terapia: id do card expandido na grade
+  const [expandedEspCardId, setExpandedEspCardId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!expandedEspCardId) return
+    const close = (e: MouseEvent) => {
+      if ((e.target as Element)?.closest("[data-esp-dropdown]")) return
+      setExpandedEspCardId(null)
+    }
+    document.addEventListener("mousedown", close)
+    return () => document.removeEventListener("mousedown", close)
+  }, [expandedEspCardId])
+
   useImperativeHandle(ref, () => ({
     selectAll() {
       const next = new Set<string>()
@@ -877,6 +889,11 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                 const allProfs = mainEd ? [{ prof: mainEd.prof, tP: mainEd.tP, unidade: mainEd.unidade } as ProfAlt, ...mainEd.profAlts] : []
                                 const altCount = Math.max(0, allProfs.length - 1)
                                 const isExpanded = expandedProfCardId === c.sugestaoId
+                                // Terapias elegíveis para este slot (espAlts calculadas por buildSugestoes)
+                                const allEsps     = mainSug ? [{ esp: mainSug.esp, tP: mainSug.tP }, ...mainSug.espAlts.map(a => ({ esp: a.esp, tP: a.tP }))] : []
+                                const espAltCount = Math.max(0, allEsps.length - 1)
+                                const isEspExpanded = expandedEspCardId === c.sugestaoId
+                                const curEspIdx   = mainSug ? (espSelIdx[mainSug.id] ?? 0) : 0
                                 return (
                                   <div
                                     key={ci}
@@ -963,6 +980,55 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                       </div>
                                     )}
 
+                                    {/* Seção expandida: lista radio de terapias elegíveis */}
+                                    {espAltCount > 0 && isClickable && !isVCompCard && (
+                                      <div
+                                        data-esp-dropdown="true"
+                                        style={{
+                                          overflow: "hidden",
+                                          maxHeight: isEspExpanded ? `${(espAltCount + 1) * 26 + 8}px` : "0px",
+                                          opacity: isEspExpanded ? 1 : 0,
+                                          transition: "max-height 200ms ease-out, opacity 150ms ease-out",
+                                          display: "flex", flexDirection: "column", gap: "1px",
+                                          marginTop: isEspExpanded ? "3px" : "0",
+                                        }}
+                                        onClick={e => e.stopPropagation()}
+                                      >
+                                        {allEsps.map((e, i) => {
+                                          const isCurr = curEspIdx === i
+                                          return (
+                                            <button
+                                              key={i}
+                                              onClick={evt => {
+                                                evt.stopPropagation()
+                                                setEspSelIdx(prev => ({ ...prev, [mainSug!.id]: i }))
+                                                setProfSelIdx(prev => ({ ...prev, [mainSug!.id]: 0 }))
+                                                setSelIdx(prev => ({ ...prev, [mainSug!.id]: {} }))
+                                                setExpandedEspCardId(null)
+                                              }}
+                                              style={{
+                                                display: "flex", alignItems: "center", gap: "5px",
+                                                padding: "3px 5px", borderRadius: "5px", border: "none",
+                                                background: isCurr ? "rgba(126,34,206,0.08)" : "transparent",
+                                                cursor: "pointer", fontFamily: "inherit",
+                                                fontSize: "11px", fontWeight: isCurr ? 600 : 400,
+                                                color: isCurr ? "#6b21a8" : "#374151",
+                                                textAlign: "left", width: "100%",
+                                                transition: "background 100ms ease",
+                                              }}
+                                            >
+                                              <span style={{ fontSize: "8px", color: isCurr ? "#7e22ce" : "#9ca3af", flexShrink: 0, lineHeight: 1 }}>
+                                                {isCurr ? "●" : "○"}
+                                              </span>
+                                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                                {e.tP}
+                                              </span>
+                                            </button>
+                                          )
+                                        })}
+                                      </div>
+                                    )}
+
                                     {isDisc && (
                                       <div style={{ fontSize: "11px", fontWeight: 700, color: "#ea580c", marginTop: "2px", display: "flex", alignItems: "center", gap: "3px" }}>
                                         ⚠ {c.unidade}
@@ -977,24 +1043,46 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                     {/* Rodapé: status / trigger de alternativas + ✕/↺ */}
                                     {!isDark && (cs.label || isClickable || isRecusadaCard) && (
                                       <div style={{ fontSize: "10px", fontWeight: 700, marginTop: "auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "3px" }}>
-                                        {altCount > 0 && isClickable && !isVCompCard ? (
+                                        {(altCount > 0 || espAltCount > 0) && isClickable && !isVCompCard ? (
                                           <div style={{ display: "flex", alignItems: "center", gap: "3px", minWidth: 0 }}>
-                                            <button
-                                              data-prof-dropdown="true"
-                                              onClick={e => {
-                                                e.stopPropagation()
-                                                setExpandedProfCardId(isExpanded ? null : c.sugestaoId!)
-                                              }}
-                                              style={{
-                                                display: "flex", alignItems: "center", gap: "2px", flexShrink: 0,
-                                                fontSize: "10px", fontWeight: 700, color: "#0369a1",
-                                                background: "none", border: "none", padding: 0,
-                                                cursor: "pointer", fontFamily: "inherit", lineHeight: "1.4",
-                                              }}
-                                            >
-                                              <span style={{ fontSize: "7px", display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 180ms ease" }}>▼</span>
-                                              <span>{altCount === 1 ? "1 opção" : `${altCount} opções`}</span>
-                                            </button>
+                                            {altCount > 0 && (
+                                              <button
+                                                data-prof-dropdown="true"
+                                                onClick={e => {
+                                                  e.stopPropagation()
+                                                  setExpandedProfCardId(isExpanded ? null : c.sugestaoId!)
+                                                  setExpandedEspCardId(null)
+                                                }}
+                                                style={{
+                                                  display: "flex", alignItems: "center", gap: "2px", flexShrink: 0,
+                                                  fontSize: "10px", fontWeight: 700, color: "#0369a1",
+                                                  background: "none", border: "none", padding: 0,
+                                                  cursor: "pointer", fontFamily: "inherit", lineHeight: "1.4",
+                                                }}
+                                              >
+                                                <span style={{ fontSize: "7px", display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 180ms ease" }}>▼</span>
+                                                <span>{altCount === 1 ? "1 prof." : `${altCount} profs.`}</span>
+                                              </button>
+                                            )}
+                                            {espAltCount > 0 && (
+                                              <button
+                                                data-esp-dropdown="true"
+                                                onClick={e => {
+                                                  e.stopPropagation()
+                                                  setExpandedEspCardId(isEspExpanded ? null : c.sugestaoId!)
+                                                  setExpandedProfCardId(null)
+                                                }}
+                                                style={{
+                                                  display: "flex", alignItems: "center", gap: "2px", flexShrink: 0,
+                                                  fontSize: "10px", fontWeight: 700, color: "#7e22ce",
+                                                  background: "none", border: "none", padding: 0,
+                                                  cursor: "pointer", fontFamily: "inherit", lineHeight: "1.4",
+                                                }}
+                                              >
+                                                <span style={{ fontSize: "7px", display: "inline-block", transform: isEspExpanded ? "rotate(180deg)" : "none", transition: "transform 180ms ease" }}>▼</span>
+                                                <span>{espAltCount === 1 ? "1 terapia" : `${espAltCount} terapias`}</span>
+                                              </button>
+                                            )}
                                             {cs.label && <>
                                               <span style={{ color: "#d1d5db", flexShrink: 0 }}>•</span>
                                               <span style={{ color: c.tipo === "aceito" ? B.blue : "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cs.label}</span>
