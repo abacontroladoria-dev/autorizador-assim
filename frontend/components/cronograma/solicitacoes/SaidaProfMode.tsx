@@ -12,6 +12,7 @@ import { fmtName, getTurno, gPrio, pm } from "@/lib/cronograma/helpers"
 import { slotValidoParaPaciente } from "@/lib/cronograma/candidatos"
 import { buildSaidaAnalise } from "@/lib/cronograma/saida"
 import { SaidaCronModal } from "./SaidaCronModal"
+import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 import type {
   AfetadaItem, CsvRow, LaudoRow, OpcaoEstrategia, ResultItem, SessPacItem, StatusEntry, StatusMap, StatusSaida, MovimentoSessao, CfgState,
 } from "@/types/cronograma"
@@ -145,6 +146,7 @@ const COBERTURA_FILTER_MAP: Record<string, (r: ResultItem) => boolean> = {
 // ─── COMPONENTE ───────────────────────────────────────────────────────────────
 
 export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: Props) {
+  const { conf } = useCronogramaData()
   const [prof, setProf] = useState("")
   const [inputVal, setInputVal] = useState("")
   const [dropOpen, setDropOpen] = useState(false)
@@ -460,11 +462,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       if (!diaUnidade[d] && item.afetada.unidade) diaUnidade[d] = item.afetada.unidade
     }
 
-    let confirmedSlotKeys = new Set<string>()
-    try {
-      const cItems: { dia: string; hora: string }[] = JSON.parse(localStorage.getItem("aba_confirmados_v1") || "[]")
-      confirmedSlotKeys = new Set(cItems.map(c => `${c.dia}|||${c.hora}`))
-    } catch {}
+    const confirmedSlotKeys = new Set(conf.map(c => `${c.dia}|||${c.hora}`))
 
     const result: Record<string, CandidatoSlot[]> = {}
     for (const dia of novoProfData.dias) {
@@ -492,7 +490,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       }
     }
     return result
-  }, [novoProfData, lRows, agendRows, semSolucaoItems, cfg.judicialMap])
+  }, [novoProfData, lRows, agendRows, semSolucaoItems, cfg.judicialMap, conf])
 
   function toggleDT(dia: string, turno: string) {
     setSelDT(prev => {

@@ -12,6 +12,7 @@ import {
 } from "@/lib/cronograma/helpers"
 import { UnitHeaderBadges, CronoGlobalUnitBadge } from "@/components/cronograma/ui/UnitBadges"
 import type { CsvRow, LaudoRow, CfgState, RecItem, InvItem } from "@/types/cronograma"
+import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -1655,9 +1656,9 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
   const [statusMap, setStatusMap] = useState<Record<string, Status>>(() => {
     try { return JSON.parse(localStorage.getItem(SK) || "{}") } catch { return {} }
   })
-  const [aceites, setAceites]   = useState<AceitePacBundle[]>(() => {
-    try { return JSON.parse(localStorage.getItem(SK_ACEITES) || "[]") } catch { return [] }
-  })
+  const { pacBundles, persistPacBundles } = useCronogramaData()
+  const aceites = pacBundles
+  const persistAceites = persistPacBundles
   const [invPending, setInvPending] = useState<Sugestao | null>(null)
   const [invMotivo, setInvMotivo]   = useState("")
   const [inputFocused, setInputFocused] = useState(false)
@@ -1685,11 +1686,6 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
   function persistStatus(m: Record<string, Status>) {
     setStatusMap(m)
     try { localStorage.setItem(SK, JSON.stringify(m)) } catch {}
-  }
-
-  function persistAceites(a: AceitePacBundle[]) {
-    setAceites(a)
-    try { localStorage.setItem(SK_ACEITES, JSON.stringify(a)) } catch {}
   }
 
   function handleAceitar({ sessoes }: { sessoes: AceiteSessao[] }) {

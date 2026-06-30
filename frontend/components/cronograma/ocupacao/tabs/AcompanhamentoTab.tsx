@@ -1,39 +1,20 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useMemo, useRef, useState } from "react"
 import { B, SK_SAIDA, HORAS_GRID, DIAS_LIST } from "@/lib/cronograma/constants"
 import { waKey, fmtName } from "@/lib/cronograma/helpers"
 import { exportBase } from "@/lib/cronograma/xlsx"
-import { useCronogramaData } from "@/contexts/CronogramaDataContext"
+import { useCronogramaData, genConfId } from "@/contexts/CronogramaDataContext"
 import { RecusadosTab } from "./RecusadosTab"
 import { InviavelTab } from "./InviavelTab"
 import type { AlgorithmResult, Sugestao, WaMap, WaStatus, StatusMap, CsvRow, OpcaoEstrategia, MovimentoSessao, AfetadaItem, SessPacItem, AnaliseResult, StatusEntry, OpcaoSwap, OpcaoDiaMigracao } from "@/types/cronograma"
+import type { AceitePacBundle, ConfItem, SlotStatus } from "@/types/acompanhamento"
 import { SaidaCronModal } from "@/components/cronograma/solicitacoes/SaidaCronModal"
 
-const SK_PROF = "aba_v8"
-const SK_PAC_BUNDLES = "aba_ocup_pac_aceites_v1"
-const SK_CONF = "aba_confirmados_v1"
-
-interface ConfItem {
-  pac: string; prof: string; esp: string; unidade: string
-  dia: string; hora: string; origem: string; registradoEm: string
-}
-
-interface AceiteSessao {
-  dia: string; hora: string; tP: string; prof: string; unidade: string
-}
-type SlotStatus = "confirmado" | "recusado" | "inviavel"
 const SLOT_META: Record<SlotStatus, { label: string; bg: string; c: string; bd: string }> = {
   confirmado: { label: "Confirmou",  bg: "#dcfce7", c: "#14532d", bd: "#86efac" },
   recusado:   { label: "Recusou",    bg: "#fee2e2", c: "#7f1d1d", bd: "#fca5a5" },
   inviavel:   { label: "Inviável",   bg: "var(--muted)", c: "var(--muted-foreground)", bd: "var(--border)" },
-}
-interface AceitePacBundle {
-  id: string; pac: string; ts: number; origem: "ocp-paciente"
-  sessoes: AceiteSessao[]
-  status: "pendente" | "confirmado" | "recusado"
-  inviavelSlots: string[]
-  slotStatus?: Record<string, SlotStatus>
 }
 
 interface Props {
@@ -57,7 +38,10 @@ const ORIGEM_LABELS: Record<string, string> = {
 }
 
 export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onInv, onCron }: Props) {
-  const { cRows, rec, inv, waMap, statusMap, sRec, sInv, sWa, persistStatus } = useCronogramaData()
+  const {
+    cRows, rec, inv, waMap, statusMap, sRec, sInv, sWa, persistStatus,
+    profMap, pacBundles, conf, persistProfMap, persistPacBundles, persistConf,
+  } = useCronogramaData()
   const [sub, setSub] = useState<Sub>("aguardando")
   const [fOrigem, setFOrigem] = useState<Origem>("")
   const [ocupOpen, setOcupOpen] = useState(false)
@@ -66,30 +50,6 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
   const [ocupPacOpen, setOcupPacOpen] = useState(false)
   const [invModalPac, setInvModalPac] = useState<string | null>(null)
   const [invMotivo, setInvMotivo] = useState("")
-
-  const [profMap, setProfMap] = useState<Record<string, string>>(() => {
-    try { return JSON.parse(localStorage.getItem(SK_PROF) || "{}") } catch { return {} }
-  })
-  const persistProfMap = (map: Record<string, string>) => {
-    setProfMap(map)
-    try { localStorage.setItem(SK_PROF, JSON.stringify(map)) } catch {}
-  }
-
-  const [pacBundles, setPacBundles] = useState<AceitePacBundle[]>(() => {
-    try { return JSON.parse(localStorage.getItem(SK_PAC_BUNDLES) || "[]") } catch { return [] }
-  })
-  const persistPacBundles = (bundles: AceitePacBundle[]) => {
-    setPacBundles(bundles)
-    try { localStorage.setItem(SK_PAC_BUNDLES, JSON.stringify(bundles)) } catch {}
-  }
-
-  const [conf, setConf] = useState<ConfItem[]>(() => {
-    try { return JSON.parse(localStorage.getItem(SK_CONF) || "[]") } catch { return [] }
-  })
-  const persistConf = (items: ConfItem[]) => {
-    setConf(items)
-    try { localStorage.setItem(SK_CONF, JSON.stringify(items)) } catch {}
-  }
 
   const hoje = () => new Date().toLocaleDateString("pt-BR")
 
@@ -123,7 +83,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     sWa({ ...waMap, [key]: "aceito" as WaStatus })
     if (sug) {
       const [, , dia, hora] = key.split("|||")
-      persistConf([...conf, { pac: sug.pac, prof: sug.prof, esp: sug.tP ?? sug.esp ?? "", unidade: sug.unidade ?? "", dia: sug.dia ?? dia, hora: sug.hora ?? hora, origem: "Ocp. Clínica", registradoEm: hoje() }])
+      persistConf([...conf, { id: genConfId(), pac: sug.pac, prof: sug.prof, esp: sug.tP ?? sug.esp ?? "", unidade: sug.unidade ?? "", dia: sug.dia ?? dia, hora: sug.hora ?? hora, origem: "Ocp. Clínica", registradoEm: hoje() }])
     }
   }
   function handleOcupRecusado(key: string, sug: Sugestao | null) {
@@ -158,7 +118,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
   function handleProfConfirmar(key: string) {
     persistProfMap({ ...profMap, [key]: "aceito" })
     const [pac, prof, dia, hora] = key.split("|||")
-    persistConf([...conf, { pac, prof, esp: "", unidade: "", dia, hora, origem: "Ocp. Profissional", registradoEm: hoje() }])
+    persistConf([...conf, { id: genConfId(), pac, prof, esp: "", unidade: "", dia, hora, origem: "Ocp. Profissional", registradoEm: hoje() }])
   }
   function handleProfRecusar(key: string) {
     persistProfMap({ ...profMap, [key]: "recusado" })
@@ -192,7 +152,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     if (bundle && sessao && status) {
       const d = hoje()
       if (status === "confirmado")
-        persistConf([...conf, { pac: bundle.pac, prof: sessao.prof, esp: sessao.tP, unidade: sessao.unidade, dia: sessao.dia, hora: sessao.hora, origem: "Ocp. Paciente", registradoEm: d }])
+        persistConf([...conf, { id: genConfId(), pac: bundle.pac, prof: sessao.prof, esp: sessao.tP, unidade: sessao.unidade, dia: sessao.dia, hora: sessao.hora, origem: "Ocp. Paciente", registradoEm: d }])
       else if (status === "recusado")
         sRec([...rec, { paciente: bundle.pac, profissional: sessao.prof, especialidade: sessao.tP, unidade: sessao.unidade, dia: sessao.dia, hora: sessao.hora, registradoEm: d }])
       else if (status === "inviavel")
@@ -222,7 +182,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     if (!bundle) return
     const d = hoje()
     if (status === "confirmado")
-      persistConf([...conf, ...bundle.sessoes.map(s => ({ pac: bundle.pac, prof: s.prof, esp: s.tP, unidade: s.unidade, dia: s.dia, hora: s.hora, origem: "Ocp. Paciente", registradoEm: d }))])
+      persistConf([...conf, ...bundle.sessoes.map(s => ({ id: genConfId(), pac: bundle.pac, prof: s.prof, esp: s.tP, unidade: s.unidade, dia: s.dia, hora: s.hora, origem: "Ocp. Paciente", registradoEm: d }))])
     else if (status === "recusado")
       sRec([...rec, ...bundle.sessoes.map(s => ({ paciente: bundle.pac, profissional: s.prof, especialidade: s.tP, unidade: s.unidade, dia: s.dia, hora: s.hora, registradoEm: d }))])
     else if (status === "inviavel")
@@ -235,7 +195,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     persistStatus({ ...statusMap, [key]: { ...val, status: "resolvido" as any, atualizadoEm: Date.now() } })
     const [pac, dia, hora, terapia] = key.split("|||")
     const [profRes, diaRes, horaRes] = (val.slotReservado || "|||").split("|||")
-    persistConf([...conf, { pac, prof: profRes || "", esp: terapia, unidade: "", dia: diaRes || dia, hora: horaRes || hora, origem: "Saída Profissional", registradoEm: hoje() }])
+    persistConf([...conf, { id: genConfId(), pac, prof: profRes || "", esp: terapia, unidade: "", dia: diaRes || dia, hora: horaRes || hora, origem: "Saída Profissional", registradoEm: hoje() }])
   }
   function handleSaidaRecusar(key: string) {
     const val = statusMap[key]
