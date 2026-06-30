@@ -397,6 +397,10 @@ function buildSugestoes(
     }
     if (!defaultEntry) continue
 
+    // Invariante: todo tP em espAlts e profAlts vem de buildEntry(), que usa CsvRow real
+    // (Profissional + Terapia + Status=Livre). allEsps e allProfs no render são a única
+    // fonte de verdade para terapias e profissionais disponíveis — não há terapia elegível
+    // sem profissional correspondente.
     if (hasDay && isAdj) {
       sugestoes.push({
         id: `${dia}|||${hora}|||${defaultEntry.esp}`,
@@ -920,9 +924,14 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                       <span style={{ position: "absolute", top: "2px", right: "4px", fontSize: "9px", lineHeight: 1, pointerEvents: "none", opacity: 0.7 }}>🚫</span>
                                     )}
 
-                                    {/* Linha 1: terapia */}
-                                    <div style={{ fontSize: "10px", fontWeight: 600, color: isDark ? "white" : "#111827", lineHeight: "1.3", paddingRight: !isExpanded && isSel ? "12px" : 0 }}>
-                                      {c.tP}
+                                    {/* Linha 1: terapia + pin unidade */}
+                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "2px" }}>
+                                      <span style={{ fontSize: "10px", fontWeight: 600, color: isDark ? "white" : "#111827", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
+                                        {c.tP}
+                                      </span>
+                                      <span style={{ fontSize: "8px", color: isDark ? "#d1d5db" : "#9ca3af", flexShrink: 0, whiteSpace: "nowrap", paddingRight: !isExpanded && (isSel || isRecusadaCard) ? "12px" : 0 }}>
+                                        📍 {c.unidade}
+                                      </span>
                                     </div>
 
                                     {/* Linha 2: profissional — visível só quando colapsado */}
