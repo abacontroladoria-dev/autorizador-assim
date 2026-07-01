@@ -11,7 +11,8 @@
       "Bash(find \"c:\\\\\\\\Users\\\\\\\\UNIVERSO\\\\\\\\projeto_automacao\\\\\\\\sistema-pulsar\\\\\\\\frontend\\\\\\\\components\" -type d)",
       "Bash(ls -la \"c:\\\\\\\\Users\\\\\\\\UNIVERSO\\\\\\\\projeto_automacao\\\\\\\\sistema-pulsar\\\\\\\\frontend\\\\\\\\lib\")",
       "Bash(find \"c:\\\\\\\\Users\\\\\\\\UNIVERSO\\\\\\\\projeto_automacao\\\\\\\\sistema-pulsar\\\\\\\\frontend\\\\\\\\app\" -name \"page.tsx\")",
-      "Bash(gh pr *)"
+      "Bash(gh pr *)",
+      "Bash(python -c \"import sys,json,collections;d=json.load\\(sys.stdin\\);[print\\(repr\\(k\\),v\\) for k,v in collections.Counter\\(\\(r['paciente_id'],r['paciente_nome']\\) for r in d\\).items\\(\\)]\")"
     ]
   }
 }

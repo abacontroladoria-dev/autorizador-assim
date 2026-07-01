@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { B, SK_SAIDA, HORAS_GRID, DIAS_LIST } from "@/lib/cronograma/constants"
 import { waKey, fmtName } from "@/lib/cronograma/helpers"
 import { exportBase } from "@/lib/cronograma/xlsx"
