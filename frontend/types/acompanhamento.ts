@@ -32,4 +32,5 @@ export interface ConfItem {
   hora: string
   origem: string
   registradoEm: string
+  obs?: string
 }
