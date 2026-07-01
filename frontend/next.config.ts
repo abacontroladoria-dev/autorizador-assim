@@ -1,9 +1,13 @@
 import type { NextConfig } from "next";
+import path from "path";
 
 const nextConfig: NextConfig = {
   output: 'standalone',
   trailingSlash: true,
   allowedDevOrigins: ['192.168.0.241'],
+  turbopack: {
+    root: path.resolve(__dirname),
+  },
 
   async headers() {
     return [

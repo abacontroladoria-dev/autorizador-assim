@@ -30,6 +30,7 @@ import {
   BookOpen,
   Settings,
   CalendarRange,
+  RotateCcw,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -469,10 +470,11 @@ export default function Sidebar() {
           )}
 
           {/* Cronograma */}
-          {(canAccess("/cronograma/solicitacoes") || canAccess("/cronograma/ocupacao")) && (
+          {(canAccess("/cronograma/solicitacoes") || canAccess("/cronograma/ocupacao") || canAccess("/cronograma/reposicao")) && (
             <SidebarGroup title="Cronograma" icon={CalendarRange}>
               {canAccess("/cronograma/solicitacoes") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/solicitacoes?tab=saida" />}
               {canAccess("/cronograma/ocupacao") && <MenuItem label="Aceites e Recusas" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
+              {canAccess("/cronograma/reposicao") && <MenuItem label="Reposição de Faltas" icon={RotateCcw} path="/cronograma/reposicao" />}
             </SidebarGroup>
           )}
 

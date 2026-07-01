@@ -32,7 +32,8 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const pathname = usePathname()
   // Páginas que gerenciam rightContent por conta própria (não precisam do badge de Laudos no header)
-  const isOcupacaoPage = !!pathname?.includes('/ocupacao')
+  const isOcupacaoPage  = !!pathname?.includes('/ocupacao')
+  const isReposicaoPage = !!pathname?.includes('/reposicao')
 
   const handleLaudosFile = useCallback(async (file: File) => {
     const rw = getRefWeek()
@@ -59,7 +60,7 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
   }, [setCRows, setLRows])
 
   useEffect(() => {
-    if (isOcupacaoPage) return  // OcupacaoProfShell gerencia rightContent nessa aba
+    if (isOcupacaoPage || isReposicaoPage) return  // essas páginas gerenciam rightContent por conta própria
     setRightContent(
       <CronogramaUploadBadges
         cRows={cRows}
@@ -71,7 +72,7 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
       />
     )
     return () => setRightContent(null)
-  }, [cRows, lRows, uploading, uploadError, handleLaudosFile, handleClear, setRightContent, isOcupacaoPage])
+  }, [cRows, lRows, uploading, uploadError, handleLaudosFile, handleClear, setRightContent, isOcupacaoPage, isReposicaoPage])
 
   return <div>{children}</div>
 }

@@ -91,7 +91,7 @@ interface TabContentProps extends ShellProps {
   tab: TabKey
   statusMap: StatusMap
   persistStatus: (m: StatusMap) => void
-  inputRef: RefObject<HTMLInputElement>
+  inputRef: RefObject<HTMLInputElement | null>
   uploading: boolean
   uploadError: string | null
   onLaudosFile: (file: File) => void

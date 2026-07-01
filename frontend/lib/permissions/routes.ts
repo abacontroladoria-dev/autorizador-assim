@@ -12,6 +12,7 @@ export const roleDefaults: Record<string, string[]> = {
     'guias_digitais', 'auditoria_assim', 'usuarios', 'permissoes', 'cco',
     'autorizacoes', 'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'ocupacao_clinica', 'ocupacao_profissionais',
+    'reposicao_faltas',
   ],
   diretoria: [
     'dashboard', 'atendimentos', 'gestao', 'cronograma',
@@ -19,6 +20,7 @@ export const roleDefaults: Record<string, string[]> = {
     'guias_digitais', 'auditoria_assim', 'cco',
     'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'ocupacao_clinica', 'ocupacao_profissionais',
+    'reposicao_faltas',
   ],
   recepcao: [
     'dashboard', 'atendimentos', 'gestao', 'cronograma', 'auditoria_assim',
@@ -31,7 +33,7 @@ export const roleDefaults: Record<string, string[]> = {
   terapeutico: ['dashboard', 'escala_terapeutica', 'salas', 'agenda_terapeutica'],
   faturamento: ['dashboard', 'guias_digitais', 'cronograma', 'agenda_terapeutica', 'salas', 'cco'],
   rp: ['dashboard', 'escala_terapeutica'],
-  cronograma: ['dashboard', 'cronograma_solicitacoes', 'ocupacao_clinica', 'ocupacao_profissionais'],
+  cronograma: ['dashboard', 'cronograma_solicitacoes', 'ocupacao_clinica', 'ocupacao_profissionais', 'reposicao_faltas'],
 }
 
 export function getRoleDefaultPermissions(role: string): string[] {
@@ -58,6 +60,7 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   cronograma_solicitacoes: ['/cronograma/solicitacoes'],
   ocupacao_clinica: ['/cronograma/ocupacao'],
   ocupacao_profissionais: ['/cronograma/indicadores'],
+  reposicao_faltas: ['/cronograma/reposicao'],
 }
 
 // Converte um conjunto de códigos de permissão em rotas permitidas,
