@@ -13,6 +13,7 @@ import {
 } from "@/lib/cronograma/helpers"
 import { UnitHeaderBadges, CronoGlobalUnitBadge } from "@/components/cronograma/ui/UnitBadges"
 import type { CsvRow, LaudoRow, CfgState } from "@/types/cronograma"
+import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -462,21 +463,17 @@ function ProfAgendaGrid({ prof, cRows, resultados }: { prof: string; cRows: CsvR
 interface Props { cRows: CsvRow[]; lRows: LaudoRow[]; cfg: CfgState }
 
 export function OcupProfMode({ cRows, lRows, cfg }: Props) {
+  const { profMap, persistProfMap } = useCronogramaData()
   const [prof, setProf]         = useState("")
   const [inputVal, setInputVal] = useState("")
   const [dropOpen, setDropOpen] = useState(false)
   const [filtEsp, setFiltEsp]   = useState("")
   const [filtDia, setFiltDia]   = useState("")
-  const [statusMap, setStatusMap] = useState<Record<string, Status>>(() => {
-    try { return JSON.parse(localStorage.getItem(SK) || "{}") } catch { return {} }
-  })
   const [modalItem, setModalItem] = useState<ModalItem | null>(null)
   const comboRef = useRef<HTMLDivElement>(null)
 
-  function persistStatus(m: Record<string, Status>) {
-    setStatusMap(m)
-    try { localStorage.setItem(SK, JSON.stringify(m)) } catch {}
-  }
+  const statusMap = profMap as Record<string, Status>
+  function persistStatus(m: Record<string, Status>) { persistProfMap(m) }
   const stKey = (pac: string, dia: string, hora: string) => `${pac}|||${prof}|||${dia}|||${hora}`
   const stOf  = (pac: string, dia: string, hora: string): Status | null => statusMap[stKey(pac, dia, hora)] || null
   const setSt = (pac: string, dia: string, hora: string, s: Status | null) => {

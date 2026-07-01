@@ -24,7 +24,7 @@ export const roleDefaults: Record<string, string[]> = {
   ],
   recepcao: [
     'dashboard', 'atendimentos', 'gestao', 'cronograma', 'auditoria_assim',
-    'autorizacoes', 'outros_convenios',
+    'autorizacoes', 'outros_convenios', 'cronograma_solicitacoes',
   ],
   autorizacao: [
     'dashboard', 'cronograma', 'agenda_terapeutica', 'salas', 'auditoria_assim',

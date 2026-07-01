@@ -46,6 +46,22 @@
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
 
+    /* ── Type scale (product register — fixed rem, 1.143 ratio) ── */
+    --text-xs:  0.6875rem;  /* 11px — caption / badge        */
+    --text-sm:  0.75rem;    /* 12px — label / meta           */
+    --text-md:  0.875rem;   /* 14px — body / controls        */
+    --text-base: 1rem;      /* 16px — title / primary input  */
+    --text-lg:  1.0625rem;  /* 17px — modal heading          */
+    --text-xl:  1.125rem;   /* 18px — display                */
+    --leading-tight: 1.25;
+    --leading-body:  1.5;
+    --weight-regular:  400;
+    --weight-medium:   500;
+    --weight-semibold: 600;
+    --weight-bold:     700;
+    --weight-heavy:    800;
+    --weight-black:    900;
+
     /* ── Brand tokens ───────────────────────────────────────── */
     /* accent: icons, borders, focus rings, fills (non-text)     */
     --color-brand: oklch(0.62 0.092 217);
@@ -59,6 +75,11 @@
     --color-brand-hover: oklch(0.979 0.011 217);
     /* bg: page-level background                                 */
     --color-brand-bg: oklch(0.975 0.009 217);
+
+    /* ── Central de Atendimento surfaces (hue 240) ─────────── */
+    --color-central-topbar:  oklch(0.97 0.007 240);
+    --color-central-sidebar: oklch(0.94 0.010 240);
+    --color-central-panel:   oklch(0.975 0.005 240);
 }
 
 :root {
@@ -98,6 +119,8 @@
 }
 
 .dark {
+    --color-central-topbar:  oklch(0.22 0.015 240);
+    --color-central-sidebar: oklch(0.17 0.012 240);
     --background: oklch(0.145 0 0);
     --foreground: oklch(0.985 0 0);
     --card: oklch(0.205 0 0);
@@ -135,13 +158,24 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    }
-  body {
-    @apply bg-background text-foreground;
-    }
+  }
   html {
     @apply font-sans;
-    }
+    font-size: 1rem;
+    font-kerning: normal;
+    font-optical-sizing: auto;
+  }
+  body {
+    @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    line-height: 1.5;
+  }
+  /* Tabular numerals for numeric data, times and dates */
+  time, [data-tabular], .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 /* ─── Global scrollbar ───────────────────────────────────────────────────── */

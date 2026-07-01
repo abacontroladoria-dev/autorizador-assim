@@ -473,6 +473,7 @@ export default function Sidebar() {
           {(canAccess("/cronograma/solicitacoes") || canAccess("/cronograma/ocupacao") || canAccess("/cronograma/reposicao")) && (
             <SidebarGroup title="Cronograma" icon={CalendarRange}>
               {canAccess("/cronograma/solicitacoes") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/solicitacoes?tab=saida" />}
+              {canAccess("/cronograma/solicitacoes") && <MenuItem label="Ocupação Paciente" icon={UserCheck} path="/cronograma/solicitacoes?tab=ocup-pac" />}
               {canAccess("/cronograma/ocupacao") && <MenuItem label="Aceites e Recusas" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
               {canAccess("/cronograma/reposicao") && <MenuItem label="Reposição de Faltas" icon={RotateCcw} path="/cronograma/reposicao" />}
             </SidebarGroup>

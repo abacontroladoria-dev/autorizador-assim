@@ -86,6 +86,10 @@ export default function FluxoOperacionalCard({
             .select("data_atendimento, sala_nome, terapias")
             .gte("data_atendimento", queryStart)
             .lte("data_atendimento", queryEnd)
+            // Ordenação determinística (chave única) — paginação estável, sem pular/duplicar linhas
+            .order("data_atendimento")
+            .order("horario")
+            .order("paciente_id")
             .range(from, from + BATCH - 1)
           if (error || !data || data.length === 0) break
           all.push(...data)

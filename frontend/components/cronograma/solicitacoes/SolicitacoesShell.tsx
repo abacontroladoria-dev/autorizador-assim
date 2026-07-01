@@ -19,7 +19,7 @@ const TABS = [
   { key: "simulacao",  label: "Simulação de Novo Prestador" },
   { key: "saida",      label: "Saída de Profissional" },
   { key: "ocup-prof",  label: "Aumentar Ocupação (Profissional)" },
-  { key: "ocup-pac",   label: "Aumentar Ocupação (Paciente)" },
+  { key: "ocup-pac",   label: "Ocupação · Paciente" },
   { key: "novo-cron",  label: "Novo Cronograma" },
 ] as const
 
@@ -68,9 +68,17 @@ export function SolicitacoesShell({ cRows, lRows, dispRows, cfg }: ShellProps) {
   }
 
   useEffect(() => {
-    setHeader("Saída de Profissional", "Análise de impacto e redistribuição de sessões")
+    const tab = TABS.find(t => t.key === activeTab)
+    const subtitles: Record<string, string> = {
+      "saida":      "Análise de impacto e redistribuição de sessões",
+      "ocup-prof":  "Aumente a ocupação de sessões por profissional",
+      "ocup-pac":   "Aumente a ocupação de sessões por paciente",
+      "simulacao":  "Simulação de novo prestador",
+      "novo-cron":  "Criação de novo cronograma",
+    }
+    setHeader(tab?.label ?? "Cronograma", subtitles[activeTab] ?? "")
     return () => setHeader("", "")
-  }, [setHeader])
+  }, [activeTab, setHeader])
 
   useEffect(() => {
     if (!raw) router.replace("/cronograma/solicitacoes?tab=saida")
@@ -101,6 +109,7 @@ function TabContent({
   tab, cRows, lRows, dispRows, cfg, statusMap, persistStatus,
   inputRef, uploading, uploadError, onLaudosFile,
 }: TabContentProps) {
+  const { rec, inv, sRec, sInv } = useCronogramaData()
   const label = TABS.find(t => t.key === tab)?.label ?? tab
 
   if (tab === "saida") {
@@ -188,7 +197,7 @@ function TabContent({
   }
 
   if (tab === "ocup-pac") {
-    return <OcupPacMode cRows={cRows} lRows={lRows} cfg={cfg} />
+    return <OcupPacMode cRows={cRows} lRows={lRows} cfg={cfg} rec={rec} inv={inv} sRec={sRec} sInv={sInv} />
   }
 
   if (tab === "novo-cron") {
