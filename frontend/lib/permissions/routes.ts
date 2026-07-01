@@ -17,7 +17,7 @@ export const roleDefaults: Record<string, string[]> = {
     'dashboard', 'atendimentos', 'gestao',
     'escala_terapeutica', 'auditoria_assim',
     'preauditoria', 'outros_convenios',
-    'ocupacao_profissionais',
+    'cronograma_solicitacoes', 'ocupacao_clinica', 'ocupacao_profissionais',
   ],
   recepcao: [
     'dashboard', 'atendimentos', 'gestao', 'auditoria_assim',
@@ -30,7 +30,7 @@ export const roleDefaults: Record<string, string[]> = {
   terapeutico: ['dashboard', 'escala_terapeutica'],
   faturamento: ['dashboard'],
   rp: ['dashboard', 'escala_terapeutica'],
-  cronograma: ['dashboard', 'ocupacao_profissionais'],
+  cronograma: ['dashboard', 'cronograma_solicitacoes', 'ocupacao_clinica', 'ocupacao_profissionais'],
 }
 
 export function getRoleDefaultPermissions(role: string): string[] {
