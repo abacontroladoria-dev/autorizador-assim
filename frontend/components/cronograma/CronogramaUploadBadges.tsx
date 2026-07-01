@@ -8,13 +8,14 @@ import type { CsvRow, LaudoRow } from "@/types/cronograma"
 interface Props {
   cRows: CsvRow[]
   lRows: LaudoRow[]
+  gradeLoading: boolean
   loading: boolean
   error: string | null
   onSelectFile: (file: File) => void
   onClear: () => void
 }
 
-export function CronogramaUploadBadges({ cRows, lRows, loading, error, onSelectFile, onClear }: Props) {
+export function CronogramaUploadBadges({ cRows, lRows, gradeLoading, loading, error, onSelectFile, onClear }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const rw = getRefWeek()
@@ -54,7 +55,7 @@ export function CronogramaUploadBadges({ cRows, lRows, loading, error, onSelectF
             ? "border-green-200 bg-green-50 text-green-700 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400"
             : "border-border bg-muted text-muted-foreground"}`}
         >
-          {loading && !gradeLoaded
+          {gradeLoading && !gradeLoaded
             ? <Loader2 size={11} className="animate-spin" />
             : <CheckCircle2 size={11} className={gradeLoaded ? "text-green-500" : "text-muted-foreground/30"} />
           }

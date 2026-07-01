@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import * as XLSX from "xlsx"
 import { CronogramaDataProvider, useCronogramaData } from "@/contexts/CronogramaDataContext"
 import { useHeader } from "@/contexts/HeaderContext"
@@ -28,7 +28,30 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
   const { cRows, lRows, setCRows, setLRows } = useCronogramaData()
   const { setRightContent } = useHeader()
   const [uploading, setUploading] = useState(false)
+  const [gradeLoading, setGradeLoading] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const gradeFetchedRef = useRef(false)
+
+  // Carrega a grade (csv_grades_profissionais, sincronizada diariamente) automaticamente
+  // ao entrar no módulo. A grade é a fonte canônica no banco — não depende do upload de
+  // laudos, então o badge "Grade" (status-only) preenche sozinho nas abas Saída/Ocup.
+  useEffect(() => {
+    if (gradeFetchedRef.current || cRows.length > 0) return
+    gradeFetchedRef.current = true
+    const rw = getRefWeek()
+    setGradeLoading(true)
+    setUploadError(null)
+    buscarGradeComoCSVRows(rw.inicio, rw.fim)
+      .then(gradeResult => {
+        if (gradeResult.length === 0) throw new Error("Nenhum registro encontrado para o período.")
+        setCRows(gradeResult)
+      })
+      .catch(e => {
+        gradeFetchedRef.current = false // permite nova tentativa (ex.: via upload de laudos)
+        setUploadError(e instanceof Error ? e.message : "Erro ao carregar a grade.")
+      })
+      .finally(() => setGradeLoading(false))
+  }, [cRows.length, setCRows])
 
   const handleLaudosFile = useCallback(async (file: File) => {
     const rw = getRefWeek()
@@ -38,15 +61,19 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
       const lResult = await parseXlsx<LaudoRow>(file)
       if (lResult.length === 0) throw new Error("Nenhuma linha encontrada no arquivo.")
       setLRows(lResult)
-      const gradeResult = await buscarGradeComoCSVRows(rw.inicio, rw.fim)
-      if (gradeResult.length === 0) throw new Error("Nenhum registro encontrado para o período.")
-      setCRows(gradeResult)
+      // Garante a grade caso o carregamento automático tenha falhado ou ainda não ocorrido.
+      if (cRows.length === 0) {
+        const gradeResult = await buscarGradeComoCSVRows(rw.inicio, rw.fim)
+        if (gradeResult.length === 0) throw new Error("Nenhum registro encontrado para o período.")
+        setCRows(gradeResult)
+        gradeFetchedRef.current = true
+      }
     } catch (e) {
       setUploadError(e instanceof Error ? e.message : "Erro ao processar arquivo.")
     } finally {
       setUploading(false)
     }
-  }, [setLRows, setCRows])
+  }, [cRows.length, setLRows, setCRows])
 
   const handleClear = useCallback(() => {
     setCRows([])
@@ -59,6 +86,7 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
       <CronogramaUploadBadges
         cRows={cRows}
         lRows={lRows}
+        gradeLoading={gradeLoading}
         loading={uploading}
         error={uploadError}
         onSelectFile={handleLaudosFile}
@@ -66,7 +94,7 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
       />
     )
     return () => setRightContent(null)
-  }, [cRows, lRows, uploading, uploadError, handleLaudosFile, handleClear, setRightContent])
+  }, [cRows, lRows, uploading, gradeLoading, uploadError, handleLaudosFile, handleClear, setRightContent])
 
   return <div>{children}</div>
 }

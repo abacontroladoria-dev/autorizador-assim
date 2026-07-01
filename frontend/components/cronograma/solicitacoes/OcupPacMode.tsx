@@ -488,6 +488,8 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
   const [selIdx, setSelIdx]         = useState<Record<string, Record<string, number>>>({})
   const [profSelIdx, setProfSelIdx] = useState<Record<string, number>>({})
   const [espSelIdx, setEspSelIdx]   = useState<Record<string, number>>({})
+  // Confirma que o profissional foi explicitamente escolhido no wizard multi-terapia
+  const [profConfirmed, setProfConfirmed] = useState<Set<string>>(() => new Set())
   // Proposals começam no estado "Proposta" (não analisadas).
   // O usuário aceita clicando no card da grade ou no checkbox do Col 1.
   const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
@@ -778,6 +780,14 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
 
   const selectedCount = buildSelectedSessoes().length
 
+  // Verdadeiro quando algum card selecionado tem múltiplas terapias sem wizard completo
+  const hasPendingEsp = Array.from(selectedIds).some(id => {
+    if (id.includes("|||vc|||")) return false
+    const s = sugestoes.find(x => x.id === id)
+    if (!s || s.espAlts.length === 0) return false
+    return espSelIdx[s.id] === undefined || !profConfirmed.has(s.id)
+  })
+
   const selectedByEsp: Record<string, number> = {}
   for (const id of selectedIds) {
     if (id.includes("|||vc|||")) {
@@ -806,6 +816,10 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     if (isDeficitSobre) return sel > 0 && (g.of + sel) > g.aut
     return (g.of + sel) > g.aut
   })
+  // Mesma fonte de verdade do painel "Quantidade de Sessões" — nenhuma lógica duplicada
+  const excessoEsps = new Set<string>(
+    pacAllEsp.filter(g => (g.of + (selectedByEsp[g.esp] || 0)) > g.aut).map(g => g.esp)
+  )
 
   return (
     <>
@@ -873,9 +887,10 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                         </td>
                         {isSession && dias.map(d => {
                           const cells = cMap[`${d}|||${slot}`] || []
+                          const cellHasExpanded = cells.some(c => c.sugestaoId && (expandedProfCardId === c.sugestaoId || expandedEspCardId === c.sugestaoId))
                           return (
-                            <td key={d} rowSpan={2} style={{ position: "relative" }}>
-                              <div style={{ position: "absolute", inset: "2px", display: "flex", flexDirection: "column", gap: "2px" }}>
+                            <td key={d} rowSpan={2} style={{ position: "relative", zIndex: cellHasExpanded ? 1 : "auto" }}>
+                              <div style={{ position: "absolute", inset: "2px", display: "flex", flexDirection: "column", gap: "2px", overflow: "visible" }}>
                               {cells.map((c, ci) => {
                                 const cs       = cSt(c.tipo)
                                 const isDark   = c.tipo === "supervDesloc" || c.tipo === "adminSuperv"
@@ -886,8 +901,6 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                 const isClickable    = (c.tipo === "proposta") && !!c.sugestaoId
                                 // isSel funciona para main cards E vComps: cada um tem sugestaoId único
                                 const isSel    = isClickable && selectedIds.has(c.sugestaoId!)
-                                const bg  = isSel ? "#dcfce7" : cs.bg
-                                const bd  = isSel ? "#16a34a" : cs.bd
                                 // Profissionais alternativos — só para main proposals (não vComp)
                                 const mainSug  = (isClickable && !isVCompCard) ? (sugestoes.find(x => x.id === c.sugestaoId) ?? null) : null
                                 const mainEd   = mainSug ? getActiveEspData(mainSug) : null
@@ -899,246 +912,192 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                 const espAltCount = Math.max(0, allEsps.length - 1)
                                 const isEspExpanded = expandedEspCardId === c.sugestaoId
                                 const curEspIdx   = mainSug ? (espSelIdx[mainSug.id] ?? 0) : 0
+                                // Wizard multi-terapia: estados derivados
+                                const espIsExplicitlySet = mainSug ? espSelIdx[mainSug.id] !== undefined : true
+                                const wizardComplete = mainSug
+                                  ? (allEsps.length > 1 && espIsExplicitlySet && profConfirmed.has(mainSug.id))
+                                  : false
+                                const espIsPending = mainSug ? (allEsps.length > 1 && !wizardComplete) : false
+                                const cardEsp = isVCompCard
+                                  ? (TERAPIA_TO_ESP[c.tP] ?? null)
+                                  : (mainEd?.esp ?? TERAPIA_TO_ESP[c.tP] ?? null)
+                                const isExcesso = isSel && cardEsp !== null && excessoEsps.has(cardEsp)
+                                // Cor do card: amarelo se pendente, vermelho se excesso, verde se selecionado, default caso contrário
+                                const bg  = espIsPending ? "#fefce8" : isExcesso ? "#fff1f2" : (isSel ? "#dcfce7" : cs.bg)
+                                const bd  = espIsPending ? "#fbbf24" : isExcesso ? "#fca5a5" : (isSel ? "#16a34a" : cs.bd)
+                                const isMultiEsp = !!(mainSug && allEsps.length > 1)
+                                const cardClickable = isClickable && (!isMultiEsp || wizardComplete)
                                 return (
                                   <div
                                     key={ci}
-                                    onClick={isClickable ? () => toggleSelected(c.sugestaoId!) : undefined}
+                                    onClick={cardClickable ? () => toggleSelected(c.sugestaoId!) : undefined}
                                     style={{
                                       background: bg,
                                       border: `1px solid ${isDisc ? "#f97316" : bd}`,
                                       borderRadius: "8px", padding: "5px 7px",
-                                      flex: isExpanded ? "none" : "1",
+                                      flex: (isExpanded || isEspExpanded) ? "none" : "1",
                                       boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "2px",
                                       outline: isDisc ? "2px solid #fed7aa" : "none",
-                                      cursor: isClickable ? "pointer" : "default",
+                                      cursor: cardClickable ? "pointer" : "default",
                                       position: "relative",
                                       opacity: isRecusadaCard ? 0.65 : 1,
-                                      zIndex: isExpanded ? 20 : "auto",
-                                      boxShadow: isExpanded ? "0 6px 24px rgba(0,0,0,.13)" : "none",
+                                      zIndex: (isExpanded || isEspExpanded) ? 20 : "auto",
+                                      boxShadow: (isExpanded || isEspExpanded) ? "0 6px 24px rgba(0,0,0,.13)" : "none",
                                       transition: "box-shadow 180ms ease",
                                     }}>
-                                    {/* Ícone de estado no canto superior direito */}
-                                    {isSel && !isExpanded && (
-                                      <span style={{ position: "absolute", top: "3px", right: "4px", fontSize: "10px", fontWeight: 900, color: "#16a34a", lineHeight: 1, pointerEvents: "none" }}>✓</span>
-                                    )}
-                                    {isRecusadaCard && (
-                                      <span style={{ position: "absolute", top: "2px", right: "4px", fontSize: "9px", lineHeight: 1, pointerEvents: "none", opacity: 0.7 }}>🚫</span>
-                                    )}
 
-                                    {/* Linha 1: terapia + pin unidade */}
-                                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "2px" }}>
-                                      <span style={{ fontSize: "10px", fontWeight: 600, color: isDark ? "white" : "#111827", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>
-                                        {c.tP}
-                                      </span>
-                                      <span style={{ fontSize: "8px", color: isDark ? "#d1d5db" : "#9ca3af", flexShrink: 0, whiteSpace: "nowrap", paddingRight: !isExpanded && (isSel || isRecusadaCard) ? "12px" : 0 }}>
-                                        📍 {c.unidade}
-                                      </span>
-                                    </div>
-
-                                    {/* Linha 2: profissional — visível só quando colapsado */}
-                                    {!isExpanded && (
-                                      <div style={{ fontSize: "11px", color: isDark ? "#d1d5db" : "#6b7280", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                        {fmtName(c.prof)}
-                                      </div>
-                                    )}
-
-
-                                    {/* Seção expandida: lista radio de profissionais */}
-                                    {altCount > 0 && isClickable && !isVCompCard && (
-                                      <div
-                                        data-prof-dropdown="true"
-                                        style={{
-                                          overflow: "hidden",
-                                          maxHeight: isExpanded ? `${(altCount + 1) * 26 + 8}px` : "0px",
-                                          opacity: isExpanded ? 1 : 0,
-                                          transition: "max-height 200ms ease-out, opacity 150ms ease-out",
-                                          display: "flex", flexDirection: "column", gap: "1px",
-                                          marginTop: isExpanded ? "3px" : "0",
-                                        }}
-                                        onClick={e => e.stopPropagation()}
-                                      >
-                                        {allProfs.map((p, i) => {
-                                          const isCurr = (profSelIdx[mainSug!.id] ?? 0) === i
-                                          return (
-                                            <button
-                                              key={i}
-                                              onClick={e => {
-                                                e.stopPropagation()
-                                                setProfSelIdx(prev => ({ ...prev, [mainSug!.id]: i }))
-                                                setExpandedProfCardId(null)
-                                              }}
-                                              style={{
-                                                display: "flex", alignItems: "center", gap: "5px",
-                                                padding: "3px 5px", borderRadius: "5px", border: "none",
-                                                background: isCurr ? "rgba(22,163,74,0.1)" : "transparent",
-                                                cursor: "pointer", fontFamily: "inherit",
-                                                fontSize: "11px", fontWeight: isCurr ? 600 : 400,
-                                                color: isCurr ? "#166534" : "#374151",
-                                                textAlign: "left", width: "100%",
-                                                transition: "background 100ms ease",
-                                              }}
-                                            >
-                                              <span style={{ fontSize: "8px", color: isCurr ? "#16a34a" : "#9ca3af", flexShrink: 0, lineHeight: 1 }}>
-                                                {isCurr ? "●" : "○"}
-                                              </span>
-                                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                                {fmtName(p.prof)}
-                                              </span>
-                                            </button>
-                                          )
-                                        })}
-                                      </div>
-                                    )}
-
-                                    {/* Seção expandida: lista radio de terapias elegíveis */}
-                                    {espAltCount > 0 && isClickable && !isVCompCard && (
-                                      <div
-                                        data-esp-dropdown="true"
-                                        style={{
-                                          overflow: "hidden",
-                                          maxHeight: isEspExpanded ? `${(espAltCount + 1) * 26 + 8}px` : "0px",
-                                          opacity: isEspExpanded ? 1 : 0,
-                                          transition: "max-height 200ms ease-out, opacity 150ms ease-out",
-                                          display: "flex", flexDirection: "column", gap: "1px",
-                                          marginTop: isEspExpanded ? "3px" : "0",
-                                        }}
-                                        onClick={e => e.stopPropagation()}
-                                      >
-                                        {allEsps.map((e, i) => {
-                                          const isCurr = curEspIdx === i
-                                          return (
-                                            <button
-                                              key={i}
-                                              onClick={evt => {
-                                                evt.stopPropagation()
-                                                setEspSelIdx(prev => ({ ...prev, [mainSug!.id]: i }))
-                                                setProfSelIdx(prev => ({ ...prev, [mainSug!.id]: 0 }))
-                                                setSelIdx(prev => ({ ...prev, [mainSug!.id]: {} }))
-                                                setExpandedEspCardId(null)
-                                              }}
-                                              style={{
-                                                display: "flex", alignItems: "center", gap: "5px",
-                                                padding: "3px 5px", borderRadius: "5px", border: "none",
-                                                background: isCurr ? "rgba(126,34,206,0.08)" : "transparent",
-                                                cursor: "pointer", fontFamily: "inherit",
-                                                fontSize: "11px", fontWeight: isCurr ? 600 : 400,
-                                                color: isCurr ? "#6b21a8" : "#374151",
-                                                textAlign: "left", width: "100%",
-                                                transition: "background 100ms ease",
-                                              }}
-                                            >
-                                              <span style={{ fontSize: "8px", color: isCurr ? "#7e22ce" : "#9ca3af", flexShrink: 0, lineHeight: 1 }}>
-                                                {isCurr ? "●" : "○"}
-                                              </span>
-                                              <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                                                {e.tP}
-                                              </span>
-                                            </button>
-                                          )
-                                        })}
-                                      </div>
-                                    )}
-
-                                    {isDisc && (
-                                      <div style={{ fontSize: "11px", fontWeight: 700, color: "#ea580c", marginTop: "2px", display: "flex", alignItems: "center", gap: "3px" }}>
-                                        ⚠ {c.unidade}
-                                      </div>
-                                    )}
-                                    {isDark && (
-                                      <div style={{ fontSize: "11px", fontWeight: 700, color: "#fbbf24", marginTop: "auto" }}>
-                                        {c.target ? `→ ${c.target}` : "→ verificar"}
-                                      </div>
-                                    )}
-
-                                    {/* Rodapé: status / trigger de alternativas + ✕/↺ */}
-                                    {!isDark && (cs.label || isClickable || isRecusadaCard) && (
-                                      <div style={{ fontSize: "10px", fontWeight: 700, marginTop: "auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "3px" }}>
-                                        {(altCount > 0 || espAltCount > 0) && isClickable && !isVCompCard ? (
-                                          <div style={{ display: "flex", alignItems: "center", gap: "3px", minWidth: 0 }}>
-                                            {altCount > 0 && (
-                                              <button
-                                                data-prof-dropdown="true"
-                                                onClick={e => {
-                                                  e.stopPropagation()
-                                                  setExpandedProfCardId(isExpanded ? null : c.sugestaoId!)
-                                                  setExpandedEspCardId(null)
-                                                }}
-                                                style={{
-                                                  display: "flex", alignItems: "center", gap: "2px", flexShrink: 0,
-                                                  fontSize: "10px", fontWeight: 700, color: "#0369a1",
-                                                  background: "none", border: "none", padding: 0,
-                                                  cursor: "pointer", fontFamily: "inherit", lineHeight: "1.4",
-                                                }}
-                                              >
-                                                <span style={{ fontSize: "7px", display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 180ms ease" }}>▼</span>
-                                                <span>{altCount === 1 ? "1 prof." : `${altCount} profs.`}</span>
-                                              </button>
+                                    {/* ── CARD TERAPIA ÚNICA (comportamento original inalterado) ── */}
+                                    {!isMultiEsp && (
+                                      <>
+                                        {isSel && !isExpanded && (
+                                          <span style={{ position: "absolute", top: "3px", right: "4px", fontSize: "10px", fontWeight: 900, color: isExcesso ? "#dc2626" : "#16a34a", lineHeight: 1, pointerEvents: "none" }}>{isExcesso ? "⚠" : "✓"}</span>
+                                        )}
+                                        {isRecusadaCard && (
+                                          <span style={{ position: "absolute", top: "2px", right: "4px", fontSize: "9px", lineHeight: 1, pointerEvents: "none", opacity: 0.7 }}>🚫</span>
+                                        )}
+                                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "2px" }}>
+                                          <span style={{ fontSize: "10px", fontWeight: 600, color: isDark ? "white" : "#111827", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{c.tP}</span>
+                                          <span style={{ fontSize: "8px", color: isDark ? "#d1d5db" : "#9ca3af", flexShrink: 0, whiteSpace: "nowrap", paddingRight: !isExpanded && (isSel || isRecusadaCard) ? "12px" : 0 }}>📍 {c.unidade}</span>
+                                        </div>
+                                        {!isExpanded && (
+                                          <div style={{ fontSize: "11px", color: isDark ? "#d1d5db" : "#6b7280", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fmtName(c.prof)}</div>
+                                        )}
+                                        {altCount > 0 && isClickable && !isVCompCard && (
+                                          <div data-prof-dropdown="true" style={{ overflow: "hidden", maxHeight: isExpanded ? `${(altCount + 1) * 26 + 8}px` : "0px", opacity: isExpanded ? 1 : 0, transition: "max-height 200ms ease-out, opacity 150ms ease-out", display: "flex", flexDirection: "column", gap: "1px", marginTop: isExpanded ? "3px" : "0" }} onClick={e => e.stopPropagation()}>
+                                            {allProfs.map((p, i) => {
+                                              const isCurr = (profSelIdx[mainSug!.id] ?? 0) === i
+                                              return (
+                                                <button key={i} onClick={e => { e.stopPropagation(); setProfSelIdx(prev => ({ ...prev, [mainSug!.id]: i })); setExpandedProfCardId(null) }}
+                                                  style={{ display: "flex", alignItems: "center", gap: "5px", padding: "3px 5px", borderRadius: "5px", border: "none", background: isCurr ? "rgba(22,163,74,0.1)" : "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: "11px", fontWeight: isCurr ? 600 : 400, color: isCurr ? "#166534" : "#374151", textAlign: "left", width: "100%", transition: "background 100ms ease" }}>
+                                                  <span style={{ fontSize: "8px", color: isCurr ? "#16a34a" : "#9ca3af", flexShrink: 0, lineHeight: 1 }}>{isCurr ? "●" : "○"}</span>
+                                                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fmtName(p.prof)}</span>
+                                                </button>
+                                              )
+                                            })}
+                                          </div>
+                                        )}
+                                        {isDisc && <div style={{ fontSize: "11px", fontWeight: 700, color: "#ea580c", marginTop: "2px", display: "flex", alignItems: "center", gap: "3px" }}>⚠ {c.unidade}</div>}
+                                        {isDark && <div style={{ fontSize: "11px", fontWeight: 700, color: "#fbbf24", marginTop: "auto" }}>{c.target ? `→ ${c.target}` : "→ verificar"}</div>}
+                                        {!isDark && (cs.label || isClickable || isRecusadaCard) && (
+                                          <div style={{ fontSize: "10px", fontWeight: 700, marginTop: "auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "3px" }}>
+                                            {altCount > 0 && isClickable && !isVCompCard ? (
+                                              <div style={{ display: "flex", alignItems: "center", gap: "3px", minWidth: 0 }}>
+                                                <button data-prof-dropdown="true" onClick={e => { e.stopPropagation(); setExpandedProfCardId(isExpanded ? null : c.sugestaoId!); setExpandedEspCardId(null) }}
+                                                  style={{ display: "flex", alignItems: "center", gap: "2px", flexShrink: 0, fontSize: "10px", fontWeight: 700, color: "#0369a1", background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", lineHeight: "1.4" }}>
+                                                  <span style={{ fontSize: "7px", display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 180ms ease" }}>▼</span>
+                                                  <span>{altCount === 1 ? "1 prof." : `${altCount} profs.`}</span>
+                                                </button>
+                                                {cs.label && <><span style={{ color: "#d1d5db", flexShrink: 0 }}>•</span><span style={{ color: c.tipo === "aceito" ? B.blue : "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cs.label}</span></>}
+                                              </div>
+                                            ) : isExcesso ? (
+                                              <span style={{ fontSize: "9px", fontWeight: 800, color: "#dc2626", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 5px", lineHeight: "1.6" }}>Acima do limite</span>
+                                            ) : cs.label ? (
+                                              <span style={{ color: c.tipo === "aceito" ? B.blue : "#374151" }}>{cs.label}</span>
+                                            ) : null}
+                                            {isClickable && c.sugestaoId && (
+                                              <button onClick={e => { e.stopPropagation(); const sid = isVCompCard ? c.sugestaoId!.slice(0, c.sugestaoId!.indexOf("|||vc|||")) : c.sugestaoId!; const sug = sugestoes.find(x => x.id === sid); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, acao: "recusar" }); setAcaoMotivo("") }}
+                                                style={{ fontSize: "9px", padding: "1px 6px", borderRadius: "3px", border: "1px solid #fca5a5", background: "#fee2e2", color: "#dc2626", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, lineHeight: "1.4", flexShrink: 0, marginLeft: "auto" }}>Recusar</button>
                                             )}
-                                            {espAltCount > 0 && (
+                                            {isRecusadaCard && c.sugestaoId && (
+                                              <button onClick={e => { e.stopPropagation(); const sid = c.sugestaoId!.includes("|||vc|||") ? c.sugestaoId!.slice(0, c.sugestaoId!.indexOf("|||vc|||")) : c.sugestaoId!; const sug = sugestoes.find(x => x.id === sid); if (sug) setSt(sug, null); onUndoRecusa(d, slot, c.tP, c.prof) }}
+                                                style={{ fontSize: "9px", padding: "1px 4px", borderRadius: "3px", border: "1px solid var(--border)", background: "var(--muted)", color: "var(--muted-foreground)", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, lineHeight: "1.4", flexShrink: 0 }}>↺</button>
+                                            )}
+                                          </div>
+                                        )}
+                                      </>
+                                    )}
+
+                                    {/* ── WIZARD MULTI-TERAPIA ── */}
+                                    {isMultiEsp && (
+                                      <>
+                                        {/* Estágio 1: Pendente — wizard fechado */}
+                                        {!isEspExpanded && !wizardComplete && (
+                                          <>
+                                            <span style={{ position: "absolute", top: "2px", right: "4px", fontSize: "9px", fontWeight: 900, color: "#92400e", lineHeight: 1, pointerEvents: "none" }}>⚠</span>
+                                            <div style={{ fontSize: "8px", color: "#9ca3af", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>📍 {c.unidade}</div>
+                                            <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: "3px" }}>
                                               <button
                                                 data-esp-dropdown="true"
-                                                onClick={e => {
-                                                  e.stopPropagation()
-                                                  setExpandedEspCardId(isEspExpanded ? null : c.sugestaoId!)
-                                                  setExpandedProfCardId(null)
-                                                }}
-                                                style={{
-                                                  display: "flex", alignItems: "center", gap: "2px", flexShrink: 0,
-                                                  fontSize: "10px", fontWeight: 700, color: "#7e22ce",
-                                                  background: "none", border: "none", padding: 0,
-                                                  cursor: "pointer", fontFamily: "inherit", lineHeight: "1.4",
-                                                }}
-                                              >
-                                                <span style={{ fontSize: "7px", display: "inline-block", transform: isEspExpanded ? "rotate(180deg)" : "none", transition: "transform 180ms ease" }}>▼</span>
-                                                <span>{espAltCount === 1 ? "1 terapia" : `${espAltCount} terapias`}</span>
+                                                onClick={e => { e.stopPropagation(); setExpandedEspCardId(c.sugestaoId!); setExpandedProfCardId(null) }}
+                                                style={{ fontSize: "9px", fontWeight: 700, color: "#92400e", background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: "4px", padding: "2px 4px", cursor: "pointer", fontFamily: "inherit", lineHeight: "1.4", textAlign: "center" }}>
+                                                ⚠ Escolher terapia
                                               </button>
+                                              <button
+                                                onClick={e => { e.stopPropagation(); const sug = sugestoes.find(x => x.id === c.sugestaoId!); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, acao: "recusar" }); setAcaoMotivo("") }}
+                                                style={{ fontSize: "9px", padding: "2px 4px", borderRadius: "3px", border: "1px solid #fca5a5", background: "#fee2e2", color: "#dc2626", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, lineHeight: "1.4", textAlign: "center" }}>
+                                                Recusar
+                                              </button>
+                                            </div>
+                                          </>
+                                        )}
+
+                                        {/* Estágio 2+3: Wizard aberto — escolha de terapia e profissional */}
+                                        {isEspExpanded && (
+                                          <div data-esp-dropdown="true" onClick={e => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                            <div style={{ fontSize: "9px", fontWeight: 800, color: "#374151", marginBottom: "1px" }}>Escolha uma terapia</div>
+                                            {allEsps.map((e, i) => {
+                                              const isCurr = espIsExplicitlySet && curEspIdx === i
+                                              return (
+                                                <button key={i}
+                                                  onClick={evt => { evt.stopPropagation(); setEspSelIdx(prev => ({ ...prev, [mainSug!.id]: i })); setProfSelIdx(prev => ({ ...prev, [mainSug!.id]: 0 })); setSelIdx(prev => ({ ...prev, [mainSug!.id]: {} })); setProfConfirmed(prev => { const s = new Set(prev); s.delete(mainSug!.id); return s }) }}
+                                                  style={{ display: "flex", alignItems: "center", gap: "5px", padding: "3px 5px", borderRadius: "5px", border: "none", background: isCurr ? "rgba(126,34,206,0.08)" : "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: "11px", fontWeight: isCurr ? 600 : 400, color: isCurr ? "#6b21a8" : "#374151", textAlign: "left", width: "100%", transition: "background 100ms ease" }}>
+                                                  <span style={{ fontSize: "8px", color: isCurr ? "#7e22ce" : "#9ca3af", flexShrink: 0, lineHeight: 1 }}>{isCurr ? "●" : "○"}</span>
+                                                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.tP}</span>
+                                                </button>
+                                              )
+                                            })}
+                                            {/* Estágio 3: lista de profissionais aparece após terapia escolhida */}
+                                            {espIsExplicitlySet && (
+                                              <>
+                                                <div style={{ borderTop: "1px solid #e5e7eb", margin: "2px 0" }} />
+                                                <div style={{ fontSize: "9px", fontWeight: 800, color: "#374151", marginBottom: "1px" }}>Escolha um profissional</div>
+                                                {allProfs.map((p, i) => {
+                                                  const isCurr = profConfirmed.has(mainSug!.id) && (profSelIdx[mainSug!.id] ?? 0) === i
+                                                  return (
+                                                    <button key={i}
+                                                      onClick={evt => { evt.stopPropagation(); setProfSelIdx(prev => ({ ...prev, [mainSug!.id]: i })); setProfConfirmed(prev => { const s = new Set(prev); s.add(mainSug!.id); return s }); setExpandedEspCardId(null) }}
+                                                      style={{ display: "flex", alignItems: "center", gap: "5px", padding: "3px 5px", borderRadius: "5px", border: "none", background: isCurr ? "rgba(22,163,74,0.1)" : "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: "11px", fontWeight: isCurr ? 600 : 400, color: isCurr ? "#166534" : "#374151", textAlign: "left", width: "100%", transition: "background 100ms ease" }}>
+                                                      <span style={{ fontSize: "8px", color: isCurr ? "#16a34a" : "#9ca3af", flexShrink: 0, lineHeight: 1 }}>{isCurr ? "●" : "○"}</span>
+                                                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fmtName(p.prof)}</span>
+                                                    </button>
+                                                  )
+                                                })}
+                                              </>
                                             )}
-                                            {cs.label && <>
-                                              <span style={{ color: "#d1d5db", flexShrink: 0 }}>•</span>
-                                              <span style={{ color: c.tipo === "aceito" ? B.blue : "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cs.label}</span>
-                                            </>}
                                           </div>
-                                        ) : (
-                                          cs.label ? (
-                                            <span style={{ color: c.tipo === "aceito" ? B.blue : "#374151" }}>
-                                              {cs.label}
-                                            </span>
-                                          ) : null
                                         )}
-                                        {/* Botão ✕ recusar */}
-                                        {isClickable && c.sugestaoId && (
-                                          <button
-                                            onClick={e => {
-                                              e.stopPropagation()
-                                              const sid = isVCompCard
-                                                ? c.sugestaoId!.slice(0, c.sugestaoId!.indexOf("|||vc|||"))
-                                                : c.sugestaoId!
-                                              const sug = sugestoes.find(x => x.id === sid)
-                                              if (!sug) return
-                                              const ae = getActiveEntry(sug)
-                                              setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, acao: "recusar" })
-                                              setAcaoMotivo("")
-                                            }}
-                                            style={{ fontSize: "9px", padding: "1px 6px", borderRadius: "3px", border: "1px solid #fca5a5", background: "#fee2e2", color: "#dc2626", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, lineHeight: "1.4", flexShrink: 0, marginLeft: "auto" }}
-                                          >Recusar</button>
+
+                                        {/* Estágio 4: Wizard concluído — layout normal + "Alterar terapia" */}
+                                        {!isEspExpanded && wizardComplete && (
+                                          <>
+                                            {isSel && (
+                                              <span style={{ position: "absolute", top: "3px", right: "4px", fontSize: "10px", fontWeight: 900, color: isExcesso ? "#dc2626" : "#16a34a", lineHeight: 1, pointerEvents: "none" }}>{isExcesso ? "⚠" : "✓"}</span>
+                                            )}
+                                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "2px" }}>
+                                              <span style={{ fontSize: "10px", fontWeight: 600, color: "#111827", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{c.tP}</span>
+                                              <span style={{ fontSize: "8px", color: "#9ca3af", flexShrink: 0, whiteSpace: "nowrap", paddingRight: isSel ? "12px" : 0 }}>📍 {c.unidade}</span>
+                                            </div>
+                                            <div style={{ fontSize: "11px", color: "#6b7280", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fmtName(c.prof)}</div>
+                                            {isDisc && <div style={{ fontSize: "11px", fontWeight: 700, color: "#ea580c", marginTop: "2px", display: "flex", alignItems: "center", gap: "3px" }}>⚠ {c.unidade}</div>}
+                                            <div style={{ fontSize: "10px", fontWeight: 700, marginTop: "auto", display: "flex", alignItems: "center", gap: "3px" }}>
+                                              {isExcesso && <span style={{ fontSize: "9px", fontWeight: 800, color: "#dc2626", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 5px", lineHeight: "1.6" }}>Acima do limite</span>}
+                                              <button
+                                                data-esp-dropdown="true"
+                                                onClick={e => { e.stopPropagation(); setProfConfirmed(prev => { const s = new Set(prev); s.delete(mainSug!.id); return s }); setExpandedEspCardId(c.sugestaoId!); setExpandedProfCardId(null) }}
+                                                style={{ fontSize: "9px", fontWeight: 700, color: "#7e22ce", background: "rgba(126,34,206,0.05)", border: "1px solid rgba(126,34,206,0.2)", borderRadius: "4px", padding: "1px 5px", cursor: "pointer", fontFamily: "inherit", lineHeight: "1.4" }}>
+                                                Alterar terapia
+                                              </button>
+                                              <button
+                                                onClick={e => { e.stopPropagation(); const sug = sugestoes.find(x => x.id === c.sugestaoId!); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, acao: "recusar" }); setAcaoMotivo("") }}
+                                                style={{ fontSize: "9px", padding: "1px 6px", borderRadius: "3px", border: "1px solid #fca5a5", background: "#fee2e2", color: "#dc2626", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, lineHeight: "1.4", flexShrink: 0, marginLeft: "auto" }}>
+                                                Recusar
+                                              </button>
+                                            </div>
+                                          </>
                                         )}
-                                        {/* Botão ↺ desfazer recusa */}
-                                        {isRecusadaCard && c.sugestaoId && (
-                                          <button
-                                            onClick={e => {
-                                              e.stopPropagation()
-                                              const sid = c.sugestaoId!.includes("|||vc|||")
-                                                ? c.sugestaoId!.slice(0, c.sugestaoId!.indexOf("|||vc|||"))
-                                                : c.sugestaoId!
-                                              const sug = sugestoes.find(x => x.id === sid)
-                                              if (sug) setSt(sug, null)
-                                              onUndoRecusa(d, slot, c.tP, c.prof)
-                                            }}
-                                            style={{ fontSize: "9px", padding: "1px 4px", borderRadius: "3px", border: "1px solid var(--border)", background: "var(--muted)", color: "var(--muted-foreground)", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, lineHeight: "1.4", flexShrink: 0 }}
-                                          >↺</button>
-                                        )}
-                                      </div>
+                                      </>
                                     )}
+
                                   </div>
                                 )
                               })}
@@ -1199,14 +1158,14 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                       Cancelar seleção
                     </button>
                     <button
-                      disabled={hasExcesso}
-                      onClick={() => !hasExcesso && handleAceitar()}
-                      style={{ padding: "8px 16px", borderRadius: "9px", border: "none", background: hasExcesso ? "#e5e7eb" : "#16a34a", color: hasExcesso ? "#9ca3af" : "white", cursor: hasExcesso ? "not-allowed" : "pointer", fontFamily: "inherit", fontWeight: 800, fontSize: "12px", boxShadow: hasExcesso ? "none" : "0 2px 8px rgba(22,163,74,0.30)" }}>
+                      disabled={hasExcesso || hasPendingEsp}
+                      onClick={() => !hasExcesso && !hasPendingEsp && handleAceitar()}
+                      style={{ padding: "8px 16px", borderRadius: "9px", border: "none", background: (hasExcesso || hasPendingEsp) ? "#e5e7eb" : "#16a34a", color: (hasExcesso || hasPendingEsp) ? "#9ca3af" : "white", cursor: (hasExcesso || hasPendingEsp) ? "not-allowed" : "pointer", fontFamily: "inherit", fontWeight: 800, fontSize: "12px", boxShadow: (hasExcesso || hasPendingEsp) ? "none" : "0 2px 8px rgba(22,163,74,0.30)" }}>
                       Aceitar alterações ({n})
                     </button>
                   </div>
-                  <div style={{ fontSize: "10px", color: hasExcesso ? "#dc2626" : "var(--muted-foreground)", fontWeight: hasExcesso ? 700 : 400 }}>
-                    {hasExcesso ? "⚠ Limite ultrapassado — desmarque sessões em excesso." : "As alterações só serão aplicadas após a confirmação."}
+                  <div style={{ fontSize: "10px", color: hasExcesso ? "#dc2626" : hasPendingEsp ? "#d97706" : "var(--muted-foreground)", fontWeight: (hasExcesso || hasPendingEsp) ? 700 : 400 }}>
+                    {hasExcesso ? "⚠ Limite ultrapassado — desmarque sessões em excesso." : hasPendingEsp ? "⚠ Selecione a terapia de todas as sugestões antes de continuar." : "As alterações só serão aplicadas após a confirmação."}
                   </div>
                 </div>
               </div>
