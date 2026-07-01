@@ -7,7 +7,7 @@ import { exportBase } from "@/lib/cronograma/xlsx"
 import { useCronogramaData, genConfId } from "@/contexts/CronogramaDataContext"
 import { RecusadosTab } from "./RecusadosTab"
 import { InviavelTab } from "./InviavelTab"
-import type { AlgorithmResult, Sugestao, WaMap, WaStatus, StatusMap, CsvRow, OpcaoEstrategia, MovimentoSessao, AfetadaItem, SessPacItem, AnaliseResult, StatusEntry, OpcaoSwap, OpcaoDiaMigracao } from "@/types/cronograma"
+import type { AlgorithmResult, Sugestao, WaMap, WaStatus, StatusMap, CsvRow, OpcaoEstrategia, MovimentoSessao, AfetadaItem, SessPacItem, AnaliseResult, StatusEntry, OpcaoSwap, OpcaoDiaMigracao, RecItem, InvItem } from "@/types/cronograma"
 import type { AceitePacBundle, AceiteSessao, ConfItem, SlotStatus } from "@/types/acompanhamento"
 import { SaidaCronModal } from "@/components/cronograma/solicitacoes/SaidaCronModal"
 import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
@@ -67,17 +67,81 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
       })
   }, [waMap, res])
 
-  const aguardandoSaidaItems = Object.entries(statusMap).filter(([, v]) => v.status === "aguardando")
+  const aguardandoSaidaItems = Object.entries(statusMap).filter(([, v]) => v.status === "aguardando" || v.status === "pendente")
   const aguardandoSaidaCount = aguardandoSaidaItems.length
   const aguardandoProfItems = Object.entries(profMap).filter(([, v]) => v === "acompanhamento")
   const aguardandoPacBundles = pacBundles.filter(b => b.status === "pendente")
   const aguardandoCount = aguardandoOcup.length + aguardandoSaidaCount + aguardandoProfItems.length + aguardandoPacBundles.length
 
+  // Itens de saida_aceites que não foram propagados para conf/rec/inv (ex: processados por outro usuário)
+  const saidaConfDerived = useMemo((): ConfItem[] => (
+    Object.entries(statusMap)
+      .filter(([, v]) => v.status === "resolvido")
+      .map(([key, v]) => {
+        const [pac, dia, hora, terapia] = key.split("|||")
+        const [profRes, diaRes, horaRes] = (v.slotReservado || "|||").split("|||")
+        return {
+          id: `saida_${key}`,
+          pac,
+          prof: profRes || "",
+          esp: terapia,
+          unidade: v.afetada?.unidade || "",
+          dia: diaRes || dia,
+          hora: horaRes || hora,
+          origem: "Saída Profissional",
+          registradoEm: v.atualizadoEm ? new Date(v.atualizadoEm).toLocaleDateString("pt-BR") : "—",
+          obs: v.obsAceite,
+        }
+      })
+      .filter(item => !conf.some(c => c.pac === item.pac && c.dia === item.dia && c.hora === item.hora && c.esp === item.esp))
+  ), [statusMap, conf])
+
+  const saidaRecDerived = useMemo((): RecItem[] => (
+    Object.entries(statusMap)
+      .filter(([, v]) => v.status === "recusado")
+      .map(([key, v]) => {
+        const [pac, dia, hora, terapia] = key.split("|||")
+        const firstSlot = (v.slotReservado || "").split(";;")[0] || ""
+        const profRes = firstSlot.split("|||")[0] || ""
+        return {
+          paciente: pac,
+          profissional: profRes,
+          especialidade: terapia,
+          unidade: v.afetada?.unidade || "",
+          dia,
+          hora,
+          registradoEm: v.atualizadoEm ? new Date(v.atualizadoEm).toLocaleDateString("pt-BR") : "—",
+          obs: v.obsAceite,
+        }
+      })
+      .filter(item => !rec.some(r => r.paciente === item.paciente && r.dia === item.dia && r.hora === item.hora))
+  ), [statusMap, rec])
+
+  const saidaInvDerived = useMemo((): InvItem[] => (
+    Object.entries(statusMap)
+      .filter(([, v]) => v.status === "sem_solucao")
+      .map(([key, v]) => {
+        const [pac, dia, hora] = key.split("|||")
+        return {
+          paciente: pac,
+          motivo: v.obsAceite || "Sem solução encontrada",
+          dia,
+          hora,
+          registradoEm: v.atualizadoEm ? new Date(v.atualizadoEm).toLocaleDateString("pt-BR") : "—",
+        }
+      })
+      .filter(item => !inv.some(i => i.paciente === item.paciente && i.dia === item.dia && i.hora === item.hora))
+  ), [statusMap, inv])
+
+  const allConf = useMemo(() => [...conf, ...saidaConfDerived], [conf, saidaConfDerived])
+  const allRec  = useMemo(() => [...rec,  ...saidaRecDerived],  [rec,  saidaRecDerived])
+  const allInv  = useMemo(() => [...inv,  ...saidaInvDerived],  [inv,  saidaInvDerived])
+
   const SUBS: { key: Sub; label: string; count: number }[] = [
     { key: "aguardando",  label: "Aguardando Resposta", count: aguardandoCount },
-    { key: "confirmados", label: "Confirmados",          count: conf.length },
-    { key: "recusados",   label: "Recusados",            count: rec.length },
-    { key: "inviavel",    label: "Inviáveis",             count: inv.length },
+    { key: "confirmados", label: "Confirmados",          count: allConf.length },
+    { key: "recusados",   label: "Recusados",            count: allRec.length },
+    { key: "inviavel",    label: "Inviáveis",             count: allInv.length },
   ]
 
   function handleOcupAceito(key: string, sug: { pac: string; prof: string; tP?: string; esp?: string; unidade?: string; dia?: string; hora?: string } | null) {
@@ -429,16 +493,16 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
       )}
 
       {sub === "confirmados" && (
-        <ConfirmadosTab conf={conf} onRemove={i => persistConf(conf.filter((_, j) => j !== i))} />
+        <ConfirmadosTab conf={allConf} onRemove={i => { if (i < conf.length) persistConf(conf.filter((_, j) => j !== i)) }} />
       )}
       {sub === "recusados" && (
-        <RecusadosTab rec={rec} inv={inv} waMap={waMap}
-          onRemove={i => sRec(rec.filter((_, j) => j !== i))}
+        <RecusadosTab rec={allRec} inv={allInv} waMap={waMap}
+          onRemove={i => { if (i < rec.length) sRec(rec.filter((_, j) => j !== i)) }}
           onExport={() => exportBase(rec, inv, waMap)} />
       )}
       {sub === "inviavel" && (
-        <InviavelTab inv={inv} rec={rec} waMap={waMap}
-          onRemove={i => sInv(inv.filter((_, j) => j !== i))}
+        <InviavelTab inv={allInv} rec={allRec} waMap={waMap}
+          onRemove={i => { if (i < inv.length) sInv(inv.filter((_, j) => j !== i)) }}
           onExport={() => exportBase(rec, inv, waMap)} />
       )}
 
