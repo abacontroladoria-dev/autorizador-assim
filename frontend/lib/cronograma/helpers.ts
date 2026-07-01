@@ -1,5 +1,6 @@
 import { B, HORAS_GRID, normTxt } from "./constants"
-import type { Sugestao } from "@/types/cronograma"
+import type { CsvRow, Sugestao } from "@/types/cronograma"
+import type { ConfItem } from "@/types/acompanhamento"
 
 // ─── TEMPO ────────────────────────────────────────────────────────────────────
 
@@ -237,5 +238,24 @@ export function getRefWeek(): { inicio: string; fim: string; label: string } {
     fim: fri.toISOString().slice(0, 10),
     label: `${fmtDate(nm)} a ${fmtDate(fri)}`,
   }
+}
+
+// ─── RESERVAS PENDENTES (CRON-008) ────────────────────────────────────────────
+
+/** Uma Reserva Pendente é considerada implantada assim que a grade oficial (cRows)
+ * já contém a mesma sessão Agendada — usada tanto para tirar o aviso de
+ * sincronização quanto para o efeito automático em CronogramaDataContext. */
+export function isReservaImplantada(
+  item: Pick<ConfItem, "pac" | "prof" | "esp" | "dia" | "hora">,
+  cRows: CsvRow[],
+): boolean {
+  return cRows.some(r =>
+    r["Nome Favorecido"] === item.pac &&
+    r["Status do Agendamento"] === "Agendado" &&
+    r["Dia da Semana"] === item.dia &&
+    r["Profissional"] === item.prof &&
+    r["Terapia"] === item.esp &&
+    String(r.HI_str || "") === item.hora,
+  )
 }
 

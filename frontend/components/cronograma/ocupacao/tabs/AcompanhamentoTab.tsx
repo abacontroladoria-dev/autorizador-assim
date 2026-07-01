@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { B, SK_SAIDA, HORAS_GRID, DIAS_LIST } from "@/lib/cronograma/constants"
-import { waKey, fmtName } from "@/lib/cronograma/helpers"
+import { waKey, fmtName, isReservaImplantada } from "@/lib/cronograma/helpers"
 import { exportBase } from "@/lib/cronograma/xlsx"
 import { useCronogramaData, genConfId } from "@/contexts/CronogramaDataContext"
 import { RecusadosTab } from "./RecusadosTab"
@@ -16,6 +16,14 @@ const SLOT_META: Record<SlotStatus, { label: string; bg: string; c: string; bd: 
   confirmado: { label: "Confirmou",  bg: "#dcfce7", c: "#14532d", bd: "#86efac" },
   recusado:   { label: "Recusou",    bg: "#fee2e2", c: "#7f1d1d", bd: "#fca5a5" },
   inviavel:   { label: "Inviável",   bg: "var(--muted)", c: "var(--muted-foreground)", bd: "var(--border)" },
+}
+
+// CRON-008: itens derivados de uma Reserva Pendente (pacBundles) carregam esse
+// prefixo no id — não existem como linha própria em `conf` (ver pacConfDerived).
+// É o único jeito de distinguir a origem sem precisar de outra flag.
+const RESERVA_PENDENTE_PREFIX = "pacres_"
+function isReservaPendenteItem(c: ConfItem): boolean {
+  return c.id.startsWith(RESERVA_PENDENTE_PREFIX)
 }
 
 interface Props {
@@ -133,9 +141,49 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
       .filter(item => !inv.some(i => i.paciente === item.paciente && i.dia === item.dia && i.hora === item.hora))
   ), [statusMap, inv])
 
-  const allConf = useMemo(() => [...conf, ...saidaConfDerived], [conf, saidaConfDerived])
+  // CRON-008: Reserva Pendente (Ocp. Paciente) não é gravada em `conf` — pacBundles
+  // é a única fonte de verdade. Aqui só derivamos uma representação de leitura para
+  // a aba Confirmados, no mesmo padrão de saidaConfDerived (sem duplicar estado).
+  const pacConfDerived = useMemo((): ConfItem[] => (
+    pacBundles
+      .filter(b => b.status === "confirmado")
+      .flatMap(b => b.sessoes.map(s => ({
+        id: `${RESERVA_PENDENTE_PREFIX}${b.id}|||${s.dia}|||${s.hora}`,
+        pac: b.pac,
+        prof: s.prof,
+        esp: s.tP,
+        unidade: s.unidade,
+        dia: s.dia,
+        hora: s.hora,
+        origem: "Ocp. Paciente",
+        registradoEm: new Date(b.ts).toLocaleDateString("pt-BR"),
+      })))
+  ), [pacBundles])
+
+  const allConf = useMemo(() => [...conf, ...saidaConfDerived, ...pacConfDerived], [conf, saidaConfDerived, pacConfDerived])
   const allRec  = useMemo(() => [...rec,  ...saidaRecDerived],  [rec,  saidaRecDerived])
   const allInv  = useMemo(() => [...inv,  ...saidaInvDerived],  [inv,  saidaInvDerived])
+
+  // CRON-008: remover um Confirmado derivado de Reserva Pendente precisa reverter a
+  // implantação na origem — pacBundles é a única fonte de verdade, então a remoção
+  // acontece ali (removendo a sessão do bundle, ou o bundle inteiro se for a última).
+  // Itens derivados de Saída Profissional seguem read-only aqui, como já era.
+  function handleRemoverConfirmado(item: ConfItem) {
+    if (isReservaPendenteItem(item)) {
+      const sep = item.id.indexOf("|||")
+      const bundleId = item.id.slice(RESERVA_PENDENTE_PREFIX.length, sep)
+      const atualizados = pacBundles
+        .map(b => b.id === bundleId
+          ? { ...b, sessoes: b.sessoes.filter(s => !(s.dia === item.dia && s.hora === item.hora && s.prof === item.prof && s.tP === item.esp)) }
+          : b)
+        .filter(b => b.id !== bundleId || b.sessoes.length > 0)
+      persistPacBundles(atualizados)
+      return
+    }
+    if (item.id.startsWith("saida_")) return
+    const idx = conf.findIndex(c => c.id === item.id)
+    if (idx !== -1) persistConf(conf.filter((_, j) => j !== idx))
+  }
 
   const SUBS: { key: Sub; label: string; count: number }[] = [
     { key: "aguardando",  label: "Aguardando Resposta", count: aguardandoCount },
@@ -246,9 +294,11 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     }))
     if (!bundle) return
     const d = hoje()
-    if (status === "confirmado")
-      persistConf([...conf, ...bundle.sessoes.map(s => ({ id: genConfId(), pac: bundle.pac, prof: s.prof, esp: s.tP, unidade: s.unidade, dia: s.dia, hora: s.hora, origem: "Ocp. Paciente", registradoEm: d }))])
-    else if (status === "recusado")
+    // CRON-008: "confirmado" não grava mais em conf — o bundle (agora com
+    // status "confirmado") já é surfaced na aba Confirmados via pacConfDerived.
+    // Gravar aqui também duplicaria a linha (uma real + uma derivada) e reabriria
+    // o mesmo problema de duas fontes de verdade para a mesma reserva.
+    if (status === "recusado")
       sRec([...rec, ...bundle.sessoes.map(s => ({ paciente: bundle.pac, profissional: s.prof, especialidade: s.tP, unidade: s.unidade, dia: s.dia, hora: s.hora, registradoEm: d }))])
     else if (status === "inviavel")
       sInv([...inv, ...bundle.sessoes.map(s => ({ paciente: bundle.pac, motivo: s.tP, dia: s.dia, hora: s.hora, registradoEm: d }))])
@@ -493,7 +543,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
       )}
 
       {sub === "confirmados" && (
-        <ConfirmadosTab conf={allConf} onRemove={i => { if (i < conf.length) persistConf(conf.filter((_, j) => j !== i)) }} />
+        <ConfirmadosTab conf={allConf} cRows={cRows} onRemove={handleRemoverConfirmado} />
       )}
       {sub === "recusados" && (
         <RecusadosTab rec={allRec} inv={allInv} waMap={waMap}
@@ -563,8 +613,8 @@ function InviavelModal({ pac, motivo, onMotivoChange, onConfirmar, onClose }: {
   )
 }
 
-function ConfirmadosTab({ conf, onRemove }: { conf: ConfItem[]; onRemove: (i: number) => void }) {
-  const [removIdx, setRemovIdx] = useState<number | null>(null)
+function ConfirmadosTab({ conf, cRows, onRemove }: { conf: ConfItem[]; cRows: CsvRow[]; onRemove: (item: ConfItem) => void }) {
+  const [removendo, setRemovendo] = useState<ConfItem | null>(null)
   return (
     <>
     <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", boxShadow: "0 1px 4px rgba(0,0,0,.06)", padding: "16px" }}>
@@ -588,8 +638,11 @@ function ConfirmadosTab({ conf, onRemove }: { conf: ConfItem[]; onRemove: (i: nu
               </tr>
             </thead>
             <tbody>
-              {conf.map((c, i) => (
-                <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
+              {conf.map((c, i) => {
+                const isReservaPendente = isReservaPendenteItem(c)
+                const aguardandoSync = isReservaPendente && !isReservaImplantada(c, cRows)
+                return (
+                <tr key={c.id || i} style={{ borderTop: "1px solid var(--border)" }}>
                   <td style={{ padding: "8px 12px", fontWeight: 700, color: B.navy }}>{c.pac}</td>
                   <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontSize: "12px" }}>{fmtName(c.prof)}</td>
                   <td style={{ padding: "8px 12px" }}>
@@ -598,30 +651,45 @@ function ConfirmadosTab({ conf, onRemove }: { conf: ConfItem[]; onRemove: (i: nu
                   <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontSize: "12px" }}>{c.dia}</td>
                   <td style={{ padding: "8px 12px", fontWeight: 700, fontSize: "12px" }}>{c.hora}</td>
                   <td style={{ padding: "8px 12px" }}>
-                    <span style={{ background: B.limeLt, color: "#4d7c0f", borderRadius: "999px", padding: "2px 8px", fontSize: "11px", border: `1px solid ${B.lime}88` }}>{c.origem}</span>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "4px" }}>
+                      <span style={{ background: B.limeLt, color: "#4d7c0f", borderRadius: "999px", padding: "2px 8px", fontSize: "11px", border: `1px solid ${B.lime}88` }}>{c.origem}</span>
+                      {aguardandoSync && (
+                        <span
+                          title="Sessão reservada imediatamente pelo coordenador — ainda não refletida na grade oficial."
+                          style={{ background: "#f0fdf4", color: "#15803d", borderRadius: "999px", padding: "2px 8px", fontSize: "11px", border: "1px dashed #16a34a", fontWeight: 700 }}
+                        >
+                          🔒 Reservado · ⏳ Aguardando sincronização
+                        </span>
+                      )}
+                    </div>
                   </td>
                   <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontSize: "11px" }}>{c.registradoEm}</td>
                   <td style={{ padding: "8px 12px", maxWidth: "180px", fontSize: "12px", color: "var(--muted-foreground)", fontStyle: c.obs ? "italic" : "normal" }}>
                     {c.obs ? `"${c.obs}"` : "—"}
                   </td>
                   <td style={{ padding: "8px 12px" }}>
-                    <button onClick={() => setRemovIdx(i)} style={{ fontSize: "11px", color: "#16a34a", background: "none", border: "none", cursor: "pointer" }}>remover</button>
+                    <button onClick={() => setRemovendo(c)} style={{ fontSize: "11px", color: "#16a34a", background: "none", border: "none", cursor: "pointer" }}>remover</button>
                   </td>
                 </tr>
-              ))}
+                )
+              })}
             </tbody>
           </table>
         </div>
       )}
     </div>
-    {removIdx !== null && (
+    {removendo && (
       <ConfirmDialog
         title="Remover registro?"
-        description="O registro será removido da lista de confirmados."
+        description={
+          isReservaPendenteItem(removendo)
+            ? "Isso reverte a implantação: a sessão deixa de estar reservada, volta a aparecer como sugestão para este paciente e a vaga fica disponível para outros."
+            : "O registro será removido da lista de confirmados."
+        }
         confirmLabel="Remover"
         confirmColor="#dc2626"
-        onConfirm={() => { onRemove(removIdx); setRemovIdx(null) }}
-        onCancel={() => setRemovIdx(null)}
+        onConfirm={() => { onRemove(removendo); setRemovendo(null) }}
+        onCancel={() => setRemovendo(null)}
       />
     )}
     </>

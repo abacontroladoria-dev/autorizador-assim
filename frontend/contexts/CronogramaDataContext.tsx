@@ -565,7 +565,10 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
     })()
   }, [])
 
-  // Grava itens confirmados — apenas insere novos (não deleta)
+  // Grava itens confirmados — upsert de tudo (reflete updates, ex.: reservaPendente
+  // virando implantada) e apaga da tabela os que saíram da lista (ex.: bundle
+  // cancelado/recusado desfazendo uma Reserva Pendente) — mesma estratégia de
+  // persistPacBundles, para não deixar linhas órfãs que ressuscitam no próximo load.
   const persistConf = useCallback((next: ConfItem[]) => {
     const prev = confRef.current
     setConf(next)
@@ -574,17 +577,26 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
     if (acompTableMissing) return
 
     const prevIds = new Set(prev.map(c => c.id))
-    const novas = next.filter(c => c.id && !prevIds.has(c.id))
-    if (!novas.length) return
+    const nextIds = new Set(next.map(c => c.id))
+    const toUpsert = next.filter(c => c.id)
+    const toDelete = [...prevIds].filter(id => !nextIds.has(id))
+    if (!toUpsert.length && !toDelete.length) return
 
     ;(async () => {
       try {
         const sb = getSupabaseClient()
         const { data: { user } } = await sb.auth.getUser()
         const nowIso = new Date().toISOString()
-        const rows = novas.map(c => ({ id: c.id, dados: c, atualizado_por: user?.id ?? null, atualizado_em: nowIso }))
-        const { error } = await sb.from("acomp_conf").upsert(rows, { onConflict: "id" })
-        if (error) throw error
+
+        if (toUpsert.length) {
+          const rows = toUpsert.map(c => ({ id: c.id, dados: c, atualizado_por: user?.id ?? null, atualizado_em: nowIso }))
+          const { error } = await sb.from("acomp_conf").upsert(rows, { onConflict: "id" })
+          if (error) throw error
+        }
+        if (toDelete.length) {
+          const { error } = await sb.from("acomp_conf").delete().in("id", toDelete)
+          if (error) throw error
+        }
       } catch (e) {
         const msg = (e as Error).message || ""
         if (isAcompTableError(msg)) { acompTableMissing = true; setSaveError(ACOMP_OFFLINE_MSG) }

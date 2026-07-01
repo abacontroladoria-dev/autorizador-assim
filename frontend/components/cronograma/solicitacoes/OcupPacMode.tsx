@@ -1,6 +1,7 @@
 "use client"
 
 import * as XLSX from "xlsx"
+import toast from "react-hot-toast"
 import { type CSSProperties, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import {
   ABA_EXIB_PSICO_NAMES, B, DIAS_LIST, DIAS_ORD, EXCLUIR_OCUP, EXIB_NOME,
@@ -11,6 +12,7 @@ import {
   shouldShowSessionUnit, unidadeBadgeText,
 } from "@/lib/cronograma/helpers"
 import { UnitHeaderBadges, CronoGlobalUnitBadge } from "@/components/cronograma/ui/UnitBadges"
+import { ConfirmarImplantacaoModal } from "./ConfirmarImplantacaoModal"
 import type { CsvRow, LaudoRow, CfgState, RecItem, InvItem } from "@/types/cronograma"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 
@@ -196,6 +198,13 @@ function buildSugestoes(
     if (!dayHours[d]) dayHours[d] = new Set()
     dayHours[d].add(canonical)
   }
+  // CRON-008: slots já reservados (implantação imediata) por OUTROS pacientes — vagas
+  // ainda "Livre" no CSV mas comprometidas, não podem ser sugeridas para ninguém mais.
+  const slotsReservadosOutros = new Set<string>()
+  for (const bundle of aceites) {
+    if (bundle.pac === pac || bundle.status !== "confirmado") continue
+    for (const s of bundle.sessoes) slotsReservadosOutros.add(`${s.prof}|||${s.dia}|||${s.hora}`)
+  }
   // Vagas comprometidas: sessões aguardando ou confirmadas que ainda não estão no agend
   for (const bundle of aceites) {
     if (bundle.pac !== pac) continue
@@ -263,6 +272,7 @@ function buildSugestoes(
     if (!isTurnoOk(h)) continue
     const canonical = fm(h)
     if (!canonical) continue
+    if (slotsReservadosOutros.has(`${r.Profissional}|||${r["Dia da Semana"]}|||${canonical}`)) continue
     const dk = `${r["Dia da Semana"]}|||${h}|||${r.Terapia}|||${r.Profissional}`
     if (seenFree.has(dk)) continue
     seenFree.add(dk)
@@ -468,11 +478,14 @@ interface TodasSugestoesModalProps {
   stOf: (s: Sugestao) => Status | null
   setSt: (s: Sugestao, st: Status | null) => void
   estrategia: Estrategia; setEstrategia: (e: Estrategia) => void
-  onAceitar: (bundle: { sessoes: AceiteSessao[] }) => void
+  onAceitar: (bundle: { sessoes: AceiteSessao[]; beforeCount: number }) => void
   onInviavel: (sessoes: AceiteSessao[], motivo: string) => void
   onAcaoDireta: (sessoes: AceiteSessao[], status: "pendente" | "recusado" | "inviavel", motivo?: string) => void
   recusadasSet: Set<string>
   onUndoRecusa: (dia: string, hora: string, tP: string, prof: string) => void
+  /** CRON-008: sessões já reservadas (implantação imediata) deste paciente — exibidas
+   * diretamente na grade como "Reservado", fora do fluxo normal de sugestões. */
+  reservasConfirmadas: AceiteSessao[]
 }
 
 export interface TodasSugestoesModalHandle {
@@ -483,7 +496,7 @@ export interface TodasSugestoesModalHandle {
 const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoesModalProps>(function TodasSugestoesModal({
   pac, conv, cRows, sugestoes, pacGaps, pacAllEsp, stOf, setSt,
   estrategia, setEstrategia, onAceitar, onInviavel, onAcaoDireta,
-  recusadasSet, onUndoRecusa,
+  recusadasSet, onUndoRecusa, reservasConfirmadas,
 }: TodasSugestoesModalProps, ref: React.Ref<TodasSugestoesModalHandle>) {
   const [selIdx, setSelIdx]         = useState<Record<string, Record<string, number>>>({})
   const [profSelIdx, setProfSelIdx] = useState<Record<string, number>>({})
@@ -613,8 +626,10 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
   function handleAceitar() {
     const sessoes = buildSelectedSessoes()
     if (!sessoes.length) return
-    onAceitar({ sessoes })
-    setSelectedIds(new Set())
+    // CRON-008: não aplica nem limpa a seleção aqui — o pai abre o modal premium de
+    // confirmação; a seleção só é limpa (via ref.clearAll) após a implantação ser
+    // efetivamente confirmada, permitindo cancelar sem perder o que foi selecionado.
+    onAceitar({ sessoes, beforeCount: sessPac.length })
   }
 
   const sessPac = useMemo(() => {
@@ -640,9 +655,16 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     return res
   }, [pac, cRows])
 
+  // CRON-008: reservas confirmadas que ainda não apareceram sincronizadas em cRows —
+  // usado pelo painel lateral para o aviso "aguardando sincronização".
+  const reservaPendenteCount = useMemo(() => {
+    const implantadas = new Set(sessPac.map(s => `${s.dia}|||${s.hora}|||${s.tP}|||${s.prof}`))
+    return reservasConfirmadas.filter(s => !implantadas.has(`${s.dia}|||${s.hora}|||${s.tP}|||${s.prof}`)).length
+  }, [reservasConfirmadas, sessPac])
+
   type CellInfo = {
     tP: string; tE?: string; prof: string
-    tipo: "proposta" | "aceito" | "exist" | "adminSuperv" | "adminWarn" | "supervDesloc" | "recusada"
+    tipo: "proposta" | "aceito" | "exist" | "adminSuperv" | "adminWarn" | "supervDesloc" | "recusada" | "reservado"
     unidade: string; target?: string
     sugestaoId?: string
     isVComp?: boolean
@@ -657,10 +679,24 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     }
   }
 
+  // CRON-008: reservas já implantadas (aguardando sincronização) — não são mais
+  // sugestões (buildSugestoes já as bloqueia via dayHours), entram direto na grade
+  // como "Reservado": não clicáveis, sem opção de trocar terapia ou remover.
+  for (const s of reservasConfirmadas) {
+    const k = `${s.dia}|||${s.hora}`
+    if (!cMap[k]) cMap[k] = []
+    if (!cMap[k].some(x => x.tP === s.tP && x.prof === s.prof)) {
+      cMap[k].push({ tP: s.tP, prof: s.prof, tipo: "reservado", unidade: s.unidade })
+    }
+  }
+
   // Todos os cards de proposta sempre visíveis na grade — o estado visual muda, não a presença.
   // mainSlots registra todos os slots principais para impedir que vComps os sobrescrevam.
   const mainSlots = new Set<string>()
   for (const s of sugestoes) {
+    mainSlots.add(`${s.dia}|||${s.hora}`)
+  }
+  for (const s of reservasConfirmadas) {
     mainSlots.add(`${s.dia}|||${s.hora}`)
   }
   for (const s of sugestoes) {
@@ -775,6 +811,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     if (tipo === "aceito")       return { bg: B.blueLt,  bd: B.blue,    label: "Aceito"   }
     if (tipo === "proposta")     return { bg: B.blueLt,  bd: B.blue,    label: null       }
     if (tipo === "recusada")     return { bg: "#fff5f5", bd: "#fca5a5", label: null       }
+    if (tipo === "reservado")    return { bg: "#f0fdf4", bd: "#16a34a", label: "🔒 Reservado" }
     return                              { bg: "#f8fafc", bd: "#e2e8f0", label: null       }
   }
 
@@ -933,7 +970,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                     onClick={cardClickable ? () => toggleSelected(c.sugestaoId!) : undefined}
                                     style={{
                                       background: bg,
-                                      border: `1px solid ${isDisc ? "#f97316" : bd}`,
+                                      border: `1px ${c.tipo === "reservado" ? "dashed" : "solid"} ${isDisc ? "#f97316" : bd}`,
                                       borderRadius: "8px", padding: "5px 7px",
                                       flex: (isExpanded || isEspExpanded) ? "none" : "1",
                                       boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "2px",
@@ -1213,6 +1250,12 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                       )}
                     </div>
                   </div>
+
+                  {reservaPendenteCount > 0 && (
+                    <div style={{ marginTop: "8px", fontSize: "11px", fontWeight: 700, color: "#15803d", display: "flex", alignItems: "center", gap: "4px" }}>
+                      ⏳ +{reservaPendenteCount} aguardando sincronização
+                    </div>
+                  )}
 
                   <div style={{ height: "1px", background: "var(--border)", margin: "12px 0 0" }} />
                 </div>
@@ -1623,6 +1666,15 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
   const [inputFocused, setInputFocused] = useState(false)
   const [highlightedIdx, setHighlightedIdx] = useState(-1)
   const listboxRef = useRef<HTMLDivElement>(null)
+  // CRON-008: sessões aguardando confirmação no modal premium de implantação
+  const [pendingConfirm, setPendingConfirm] = useState<{ sessoes: AceiteSessao[]; beforeCount: number } | null>(null)
+
+  // CRON-008: sessões já reservadas (implantação imediata) deste paciente — exibidas
+  // diretamente na grade do TodasSugestoesModal como "Reservado".
+  const reservasConfirmadas = useMemo(
+    () => aceites.filter(b => b.pac === pac && b.status === "confirmado").flatMap(b => b.sessoes),
+    [aceites, pac],
+  )
 
   const recusadasSet = useMemo(() => {
     const s = new Set<string>()
@@ -1647,17 +1699,45 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     try { localStorage.setItem(SK, JSON.stringify(m)) } catch {}
   }
 
-  function handleAceitar({ sessoes }: { sessoes: AceiteSessao[] }) {
+  // CRON-008: "Aceitar alterações" não aplica mais direto — abre o modal premium de
+  // confirmação. A implantação de fato só ocorre em confirmarImplantacao().
+  function handleAceitar({ sessoes, beforeCount }: { sessoes: AceiteSessao[]; beforeCount: number }) {
     if (!sessoes.length) return
+    setPendingConfirm({ sessoes, beforeCount })
+  }
+
+  function cancelarImplantacao() {
+    setPendingConfirm(null)
+  }
+
+  // CRON-008: pacBundles é a ÚNICA fonte de verdade da Reserva Pendente — nada é
+  // espelhado em `conf`. Isso evita o estado duplicado (bundle + conf) que ficava
+  // dessincronizado sempre que a reserva era desfeita por um caminho que só
+  // conhecia um dos dois lados. Grade ("Reservado"), bloqueio cross-paciente
+  // (slotsReservadosOutros/aqui e confirmedItems em OcupacaoShell) e a aba
+  // Confirmados (via pacConfDerived em AcompanhamentoTab) leem todos direto daqui.
+  function confirmarImplantacao() {
+    if (!pendingConfirm) return
+    const { sessoes } = pendingConfirm
+
     const bundle: AceitePacBundle = {
       id: `${Date.now()}_${pac.slice(0, 8)}`,
       pac, ts: Date.now(),
       origem: "ocp-paciente",
       sessoes,
-      status: "pendente",
+      status: "confirmado",
       inviavelSlots: [],
     }
     persistAceites([...aceites, bundle])
+
+    // 2. Contexto já atualizado pelo persist acima. 3. Limpar seleção.
+    modalRef.current?.clearAll()
+    // 4. Fechar modal.
+    setPendingConfirm(null)
+    // 5. Permanece no paciente selecionado: a grade e o painel lateral já reagem
+    //    sozinhos (reservasConfirmadas/sugestoes derivam de `aceites`), então o
+    //    "Reservado" aparece imediatamente sem precisar sair da tela do paciente.
+    toast(`✅ ${sessoes.length} ${sessoes.length === 1 ? "sessão reservada" : "sessões reservadas"} para ${pac}. Aguardando sincronização da grade.`)
   }
 
   function handleInviavel(sessoes: AceiteSessao[], motivo: string) {
@@ -2006,11 +2086,14 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     if (!pac || estrategia !== "S1") return [] as Sugestao[]
     const conv      = pacConvMap[pac] || ""
     const isLiminar = /LIMINAR/i.test(cfg.judicialMap?.[pac] || "")
-    // Passa [] para aceites: proposals não são bloqueadas por bundles já existentes.
-    // O estado visual (proposta/aceita/recusada) é rastreado via selectedIds + stOf,
-    // não via regeneração da lista — isso garante que cards nunca desapareçam da grade.
-    return buildSugestoes(pac, agend, agendClin, cRows, gapMap, [], conv, isLiminar)
-  }, [pac, estrategia, agend, agendClin, cRows, gapMap, pacConvMap, cfg.judicialMap])
+    // CRON-008: bundles "confirmado" (Reserva Pendente) são passados para que a vaga
+    // implantada saia da lista de sugestões — tanto para o próprio paciente (não pode
+    // ser reofertada) quanto para os demais (slot já reservado, ver slotsReservadosOutros).
+    // Bundles "pendente" continuam fora do cálculo — preserva o comportamento anterior
+    // de manter os cards visíveis enquanto aguardam confirmação do responsável.
+    const aceitesConfirmados = aceites.filter(a => a.status === "confirmado")
+    return buildSugestoes(pac, agend, agendClin, cRows, gapMap, aceitesConfirmados, conv, isLiminar)
+  }, [pac, estrategia, agend, agendClin, cRows, gapMap, pacConvMap, cfg.judicialMap, aceites])
 
   useEffect(() => {
     if (!pac) return
@@ -2388,9 +2471,20 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
             onAcaoDireta={handleAcaoDireta}
             recusadasSet={recusadasSet}
             onUndoRecusa={onUndoRecusa}
+            reservasConfirmadas={reservasConfirmadas}
           />
           <AceitesPanel pac={pac} aceites={aceites} onUpdate={persistAceites} onVerAll={() => {}} />
         </>
+      )}
+
+      {pendingConfirm && (
+        <ConfirmarImplantacaoModal
+          pac={pac}
+          sessoesAtuais={pendingConfirm.beforeCount}
+          sessoes={pendingConfirm.sessoes}
+          onConfirm={confirmarImplantacao}
+          onCancel={cancelarImplantacao}
+        />
       )}
 
       {invPending && (

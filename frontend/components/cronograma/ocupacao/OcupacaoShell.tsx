@@ -37,7 +37,7 @@ const TAB_HEADERS: Record<TabKey, { title: string; subtitle: string }> = {
 }
 
 export function OcupacaoShell() {
-  const { cRows, lRows, rec, inv, waMap, cfg, conf, savedAt, saveError, clearSaveError, sRec, sInv, sWa, setCRows } = useCronogramaData()
+  const { cRows, lRows, rec, inv, waMap, cfg, conf, pacBundles, savedAt, saveError, clearSaveError, sRec, sInv, sWa, setCRows } = useCronogramaData()
 
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -74,7 +74,15 @@ export function OcupacaoShell() {
     setErr(null)
     const t = setTimeout(() => {
       try {
-        const confirmedItems = conf.map(c => ({ prof: c.prof, dia: c.dia, hora: c.hora }))
+        // CRON-008: Grade Final = CSV + Reservas Pendentes. pacBundles (Ocp. Paciente)
+        // é a única fonte de verdade da reserva — não é espelhado em `conf` — então
+        // precisa entrar aqui também para bloquear a vaga para qualquer outro paciente.
+        const confirmedItems = [
+          ...conf.map(c => ({ prof: c.prof, dia: c.dia, hora: c.hora })),
+          ...pacBundles
+            .filter(b => b.status === "confirmado")
+            .flatMap(b => b.sessoes.map(s => ({ prof: s.prof, dia: s.dia, hora: s.hora }))),
+        ]
         setRes(runAlgorithm(cRows, lRows, rec, inv, { ...cfg, waMap, confirmedItems }))
       } catch (e) {
         setErr(`Erro: ${(e as Error).message}`)
@@ -83,7 +91,7 @@ export function OcupacaoShell() {
       }
     }, 50)
     return () => clearTimeout(t)
-  }, [cRows, lRows, rec, inv, cfg, waMap, conf])
+  }, [cRows, lRows, rec, inv, cfg, waMap, conf, pacBundles])
 
   const handleWA = useCallback((s: Sugestao) => {
     sWa({ ...waMap, [waKey(s)]: "aguardando" })
