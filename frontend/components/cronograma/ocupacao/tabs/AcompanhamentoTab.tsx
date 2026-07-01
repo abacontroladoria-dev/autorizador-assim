@@ -8,7 +8,7 @@ import { useCronogramaData, genConfId } from "@/contexts/CronogramaDataContext"
 import { RecusadosTab } from "./RecusadosTab"
 import { InviavelTab } from "./InviavelTab"
 import type { AlgorithmResult, Sugestao, WaMap, WaStatus, StatusMap, CsvRow, OpcaoEstrategia, MovimentoSessao, AfetadaItem, SessPacItem, AnaliseResult, StatusEntry, OpcaoSwap, OpcaoDiaMigracao } from "@/types/cronograma"
-import type { AceitePacBundle, ConfItem, SlotStatus } from "@/types/acompanhamento"
+import type { AceitePacBundle, AceiteSessao, ConfItem, SlotStatus } from "@/types/acompanhamento"
 import { SaidaCronModal } from "@/components/cronograma/solicitacoes/SaidaCronModal"
 
 const SLOT_META: Record<SlotStatus, { label: string; bg: string; c: string; bd: string }> = {
