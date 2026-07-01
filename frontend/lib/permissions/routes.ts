@@ -14,24 +14,23 @@ export const roleDefaults: Record<string, string[]> = {
     'cronograma_solicitacoes', 'ocupacao_clinica', 'ocupacao_profissionais',
   ],
   diretoria: [
-    'dashboard', 'atendimentos', 'gestao', 'cronograma',
-    'escala_terapeutica', 'agenda_terapeutica', 'salas',
-    'guias_digitais', 'auditoria_assim', 'cco',
+    'dashboard', 'atendimentos', 'gestao',
+    'escala_terapeutica', 'auditoria_assim',
     'preauditoria', 'outros_convenios',
-    'cronograma_solicitacoes', 'ocupacao_clinica', 'ocupacao_profissionais',
+    'ocupacao_profissionais',
   ],
   recepcao: [
-    'dashboard', 'atendimentos', 'gestao', 'cronograma', 'auditoria_assim',
-    'autorizacoes', 'outros_convenios', 'cronograma_solicitacoes',
+    'dashboard', 'atendimentos', 'gestao', 'auditoria_assim',
+    'autorizacoes', 'outros_convenios',
   ],
   autorizacao: [
-    'dashboard', 'cronograma', 'agenda_terapeutica', 'salas', 'auditoria_assim',
+    'dashboard', 'auditoria_assim',
     'autorizacoes', 'preauditoria',
   ],
-  terapeutico: ['dashboard', 'escala_terapeutica', 'salas', 'agenda_terapeutica'],
-  faturamento: ['dashboard', 'guias_digitais', 'cronograma', 'agenda_terapeutica', 'salas', 'cco'],
+  terapeutico: ['dashboard', 'escala_terapeutica'],
+  faturamento: ['dashboard'],
   rp: ['dashboard', 'escala_terapeutica'],
-  cronograma: ['dashboard', 'cronograma_solicitacoes', 'ocupacao_clinica', 'ocupacao_profissionais'],
+  cronograma: ['dashboard', 'ocupacao_profissionais'],
 }
 
 export function getRoleDefaultPermissions(role: string): string[] {
