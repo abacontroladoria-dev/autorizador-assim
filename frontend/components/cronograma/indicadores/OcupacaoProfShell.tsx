@@ -1,0 +1,1066 @@
+'use client'
+
+import { useCallback, useEffect, useMemo, useState } from 'react'
+import * as XLSX from 'xlsx'
+import { useHeader } from '@/contexts/HeaderContext'
+import { B, normTxt } from '@/lib/cronograma/constants'
+import { fmtH, fmtHDec, fmtPctOcup } from '@/lib/cronograma/helpers'
+import {
+  agregarOcupacaoDeSlots,
+  corFaixaOcupacao,
+  dentroFaixaOcupacao,
+  filtrarOcupacaoPorUnidade,
+  finalizarBaseOcup,
+  novaBaseOcup,
+  normalizarUnidadeOcupacao,
+  regrasCapacidadeTexto,
+  somaBaseOcup,
+  temBaseOcupacaoLinha,
+  temComparecimentoNoTurno,
+  textoFaixaOcupacao,
+} from '@/lib/cronograma/ocupacaoProf'
+import { DOW_PT, OCUP_COMPARE_SLOTS, OCUP_FAIXAS, OCUP_SORTS } from '@/lib/cronograma/ocupacaoConst'
+import { useOcupacaoProf } from '@/hooks/useOcupacaoProf'
+import { getRefWeek } from '@/lib/cronograma/helpers'
+import { AgendaMinimalista, resumoUnidadesAgenda, unidadeDiaAgenda } from './AgendaMinimalista'
+import { OcupacaoDonut } from './OcupacaoDonut'
+import { DashboardCard, FiltroCheckbox, FiltroRadio, PercentualOcupacao } from './OcupacaoAtomicos'
+import { InteractivePieChart } from './InteractivePieChart'
+import type { BaseOcup, OcupacaoAgregada, OcupacaoFinalizada, SlotNormalizado } from '@/types/ocupacaoProf'
+
+// ─── CONSTANTES LOCAIS ────────────────────────────────────────────────────────
+
+const UNIDADES_DASHBOARD = ['Realengo', 'Fazendinha', 'Padre Miguel', 'Ambiente Natural']
+const UNIDADE_CORRIGIR   = 'Consertar Unidade no sistema'
+const LIVRE_BG           = '#fee2e2'
+
+// Cores de terapia (paleta da clínica, conforme tabela oficial)
+// Entradas #FFFFFF = sem cor definida → usa corFaixaOcupacao como fallback
+const TERAPIA_CORES: Record<string, string> = {
+  'Aplicador ABA (AE)':                '#E89D9D',
+  'Aplicador ABA (AV)':                '#FFFFFF',
+  'Aplicador ABA (EF)':                '#57E6D6',
+  'Aplicador ABA (HS)':                '#FFFFFF',
+  'Aplicador ABA (PS)':                '#D4A9F5',
+  'Aplicador ABA (SF)':                '#BDB8BF',
+  'Aplicador ABA Casa':                '#BDB8BF',
+  'Aplicador ABA Escola':              '#A9A2A2',
+  'Aplicador Suporte':                 '#E9FECE',
+  'Aplicador Suporte (MT)':            '#FFFFFF',
+  'Aplicador Suporte (TA)':            '#FFFFFF',
+  'Aplicador Suporte (TO)':            '#FFFFFF',
+  'Apoio Operacional':                 '#FFFFFF',
+  'Arteterapia':                       '#E89D9D',
+  'Arteterapia (Psicologia ABA)':      '#FFAD98',
+  'Assistente de Desenvolvimento':     '#FFFFFF',
+  'Avaliação Neuropsicológica':        '#FFFFFF',
+  'Circuito Funcional':                '#FFFFFF',
+  'Coordenador de Caso':               '#A560E5',
+  'Cozinha Funcional':                 '#FFFFFF',
+  'Equoterapia':                       '#946D05',
+  'Especialista Técnico de Área':      '#FFFFFF',
+  'Esporte Adaptado':                  '#FFFFFF',
+  'Estágio':                           '#FFFFFF',
+  'Facilitador Técnico':               '#FFFFFF',
+  'Fisioterapia':                      '#54E8E3',
+  'Fisioterapia Aquática':             '#9DD0FD',
+  'Fonoaudiologia':                    '#E0B00F',
+  'Habilidades Sociais (Psicologia ABA)': '#6B5D5D',
+  'Musicalização':                     '#FFFFFF',
+  'Musicoterapia':                     '#FFAD98',
+  'Nutrição':                          '#BCF47C',
+  'OFERECER CONSULTA NUTRIÇÃO':        '#54A9FA',
+  'Oficina de Aprendizagem':           '#FFFFFF',
+  'Operações Clínicas':                '#FFFFFF',
+  'Psicoeducação':                     '#E996F1',
+  'Psicologia':                        '#C81ED5',
+  'Psicologia ABA':                    '#FFFFFF',
+  'Psicomotricidade':                  '#39A8F9',
+  'Psicopedagogia':                    '#FFFB73',
+  'Supervisão ABA':                    '#000000',
+  'Técnico Terapêutico Particular':    '#FFFFFF',
+  'Terapia Alimentar':                 '#95EF9C',
+  'Terapia Ocupacional':               '#0B13CA',
+  'Triagem':                           '#EE8F00',
+  'Trilha Socioemocional':             '#FFFFFF',
+  'Visita Guiada':                     '#EC62E5',
+}
+const COR_LIVRE_ESP = '#CBD5E1' // cinza-azulado neutro (slate-300)
+
+function corTerapiaEsp(esp: string, fallback: string): string {
+  const c = TERAPIA_CORES[esp]
+  if (!c || c.toUpperCase() === '#FFFFFF') return fallback
+  return c
+}
+
+// ─── HELPERS DE VIEW ─────────────────────────────────────────────────────────
+
+function terapiaContemFiltro(terapia: string, filtro: string): boolean {
+  const t = normTxt(terapia), f = normTxt(filtro)
+  if (!t || !f) return false
+  return t === f || t.includes(f) || f.includes(t)
+}
+
+function visaoProfissional(base: OcupacaoFinalizada): { pct: number | null; texto: string } {
+  const total    = base?.horariosTotal    ?? 0
+  const ocupados = base?.horariosOcupados ?? 0
+  const pct      = total > 0 ? ocupados / total : null
+  return {
+    pct,
+    texto: total > 0
+      ? `${ocupados} de ${total} horários dos profissionais ocupados = ${fmtPctOcup(pct)}`
+      : 'Sem horários de profissionais na base filtrada',
+  }
+}
+
+type DashEspItem = OcupacaoFinalizada & {
+  especialidade: string
+  profissional: ReturnType<typeof visaoProfissional>
+  profissionaisQtd: number
+  profissionaisNomes: string[]
+}
+
+function dashboardPorEspecialidade(
+  lista: { prof: string; ocupacao: OcupacaoAgregada | null }[],
+  espFiltro: string[],
+): DashEspItem[] {
+  const filtro = espFiltro.filter(x => x && x !== '__none__')
+  const mapa: Record<string, { especialidade: string; slots: SlotNormalizado[]; profissionais: Set<string> }> = {}
+  lista.forEach(d => {
+    ;(d.ocupacao?.slots ?? []).forEach(s => {
+      const esp = s.terp || 'Sem especialidade'
+      if (filtro.length && !filtro.some(f => terapiaContemFiltro(esp, f))) return
+      if (!mapa[esp]) mapa[esp] = { especialidade: esp, slots: [], profissionais: new Set() }
+      mapa[esp].slots.push(s)
+      mapa[esp].profissionais.add(d.prof)
+    })
+  })
+  return Object.values(mapa).map(g => {
+    const base = agregarOcupacaoDeSlots(g.slots)
+    return {
+      ...base,
+      especialidade: g.especialidade,
+      profissional: visaoProfissional(base),
+      profissionaisQtd: g.profissionais.size,
+      profissionaisNomes: [...g.profissionais].sort((a, b) => a.localeCompare(b)),
+    }
+  }).sort((a, b) => ((b.pct ?? -1) - (a.pct ?? -1)) || a.especialidade.localeCompare(b.especialidade))
+}
+
+// ─── TABELA RESUMO (fora do componente para evitar remount) ──────────────────
+
+type LinhaResumo = { label: string; pct: number | null; baseCompacta: string; baseTexto: string; horasLivres: number }
+
+function TabelaResumo({ linhas }: { linhas: LinhaResumo[] }) {
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-xs">
+        <thead>
+          <tr className="text-gray-500">
+            <th className="text-left py-1">Recorte</th>
+            <th className="text-right py-1 w-32">Base</th>
+            <th className="text-right py-1 w-20">CH livre</th>
+            <th className="text-right py-1 w-20">% ocup.</th>
+          </tr>
+        </thead>
+        <tbody>
+          {linhas.map(x => (
+            <tr key={x.label} className="border-t">
+              <td className="py-1.5 font-medium whitespace-nowrap">{x.label}</td>
+              <td className="text-right whitespace-nowrap text-gray-400" title={x.baseTexto}>{x.baseCompacta || '—'}</td>
+              <td className="text-right whitespace-nowrap" style={{ color: B.red }}>{fmtH(x.horasLivres)}</td>
+              <td className="text-right font-bold whitespace-nowrap">
+                <PercentualOcupacao pct={x.pct} />
+              </td>
+            </tr>
+          ))}
+          {!linhas.length && (
+            <tr>
+              <td colSpan={4} className="py-4 text-center text-gray-400">Sem dados nos filtros atuais.</td>
+            </tr>
+          )}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+// ─── SHELL PRINCIPAL ─────────────────────────────────────────────────────────
+
+export function OcupacaoProfShell() {
+  const refWeek = getRefWeek()
+  const { dadosPorProf, allTerps, allUnits, analMes, loading, error } = useOcupacaoProf(refWeek.inicio, refWeek.fim, refWeek.label)
+
+  const { setHeader, setRightContent } = useHeader()
+
+  useEffect(() => {
+    setHeader("Ocupação de Profissionais", analMes ? `Período: ${analMes}` : "")
+    return () => setHeader("", "")
+  }, [analMes, setHeader])
+
+  // ── filtros ──
+  const [ocupBusca,         setOcupBusca]         = useState('')
+  const [ocupProfissionais, setOcupProfissionais] = useState<string[]>([])
+  const [ocupEsp,           setOcupEsp]           = useState<string[]>([])
+  const [ocupUnidades,      setOcupUnidades]      = useState<string[]>([])
+  const [ocupCompareModo,   setOcupCompareModo]   = useState('')
+  const [ocupCompareSlots,  setOcupCompareSlots]  = useState<string[]>([])
+  const [ocupFaixa,         setOcupFaixa]         = useState('todos')
+  const [ocupSort,          setOcupSort]          = useState('ocup_desc')
+
+  // ── UI state ──
+  const [painelAberto,    setPainelAberto]    = useState(false)
+  const [buscaResetKey,   setBuscaResetKey]   = useState(0)
+  const [dashboardAberto, setDashboardAberto] = useState(false)
+  const [dashUnidAberto,  setDashUnidAberto]  = useState(false)
+  const [espModal,        setEspModal]        = useState<DashEspItem | null>(null)
+  const [unidadeAberto,   setUnidadeAberto]   = useState(false)
+  const [espAberto,       setEspAberto]       = useState(false)
+  const [diaTurnoAberto,  setDiaTurnoAberto]  = useState(false)
+  const [profsAbertos,    setProfsAbertos]    = useState<Record<string, boolean>>({})
+
+  // ── opções derivadas ──
+  const unidadesFiltro = useMemo(() => {
+    const set = new Set([...UNIDADES_DASHBOARD, UNIDADE_CORRIGIR])
+    ;(allUnits ?? []).forEach(u => set.add(normalizarUnidadeOcupacao(u)))
+    const ordem = [...UNIDADES_DASHBOARD, UNIDADE_CORRIGIR]
+    return [...set].sort((a, b) => {
+      const ia = ordem.indexOf(a), ib = ordem.indexOf(b)
+      return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib) || a.localeCompare(b)
+    })
+  }, [allUnits])
+
+  const profissionaisFiltro = useMemo(() =>
+    dadosPorProf.map(d => d.prof).sort((a, b) => a.localeCompare(b)),
+  [dadosPorProf])
+
+  const terapiasSomenteAdmin = useMemo(() =>
+    (allTerps ?? []).filter(terp => {
+      const slots = dadosPorProf.flatMap(d =>
+        (d.ocupacao?.slots ?? []).filter(s => s.terp === terp)
+      )
+      return slots.length > 0 && slots.every(s => s.horarioAdministrativoEta || s.excluirBaseOcupacao)
+    }),
+  [allTerps, dadosPorProf])
+
+  const terapiasPadrao = useMemo(() =>
+    allTerps.filter(t => !terapiasSomenteAdmin.includes(t)),
+  [allTerps, terapiasSomenteAdmin])
+
+  // ── dados filtrados ──
+  const dadosFiltrados = useMemo(() => {
+    type ItemFiltrado = (typeof dadosPorProf)[number] & { taxaOcupacao: number | null }
+
+    let r: ItemFiltrado[] = dadosPorProf.map(d => {
+      const unsFiltro = ocupUnidades.includes('__none__') ? [] : ocupUnidades
+      const oc = filtrarOcupacaoPorUnidade(d.ocupacao, unsFiltro)
+      return { ...d, ocupacao: oc, taxaOcupacao: oc?.pct ?? null }
+    })
+
+    if (ocupProfissionais.includes('__none__'))    r = []
+    else if (ocupProfissionais.length > 0)         r = r.filter(d => ocupProfissionais.includes(d.prof))
+
+    const q = normTxt(ocupBusca.trim())
+    if (q) {
+      const tokens = q.split(/\s+/).filter(Boolean)
+      r = r.filter(d => {
+        const haystack = [
+          normTxt(d.prof),
+          ...d.terapiaDetails.map(t => normTxt(t.terp)),
+          ...(d.ocupacao?.unidades ?? []).map(u => normTxt(u)),
+        ].join(' ')
+        return tokens.every(tok => haystack.includes(tok))
+      })
+    }
+
+    if (ocupUnidades.includes('__none__'))         r = []
+    else if (ocupUnidades.length > 0)              r = r.filter(d => (d.ocupacao?.slotsTotal ?? 0) > 0)
+
+    const espFiltro = ocupEsp.length ? ocupEsp : terapiasPadrao
+    if (ocupEsp.includes('__none__'))              r = []
+    else if (espFiltro.length)                     r = r.filter(d =>
+      espFiltro.some(esp => d.terapiaDetails.some(t => terapiaContemFiltro(t.terp, esp)))
+    )
+
+    if (ocupCompareModo && ocupCompareSlots.length) {
+      const specs = ocupCompareSlots
+        .map(key => OCUP_COMPARE_SLOTS.find(s => s.key === key))
+        .filter(Boolean) as typeof OCUP_COMPARE_SLOTS
+      r = r.filter(d => specs.every(spec => {
+        const comparece = temComparecimentoNoTurno(d.ocupacao, spec.dow, spec.turno)
+        return ocupCompareModo === 'comparece' ? comparece : !comparece
+      }))
+    }
+
+    if (ocupFaixa !== 'todos') r = r.filter(d => dentroFaixaOcupacao(d.taxaOcupacao, ocupFaixa))
+
+    return [...r].sort((a, b) => {
+      if (ocupSort === 'ocios_desc') return ((b.ocupacao?.ociosidade ?? -1) - (a.ocupacao?.ociosidade ?? -1)) || a.prof.localeCompare(b.prof)
+      if (ocupSort === 'alpha')      return a.prof.localeCompare(b.prof)
+      return ((b.taxaOcupacao ?? -1) - (a.taxaOcupacao ?? -1)) || a.prof.localeCompare(b.prof)
+    })
+  }, [dadosPorProf, ocupBusca, ocupProfissionais, ocupUnidades, ocupEsp, terapiasPadrao, ocupCompareModo, ocupCompareSlots, ocupFaixa, ocupSort])
+
+  // ── dashboard e resumos ──
+  const espDashFiltro = useMemo(() =>
+    ocupEsp.includes('__none__') ? [] : (ocupEsp.length ? ocupEsp : terapiasPadrao),
+  [ocupEsp, terapiasPadrao])
+
+  const dashboardEsp = useMemo(() =>
+    dashboardPorEspecialidade(dadosFiltrados, espDashFiltro),
+  [dadosFiltrados, espDashFiltro])
+
+  const dashboardUnidades = useMemo(() =>
+    [...UNIDADES_DASHBOARD, UNIDADE_CORRIGIR].map(unidade => {
+      const b = novaBaseOcup()
+      dadosFiltrados.forEach(d => {
+        const oc = filtrarOcupacaoPorUnidade(d.ocupacao, [unidade])
+        if (oc) somaBaseOcup(b, oc)
+      })
+      const f = finalizarBaseOcup(b)
+      return { unidade, f, profissional: visaoProfissional(f) }
+    }).filter(x => x.f.slotsTotal > 0),
+  [dadosFiltrados])
+
+  const porUnidade = useMemo((): LinhaResumo[] => {
+    const mapa: Record<string, BaseOcup & { label: string }> = {}
+    dadosFiltrados.forEach(d => {
+      d.ocupacao?.porUnidade?.forEach(u => {
+        const nome = u.unidade || 'Unidade não informada'
+        if (!mapa[nome]) mapa[nome] = { label: nome, ...novaBaseOcup() }
+        somaBaseOcup(mapa[nome], u)
+      })
+    })
+    return Object.values(mapa).map(e => {
+      const f = finalizarBaseOcup(e)
+      return { label: e.label, pct: f.pct, baseCompacta: f.baseCompacta, baseTexto: f.baseTexto, horasLivres: f.horasLivres }
+    }).sort((a, b) => a.label.localeCompare(b.label))
+  }, [dadosFiltrados])
+
+  const porEsp = useMemo((): LinhaResumo[] => {
+    const mapa: Record<string, BaseOcup & { label: string }> = {}
+    dadosFiltrados.forEach(d => {
+      d.ocupacao?.porEspecialidade?.forEach(e => {
+        if (!mapa[e.terp]) mapa[e.terp] = { label: e.terp, ...novaBaseOcup() }
+        somaBaseOcup(mapa[e.terp], e)
+      })
+    })
+    return Object.values(mapa).map(e => {
+      const f = finalizarBaseOcup(e)
+      return { label: e.label, pct: f.pct, baseCompacta: f.baseCompacta, baseTexto: f.baseTexto, horasLivres: f.horasLivres }
+    }).sort((a, b) => a.label.localeCompare(b.label))
+  }, [dadosFiltrados])
+
+  const toggleCompareSlot = useCallback((key: string) => {
+    setOcupCompareSlots(prev => prev.includes(key) ? prev.filter(x => x !== key) : [...prev, key])
+  }, [])
+
+  const limparFiltros = useCallback(() => {
+    setOcupBusca('')
+    setBuscaResetKey(k => k + 1)
+    setOcupProfissionais([])
+    setOcupEsp([])
+    setOcupUnidades([])
+    setOcupCompareModo('')
+    setOcupCompareSlots([])
+    setOcupFaixa('todos')
+    setOcupSort('ocup_desc')
+  }, [])
+
+  const exportarXLSX = useCallback(() => {
+    const r2 = (v: number) => Math.round(v * 100) / 100
+    const pctVal  = (v: number | null) => v !== null ? r2(v * 100) : 0
+    const ocioVal = (pct: number | null, ocio: number | null) =>
+      ocio !== null ? r2(ocio * 100) : pct !== null ? r2((1 - pct) * 100) : 100
+
+    // ── Folha 1: por (profissional, unidade, especialidade) ──────────────────
+    const profRows: Record<string, unknown>[] = []
+    for (const d of dadosFiltrados) {
+      const grupos = new Map<string, typeof d.ocupacao.slots>()
+      for (const s of d.ocupacao?.slots ?? []) {
+        const k = `${s.unidade}\x00${s.terp}`
+        if (!grupos.has(k)) grupos.set(k, [])
+        grupos.get(k)!.push(s)
+      }
+      for (const [k, slots] of grupos) {
+        const sep = k.indexOf('\x00')
+        const unidade = k.slice(0, sep)
+        const terp    = k.slice(sep + 1)
+        const f = agregarOcupacaoDeSlots(slots)
+        profRows.push({
+          Profissional:   d.prof,
+          Unidade:        unidade,
+          Especialidades: terp,
+          Ocupacao_pct:   pctVal(f.pct),
+          Ociosidade_pct: ocioVal(f.pct, f.ociosidade),
+          Base_Compacta:  f.baseCompacta,
+          Base_do_Calculo: f.baseTexto,
+          CH_Ocupada: r2(f.horasOcupadas),
+          CH_Total:   r2(f.horasTotal),
+          CH_Livre:   r2(f.horasLivres),
+        })
+      }
+    }
+
+    // ── Folha 2: por especialidade ───────────────────────────────────────────
+    const espRows = dashboardEsp.map(e => ({
+      Especialidade:  e.especialidade,
+      Ocupacao_pct:   pctVal(e.pct),
+      Ociosidade_pct: ocioVal(e.pct, e.ociosidade),
+      Base_Compacta:  e.baseCompacta,
+      Base_do_Calculo: e.baseTexto,
+      CH_Ocupada: r2(e.horasOcupadas),
+      CH_Total:   r2(e.horasTotal),
+      CH_Livre:   r2(e.horasLivres),
+    }))
+
+    // ── Folha 3: por unidade ─────────────────────────────────────────────────
+    const unidRows = dashboardUnidades.map(u => ({
+      Unidade:        u.unidade,
+      Ocupacao_pct:   pctVal(u.f.pct),
+      Ociosidade_pct: ocioVal(u.f.pct, u.f.ociosidade),
+      Base_Compacta:  u.f.baseCompacta,
+      Base_do_Calculo: u.f.baseTexto,
+      CH_Ocupada: r2(u.f.horasOcupadas),
+      CH_Total:   r2(u.f.horasTotal),
+      CH_Livre:   r2(u.f.horasLivres),
+    }))
+
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(profRows), 'Ocupacao profissional')
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(espRows),  'Ocupacao especialidade')
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(unidRows), 'Ocupacao unidade')
+
+    const nome = `Ocupacao_${(analMes ?? 'export').replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '')}.xlsx`
+    XLSX.writeFile(wb, nome)
+  }, [dadosFiltrados, dashboardEsp, dashboardUnidades, analMes])
+
+  const filtrosAtivos = Boolean(
+    ocupBusca || ocupEsp.length || ocupUnidades.length ||
+    ocupCompareModo || ocupCompareSlots.length || ocupFaixa !== 'todos' || ocupSort !== 'ocup_desc'
+  )
+
+  useEffect(() => {
+    setRightContent(
+      <div className="flex flex-wrap items-center gap-2">
+        <input
+          key={buscaResetKey}
+          type="search"
+          defaultValue={ocupBusca}
+          onChange={e => setOcupBusca(e.target.value)}
+          placeholder="Busca"
+          className="rounded-xl border px-3 py-1.5 text-sm"
+          style={{ borderColor: '#d1d5db', width: 160 }}
+        />
+        <span className="text-xs font-medium text-muted-foreground">
+          {dadosFiltrados.length}/{dadosPorProf.length} prof.
+        </span>
+        <button type="button" onClick={() => setPainelAberto(v => !v)}
+          className="px-3 py-1.5 rounded-full text-xs font-bold border"
+          style={{ background: painelAberto ? B.navy : '#fff', color: painelAberto ? '#fff' : B.navy, borderColor: B.navy }}>
+          {painelAberto ? '▲ Recolher' : '▼ Filtros'}
+        </button>
+        {filtrosAtivos && (
+          <button type="button" onClick={limparFiltros}
+            className="px-3 py-1.5 rounded-full text-xs font-bold border"
+            style={{ background: '#fff', color: B.red, borderColor: B.red }}>
+            ✕ Limpar
+          </button>
+        )}
+        <button type="button" onClick={exportarXLSX}
+          className="px-3 py-1.5 rounded-full text-xs font-bold border flex items-center gap-1"
+          style={{ background: '#fff', color: '#16a34a', borderColor: '#16a34a' }}>
+          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+          </svg>
+          Exportar XLSX
+        </button>
+      </div>
+    )
+    return () => setRightContent(null)
+  }, [dadosFiltrados.length, dadosPorProf.length, painelAberto, filtrosAtivos,
+      buscaResetKey, limparFiltros, exportarXLSX, setRightContent])
+
+  // ── estados de carregamento ──
+  if (loading) return (
+    <div className="flex items-center justify-center py-24 text-sm text-muted-foreground">
+      Carregando ocupação...
+    </div>
+  )
+
+  if (error) return (
+    <div className="flex items-center justify-center py-24 text-sm text-destructive">
+      Erro ao carregar dados: {error}
+    </div>
+  )
+
+  if (!dadosPorProf.length) return (
+    <div className="text-center py-16">
+      <div className="font-bold text-lg mb-1" style={{ color: B.navy }}>Nenhum dado para o período</div>
+      <div className="text-sm text-gray-400">{analMes}</div>
+      <div className="text-sm text-gray-400 mt-1">Verifique se há grade importada para este período.</div>
+    </div>
+  )
+
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  return (
+    <>
+      {painelAberto && (
+        <div className="-mx-6 -mt-6 mb-6 border-b border-border bg-card px-6 py-4 space-y-3 sticky -top-6 z-20">
+            <div className="rounded-xl bg-muted/40 p-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[minmax(200px,1fr)_minmax(240px,1.2fr)_minmax(240px,1.2fr)_minmax(180px,0.8fr)] gap-2 items-start">
+                <FiltroCheckbox titulo="Profissionais" opcoes={profissionaisFiltro} selecionados={ocupProfissionais} setSelecionados={setOcupProfissionais} cor={B.navy} />
+                <FiltroCheckbox titulo="Terapias" opcoes={allTerps} selecionados={ocupEsp} setSelecionados={setOcupEsp} cor={B.purple} selecaoPadrao={terapiasPadrao} />
+                <FiltroCheckbox titulo="Unidades" opcoes={unidadesFiltro} selecionados={ocupUnidades} setSelecionados={setOcupUnidades} cor={B.blue} />
+                <FiltroRadio titulo="Ordenação" opcoes={OCUP_SORTS} selecionado={ocupSort} setSelecionado={setOcupSort} />
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-1.5 items-center">
+              <span className="text-[11px] font-bold text-muted-foreground">Nível de ocupação:</span>
+              {OCUP_FAIXAS.map(f => (
+                <button key={f.k} type="button" onClick={() => setOcupFaixa(f.k)}
+                  className="px-2.5 py-1 rounded-full text-[11px] font-bold border"
+                  style={{ background: ocupFaixa === f.k ? B.navy : '#fff', color: ocupFaixa === f.k ? '#fff' : B.navy, borderColor: ocupFaixa === f.k ? B.navy : '#d1d5db' }}>
+                  {f.l}
+                </button>
+              ))}
+            </div>
+
+            <div className="rounded-xl p-2 px-3" style={{ background: B.navyLt }}>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-[11px] font-bold" style={{ color: B.navy }}>Agenda</span>
+                {[
+                  { k: 'comparece',     l: 'Comparece',     c: B.green  },
+                  { k: 'nao_comparece', l: 'Não comparece', c: B.orange },
+                ].map(opt => (
+                  <button key={opt.k} type="button"
+                    onClick={() => setOcupCompareModo(prev => prev === opt.k ? '' : opt.k)}
+                    className="px-3 py-1.5 rounded-full text-xs font-bold border"
+                    style={{ background: ocupCompareModo === opt.k ? opt.c : '#fff', color: ocupCompareModo === opt.k ? '#fff' : opt.c, borderColor: opt.c }}>
+                    {opt.l}
+                  </button>
+                ))}
+                {ocupCompareModo && (
+                  <button type="button" onClick={() => { setOcupCompareModo(''); setOcupCompareSlots([]) }}
+                    className="text-[11px] text-gray-400 hover:text-red-500 underline">
+                    limpar agenda
+                  </button>
+                )}
+              </div>
+              {ocupCompareModo && (
+                <div className="mt-2 grid grid-cols-1 lg:grid-cols-[70px_1fr] gap-1 text-xs">
+                  {(['Manhã', 'Tarde'] as const).map(row => (
+                    <div key={row} className="contents">
+                      <div className="font-bold py-1" style={{ color: row === 'Manhã' ? B.blue : B.purple }}>{row}</div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {OCUP_COMPARE_SLOTS.filter(s => s.row === row).map(s => {
+                          const ativo = ocupCompareSlots.includes(s.key)
+                          const cor   = row === 'Manhã' ? B.blue : B.purple
+                          return (
+                            <button key={s.key} type="button" onClick={() => toggleCompareSlot(s.key)}
+                              className="px-2.5 py-1 rounded-full border text-[11px] font-bold"
+                              style={{ background: ativo ? cor : '#fff', color: ativo ? '#fff' : cor, borderColor: cor }}>
+                              {s.label}
+                            </button>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+        </div>
+      )}
+
+      <div className="max-w-[1800px] mx-auto">
+
+      {/* ── dashboard especialidade ── */}
+      <div className="rounded-xl bg-white shadow-sm overflow-hidden mb-3">
+        <button type="button" onClick={() => setDashboardAberto(v => !v)}
+          className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50">
+          <span className="font-bold text-sm" style={{ color: B.navy }}>
+            {dashboardAberto ? '▼' : '▶'} Dashboard por especialidade
+          </span>
+          <span className="text-xs text-gray-400">{dashboardEsp.length} especialidade(s)</span>
+        </button>
+        {dashboardAberto && (
+          <div className="px-4 pb-4">
+            {!dashboardEsp.length ? (
+              <div className="text-center py-6 text-sm text-gray-400">
+                Nenhuma especialidade nos filtros atuais.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {dashboardEsp.map(e => {
+                  const corOcup = corTerapiaEsp(e.especialidade, corFaixaOcupacao(e.pct) ?? B.green)
+                  const pctNum  = Math.max(0, Math.min(100, (Number(e.pct) || 0) * 100))
+                  return (
+                    <div key={e.especialidade}
+                      className="rounded-xl border bg-white flex flex-col items-center px-4 pt-3 pb-3 gap-2"
+                      style={{ borderColor: '#e8eef5', borderTop: `3px solid ${corOcup}` }}>
+                      <div className="font-bold text-sm text-center leading-tight"
+                        title={e.especialidade} style={{ color: B.navy }}>
+                        {e.especialidade}
+                      </div>
+                      <InteractivePieChart
+                        size={110}
+                        centerLabel={fmtPctOcup(e.pct)}
+                        valueFormatter={(v) => fmtH(v)}
+                        segments={[
+                          { value: e.horasOcupadas, color: corOcup,       label: 'Ocupada' },
+                          { value: e.horasLivres,   color: COR_LIVRE_ESP, label: 'Livre'   },
+                        ].filter(s => s.value > 0)}
+                      />
+                      <div className="w-full">
+                        <div className="h-1.5 rounded-full overflow-hidden bg-gray-100 mb-2">
+                          <div className="h-full rounded-full" style={{ width: `${pctNum}%`, background: corOcup }} />
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setEspModal(e)}
+                          className="w-full rounded-lg py-1.5 text-sm font-bold text-center"
+                          style={{ background: B.navyLt, color: B.navy }}>
+                          Ver {e.profissionaisQtd} {e.profissionaisQtd !== 1 ? 'profissionais' : 'profissional'} →
+                        </button>
+                        {e.horasLivres > 0 && (
+                          <div className="text-xs text-center mt-1.5" style={{ color: B.red }}>
+                            {fmtH(e.horasLivres)} livres
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* ── dashboard unidades ── */}
+      {dashboardUnidades.length > 0 && (
+        <div className="rounded-xl bg-white shadow-sm overflow-hidden mb-3">
+          <button type="button" onClick={() => setDashUnidAberto(v => !v)}
+            className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50">
+            <span className="font-bold text-sm" style={{ color: B.navy }}>
+              {dashUnidAberto ? '▼' : '▶'} Dashboard por unidade
+            </span>
+            <span className="text-xs text-gray-400">{dashboardUnidades.length} unidade(s)</span>
+          </button>
+          {dashUnidAberto && (
+            <div className="px-4 pb-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
+                {dashboardUnidades.map(({ unidade, f }) => (
+                  <DashboardCard
+                    key={unidade}
+                    titulo={unidade}
+                    valor={fmtPctOcup(f.pct)}
+                    detalhe={`${fmtH(f.horasLivres)} livres · ${f.baseCompacta || '—'}`}
+                    cor={corFaixaOcupacao(f.pct)}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── resumos colapsáveis ── */}
+      <div className="space-y-2 mb-3">
+        <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+          <button type="button" onClick={() => setUnidadeAberto(v => !v)}
+            className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50">
+            <span className="font-bold text-sm" style={{ color: B.navy }}>
+              {unidadeAberto ? '▼' : '▶'} Ocupação por unidade
+            </span>
+            <span className="text-xs text-gray-400">{porUnidade.length} unidade(s)</span>
+          </button>
+          {unidadeAberto && <div className="px-4 pb-4"><TabelaResumo linhas={porUnidade} /></div>}
+        </div>
+
+        <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+          <button type="button" onClick={() => setEspAberto(v => !v)}
+            className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50">
+            <span className="font-bold text-sm" style={{ color: B.navy }}>
+              {espAberto ? '▼' : '▶'} Ocupação por especialidade
+            </span>
+            <span className="text-xs text-gray-400">{porEsp.length} especialidade(s)</span>
+          </button>
+          {espAberto && <div className="px-4 pb-4"><TabelaResumo linhas={porEsp} /></div>}
+        </div>
+
+        <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+          <button type="button" onClick={() => setDiaTurnoAberto(v => !v)}
+            className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50">
+            <span className="font-bold text-sm" style={{ color: B.navy }}>
+              {diaTurnoAberto ? '▼' : '▶'} Dia × turno — geral
+            </span>
+            <span className="text-xs text-gray-400">segunda a sexta</span>
+          </button>
+          {diaTurnoAberto && (
+            <div className="px-4 pb-4 overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="text-gray-500">
+                    <th className="text-left py-1">Dia / turno</th>
+                    <th className="text-right py-1 w-20">% ocup.</th>
+                    <th className="text-right py-1 w-32">Base</th>
+                    <th className="text-right py-1 w-20">CH livre</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[1, 2, 3, 4, 5].flatMap(dow =>
+                    (['Manhã', 'Tarde'] as const).map(turno => {
+                      const b = novaBaseOcup()
+                      dadosFiltrados.forEach(d => {
+                        const x = d.ocupacao?.porTurno?.find(t => t.dow === dow && t.turno === turno)
+                        if (x) somaBaseOcup(b, x)
+                      })
+                      const f = finalizarBaseOcup(b)
+                      return (
+                        <tr key={`${dow}-${turno}`} className="border-t">
+                          <td className="py-1.5 whitespace-nowrap">{DOW_PT[dow]} · {turno}</td>
+                          <td className="py-1.5 text-right font-bold whitespace-nowrap">
+                            <PercentualOcupacao pct={f.pct} />
+                          </td>
+                          <td className="py-1.5 text-right whitespace-nowrap text-gray-400">{f.baseCompacta || '—'}</td>
+                          <td className="py-1.5 text-right whitespace-nowrap" style={{ color: B.red }}>{fmtH(f.horasLivres)}</td>
+                        </tr>
+                      )
+                    })
+                  )}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* ── cards de profissionais ── */}
+      <div className="space-y-2">
+        {dadosFiltrados.map(d => {
+          const temRegraEspecial = !!regrasCapacidadeTexto(d)
+          const temAdmin         = (d.ocupacao?.horasTecnicas ?? 0) > 0
+          const aberto           = !!profsAbertos[d.prof]
+          const pctVal           = Math.max(0, Math.min(100, (Number(d.taxaOcupacao) || 0) * 100))
+          const corPct           = corFaixaOcupacao(d.taxaOcupacao)
+          const baseTxt          = d.ocupacao?.baseCompacta || '—'
+          const resumoUnidade    = resumoUnidadesAgenda(d.ocupacao?.slots)
+          const unidadeSoUma     = resumoUnidade?.startsWith('Sempre ')
+
+          return (
+            <div key={d.prof}
+              className="rounded-2xl bg-white shadow-sm border overflow-hidden"
+              style={{ borderColor: '#e7edf5', borderLeft: `4px solid ${corPct}` }}>
+
+              {/* cabeçalho do card */}
+              <button type="button"
+                onClick={() => setProfsAbertos(prev => ({ ...prev, [d.prof]: !prev[d.prof] }))}
+                className="w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors">
+                <div className="grid grid-cols-1 lg:grid-cols-[minmax(260px,480px)_minmax(180px,1fr)_80px] gap-2 lg:gap-3 items-center">
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-black shrink-0" style={{ color: B.navy }}>{aberto ? '▼' : '▶'}</span>
+                      <span className="font-bold truncate" style={{ color: B.navy }} title={d.prof}>{d.prof}</span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-x-2 pl-5 text-[10px] text-gray-500 leading-tight">
+                      <span className="truncate" title={d.terapiaDetails.map(t => t.terp).join(' · ')}>
+                        {d.terapiaDetails.map(t => t.terp).join(' · ')}
+                      </span>
+                      {d.ocupacao?.unidadeTexto && (
+                        <span className="truncate" style={{ color: B.blue }}>· {d.ocupacao.unidadeTexto}</span>
+                      )}
+                    </div>
+                  </div>
+                  <div className="min-w-0">
+                    <div className="h-1.5 rounded-full overflow-hidden bg-gray-100 border border-gray-200">
+                      <div className="h-full rounded-full" style={{ width: `${pctVal}%`, background: corPct }} />
+                    </div>
+                    <div className="mt-0.5 text-[9px] text-gray-400 truncate">{baseTxt}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-base font-black leading-none" style={{ color: corPct }}>
+                      {fmtPctOcup(d.taxaOcupacao)}
+                    </div>
+                    <div className="text-[9px] text-gray-400 mt-0.5">
+                      {baseTxt}
+                    </div>
+                  </div>
+                </div>
+              </button>
+
+              {/* detalhe expandido */}
+              {aberto && (
+                <div className="px-5 pb-5 pt-2 border-t" style={{ borderColor: '#f0f4f8' }}>
+                  <div className="overflow-x-auto">
+                    <div className="inline-grid gap-4 items-start"
+                      style={{ gridTemplateColumns: '300px 320px minmax(300px, 760px)', minWidth: 'min-content' }}>
+
+                      {/* donut */}
+                      <div className="rounded-2xl p-4" style={{ background: '#fbfcfe', border: '1px solid #eef2f7' }}>
+                        <OcupacaoDonut item={d} size={148} />
+                        <div className="grid grid-cols-2 gap-2 mt-3 text-[11px]">
+                          <div className="rounded-lg px-2 py-2" style={{ background: LIVRE_BG, color: B.red }}>
+                            <strong className="text-sm">{fmtH(d.ocupacao?.horasOcupadas ?? 0)}</strong>
+                            <div>ocupadas</div>
+                          </div>
+                          <div className="rounded-lg px-2 py-2" style={{ background: B.limeLt, color: B.green }}>
+                            <strong className="text-sm">{fmtH(d.ocupacao?.horasLivres ?? 0)}</strong>
+                            <div>livres</div>
+                          </div>
+                          {temAdmin && (
+                            <div className="rounded-lg px-2 py-2 col-span-2" style={{ background: B.purpleLt, color: B.purple }}>
+                              <strong>{fmtHDec(d.ocupacao?.horasTecnicas ?? 0)}</strong> em Horário Administrativo
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* agenda */}
+                      <AgendaMinimalista ocupacao={d.ocupacao} />
+
+                      {/* tabelas por dia e por especialidade */}
+                      <div className="flex flex-col gap-3">
+
+                        {/* por dia */}
+                        <div className="rounded-xl p-3" style={{ background: '#fff', border: '1px solid #eef2f7' }}>
+                          <div className="font-bold text-xs mb-1 flex items-center gap-1.5" style={{ color: B.navy }}>
+                            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: B.purple, flexShrink: 0 }}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+                            Ocupação por dia{unidadeSoUma ? ` · ${resumoUnidade}` : ''}
+                          </div>
+                          {temRegraEspecial && (
+                            <div className="text-[11px] font-semibold mb-2" style={{ color: B.purple }}>
+                              {regrasCapacidadeTexto(d)}
+                            </div>
+                          )}
+                          <table className="w-full text-xs">
+                            <thead>
+                              <tr className="text-gray-400 text-[11px] border-b">
+                                <th className="text-left px-1 pb-2 pt-1 font-medium">Dia</th>
+                                <th className="text-left px-1 pb-2 pt-1 font-medium">% ocup.</th>
+                                {temRegraEspecial ? (
+                                  <>
+                                    <th className="text-right px-1 pb-2 pt-1 font-medium whitespace-nowrap">Vagas simult.</th>
+                                    <th className="text-right px-1 pb-2 pt-1 font-medium">Sessões</th>
+                                  </>
+                                ) : (
+                                  <th className="text-right px-1 pb-2 pt-1 font-medium w-24">Base</th>
+                                )}
+                                <th className="text-right px-1 pb-2 pt-1 font-medium">Livre</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {(d.ocupacao?.porDia ?? []).filter(temBaseOcupacaoLinha).map(x => {
+                                const uDia = unidadeSoUma ? '' : unidadeDiaAgenda(d.ocupacao?.slots, x.dow)
+                                const pctSess = x.capacidadeMultipla && x.horariosTotal > 0
+                                  ? x.horariosOcupados / x.horariosTotal : null
+                                const cor = corFaixaOcupacao(x.pct) ?? B.green
+                                const pctNum = Math.max(0, Math.min(100, (Number(x.pct) || 0) * 100))
+                                return (
+                                  <tr key={x.dow} className="border-t">
+                                    <td className="px-1 py-2 whitespace-nowrap">
+                                      <div className="font-medium">{x.dia}</div>
+                                      {uDia && <div className="text-[10px] mt-0.5" style={{ color: B.blue }}>· {uDia}</div>}
+                                    </td>
+                                    <td className="px-1 py-2" style={{ minWidth: 160 }}>
+                                      <div className="flex items-center gap-2">
+                                        <span className="inline-block rounded-full px-2.5 py-0.5 font-bold whitespace-nowrap text-xs"
+                                          style={{ background: `${cor}22`, color: cor, border: `1.5px solid ${cor}55` }}>
+                                          {fmtPctOcup(x.pct)}
+                                        </span>
+                                        <div className="flex-1 h-1.5 rounded-full bg-gray-100 min-w-[48px]">
+                                          <div className="h-full rounded-full" style={{ width: `${pctNum}%`, background: cor }} />
+                                        </div>
+                                      </div>
+                                    </td>
+                                    {temRegraEspecial ? (
+                                      <>
+                                        <td className="px-1 py-2 text-right">
+                                          <span className="inline-block rounded-full px-2.5 py-0.5 font-bold whitespace-nowrap"
+                                            style={{ background: `${cor}22`, color: cor, border: `1.5px solid ${cor}55` }}>
+                                            {Math.round(x.slotsOcupados)} / {Math.round(x.slotsTotal)}
+                                          </span>
+                                        </td>
+                                        <td className="px-1 py-2 text-right">
+                                          {x.capacidadeMultipla ? (
+                                            <>
+                                              <div className="font-semibold text-gray-700 whitespace-nowrap">
+                                                {Math.round(x.horariosOcupados)} / {Math.round(x.horariosTotal)}
+                                              </div>
+                                              {pctSess !== null && (
+                                                <div className="text-[10px] text-gray-400">{fmtPctOcup(pctSess)}</div>
+                                              )}
+                                            </>
+                                          ) : (
+                                            <span className="text-gray-300 text-sm">—</span>
+                                          )}
+                                        </td>
+                                      </>
+                                    ) : (
+                                      <td className="px-1 py-2 text-right whitespace-nowrap text-gray-400">
+                                        {x.baseCompacta || '—'}
+                                      </td>
+                                    )}
+                                    <td className="px-1 py-2 text-right whitespace-nowrap font-semibold" style={{ color: B.red }}>
+                                      {fmtH(x.horasLivres)}
+                                    </td>
+                                  </tr>
+                                )
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+
+                        {/* por especialidade */}
+                        {(d.ocupacao?.porEspecialidade?.length ?? 0) > 0 && (
+                          <div className="rounded-xl p-3" style={{ background: '#fff', border: '1px solid #eef2f7' }}>
+                            <div className="font-bold text-xs mb-2" style={{ color: B.navy }}>Ocupação por especialidade</div>
+                            <table className="w-full text-xs">
+                              <thead>
+                                <tr className="text-gray-400 text-[11px] border-b">
+                                  <th className="text-left px-1 pb-2 pt-1 font-medium">Especialidade</th>
+                                  <th className="text-left px-1 pb-2 pt-1 font-medium">% ocup.</th>
+                                  {temRegraEspecial ? (
+                                    <>
+                                      <th className="text-right px-1 pb-2 pt-1 font-medium whitespace-nowrap">Vagas simult.</th>
+                                      <th className="text-right px-1 pb-2 pt-1 font-medium">Sessões</th>
+                                    </>
+                                  ) : (
+                                    <th className="text-right px-1 pb-2 pt-1 font-medium w-24">Base</th>
+                                  )}
+                                  <th className="text-right px-1 pb-2 pt-1 font-medium">Livre</th>
+                                </tr>
+                              </thead>
+                              <tbody>
+                                {d.ocupacao?.porEspecialidade?.map(x => {
+                                  const pctSessEsp = x.capacidadeMultipla && x.horariosTotal > 0
+                                    ? x.horariosOcupados / x.horariosTotal : null
+                                  const corEsp = corFaixaOcupacao(x.pct) ?? B.green
+                                  const pctNumEsp = Math.max(0, Math.min(100, (Number(x.pct) || 0) * 100))
+                                  return (
+                                    <tr key={x.terp} className="border-t">
+                                      <td className="px-1 py-2 truncate max-w-[120px]" title={x.terp}>{x.terp}</td>
+                                      <td className="px-1 py-2" style={{ minWidth: 140 }}>
+                                        <div className="flex items-center gap-2">
+                                          <span className="inline-block rounded-full px-2.5 py-0.5 font-bold whitespace-nowrap text-xs"
+                                            style={{ background: `${corEsp}22`, color: corEsp, border: `1.5px solid ${corEsp}55` }}>
+                                            {fmtPctOcup(x.pct)}
+                                          </span>
+                                          {temRegraEspecial && (
+                                            <div className="flex-1 h-1.5 rounded-full bg-gray-100 min-w-[40px]">
+                                              <div className="h-full rounded-full" style={{ width: `${pctNumEsp}%`, background: corEsp }} />
+                                            </div>
+                                          )}
+                                        </div>
+                                      </td>
+                                      {temRegraEspecial ? (
+                                        <>
+                                          <td className="px-1 py-2 text-right">
+                                            <span className="inline-block rounded-full px-2.5 py-0.5 font-bold whitespace-nowrap"
+                                              style={{ background: `${corEsp}22`, color: corEsp, border: `1.5px solid ${corEsp}55` }}>
+                                              {Math.round(x.slotsOcupados)} / {Math.round(x.slotsTotal)}
+                                            </span>
+                                          </td>
+                                          <td className="px-1 py-2 text-right">
+                                            {x.capacidadeMultipla ? (
+                                              <>
+                                                <div className="font-semibold text-gray-700 whitespace-nowrap">
+                                                  {Math.round(x.horariosOcupados)} / {Math.round(x.horariosTotal)}
+                                                </div>
+                                                {pctSessEsp !== null && (
+                                                  <div className="text-[10px] text-gray-400">{fmtPctOcup(pctSessEsp)}</div>
+                                                )}
+                                              </>
+                                            ) : (
+                                              <span className="text-gray-300 text-sm">—</span>
+                                            )}
+                                          </td>
+                                        </>
+                                      ) : (
+                                        <td className="px-1 py-2 text-right whitespace-nowrap text-gray-400">{x.baseCompacta || '—'}</td>
+                                      )}
+                                      <td className="px-1 py-2 text-right whitespace-nowrap font-semibold" style={{ color: B.red }}>
+                                        {fmtH(x.horasLivres)}
+                                      </td>
+                                    </tr>
+                                  )
+                                })}
+                              </tbody>
+                            </table>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )
+        })}
+
+        {!dadosFiltrados.length && (
+          <div className="text-center text-sm text-gray-400 py-10 bg-white rounded-xl">
+            Nenhum profissional dentro dos filtros de ocupação.
+          </div>
+        )}
+      </div>
+
+      {/* ── nota de cálculo ── */}
+      <div className="mt-5 text-xs text-gray-500 rounded-xl p-3 border"
+        style={{ background: B.blueLt, borderColor: '#d8ecf6' }}>
+        <strong style={{ color: B.navy }}>Notas sobre o cálculo:</strong> sessões comuns usam sessões ocupadas ÷ sessões disponíveis. Musicoterapia usa vagas preenchidas ÷ capacidade total (múltiplos pacientes por sessão). Aplicador ABA EF usa capacidade de 2 pacientes por sessão. Horário Administrativo conta como ocupação técnica e aparece separado no detalhe do profissional.
+      </div>
+      </div>
+
+      {/* ── modal: profissionais da especialidade ── */}
+      {espModal && (
+        <div
+          style={{ position: 'fixed', inset: 0, zIndex: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,.45)', padding: '16px' }}
+          onClick={e => { if (e.target === e.currentTarget) setEspModal(null) }}>
+          <div style={{ background: 'var(--card)', borderRadius: '18px', boxShadow: '0 20px 60px rgba(0,0,0,.25)', width: '100%', maxWidth: '420px', overflow: 'hidden' }}>
+            {/* cabeçalho */}
+            <div style={{ borderTop: `4px solid ${corTerapiaEsp(espModal.especialidade, corFaixaOcupacao(espModal.pct) ?? B.green)}`, padding: '18px 20px 14px' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 }}>
+                <div>
+                  <div style={{ fontWeight: 900, fontSize: '16px', color: 'var(--foreground)', lineHeight: 1.2 }}>
+                    {espModal.especialidade}
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--muted-foreground)', marginTop: 3 }}>
+                    {espModal.profissionaisQtd} profissional{espModal.profissionaisQtd !== 1 ? 'is' : ''} · {fmtPctOcup(espModal.pct)} ocupação
+                  </div>
+                </div>
+                <button type="button" onClick={() => setEspModal(null)}
+                  style={{ flexShrink: 0, width: 28, height: 28, borderRadius: '50%', border: '1px solid var(--border)', background: 'var(--muted)', cursor: 'pointer', fontSize: 14, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--muted-foreground)', fontFamily: 'inherit' }}>
+                  ✕
+                </button>
+              </div>
+            </div>
+            {/* lista de profissionais */}
+            <div style={{ padding: '4px 20px 20px', maxHeight: '60vh', overflowY: 'auto' }}>
+              {espModal.profissionaisNomes.map((nome, i) => (
+                <div key={nome} style={{
+                  display: 'flex', alignItems: 'center', gap: 10,
+                  padding: '9px 0',
+                  borderBottom: i < espModal.profissionaisNomes.length - 1 ? '1px solid var(--border)' : 'none',
+                }}>
+                  <div style={{
+                    width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
+                    background: B.navyLt, color: B.navy,
+                    display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    fontSize: 11, fontWeight: 700,
+                  }}>
+                    {nome.trim().charAt(0).toUpperCase()}
+                  </div>
+                  <span style={{ fontSize: '13px', color: 'var(--foreground)', fontWeight: 500 }}>{nome}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  )
+}

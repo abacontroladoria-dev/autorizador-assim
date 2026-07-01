@@ -176,7 +176,15 @@ export function resolverStatus(item: any): StatusToken {
     ''
 
   const token = TOKENS[String(bruto).toLowerCase()]
-  if (token) return token
+  if (token) {
+    if (token.key === 'autorizado') {
+      const conv = (item?.convenio || item?.convenio_nome || '').toLowerCase()
+      if (!conv.includes('assim')) {
+        return { ...token, label: 'Presente' }
+      }
+    }
+    return token
+  }
 
   return { ...FALLBACK, label: bruto || 'Sem status' }
 }

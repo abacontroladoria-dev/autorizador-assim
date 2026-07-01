@@ -8,7 +8,7 @@ const nextConfig: NextConfig = {
   typescript: {
     tsconfigPath: './tsconfig.json'
   },
-  turbopack: {},
+  turbopack: { root: __dirname },
 
   webpack(config, { webpack: wp }) {
 

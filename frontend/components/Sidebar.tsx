@@ -16,10 +16,23 @@ import {
   Star,
   KeyRound,
   BarChart3,
+  CalendarPlus,
+  Database,
+  LogOut,
+  TrendingUp,
+  UserCheck,
+  UserPlus,
   Zap,
+  Clock,
+  XCircle,
+  AlertTriangle,
+  CalendarOff,
+  BookOpen,
+  Settings,
+  CalendarRange,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { getFunctionHeaders, getFunctionUrl } from "@/lib/supabase/functions"
 import toast from "react-hot-toast"
@@ -51,11 +64,27 @@ const pathIconMap: Record<string, any> = {
   "/admin": ShieldCheck,
   "/admin/permissoes": KeyRound,
   "/connect": Zap,
+  "/cronograma/solicitacoes?tab=simulacao": UserPlus,
+  "/cronograma/solicitacoes?tab=saida": LogOut,
+  "/cronograma/solicitacoes?tab=ocup-prof": TrendingUp,
+  "/cronograma/solicitacoes?tab=ocup-pac": TrendingUp,
+  "/cronograma/solicitacoes?tab=novo-cron": CalendarPlus,
+  "/cronograma/solicitacoes?tab=banco": Database,
+  "/cronograma/ocupacao?tab=vagas": TrendingUp,
+  "/cronograma/ocupacao?tab=fila": Clock,
+  "/cronograma/ocupacao?tab=recusados": XCircle,
+  "/cronograma/ocupacao?tab=inviavel": AlertTriangle,
+  "/cronograma/ocupacao?tab=gaps": CalendarOff,
+  "/cronograma/ocupacao?tab=inconsistencias": AlertTriangle,
+  "/cronograma/ocupacao?tab=guia": BookOpen,
+  "/cronograma/ocupacao?tab=config": Settings,
+  "/cronograma/indicadores": BarChart3,
 }
 
 export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = getSupabaseClient()
   const { theme } = useTheme()
   const { isImpersonating, impersonatedTarget, canImpersonate } = useImpersonation()
@@ -99,10 +128,17 @@ export default function Sidebar() {
   }
 
   function isActive(path: string) {
+    const [rawPart, queryPart] = path.split("?")
+    const pathPart = rawPart.replace(/\/$/, "") || "/"
     const current = pathname.replace(/\/$/, "") || "/"
-    // /connect and its sub-paths are all considered active for the Connect item
     if (path === "/connect") return current === "/connect" || current.startsWith("/connect/")
-    return current === path
+    if (current !== pathPart) return false
+    if (!queryPart) return true
+    const expected = new URLSearchParams(queryPart)
+    for (const [k, v] of expected) {
+      if (searchParams.get(k) !== v) return false
+    }
+    return true
   }
 
   async function handleLogout() {
@@ -113,7 +149,8 @@ export default function Sidebar() {
 
   function canAccess(path: string) {
     if (!role) return false
-    return allowedPaths.includes(path)
+    const barePath = path.split("?")[0]
+    return allowedPaths.includes(barePath)
   }
 
   useEffect(() => {
@@ -430,6 +467,22 @@ export default function Sidebar() {
               {canAccess("/guias-digitais") && (
                 <MenuItem label="Guias Digitais" icon={FileText} path="/guias-digitais" />
               )}
+            </SidebarGroup>
+          )}
+
+          {/* Cronograma */}
+          {(canAccess("/cronograma/solicitacoes") || canAccess("/cronograma/ocupacao")) && (
+            <SidebarGroup title="Cronograma" icon={CalendarRange}>
+              {canAccess("/cronograma/solicitacoes") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/solicitacoes?tab=saida" />}
+              {canAccess("/cronograma/solicitacoes") && <MenuItem label="Ocupação Paciente" icon={UserCheck} path="/cronograma/solicitacoes?tab=ocup-pac" />}
+              {canAccess("/cronograma/ocupacao") && <MenuItem label="Aceites e Recusas" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
+            </SidebarGroup>
+          )}
+
+          {/* Indicadores */}
+          {canAccess("/cronograma/indicadores") && (
+            <SidebarGroup title="Indicadores" icon={TrendingUp}>
+              <MenuItem label="Ocupação de Profissionais" icon={BarChart3} path="/cronograma/indicadores" />
             </SidebarGroup>
           )}
 

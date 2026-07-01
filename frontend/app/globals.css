@@ -46,6 +46,22 @@
     --radius-3xl: calc(var(--radius) * 2.2);
     --radius-4xl: calc(var(--radius) * 2.6);
 
+    /* ── Type scale (product register — fixed rem, 1.143 ratio) ── */
+    --text-xs:  0.6875rem;  /* 11px — caption / badge        */
+    --text-sm:  0.75rem;    /* 12px — label / meta           */
+    --text-md:  0.875rem;   /* 14px — body / controls        */
+    --text-base: 1rem;      /* 16px — title / primary input  */
+    --text-lg:  1.0625rem;  /* 17px — modal heading          */
+    --text-xl:  1.125rem;   /* 18px — display                */
+    --leading-tight: 1.25;
+    --leading-body:  1.5;
+    --weight-regular:  400;
+    --weight-medium:   500;
+    --weight-semibold: 600;
+    --weight-bold:     700;
+    --weight-heavy:    800;
+    --weight-black:    900;
+
     /* ── Brand tokens ───────────────────────────────────────── */
     /* accent: icons, borders, focus rings, fills (non-text)     */
     --color-brand: oklch(0.62 0.092 217);
@@ -99,6 +115,7 @@
     --sidebar-accent-foreground: #1D4ED8;
     --sidebar-border: #E2E8F0;
     --sidebar-ring: #93C5FD;
+    --cron-active-bg: #eaf5fb;
 }
 
 .dark {
@@ -133,6 +150,7 @@
     --sidebar-primary-foreground: oklch(0.985 0 0);
     --sidebar-accent: oklch(0.269 0 0);
     --sidebar-accent-foreground: oklch(0.985 0 0);
+    --cron-active-bg: oklch(0.27 0.06 240);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
 }
@@ -140,13 +158,24 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    }
-  body {
-    @apply bg-background text-foreground;
-    }
+  }
   html {
     @apply font-sans;
-    }
+    font-size: 1rem;
+    font-kerning: normal;
+    font-optical-sizing: auto;
+  }
+  body {
+    @apply bg-background text-foreground;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+    line-height: 1.5;
+  }
+  /* Tabular numerals for numeric data, times and dates */
+  time, [data-tabular], .tabular-nums {
+    font-variant-numeric: tabular-nums;
+  }
 }
 
 /* ─── Global scrollbar ───────────────────────────────────────────────────── */
