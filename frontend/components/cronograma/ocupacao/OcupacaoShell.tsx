@@ -2,8 +2,8 @@
 
 import { useSearchParams, useRouter } from "next/navigation"
 import { useCallback, useEffect, useMemo, useState } from "react"
-import Papa from "papaparse"
-import { B, API_BASE } from "@/lib/cronograma/constants"
+import { B } from "@/lib/cronograma/constants"
+import { buscarGradeComoCSVRows } from "@/lib/cronograma/gradeService"
 import { getRefWeek, waKey } from "@/lib/cronograma/helpers"
 import { runAlgorithm } from "@/lib/cronograma/runAlgorithm"
 import { exportBase } from "@/lib/cronograma/xlsx"
@@ -16,7 +16,7 @@ import { AcompanhamentoTab } from "./tabs/AcompanhamentoTab"
 import { InconsistenciasTab } from "./tabs/InconsistenciasTab"
 import { CronModal } from "./CronModal"
 import { detectarInconsistencias } from "@/lib/cronograma/inconsistencias"
-import type { AlgorithmResult, CsvRow, Sugestao, WaStatus } from "@/types/cronograma"
+import type { AlgorithmResult, Sugestao, WaStatus } from "@/types/cronograma"
 
 const TABS = [
   { key: "vagas",            label: "📋 Aumentar Ocupação (Clínica)" },
@@ -37,7 +37,7 @@ const TAB_HEADERS: Record<TabKey, { title: string; subtitle: string }> = {
 }
 
 export function OcupacaoShell() {
-  const { cRows, lRows, rec, inv, waMap, cfg, savedAt, saveError, clearSaveError, sRec, sInv, sWa, setCRows } = useCronogramaData()
+  const { cRows, lRows, rec, inv, waMap, cfg, conf, savedAt, saveError, clearSaveError, sRec, sInv, sWa, setCRows } = useCronogramaData()
 
   const searchParams = useSearchParams()
   const router = useRouter()
@@ -74,9 +74,7 @@ export function OcupacaoShell() {
     setErr(null)
     const t = setTimeout(() => {
       try {
-        const confirmedItems: { prof: string; dia: string; hora: string }[] = (() => {
-          try { return JSON.parse(localStorage.getItem("aba_confirmados_v1") || "[]") } catch { return [] }
-        })()
+        const confirmedItems = conf.map(c => ({ prof: c.prof, dia: c.dia, hora: c.hora }))
         setRes(runAlgorithm(cRows, lRows, rec, inv, { ...cfg, waMap, confirmedItems }))
       } catch (e) {
         setErr(`Erro: ${(e as Error).message}`)
@@ -85,7 +83,7 @@ export function OcupacaoShell() {
       }
     }, 50)
     return () => clearTimeout(t)
-  }, [cRows, lRows, rec, inv, cfg, waMap])
+  }, [cRows, lRows, rec, inv, cfg, waMap, conf])
 
   const handleWA = useCallback((s: Sugestao) => {
     sWa({ ...waMap, [waKey(s)]: "aguardando" })
@@ -121,35 +119,22 @@ export function OcupacaoShell() {
   const aguardando = useMemo(() => Object.values(waMap).filter(v => v === "aguardando").length, [waMap])
   const incItems = useMemo(() => detectarInconsistencias(cRows, lRows), [cRows, lRows])
 
+  // Carrega a grade da tabela csv_grades_profissionais (sincronizada diariamente às 06h).
+  // É a fonte canônica e completa — substitui a antiga chamada à API ao vivo do TITA,
+  // que vinha incompleta (ex.: sem sessões de "Coordenador de Caso").
   const handleApiFetch = useCallback(async () => {
-    if (!cfg.apiToken) { setApiErr("Configure o token em 📖 Guia primeiro."); return }
     setApiFetch(true); setApiErr("")
     const rw = getRefWeek()
     try {
-      const resp = await fetch(`${API_BASE}/integracao/csv_grade_profissionais`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "X-INTEGRACAO-TOKEN": cfg.apiToken },
-        body: JSON.stringify({ data_inicio: rw.inicio, data_fim: rw.fim }),
-      })
-      if (!resp.ok) { setApiErr(`API retornou status ${resp.status}.`); return }
-      const text = await resp.text()
-      Papa.parse<Record<string, string>>(text, {
-        header: true, skipEmptyLines: true,
-        complete: (result) => {
-          const rows = result.data.map(row => {
-            const o: Record<string, string> = {}
-            for (const [k, v] of Object.entries(row)) o[k.replace(/^﻿/, "").trim()] = v
-            return o as CsvRow
-          })
-          setCRows(rows)
-        },
-      })
-    } catch {
-      setApiErr("CORS bloqueou a requisição. Use o upload manual do CSV.")
+      const rows = await buscarGradeComoCSVRows(rw.inicio, rw.fim)
+      if (rows.length === 0) { setApiErr("Nenhum registro encontrado para o período."); return }
+      setCRows(rows)
+    } catch (e) {
+      setApiErr(e instanceof Error ? e.message : "Erro ao buscar a grade.")
     } finally {
       setApiFetch(false)
     }
-  }, [cfg.apiToken, setCRows])
+  }, [setCRows])
 
   return (
     <div style={{ display: "flex", flexDirection: "column" }}>

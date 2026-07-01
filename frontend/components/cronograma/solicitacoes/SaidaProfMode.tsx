@@ -12,6 +12,7 @@ import { fmtName, getTurno, gPrio, pm } from "@/lib/cronograma/helpers"
 import { slotValidoParaPaciente } from "@/lib/cronograma/candidatos"
 import { buildSaidaAnalise } from "@/lib/cronograma/saida"
 import { SaidaCronModal } from "./SaidaCronModal"
+import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 import type {
   AfetadaItem, CsvRow, LaudoRow, OpcaoEstrategia, ResultItem, SessPacItem, StatusEntry, StatusMap, StatusSaida, MovimentoSessao, CfgState,
 } from "@/types/cronograma"
@@ -145,10 +146,17 @@ const COBERTURA_FILTER_MAP: Record<string, (r: ResultItem) => boolean> = {
 // ─── COMPONENTE ───────────────────────────────────────────────────────────────
 
 export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: Props) {
+  const { conf } = useCronogramaData()
   const [prof, setProf] = useState("")
   const [inputVal, setInputVal] = useState("")
   const [dropOpen, setDropOpen] = useState(false)
+  const [activeIdx, setActiveIdx] = useState(-1)
   const [selDT, setSelDT] = useState(new Set<string>())
+
+  useEffect(() => {
+    if (activeIdx < 0) return
+    document.getElementById(`prof-opt-${activeIdx}`)?.scrollIntoView({ block: "nearest" })
+  }, [activeIdx])
   const [results, setResults] = useState<ResultItem[] | null>(null)
   const [modalGroup, setModalGroup] = useState<ResultItem[] | null>(null)
   const [modalTabIdx, setModalTabIdx] = useState(0)
@@ -503,11 +511,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       if (!diaUnidade[d] && item.afetada.unidade) diaUnidade[d] = item.afetada.unidade
     }
 
-    let confirmedSlotKeys = new Set<string>()
-    try {
-      const cItems: { dia: string; hora: string }[] = JSON.parse(localStorage.getItem("aba_confirmados_v1") || "[]")
-      confirmedSlotKeys = new Set(cItems.map(c => `${c.dia}|||${c.hora}`))
-    } catch {}
+    const confirmedSlotKeys = new Set(conf.map(c => `${c.dia}|||${c.hora}`))
 
     const result: Record<string, CandidatoSlot[]> = {}
     for (const dia of novoProfData.dias) {
@@ -536,7 +540,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       }
     }
     return result
-  }, [novoProfData, lRows, agendRows, semSolucaoItems, cfg.judicialMap])
+  }, [novoProfData, lRows, agendRows, semSolucaoItems, cfg.judicialMap, conf])
 
   function toggleDT(dia: string, turno: string) {
     setSelDT(prev => {
@@ -817,6 +821,7 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                 aria-autocomplete="list"
                 aria-expanded={dropOpen && filteredProfs.length > 0}
                 aria-controls="prof-search-list"
+                aria-activedescendant={activeIdx >= 0 ? `prof-opt-${activeIdx}` : undefined}
                 value={inputVal}
                 onChange={e => {
                   setInputVal(e.target.value)
@@ -824,8 +829,25 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                   setSelDT(new Set())
                   setResults(null)
                   setDropOpen(true)
+                  setActiveIdx(-1)
                 }}
                 onFocus={() => setDropOpen(true)}
+                onKeyDown={e => {
+                  if (!dropOpen || filteredProfs.length === 0) return
+                  if (e.key === "ArrowDown") {
+                    e.preventDefault()
+                    setActiveIdx(i => Math.min(i + 1, filteredProfs.length - 1))
+                  } else if (e.key === "ArrowUp") {
+                    e.preventDefault()
+                    setActiveIdx(i => Math.max(i - 1, 0))
+                  } else if (e.key === "Enter" && activeIdx >= 0) {
+                    e.preventDefault()
+                    const p = filteredProfs[activeIdx]
+                    setProf(p); setInputVal(p); setDropOpen(false); setSelDT(new Set()); setResults(null); setActiveIdx(-1)
+                  } else if (e.key === "Escape") {
+                    setDropOpen(false); setActiveIdx(-1)
+                  }
+                }}
                 placeholder="Buscar profissional..."
                 style={{ outline: "none", width: "100%", border: "1px solid var(--border)", borderRadius: "10px", padding: "10px 12px", fontSize: "13px", background: "var(--card)", color: "var(--foreground)", transition: "border-color 150ms ease-out, box-shadow 150ms ease-out" }}
                 onFocusCapture={e => { e.currentTarget.style.borderColor = B.blue; e.currentTarget.style.boxShadow = `0 0 0 3px ${B.blue}22` }}
@@ -842,28 +864,35 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                     background: "var(--card)", border: "1px solid var(--border)", borderRadius: "10px",
                     boxShadow: "0 8px 24px rgba(0,0,0,0.10)", maxHeight: "200px", overflowY: "auto",
                   }}>
-                  {filteredProfs.map(p => (
-                    <button
-                      key={p}
-                      role="option"
-                      aria-selected={p === prof}
-                      onMouseDown={e => {
-                        e.preventDefault()
-                        setProf(p); setInputVal(p); setDropOpen(false); setSelDT(new Set()); setResults(null)
-                      }}
-                      style={{
-                        display: "block", width: "100%", textAlign: "left",
-                        padding: "9px 12px", background: p === prof ? B.navyLt : "none",
-                        border: "none", fontSize: "13px", cursor: "pointer",
-                        color: p === prof ? B.navy : "var(--card-foreground)", fontWeight: p === prof ? 700 : 400,
-                        transition: "background 120ms ease-out",
-                      }}
-                      onMouseEnter={e => { if (p !== prof) e.currentTarget.style.background = "var(--muted)" }}
-                      onMouseLeave={e => { if (p !== prof) e.currentTarget.style.background = "none" }}
-                    >
-                      {p}
-                    </button>
-                  ))}
+                  {filteredProfs.map((p, i) => {
+                    const isActive = i === activeIdx
+                    const isSelected = p === prof
+                    return (
+                      <button
+                        key={p}
+                        id={`prof-opt-${i}`}
+                        role="option"
+                        aria-selected={isSelected}
+                        onMouseDown={e => {
+                          e.preventDefault()
+                          setProf(p); setInputVal(p); setDropOpen(false); setSelDT(new Set()); setResults(null); setActiveIdx(-1)
+                        }}
+                        onMouseEnter={() => setActiveIdx(i)}
+                        onMouseLeave={() => setActiveIdx(-1)}
+                        style={{
+                          display: "block", width: "100%", textAlign: "left",
+                          padding: "9px 12px",
+                          background: isActive ? B.navy : isSelected ? "var(--muted)" : "none",
+                          border: "none", fontSize: "13px", cursor: "pointer",
+                          color: isActive ? "#fff" : isSelected ? B.navy : "var(--card-foreground)",
+                          fontWeight: isActive || isSelected ? 700 : 400,
+                          transition: "background 120ms ease-out",
+                        }}
+                      >
+                        {p}
+                      </button>
+                    )
+                  })}
                 </div>
               )}
             </div>

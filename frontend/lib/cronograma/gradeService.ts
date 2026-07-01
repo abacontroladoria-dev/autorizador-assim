@@ -5,11 +5,23 @@ import type { CsvRow } from "@/types/cronograma"
 const FIELDS = "paciente_nome, dia_semana, hora_inicial, hora_final, profissional_nome, terapia_nome, terapia_exibicao_nome, status_agendamento, convenio_nome, sala_nome, data, unidade_nome"
 const PAGE = 1000
 
-const DIAS_PT = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"]
+// Padrão de dupla codificação UTF-8 (mojibake): byte líder C2/C3 seguido de byte
+// de continuação (80–BF). Ex.: "Araújo" gravado como "AraÃºjo".
+const MOJIBAKE_RE = /[Â-Ã][-¿]/
 
-function diaSemanaDeData(data: string | null): string {
-  if (!data) return ""
-  return DIAS_PT[new Date(`${data}T12:00:00`).getDay()] ?? ""
+// A sincronização da grade (Edge Function sync-grade-csv) grava texto com dupla
+// codificação UTF-8. Isto repara na leitura. Só atua quando o padrão está presente,
+// para não corromper texto já correto.
+function fixMojibake(s: string | null | undefined): string {
+  const str = s ?? ""
+  if (!str || !MOJIBAKE_RE.test(str)) return str
+  try {
+    return new TextDecoder("utf-8", { fatal: false }).decode(
+      Uint8Array.from(str, c => c.charCodeAt(0) & 0xff),
+    )
+  } catch {
+    return str
+  }
 }
 
 export async function buscarGradeComoCSVRows(dataInicio: string, dataFim: string): Promise<CsvRow[]> {
@@ -27,7 +39,7 @@ export async function buscarGradeComoCSVRows(dataInicio: string, dataFim: string
       .eq("unidade_id", 280)
       .order("data")
       .order("hora_inicial")
-      .order("profissional_nome")
+      .order("id")          // desempate único — paginação estável, sem pular/duplicar linhas
       .range(from, from + PAGE - 1)
 
     if (error) throw new Error(error.message)
@@ -39,24 +51,22 @@ export async function buscarGradeComoCSVRows(dataInicio: string, dataFim: string
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return (all as any[]).map((r: Record<string, string | null>) => {
-    const hi_str = String(r.hora_inicial ?? "").slice(0, 5)
-    const hf_str = String(r.hora_final  ?? "").slice(0, 5)
+    const hi_str   = String(r.hora_inicial ?? "").slice(0, 5)
+    const salaNome = fixMojibake(r.sala_nome)
     return {
-      "Nome Favorecido":        r.paciente_nome         ?? "",
-      "Dia da Semana":          r.dia_semana || diaSemanaDeData(r.data),
+      "Nome Favorecido":        fixMojibake(r.paciente_nome),
+      "Dia da Semana":          r.dia_semana            ?? "",
       "Hora Inicial":           hi_str,
-      "Terapia":                r.terapia_nome          ?? "",
-      "Terapia Exibição":       r.terapia_exibicao_nome ?? "",
-      "Profissional":           r.profissional_nome     ?? "",
+      "Terapia":                fixMojibake(r.terapia_nome),
+      "Terapia Exibição":       fixMojibake(r.terapia_exibicao_nome),
+      "Profissional":           fixMojibake(r.profissional_nome),
       "Status do Agendamento":  r.status_agendamento    ?? "",
-      "Convênio":               r.convenio_nome         ?? "",
-      "Sala":                   r.sala_nome             ?? "",
+      "Convênio":               fixMojibake(r.convenio_nome),
+      "Sala":                   salaNome,
       "Data":                   r.data                  ?? "",
       HI_str:                   hi_str,
       HI:                       pm(hi_str),
-      HF_str:                   hf_str,
-      HF:                       pm(hf_str),
-      Unidade:                  exU(r.sala_nome),
+      Unidade:                  exU(salaNome),
     } as unknown as CsvRow
   })
 }

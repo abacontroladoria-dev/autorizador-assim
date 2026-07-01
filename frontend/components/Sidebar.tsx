@@ -472,6 +472,7 @@ export default function Sidebar() {
           {(canAccess("/cronograma/solicitacoes") || canAccess("/cronograma/ocupacao")) && (
             <SidebarGroup title="Cronograma" icon={CalendarRange}>
               {canAccess("/cronograma/solicitacoes") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/solicitacoes?tab=saida" />}
+              {canAccess("/cronograma/solicitacoes") && <MenuItem label="Ocupação Paciente" icon={UserCheck} path="/cronograma/solicitacoes?tab=ocup-pac" />}
               {canAccess("/cronograma/ocupacao") && <MenuItem label="Aceites e Recusas" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
             </SidebarGroup>
           )}

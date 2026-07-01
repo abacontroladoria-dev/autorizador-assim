@@ -1,0 +1,9 @@
+-- Central de Atendimento — RLS Test Suite
+-- M-RLS-003 | Block 4 — Security Layer
+--
+-- Os testes de RLS foram removidos desta migration para evitar falhas em produção.
+-- O script original tentava inserir usuários fictícios em public.usuarios cujos IDs
+-- não existem em auth.users, violando a FK usuarios_id_fkey.
+--
+-- Para executar os testes manualmente, use o script em:
+--   supabase/tests/ca_rls_tests.sql  (SQL Editor only — não é uma migration)

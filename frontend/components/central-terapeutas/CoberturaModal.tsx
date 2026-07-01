@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   CalendarDays,
   Check,
@@ -107,10 +107,11 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
         setProfissionais(semTerapeuta)
 
         // Resolve substitutoId por nome para sessões pré-carregadas sem ID
+        const profByName = new Map(semTerapeuta.map((p) => [p.profissional_nome, p.profissional_id]))
         setSessoes((prev) => prev.map((s) => {
           if (s.substitutoNome && !s.substitutoId) {
-            const prof = semTerapeuta.find((p) => p.profissional_nome === s.substitutoNome)
-            if (prof) return { ...s, substitutoId: prof.profissional_id }
+            const id = profByName.get(s.substitutoNome)
+            if (id != null) return { ...s, substitutoId: id }
           }
           return s
         }))
@@ -222,6 +223,17 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
       if (document.activeElement === last) { e.preventDefault(); first.focus() }
     }
   }, [onClose])
+
+  const slotsMap = useMemo(() => {
+    const map = new Map<number, SlotModalSubstituicao[]>()
+    for (const s of profissionais) {
+      if (!map.has(s.profissional_id)) map.set(s.profissional_id, [])
+      map.get(s.profissional_id)!.push(s)
+    }
+    return map
+  }, [profissionais])
+
+  const profsUnicosModal = useMemo(() => getProfissionaisUnicos(profissionais), [profissionais])
 
   const sessoesManha = useMemo(
     () => sessoes.filter((s) => String(s.atendimento.hora_inicial).slice(0, 5) < '13:00'),
@@ -643,6 +655,8 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
                   key={sessao.id}
                   sessao={sessao}
                   profissionais={profissionais}
+                  profsUnicos={profsUnicosModal}
+                  slotsMap={slotsMap}
                   recomendadoId={sessao.recomendadoId}
                   onSelecionar={selecionarSubstituto}
                   onMarcarDisponivel={marcarDisponivel}
@@ -720,9 +734,11 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
 
 // ── SessionRow ──────────────────────────────────────────────────
 
-function SessionRow({
+const SessionRow = memo(function SessionRow({
   sessao,
   profissionais,
+  profsUnicos,
+  slotsMap,
   recomendadoId,
   onSelecionar,
   onMarcarDisponivel,
@@ -730,6 +746,8 @@ function SessionRow({
 }: {
   sessao: SessaoCobertura
   profissionais: SlotModalSubstituicao[]
+  profsUnicos: { id: number; nome: string; unidade: string; terapia_nome: string }[]
+  slotsMap: Map<number, SlotModalSubstituicao[]>
   recomendadoId: number | null
   onSelecionar: (id: number, profId: number | null, nome: string | null) => void
   onMarcarDisponivel: (id: number) => void
@@ -751,16 +769,13 @@ function SessionRow({
   )
   const iniciaisPaciente = getIniciais(paciente)
 
-  const profsUnicos = useMemo(() => getProfissionaisUnicos(profissionais), [profissionais])
-
   const profsComStatus = useMemo(() => {
     const turnoSessao = hora < '13:00' ? 'manha' : 'tarde'
     const ordemStatus: Record<string, number> = { livre: 0, ocupado: 1, sem_agenda_hoje: 2 }
 
     const profsDoTurno = profsUnicos.filter((p) => {
-      const slotsDoDia = profissionais.filter(
-        (s) => s.profissional_id === p.id && s.status_slot !== 'sem_agenda_hoje'
-      )
+      const todosSlots = slotsMap.get(p.id) ?? []
+      const slotsDoDia = todosSlots.filter((s) => s.status_slot !== 'sem_agenda_hoje')
 
       // Tem slots hoje: incluir somente se há slot no horário exato da sessão
       if (slotsDoDia.length > 0) {
@@ -768,15 +783,13 @@ function SessionRow({
       }
 
       // Sem agenda hoje: incluir se turno_semana bate com o turno da sessão
-      const semAgenda = profissionais.find(
-        (s) => s.profissional_id === p.id && s.status_slot === 'sem_agenda_hoje'
-      )
+      const semAgenda = todosSlots.find((s) => s.status_slot === 'sem_agenda_hoje')
       if (!semAgenda?.turno_semana) return false
       return semAgenda.turno_semana === 'ambos' || semAgenda.turno_semana === turnoSessao
     })
 
     const profsComStatusRaw = profsDoTurno
-      .map((p) => ({ ...p, ...getStatusProfNaHora(profissionais, p.id, hora) }))
+      .map((p) => ({ ...p, ...getStatusProfNaHora(slotsMap.get(p.id) ?? [], hora) }))
 
     // Regra Coordenador de Caso (spec): só exibir quando não houver nenhum ABA Livre
     const sessaoTerapiaNome = String((sessao.atendimento as any)?.terapia_nome || '')
@@ -793,7 +806,7 @@ function SessionRow({
     }
 
     return profsFinais.sort((a, b) => (ordemStatus[a.status] ?? 3) - (ordemStatus[b.status] ?? 3))
-  }, [profsUnicos, profissionais, hora])
+  }, [profsUnicos, slotsMap, hora])
 
   // Garante que o profissional recomendado seja sempre o primeiro card visível
   const profsOrdenados = useMemo(() => {
@@ -940,11 +953,11 @@ function SessionRow({
       </div>
     </div>
   )
-}
+})
 
 // ── ProfMiniCard ────────────────────────────────────────────────
 
-function ProfMiniCard({
+const ProfMiniCard = memo(function ProfMiniCard({
   prof,
   selecionado,
   recomendado,
@@ -1010,7 +1023,7 @@ function ProfMiniCard({
       )}
     </button>
   )
-}
+})
 
 // ── Helpers ─────────────────────────────────────────────────────
 
@@ -1079,12 +1092,9 @@ function getProfissionaisUnicos(
 }
 
 function getStatusProfNaHora(
-  slots: SlotModalSubstituicao[],
-  profId: number,
+  profSlots: SlotModalSubstituicao[],
   hora: string
 ): { status: 'livre' | 'ocupado' | 'sem_agenda_hoje'; paciente: string | null } {
-  const profSlots = slots.filter((s) => s.profissional_id === profId)
-
   if (profSlots.length > 0 && profSlots.every((s) => s.status_slot === 'sem_agenda_hoje')) {
     return { status: 'sem_agenda_hoje', paciente: null }
   }

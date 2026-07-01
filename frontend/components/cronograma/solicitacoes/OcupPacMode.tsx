@@ -1,8 +1,7 @@
 "use client"
 
-import { type CSSProperties, useMemo, useState } from "react"
-import { createPortal } from "react-dom"
-import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts"
+import * as XLSX from "xlsx"
+import { type CSSProperties, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import {
   ABA_EXIB_PSICO_NAMES, B, DIAS_LIST, DIAS_ORD, EXCLUIR_OCUP, EXIB_NOME,
   HORAS_GRID, PACS_ADMIN, TERAPIA_TO_ESP, isProfBloqueadoTemp,
@@ -12,8 +11,8 @@ import {
   shouldShowSessionUnit, unidadeBadgeText,
 } from "@/lib/cronograma/helpers"
 import { UnitHeaderBadges, CronoGlobalUnitBadge } from "@/components/cronograma/ui/UnitBadges"
+import type { CsvRow, LaudoRow, CfgState, RecItem, InvItem } from "@/types/cronograma"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
-import type { CsvRow, LaudoRow, CfgState } from "@/types/cronograma"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -22,6 +21,13 @@ type Status     = "acompanhamento" | "inviavel"
 
 interface VComp { tP: string; prof: string; hora: string }
 interface ProfAlt { tP: string; prof: string; unidade: string }
+
+interface EspAlt {
+  esp: string; tP: string; prof: string; unidade: string
+  profAlts: ProfAlt[]
+  vComp: VComp[]
+  vCompAlts: Record<string, VComp[]>
+}
 
 interface Sugestao {
   id: string
@@ -32,6 +38,7 @@ interface Sugestao {
   vComp: VComp[]
   vCompAlts: Record<string, VComp[]>
   profAlts: ProfAlt[]
+  espAlts: EspAlt[]
 }
 
 interface GapInfo { esp: string; aut: number; of: number; dif: number }
@@ -43,8 +50,9 @@ interface AceiteSessao {
 interface AceitePacBundle {
   id: string; pac: string; ts: number; origem: "ocp-paciente"
   sessoes: AceiteSessao[]
-  status: "pendente" | "confirmado" | "recusado"
+  status: "pendente" | "confirmado" | "recusado" | "inviavel"
   inviavelSlots: string[]
+  motivo?: string
 }
 
 // ─── Metadata ─────────────────────────────────────────────────────────────────
@@ -82,9 +90,10 @@ const STATUS_META: Record<Status, { label: string; bg: string; c: string }> = {
 
 const ABA_EXT_NAMES = new Set(["Aplicador ABA Casa", "Aplicador ABA Escola", "Aplicador ABA Escola/Casa"])
 const EXCLUIR_GAPS  = new Set([
-  "Coordenador de Caso", "Supervisão ABA",
   "Aplicador ABA Casa", "Aplicador ABA Escola", "Aplicador ABA Escola/Casa",
 ])
+// Terapias vedadas para ASSIM Saúde, salvo exceção judicial LIMINAR com gap > 0
+const ASSIM_RESTR_TERAPIAS = new Set(["Fisioterapia Aquática", "Equoterapia"])
 const SK         = "aba_ocup_pac_status_v1"
 const SK_ACEITES = "aba_ocup_pac_aceites_v1"
 const DIAS_UTIL  = DIAS_LIST.slice(0, 5)
@@ -98,6 +107,18 @@ const DIA_ABR: Record<string, string> = {
 function hiStr(r: CsvRow): string { return String(r.HI_str || "") }
 function hiMin(r: CsvRow): number { return Number(r.HI || 0) }
 function rowUnid(r: CsvRow): string { return String(r.Unidade || "Desconhecida") }
+
+// Normaliza variações de encoding comuns entre os dois CSVs (apóstrofo curvo vs reto,
+// espaços duplos, NFC vs NFD) para permitir junção tolerante de nomes.
+function normalizeName(n: string): string {
+  return n
+    .normalize("NFC")
+    .toLowerCase()
+    .replace(/[‘’ʼ`´]/g, "’")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
 
 function adjHs(hora: string): string[] {
   const hi = pm(hora)
@@ -141,6 +162,9 @@ function buildSugestoes(
   agendClin: CsvRow[],
   cRows: CsvRow[],
   gapMap: Record<string, { dif: number; aut: number; of: number }>,
+  aceites: AceitePacBundle[] = [],
+  conv = "",
+  isLiminar = false,
 ): Sugestao[] {
   const pacClinRows = agendClin.filter(r => r["Nome Favorecido"] === pac)
   const clinPuras   = pacClinRows.filter(r => !ABA_EXT_NAMES.has(r.Terapia))
@@ -161,8 +185,9 @@ function buildSugestoes(
     return clinTurno === "manhã" ? hMinVal < 720 : hMinVal >= 720
   }
 
+  // Todas as sessões do paciente — usado para evitar sugerir slot já ocupado
   const dayHours: Record<string, Set<string>> = {}
-  for (const r of clinPuras) {
+  for (const r of agend.filter(r => r["Nome Favorecido"] === pac)) {
     const d = r["Dia da Semana"]
     const h = hMin(r)
     if (!h && h !== 0) continue
@@ -171,8 +196,40 @@ function buildSugestoes(
     if (!dayHours[d]) dayHours[d] = new Set()
     dayHours[d].add(canonical)
   }
+  // Vagas comprometidas: sessões aguardando ou confirmadas que ainda não estão no agend
+  for (const bundle of aceites) {
+    if (bundle.pac !== pac) continue
+    if (bundle.status !== "pendente" && bundle.status !== "confirmado") continue
+    for (const s of bundle.sessoes) {
+      if (!dayHours[s.dia]) dayHours[s.dia] = new Set()
+      dayHours[s.dia].add(s.hora)
+    }
+  }
+
+  // Apenas sessões clínicas (excl. EXCLUIR_OCUP) — usado para adjacência e hasDay
+  const dayHoursClin: Record<string, Set<string>> = {}
+  for (const r of agend.filter(r => r["Nome Favorecido"] === pac && !EXCLUIR_OCUP.has(r.Terapia) && !ABA_EXT_NAMES.has(r.Terapia))) {
+    const d = r["Dia da Semana"]
+    const h = hMin(r)
+    if (!h && h !== 0) continue
+    const canonical = fm(h)
+    if (!canonical) continue
+    if (!dayHoursClin[d]) dayHoursClin[d] = new Set()
+    dayHoursClin[d].add(canonical)
+  }
 
   const pacUnidades = new Set(pacClinRows.map(r => rowUnid(r)))
+
+  // R5.4: mapa da unidade que o paciente já usa por dia+turno (manhã < 720 min; tarde ≥ 720)
+  const pacDayTurnoUnid: Record<string, string> = {}
+  for (const r of pacClinRows) {
+    const d = r["Dia da Semana"]
+    const h = hMin(r)
+    if (!h && h !== 0) continue
+    const turno = h < 720 ? "manha" : "tarde"
+    const key = `${d}|||${turno}`
+    if (!pacDayTurnoUnid[key]) pacDayTurnoUnid[key] = rowUnid(r)
+  }
 
   const pacGaps = Object.entries(gapMap)
     .filter(([k]) => k.startsWith(`${pac}|||`))
@@ -183,8 +240,14 @@ function buildSugestoes(
   if (pacGaps.length === 0) return []
 
   const espDif: Record<string, number> = {}
-  for (const g of pacGaps) espDif[g.esp] = g.dif
+  const espMeta: Record<string, { dif: number; aut: number; of: number }> = {}
+  for (const g of pacGaps) { espDif[g.esp] = g.dif; espMeta[g.esp] = g }
 
+  // Rastreia sessões já propostas nesta rodada para não ultrapassar o autorizado.
+  const proposedOf: Record<string, number> = {}
+  const effDif = (e: string, extra = 0) => (espDif[e] ?? 0) - (proposedOf[e] ?? 0) - extra
+
+  const isAssimSaude = /assim/i.test(conv)
   const seenFree = new Set<string>()
   const allFreeRows: Array<CsvRow & { _hMin: number; _hora: string }> = []
   for (const r of cRows) {
@@ -193,6 +256,8 @@ function buildSugestoes(
     if (EXCLUIR_OCUP.has(r.Terapia)) continue
     const esp = TERAPIA_TO_ESP[r.Terapia]
     if (!esp || !espDif[esp]) continue
+    // ASSIM Saúde: Fisioterapia Aquática e Equoterapia só se o paciente for LIMINAR (gap > 0 já garantido pelo check acima)
+    if (isAssimSaude && ASSIM_RESTR_TERAPIAS.has(r.Terapia) && !isLiminar) continue
     if (pacUnidades.size > 0 && !pacUnidades.has(rowUnid(r))) continue
     const h = hMin(r)
     if (!isTurnoOk(h)) continue
@@ -231,68 +296,136 @@ function buildSugestoes(
       byEspRows[esp].push(r)
     }
 
-    let bestEsp: string | null = null
-    let bestDif = -1
-    for (const esp of Object.keys(byEspRows)) {
-      if ((espDif[esp] ?? 0) > bestDif) { bestDif = espDif[esp]; bestEsp = esp }
-    }
-    if (!bestEsp) continue
-
-    const espRows = byEspRows[bestEsp]
-    const [primaryRow, ...altRows] = espRows
-    const profAlts: ProfAlt[] = altRows.map(r => ({ tP: r.Terapia, prof: r.Profissional, unidade: rowUnid(r) }))
-
-    const prof = primaryRow.Profissional
-    const unid = rowUnid(primaryRow)
-    const id   = `${dia}|||${hora}|||${bestEsp}`
-
-    const hoursOnDay = dayHours[dia]
+    const hoursOnDay = dayHoursClin[dia]
     const hasDay = !!hoursOnDay && hoursOnDay.size > 0
     const adjs   = adjHs(hora)
     const isAdj  = hasDay && adjs.some(a => hoursOnDay!.has(a))
 
-    if (hasDay && isAdj) {
-      sugestoes.push({
-        id, esp: bestEsp, tP: primaryRow.Terapia,
-        dia, hora, prof, unidade: unid,
-        tipo: "adjacente", vComp: [], vCompAlts: {},
-        profAlts,
+    // Esps elegíveis: ordenadas por déficit efetivo desc; tiebreak por taxa de preenchimento asc.
+    const eligibleEsps = Object.keys(byEspRows)
+      .filter(esp => effDif(esp) > 0)
+      .sort((a, b) => {
+        const da = effDif(a), db = effDif(b)
+        if (db !== da) return db - da
+        const ra = (espMeta[a]?.aut ?? 0) > 0 ? (espMeta[a].of / espMeta[a].aut) : 0
+        const rb = (espMeta[b]?.aut ?? 0) > 0 ? (espMeta[b].of / espMeta[b].aut) : 0
+        return ra - rb
       })
-    } else if (!hasDay) {
-      const seenComp = new Set<string>()
-      const compRows: Array<{ tP: string; prof: string; hora: string }> = []
-      for (const r of cRows) {
-        if (r["Status do Agendamento"] !== "Livre") continue
-        if (isProfBloqueadoTemp(r.Profissional)) continue
-        if (r["Dia da Semana"] !== dia) continue
-        if (rowUnid(r) !== unid) continue
-        if (EXCLUIR_OCUP.has(r.Terapia)) continue
-        const compEsp = TERAPIA_TO_ESP[r.Terapia]
-        if (!compEsp || !espDif[compEsp]) continue
-        const ch = hMin(r)
-        if (!isTurnoOk(ch)) continue
-        const cHora = fm(ch)
-        if (!adjs.includes(cHora)) continue
-        const ck = `${r.Terapia}|||${r.Profissional}|||${cHora}`
-        if (seenComp.has(ck)) continue
-        seenComp.add(ck)
-        compRows.push({ tP: r.Terapia, prof: r.Profissional, hora: cHora })
-      }
+    if (eligibleEsps.length === 0) continue
 
-      if (compRows.length > 0) {
+    // Constrói os dados de uma esp para este slot; retorna null se inválido.
+    const buildEntry = (esp: string): EspAlt | null => {
+      const espRows = byEspRows[esp]
+      const [primaryRow, ...altRows] = espRows
+      const unid = rowUnid(primaryRow)
+      // Para dia-novo: restringe profAlts à mesma unidade do slot principal, pois os
+      // vComps são calculados com base em `unid`. Trocar para um profAlt de outra unidade
+      // causaria duas sessões consecutivas em unidades diferentes (viola R5.4).
+      const profAlts = altRows
+        .filter(r => !hasDay ? rowUnid(r) === unid : true)
+        .map(r => ({ tP: r.Terapia, prof: r.Profissional, unidade: rowUnid(r) }))
+      if (!hasDay) {
+        const seenComp = new Set<string>()
+        const compRows: Array<{ tP: string; prof: string; hora: string }> = []
+        for (const r of cRows) {
+          if (r["Status do Agendamento"] !== "Livre") continue
+          if (isProfBloqueadoTemp(r.Profissional)) continue
+          if (r["Dia da Semana"] !== dia) continue
+          if (rowUnid(r) !== unid) continue
+          if (EXCLUIR_OCUP.has(r.Terapia)) continue
+          const compEsp = TERAPIA_TO_ESP[r.Terapia]
+          // Desconta 1 do esp principal, pois ele já será adicionado neste slot.
+          if (!compEsp || effDif(compEsp, compEsp === esp ? 1 : 0) <= 0) continue
+          const ch = hMin(r)
+          if (!isTurnoOk(ch)) continue
+          const cHora = fm(ch)
+          if (!adjs.includes(cHora)) continue
+          const ck = `${r.Terapia}|||${r.Profissional}|||${cHora}`
+          if (seenComp.has(ck)) continue
+          seenComp.add(ck)
+          compRows.push({ tP: r.Terapia, prof: r.Profissional, hora: cHora })
+        }
+        if (compRows.length === 0) return null
+        // Ordena por déficit desc + taxa de preenchimento asc para que g[0] seja sempre
+        // a especialidade mais necessária em cada hora.
+        compRows.sort((a, b) => {
+          const espA = TERAPIA_TO_ESP[a.tP] ?? "", espB = TERAPIA_TO_ESP[b.tP] ?? ""
+          // Desconta 1 do esp principal ao comparar vComps do mesmo slot.
+          const da = effDif(espA, espA === esp ? 1 : 0)
+          const db = effDif(espB, espB === esp ? 1 : 0)
+          if (db !== da) return db - da
+          const ra = (espMeta[espA]?.aut ?? 0) > 0 ? (espMeta[espA].of / espMeta[espA].aut) : 0
+          const rb = (espMeta[espB]?.aut ?? 0) > 0 ? (espMeta[espB].of / espMeta[espB].aut) : 0
+          return ra - rb
+        })
         const byHora: Record<string, VComp[]> = {}
         for (const c of compRows) {
           if (!byHora[c.hora]) byHora[c.hora] = []
           byHora[c.hora].push(c)
         }
-        sugestoes.push({
-          id, esp: bestEsp, tP: primaryRow.Terapia,
-          dia, hora, prof, unidade: unid,
-          tipo: "dia-novo",
+        return {
+          esp, tP: primaryRow.Terapia, prof: primaryRow.Profissional, unidade: unid, profAlts,
           vComp: Object.values(byHora).map(g => g[0]),
           vCompAlts: byHora,
-          profAlts,
-        })
+        }
+      }
+      // R5.4: slot adjacente deve estar na mesma unidade que as sessões existentes do
+      // paciente naquele dia+turno. Filtra todas as linhas pelo turno correto e rejeita
+      // se nenhuma tiver a unidade esperada.
+      const slotTurno = (pm(hora) ?? 0) < 720 ? "manha" : "tarde"
+      const existingUnid = pacDayTurnoUnid[`${dia}|||${slotTurno}`]
+      if (existingUnid) {
+        const validRows = espRows.filter(r => rowUnid(r) === existingUnid)
+        if (validRows.length === 0) return null
+        const [vPrimary, ...vAlts] = validRows
+        return {
+          esp, tP: vPrimary.Terapia, prof: vPrimary.Profissional, unidade: existingUnid,
+          profAlts: vAlts.map(r => ({ tP: r.Terapia, prof: r.Profissional, unidade: rowUnid(r) })),
+          vComp: [], vCompAlts: {},
+        }
+      }
+      return { esp, tP: primaryRow.Terapia, prof: primaryRow.Profissional, unidade: unid, profAlts, vComp: [], vCompAlts: {} }
+    }
+
+    // Encontra a esp default (maior gap com dados válidos) e coleta espAlts.
+    let defaultEntry: EspAlt | null = null
+    const altEntries: EspAlt[] = []
+    for (const esp of eligibleEsps) {
+      const entry = buildEntry(esp)
+      if (!entry) continue
+      if (!defaultEntry) { defaultEntry = entry; continue }
+      altEntries.push(entry)
+    }
+    if (!defaultEntry) continue
+
+    // Invariante: todo tP em espAlts e profAlts vem de buildEntry(), que usa CsvRow real
+    // (Profissional + Terapia + Status=Livre). allEsps e allProfs no render são a única
+    // fonte de verdade para terapias e profissionais disponíveis — não há terapia elegível
+    // sem profissional correspondente.
+    if (hasDay && isAdj) {
+      sugestoes.push({
+        id: `${dia}|||${hora}|||${defaultEntry.esp}`,
+        esp: defaultEntry.esp, tP: defaultEntry.tP,
+        dia, hora, prof: defaultEntry.prof, unidade: defaultEntry.unidade,
+        tipo: "adjacente", vComp: [], vCompAlts: {},
+        profAlts: defaultEntry.profAlts,
+        espAlts: altEntries,
+      })
+      proposedOf[defaultEntry.esp] = (proposedOf[defaultEntry.esp] ?? 0) + 1
+    } else if (!hasDay) {
+      sugestoes.push({
+        id: `${dia}|||${hora}|||${defaultEntry.esp}`,
+        esp: defaultEntry.esp, tP: defaultEntry.tP,
+        dia, hora, prof: defaultEntry.prof, unidade: defaultEntry.unidade,
+        tipo: "dia-novo",
+        vComp: defaultEntry.vComp, vCompAlts: defaultEntry.vCompAlts,
+        profAlts: defaultEntry.profAlts,
+        espAlts: altEntries,
+      })
+      proposedOf[defaultEntry.esp] = (proposedOf[defaultEntry.esp] ?? 0) + 1
+      for (const vc of defaultEntry.vComp) {
+        const e = TERAPIA_TO_ESP[vc.tP]
+        if (e) proposedOf[e] = (proposedOf[e] ?? 0) + 1
       }
     }
   }
@@ -310,8 +443,7 @@ function buildSugestoes(
     return true
   })
 
-  // R5.1 para dia-novo: múltiplos pares independentes no mesmo dia criam buraco.
-  // Mantém apenas a sugestão de maior gap por dia novo — um bloco contíguo por dia.
+  // R5.1 para dia-novo: um bloco contíguo por dia — mantém apenas o de maior gap.
   const diaNovoByDay: Record<string, Sugestao> = {}
   const finalResult: Sugestao[] = []
   for (const s of slotFiltered) {
@@ -326,34 +458,102 @@ function buildSugestoes(
 
 // ─── TodasSugestoesModal ──────────────────────────────────────────────────────
 
-interface TodasSugestoesModalProps {
-  pac: string; cRows: CsvRow[]; sugestoes: Sugestao[]; pacGaps: GapInfo[]
-  stOf: (s: Sugestao) => Status | null
-  setSt: (s: Sugestao, st: Status | null) => void
-  onClose: () => void
-  estrategia: Estrategia; setEstrategia: (e: Estrategia) => void
-  onAceitar: (bundle: { sessoes: AceiteSessao[] }) => void
-  onInviavel: (s: Sugestao) => void
+type AcaoDiretaType = "aceitar" | "recusar" | "inviavel"
+interface PendingAcaoInfo {
+  sugestao: Sugestao; hora: string; tP: string; prof: string; unidade: string; acao: AcaoDiretaType
 }
 
-function TodasSugestoesModal({
-  pac, cRows, sugestoes, pacGaps, stOf, setSt, onClose,
-  estrategia, setEstrategia, onAceitar, onInviavel,
-}: TodasSugestoesModalProps) {
-  const [selIdx, setSelIdx]       = useState<Record<string, Record<string, number>>>({})
-  const [profSelIdx, setProfSelIdx] = useState<Record<string, number>>({})
-  const [selectedIds, setSelectedIds] = useState<Set<string>>(
-    () => new Set(sugestoes.filter(s => stOf(s) !== "inviavel").map(s => s.id))
-  )
+interface TodasSugestoesModalProps {
+  pac: string; conv: string; cRows: CsvRow[]; sugestoes: Sugestao[]; pacGaps: GapInfo[]; pacAllEsp: GapInfo[]
+  stOf: (s: Sugestao) => Status | null
+  setSt: (s: Sugestao, st: Status | null) => void
+  estrategia: Estrategia; setEstrategia: (e: Estrategia) => void
+  onAceitar: (bundle: { sessoes: AceiteSessao[] }) => void
+  onInviavel: (sessoes: AceiteSessao[], motivo: string) => void
+  onAcaoDireta: (sessoes: AceiteSessao[], status: "pendente" | "recusado" | "inviavel", motivo?: string) => void
+  recusadasSet: Set<string>
+  onUndoRecusa: (dia: string, hora: string, tP: string, prof: string) => void
+}
 
-  // Itens selecionados excluindo os que foram marcados inviável após a abertura do modal
-  const effectiveSelected = useMemo(
-    () => new Set([...selectedIds].filter(id => {
-      const s = sugestoes.find(x => x.id === id)
-      return s && stOf(s) !== "inviavel"
-    })),
-    [selectedIds, sugestoes, stOf]
-  )
+export interface TodasSugestoesModalHandle {
+  selectAll: () => void
+  clearAll: () => void
+}
+
+const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoesModalProps>(function TodasSugestoesModal({
+  pac, conv, cRows, sugestoes, pacGaps, pacAllEsp, stOf, setSt,
+  estrategia, setEstrategia, onAceitar, onInviavel, onAcaoDireta,
+  recusadasSet, onUndoRecusa,
+}: TodasSugestoesModalProps, ref: React.Ref<TodasSugestoesModalHandle>) {
+  const [selIdx, setSelIdx]         = useState<Record<string, Record<string, number>>>({})
+  const [profSelIdx, setProfSelIdx] = useState<Record<string, number>>({})
+  const [espSelIdx, setEspSelIdx]   = useState<Record<string, number>>({})
+  // Confirma que o profissional foi explicitamente escolhido no wizard multi-terapia
+  const [profConfirmed, setProfConfirmed] = useState<Set<string>>(() => new Set())
+  // Proposals começam no estado "Proposta" (não analisadas).
+  // O usuário aceita clicando no card da grade ou no checkbox do Col 1.
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(() => new Set())
+  // Ação direta por sessão (✗ / ⛔)
+  const [pendingAcao, setPendingAcao] = useState<PendingAcaoInfo | null>(null)
+  const [acaoMotivo, setAcaoMotivo]   = useState("")
+  // vComps excluídos individualmente: { sugestaoId: Set<hora> }
+  const [vcExcluded, setVcExcluded] = useState<Record<string, Set<string>>>({})
+
+  // Seletor inline de profissional: id do card expandido na grade
+  const [expandedProfCardId, setExpandedProfCardId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!expandedProfCardId) return
+    const close = (e: MouseEvent) => {
+      if ((e.target as Element)?.closest("[data-prof-dropdown]")) return
+      setExpandedProfCardId(null)
+    }
+    document.addEventListener("mousedown", close)
+    return () => document.removeEventListener("mousedown", close)
+  }, [expandedProfCardId])
+
+  // Seletor inline de terapia: id do card expandido na grade
+  const [expandedEspCardId, setExpandedEspCardId] = useState<string | null>(null)
+  useEffect(() => {
+    if (!expandedEspCardId) return
+    const close = (e: MouseEvent) => {
+      if ((e.target as Element)?.closest("[data-esp-dropdown]")) return
+      setExpandedEspCardId(null)
+    }
+    document.addEventListener("mousedown", close)
+    return () => document.removeEventListener("mousedown", close)
+  }, [expandedEspCardId])
+
+  useImperativeHandle(ref, () => ({
+    selectAll() {
+      const next = new Set<string>()
+      for (const s of sugestoes) {
+        if (stOf(s) === "inviavel") continue
+        const mainKey = `${s.dia}|||${s.hora}|||${s.tP}|||${s.prof}`
+        if (recusadasSet.has(mainKey)) continue
+        next.add(s.id)
+        for (const vc of getActiveVComps(s)) {
+          const vcKey = `${s.dia}|||${vc.hora}|||${vc.tP}|||${vc.prof}`
+          if (recusadasSet.has(vcKey)) continue
+          next.add(`${s.id}|||vc|||${vc.hora}`)
+        }
+      }
+      setSelectedIds(next)
+    },
+    clearAll() {
+      setSelectedIds(new Set())
+    },
+  }))
+
+  function isVCompExcluded(sid: string, hora: string) {
+    return vcExcluded[sid]?.has(hora) ?? false
+  }
+  function toggleVComp(sid: string, hora: string) {
+    setVcExcluded(prev => {
+      const s = new Set(prev[sid] || [])
+      if (s.has(hora)) s.delete(hora); else s.add(hora)
+      return { ...prev, [sid]: s }
+    })
+  }
 
   function toggleSelected(id: string) {
     setSelectedIds(prev => {
@@ -363,48 +563,78 @@ function TodasSugestoesModal({
     })
   }
 
+  function getActiveEspData(s: Sugestao): EspAlt {
+    const idx = espSelIdx[s.id] ?? 0
+    if (idx > 0 && s.espAlts[idx - 1]) return s.espAlts[idx - 1]
+    return { esp: s.esp, tP: s.tP, prof: s.prof, unidade: s.unidade, profAlts: s.profAlts, vComp: s.vComp, vCompAlts: s.vCompAlts }
+  }
+
   function getActiveEntry(s: Sugestao): { tP: string; prof: string; unidade: string } {
+    const ed  = getActiveEspData(s)
     const idx = profSelIdx[s.id] ?? 0
-    if (idx === 0 || !s.profAlts[idx - 1]) return { tP: s.tP, prof: s.prof, unidade: s.unidade }
-    return s.profAlts[idx - 1]
+    if (idx === 0 || !ed.profAlts[idx - 1]) return { tP: ed.tP, prof: ed.prof, unidade: ed.unidade }
+    return ed.profAlts[idx - 1]
   }
 
   function getActiveVComps(s: Sugestao): VComp[] {
-    return s.vComp.map(v => {
-      const alts = s.vCompAlts[v.hora] || [v]
+    const ed = getActiveEspData(s)
+    return ed.vComp.map(v => {
+      const alts = ed.vCompAlts[v.hora] || [v]
       return alts[selIdx[s.id]?.[v.hora] ?? 0] ?? v
     })
   }
 
-  function handleAceitar() {
-    const toAccept = sugestoes.filter(s => effectiveSelected.has(s.id))
-    if (!toAccept.length) return
+  function buildSelectedSessoes(): AceiteSessao[] {
     const sessoes: AceiteSessao[] = []
-    for (const s of toAccept) {
-      const ae = getActiveEntry(s)
-      sessoes.push({ dia: s.dia, hora: s.hora, tP: ae.tP, prof: ae.prof, unidade: ae.unidade })
-      for (const vc of getActiveVComps(s)) {
-        sessoes.push({ dia: s.dia, hora: vc.hora, tP: vc.tP, prof: vc.prof, unidade: ae.unidade })
+    for (const id of selectedIds) {
+      if (id.includes("|||vc|||")) {
+        // vComp independente: "${parentId}|||vc|||${hora}"
+        const sep    = id.indexOf("|||vc|||")
+        const parentId = id.slice(0, sep)
+        const hora   = id.slice(sep + 8)
+        const s = sugestoes.find(x => x.id === parentId)
+        if (!s || stOf(s) === "inviavel") continue
+        const vc = getActiveVComps(s).find(v => v.hora === hora)
+        if (!vc) continue
+        const ae = getActiveEntry(s)
+        sessoes.push({ dia: s.dia, hora, tP: vc.tP, prof: vc.prof, unidade: ae.unidade })
+      } else {
+        const s = sugestoes.find(x => x.id === id)
+        if (!s || stOf(s) === "inviavel") continue
+        const ae = getActiveEntry(s)
+        if (!isVCompExcluded(s.id, s.hora)) {
+          sessoes.push({ dia: s.dia, hora: s.hora, tP: ae.tP, prof: ae.prof, unidade: ae.unidade })
+        }
       }
     }
+    return sessoes
+  }
+
+  function handleAceitar() {
+    const sessoes = buildSelectedSessoes()
+    if (!sessoes.length) return
     onAceitar({ sessoes })
     setSelectedIds(new Set())
   }
 
   const sessPac = useMemo(() => {
     const seen = new Set<string>()
-    const res: { dia: string; hora: string; tP: string; tE?: string; prof: string; unidade: string; tipo: "exist" | "admin" }[] = []
+    const ADMIN_WARN = new Set(["Triagem", "Avaliação Neuropsicológica", "Visita Guiada"])
+    const res: { dia: string; hora: string; tP: string; tE?: string; prof: string; unidade: string; tipo: "exist" | "adminSuperv" | "adminWarn" }[] = []
     for (const r of cRows) {
       if (r["Nome Favorecido"] !== pac || ABA_EXT_NAMES.has(r.Terapia)) continue
       const hm = pm(hiStr(r)) ?? Number(r.HI || 0)
       const hora = fm(hm) || hiStr(r)
       const k = `${r["Dia da Semana"]}|||${hm}|||${r.Terapia}|||${r.Profissional}`
       if (seen.has(k)) continue; seen.add(k)
+      let tipo: "exist" | "adminSuperv" | "adminWarn" = "exist"
+      if (r.Terapia === "Supervisão ABA")       tipo = "adminSuperv"
+      else if (ADMIN_WARN.has(r.Terapia))       tipo = "adminWarn"
       res.push({
         dia: r["Dia da Semana"], hora,
         tP: r.Terapia, tE: tExib(r.Terapia),
         prof: r.Profissional, unidade: rowUnid(r),
-        tipo: EXCLUIR_OCUP.has(r.Terapia) ? "admin" : "exist",
+        tipo,
       })
     }
     return res
@@ -412,8 +642,10 @@ function TodasSugestoesModal({
 
   type CellInfo = {
     tP: string; tE?: string; prof: string
-    tipo: "proposta" | "aceito" | "admin" | "exist" | "supervDesloc"
+    tipo: "proposta" | "aceito" | "exist" | "adminSuperv" | "adminWarn" | "supervDesloc" | "recusada"
     unidade: string; target?: string
+    sugestaoId?: string
+    isVComp?: boolean
   }
 
   const cMap: Record<string, CellInfo[]> = {}
@@ -425,40 +657,45 @@ function TodasSugestoesModal({
     }
   }
 
-  // Passo 1: registrar todos os slots principais — garantia de prioridade
+  // Todos os cards de proposta sempre visíveis na grade — o estado visual muda, não a presença.
+  // mainSlots registra todos os slots principais para impedir que vComps os sobrescrevam.
   const mainSlots = new Set<string>()
   for (const s of sugestoes) {
-    if (stOf(s) === "inviavel" || !effectiveSelected.has(s.id)) continue
     mainSlots.add(`${s.dia}|||${s.hora}`)
   }
-
-  // Passo 2: adicionar entradas principais ao cMap
   for (const s of sugestoes) {
-    const st = stOf(s)
-    if (st === "inviavel" || !effectiveSelected.has(s.id)) continue
-    const tipo: CellInfo["tipo"] = st === "acompanhamento" ? "aceito" : "proposta"
-    const ae = getActiveEntry(s)
-    const kP = `${s.dia}|||${s.hora}`
+    const st  = stOf(s)
+    const ae  = getActiveEntry(s)
+    const kP  = `${s.dia}|||${s.hora}`
+    // tipo visual: "recusada" se inviavel ou já recusado pelo usuário; "proposta" caso contrário
+    // A distinção aceita/não-aceita é feita no render via selectedIds.has(c.sugestaoId)
+    const recKey = `${s.dia}|||${s.hora}|||${ae.tP}|||${ae.prof}`
+    const tipo: CellInfo["tipo"] = st === "inviavel" ? "recusada" : recusadasSet.has(recKey) ? "recusada" : "proposta"
     if (!cMap[kP]) cMap[kP] = []
-    if (!cMap[kP].some(x => x.tP === ae.tP && x.prof === ae.prof && x.tipo === tipo)) {
-      cMap[kP].push({ tP: ae.tP, tE: tExib(ae.tP), prof: ae.prof, tipo, unidade: ae.unidade })
+    if (!cMap[kP].some(x => x.sugestaoId === s.id)) {
+      cMap[kP].push({ tP: ae.tP, tE: tExib(ae.tP), prof: ae.prof, tipo, unidade: ae.unidade, sugestaoId: s.id })
     }
   }
 
-  // Passo 3: vComps só vão para slots sem proposta principal (e sem outro vComp)
+  // vComps: sempre visíveis na grade, em slots não ocupados por slot principal.
+  // Cada vComp recebe sugestaoId único ("${parentId}|||vc|||${hora}") para ser
+  // selecionável de forma independente — sem dependência do estado do card pai.
   const seenSlot = new Set<string>(mainSlots)
   for (const s of sugestoes) {
     const st = stOf(s)
-    if (st === "inviavel" || !effectiveSelected.has(s.id)) continue
-    const tipo: CellInfo["tipo"] = st === "acompanhamento" ? "aceito" : "proposta"
+    if (st === "inviavel") continue
+    const activeUnid = getActiveEspData(s).unidade
     const activeVComps = getActiveVComps(s)
     for (const vc of activeVComps) {
-      const kC = `${s.dia}|||${vc.hora}`
+      const kC     = `${s.dia}|||${vc.hora}`
+      const vcSugId = `${s.id}|||vc|||${vc.hora}`
       if (seenSlot.has(kC)) continue
       seenSlot.add(kC)
       if (!cMap[kC]) cMap[kC] = []
-      if (!cMap[kC].some(x => x.tP === vc.tP && x.prof === vc.prof)) {
-        cMap[kC].push({ tP: vc.tP, tE: tExib(vc.tP), prof: vc.prof, tipo, unidade: s.unidade })
+      if (!cMap[kC].some(x => x.sugestaoId === vcSugId)) {
+        const recKeyVc = `${s.dia}|||${vc.hora}|||${vc.tP}|||${vc.prof}`
+        const tipoVc: CellInfo["tipo"] = recusadasSet.has(recKeyVc) ? "recusada" : "proposta"
+        cMap[kC].push({ tP: vc.tP, tE: tExib(vc.tP), prof: vc.prof, tipo: tipoVc, unidade: activeUnid, sugestaoId: vcSugId, isVComp: true })
       }
     }
   }
@@ -467,7 +704,7 @@ function TodasSugestoesModal({
   for (const [k, cells] of Object.entries(cMap)) {
     const hasProposal = cells.some(c => c.tipo === "proposta" || c.tipo === "aceito")
     if (!hasProposal) continue
-    const supervIdx = cells.findIndex(c => c.tipo === "admin" && c.tP === "Supervisão ABA")
+    const supervIdx = cells.findIndex(c => c.tipo === "adminSuperv" && c.tP === "Supervisão ABA")
     if (supervIdx === -1) continue
     const sv = cells[supervIdx]
     const kParts = k.split("|||")
@@ -476,53 +713,118 @@ function TodasSugestoesModal({
   }
 
   const dias   = [...DIAS_UTIL].sort((a, b) => (DIAS_ORD[a] ?? 9) - (DIAS_ORD[b] ?? 9))
-  const horas  = HORAS_GRID.filter(h => dias.some(d => cMap[`${d}|||${h}`]?.length))
+  // Eixo de tempo contínuo: dentro da faixa ocupada (por turno), inclui TODOS os tempos da
+  // grade — inclusive os sem sessão — para que apareçam como linhas em branco, sem vãos.
+  const horasComConteudo = HORAS_GRID.filter(h => dias.some(d => cMap[`${d}|||${h}`]?.length))
+  const horas  = (() => {
+    if (horasComConteudo.length === 0) return [] as string[]
+    const manha = horasComConteudo.filter(h => (pm(h) ?? 0) < 720)
+    const tarde = horasComConteudo.filter(h => (pm(h) ?? 0) >= 720)
+    const ranges: Array<[number, number]> = []
+    if (manha.length) ranges.push([pm(manha[0])!, pm(manha[manha.length - 1])!])
+    if (tarde.length) ranges.push([pm(tarde[0])!, pm(tarde[tarde.length - 1])!])
+    return HORAS_GRID.filter(h => { const m = pm(h) ?? -1; return ranges.some(([lo, hi]) => m >= lo && m <= hi) })
+  })()
   const unitMeta = buildCronoUnitMeta(dias, cMap)
 
+  // Time-axis: generate every 20-min tick within the range that has sessions.
+  // Session rows (in `horas`) get rowSpan=2 to occupy 80px (= 40 min).
+  const sessionStartSet = new Set(horas)
+  const allSlots = (() => {
+    if (horas.length === 0) return [] as string[]
+    const toMin = (h: string) => { const [hr, mn] = h.split(":").map(Number); return hr * 60 + mn }
+    const toHora = (m: number) => `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`
+    const slots: string[] = []
+    const morningH  = horas.filter(h => toMin(h) < 720)
+    const afternoonH = horas.filter(h => toMin(h) >= 720)
+    if (morningH.length > 0) {
+      for (let m = toMin(morningH[0]); m < toMin(morningH[morningH.length - 1]) + 40; m += 20) slots.push(toHora(m))
+    }
+    if (afternoonH.length > 0) {
+      for (let m = toMin(afternoonH[0]); m < toMin(afternoonH[afternoonH.length - 1]) + 40; m += 20) slots.push(toHora(m))
+    }
+    return slots
+  })()
+  const firstAfternoonSlot = allSlots.find(s => parseInt(s.replace(":", "")) >= 1300)
+
+  const discrepantCellKeys = new Set<string>()
+  if (!unitMeta.globalUnit) {
+    for (const d of dias) {
+      for (const isM of [true, false]) {
+        const horasT = horas.filter(h => isM ? (pm(h) ?? 999) < 720 : (pm(h) ?? 0) >= 720)
+        const items: Array<{ unit: string; k: string }> = []
+        for (const h of horasT) {
+          for (const c of cMap[`${d}|||${h}`] || []) {
+            if (!c.unidade || c.tipo === "adminSuperv" || c.tipo === "adminWarn" || c.tipo === "supervDesloc" || c.tipo === "recusada" || c.isVComp) continue
+            items.push({ unit: c.unidade, k: `${d}|||${h}|||${c.tP}|||${c.prof}` })
+          }
+        }
+        if (items.length < 2) continue
+        const cnt: Record<string, number> = {}
+        for (const x of items) cnt[x.unit] = (cnt[x.unit] || 0) + 1
+        const dom = Object.entries(cnt).sort((a, b) => b[1] - a[1])[0][0]
+        for (const x of items) if (x.unit !== dom) discrepantCellKeys.add(x.k)
+      }
+    }
+  }
+
   const cSt = (tipo: string) => {
-    if (tipo === "supervDesloc") return { bg: "var(--card-foreground)", bd: "var(--card-foreground)",  label: "↔ mover" }
+    if (tipo === "supervDesloc") return { bg: "#111827", bd: "#374151",  label: "↔ mover" }
+    if (tipo === "adminSuperv")  return { bg: "#111827", bd: "#374151",  label: null       }
+    if (tipo === "adminWarn")    return { bg: "#fef9c3", bd: "#fde047",  label: null       }
     if (tipo === "aceito")       return { bg: B.blueLt,  bd: B.blue,    label: "Aceito"   }
-    if (tipo === "proposta")     return { bg: B.limeLt,  bd: B.lime,    label: "Proposta" }
-    if (tipo === "admin")        return { bg: "var(--muted)", bd: "var(--border)", label: null }
-    return                              { bg: "var(--muted)", bd: "var(--border)", label: null }
+    if (tipo === "proposta")     return { bg: B.blueLt,  bd: B.blue,    label: null       }
+    if (tipo === "recusada")     return { bg: "#fff5f5", bd: "#fca5a5", label: null       }
+    return                              { bg: "#f8fafc", bd: "#e2e8f0", label: null       }
   }
 
-  const byEsp: Record<string, Sugestao[]> = {}
-  for (const s of sugestoes) {
-    if (!byEsp[s.esp]) byEsp[s.esp] = []
-    byEsp[s.esp].push(s)
+  const selectedCount = buildSelectedSessoes().length
+
+  // Verdadeiro quando algum card selecionado tem múltiplas terapias sem wizard completo
+  const hasPendingEsp = Array.from(selectedIds).some(id => {
+    if (id.includes("|||vc|||")) return false
+    const s = sugestoes.find(x => x.id === id)
+    if (!s || s.espAlts.length === 0) return false
+    return espSelIdx[s.id] === undefined || !profConfirmed.has(s.id)
+  })
+
+  const selectedByEsp: Record<string, number> = {}
+  for (const id of selectedIds) {
+    if (id.includes("|||vc|||")) {
+      const sep = id.indexOf("|||vc|||")
+      const parentId = id.slice(0, sep)
+      const hora = id.slice(sep + 8)
+      const s = sugestoes.find(x => x.id === parentId)
+      if (!s || stOf(s) === "inviavel") continue
+      const vc = getActiveVComps(s).find(v => v.hora === hora)
+      if (vc) {
+        const esp = TERAPIA_TO_ESP[vc.tP]
+        if (esp) selectedByEsp[esp] = (selectedByEsp[esp] || 0) + 1
+      }
+    } else {
+      const s = sugestoes.find(x => x.id === id)
+      if (!s || stOf(s) === "inviavel") continue
+      if (!isVCompExcluded(s.id, s.hora)) {
+        const activeEsp = getActiveEspData(s).esp
+        selectedByEsp[activeEsp] = (selectedByEsp[activeEsp] || 0) + 1
+      }
+    }
   }
+  const isDeficitSobre = pacAllEsp.some(g => g.of > g.aut)
+  const hasExcesso = pacAllEsp.some(g => {
+    const sel = selectedByEsp[g.esp] || 0
+    if (isDeficitSobre) return sel > 0 && (g.of + sel) > g.aut
+    return (g.of + sel) > g.aut
+  })
+  // Mesma fonte de verdade do painel "Quantidade de Sessões" — nenhuma lógica duplicada
+  const excessoEsps = new Set<string>(
+    pacAllEsp.filter(g => (g.of + (selectedByEsp[g.esp] || 0)) > g.aut).map(g => g.esp)
+  )
 
-  const TIPO_META = {
-    adjacente:  { label: "Adjacente", bg: "#f0f9ff", c: "#0369a1", border: "#bae6fd" },
-    "dia-novo": { label: "Dia novo",  bg: "#faf5ff", c: "#7e22ce", border: "#e9d5ff" },
-  }
-
-  const selectedCount = effectiveSelected.size
-
-  return createPortal(
-    <div
-      style={{ position: "fixed", inset: 0, zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.55)", padding: "12px" }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 24px 80px rgba(0,0,0,.22)", width: "96vw", maxWidth: "1160px", maxHeight: "92vh", display: "flex", flexDirection: "column" }}>
-
-        {/* Header */}
-        <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", background: "var(--card)", borderRadius: "18px 18px 0 0", display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
-          <div>
-            <div style={{ fontWeight: 900, fontSize: "15px", color: B.navy }}>{fmtName(pac)}</div>
-            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginTop: "2px" }}>
-              Agenda completa · {sugestoes.length} proposta{sugestoes.length !== 1 ? "s" : ""} disponíve{sugestoes.length !== 1 ? "is" : "l"}
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-            <CronoGlobalUnitBadge unit={unitMeta.globalUnit} />
-            <button onClick={onClose} aria-label="Fechar" style={{ width: "30px", height: "30px", borderRadius: "50%", border: "none", background: "var(--muted)", cursor: "pointer", fontSize: "16px", color: "var(--muted-foreground)" }}>×</button>
-          </div>
-        </div>
-
-        {/* Seletor de estratégia */}
-        <div style={{ padding: "10px 20px", borderBottom: "1px solid var(--border)", background: "var(--muted)", display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
+  return (
+    <>
+    {/* Barra de estratégias */}
+    <div style={{ padding: "10px 14px", background: "var(--card)", border: "1px solid var(--border)", borderRadius: "12px", marginBottom: "12px", display: "none", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
           <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", marginRight: "4px" }}>Estratégia:</span>
           {(["S1", "S2", "S3"] as Estrategia[]).map(s => {
             const m = ESTRATEGIA_META[s]
@@ -543,162 +845,29 @@ function TodasSugestoesModal({
                 }}>
                 <span style={{ padding: "1px 5px", borderRadius: "4px", fontSize: "10px", fontWeight: 800, background: isActive ? m.c : "var(--border)", color: isActive ? "white" : "var(--muted-foreground)" }}>{m.short}</span>
                 {m.label}
-                {!m.disponivel && <span style={{ fontSize: "9px", background: "#fef3c7", color: "#92400e", border: "1px solid #fbbf24", borderRadius: "3px", padding: "0 4px" }}>Em breve</span>}
+                {!m.disponivel && <span style={{ fontSize: "11px", background: "#fef3c7", color: "#92400e", border: "1px solid #fbbf24", borderRadius: "3px", padding: "0 4px" }}>Em breve</span>}
               </button>
             )
           })}
-        </div>
+    </div>
 
-        {/* Corpo: lado a lado */}
-        <div style={{ flex: 1, display: "flex", overflow: "hidden", minHeight: 0 }}>
+    {/* Workspace — grade (fonte única de verdade) + resumo de ocupação */}
+    <div style={{ display: "grid", gridTemplateColumns: "1fr 200px", border: "1px solid var(--border)", borderRadius: "14px", background: "var(--card)", overflow: "hidden", height: "calc(100vh - 280px)", minHeight: "480px", marginBottom: "16px" }}>
 
-          {/* ── Esquerda: propostas ──────────────────────────────────────── */}
-          <div style={{ width: "480px", flexShrink: 0, borderRight: "2px solid var(--border)", display: "flex", flexDirection: "column", minHeight: 0 }}>
-
-            {/* Legenda */}
-            <div style={{ padding: "6px 14px", borderBottom: "1px solid var(--border)", display: "flex", gap: "10px", fontSize: "10px", color: "var(--muted-foreground)", flexWrap: "wrap", flexShrink: 0 }}>
-              {[
-                { bg: "var(--muted)", bd: "var(--border)", label: "Existente" },
-                { bg: "var(--muted)", bd: "var(--border)", label: "Adm." },
-                { bg: B.limeLt,  bd: B.lime,    label: "Proposta" },
-                { bg: "var(--card-foreground)", bd: "var(--card-foreground)",  label: "Superv. deslocável" },
-              ].map(({ bg, bd, label }) => (
-                <span key={label} style={{ display: "flex", alignItems: "center", gap: "3px" }}>
-                  <span style={{ display: "inline-block", width: "9px", height: "9px", borderRadius: "2px", background: bg, border: `1px solid ${bd}` }} />
-                  {label}
-                </span>
-              ))}
-            </div>
-
-            {/* Lista scrollável */}
-            <div style={{ flex: 1, overflowY: "auto", padding: "10px 14px" }}>
-              {sugestoes.length === 0 ? (
-                <div style={{ textAlign: "center", color: "var(--muted-foreground)", padding: "20px", fontSize: "12px" }}>Nenhuma proposta gerada para esta estratégia.</div>
-              ) : Object.entries(byEsp).map(([esp, sugs]) => {
-                const gap = pacGaps.find(g => g.esp === esp)
-                return (
-                  <div key={esp} style={{ marginBottom: "14px" }}>
-                    <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "6px" }}>
-                      <span style={{ fontWeight: 800, fontSize: "12px", color: B.navy }}>{esp}</span>
-                      {gap && <span style={{ fontSize: "10px", color: "#dc2626", fontWeight: 700 }}>−{gap.dif} ({gap.of}/{gap.aut})</span>}
-                    </div>
-                    {/* Pedido 2: grade 2-colunas com altura uniforme */}
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px", alignItems: "start" }}>
-                      {sugs.map(s => {
-                        const st       = stOf(s)
-                        const stM      = st ? STATUS_META[st] : null
-                        const tm       = TIPO_META[s.tipo]
-                        const ae       = getActiveEntry(s)
-                        const allProfs = [{ tP: s.tP, prof: s.prof, unidade: s.unidade }, ...s.profAlts]
-                        const isInv    = st === "inviavel"
-                        const isChk    = effectiveSelected.has(s.id)
-                        return (
-                          <div key={s.id} style={{
-                            border: `1px solid ${isChk ? B.blue + "77" : isInv ? "var(--border)" : "var(--border)"}`,
-                            borderRadius: "10px", padding: "8px 9px",
-                            background: isChk ? "var(--muted)" : isInv ? "var(--card)" : "var(--card)",
-                            opacity: isInv ? 0.55 : 1,
-                            display: "flex", flexDirection: "column", gap: "3px",
-                          }}>
-                            {/* Header: badges + checkbox */}
-                            <div style={{ display: "flex", alignItems: "flex-start", gap: "3px" }}>
-                              <div style={{ flex: 1, display: "flex", gap: "3px", flexWrap: "wrap" }}>
-                                <span style={{ padding: "1px 4px", borderRadius: "4px", fontSize: "9px", fontWeight: 800, background: tm.bg, color: tm.c, border: `1px solid ${tm.border}` }}>{tm.label}</span>
-                                {stM && <span style={{ padding: "1px 4px", borderRadius: "4px", fontSize: "9px", fontWeight: 700, background: stM.bg, color: stM.c }}>{stM.label}</span>}
-                              </div>
-                              {!isInv && (
-                                <input type="checkbox" checked={isChk} onChange={() => toggleSelected(s.id)}
-                                  style={{ cursor: "pointer", accentColor: B.navy, flexShrink: 0, marginTop: "1px" }} />
-                              )}
-                            </div>
-                            {/* Dia/hora */}
-                            <div style={{ fontFamily: "monospace", fontWeight: 800, fontSize: "11px", color: B.navy }}>{s.dia.replace("-feira", "")} {s.hora}</div>
-                            {/* Terapia */}
-                            <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--card-foreground)" }}>{ae.tP}</div>
-                            <div style={{ fontSize: "9px", color: "var(--muted-foreground)" }}>{fmtName(ae.prof)}</div>
-                            {/* Seletor de profissional — exclusivo (Pedido 3) */}
-                            {allProfs.length > 1 && (
-                              <div style={{ display: "flex", alignItems: "center", gap: "2px", flexWrap: "wrap" }}>
-                                <span style={{ fontSize: "8px", fontWeight: 700, color: "var(--muted-foreground)" }}>Prof:</span>
-                                {allProfs.map((p, i) => {
-                                  const isSel = (profSelIdx[s.id] ?? 0) === i
-                                  return (
-                                    <button key={i}
-                                      onClick={() => setProfSelIdx(prev => ({ ...prev, [s.id]: i }))}
-                                      style={{ padding: "1px 5px", borderRadius: "4px", fontSize: "8px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid", background: isSel ? B.navy : "var(--muted)", color: isSel ? "white" : "var(--card-foreground)", borderColor: isSel ? B.navy : "var(--border)" }}>
-                                      {fmtName(p.prof)}
-                                    </button>
-                                  )
-                                })}
-                              </div>
-                            )}
-                            {/* vComp selector */}
-                            {s.tipo === "dia-novo" && s.vComp.map(v => {
-                              const alts = s.vCompAlts[v.hora] || [v]
-                              const idx  = selIdx[s.id]?.[v.hora] ?? 0
-                              return (
-                                <div key={v.hora} style={{ display: "flex", alignItems: "center", gap: "2px", flexWrap: "wrap" }}>
-                                  <span style={{ fontSize: "8px", fontWeight: 700, color: "#16a34a" }}>+{v.hora}:</span>
-                                  {alts.map((alt, i) => (
-                                    <button key={i}
-                                      onClick={() => setSelIdx(prev => ({ ...prev, [s.id]: { ...(prev[s.id] || {}), [v.hora]: i } }))}
-                                      style={{ padding: "1px 5px", borderRadius: "4px", fontSize: "8px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid", background: i === idx ? "#16a34a" : "var(--muted)", color: i === idx ? "white" : "var(--card-foreground)", borderColor: i === idx ? "#16a34a" : "var(--border)" }}>
-                                      {alt.tP} · {fmtName(alt.prof)}
-                                    </button>
-                                  ))}
-                                </div>
-                              )
-                            })}
-                            {/* Ações */}
-                            <div style={{ display: "flex", gap: "3px", flexWrap: "wrap", marginTop: "2px" }}>
-                              {!isInv && (
-                                <button
-                                  onClick={() => onInviavel(s)}
-                                  style={{ ...btnStyle("#fef2f2", "#dc2626", "#fca5a5"), fontSize: "9px" }}>
-                                  ⛔ Inviável
-                                </button>
-                              )}
-                              {isInv && (
-                                <button onClick={() => setSt(s, null)} style={{ ...btnStyle("var(--muted)", "var(--muted-foreground)", "var(--border)"), fontSize: "9px" }}>Desfazer</button>
-                              )}
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-
-            {/* Footer: Fechar + Aceitar selecionados */}
-            <div style={{ padding: "8px 14px", borderTop: "1px solid var(--border)", background: "var(--card)", borderRadius: "0 0 0 18px", flexShrink: 0, display: "flex", gap: "6px", alignItems: "center", justifyContent: "space-between" }}>
-              <button onClick={onClose} style={btnStyle("var(--muted)", "var(--card-foreground)", "var(--border)")}>Fechar</button>
-              <button
-                disabled={selectedCount === 0}
-                onClick={handleAceitar}
-                style={{
-                  ...btnStyle(selectedCount > 0 ? B.navy : "var(--muted)", selectedCount > 0 ? "white" : "var(--muted-foreground)", selectedCount > 0 ? B.navy : "var(--border)"),
-                  opacity: selectedCount === 0 ? 0.5 : 1,
-                }}>
-                Aceitar ({selectedCount}) → Acomp.
-              </button>
-            </div>
-          </div>
-
-          {/* ── Direita: grade do cronograma ─────────────────────────────── */}
-          <div style={{ flex: 1, overflowX: "auto", overflowY: "auto", padding: "10px 16px 16px" }}>
+      {/* ── Grade: Agenda ────────────────────────────────────────────── */}
+      <div style={{ display: "flex", flexDirection: "column", overflow: "hidden", borderRight: "1px solid var(--border)" }}>
+        <div style={{ flex: 1, overflowX: "auto", overflowY: "auto", padding: "6px 16px 16px" }}>
             {!horas.length ? (
               <div style={{ textAlign: "center", color: "var(--muted-foreground)", padding: "20px" }}>Nenhuma sessão encontrada.</div>
             ) : (
-              <table style={{ borderCollapse: "collapse", tableLayout: "fixed", minWidth: `${52 + dias.length * 110}px`, width: "100%" }}>
+              <table style={{ borderCollapse: "collapse", tableLayout: "fixed", minWidth: `${46 + dias.length * 110}px`, width: "100%" }}>
                 <colgroup>
-                  <col style={{ width: "48px" }} />
+                  <col style={{ width: "44px" }} />
                   {dias.map(d => <col key={d} style={{ width: "110px" }} />)}
                 </colgroup>
                 <thead>
                   <tr>
-                    <th style={{ paddingBottom: "8px", textAlign: "right", paddingRight: "8px", fontSize: "11px", color: "var(--muted-foreground)", fontWeight: 400 }}>Hora</th>
+                    <th style={{ paddingBottom: "8px", textAlign: "right", paddingRight: "4px", fontSize: "11px", color: "var(--muted-foreground)", fontWeight: 400 }}>Hora</th>
                     {dias.map(d => (
                       <th key={d} style={{ paddingBottom: "8px", textAlign: "center", fontSize: "12px", color: B.navy, fontWeight: 800 }}>
                         <div>{d.replace("-feira", "")}</div>
@@ -708,51 +877,458 @@ function TodasSugestoesModal({
                   </tr>
                 </thead>
                 <tbody>
-                  {horas.map(hora => (
-                    <tr key={hora} style={{ borderTop: hora === "13:00" ? "2px solid var(--border)" : "1px solid var(--border)" }}>
-                      <td style={{ textAlign: "right", paddingRight: "8px", verticalAlign: "top", paddingTop: "6px", fontFamily: "monospace", fontSize: "12px", fontWeight: 800, color: B.navy }}>
-                        {hora}
-                      </td>
-                      {dias.map(d => {
-                        const cells = cMap[`${d}|||${hora}`] || []
-                        return (
-                          <td key={d} style={{ padding: "2px", verticalAlign: "top", height: "1px" }}>
-                            <div style={{ height: "100%", display: "flex", flexDirection: "column", gap: "2px" }}>
-                            {cells.map((c, ci) => {
-                              const cs    = cSt(c.tipo)
-                              const isDark = c.tipo === "supervDesloc"
-                              return (
-                                <div key={ci} style={{ background: cs.bg, border: `1px solid ${cs.bd}`, borderRadius: "7px", padding: "5px 7px", height: "100%", boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "2px" }}>
-                                  <div style={{ fontSize: "10px", fontWeight: 700, color: isDark ? "white" : "var(--card-foreground)", lineHeight: "1.3" }}>{c.tP}</div>
-                                  {c.tE && <div style={{ fontSize: "8px", color: "var(--muted-foreground)", fontStyle: "italic" }}>({c.tE})</div>}
-                                  <div style={{ fontSize: "9px", color: isDark ? "var(--border)" : "var(--muted-foreground)" }}>{fmtName(c.prof)}</div>
-                                  {isDark && (
-                                    <div style={{ fontSize: "9px", fontWeight: 700, color: "#fbbf24", marginTop: "auto" }}>
-                                      {c.target ? `→ ${c.target}` : "→ verificar"}
-                                    </div>
-                                  )}
-                                  {cs.label && !isDark && (
-                                    <div style={{ fontSize: "9px", fontWeight: 700, color: c.tipo === "aceito" ? B.blue : "#4a6e20", marginTop: "auto" }}>{cs.label}</div>
-                                  )}
-                                </div>
-                              )
-                            })}
-                            </div>
-                          </td>
-                        )
-                      })}
-                    </tr>
-                  ))}
+                  {allSlots.map((slot) => {
+                    const isSession = sessionStartSet.has(slot)
+                    const isFirstAfternoon = slot === firstAfternoonSlot
+                    return (
+                      <tr key={slot} style={{ height: "36px", borderTop: isFirstAfternoon ? "2px solid var(--border)" : isSession ? "1px solid var(--border)" : "none" }}>
+                        <td style={{ textAlign: "right", paddingRight: "4px", verticalAlign: "top", paddingTop: "5px", fontFamily: "monospace", fontVariantNumeric: "tabular-nums", fontSize: "12px", fontWeight: 800, color: B.navy, whiteSpace: "nowrap" }}>
+                          {isSession ? slot : null}
+                        </td>
+                        {isSession && dias.map(d => {
+                          const cells = cMap[`${d}|||${slot}`] || []
+                          const cellHasExpanded = cells.some(c => c.sugestaoId && (expandedProfCardId === c.sugestaoId || expandedEspCardId === c.sugestaoId))
+                          return (
+                            <td key={d} rowSpan={2} style={{ position: "relative", zIndex: cellHasExpanded ? 1 : "auto" }}>
+                              <div style={{ position: "absolute", inset: "2px", display: "flex", flexDirection: "column", gap: "2px", overflow: "visible" }}>
+                              {cells.map((c, ci) => {
+                                const cs       = cSt(c.tipo)
+                                const isDark   = c.tipo === "supervDesloc" || c.tipo === "adminSuperv"
+                                const cellKey  = `${d}|||${slot}|||${c.tP}|||${c.prof}`
+                                const isDisc   = discrepantCellKeys.has(cellKey)
+                                const isRecusadaCard = c.tipo === "recusada"
+                                const isVCompCard    = !!c.isVComp
+                                const isClickable    = (c.tipo === "proposta") && !!c.sugestaoId
+                                // isSel funciona para main cards E vComps: cada um tem sugestaoId único
+                                const isSel    = isClickable && selectedIds.has(c.sugestaoId!)
+                                // Profissionais alternativos — só para main proposals (não vComp)
+                                const mainSug  = (isClickable && !isVCompCard) ? (sugestoes.find(x => x.id === c.sugestaoId) ?? null) : null
+                                const mainEd   = mainSug ? getActiveEspData(mainSug) : null
+                                const allProfs = mainEd ? [{ prof: mainEd.prof, tP: mainEd.tP, unidade: mainEd.unidade } as ProfAlt, ...mainEd.profAlts] : []
+                                const altCount = Math.max(0, allProfs.length - 1)
+                                const isExpanded = expandedProfCardId === c.sugestaoId
+                                // Terapias elegíveis para este slot (espAlts calculadas por buildSugestoes)
+                                const allEsps     = mainSug ? [{ esp: mainSug.esp, tP: mainSug.tP }, ...mainSug.espAlts.map(a => ({ esp: a.esp, tP: a.tP }))] : []
+                                const espAltCount = Math.max(0, allEsps.length - 1)
+                                const isEspExpanded = expandedEspCardId === c.sugestaoId
+                                const curEspIdx   = mainSug ? (espSelIdx[mainSug.id] ?? 0) : 0
+                                // Wizard multi-terapia: estados derivados
+                                const espIsExplicitlySet = mainSug ? espSelIdx[mainSug.id] !== undefined : true
+                                const wizardComplete = mainSug
+                                  ? (allEsps.length > 1 && espIsExplicitlySet && profConfirmed.has(mainSug.id))
+                                  : false
+                                const espIsPending = mainSug ? (allEsps.length > 1 && !wizardComplete) : false
+                                const cardEsp = isVCompCard
+                                  ? (TERAPIA_TO_ESP[c.tP] ?? null)
+                                  : (mainEd?.esp ?? TERAPIA_TO_ESP[c.tP] ?? null)
+                                const isExcesso = isSel && cardEsp !== null && excessoEsps.has(cardEsp)
+                                // Cor do card: amarelo se pendente, vermelho se excesso, verde se selecionado, default caso contrário
+                                const bg  = espIsPending ? "#fefce8" : isExcesso ? "#fff1f2" : (isSel ? "#dcfce7" : cs.bg)
+                                const bd  = espIsPending ? "#fbbf24" : isExcesso ? "#fca5a5" : (isSel ? "#16a34a" : cs.bd)
+                                const isMultiEsp = !!(mainSug && allEsps.length > 1)
+                                const cardClickable = isClickable && (!isMultiEsp || wizardComplete)
+                                return (
+                                  <div
+                                    key={ci}
+                                    onClick={cardClickable ? () => toggleSelected(c.sugestaoId!) : undefined}
+                                    style={{
+                                      background: bg,
+                                      border: `1px solid ${isDisc ? "#f97316" : bd}`,
+                                      borderRadius: "8px", padding: "5px 7px",
+                                      flex: (isExpanded || isEspExpanded) ? "none" : "1",
+                                      boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "2px",
+                                      outline: isDisc ? "2px solid #fed7aa" : "none",
+                                      cursor: cardClickable ? "pointer" : "default",
+                                      position: "relative",
+                                      opacity: isRecusadaCard ? 0.65 : 1,
+                                      zIndex: (isExpanded || isEspExpanded) ? 20 : "auto",
+                                      boxShadow: (isExpanded || isEspExpanded) ? "0 6px 24px rgba(0,0,0,.13)" : "none",
+                                      transition: "box-shadow 180ms ease",
+                                    }}>
+
+                                    {/* ── CARD TERAPIA ÚNICA (comportamento original inalterado) ── */}
+                                    {!isMultiEsp && (
+                                      <>
+                                        {isSel && !isExpanded && (
+                                          <span style={{ position: "absolute", top: "3px", right: "4px", fontSize: "10px", fontWeight: 900, color: isExcesso ? "#dc2626" : "#16a34a", lineHeight: 1, pointerEvents: "none" }}>{isExcesso ? "⚠" : "✓"}</span>
+                                        )}
+                                        {isRecusadaCard && (
+                                          <span style={{ position: "absolute", top: "2px", right: "4px", fontSize: "9px", lineHeight: 1, pointerEvents: "none", opacity: 0.7 }}>🚫</span>
+                                        )}
+                                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "2px" }}>
+                                          <span style={{ fontSize: "10px", fontWeight: 600, color: isDark ? "white" : "#111827", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{c.tP}</span>
+                                          <span style={{ fontSize: "8px", color: isDark ? "#d1d5db" : "#9ca3af", flexShrink: 0, whiteSpace: "nowrap", paddingRight: !isExpanded && (isSel || isRecusadaCard) ? "12px" : 0 }}>📍 {c.unidade}</span>
+                                        </div>
+                                        {!isExpanded && (
+                                          <div style={{ fontSize: "11px", color: isDark ? "#d1d5db" : "#6b7280", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fmtName(c.prof)}</div>
+                                        )}
+                                        {altCount > 0 && isClickable && !isVCompCard && (
+                                          <div data-prof-dropdown="true" style={{ overflow: "hidden", maxHeight: isExpanded ? `${(altCount + 1) * 26 + 8}px` : "0px", opacity: isExpanded ? 1 : 0, transition: "max-height 200ms ease-out, opacity 150ms ease-out", display: "flex", flexDirection: "column", gap: "1px", marginTop: isExpanded ? "3px" : "0" }} onClick={e => e.stopPropagation()}>
+                                            {allProfs.map((p, i) => {
+                                              const isCurr = (profSelIdx[mainSug!.id] ?? 0) === i
+                                              return (
+                                                <button key={i} onClick={e => { e.stopPropagation(); setProfSelIdx(prev => ({ ...prev, [mainSug!.id]: i })); setExpandedProfCardId(null) }}
+                                                  style={{ display: "flex", alignItems: "center", gap: "5px", padding: "3px 5px", borderRadius: "5px", border: "none", background: isCurr ? "rgba(22,163,74,0.1)" : "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: "11px", fontWeight: isCurr ? 600 : 400, color: isCurr ? "#166534" : "#374151", textAlign: "left", width: "100%", transition: "background 100ms ease" }}>
+                                                  <span style={{ fontSize: "8px", color: isCurr ? "#16a34a" : "#9ca3af", flexShrink: 0, lineHeight: 1 }}>{isCurr ? "●" : "○"}</span>
+                                                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fmtName(p.prof)}</span>
+                                                </button>
+                                              )
+                                            })}
+                                          </div>
+                                        )}
+                                        {isDisc && <div style={{ fontSize: "11px", fontWeight: 700, color: "#ea580c", marginTop: "2px", display: "flex", alignItems: "center", gap: "3px" }}>⚠ {c.unidade}</div>}
+                                        {isDark && <div style={{ fontSize: "11px", fontWeight: 700, color: "#fbbf24", marginTop: "auto" }}>{c.target ? `→ ${c.target}` : "→ verificar"}</div>}
+                                        {!isDark && (cs.label || isClickable || isRecusadaCard) && (
+                                          <div style={{ fontSize: "10px", fontWeight: 700, marginTop: "auto", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "3px" }}>
+                                            {altCount > 0 && isClickable && !isVCompCard ? (
+                                              <div style={{ display: "flex", alignItems: "center", gap: "3px", minWidth: 0 }}>
+                                                <button data-prof-dropdown="true" onClick={e => { e.stopPropagation(); setExpandedProfCardId(isExpanded ? null : c.sugestaoId!); setExpandedEspCardId(null) }}
+                                                  style={{ display: "flex", alignItems: "center", gap: "2px", flexShrink: 0, fontSize: "10px", fontWeight: 700, color: "#0369a1", background: "none", border: "none", padding: 0, cursor: "pointer", fontFamily: "inherit", lineHeight: "1.4" }}>
+                                                  <span style={{ fontSize: "7px", display: "inline-block", transform: isExpanded ? "rotate(180deg)" : "none", transition: "transform 180ms ease" }}>▼</span>
+                                                  <span>{altCount === 1 ? "1 prof." : `${altCount} profs.`}</span>
+                                                </button>
+                                                {cs.label && <><span style={{ color: "#d1d5db", flexShrink: 0 }}>•</span><span style={{ color: c.tipo === "aceito" ? B.blue : "#374151", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{cs.label}</span></>}
+                                              </div>
+                                            ) : isExcesso ? (
+                                              <span style={{ fontSize: "9px", fontWeight: 800, color: "#dc2626", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 5px", lineHeight: "1.6" }}>Acima do limite</span>
+                                            ) : cs.label ? (
+                                              <span style={{ color: c.tipo === "aceito" ? B.blue : "#374151" }}>{cs.label}</span>
+                                            ) : null}
+                                            {isClickable && c.sugestaoId && (
+                                              <button onClick={e => { e.stopPropagation(); const sid = isVCompCard ? c.sugestaoId!.slice(0, c.sugestaoId!.indexOf("|||vc|||")) : c.sugestaoId!; const sug = sugestoes.find(x => x.id === sid); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, acao: "recusar" }); setAcaoMotivo("") }}
+                                                style={{ fontSize: "9px", padding: "1px 6px", borderRadius: "3px", border: "1px solid #fca5a5", background: "#fee2e2", color: "#dc2626", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, lineHeight: "1.4", flexShrink: 0, marginLeft: "auto" }}>Recusar</button>
+                                            )}
+                                            {isRecusadaCard && c.sugestaoId && (
+                                              <button onClick={e => { e.stopPropagation(); const sid = c.sugestaoId!.includes("|||vc|||") ? c.sugestaoId!.slice(0, c.sugestaoId!.indexOf("|||vc|||")) : c.sugestaoId!; const sug = sugestoes.find(x => x.id === sid); if (sug) setSt(sug, null); onUndoRecusa(d, slot, c.tP, c.prof) }}
+                                                style={{ fontSize: "9px", padding: "1px 4px", borderRadius: "3px", border: "1px solid var(--border)", background: "var(--muted)", color: "var(--muted-foreground)", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, lineHeight: "1.4", flexShrink: 0 }}>↺</button>
+                                            )}
+                                          </div>
+                                        )}
+                                      </>
+                                    )}
+
+                                    {/* ── WIZARD MULTI-TERAPIA ── */}
+                                    {isMultiEsp && (
+                                      <>
+                                        {/* Estágio 1: Pendente — wizard fechado */}
+                                        {!isEspExpanded && !wizardComplete && (
+                                          <>
+                                            <span style={{ position: "absolute", top: "2px", right: "4px", fontSize: "9px", fontWeight: 900, color: "#92400e", lineHeight: 1, pointerEvents: "none" }}>⚠</span>
+                                            <div style={{ fontSize: "8px", color: "#9ca3af", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>📍 {c.unidade}</div>
+                                            <div style={{ marginTop: "auto", display: "flex", flexDirection: "column", gap: "3px" }}>
+                                              <button
+                                                data-esp-dropdown="true"
+                                                onClick={e => { e.stopPropagation(); setExpandedEspCardId(c.sugestaoId!); setExpandedProfCardId(null) }}
+                                                style={{ fontSize: "9px", fontWeight: 700, color: "#92400e", background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: "4px", padding: "2px 4px", cursor: "pointer", fontFamily: "inherit", lineHeight: "1.4", textAlign: "center" }}>
+                                                ⚠ Escolher terapia
+                                              </button>
+                                              <button
+                                                onClick={e => { e.stopPropagation(); const sug = sugestoes.find(x => x.id === c.sugestaoId!); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, acao: "recusar" }); setAcaoMotivo("") }}
+                                                style={{ fontSize: "9px", padding: "2px 4px", borderRadius: "3px", border: "1px solid #fca5a5", background: "#fee2e2", color: "#dc2626", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, lineHeight: "1.4", textAlign: "center" }}>
+                                                Recusar
+                                              </button>
+                                            </div>
+                                          </>
+                                        )}
+
+                                        {/* Estágio 2+3: Wizard aberto — escolha de terapia e profissional */}
+                                        {isEspExpanded && (
+                                          <div data-esp-dropdown="true" onClick={e => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                                            <div style={{ fontSize: "9px", fontWeight: 800, color: "#374151", marginBottom: "1px" }}>Escolha uma terapia</div>
+                                            {allEsps.map((e, i) => {
+                                              const isCurr = espIsExplicitlySet && curEspIdx === i
+                                              return (
+                                                <button key={i}
+                                                  onClick={evt => { evt.stopPropagation(); setEspSelIdx(prev => ({ ...prev, [mainSug!.id]: i })); setProfSelIdx(prev => ({ ...prev, [mainSug!.id]: 0 })); setSelIdx(prev => ({ ...prev, [mainSug!.id]: {} })); setProfConfirmed(prev => { const s = new Set(prev); s.delete(mainSug!.id); return s }) }}
+                                                  style={{ display: "flex", alignItems: "center", gap: "5px", padding: "3px 5px", borderRadius: "5px", border: "none", background: isCurr ? "rgba(126,34,206,0.08)" : "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: "11px", fontWeight: isCurr ? 600 : 400, color: isCurr ? "#6b21a8" : "#374151", textAlign: "left", width: "100%", transition: "background 100ms ease" }}>
+                                                  <span style={{ fontSize: "8px", color: isCurr ? "#7e22ce" : "#9ca3af", flexShrink: 0, lineHeight: 1 }}>{isCurr ? "●" : "○"}</span>
+                                                  <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{e.tP}</span>
+                                                </button>
+                                              )
+                                            })}
+                                            {/* Estágio 3: lista de profissionais aparece após terapia escolhida */}
+                                            {espIsExplicitlySet && (
+                                              <>
+                                                <div style={{ borderTop: "1px solid #e5e7eb", margin: "2px 0" }} />
+                                                <div style={{ fontSize: "9px", fontWeight: 800, color: "#374151", marginBottom: "1px" }}>Escolha um profissional</div>
+                                                {allProfs.map((p, i) => {
+                                                  const isCurr = profConfirmed.has(mainSug!.id) && (profSelIdx[mainSug!.id] ?? 0) === i
+                                                  return (
+                                                    <button key={i}
+                                                      onClick={evt => { evt.stopPropagation(); setProfSelIdx(prev => ({ ...prev, [mainSug!.id]: i })); setProfConfirmed(prev => { const s = new Set(prev); s.add(mainSug!.id); return s }); setExpandedEspCardId(null) }}
+                                                      style={{ display: "flex", alignItems: "center", gap: "5px", padding: "3px 5px", borderRadius: "5px", border: "none", background: isCurr ? "rgba(22,163,74,0.1)" : "transparent", cursor: "pointer", fontFamily: "inherit", fontSize: "11px", fontWeight: isCurr ? 600 : 400, color: isCurr ? "#166534" : "#374151", textAlign: "left", width: "100%", transition: "background 100ms ease" }}>
+                                                      <span style={{ fontSize: "8px", color: isCurr ? "#16a34a" : "#9ca3af", flexShrink: 0, lineHeight: 1 }}>{isCurr ? "●" : "○"}</span>
+                                                      <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fmtName(p.prof)}</span>
+                                                    </button>
+                                                  )
+                                                })}
+                                              </>
+                                            )}
+                                          </div>
+                                        )}
+
+                                        {/* Estágio 4: Wizard concluído — layout normal + "Alterar terapia" */}
+                                        {!isEspExpanded && wizardComplete && (
+                                          <>
+                                            {isSel && (
+                                              <span style={{ position: "absolute", top: "3px", right: "4px", fontSize: "10px", fontWeight: 900, color: isExcesso ? "#dc2626" : "#16a34a", lineHeight: 1, pointerEvents: "none" }}>{isExcesso ? "⚠" : "✓"}</span>
+                                            )}
+                                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "2px" }}>
+                                              <span style={{ fontSize: "10px", fontWeight: 600, color: "#111827", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{c.tP}</span>
+                                              <span style={{ fontSize: "8px", color: "#9ca3af", flexShrink: 0, whiteSpace: "nowrap", paddingRight: isSel ? "12px" : 0 }}>📍 {c.unidade}</span>
+                                            </div>
+                                            <div style={{ fontSize: "11px", color: "#6b7280", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fmtName(c.prof)}</div>
+                                            {isDisc && <div style={{ fontSize: "11px", fontWeight: 700, color: "#ea580c", marginTop: "2px", display: "flex", alignItems: "center", gap: "3px" }}>⚠ {c.unidade}</div>}
+                                            <div style={{ fontSize: "10px", fontWeight: 700, marginTop: "auto", display: "flex", alignItems: "center", gap: "3px" }}>
+                                              {isExcesso && <span style={{ fontSize: "9px", fontWeight: 800, color: "#dc2626", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 5px", lineHeight: "1.6" }}>Acima do limite</span>}
+                                              <button
+                                                data-esp-dropdown="true"
+                                                onClick={e => { e.stopPropagation(); setProfConfirmed(prev => { const s = new Set(prev); s.delete(mainSug!.id); return s }); setExpandedEspCardId(c.sugestaoId!); setExpandedProfCardId(null) }}
+                                                style={{ fontSize: "9px", fontWeight: 700, color: "#7e22ce", background: "rgba(126,34,206,0.05)", border: "1px solid rgba(126,34,206,0.2)", borderRadius: "4px", padding: "1px 5px", cursor: "pointer", fontFamily: "inherit", lineHeight: "1.4" }}>
+                                                Alterar terapia
+                                              </button>
+                                              <button
+                                                onClick={e => { e.stopPropagation(); const sug = sugestoes.find(x => x.id === c.sugestaoId!); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, acao: "recusar" }); setAcaoMotivo("") }}
+                                                style={{ fontSize: "9px", padding: "1px 6px", borderRadius: "3px", border: "1px solid #fca5a5", background: "#fee2e2", color: "#dc2626", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, lineHeight: "1.4", flexShrink: 0, marginLeft: "auto" }}>
+                                                Recusar
+                                              </button>
+                                            </div>
+                                          </>
+                                        )}
+                                      </>
+                                    )}
+
+                                  </div>
+                                )
+                              })}
+                              </div>
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             )}
           </div>
+
+          {/* ── Action Bar contextual ── aparece só com seleção; selecionar → revisar → confirmar */}
+          {selectedCount > 0 && (() => {
+            const selSessoes = buildSelectedSessoes()
+            const n = selSessoes.length
+            return (
+              <div
+                className="animate-in slide-in-from-bottom-4 fade-in duration-300"
+                style={{
+                  flexShrink: 0, borderTop: "1px solid var(--border)", background: "var(--card)",
+                  boxShadow: "0 -10px 28px rgba(15,23,42,0.07)",
+                  display: "flex", alignItems: "stretch", gap: "14px", padding: "11px 16px",
+                }}>
+                {/* Esquerda — identidade da ação */}
+                <div style={{ display: "flex", alignItems: "flex-start", gap: "10px", width: "220px", flexShrink: 0 }}>
+                  <div style={{ width: "34px", height: "34px", borderRadius: "9px", background: "#dcfce7", border: "1px solid #86efac", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, color: "#16a34a", fontSize: "17px", fontWeight: 900, lineHeight: 1 }}>✓</div>
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ fontSize: "13px", fontWeight: 800, color: B.navy, lineHeight: 1.25 }}>
+                      {n} {n === 1 ? "alteração pronta" : "alterações prontas"} para implantação
+                    </div>
+                    <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "2px", lineHeight: 1.35 }}>
+                      Revise as propostas selecionadas na grade.
+                    </div>
+                  </div>
+                </div>
+
+                {/* Centro — resumo das alterações (gerado automaticamente) */}
+                <div style={{ flex: 1, minWidth: 0, display: "flex", gap: "8px", overflowX: "auto", alignItems: "center", borderLeft: "1px solid var(--border)", borderRight: "1px solid var(--border)", padding: "0 14px" }}>
+                  {selSessoes.map((s, i) => (
+                    <div key={i} style={{ flexShrink: 0, background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "8px", padding: "5px 9px", minWidth: "120px", maxWidth: "150px" }}>
+                      <div style={{ fontFamily: "monospace", fontVariantNumeric: "tabular-nums", fontSize: "11px", fontWeight: 800, color: B.navy }}>{(DIA_ABR[s.dia] ?? s.dia.replace("-feira", ""))} • {s.hora}</div>
+                      <div style={{ fontSize: "11px", fontWeight: 600, color: "var(--card-foreground)", marginTop: "1px", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{s.tP}</div>
+                      <div style={{ fontSize: "10px", color: "var(--muted-foreground)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{fmtName(s.prof)}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Direita — ações */}
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", justifyContent: "center", gap: "6px", flexShrink: 0 }}>
+                  <div style={{ display: "flex", gap: "8px" }}>
+                    <button
+                      onClick={() => setSelectedIds(new Set())}
+                      style={{ padding: "8px 14px", borderRadius: "9px", border: "1px solid var(--border)", background: "var(--card)", color: "var(--card-foreground)", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: "12px" }}>
+                      Cancelar seleção
+                    </button>
+                    <button
+                      disabled={hasExcesso || hasPendingEsp}
+                      onClick={() => !hasExcesso && !hasPendingEsp && handleAceitar()}
+                      style={{ padding: "8px 16px", borderRadius: "9px", border: "none", background: (hasExcesso || hasPendingEsp) ? "#e5e7eb" : "#16a34a", color: (hasExcesso || hasPendingEsp) ? "#9ca3af" : "white", cursor: (hasExcesso || hasPendingEsp) ? "not-allowed" : "pointer", fontFamily: "inherit", fontWeight: 800, fontSize: "12px", boxShadow: (hasExcesso || hasPendingEsp) ? "none" : "0 2px 8px rgba(22,163,74,0.30)" }}>
+                      Aceitar alterações ({n})
+                    </button>
+                  </div>
+                  <div style={{ fontSize: "10px", color: hasExcesso ? "#dc2626" : hasPendingEsp ? "#d97706" : "var(--muted-foreground)", fontWeight: (hasExcesso || hasPendingEsp) ? 700 : 400 }}>
+                    {hasExcesso ? "⚠ Limite ultrapassado — desmarque sessões em excesso." : hasPendingEsp ? "⚠ Selecione a terapia de todas as sugestões antes de continuar." : "As alterações só serão aplicadas após a confirmação."}
+                  </div>
+                </div>
+              </div>
+            )
+          })()}
+        </div>
+
+      {/* ── Coluna 3: Resumo Ocupação ─────────────────────────────────── */}
+      <div style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        <div style={{ padding: "8px 14px", flexShrink: 0, borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <span style={{ fontSize: "11px", fontWeight: 800, color: "var(--card-foreground)", letterSpacing: "0.03em" }}>Quantidade de Sessões</span>
+        </div>
+        <div style={{ flex: 1, display: "flex", flexDirection: "column", padding: "12px 14px", overflowY: "auto", gap: "0" }}>
+
+            {/* Quantidade de Sessões — antes e depois */}
+            {(() => {
+              const beforeCount = sessPac.length
+              const addedCount  = buildSelectedSessoes().length
+              const afterCount  = beforeCount + addedCount
+              const pctGain     = beforeCount > 0 ? Math.round((addedCount / beforeCount) * 100) : null
+              return (
+                <div style={{ marginBottom: "14px", flexShrink: 0 }}>
+
+                  {/* Labels */}
+                  <div style={{ display: "flex", justifyContent: "space-between", marginBottom: "5px" }}>
+                    <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.03em" }}>Antes</div>
+                    <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.03em" }}>Depois</div>
+                  </div>
+
+                  {/* Numbers */}
+                  <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                    <div style={{ fontSize: "22px", fontWeight: 900, color: "var(--muted-foreground)", lineHeight: 1 }}>{beforeCount}</div>
+
+                    <div style={{ fontSize: "20px", fontWeight: 900, color: addedCount > 0 ? "#16a34a" : "var(--border)", transition: "color 200ms ease", flexShrink: 0 }}>→</div>
+
+                    <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
+                      <div key={afterCount} className="ocup-num-tick" style={{ fontSize: "28px", fontWeight: 900, color: addedCount > 0 ? "#16a34a" : "var(--muted-foreground)", lineHeight: 1, transition: "color 200ms ease" }}>
+                        {afterCount}
+                      </div>
+                      {addedCount > 0 && (
+                        <div key={addedCount} style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                          <span className="ocup-badge-pop" style={{ fontSize: "10px", fontWeight: 800, background: "#dcfce7", color: "#15803d", border: "1px solid #86efac", borderRadius: "5px", padding: "1px 6px", whiteSpace: "nowrap" }}>+{addedCount}</span>
+                          {pctGain !== null && <span style={{ fontSize: "9px", fontWeight: 700, color: "#16a34a", textAlign: "center", whiteSpace: "nowrap" }}>(+{pctGain}%)</span>}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div style={{ height: "1px", background: "var(--border)", margin: "12px 0 0" }} />
+                </div>
+              )
+            })()}
+
+<div style={{ flex: 1, display: "flex", flexDirection: "column", gap: "10px" }}>
+              {pacAllEsp.length === 0 && (
+                <div style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>Sem autorização registrada.</div>
+              )}
+              {pacAllEsp.map((g, i) => {
+                const sel = selectedByEsp[g.esp] || 0
+                const total = g.of + sel
+                const excesso = total > g.aut
+                const completo = total === g.aut
+                const parcial = !excesso && !completo && sel > 0
+                const cor = excesso ? "#dc2626" : completo ? "#16a34a" : parcial ? "#d97706" : B.navy
+                return (
+                  <div key={`${pac}|||${g.esp}`} className="ocup-esp-row" style={{ "--i": i } as CSSProperties}>
+                    <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--card-foreground)", marginBottom: "3px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={g.esp}>{g.esp}</div>
+                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                      <span key={`${pac}|||${g.esp}|||${total}`} className="ocup-num-tick" style={{ fontSize: "15px", fontWeight: 900, color: cor, transition: "color 180ms ease" }}>{total}/{g.aut}</span>
+                      {excesso && <span className="ocup-badge-pop" style={{ fontSize: "11px", background: "#fee2e2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 4px", fontWeight: 700 }}>acima</span>}
+                      {completo && sel > 0 && <span key={`completo-${sel}`} className="ocup-badge-pop" style={{ fontSize: "11px", background: "#dcfce7", color: "#16a34a", border: "1px solid #86efac", borderRadius: "4px", padding: "0 4px", fontWeight: 700 }}>+{sel}</span>}
+                      {completo && sel === 0 && <span className="ocup-badge-pop" style={{ fontSize: "11px", background: "#dcfce7", color: "#16a34a", border: "1px solid #86efac", borderRadius: "4px", padding: "0 4px", fontWeight: 700 }}>✓</span>}
+                      {parcial && <span key={`parcial-${sel}`} className="ocup-badge-pop" style={{ fontSize: "11px", background: "#fef3c7", color: "#d97706", border: "1px solid #fcd34d", borderRadius: "4px", padding: "0 4px", fontWeight: 700 }}>+{sel}</span>}
+                    </div>
+                    <div style={{ height: "4px", background: "var(--muted)", borderRadius: "2px", marginTop: "4px", overflow: "hidden" }}>
+                      <div className="ocup-progress-bar" style={{ height: "100%", borderRadius: "2px", width: "100%", background: cor, transform: `scaleX(${Math.min(1, total / g.aut)})`, transformOrigin: "left" }} />
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+            {hasExcesso && (
+              <div style={{ marginTop: "12px", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "8px", padding: "8px 10px", fontSize: "10px", color: "#dc2626", fontWeight: 700, flexShrink: 0 }}>
+                ⚠ Limite ultrapassado. Desmarque sessões em excesso antes de aceitar.
+              </div>
+            )}
         </div>
       </div>
-    </div>,
-    document.body
+    </div>
+
+    {/* ── Modal: ação direta por sessão (✓ aceitar · ✗ recusar · ⛔ inviável) ── */}
+    {pendingAcao && (() => {
+      const ACAO_META: Record<AcaoDiretaType, { titulo: string; desc: string; cor: string; label: string; placeholder: string }> = {
+        aceitar:  { titulo: "✓ Confirmar Aceite",   desc: "Sessão enviada para Acompanhamento → Aguardando Resposta.", cor: "#15803d", label: "Confirmar",     placeholder: "Ex: família confirmou disponibilidade..." },
+        recusar:  { titulo: "✗ Confirmar Recusa",   desc: "Sessão registrada como recusada em Aceites e Recusas.",      cor: "#dc2626", label: "Confirmar",     placeholder: "Ex: família recusou por conflito de agenda..." },
+        inviavel: { titulo: "⛔ Confirmar Inviável", desc: "Sessão registrada como inviável em Aceites e Recusas.",      cor: B.navy,    label: "Confirmar",     placeholder: "Ex: família não tem disponibilidade neste horário..." },
+      }
+      const meta = ACAO_META[pendingAcao.acao]
+      const isInvAcao = pendingAcao.acao === "inviavel"
+      const motivoFaltando = isInvAcao && !acaoMotivo.trim()
+      const handleConfirmar = () => {
+        if (motivoFaltando) return
+        const sessao: AceiteSessao = { dia: pendingAcao.sugestao.dia, hora: pendingAcao.hora, tP: pendingAcao.tP, prof: pendingAcao.prof, unidade: pendingAcao.unidade }
+        const statusFinal = pendingAcao.acao === "aceitar" ? "pendente" : pendingAcao.acao === "recusar" ? "recusado" : "inviavel"
+        onAcaoDireta([sessao], statusFinal, acaoMotivo || undefined)
+        if (pendingAcao.acao === "inviavel") {
+          setSt(pendingAcao.sugestao, "inviavel")
+          setSelectedIds(prev => { const n = new Set(prev); n.delete(pendingAcao.sugestao.id); return n })
+        }
+        setPendingAcao(null); setAcaoMotivo("")
+      }
+      return (
+        <div
+          style={{ position: "fixed", inset: 0, zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.45)", padding: "16px" }}
+          onClick={e => { if (e.target === e.currentTarget) { setPendingAcao(null); setAcaoMotivo("") } }}
+        >
+          <div style={{ background: "var(--card)", borderRadius: "16px", boxShadow: "0 20px 60px rgba(0,0,0,.25)", maxWidth: "380px", width: "100%", padding: "22px" }}>
+            <div style={{ fontWeight: 900, fontSize: "16px", color: meta.cor, marginBottom: "4px", textWrap: "balance" as const }}>{meta.titulo}</div>
+            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "14px" }}>{meta.desc}</div>
+            <div style={{ background: "var(--muted)", borderRadius: "10px", padding: "11px 14px", marginBottom: "12px" }}>
+              <div style={{ fontFamily: "monospace", fontVariantNumeric: "tabular-nums", fontWeight: 800, fontSize: "13px", color: B.navy }}>{pendingAcao.sugestao.dia.replace("-feira", "")} {pendingAcao.hora}</div>
+              <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--card-foreground)", marginTop: "3px" }}>{pendingAcao.tP}</div>
+              <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", marginTop: "1px" }}>{fmtName(pendingAcao.prof)}</div>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "5px", marginBottom: "5px" }}>
+              <span style={{ fontSize: "11px", fontWeight: 700, color: isInvAcao ? "#dc2626" : "#6b7280" }}>
+                Justificativa{isInvAcao ? " *" : " (opcional)"}
+              </span>
+              {motivoFaltando && (
+                <span style={{ fontSize: "10px", color: "#dc2626", fontWeight: 600 }}>— obrigatória para Inviável</span>
+              )}
+            </div>
+            <textarea
+              value={acaoMotivo}
+              onChange={e => setAcaoMotivo(e.target.value)}
+              placeholder={meta.placeholder}
+              rows={3}
+              style={{ width: "100%", border: `1px solid ${motivoFaltando ? "#fca5a5" : "#d1d5db"}`, borderRadius: "10px", padding: "8px 12px", fontSize: "16px", fontFamily: "inherit", resize: "none", marginBottom: motivoFaltando ? "6px" : "16px", boxSizing: "border-box", outline: motivoFaltando ? "none" : undefined }}
+            />
+            {motivoFaltando && (
+              <div style={{ fontSize: "11px", color: "#dc2626", marginBottom: "10px" }}>Descreva o motivo para registrar como inviável.</div>
+            )}
+            <div style={{ display: "flex", gap: "8px" }}>
+              <button
+                onClick={handleConfirmar}
+                disabled={motivoFaltando}
+                style={{ flex: 1, padding: "10px 14px", borderRadius: "10px", background: motivoFaltando ? "#f3f4f6" : meta.cor, color: motivoFaltando ? "#9ca3af" : "white", border: "none", cursor: motivoFaltando ? "not-allowed" : "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: "13px" }}>
+                {meta.label}
+              </button>
+              <button onClick={() => { setPendingAcao(null); setAcaoMotivo("") }} style={{ flex: 1, padding: "10px 14px", borderRadius: "10px", background: "#f3f4f6", color: "#374151", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+                Cancelar
+              </button>
+            </div>
+          </div>
+        </div>
+      )
+    })()}
+
+
+
+  </>
   )
-}
+})
 
 // ─── AceitesPanel ─────────────────────────────────────────────────────────────
 
@@ -760,6 +1336,7 @@ const BUNDLE_STATUS_META = {
   pendente:   { label: "Pendente",  bg: "#fef3c7", c: "#92400e", bd: "#fbbf24" },
   confirmado: { label: "Confirmou", bg: "#dcfce7", c: "#14532d", bd: "#86efac" },
   recusado:   { label: "Recusou",   bg: "#fee2e2", c: "#7f1d1d", bd: "#fca5a5" },
+  inviavel:   { label: "⛔ Inviável", bg: "#f3f4f6", c: "#6b7280", bd: "#d1d5db" },
 }
 
 function AceitesPanel({
@@ -770,6 +1347,7 @@ function AceitesPanel({
   onUpdate: (updated: AceitePacBundle[]) => void
   onVerAll: () => void
 }) {
+  const [confirmandoId, setConfirmandoId] = useState<string | null>(null)
   const pacAceites = aceites.filter(a => a.pac === pac)
   if (!pacAceites.length) return null
 
@@ -807,54 +1385,69 @@ function AceitesPanel({
                 <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                   <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)" }}>{dateStr}</span>
                   <span style={{ fontSize: "10px", fontWeight: 600, color: "var(--muted-foreground)", background: "var(--muted)", padding: "0 6px", borderRadius: "4px" }}>ocp. paciente</span>
-                  <span style={{ padding: "1px 7px", borderRadius: "5px", fontSize: "9px", fontWeight: 800, background: sm.bg, color: sm.c, border: `1px solid ${sm.bd}` }}>{sm.label}</span>
+                  <span style={{ padding: "1px 7px", borderRadius: "5px", fontSize: "11px", fontWeight: 800, background: sm.bg, color: sm.c, border: `1px solid ${sm.bd}` }}>{sm.label}</span>
                 </div>
                 <span style={{ fontSize: "11px", color: "var(--muted-foreground)", flexShrink: 0 }}>{bundle.sessoes.length} sessão(ões)</span>
               </div>
+
+              {/* Motivo (bundles recusados ou inviáveis) */}
+              {(bundle.status === "inviavel" || bundle.status === "recusado") && bundle.motivo && (
+                <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: "8px", padding: "7px 10px", marginBottom: "10px", fontSize: "11px", color: "#6b7280" }}>
+                  <span style={{ fontWeight: 700 }}>Justificativa: </span>{bundle.motivo}
+                </div>
+              )}
 
               {/* Sessões */}
               <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(155px, 1fr))", gap: "6px", marginBottom: "10px" }}>
                 {bundle.sessoes.map((s, i) => {
                   const slotKey  = `${s.dia}|||${s.hora}`
                   const isInv    = bundle.inviavelSlots.includes(slotKey)
+                  const isInvBundle = bundle.status === "inviavel"
                   return (
-                    <div key={i} style={{ border: `1px solid ${isInv ? "#fca5a5" : "var(--border)"}`, borderRadius: "8px", padding: "7px 9px", background: isInv ? "#fff1f2" : "var(--card)", opacity: isInv ? 0.7 : 1 }}>
-                      <div style={{ fontFamily: "monospace", fontSize: "10px", fontWeight: 800, color: B.navy }}>{s.dia.replace("-feira", "")} {s.hora}</div>
-                      <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--card-foreground)", marginTop: "2px" }}>{s.tP}</div>
-                      <div style={{ fontSize: "9px", color: "var(--muted-foreground)" }}>{fmtName(s.prof)}</div>
-                      <button
-                        onClick={() => toggleInviavel(bundle.id, slotKey)}
-                        style={{ ...btnStyle(isInv ? "var(--muted)" : "#fef2f2", isInv ? "var(--muted-foreground)" : "#dc2626", isInv ? "var(--border)" : "#fca5a5"), fontSize: "8px", marginTop: "5px", width: "100%", textAlign: "center" }}>
-                        {isInv ? "↩ Desfazer" : "⛔ Inviável"}
-                      </button>
+                    <div key={i} style={{ border: `1px solid ${isInv || isInvBundle ? "#fca5a5" : "#e5e7eb"}`, borderRadius: "8px", padding: "7px 9px", background: isInv || isInvBundle ? "#fff1f2" : "white", opacity: isInv ? 0.7 : 1 }}>
+                      <div style={{ fontFamily: "monospace", fontVariantNumeric: "tabular-nums", fontSize: "10px", fontWeight: 800, color: B.navy }}>{s.dia.replace("-feira", "")} {s.hora}</div>
+                      <div style={{ fontSize: "10px", fontWeight: 700, color: "#1f2937", marginTop: "2px" }}>{s.tP}</div>
+                      <div style={{ fontSize: "11px", color: "#6b7280" }}>{fmtName(s.prof)}</div>
+                      {!isInvBundle && (
+                        <button
+                          onClick={() => toggleInviavel(bundle.id, slotKey)}
+                          style={{ ...btnStyle(isInv ? "#f3f4f6" : "#fef2f2", isInv ? "#6b7280" : "#dc2626", isInv ? "#e5e7eb" : "#fca5a5"), fontSize: "10px", marginTop: "5px", width: "100%", textAlign: "center" }}>
+                          {isInv ? "↩ Desfazer" : "⛔ Inviável"}
+                        </button>
+                      )}
                     </div>
                   )
                 })}
               </div>
 
               {/* Ações do bundle */}
-              <div style={{ display: "flex", gap: "5px", flexWrap: "wrap", borderTop: "1px solid var(--border)", paddingTop: "8px", alignItems: "center" }}>
-                <button
-                  onClick={() => onVerAll()}
-                  style={{ ...btnStyle("transparent", B.navy, B.navy), fontSize: "10px", fontWeight: 600, border: `1.5px solid ${B.navy}`, display: "flex", alignItems: "center", justifyContent: "center", textAlign: "center" }}>
-                  Sugestão de Alteração
-                </button>
-                <button
-                  onClick={() => updateBundle(bundle.id, { status: "confirmado" })}
-                  style={{ ...btnStyle(bundle.status === "confirmado" ? "#dcfce7" : "#f0fdf4", "#14532d", bundle.status === "confirmado" ? "#86efac" : "#bbf7d0"), fontSize: "11px", fontWeight: 600 }}>
-                  ✓ Confirmou
-                </button>
-                <button
-                  onClick={() => updateBundle(bundle.id, { status: "recusado" })}
-                  style={{ ...btnStyle(bundle.status === "recusado" ? "#fee2e2" : "#fef2f2", "#7f1d1d", bundle.status === "recusado" ? "#fca5a5" : "#fecaca"), fontSize: "11px", fontWeight: 600 }}>
-                  ✗ Recusou
-                </button>
-                <div style={{ marginLeft: "auto", display: "flex", gap: "5px" }}>
-                  {bundle.status !== "pendente" && (
-                    <button onClick={() => updateBundle(bundle.id, { status: "pendente" })} style={{ ...btnStyle("var(--muted)", "var(--muted-foreground)", "var(--border)"), fontSize: "10px" }}>Desfazer</button>
-                  )}
-                  <button onClick={() => deleteBundle(bundle.id)} style={{ ...btnStyle("#fef2f2", "#dc2626", "#fca5a5"), fontSize: "10px" }}>Cancelar</button>
-                </div>
+              <div style={{ display: "flex", gap: "5px", flexWrap: "wrap", borderTop: "1px solid #f0f0f0", paddingTop: "8px", alignItems: "center" }}>
+                {bundle.status !== "inviavel" && (
+                  <>
+                    <button
+                      onClick={() => updateBundle(bundle.id, { status: "confirmado" })}
+                      style={{ ...btnStyle(bundle.status === "confirmado" ? "#dcfce7" : "#f0fdf4", "#14532d", bundle.status === "confirmado" ? "#86efac" : "#bbf7d0"), fontSize: "10px" }}>
+                      ✓ Responsável Confirmou
+                    </button>
+                    <button
+                      onClick={() => updateBundle(bundle.id, { status: "recusado" })}
+                      style={{ ...btnStyle(bundle.status === "recusado" ? "#fee2e2" : "#fef2f2", "#7f1d1d", bundle.status === "recusado" ? "#fca5a5" : "#fecaca"), fontSize: "10px" }}>
+                      ✗ Recusou
+                    </button>
+                    {bundle.status !== "pendente" && (
+                      <button onClick={() => updateBundle(bundle.id, { status: "pendente" })} style={{ ...btnStyle("#f3f4f6", "#6b7280", "#e5e7eb"), fontSize: "10px" }}>Desfazer</button>
+                    )}
+                  </>
+                )}
+                {confirmandoId === bundle.id ? (
+                  <div style={{ display: "flex", gap: "4px", marginLeft: "auto", alignItems: "center" }}>
+                    <span style={{ fontSize: "10px", color: "#dc2626", fontWeight: 700 }}>Excluir bundle?</span>
+                    <button onClick={() => { deleteBundle(bundle.id); setConfirmandoId(null) }} style={{ ...btnStyle("#fef2f2", "#dc2626", "#fca5a5"), fontSize: "10px" }}>Sim</button>
+                    <button onClick={() => setConfirmandoId(null)} style={{ ...btnStyle("#f3f4f6", "#6b7280", "#e5e7eb"), fontSize: "10px" }}>Não</button>
+                  </div>
+                ) : (
+                  <button onClick={() => setConfirmandoId(bundle.id)} style={{ ...btnStyle("#fef2f2", "#dc2626", "#fca5a5"), fontSize: "10px", marginLeft: "auto" }}>Cancelar</button>
+                )}
               </div>
             </div>
           )
@@ -955,7 +1548,7 @@ function PacAgendaGrid({ pac, cRows, sugestoes, onVerAll }: { pac: string; cRows
                         <td key={d} style={{ padding: "2px 4px", verticalAlign: "middle" }}>
                           <div style={{ background: "var(--card-foreground)", borderRadius: "8px", minHeight: "36px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "4px 6px", gap: "2px" }}>
                             <div style={{ fontWeight: 700, fontSize: "10px", lineHeight: 1.2, color: "white", textAlign: "center" }}>Superv. ABA</div>
-                            <div style={{ fontSize: "9px", color: "#fbbf24", fontWeight: 700 }}>↔ deslocar</div>
+                            <div style={{ fontSize: "11px", color: "#fbbf24", fontWeight: 700 }}>↔ deslocar</div>
                           </div>
                         </td>
                       )
@@ -969,7 +1562,7 @@ function PacAgendaGrid({ pac, cRows, sugestoes, onVerAll }: { pac: string; cRows
                                 {t.length > 14 ? t.slice(0, 13) + "…" : t}
                               </div>
                             ))}
-                            {sesses.length > 2 && <div style={{ fontSize: "9px", opacity: 0.7 }}>+{sesses.length - 2}</div>}
+                            {sesses.length > 2 && <div style={{ fontSize: "11px", opacity: 0.7 }}>+{sesses.length - 2}</div>}
                           </div>
                         </td>
                       )
@@ -979,11 +1572,11 @@ function PacAgendaGrid({ pac, cRows, sugestoes, onVerAll }: { pac: string; cRows
                         <td key={d} style={{ padding: "2px 4px", verticalAlign: "middle" }}>
                           <div style={{ background: "#fef3c7", border: "1px solid #fbbf24", borderRadius: "8px", minHeight: "36px", display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", padding: "3px 4px", gap: "1px" }}>
                             {sugs.slice(0, 2).map((t, i) => (
-                              <div key={i} style={{ fontWeight: 600, fontSize: "9px", color: "#92400e", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%", textAlign: "center" }}>
+                              <div key={i} style={{ fontWeight: 600, fontSize: "11px", color: "#92400e", lineHeight: 1.2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", width: "100%", textAlign: "center" }}>
                                 {t.length > 14 ? t.slice(0, 13) + "…" : t}
                               </div>
                             ))}
-                            <div style={{ fontSize: "9px", color: "#d97706", fontWeight: 700 }}>proposta ↓</div>
+                            <div style={{ fontSize: "11px", color: "#d97706", fontWeight: 700 }}>proposta ↓</div>
                           </div>
                         </td>
                       )
@@ -1002,9 +1595,18 @@ function PacAgendaGrid({ pac, cRows, sugestoes, onVerAll }: { pac: string; cRows
 
 // ─── OcupPacMode ──────────────────────────────────────────────────────────────
 
-interface Props { cRows: CsvRow[]; lRows: LaudoRow[]; cfg: CfgState }
+interface Props {
+  cRows: CsvRow[]
+  lRows: LaudoRow[]
+  cfg: CfgState
+  rec?: RecItem[]
+  inv?: InvItem[]
+  sRec?: (rec: RecItem[]) => void
+  sInv?: (inv: InvItem[]) => void
+}
 
-export function OcupPacMode({ cRows, lRows, cfg }: Props) {
+export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGlobal = [], sRec, sInv }: Props) {
+  const modalRef = useRef<TodasSugestoesModalHandle>(null)
   const [pac, setPac]           = useState("")
   const [inputVal, setInputVal] = useState("")
   const [dropOpen, setDropOpen] = useState(false)
@@ -1013,19 +1615,29 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
   const [statusMap, setStatusMap] = useState<Record<string, Status>>(() => {
     try { return JSON.parse(localStorage.getItem(SK) || "{}") } catch { return {} }
   })
-  const [showModal, setShowModal] = useState(false)
-  const [aceites, setAceites]   = useState<AceitePacBundle[]>(() => {
-    try { return JSON.parse(localStorage.getItem(SK_ACEITES) || "[]") } catch { return [] }
-  })
-  const { sInv, inv } = useCronogramaData()
+  const { pacBundles, persistPacBundles } = useCronogramaData()
+  const aceites = pacBundles
+  const persistAceites = persistPacBundles
   const [invPending, setInvPending] = useState<Sugestao | null>(null)
   const [invMotivo, setInvMotivo]   = useState("")
+  const [inputFocused, setInputFocused] = useState(false)
+  const [highlightedIdx, setHighlightedIdx] = useState(-1)
+  const listboxRef = useRef<HTMLDivElement>(null)
+
+  const recusadasSet = useMemo(() => {
+    const s = new Set<string>()
+    for (const r of recGlobal) {
+      if (r.paciente !== pac) continue
+      s.add(`${r.dia}|||${r.hora}|||${r.especialidade}|||${r.profissional}`)
+    }
+    return s
+  }, [recGlobal, pac])
 
   function openInvModal(s: Sugestao) { setInvPending(s); setInvMotivo("") }
   function confirmInv() {
     if (!invPending) return
     setSt(invPending, "inviavel")
-    sInv([...inv, { paciente: pac, motivo: invMotivo, registradoEm: new Date().toLocaleDateString("pt-BR") }])
+    sInv?.([...invGlobal, { paciente: pac, motivo: invMotivo, registradoEm: new Date().toLocaleDateString("pt-BR") }])
     setInvPending(null)
     setInvMotivo("")
   }
@@ -1033,11 +1645,6 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
   function persistStatus(m: Record<string, Status>) {
     setStatusMap(m)
     try { localStorage.setItem(SK, JSON.stringify(m)) } catch {}
-  }
-
-  function persistAceites(a: AceitePacBundle[]) {
-    setAceites(a)
-    try { localStorage.setItem(SK_ACEITES, JSON.stringify(a)) } catch {}
   }
 
   function handleAceitar({ sessoes }: { sessoes: AceiteSessao[] }) {
@@ -1051,6 +1658,72 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
       inviavelSlots: [],
     }
     persistAceites([...aceites, bundle])
+  }
+
+  function handleInviavel(sessoes: AceiteSessao[], motivo: string) {
+    if (!sessoes.length) return
+    const bundle: AceitePacBundle = {
+      id: `inv_${Date.now()}_${pac.slice(0, 8)}`,
+      pac, ts: Date.now(),
+      origem: "ocp-paciente",
+      sessoes,
+      status: "inviavel",
+      inviavelSlots: [],
+      motivo,
+    }
+    persistAceites([...aceites, bundle])
+  }
+
+  function handleAcaoDireta(sessoes: AceiteSessao[], status: "pendente" | "recusado" | "inviavel", motivo?: string) {
+    if (!sessoes.length) return
+    const bundle: AceitePacBundle = {
+      id: `${status}_${Date.now()}_${pac.slice(0, 8)}`,
+      pac, ts: Date.now(),
+      origem: "ocp-paciente",
+      sessoes, status,
+      inviavelSlots: [],
+      motivo,
+    }
+    persistAceites([...aceites, bundle])
+
+    // Espelha em "Aceites e Recusas" (contexto global)
+    if (status === "recusado" && sRec) {
+      const registradoEm = new Date().toLocaleDateString("pt-BR")
+      const newItems: RecItem[] = sessoes.map(s => ({
+        paciente: pac,
+        profissional: s.prof,
+        especialidade: s.tP,
+        unidade: s.unidade,
+        dia: s.dia,
+        hora: s.hora,
+        registradoEm,
+      }))
+      sRec([...recGlobal, ...newItems])
+    }
+
+    if (status === "inviavel" && sInv && !invGlobal.some(x => x.paciente === pac)) {
+      sInv([...invGlobal, {
+        paciente: pac,
+        motivo: motivo || "",
+        registradoEm: new Date().toLocaleDateString("pt-BR"),
+      }])
+    }
+  }
+
+  function onUndoRecusa(dia: string, hora: string, tP: string, prof: string) {
+    sRec?.(recGlobal.filter(r =>
+      !(r.paciente === pac && r.dia === dia && r.hora === hora
+        && r.especialidade === tP && r.profissional === prof)
+    ))
+    persistAceites(
+      aceites
+        .map(b => {
+          if (b.pac !== pac || b.status !== "recusado") return b
+          const novas = b.sessoes.filter(s => !(s.dia === dia && s.hora === hora && s.tP === tP && s.prof === prof))
+          return { ...b, sessoes: novas }
+        })
+        .filter(b => b.sessoes.length > 0)
+    )
   }
 
   const stKey = (sugestao: Sugestao) => `${pac}|||${sugestao.id}`
@@ -1068,25 +1741,78 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
     agend.filter(r => r["Nome Favorecido"] && !PACS_ADMIN.has(r["Nome Favorecido"]) && !EXCLUIR_GAPS.has(r.Terapia)),
     [agend])
 
+  // Lista de nomes canônicos do agend ordenados por comprimento decrescente.
+  // Usada por agendMergeMap para encontrar o nome canônico mais curto.
+  const agendNamesByLen = useMemo(() => {
+    const s = new Set<string>()
+    for (const r of agend) {
+      const p = r["Nome Favorecido"]
+      if (p && !PACS_ADMIN.has(p)) s.add(p)
+    }
+    return [...s].sort((a, b) => b.length - a.length)
+  }, [agend])
+
+  // Mapeia variantes de nome do agend para o nome canônico mais curto.
+  // Ex: "Pietro Ferreira D'Ávila" → "Pietro Ferreira" quando ambos existem no agend.
+  const agendMergeMap = useMemo(() => {
+    const byLen = [...agendNamesByLen].reverse() // shortest first
+    const m = new Map<string, string>()
+    for (const name of byLen) {
+      const nn = normalizeName(name)
+      let canonical = name
+      // Find the shortest existing agend name that is a prefix of this one
+      for (const shorter of byLen) {
+        if (shorter.length >= name.length) continue
+        const ns = normalizeName(shorter)
+        if (ns.split(" ").length >= 2 && nn.startsWith(ns + " ")) {
+          canonical = shorter
+          break
+        }
+      }
+      m.set(name, canonical)
+    }
+    return m
+  }, [agendNamesByLen])
+
+  // Mapa: "ID Favorecido" do lRows → nome canônico do agend.
+  // Substitui a junção por nome normalizado — mais confiável e independente de encoding.
+  const agendIdMap = useMemo(() => {
+    const m = new Map<string, string>()
+    for (const r of agend) {
+      const id  = String(r["Id Favorecido"] ?? r["ID Favorecido"] ?? "").trim()
+      const rawP = r["Nome Favorecido"]
+      if (id && rawP && !PACS_ADMIN.has(rawP)) {
+        const p = agendMergeMap.get(rawP) ?? rawP
+        if (!m.has(id)) m.set(id, p)
+      }
+    }
+    return m
+  }, [agend, agendMergeMap])
+
   const gapMap = useMemo(() => {
     if (!cRows.length || !lRows.length) return {} as Record<string, { dif: number; aut: number; of: number }>
     const qtdOf: Record<string, number> = {}
+    const seenOf = new Set<string>()
     for (const r of agend) {
-      const p = r["Nome Favorecido"]
-      if (!p || PACS_ADMIN.has(p) || EXCLUIR_GAPS.has(r.Terapia)) continue
+      const rawP = r["Nome Favorecido"]
+      if (!rawP || PACS_ADMIN.has(rawP) || EXCLUIR_GAPS.has(r.Terapia)) continue
+      const p = agendMergeMap.get(rawP) ?? rawP
       const esp = TERAPIA_TO_ESP[r.Terapia]
       if (!esp) continue
+      const hm = pm(hiStr(r)) ?? hiMin(r)
+      const dk = `${p}|||${r["Dia da Semana"]}|||${hm}|||${r.Terapia}|||${r.Profissional}`
+      if (seenOf.has(dk)) continue
+      seenOf.add(dk)
       qtdOf[`${p}|||${esp}`] = (qtdOf[`${p}|||${esp}`] || 0) + 1
     }
     const qtdAut: Record<string, number> = {}
     const altaSet = new Set<string>()
     for (const l of lRows) {
-      const p   = String(l["Paciente"] || "").trim()
-      const esp = String(l["Especialidade"] || "").trim()
+      const idFav = String(l["ID Favorecido"] ?? l["Id Favorecido"] ?? "").trim()
+      const p     = (idFav ? agendIdMap.get(idFav) : undefined) ?? String(l["Paciente"] || "").trim()
+      const esp   = String(l["Especialidade"] || "").trim()
       if (!p || PACS_ADMIN.has(p) || !esp) continue
       if (isLaudoComAlta(l)) { altaSet.add(`${p}|||${esp}`); continue }
-      const sit = String(l["Situação"] || "").trim().toLowerCase()
-      if (sit && sit !== "vigente") continue
       const aut = parseFloat(String(l["Qtd autorizada"] || "0").replace(",", ".")) || 0
       if (aut <= 0) continue
       const k = `${p}|||${esp}`
@@ -1097,22 +1823,139 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
     for (const [k, aut] of Object.entries(qtdAut)) {
       const of_ = qtdOf[k] || 0
       const dif = Math.round((aut - of_) * 10) / 10
-      if (dif > 0) result[k] = { dif, aut, of: of_ }
+      result[k] = { dif, aut, of: of_ }
     }
     return result
-  }, [cRows, lRows, agend])
+  }, [cRows, lRows, agend, agendIdMap, agendMergeMap])
 
   const todosPacs = useMemo(() => {
     const pacs = new Set<string>()
-    for (const k of Object.keys(gapMap)) pacs.add(k.split("|||")[0])
-    return [...pacs].filter(p => !PACS_ADMIN.has(p)).sort()
-  }, [gapMap])
+    for (const r of agend) {
+      const rawP = r["Nome Favorecido"]
+      if (!rawP || PACS_ADMIN.has(rawP)) continue
+      pacs.add(agendMergeMap.get(rawP) ?? rawP)
+    }
+    return [...pacs].sort()
+  }, [agend, agendMergeMap])
 
-  const filteredPacs = useMemo(() =>
-    inputVal.trim() ? todosPacs.filter(p => p.toLowerCase().includes(inputVal.toLowerCase())) : todosPacs,
-    [todosPacs, inputVal])
+  const pacStatusMap = useMemo((): Record<string, "deficit" | "em-dia" | "deficit-sobre" | "sobreofertado" | "sem-laudo"> => {
+    // Detecta quem tem QUALQUER laudo com Qtd > 0 (independe de Situação).
+    const temLaudo = new Set<string>()
+    for (const l of lRows) {
+      const idFav = String(l["ID Favorecido"] ?? l["Id Favorecido"] ?? "").trim()
+      const p     = (idFav ? agendIdMap.get(idFav) : undefined) ?? String(l["Paciente"] || "").trim()
+      if (!p || PACS_ADMIN.has(p)) continue
+      const aut = parseFloat(String(l["Qtd autorizada"] || "0").replace(",", ".")) || 0
+      if (aut > 0) temLaudo.add(p)
+    }
+    // Agrupa os difs por paciente a partir do gapMap (já calculado, inclui dif ≤ 0).
+    const pacDifs: Record<string, number[]> = {}
+    for (const [k, v] of Object.entries(gapMap)) {
+      const [p] = k.split("|||")
+      if (!pacDifs[p]) pacDifs[p] = []
+      pacDifs[p].push(v.dif)
+    }
+    const result: Record<string, "deficit" | "em-dia" | "deficit-sobre" | "sobreofertado" | "sem-laudo"> = {}
+    for (const p of todosPacs) result[p] = temLaudo.has(p) ? "em-dia" : "sem-laudo"
+    for (const [p, difs] of Object.entries(pacDifs)) {
+      const hasDeficit = difs.some(d => d > 0)
+      const hasSobre   = difs.some(d => d < 0)
+      if      (hasDeficit && hasSobre) result[p] = "deficit-sobre"
+      else if (hasDeficit)             result[p] = "deficit"
+      else if (hasSobre)               result[p] = "sobreofertado"
+      else                             result[p] = "em-dia"
+    }
+    return result
+  }, [gapMap, todosPacs, lRows, agendIdMap])
 
-  const pacAllRows   = useMemo(() => agend.filter(r => r["Nome Favorecido"] === pac), [pac, agend])
+  const pacIdMap = useMemo(() => {
+    const normalize = (s: string) => s.toLowerCase().replace(/[\s_]+/g, "")
+    const TARGET = normalize("id favorecido")
+    const findId = (r: Record<string, unknown>): string => {
+      const exact = r["Id Favorecido"] ?? r["ID Favorecido"] ?? r["id favorecido"]
+      if (exact != null) return String(exact).trim()
+      // fallback: case/space-insensitive scan
+      for (const key of Object.keys(r)) {
+        if (normalize(key) === TARGET) return String(r[key] ?? "").trim()
+      }
+      return ""
+    }
+    const m: Record<string, string> = {}
+    for (const r of agend) {
+      const rawP = r["Nome Favorecido"]
+      if (!rawP) continue
+      const p = agendMergeMap.get(rawP) ?? rawP
+      const id = findId(r as Record<string, unknown>)
+      if (id && !m[p]) m[p] = id
+    }
+    return m
+  }, [agend, agendMergeMap])
+
+  const pacConvMap = useMemo(() => {
+    const m: Record<string, string> = {}
+    for (const l of lRows) {
+      const p = String(l["Paciente"] || "").trim()
+      const plano = String(l["Plano"] || "").trim()
+      if (p && plano) m[p] = plano
+    }
+    for (const r of agend) {
+      const rawP = r["Nome Favorecido"]
+      if (!rawP) continue
+      const p = agendMergeMap.get(rawP) ?? rawP
+      if (m[p]) continue
+      const conv = r["Convênio"]
+      if (conv) m[p] = conv
+    }
+    return m
+  }, [lRows, agend, agendMergeMap])
+
+  const [convFilter, setConvFilter]       = useState<Set<string>>(new Set())
+  const [statusFilter, setStatusFilter]   = useState<Set<string>>(new Set())
+  const [situacaoOpen, setSituacaoOpen]   = useState(false)
+  const [convOpen, setConvOpen]           = useState(false)
+
+  const convenios = useMemo(() => {
+    const s = new Set<string>()
+    for (const p of todosPacs) { const c = pacConvMap[p]; if (c) s.add(c) }
+    return [...s].sort()
+  }, [todosPacs, pacConvMap])
+
+  const countBySituacao = useMemo(() => {
+    const q = inputVal.toLowerCase()
+    const base = todosPacs.filter(p =>
+      (convFilter.size === 0 || convFilter.has(pacConvMap[p] || "")) &&
+      (!q || p.toLowerCase().includes(q))
+    )
+    const counts: Record<string, number> = { todos: base.length }
+    for (const p of base) {
+      const st = pacStatusMap[p] || "sem-laudo"
+      counts[st] = (counts[st] || 0) + 1
+    }
+    return counts
+  }, [todosPacs, convFilter, pacConvMap, pacStatusMap, inputVal])
+
+  const countByConv = useMemo(() => {
+    const q = inputVal.toLowerCase()
+    const base = todosPacs.filter(p =>
+      (statusFilter.size === 0 || statusFilter.has(pacStatusMap[p] || "sem-laudo")) &&
+      (!q || p.toLowerCase().includes(q))
+    )
+    const counts: Record<string, number> = { "": base.length }
+    for (const p of base) {
+      const c = pacConvMap[p]
+      if (c) counts[c] = (counts[c] || 0) + 1
+    }
+    return counts
+  }, [todosPacs, statusFilter, pacStatusMap, pacConvMap, inputVal])
+
+  const filteredPacs = useMemo(() => {
+    return todosPacs
+      .filter(p => convFilter.size === 0 || convFilter.has(pacConvMap[p] || ""))
+      .filter(p => statusFilter.size === 0 || statusFilter.has(pacStatusMap[p] || "sem-laudo"))
+      .filter(p => !inputVal.trim() || p.toLowerCase().includes(inputVal.toLowerCase()))
+  }, [todosPacs, inputVal, convFilter, pacConvMap, statusFilter, pacStatusMap])
+
+  const pacAllRows   = useMemo(() => agend.filter(r => (agendMergeMap.get(r["Nome Favorecido"] ?? "") ?? r["Nome Favorecido"]) === pac), [pac, agend, agendMergeMap])
   const currentSlots = useMemo(() => countSlots(pacAllRows), [pacAllRows])
 
   const pacGaps = useMemo((): GapInfo[] =>
@@ -1123,266 +1966,431 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
       .sort((a, b) => b.dif - a.dif),
     [pac, gapMap])
 
+  // Todas as especialidades do paciente (com déficit, zeradas ou sobreofertadas)
+  const pacAllEsp = useMemo((): GapInfo[] => {
+    if (!pac) return []
+    const qtdOf: Record<string, number> = {}
+    const seenOf = new Set<string>()
+    for (const r of agend) {
+      const rawP = r["Nome Favorecido"]
+      if (!rawP || EXCLUIR_GAPS.has(r.Terapia)) continue
+      if ((agendMergeMap.get(rawP) ?? rawP) !== pac) continue
+      const esp = TERAPIA_TO_ESP[r.Terapia]
+      if (!esp) continue
+      const hm = pm(hiStr(r)) ?? hiMin(r)
+      const dk = `${r["Dia da Semana"]}|||${hm}|||${r.Terapia}|||${r.Profissional}`
+      if (seenOf.has(dk)) continue
+      seenOf.add(dk)
+      qtdOf[esp] = (qtdOf[esp] || 0) + 1
+    }
+    const qtdAut: Record<string, number> = {}
+    const altaSet = new Set<string>()
+    for (const l of lRows) {
+      const idFav = String(l["ID Favorecido"] ?? l["Id Favorecido"] ?? "").trim()
+      const p     = (idFav ? agendIdMap.get(idFav) : undefined) ?? String(l["Paciente"] || "").trim()
+      if (p !== pac) continue
+      const esp = String(l["Especialidade"] || "").trim()
+      if (!esp) continue
+      if (isLaudoComAlta(l)) { altaSet.add(esp); continue }
+      const aut = parseFloat(String(l["Qtd autorizada"] || "0").replace(",", ".")) || 0
+      if (aut <= 0) continue
+      if (!qtdAut[esp] || aut > qtdAut[esp]) qtdAut[esp] = aut
+    }
+    for (const esp of altaSet) delete qtdAut[esp]
+    return Object.entries(qtdAut)
+      .map(([esp, aut]) => ({ esp, aut, of: qtdOf[esp] || 0, dif: Math.round((aut - (qtdOf[esp] || 0)) * 10) / 10 }))
+      .sort((a, b) => b.dif - a.dif)
+  }, [pac, agend, lRows, agendIdMap, agendMergeMap])
+
   const sugestoes = useMemo(() => {
     if (!pac || estrategia !== "S1") return [] as Sugestao[]
-    return buildSugestoes(pac, agend, agendClin, cRows, gapMap)
-  }, [pac, estrategia, agend, agendClin, cRows, gapMap])
+    const conv      = pacConvMap[pac] || ""
+    const isLiminar = /LIMINAR/i.test(cfg.judicialMap?.[pac] || "")
+    // Passa [] para aceites: proposals não são bloqueadas por bundles já existentes.
+    // O estado visual (proposta/aceita/recusada) é rastreado via selectedIds + stOf,
+    // não via regeneração da lista — isso garante que cards nunca desapareçam da grade.
+    return buildSugestoes(pac, agend, agendClin, cRows, gapMap, [], conv, isLiminar)
+  }, [pac, estrategia, agend, agendClin, cRows, gapMap, pacConvMap, cfg.judicialMap])
+
+  useEffect(() => {
+    if (!pac) return
+    const valid = new Set(sugestoes.map(s => `${pac}|||${s.id}`))
+    setStatusMap(prev => {
+      const stale = Object.keys(prev).filter(k => k.startsWith(`${pac}|||`) && !valid.has(k))
+      if (!stale.length) return prev
+      const pruned = { ...prev }
+      for (const k of stale) delete pruned[k]
+      try { localStorage.setItem(SK, JSON.stringify(pruned)) } catch {}
+      return pruned
+    })
+  }, [pac, sugestoes])
 
   const sugestoesLimitadas = useMemo(() => {
     if (maxAdic === "") return sugestoes
-    return sugestoes.slice(0, maxAdic as number)
+    const limit = maxAdic as number
+    const result: Sugestao[] = []
+    let count = 0
+    for (const s of sugestoes) {
+      if (count >= limit) break
+      result.push(s)
+      count += 1 + s.vComp.length
+    }
+    return result
   }, [sugestoes, maxAdic])
 
   const totalAceitos = aceites.filter(a => a.pac === pac).reduce((acc, b) => acc + b.sessoes.length, 0)
 
-  const gapChartData = useMemo(() => {
-    const ESP_COLORS = ["#2563eb","#059669","#7e22ce","#c2410c","#0369a1","#a16207","#dc2626","#0891b2"]
-    return pacGaps.map((g, i) => ({
-      name: g.esp.length > 16 ? g.esp.slice(0, 15) + "…" : g.esp,
-      value: g.dif,
-      fill: ESP_COLORS[i % ESP_COLORS.length],
-    }))
-  }, [pacGaps])
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setSituacaoOpen(false); setConvOpen(false); setDropOpen(false) }
+    }
+    document.addEventListener("keydown", onKey)
+    return () => document.removeEventListener("keydown", onKey)
+  }, [])
 
-  const tipoChartData = useMemo(() => {
-    const counts: Record<string, number> = {}
-    for (const s of sugestoesLimitadas) counts[s.tipo] = (counts[s.tipo] || 0) + 1
-    const TIPO_COLORS: Record<string, string> = { adjacente: "#0369a1", "dia-novo": "#7e22ce" }
-    const TIPO_LABELS: Record<string, string> = { adjacente: "Adjacente", "dia-novo": "Dia novo" }
-    return Object.entries(counts).map(([t, v]) => ({ name: TIPO_LABELS[t] || t, value: v, fill: TIPO_COLORS[t] || "var(--muted-foreground)" }))
-  }, [sugestoesLimitadas])
-
-  function selectPac(p: string) { setPac(p); setInputVal(p); setDropOpen(false) }
+  function selectPac(p: string) { setPac(p); setInputVal(p); setDropOpen(false); setHighlightedIdx(-1) }
 
   return (
     <>
-      <div style={{ display: "flex", gap: "16px", alignItems: "flex-start" }}>
+      <style>{`
+        .ocup-workbench-bar {
+          display: grid;
+          grid-template-columns: 31fr 21fr 33fr 15fr;
+          background: var(--card);
+          border: 1px solid var(--border);
+          border-radius: 16px 0 0 16px;
+          margin-bottom: 16px;
+          margin-right: -1.5rem;
+          position: relative;
+        }
+        @media (max-width: 900px) {
+          .ocup-workbench-bar { grid-template-columns: 1fr 1fr; }
+          .ocup-workbench-bar > div:nth-child(2) { border-right: none !important; }
+        }
+        @media (max-width: 560px) {
+          .ocup-workbench-bar { grid-template-columns: 1fr; }
+          .ocup-workbench-bar > div { border-right: none !important; border-bottom: 1px solid var(--border); }
+          .ocup-workbench-bar > div:last-child { border-bottom: none !important; }
+        }
+        @media (pointer: coarse) {
+          .ocup-btn-limit  { min-height: 44px !important; }
+          .ocup-btn-situacao { min-height: 44px !important; }
+        }
+        @media (prefers-reduced-motion: reduce) {
+          .ocup-workbench-bar * { transition: none !important; }
+        }
+      `}</style>
+      {/* ── WORKBENCH BAR ─────────────────────────────────────────────────────── */}
+      <div className="ocup-workbench-bar">
 
-        {/* ── Coluna esquerda ─────────────────────────────────────────────── */}
-        <div style={{ flexShrink: 0, width: "340px", display: "flex", flexDirection: "column", gap: "12px" }}>
-
-          {/* Seletor de paciente */}
-          <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px" }}>
-            <div style={{ fontWeight: 800, color: B.navy, fontSize: "15px", marginBottom: "4px" }}>
-              Aumentar Ocupação — Paciente
-            </div>
-            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "14px" }}>
-              Selecione um paciente com déficit de sessões e explore as estratégias disponíveis.
-            </div>
-
-            <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", marginBottom: "6px" }}>Paciente</div>
-            <div style={{ position: "relative" }}>
-              <input
-                type="text"
-                value={inputVal}
-                onChange={e => { setInputVal(e.target.value); setPac(""); setDropOpen(true) }}
-                onFocus={() => setDropOpen(true)}
-                onBlur={() => setTimeout(() => setDropOpen(false), 150)}
-                placeholder="Buscar paciente..."
-                style={{ width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: "9px", padding: "8px 12px", fontSize: "13px", fontFamily: "inherit", outline: "none", background: "var(--color-card, white)", color: "inherit" }}
-              />
-              {dropOpen && filteredPacs.length > 0 && (
-                <div style={{ position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, zIndex: 50, background: "var(--card)", border: "1px solid var(--border)", borderRadius: "10px", boxShadow: "0 4px 16px rgba(0,0,0,.08)", maxHeight: "200px", overflowY: "auto" }}>
-                  {filteredPacs.map(p => (
-                    <button key={p} onMouseDown={() => selectPac(p)}
-                      style={{ display: "block", width: "100%", textAlign: "left", padding: "8px 12px", background: p === pac ? "var(--muted)" : "none", border: "none", fontSize: "12px", cursor: "pointer", color: p === pac ? B.navy : "var(--card-foreground)", fontWeight: p === pac ? 700 : 400, fontFamily: "inherit" }}>
-                      {p}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            <div style={{ marginTop: "14px" }}>
-              <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", marginBottom: "6px" }}>Limite de sessões adicionais</div>
-              <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
-                {["sem limite", 1, 2, 3, 4, 5].map(v => {
-                  const val = v === "sem limite" ? "" : v as number
-                  const active = maxAdic === val
+        {/* Área 1 — Paciente */}
+        <div style={{ padding: "14px 18px", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", justifyContent: "flex-start", gap: "6px" }}>
+          <label htmlFor="pac-search" style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.02em" }}>Paciente</label>
+          <div style={{ position: "relative" }}>
+            <input
+              id="pac-search"
+              type="text"
+              aria-label="Buscar paciente"
+              aria-autocomplete="list"
+              aria-controls={dropOpen ? "pac-listbox" : undefined}
+              aria-expanded={dropOpen}
+              value={inputVal}
+              onChange={e => { setInputVal(e.target.value); setPac(""); setDropOpen(true); setHighlightedIdx(-1) }}
+              onFocus={() => { setDropOpen(true); setInputFocused(true) }}
+              onBlur={() => { setTimeout(() => { setDropOpen(false); setHighlightedIdx(-1) }, 150); setInputFocused(false); if (pac) setInputVal(pac) }}
+              onKeyDown={e => {
+                if (!dropOpen || filteredPacs.length === 0) return
+                if (e.key === "ArrowDown") {
+                  e.preventDefault()
+                  const next = Math.min(highlightedIdx + 1, filteredPacs.length - 1)
+                  setHighlightedIdx(next)
+                  listboxRef.current?.children[next]?.scrollIntoView({ block: "nearest" })
+                } else if (e.key === "ArrowUp") {
+                  e.preventDefault()
+                  const prev = Math.max(highlightedIdx - 1, 0)
+                  setHighlightedIdx(prev)
+                  listboxRef.current?.children[prev]?.scrollIntoView({ block: "nearest" })
+                } else if (e.key === "Enter") {
+                  e.preventDefault()
+                  const idx = highlightedIdx >= 0 ? highlightedIdx : (filteredPacs.length === 1 ? 0 : -1)
+                  if (idx >= 0) selectPac(filteredPacs[idx])
+                } else if (e.key === "Escape") {
+                  setDropOpen(false); setHighlightedIdx(-1)
+                  if (pac) setInputVal(pac)
+                }
+              }}
+              placeholder="Buscar paciente..."
+              style={{ width: "100%", boxSizing: "border-box", border: "1px solid var(--border)", borderRadius: "9px", padding: "7px 12px", fontSize: "16px", fontFamily: "inherit", outline: "none", background: "var(--card)", color: "inherit", boxShadow: inputFocused ? `0 0 0 2px ${B.navy}` : "none" }}
+            />
+            {dropOpen && filteredPacs.length > 0 && (
+              <div ref={listboxRef} id="pac-listbox" role="listbox" aria-label="Pacientes" style={{ position: "absolute", top: "calc(100% + 2px)", left: 0, right: 0, zIndex: 100, background: "var(--card)", border: "1px solid var(--border)", borderRadius: "10px", boxShadow: "0 4px 16px rgba(0,0,0,.08)", maxHeight: "200px", overflowY: "auto" }}>
+                {filteredPacs.map((p, i) => {
+                  const st  = pacStatusMap[p]
+                  const dot = st === "deficit" ? "#dc2626" : st === "deficit-sobre" ? "#ea580c" : st === "em-dia" ? "#16a34a" : st === "sobreofertado" ? "#d97706" : "#d1d5db"
+                  const stLabel = st === "deficit" ? "deficit" : st === "deficit-sobre" ? "deficit com sobreoferta" : st === "em-dia" ? "em dia" : st === "sobreofertado" ? "sobreofertado" : "sem laudo"
+                  const isSelected  = p === pac
+                  const isHighlight = i === highlightedIdx
                   return (
-                    <button key={String(v)} onClick={() => setMaxAdic(val)}
-                      style={{ padding: "4px 10px", borderRadius: "7px", fontSize: "11px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid", background: active ? B.navy : "var(--muted)", color: active ? "white" : "var(--card-foreground)", borderColor: active ? B.navy : "var(--border)" }}>
-                      {v === "sem limite" ? "∞" : `+${v}`}
+                    <button key={p} type="button" role="option" aria-selected={isSelected} aria-label={`${p} — ${stLabel}`} onMouseDown={() => selectPac(p)}
+                      style={{ display: "flex", alignItems: "center", gap: "8px", width: "100%", textAlign: "left", padding: "8px 12px", background: isHighlight ? B.navy : isSelected ? "var(--muted)" : "transparent", border: "none", fontSize: "12px", cursor: "pointer", color: isHighlight ? "#fff" : isSelected ? B.navy : "var(--card-foreground)", fontWeight: isSelected || isHighlight ? 700 : 400, fontFamily: "inherit" }}>
+                      <span aria-hidden="true" style={{ width: "7px", height: "7px", borderRadius: "50%", background: isHighlight ? "#fff" : dot, flexShrink: 0 }} />
+                      {p}
                     </button>
                   )
                 })}
               </div>
-              <div style={{ fontSize: "10px", color: "var(--muted-foreground)", marginTop: "5px" }}>
-                {maxAdic === "" ? "Sem restrição de quantidade." : `Máximo de ${maxAdic} sessão(ões) adicionais ao total atual.`}
-              </div>
-            </div>
+            )}
           </div>
+          {pac && pacConvMap[pac] && (
+            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginTop: "2px", paddingLeft: "2px" }}>
+              {pacConvMap[pac]}
+            </div>
+          )}
+        </div>
 
-          {/* Resumo e gaps */}
-          {pac && (
-            <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px" }}>
-              <div style={{ fontWeight: 800, color: B.navy, fontSize: "13px", marginBottom: "10px" }}>Resumo</div>
-              <div style={{ display: "flex", flexDirection: "column", gap: "7px", marginBottom: "14px" }}>
-                {[
-                  { label: "Sessões atuais",        value: currentSlots,                color: B.navy },
-                  { label: "Terapias com déficit",   value: pacGaps.length,              color: pacGaps.length > 0 ? "#dc2626" : "var(--muted-foreground)" },
-                  { label: "Sugestões disponíveis",  value: sugestoesLimitadas.length,   color: sugestoesLimitadas.length > 0 ? "#16a34a" : "var(--muted-foreground)" },
-                  { label: "Em Acompanhamento",      value: totalAceitos,                color: totalAceitos > 0 ? B.blue : "var(--muted-foreground)" },
-                  ...(maxAdic !== "" ? [{ label: "Restam aceitar", value: Math.max(0, (maxAdic as number) - totalAceitos), color: totalAceitos >= (maxAdic as number) ? "#dc2626" : B.navy }] : []),
-                ].map(({ label, value, color }) => (
-                  <div key={label} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                    <span style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>{label}</span>
-                    <span style={{ fontSize: "14px", fontWeight: 800, color }}>{value}</span>
-                  </div>
-                ))}
+        {/* Área 3 — Limite */}
+        <div style={{ padding: "14px 18px", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", justifyContent: "flex-start", alignItems: "center", gap: "6px" }}>
+          <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.02em" }}>Sessões adicionais</div>
+          <div role="group" aria-label="Sessões adicionais" style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
+            {([1, 2, 3, 4, 5, "sem limite"] as const).map(v => {
+              const val = v === "sem limite" ? "" : v as number
+              const active = maxAdic === val
+              return (
+                <button key={String(v)} type="button" aria-pressed={active} onClick={() => setMaxAdic(val)}
+                  className="ocup-btn-limit"
+                  style={{ padding: "4px 9px", borderRadius: "7px", fontSize: "11px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid", background: active ? B.navy : "var(--muted)", color: active ? "white" : "var(--card-foreground)", borderColor: active ? B.navy : "var(--border)" }}>
+                  {v === "sem limite" ? "Max" : v}
+                </button>
+              )
+            })}
+          </div>
+          <div style={{ display: "flex", gap: "4px", marginTop: "2px" }}>
+            <button
+              type="button"
+              onClick={() => modalRef.current?.selectAll()}
+              style={{ padding: "3px 8px", borderRadius: "6px", fontSize: "10px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#16a34a" }}
+            >
+              Selecionar tudo
+            </button>
+            <button
+              type="button"
+              onClick={() => modalRef.current?.clearAll()}
+              style={{ padding: "3px 8px", borderRadius: "6px", fontSize: "10px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid #fecaca", background: "#fff1f2", color: "#dc2626" }}
+            >
+              Limpar Seleção
+            </button>
+          </div>
+        </div>
+
+        {/* Área 4 — Filtros */}
+        <div style={{ padding: "14px 18px", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", justifyContent: "flex-start", gap: "6px" }}>
+          <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.02em" }}>Filtros</div>
+          <div style={{ display: "flex", gap: "8px" }}>
+
+            {/* Situação — dropdown */}
+            <div style={{ position: "relative", flex: 1 }}>
+              <button
+                type="button"
+                aria-expanded={situacaoOpen}
+                aria-haspopup="listbox"
+                onClick={() => { setSituacaoOpen(v => !v); setConvOpen(false) }}
+                className="ocup-btn-situacao"
+                style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${statusFilter.size > 0 ? B.navy : "var(--border)"}`, background: statusFilter.size > 0 ? `${B.navy}15` : "var(--muted)", color: statusFilter.size > 0 ? B.navy : "var(--card-foreground)" }}>
+                <span>Situação{statusFilter.size > 0 ? ` (${statusFilter.size})` : ""}</span>
+                <span aria-hidden="true" style={{ fontSize: "10px", marginLeft: "4px" }}>{situacaoOpen ? "▲" : "▼"}</span>
+              </button>
+              {situacaoOpen && (
+                <div role="listbox" aria-multiselectable="true" aria-label="Filtrar por situação" style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, zIndex: 200, background: "var(--card)", border: "1px solid var(--border)", borderRadius: "12px", boxShadow: "0 8px 24px rgba(0,0,0,.1)", padding: "8px", minWidth: "230px", display: "flex", flexDirection: "column", gap: "3px" }}>
+                  {([
+                    { key: "em-dia",        label: "Autorização = Oferta",               color: "#16a34a" },
+                    { key: "deficit",       label: "Acrescentar",                        color: "#dc2626" },
+                    { key: "deficit-sobre", label: "Acrescentar & Contém Sobreoferta",   color: "#ea580c" },
+                    { key: "sobreofertado", label: "Sobreofertado & Nada P/ Acrescentar",color: "#d97706" },
+                    { key: "sem-laudo",     label: "Sem autorização registrada",         color: "var(--muted-foreground)" },
+                  ] as const).map(({ key, label, color }) => {
+                    const isActive = statusFilter.has(key)
+                    const count = countBySituacao[key] ?? 0
+                    const toggle = () => setStatusFilter(prev => {
+                      const next = new Set(prev)
+                      if (next.has(key)) next.delete(key); else next.add(key)
+                      return next
+                    })
+                    return (
+                      <button key={key} type="button" role="option" aria-selected={isActive} onClick={toggle} style={{
+                        display: "flex", alignItems: "center", justifyContent: "space-between",
+                        padding: "6px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 700,
+                        cursor: "pointer", fontFamily: "inherit", border: `1px solid ${isActive ? color : "var(--border)"}`,
+                        background: isActive ? color : "var(--muted)", color: isActive ? "white" : "var(--card-foreground)", textAlign: "left",
+                      }}>
+                        <span>{label}</span>
+                        <span aria-hidden="true" style={{ fontSize: "10px", fontWeight: 800, background: isActive ? "rgba(255,255,255,0.25)" : "var(--border)", color: isActive ? "white" : "var(--muted-foreground)", borderRadius: "10px", padding: "1px 7px", minWidth: "20px", textAlign: "center" }}>
+                          {count}
+                        </span>
+                      </button>
+                    )
+                  })}
+                  {statusFilter.size > 0 && (
+                    <button type="button" onClick={() => setStatusFilter(new Set())} style={{ marginTop: "2px", padding: "4px 10px", borderRadius: "7px", fontSize: "10px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid var(--border)", background: "var(--muted)", color: "var(--muted-foreground)", textAlign: "center" }}>
+                      Limpar filtros
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+
+          </div>
+        </div>
+
+        {/* Área 5 — Exportação */}
+        {(() => {
+          const SITUACAO_LABEL: Record<string, string> = {
+            deficit: "Acrescentar",
+            "deficit-sobre": "Acrescentar & Contém Sobreoferta",
+            "em-dia": "Autorização = Oferta",
+            sobreofertado: "Sobreofertado & Nada P/ Acrescentar",
+            "sem-laudo": "Sem autorização registrada",
+          }
+          const handleExport = () => {
+            // "Autorizado em" mais recente por paciente (DD/MM/YYYY)
+            const excelSerialToDateStr = (serial: number): string => {
+              const d = new Date((serial - 25569) * 86400 * 1000)
+              const dd = d.getUTCDate().toString().padStart(2, "0")
+              const mm = (d.getUTCMonth() + 1).toString().padStart(2, "0")
+              return `${dd}/${mm}/${d.getUTCFullYear()}`
+            }
+            // Converte qualquer formato de data para DD/MM/YYYY normalizado.
+            // Suporta: serial Excel, DD/MM/YY, DD/MM/YYYY, YYYY-MM-DD, DD-MM-YY, DD-MM-YYYY.
+            const normalizeDate = (raw: string): string => {
+              const n = Number(raw)
+              if (!isNaN(n) && n > 1000) return excelSerialToDateStr(n)
+              // Separador "/"
+              const sp = raw.split("/")
+              if (sp.length === 3) {
+                let [a, b, c] = sp.map(s => s.trim())
+                if (c.length === 2) c = `20${c}`
+                // YYYY/MM/DD → reordena
+                if (a.length === 4) return `${b.padStart(2,"0")}/${c.padStart(2,"0")}/${a}`
+                return `${a.padStart(2,"0")}/${b.padStart(2,"0")}/${c}`
+              }
+              // Separador "-"
+              const sd = raw.split("-")
+              if (sd.length === 3) {
+                let [a, b, c] = sd.map(s => s.trim())
+                if (c.length === 2) c = `20${c}`
+                // YYYY-MM-DD (ISO) → reordena para DD/MM/YYYY
+                if (a.length === 4) return `${b.padStart(2,"0")}/${c.padStart(2,"0")}/${a}`
+                return `${a.padStart(2,"0")}/${b.padStart(2,"0")}/${c}`
+              }
+              return raw
+            }
+            // Retorna string "YYYYMMDD" para comparação lexicográfica; "" se inválido.
+            const toSortable = (d: string) => {
+              const parts = d.split("/")
+              if (parts.length !== 3) return ""
+              let [dd, mm, yyyy] = parts.map(s => s.trim())
+              if (yyyy.length === 2) yyyy = `20${yyyy}`
+              if (yyyy.length !== 4) return ""
+              return `${yyyy}${mm.padStart(2,"0")}${dd.padStart(2,"0")}`
+            }
+            // Sortable de hoje — descarta datas futuras (podem surgir de conversão errada)
+            const _now = new Date()
+            const todaySortable = `${_now.getFullYear()}${String(_now.getMonth()+1).padStart(2,"0")}${String(_now.getDate()).padStart(2,"0")}`
+            // Mapa nome normalizado → nome canônico (para resolver variações de grafia em lRows)
+            const normNameMap: Record<string, string> = {}
+            for (const p of todosPacs) normNameMap[normalizeName(p)] = p
+            const pacAutEmMap: Record<string, string> = {}
+            for (const l of lRows) {
+              const idFav = String(l["ID Favorecido"] ?? l["Id Favorecido"] ?? "").trim().replace(/\.0$/, "")
+              const rawPac = String(l["Paciente"] || "").trim()
+              const p = (idFav ? agendIdMap.get(idFav) : undefined)
+                ?? normNameMap[normalizeName(rawPac)]
+                ?? agendMergeMap.get(rawPac)
+                ?? rawPac
+              if (!p || PACS_ADMIN.has(p)) continue
+              // Tenta o campo em variações de capitalização
+              const autRaw = l["Autorizado em"] ?? l["Autorizado Em"] ?? l["autorizado em"]
+              const raw = normalizeDate(String(autRaw || "").trim())
+              if (!raw) continue
+              const s = toSortable(raw)
+              if (!s || s > todaySortable) continue   // descarta datas futuras ou inválidas
+              if (!pacAutEmMap[p] || s > toSortable(pacAutEmMap[p])) {
+                pacAutEmMap[p] = raw
+              }
+            }
+
+            const rows = todosPacs.map(p => {
+              const st = pacStatusMap[p]
+              let sobreoferta = ""
+              if (st === "deficit-sobre" || st === "sobreofertado") {
+                sobreoferta = Object.entries(gapMap)
+                  .filter(([k, v]) => k.startsWith(`${p}|||`) && v.dif < 0)
+                  .map(([k, v]) => `${k.split("|||")[1]}: ${v.of}/${v.aut}`)
+                  .join("; ")
+              }
+              return {
+                "ID Favorecido": pacIdMap[p] || "—",
+                "Nome": p,
+                "Convênio": pacConvMap[p] || "—",
+                "Situação": SITUACAO_LABEL[st] || "—",
+                "Sobreoferta": sobreoferta || "—",
+              }
+            })
+            const ws = XLSX.utils.json_to_sheet(rows)
+            ws["!cols"] = [{ wch: 16 }, { wch: 40 }, { wch: 28 }, { wch: 30 }, { wch: 40 }]
+            const wb = XLSX.utils.book_new()
+            XLSX.utils.book_append_sheet(wb, ws, "Pacientes")
+            XLSX.writeFile(wb, "relatorio_pacientes.xlsx")
+          }
+          return (
+            <div style={{ padding: "10px 14px", display: "flex", flexDirection: "column", alignItems: "flex-end", textAlign: "right", gap: "8px" }}>
+              <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.06em", textTransform: "uppercase" }}>Relatório de Pacientes</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: "1px" }}>
+                <div style={{ fontSize: "28px", fontWeight: 800, color: B.navy, lineHeight: 1, letterSpacing: "-0.02em", fontVariantNumeric: "tabular-nums" }}>{todosPacs.length}</div>
+                <div style={{ fontSize: "10px", color: "var(--muted-foreground)", fontWeight: 500 }}>Pacientes analisados</div>
               </div>
-
-              {pacGaps.length > 0 && (
-                <>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.05em", marginBottom: "6px" }}>DÉFICIT POR ESPECIALIDADE</div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "5px", marginBottom: "14px" }}>
-                    {pacGaps.map(g => (
-                      <div key={g.esp} style={{ display: "flex", alignItems: "center", gap: "7px" }}>
-                        <div style={{ flex: 1, fontSize: "11px", color: "var(--card-foreground)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{g.esp}</div>
-                        <span style={{ fontSize: "10px", color: "var(--muted-foreground)", flexShrink: 0 }}>{g.of}/{g.aut}</span>
-                        <span style={{ fontSize: "11px", fontWeight: 800, color: "#dc2626", flexShrink: 0 }}>−{g.dif}</span>
-                      </div>
-                    ))}
-                  </div>
-                </>
-              )}
-
-              {gapChartData.length > 0 && (
-                <div style={{ marginBottom: "14px" }}>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.05em", marginBottom: "6px" }}>DÉFICIT (gráfico)</div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <div style={{ width: "90px", height: "90px", flexShrink: 0 }}>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie data={gapChartData} cx="50%" cy="50%" innerRadius={24} outerRadius={40} dataKey="value" paddingAngle={2}>
-                            {gapChartData.map((d, i) => <Cell key={i} fill={d.fill} />)}
-                          </Pie>
-                          <Tooltip formatter={(v, n) => [v ?? 0, n]} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "3px", flex: 1, overflow: "hidden" }}>
-                      {gapChartData.map(d => (
-                        <div key={d.name} style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                          <div style={{ width: "7px", height: "7px", borderRadius: "50%", background: d.fill, flexShrink: 0 }} />
-                          <span style={{ fontSize: "10px", color: "var(--muted-foreground)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{d.name}</span>
-                          <span style={{ fontSize: "10px", fontWeight: 800, color: "var(--card-foreground)", flexShrink: 0 }}>{d.value}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              {tipoChartData.length > 0 && (
-                <div>
-                  <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.05em", marginBottom: "6px" }}>SUGESTÕES POR TIPO</div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <div style={{ width: "90px", height: "90px", flexShrink: 0 }}>
-                      <ResponsiveContainer width="100%" height="100%">
-                        <PieChart>
-                          <Pie data={tipoChartData} cx="50%" cy="50%" innerRadius={24} outerRadius={40} dataKey="value" paddingAngle={2}>
-                            {tipoChartData.map((d, i) => <Cell key={i} fill={d.fill} />)}
-                          </Pie>
-                          <Tooltip formatter={(v, n) => [v ?? 0, n]} />
-                        </PieChart>
-                      </ResponsiveContainer>
-                    </div>
-                    <div style={{ display: "flex", flexDirection: "column", gap: "3px", flex: 1 }}>
-                      {tipoChartData.map(d => (
-                        <div key={d.name} style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-                          <div style={{ width: "7px", height: "7px", borderRadius: "50%", background: d.fill, flexShrink: 0 }} />
-                          <span style={{ fontSize: "10px", color: "var(--muted-foreground)" }}>{d.name}</span>
-                          <span style={{ fontSize: "10px", fontWeight: 800, color: "var(--card-foreground)", marginLeft: "auto" }}>{d.value}</span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
+              <button
+                onClick={handleExport}
+                style={{ padding: "4px 10px", borderRadius: "7px", border: "1px solid #d1fae5", background: "#ecfdf5", color: "#065f46", fontSize: "10px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", display: "flex", alignItems: "center", gap: "4px" }}>
+                ↓ Exportar XLSX
+              </button>
             </div>
-          )}
-        </div>
+          )
+        })()}
 
-        {/* ── Coluna direita ───────────────────────────────────────────────── */}
-        <div style={{ flex: 1, minWidth: 0 }}>
-
-          {!pac && (
-            <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "48px 24px", textAlign: "center" }}>
-              <div style={{ fontSize: "32px", marginBottom: "10px" }}>🧒</div>
-              <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--card-foreground)", marginBottom: "4px" }}>Selecione um paciente</div>
-              <div style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>Apenas pacientes com déficit de sessões autorizadas aparecem na lista.</div>
-            </div>
-          )}
-
-          {pac && (
-            <>
-              <PacAgendaGrid pac={pac} cRows={cRows} sugestoes={sugestoesLimitadas} onVerAll={() => setShowModal(true)} />
-
-              {pacGaps.length === 0 && (
-                <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "24px", textAlign: "center" }}>
-                  <div style={{ fontSize: "12px", color: "#16a34a", fontWeight: 700 }}>Nenhum déficit encontrado para este paciente.</div>
-                </div>
-              )}
-              {pacGaps.length > 0 && sugestoesLimitadas.length === 0 && (
-                <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "24px", textAlign: "center" }}>
-                  <div style={{ fontSize: "12px", color: "#ef4444", fontWeight: 700, marginBottom: "4px" }}>Nenhuma vaga adjacente encontrada no turno do paciente.</div>
-                  <div style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>Verifique se o CSV está carregado e se há vagas livres na grade.</div>
-                </div>
-              )}
-              {sugestoesLimitadas.length > 0 && (() => {
-                const byEsp: Record<string, Sugestao[]> = {}
-                for (const s of sugestoesLimitadas) {
-                  if (!byEsp[s.esp]) byEsp[s.esp] = []
-                  byEsp[s.esp].push(s)
-                }
-                return Object.entries(byEsp).map(([esp, sugs]) => {
-                  const gap = pacGaps.find(g => g.esp === esp)
-                  return (
-                    <div key={esp} style={{ marginBottom: "16px" }}>
-                      <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "8px", paddingBottom: "4px", borderBottom: `2px solid ${B.navy}22` }}>
-                        <span style={{ fontWeight: 800, color: B.navy, fontSize: "14px" }}>{esp}</span>
-                        {gap && <span style={{ fontSize: "11px", color: "#dc2626", fontWeight: 700 }}>−{gap.dif} ({gap.of}/{gap.aut})</span>}
-                        <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>{sugs.length} vaga{sugs.length > 1 ? "s" : ""}</span>
-                      </div>
-                      <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-                        {sugs.map(s => (
-                          <SugestaoCard
-                            key={s.id}
-                            sugestao={s}
-                            stOf={stOf}
-                            setSt={setSt}
-                            limitReached={false}
-                            onInviavel={openInvModal}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  )
-                })
-              })()}
-
-              {/* Pedido 4: painel de aceites e recusas */}
-              <AceitesPanel pac={pac} aceites={aceites} onUpdate={persistAceites} onVerAll={() => setShowModal(true)} />
-            </>
-          )}
-        </div>
       </div>
 
-      {showModal && (
-        <TodasSugestoesModal
-          pac={pac}
-          cRows={cRows}
-          sugestoes={sugestoesLimitadas}
-          pacGaps={pacGaps}
-          stOf={stOf}
-          setSt={setSt}
-          onClose={() => setShowModal(false)}
-          estrategia={estrategia}
-          setEstrategia={setEstrategia}
-          onAceitar={handleAceitar}
-          onInviavel={openInvModal}
-        />
+      {/* ── WORKSPACE ──────────────────────────────────────────────────────────── */}
+      {!pac && (
+        <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "48px 24px", textAlign: "center" }}>
+          <div style={{ fontSize: "32px", marginBottom: "10px" }}>🧒</div>
+          <div style={{ fontWeight: 700, fontSize: "14px", color: "var(--card-foreground)", marginBottom: "4px" }}>Selecione um paciente</div>
+          <div style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>Apenas pacientes com déficit de sessões autorizadas aparecem na lista.</div>
+        </div>
+      )}
+
+      {pac && (
+        <>
+          <TodasSugestoesModal
+            ref={modalRef}
+            key={pac}
+            pac={pac}
+            conv={pacConvMap[pac] || ""}
+            cRows={cRows}
+            sugestoes={sugestoesLimitadas}
+            pacGaps={pacGaps}
+            pacAllEsp={pacAllEsp}
+            stOf={stOf}
+            setSt={setSt}
+            estrategia={estrategia}
+            setEstrategia={setEstrategia}
+            onAceitar={handleAceitar}
+            onInviavel={handleInviavel}
+            onAcaoDireta={handleAcaoDireta}
+            recusadasSet={recusadasSet}
+            onUndoRecusa={onUndoRecusa}
+          />
+          <AceitesPanel pac={pac} aceites={aceites} onUpdate={persistAceites} onVerAll={() => {}} />
+        </>
       )}
 
       {invPending && (
@@ -1391,7 +2399,7 @@ export function OcupPacMode({ cRows, lRows, cfg }: Props) {
           onClick={e => { if (e.target === e.currentTarget) { setInvPending(null); setInvMotivo("") } }}
         >
           <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "380px", width: "100%", padding: "20px" }}>
-            <div style={{ fontWeight: 900, fontSize: "17px", marginBottom: "4px" }}>⛔ Marcar como Inviável</div>
+            <div style={{ fontWeight: 900, fontSize: "17px", marginBottom: "4px", textWrap: "balance" as const }}>⛔ Marcar como Inviável</div>
             <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "10px" }}>Removido de TODAS as sugestões até tirado da lista.</div>
             <div style={{ background: "var(--muted)", borderRadius: "10px", padding: "10px 12px", fontSize: "13px", fontWeight: 700, marginBottom: "10px" }}>{pac}</div>
             <textarea
@@ -1425,8 +2433,11 @@ function SugestaoCard({
   stOf: (s: Sugestao) => Status | null
   setSt: (s: Sugestao, st: Status | null) => void
   limitReached: boolean
-  onInviavel: (s: Sugestao) => void
+  onInviavel?: (sessoes: AceiteSessao[], motivo: string) => void
 }) {
+  const [pendingInv, setPendingInv] = useState(false)
+  const [invMotivo, setInvMotivo]   = useState("")
+
   const st  = stOf(sugestao)
   const stM = st ? STATUS_META[st] : null
 
@@ -1437,6 +2448,7 @@ function SugestaoCard({
   const tm = TIPO_META[sugestao.tipo]
 
   return (
+    <>
     <div style={{
       border: `1px solid ${st === "acompanhamento" ? B.blue + "44" : "var(--border)"}`,
       borderRadius: "10px", padding: "10px 12px",
@@ -1451,7 +2463,7 @@ function SugestaoCard({
           {stM && <span style={{ padding: "1px 7px", borderRadius: "5px", fontSize: "10px", fontWeight: 700, background: stM.bg, color: stM.c }}>{stM.label}</span>}
         </div>
 
-        <div style={{ fontWeight: 800, fontFamily: "monospace", fontSize: "14px", color: B.navy }}>
+        <div style={{ fontWeight: 800, fontFamily: "monospace", fontVariantNumeric: "tabular-nums", fontSize: "14px", color: B.navy }}>
           {sugestao.dia.replace("-feira", "")} · {sugestao.hora}
         </div>
         <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--card-foreground)", marginTop: "1px" }}>{sugestao.tP}</div>
@@ -1472,7 +2484,7 @@ function SugestaoCard({
 
       <div style={{ display: "flex", gap: "5px", alignItems: "center", flexWrap: "wrap", flexShrink: 0, alignSelf: "center" }}>
         {!st && (
-          <button onClick={() => onInviavel(sugestao)} style={btnStyle("#fef2f2", "#dc2626", "#fca5a5")}>
+          <button onClick={() => { setPendingInv(true); setInvMotivo("") }} style={btnStyle("#fef2f2", "#dc2626", "#fca5a5")}>
             ⛔ Inviável
           </button>
         )}
@@ -1483,6 +2495,49 @@ function SugestaoCard({
         )}
       </div>
     </div>
+
+    {/* Modal de confirmação inviável */}
+    {pendingInv && (
+      <div
+        style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.4)", padding: "16px" }}
+        onClick={e => { if (e.target === e.currentTarget) { setPendingInv(false); setInvMotivo("") } }}
+      >
+        <div style={{ background: "var(--card)", borderRadius: "16px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "380px", width: "100%", padding: "22px" }}>
+          <div style={{ fontWeight: 900, fontSize: "16px", color: B.navy, marginBottom: "4px", textWrap: "balance" as const }}>⛔ Confirmar Inviável</div>
+          <div style={{ fontSize: "12px", color: "#6b7280", marginBottom: "14px" }}>
+            A proposta será removida de todas as sugestões e registrada em Aceites e Recusas.
+          </div>
+          <div style={{ background: "#f8fafc", borderRadius: "10px", padding: "11px 14px", fontSize: "13px", fontWeight: 700, color: B.navy, marginBottom: "12px" }}>
+            {sugestao.dia.replace("-feira", "")} {sugestao.hora} · {sugestao.tP}
+          </div>
+          <div style={{ fontSize: "11px", fontWeight: 700, color: "#6b7280", marginBottom: "5px" }}>Justificativa (opcional)</div>
+          <textarea
+            value={invMotivo}
+            onChange={e => setInvMotivo(e.target.value)}
+            placeholder="Ex: família não tem disponibilidade neste horário..."
+            rows={3}
+            style={{ width: "100%", border: "1px solid #d1d5db", borderRadius: "10px", padding: "8px 12px", fontSize: "16px", fontFamily: "inherit", resize: "none", marginBottom: "16px", boxSizing: "border-box" }}
+          />
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button
+              onClick={() => {
+                setSt(sugestao, "inviavel")
+                onInviavel?.([{ dia: sugestao.dia, hora: sugestao.hora, tP: sugestao.tP, prof: sugestao.prof, unidade: sugestao.unidade }], invMotivo)
+                setPendingInv(false); setInvMotivo("")
+              }}
+              style={{ flex: 1, padding: "10px 14px", borderRadius: "10px", background: "#dc2626", color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: "13px" }}>
+              Confirmar
+            </button>
+            <button
+              onClick={() => { setPendingInv(false); setInvMotivo("") }}
+              style={{ flex: 1, padding: "10px 14px", borderRadius: "10px", background: "#f3f4f6", color: "#374151", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+              Cancelar
+            </button>
+          </div>
+        </div>
+      </div>
+    )}
+    </>
   )
 }
 
