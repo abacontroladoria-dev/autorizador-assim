@@ -64,11 +64,11 @@ const pathIconMap: Record<string, any> = {
   "/admin": ShieldCheck,
   "/admin/permissoes": KeyRound,
   "/cronograma/solicitacoes?tab=simulacao": UserPlus,
-  "/cronograma/solicitacoes?tab=saida": LogOut,
   "/cronograma/solicitacoes?tab=ocup-prof": TrendingUp,
-  "/cronograma/solicitacoes?tab=ocup-pac": TrendingUp,
   "/cronograma/solicitacoes?tab=novo-cron": CalendarPlus,
   "/cronograma/solicitacoes?tab=banco": Database,
+  "/cronograma/saida-profissional": LogOut,
+  "/cronograma/ocupacao-paciente": TrendingUp,
   "/cronograma/ocupacao?tab=vagas": TrendingUp,
   "/cronograma/ocupacao?tab=fila": Clock,
   "/cronograma/ocupacao?tab=recusados": XCircle,
@@ -469,10 +469,10 @@ export default function Sidebar() {
           )}
 
           {/* Cronograma */}
-          {(canAccess("/cronograma/solicitacoes") || canAccess("/cronograma/ocupacao")) && (
+          {(canAccess("/cronograma/saida-profissional") || canAccess("/cronograma/ocupacao-paciente") || canAccess("/cronograma/ocupacao")) && (
             <SidebarGroup title="Cronograma" icon={CalendarRange}>
-              {canAccess("/cronograma/solicitacoes") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/solicitacoes?tab=saida" />}
-              {canAccess("/cronograma/solicitacoes") && <MenuItem label="Ocupação Paciente" icon={UserCheck} path="/cronograma/solicitacoes?tab=ocup-pac" />}
+              {canAccess("/cronograma/saida-profissional") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/saida-profissional" />}
+              {canAccess("/cronograma/ocupacao-paciente") && <MenuItem label="Ocupação Paciente" icon={UserCheck} path="/cronograma/ocupacao-paciente" />}
               {canAccess("/cronograma/ocupacao") && <MenuItem label="Aceites e Recusas" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
             </SidebarGroup>
           )}

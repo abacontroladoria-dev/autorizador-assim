@@ -3,14 +3,17 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
+  BarChart3,
   BriefcaseBusiness,
   Building2,
   CalendarDays,
+  CalendarRange,
   ChevronDown,
   ClipboardList,
   FileText,
   KeyRound,
   LayoutDashboard,
+  LogOut,
   Pencil,
   PlusCircle,
   RotateCcw,
@@ -18,6 +21,7 @@ import {
   Search,
   ShieldCheck,
   Stethoscope,
+  UserCheck,
   UserRound,
   Users,
 } from 'lucide-react'
@@ -53,6 +57,7 @@ const ROLE_LABELS: Record<string, string> = {
   terapeutico: 'Terapêutico',
   faturamento: 'Faturamento',
   rp: 'RP',
+  cronograma: 'Cronograma',
 }
 
 const ROLES = Object.entries(ROLE_LABELS).map(([value, label]) => ({ value, label }))
@@ -69,6 +74,11 @@ const MODULE_ICONS: Record<string, React.ElementType> = {
   guias_digitais: FileText,
   usuarios: Users,
   permissoes: KeyRound,
+  cronograma_solicitacoes: ClipboardList,
+  cronograma_saida_profissional: LogOut,
+  cronograma_ocupacao_paciente: UserCheck,
+  ocupacao_clinica: ClipboardList,
+  ocupacao_profissionais: BarChart3,
 }
 
 const GROUP_ICONS: Record<string, React.ElementType> = {
@@ -77,10 +87,11 @@ const GROUP_ICONS: Record<string, React.ElementType> = {
   Pacientes: Users,
   Terapêutico: Stethoscope,
   Operações: BriefcaseBusiness,
+  Cronograma: CalendarRange,
   Administração: ShieldCheck,
 }
 
-const GROUP_ORDER = ['Pacientes', 'Terapêutico', 'Operações', 'Administração', 'Sistema', 'Geral']
+const GROUP_ORDER = ['Pacientes', 'Terapêutico', 'Operações', 'Cronograma', 'Administração', 'Sistema', 'Geral']
 
 const INITIAL_OPEN = new Set(GROUP_ORDER)
 

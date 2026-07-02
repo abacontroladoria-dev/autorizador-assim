@@ -11,13 +11,15 @@ export const roleDefaults: Record<string, string[]> = {
     'escala_terapeutica', 'agenda_terapeutica', 'salas',
     'guias_digitais', 'auditoria_assim', 'usuarios', 'permissoes', 'cco',
     'autorizacoes', 'preauditoria', 'outros_convenios',
-    'cronograma_solicitacoes', 'ocupacao_clinica', 'ocupacao_profissionais',
+    'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
+    'ocupacao_clinica', 'ocupacao_profissionais',
   ],
   diretoria: [
     'dashboard', 'atendimentos', 'gestao',
     'escala_terapeutica', 'auditoria_assim',
     'preauditoria', 'outros_convenios',
-    'cronograma_solicitacoes', 'ocupacao_clinica', 'ocupacao_profissionais',
+    'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
+    'ocupacao_clinica', 'ocupacao_profissionais',
   ],
   recepcao: [
     'dashboard', 'atendimentos', 'gestao', 'auditoria_assim',
@@ -30,7 +32,11 @@ export const roleDefaults: Record<string, string[]> = {
   terapeutico: ['dashboard', 'escala_terapeutica'],
   faturamento: ['dashboard'],
   rp: ['dashboard', 'escala_terapeutica'],
-  cronograma: ['dashboard', 'cronograma_solicitacoes', 'ocupacao_clinica'],
+  cronograma: [
+    'dashboard', 'cronograma_solicitacoes',
+    'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
+    'ocupacao_clinica',
+  ],
 }
 
 export function getRoleDefaultPermissions(role: string): string[] {
@@ -55,6 +61,8 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   preauditoria: ['/preauditoria'],
   outros_convenios: ['/outros-convenios'],
   cronograma_solicitacoes: ['/cronograma/solicitacoes'],
+  cronograma_saida_profissional: ['/cronograma/saida-profissional'],
+  cronograma_ocupacao_paciente: ['/cronograma/ocupacao-paciente'],
   ocupacao_clinica: ['/cronograma/ocupacao'],
   ocupacao_profissionais: ['/cronograma/indicadores'],
 }
