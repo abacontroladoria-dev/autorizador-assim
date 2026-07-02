@@ -186,6 +186,18 @@ export function waKey(s: Sugestao): string {
   return `${s.pac}|||${s.prof}|||${s.dia}|||${s.hora}`
 }
 
+// `slotReservado` (Saída de Profissional) grava 1+ movimentos como
+// "prof|||dia|||hora" separados por ";;" quando há mais de um (ver
+// buildSlotReservado em SaidaCronModal.tsx). Sempre isole o primeiro
+// movimento via ";;" ANTES de separar por "|||" — fazer só ".split(\"|||\")"
+// direto na string inteira faz o campo "hora" vazar o profissional do
+// próximo movimento (ex.: "09:20;;Nome Do Próximo Profissional").
+export function parseSlotReservado(slotReservado: string | null | undefined): { prof: string; dia: string; hora: string } {
+  const primeiro = (slotReservado || "").split(";;")[0] || ""
+  const [prof = "", dia = "", hora = ""] = primeiro.split("|||")
+  return { prof, dia, hora }
+}
+
 // ─── FORMATAÇÃO OCUPAÇÃO ─────────────────────────────────────────────────────
 
 export function fmtH(h: number | string): string {

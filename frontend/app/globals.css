@@ -591,3 +591,7 @@ html {
 .dark .agenda-calendar .fc-timegrid-col                     { background: var(--card); }
 .dark .agenda-calendar .fc-day-today:not(.fc-col-header-cell) { background: oklch(0.22 0.03 245 / 0.4) !important; }
 .dark .agenda-calendar .fc-scroller::-webkit-scrollbar-thumb { background-color: oklch(0.45 0 0); }
+
+/* Acompanhamento (Ocupação) — hover de linhas de tabela/lista */
+.acomp-tr { transition: background-color .1s ease; }
+.acomp-tr:hover { background-color: var(--muted); }
