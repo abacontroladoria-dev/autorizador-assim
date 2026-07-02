@@ -895,9 +895,9 @@ function PacBundleItem({
             <div key={slotKey} style={{ background: "var(--muted)", borderRadius: "var(--radius-sm)", padding: "7px 10px", opacity: st === "inviavel" ? 0.65 : 1 }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ fontWeight: "var(--weight-bold)", fontSize: "var(--text-sm)", color: "var(--foreground)" }}>{s.dia.replace("-feira", "")} {s.hora}</span>
-                  <span style={{ fontSize: "var(--text-xs)", color: "var(--card-foreground)", marginLeft: "6px" }}>{s.tP}</span>
-                  <span style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)", marginLeft: "4px" }}>· {fmtName(s.prof)}</span>
+                  <span style={{ fontWeight: "var(--weight-bold)", fontSize: "var(--text-md)", color: "var(--foreground)" }}>{s.dia.replace("-feira", "")} {s.hora}</span>
+                  <span style={{ fontSize: "var(--text-sm)", color: "var(--card-foreground)", marginLeft: "6px" }}>{s.tP}</span>
+                  <span style={{ fontSize: "var(--text-sm)", color: "var(--muted-foreground)", marginLeft: "4px" }}>· {fmtName(s.prof)}</span>
                   {meta && (
                     <span style={{ marginLeft: "8px", fontSize: "var(--text-xs)", fontWeight: "var(--weight-bold)", padding: "1px 6px", borderRadius: "var(--radius-sm)", background: meta.bg, color: meta.c, border: `1px solid ${meta.bd}` }}>
                       {meta.label}
@@ -1156,9 +1156,9 @@ function SaidaItem({
             <OriginTag icon={ORIGEM_ICON.saida} label="Saída de Profissional" color={ORIGEM_COLOR.saida} />
           </div>
           <div style={{ fontWeight: "var(--weight-heavy)", fontSize: "var(--text-base)", color: "var(--foreground)" }}>{pac}</div>
-          <div style={{ fontSize: "var(--text-sm)", color: "var(--muted-foreground)" }}>{terapia} · {dia} {hora}</div>
-          {profRes && <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-bold)", color: "var(--foreground)" }}>→ {profRes} · {diaRes} {horaRes}</div>}
-          {obs && <div style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)", fontStyle: "italic" }}>"{obs}"</div>}
+          <div style={{ fontSize: "var(--text-md)", color: "var(--muted-foreground)" }}>{terapia} · {dia} {hora}</div>
+          {profRes && <div style={{ fontSize: "var(--text-md)", fontWeight: "var(--weight-bold)", color: "var(--foreground)" }}>→ {profRes} · {diaRes} {horaRes}</div>}
+          {obs && <div style={{ fontSize: "var(--text-sm)", color: "var(--muted-foreground)", fontStyle: "italic" }}>"{obs}"</div>}
         </div>
 
         {/* Ações — todas lado a lado, mesmo padrão de Ocupação Paciente */}
