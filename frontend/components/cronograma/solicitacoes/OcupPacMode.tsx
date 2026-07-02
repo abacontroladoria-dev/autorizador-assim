@@ -43,7 +43,7 @@ interface Sugestao {
   espAlts: EspAlt[]
 }
 
-interface GapInfo { esp: string; aut: number; of: number; dif: number }
+interface GapInfo { esp: string; aut: number; of: number; dif: number; reservado?: number }
 
 interface AceiteSessao {
   dia: string; hora: string; tP: string; prof: string; unidade: string
@@ -453,17 +453,10 @@ function buildSugestoes(
     return true
   })
 
-  // R5.1 para dia-novo: um bloco contíguo por dia — mantém apenas o de maior gap.
-  const diaNovoByDay: Record<string, Sugestao> = {}
-  const finalResult: Sugestao[] = []
-  for (const s of slotFiltered) {
-    if (s.tipo !== "dia-novo") { finalResult.push(s); continue }
-    const existing = diaNovoByDay[s.dia]
-    if (!existing || (espDif[s.esp] ?? 0) > (espDif[existing.esp] ?? 0)) {
-      diaNovoByDay[s.dia] = s
-    }
-  }
-  return [...finalResult, ...Object.values(diaNovoByDay)]
+  // Nenhum corte por quantidade: todas as sugestões válidas (adjacente e dia-novo)
+  // são retornadas — o único descarte por slot já ocorreu acima via `slotFinal`,
+  // que evita duas sugestões diferentes disputando o mesmo dia+hora.
+  return slotFiltered
 }
 
 // ─── TodasSugestoesModal ──────────────────────────────────────────────────────
@@ -1268,6 +1261,8 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
               )}
               {pacAllEsp.map((g, i) => {
                 const sel = selectedByEsp[g.esp] || 0
+                const reservado = g.reservado || 0
+                const sincronizado = g.of - reservado
                 const total = g.of + sel
                 const excesso = total > g.aut
                 const completo = total === g.aut
@@ -1277,7 +1272,11 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                   <div key={`${pac}|||${g.esp}`} className="ocup-esp-row" style={{ "--i": i } as CSSProperties}>
                     <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--card-foreground)", marginBottom: "3px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={g.esp}>{g.esp}</div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                      <span key={`${pac}|||${g.esp}|||${total}`} className="ocup-num-tick" style={{ fontSize: "15px", fontWeight: 900, color: cor, transition: "color 180ms ease" }}>{total}/{g.aut}</span>
+                      <span key={`${pac}|||${g.esp}|||${total}`} className="ocup-num-tick" style={{ fontSize: "15px", fontWeight: 900, color: cor, transition: "color 180ms ease", display: "inline-flex", alignItems: "baseline", gap: "3px" }}>
+                        <span>{sincronizado}</span>
+                        {reservado > 0 && <span title="Reservado — aguardando sincronização com o cronograma" style={{ color: "#d97706" }}>+{reservado}</span>}
+                        <span>/{g.aut}</span>
+                      </span>
                       {excesso && <span className="ocup-badge-pop" style={{ fontSize: "11px", background: "#fee2e2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 4px", fontWeight: 700 }}>acima</span>}
                       {completo && sel > 0 && <span key={`completo-${sel}`} className="ocup-badge-pop" style={{ fontSize: "11px", background: "#dcfce7", color: "#16a34a", border: "1px solid #86efac", borderRadius: "4px", padding: "0 4px", fontWeight: 700 }}>+{sel}</span>}
                       {completo && sel === 0 && <span className="ocup-badge-pop" style={{ fontSize: "11px", background: "#dcfce7", color: "#16a34a", border: "1px solid #86efac", borderRadius: "4px", padding: "0 4px", fontWeight: 700 }}>✓</span>}
@@ -1654,7 +1653,6 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
   const [inputVal, setInputVal] = useState("")
   const [dropOpen, setDropOpen] = useState(false)
   const [estrategia, setEstrategia] = useState<Estrategia>("S1")
-  const [maxAdic, setMaxAdic]   = useState<number | "">("")
   const [statusMap, setStatusMap] = useState<Record<string, Status>>(() => {
     try { return JSON.parse(localStorage.getItem(SK) || "{}") } catch { return {} }
   })
@@ -1777,6 +1775,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
         dia: s.dia,
         hora: s.hora,
         registradoEm,
+        obs: motivo || undefined,
       }))
       sRec([...recGlobal, ...newItems])
     }
@@ -1885,6 +1884,24 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       seenOf.add(dk)
       qtdOf[`${p}|||${esp}`] = (qtdOf[`${p}|||${esp}`] || 0) + 1
     }
+    // Reservas aguardando resposta/confirmação também ocupam a vaga — sem isso o
+    // motor de sugestões (buildSugestoes) continuaria ofertando sessões além do que
+    // resta de autorização. `seenOf` evita dupla contagem após a sincronização.
+    for (const b of aceites) {
+      if (b.status !== "pendente" && b.status !== "confirmado") continue
+      if (PACS_ADMIN.has(b.pac)) continue
+      for (const s of b.sessoes) {
+        if (EXCLUIR_GAPS.has(s.tP)) continue
+        const esp = TERAPIA_TO_ESP[s.tP]
+        if (!esp) continue
+        const hm = pm(s.hora)
+        if (hm === null) continue
+        const dk = `${b.pac}|||${s.dia}|||${hm}|||${s.tP}|||${s.prof}`
+        if (seenOf.has(dk)) continue
+        seenOf.add(dk)
+        qtdOf[`${b.pac}|||${esp}`] = (qtdOf[`${b.pac}|||${esp}`] || 0) + 1
+      }
+    }
     const qtdAut: Record<string, number> = {}
     const altaSet = new Set<string>()
     for (const l of lRows) {
@@ -1906,7 +1923,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       result[k] = { dif, aut, of: of_ }
     }
     return result
-  }, [cRows, lRows, agend, agendIdMap, agendMergeMap])
+  }, [cRows, lRows, agend, agendIdMap, agendMergeMap, aceites])
 
   const todosPacs = useMemo(() => {
     const pacs = new Set<string>()
@@ -2050,6 +2067,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
   const pacAllEsp = useMemo((): GapInfo[] => {
     if (!pac) return []
     const qtdOf: Record<string, number> = {}
+    const qtdReserva: Record<string, number> = {}
     const seenOf = new Set<string>()
     for (const r of agend) {
       const rawP = r["Nome Favorecido"]
@@ -2062,6 +2080,27 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       if (seenOf.has(dk)) continue
       seenOf.add(dk)
       qtdOf[esp] = (qtdOf[esp] || 0) + 1
+    }
+    // Reservas ainda não sincronizadas com a grade (aguardando resposta/confirmação)
+    // já ocupam a vaga — sem isso o painel mostra menos sessões do que a grade real.
+    // `seenOf` evita dupla contagem quando a sessão já sincronizou e apareceu em `agend`.
+    // `qtdReserva` isola a parte "reservada" para exibir separado do que já sincronizou
+    // (ex.: "6 +2 / 30") — some automaticamente após a sincronização, quando a mesma
+    // sessão passa a bater com `agend` e cai no `seenOf.has(dk)` acima.
+    for (const b of aceites) {
+      if (b.pac !== pac || (b.status !== "pendente" && b.status !== "confirmado")) continue
+      for (const s of b.sessoes) {
+        if (EXCLUIR_GAPS.has(s.tP)) continue
+        const esp = TERAPIA_TO_ESP[s.tP]
+        if (!esp) continue
+        const hm = pm(s.hora)
+        if (hm === null) continue
+        const dk = `${s.dia}|||${hm}|||${s.tP}|||${s.prof}`
+        if (seenOf.has(dk)) continue
+        seenOf.add(dk)
+        qtdOf[esp] = (qtdOf[esp] || 0) + 1
+        qtdReserva[esp] = (qtdReserva[esp] || 0) + 1
+      }
     }
     const qtdAut: Record<string, number> = {}
     const altaSet = new Set<string>()
@@ -2078,9 +2117,9 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     }
     for (const esp of altaSet) delete qtdAut[esp]
     return Object.entries(qtdAut)
-      .map(([esp, aut]) => ({ esp, aut, of: qtdOf[esp] || 0, dif: Math.round((aut - (qtdOf[esp] || 0)) * 10) / 10 }))
+      .map(([esp, aut]) => ({ esp, aut, of: qtdOf[esp] || 0, reservado: qtdReserva[esp] || 0, dif: Math.round((aut - (qtdOf[esp] || 0)) * 10) / 10 }))
       .sort((a, b) => b.dif - a.dif)
-  }, [pac, agend, lRows, agendIdMap, agendMergeMap])
+  }, [pac, agend, lRows, agendIdMap, agendMergeMap, aceites])
 
   const sugestoes = useMemo(() => {
     if (!pac || estrategia !== "S1") return [] as Sugestao[]
@@ -2108,19 +2147,6 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     })
   }, [pac, sugestoes])
 
-  const sugestoesLimitadas = useMemo(() => {
-    if (maxAdic === "") return sugestoes
-    const limit = maxAdic as number
-    const result: Sugestao[] = []
-    let count = 0
-    for (const s of sugestoes) {
-      if (count >= limit) break
-      result.push(s)
-      count += 1 + s.vComp.length
-    }
-    return result
-  }, [sugestoes, maxAdic])
-
   const totalAceitos = aceites.filter(a => a.pac === pac).reduce((acc, b) => acc + b.sessoes.length, 0)
 
   useEffect(() => {
@@ -2138,7 +2164,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       <style>{`
         .ocup-workbench-bar {
           display: grid;
-          grid-template-columns: 31fr 21fr 33fr 15fr;
+          grid-template-columns: 35fr 12fr 38fr 15fr;
           background: var(--card);
           border: 1px solid var(--border);
           border-radius: 16px 0 0 16px;
@@ -2156,7 +2182,6 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
           .ocup-workbench-bar > div:last-child { border-bottom: none !important; }
         }
         @media (pointer: coarse) {
-          .ocup-btn-limit  { min-height: 44px !important; }
           .ocup-btn-situacao { min-height: 44px !important; }
         }
         @media (prefers-reduced-motion: reduce) {
@@ -2231,34 +2256,21 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
           )}
         </div>
 
-        {/* Área 3 — Limite */}
-        <div style={{ padding: "14px 18px", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", justifyContent: "flex-start", alignItems: "center", gap: "6px" }}>
-          <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.02em" }}>Sessões adicionais</div>
-          <div role="group" aria-label="Sessões adicionais" style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
-            {([1, 2, 3, 4, 5, "sem limite"] as const).map(v => {
-              const val = v === "sem limite" ? "" : v as number
-              const active = maxAdic === val
-              return (
-                <button key={String(v)} type="button" aria-pressed={active} onClick={() => setMaxAdic(val)}
-                  className="ocup-btn-limit"
-                  style={{ padding: "4px 9px", borderRadius: "7px", fontSize: "11px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid", background: active ? B.navy : "var(--muted)", color: active ? "white" : "var(--card-foreground)", borderColor: active ? B.navy : "var(--border)" }}>
-                  {v === "sem limite" ? "Max" : v}
-                </button>
-              )
-            })}
-          </div>
-          <div style={{ display: "flex", gap: "4px", marginTop: "2px" }}>
+        {/* Área 3 — Seleção */}
+        <div style={{ padding: "14px 18px", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: "8px" }}>
+          <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.02em" }}>Seleção</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px", width: "100%" }}>
             <button
               type="button"
               onClick={() => modalRef.current?.selectAll()}
-              style={{ padding: "3px 8px", borderRadius: "6px", fontSize: "10px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#16a34a" }}
+              style={{ padding: "5px 10px", borderRadius: "7px", fontSize: "11px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#16a34a", whiteSpace: "nowrap" }}
             >
               Selecionar tudo
             </button>
             <button
               type="button"
               onClick={() => modalRef.current?.clearAll()}
-              style={{ padding: "3px 8px", borderRadius: "6px", fontSize: "10px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid #fecaca", background: "#fff1f2", color: "#dc2626" }}
+              style={{ padding: "5px 10px", borderRadius: "7px", fontSize: "11px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid #fecaca", background: "#fff1f2", color: "#dc2626", whiteSpace: "nowrap" }}
             >
               Limpar Seleção
             </button>
@@ -2459,7 +2471,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
             pac={pac}
             conv={pacConvMap[pac] || ""}
             cRows={cRows}
-            sugestoes={sugestoesLimitadas}
+            sugestoes={sugestoes}
             pacGaps={pacGaps}
             pacAllEsp={pacAllEsp}
             stOf={stOf}

@@ -1,8 +1,8 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Inbox, Search, XCircle } from "lucide-react"
-import { DIAS_ORD } from "@/lib/cronograma/constants"
+import { Inbox, MessageSquare, RotateCcw, Search, XCircle } from "lucide-react"
+import { B, DIAS_ORD } from "@/lib/cronograma/constants"
 import { fmtName } from "@/lib/cronograma/helpers"
 import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
 import { ListCard, EmptyState, GroupHeader, TimeBadge, SearchInput, rowStyle, rowClass } from "@/components/cronograma/ui/DataTable"
@@ -31,7 +31,7 @@ export function RecusadosTab({ rec, onRemove }: Props) {
     return q ? rec.filter(r => r.paciente.toLowerCase().includes(q)) : rec
   }, [rec, filtro])
 
-  // Índice original preservado em cada item para que "remover" continue
+  // Índice original preservado em cada item para que "reativar" continue
   // apontando para a posição certa em `rec` mesmo depois de agrupar/ordenar.
   const groups = useMemo(() => {
     const withIdx = filtrados.map(r => ({ r, i: rec.indexOf(r) }))
@@ -73,12 +73,22 @@ export function RecusadosTab({ rec, onRemove }: Props) {
                       {r.especialidade || "—"} · {fmtName(r.profissional)}{r.unidade ? ` · ${r.unidade}` : ""}
                     </div>
                     {r.obs && (
-                      <div style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)", fontStyle: "italic", marginTop: "4px" }}>{`"${r.obs}"`}</div>
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: "5px", fontSize: "var(--text-xs)", color: "var(--muted-foreground)", marginTop: "4px" }}>
+                        <MessageSquare size={11} style={{ flexShrink: 0, marginTop: "1px" }} />
+                        <span style={{ whiteSpace: "pre-wrap" }}>{r.obs}</span>
+                      </div>
                     )}
                   </div>
                   <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px" }}>
                     <span style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)", whiteSpace: "nowrap" }}>{r.registradoEm}</span>
-                    <button onClick={() => setRemovIdx(i)} style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-semibold)", color: "#dc2626", background: "none", border: "none", cursor: "pointer" }}>remover</button>
+                    <button onClick={() => setRemovIdx(i)} style={{
+                      display: "flex", alignItems: "center", gap: "5px", whiteSpace: "nowrap",
+                      fontSize: "var(--text-xs)", fontWeight: "var(--weight-semibold)",
+                      color: B.blue, background: "var(--cron-active-bg)", border: `1px solid ${B.blue}44`,
+                      borderRadius: "var(--radius-sm)", padding: "5px 10px", cursor: "pointer", fontFamily: "inherit",
+                    }}>
+                      <RotateCcw size={11} /> Reativar sugestão
+                    </button>
                   </div>
                 </div>
               ))}
@@ -89,10 +99,10 @@ export function RecusadosTab({ rec, onRemove }: Props) {
     </ListCard>
     {removIdx !== null && (
       <ConfirmDialog
-        title="Remover registro?"
-        description="O registro será removido da lista de recusados."
-        confirmLabel="Remover"
-        confirmColor="#dc2626"
+        title="Reativar esta sugestão?"
+        description="Ela sai da lista de recusados e volta a ser oferecida normalmente para este paciente."
+        confirmLabel="Reativar"
+        confirmColor={B.blue}
         onConfirm={() => { onRemove(removIdx); setRemovIdx(null) }}
         onCancel={() => setRemovIdx(null)}
       />
