@@ -46,54 +46,34 @@ export function useVisaoGeralFaltas(semanaInicio: string) {
         return
       }
 
-      const faltas = faltasRaw ?? []
-
-      // Q_CT: controle_terapeutico para filtrar só faltas com CT indisponível
-      const titaIds = faltas.map((r: any) => r.tita_agendamento_id).filter(Boolean)
-
-      let ctSet = new Set<string>()
-
-      if (titaIds.length > 0) {
-        const { data: ctData, error: ctError } = await sb
-          .from('controle_terapeutico')
-          .select('tita_agendamento_id')
-          .in('tita_agendamento_id', titaIds)
-          .eq('status', 'indisponivel')
-
-        if (ctError || cancelled) {
-          if (!cancelled) setError(ctError?.message ?? 'Erro ao carregar controle terapêutico')
-          if (!cancelled) setLoading(false)
-          return
-        }
-
-        ctSet = new Set((ctData ?? []).map((ct: any) => String(ct.tita_agendamento_id)))
-      }
-
-      if (cancelled) return
-
-      // Filtra faltas elegíveis: sem tita_id (sem dados) ou CT indisponível
-      const faltasElegiveis = faltas.filter(
-        (r: any) => !r.tita_agendamento_id || ctSet.has(String(r.tita_agendamento_id))
-      )
+      // Todas as faltas (status='falta', não canceladas/revertidas) são elegíveis
+      // para reposição, independente do motivo (indisponibilidade do profissional
+      // ou não comparecimento do paciente) — ver useReposicaoFaltas.ts.
+      const faltasElegiveis = faltasRaw ?? []
 
       // Carrega aceites do localStorage
       const aceites = loadAceites()
 
       // Agrupa por paciente e categoriza
-      const porPaciente = new Map<string, { nome: string; total: number; resolvidas: number; irrecuperaveis: number }>()
+      const porPaciente = new Map<string, { nome: string; total: number; resolvidas: number; repostas: number; irrecuperaveis: number }>()
 
       for (const f of faltasElegiveis) {
         const pid = String(f.paciente_id)
         if (!porPaciente.has(pid)) {
-          porPaciente.set(pid, { nome: f.paciente_nome ?? '', total: 0, resolvidas: 0, irrecuperaveis: 0 })
+          porPaciente.set(pid, { nome: f.paciente_nome ?? '', total: 0, resolvidas: 0, repostas: 0, irrecuperaveis: 0 })
         }
         const entry = porPaciente.get(pid)!
         entry.total++
         // Irrecuperável: falta na sexta (semanaFim) — sem dias restantes na semana
         if (f.data_atendimento === semanaFim) entry.irrecuperaveis++
         const aceite = aceites[f.id]
+        // "Resolvida" inclui aceito + recusado (usado na categorização); "reposta" conta só
+        // aceito — uma falta recusada não foi reposta, só deixou de estar pendente.
         if (aceite?.status === 'aceito' || aceite?.status === 'recusado') {
           entry.resolvidas++
+        }
+        if (aceite?.status === 'aceito') {
+          entry.repostas++
         }
       }
 
@@ -105,7 +85,7 @@ export function useVisaoGeralFaltas(semanaInicio: string) {
 
       const resultado: PacienteSemana[] = []
 
-      for (const [pacienteId, { nome, total, resolvidas, irrecuperaveis }] of porPaciente) {
+      for (const [pacienteId, { nome, total, resolvidas, repostas, irrecuperaveis }] of porPaciente) {
         let categoria: CategoriaReposicao
 
         if (total === 0) {
@@ -118,7 +98,15 @@ export function useVisaoGeralFaltas(semanaInicio: string) {
           categoria = 'reposicao_completa'
         }
 
-        resultado.push({ pacienteId, pacienteNome: nome, categoria, totalFaltas: total, totalResolvidas: resolvidas, totalIrrecuperaveis: irrecuperaveis })
+        resultado.push({
+          pacienteId,
+          pacienteNome: nome,
+          categoria,
+          totalFaltas: total,
+          totalResolvidas: resolvidas,
+          totalRepostas: repostas,
+          totalIrrecuperaveis: irrecuperaveis,
+        })
       }
 
       // Ordena: sem_reposicao primeiro, parcial, completo

@@ -21,7 +21,15 @@
       "PowerShell(New-Item -ItemType Directory -Force \"C:\\\\Users\\\\UNIVERSO\\\\projeto_automacao\\\\calculadora-remuneracao\\\\src\\\\components\\\\layout\")",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(grep -E \"^[^/]+\\(/[^/]+\\){0,2}\\(/layout|/page\\)\\\\.tsx\")",
+      "Bash(xargs -I {} basename {})",
+      "mcp__Claude_in_Chrome__navigate",
+      "Bash(npx tsc *)",
+      "PowerShell(& cmd.exe /c \"cd C:\\\\Users\\\\Maquina001\\\\gerenciador-tarefas && npx tsc --noEmit 2>&1\")",
+      "Bash(cd /c/Users/Maquina001/sistema-pulsar/frontend && find . -type f -name \"*.tsx\" -o -name \"*.ts\" -o -name \"*.json\" | head -50)",
+      "mcp__visualize__read_me",
+      "mcp__visualize__show_widget"
     ]
   }
 }

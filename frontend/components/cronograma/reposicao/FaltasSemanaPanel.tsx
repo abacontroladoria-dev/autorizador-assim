@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { useReposicaoFaltas } from "@/hooks/useReposicaoFaltas"
 import { loadAceites, saveAceites } from "@/lib/cronograma/reposicaoStorage"
-import type { ReposicaoStorage } from "@/types/reposicao"
+import type { ReposicaoStorage, SugestaoReposicao } from "@/types/reposicao"
 import { VisaoComparativa } from "./VisaoComparativa"
 
 // ─── Loading skeleton ─────────────────────────────────────────────────────────
@@ -26,6 +26,27 @@ function Skeleton() {
         />
       ))}
       <style>{`@keyframes pulse { 0%,100%{opacity:.5} 50%{opacity:.9} }`}</style>
+    </div>
+  )
+}
+
+// ─── Cabeçalho com nome do paciente ───────────────────────────────────────────
+// Mostrado nos estados de loading/erro/vazio; no estado com conteúdo, o nome
+// aparece dentro de VisaoComparativa, junto do botão "Sugestão automática".
+
+function PacienteHeader({ nome }: { nome: string }) {
+  return (
+    <div
+      style={{
+        fontSize: 11,
+        fontWeight: 700,
+        letterSpacing: ".06em",
+        textTransform: "uppercase",
+        color: "var(--muted-foreground)",
+        marginBottom: 10,
+      }}
+    >
+      {nome}
     </div>
   )
 }
@@ -66,26 +87,24 @@ export function FaltasSemanaPanel({
   pacienteNome,
   semanaInicio,
 }: FaltasSemanaProps) {
-  const { resultados, sessoesAgendadas, loading, error } = useReposicaoFaltas(
+  const { resultados, sessoesAgendadas, sessoesConcluidas, loading, error } = useReposicaoFaltas(
     pacienteId,
     pacienteNome,
     semanaInicio,
   )
 
-  const [, setAceites] = useState<ReposicaoStorage>(loadAceites)
+  const [aceites, setAceites] = useState<ReposicaoStorage>(loadAceites)
 
-  function handleAceitar(faltaIds: string[]) {
+  // A escolha de qual sugestão usar (quando há mais de uma opção por falta) já vem
+  // resolvida do VisaoComparativa — aqui só persiste.
+  function handleAceitar(escolhas: { faltaId: string; sugestao: SugestaoReposicao }[]) {
     setAceites(prev => {
       const next = { ...prev }
-      const porId = Object.fromEntries(resultados.map(r => [r.falta.faltaId, r]))
-      faltaIds.forEach(id => {
-        const r = porId[id]
-        if (r?.status === "com_sugestao") {
-          next[id] = {
-            status: "aceito" as const,
-            sugestao: r.sugestoes[0],
-            atualizadoEm: new Date().toISOString(),
-          }
+      escolhas.forEach(({ faltaId, sugestao }) => {
+        next[faltaId] = {
+          status: "aceito" as const,
+          sugestao,
+          atualizadoEm: new Date().toISOString(),
         }
       })
       saveAceites(next)
@@ -93,32 +112,56 @@ export function FaltasSemanaPanel({
     })
   }
 
-  if (loading) return <Skeleton />
+  function handleRecusarAceito(faltaId: string) {
+    setAceites(prev => {
+      const next = { ...prev }
+      next[faltaId] = { status: "recusado" as const, atualizadoEm: new Date().toISOString() }
+      saveAceites(next)
+      return next
+    })
+  }
 
-  if (error) {
+  if (loading) {
     return (
-      <EmptyState
-        msg="Erro ao carregar faltas"
-        sub={error}
-      />
+      <>
+        <PacienteHeader nome={pacienteNome} />
+        <Skeleton />
+      </>
     )
   }
 
-  if (resultados.length === 0) {
+  if (error) {
     return (
-      <EmptyState
-        msg="Nenhuma falta elegível encontrada"
-        sub="Não há faltas com reposição pendente para esta semana."
-      />
+      <>
+        <PacienteHeader nome={pacienteNome} />
+        <EmptyState msg="Erro ao carregar faltas" sub={error} />
+      </>
+    )
+  }
+
+  if (resultados.length === 0 && sessoesAgendadas.length === 0 && sessoesConcluidas.length === 0) {
+    return (
+      <>
+        <PacienteHeader nome={pacienteNome} />
+        <EmptyState
+          msg="Nenhuma sessão encontrada"
+          sub="Não há faltas, sessões concluídas ou agendadas para esta semana."
+        />
+      </>
     )
   }
 
   return (
     <VisaoComparativa
+      key={`${pacienteId}::${semanaInicio}`}
+      pacienteNome={pacienteNome}
       resultados={resultados}
       sessoesAgendadas={sessoesAgendadas}
+      sessoesConcluidas={sessoesConcluidas}
+      aceites={aceites}
       semanaInicio={semanaInicio}
       onAceitar={handleAceitar}
+      onRecusarAceito={handleRecusarAceito}
     />
   )
 }

@@ -6,3 +6,7 @@
 .env.keys
 .env.local
 .env.*.local
+.env.dump
+
+# Dumps gerados por frontend/scripts/sync-local.mjs (espelho cloud -> Docker local)
+sync_public_from_cloud*.sql

@@ -5,6 +5,11 @@ import { checkRateLimit, getClientIp } from '@/lib/rate-limit'
 import { getRoleDefaultPermissions, codigosToRotas } from '@/lib/permissions/routes'
 
 export async function proxy(request: NextRequest) {
+  // Bypass de auth para dev local (nunca deve estar true em produção).
+  if (process.env.DISABLE_AUTH === 'true') {
+    return NextResponse.next()
+  }
+
   let response = NextResponse.next()
 
   const clientIp = getClientIp(request)

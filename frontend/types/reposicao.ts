@@ -17,17 +17,20 @@ export interface SessaoFaltada {
   faltaId:         string        // fila_autorizacoes.id
   pacienteId:      string
   paciente:        string
-  profissional:    string        // controle_terapeutico.profissional_nome
+  profissional:    string        // csv_reposicao_faltas.profissional_nome (fallback: controle_terapeutico)
   profissionalId:  number | null // controle_terapeutico.profissional_id
-  terapia:         string        // controle_terapeutico.terapia_nome
-  terapiaExibicao: string        // csv_grades_profissionais.terapia_exibicao_nome
+  terapia:         string        // csv_reposicao_faltas.terapia_nome (fallback: controle_terapeutico, depois fila_autorizacoes)
+  terapiaExibicao: string        // idem, mais EXIB_NOME (IDs especiais ABA) como prioridade máxima
   dia:             DiaSemana | string
   hora:            string        // "08:00"
-  unidade:         string        // csv_grades_profissionais.sala_nome
+  unidade:         string        // csv_reposicao_faltas.sala_nome — única fonte de sala para uma FALTA
+                                  // (controle_terapeutico não tem coluna de sala; csv_grades_profissionais
+                                  // nunca tem a linha, só cobre "hoje em diante"). Fica '' se a semana
+                                  // estiver fora da cobertura de csv_reposicao_faltas (caso raro).
   dataOriginal:    string        // ISO date "2026-06-23"
   justificativa:   string | null
   origemFalta:     string        // tipo_falta — display only, não é filtro de elegibilidade
-  semJoin:         boolean       // tita_agendamento_id era null → sem dados para identificar prof/unidade
+  semJoin:         boolean       // nenhuma fonte (csv_reposicao_faltas, controle_terapeutico, fila) forneceu a terapia
 }
 
 export interface SugestaoReposicao {
@@ -91,6 +94,22 @@ export interface SessaoPresente {
   terapiaExibicao: string
 }
 
+// ─── Sessão concluída (status CONCLUÍDO na grade) ────────────────────────────
+
+export interface SessaoConcluida {
+  data:            string
+  dia:             string
+  hora:            string
+  unidade:         string
+  terapia:         string   // terapia de ação (ex.: "Coordenador de Caso")
+  terapiaExibicao: string   // terapia de exibição — pode divergir da ação (ex.: "Psicologia ABA")
+  profissional:    string   // pode ser '' se não resolvido
+  // true quando fila_autorizacoes.status = 'glosa': sessão aconteceu normalmente,
+  // "glosa" é o convênio negando/questionando o pagamento depois — não afeta
+  // comparecimento nem elegibilidade de reposição, só o rótulo exibido.
+  glosa:           boolean
+}
+
 // ─── Visão geral da semana ────────────────────────────────────────────────────
 
 export type CategoriaReposicao =
@@ -103,7 +122,8 @@ export interface PacienteSemana {
   pacienteId:          string
   pacienteNome:        string
   categoria:           CategoriaReposicao
-  totalFaltas:         number  // faltas elegíveis (CT indisponivel)
+  totalFaltas:         number  // faltas elegíveis (status='falta', não cancelada/revertida)
   totalResolvidas:     number  // aceito + recusado no localStorage
+  totalRepostas:       number  // só aceito no localStorage — reposição de fato realizada
   totalIrrecuperaveis: number  // faltas na sexta-feira (sem dias restantes)
 }

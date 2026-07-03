@@ -30,6 +30,12 @@ export function unidadesCompativeis(unidade: string): string[] {
   return UNIDADES_COMPAT[key] ?? [key]
 }
 
+// Turno a partir do horário: grade tem intervalo de almoço entre 11:20 e 13:00
+// (ver HORAS_GRID em constants.ts) — qualquer hora antes do meio-dia é manhã.
+export function turno(hora: string): "manha" | "tarde" {
+  return hora < "12:00" ? "manha" : "tarde"
+}
+
 // ─── Tipos internos do algoritmo ──────────────────────────────────────────────
 
 export interface SlotLivre {
@@ -130,6 +136,13 @@ function avaliarSlot(
     return { viavel: false, motivo: "unidade_incompativel", prioridade, mesmaUnidade, slot }
   }
 
+  // Reposição precisa ficar no mesmo turno da sessão perdida — paciente de manhã
+  // (rotina de escola/outros compromissos à tarde, ou vice-versa) não pode ser
+  // realocado para o outro turno.
+  if (turno(slot.hora) !== turno(falta.hora)) {
+    return { viavel: false, motivo: "turno_incompativel", prioridade, mesmaUnidade, slot }
+  }
+
   // R2.1 (temDiaComSessoes) é OMITIDO no contexto de reposição:
   // a regra "PERMITE EXCEÇÃO" (CLAUDE.md R2.1) e quando o paciente perde um dia
   // inteiro, a agendaVirtual estaria vazia — rejeitar tudo seria incorreto.
@@ -151,6 +164,22 @@ function avaliarSlot(
   }
 
   return { viavel: true, prioridade, mesmaUnidade, slot }
+}
+
+// "Coordenador de Caso" é vínculo de caso, não intercambiável entre profissionais:
+// só repõe com o mesmo coordenador, ou com qualquer "Aplicador ABA (PS)" como
+// substituto genérico (unidade/turno continuam checados depois, em avaliarSlot —
+// mesma regra de compatibilidade cruzada de unidade usada para as demais terapias).
+// Um Coordenador de Caso DIFERENTE nunca é candidato válido.
+export const TERAPIA_COORDENADOR_DE_CASO = "Coordenador de Caso"
+export const TERAPIA_APLICADOR_SUBSTITUTO = "Aplicador ABA (PS)"
+
+function terapiaElegivel(slot: SlotLivre, falta: SessaoFaltada): boolean {
+  if (falta.terapia === TERAPIA_COORDENADOR_DE_CASO) {
+    return (slot.terapia === falta.terapia && slot.profissional === falta.profissional)
+      || slot.terapia === TERAPIA_APLICADOR_SUBSTITUTO
+  }
+  return slot.terapia === falta.terapia
 }
 
 // ─── Ordenação final das sugestões ────────────────────────────────────────────
@@ -194,10 +223,11 @@ export function calcularSugestoes(
     // reposições em semanas futuras (tabela pode não ter dados da semana corrente).
     const dataOriginal = falta.dataOriginal
 
-    // Filtra slots candidatos: mesma terapia (P1 = mesmo prof, P2 = prof diferente),
-    // data posterior à falta, não já alocado por outra falta.
+    // Filtra slots candidatos: mesma terapia (P1 = mesmo prof, P2 = prof diferente) —
+    // exceto Coordenador de Caso, que tem regra própria (ver terapiaElegivel) — data
+    // posterior à falta, não já alocado por outra falta.
     const candidatos: AvaliacaoSlot[] = slotsLivres
-      .filter(s => s.terapia === falta.terapia)
+      .filter(s => terapiaElegivel(s, falta))
       .filter(s => s.data > dataOriginal)
       .filter(s => !slotsAlocados.has(chaveSlot(s)))
       .map(s => avaliarSlot(s, falta, agendaVirtual))

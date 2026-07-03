@@ -3,10 +3,12 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "predev": "node scripts/seed-local-reposicao-faltas.mjs",
     "dev": "node --max-old-space-size=8192 node_modules/next/dist/bin/next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "sync:local": "node scripts/sync-local.mjs"
   },
   "dependencies": {
     "@fullcalendar/core": "^6.1.20",

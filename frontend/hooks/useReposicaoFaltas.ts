@@ -2,9 +2,9 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { getSupabaseClient } from '@/lib/supabase/client'
-import { calcularSugestoes } from '@/lib/cronograma/reposicao'
+import { calcularSugestoes, TERAPIA_APLICADOR_SUBSTITUTO, TERAPIA_COORDENADOR_DE_CASO } from '@/lib/cronograma/reposicao'
 import type { AgendaPacienteSlot, SlotLivre } from '@/lib/cronograma/reposicao'
-import type { ResultadoReposicao, SessaoAgendada, SessaoFaltada, SessaoPresente } from '@/types/reposicao'
+import type { ResultadoReposicao, SessaoAgendada, SessaoConcluida, SessaoFaltada, SessaoPresente } from '@/types/reposicao'
 import { EXIB_NOME } from '@/lib/cronograma/constants'
 
 // ─── Helpers de data ──────────────────────────────────────────────────────────
@@ -33,8 +33,8 @@ function fimSemana(inicio: string): string {
 }
 
 // Deriva o nome do dia a partir de uma data ISO ("2026-06-30" → "Terca").
-// Necessário como fallback quando csv_grades_profissionais não tem linha para o paciente
-// (slot liberado após a falta — paciente_nome removido, status → 'Livre').
+// Necessário para FALTA/CONCLUÍDO: csv_grades_profissionais só cobre "hoje em diante"
+// (sync-grade-csv-daily), então uma sessão de data já passada nunca tem linha lá.
 function diaDaSemana(isoDate: string): string {
   const d = new Date(`${isoDate}T12:00:00`)
   const map: Record<number, string> = { 1: 'Segunda', 2: 'Terca', 3: 'Quarta', 4: 'Quinta', 5: 'Sexta' }
@@ -52,6 +52,7 @@ export function useReposicaoFaltas(
   const [sessoesSemana,    setSessoesSemana]    = useState<SessaoPresente[]>([])
   const [agendaPaciente,   setAgendaPaciente]   = useState<AgendaPacienteSlot[]>([])
   const [sessoesAgendadas, setSessoesAgendadas] = useState<SessaoAgendada[]>([])
+  const [sessoesConcluidas, setSessoesConcluidas] = useState<SessaoConcluida[]>([])
   const [loading,          setLoading]          = useState(false)
   const [error,            setError]            = useState<string | null>(null)
 
@@ -63,6 +64,7 @@ export function useReposicaoFaltas(
       setSessoesSemana([])
       setAgendaPaciente([])
       setSessoesAgendadas([])
+      setSessoesConcluidas([])
       return
     }
 
@@ -73,17 +75,20 @@ export function useReposicaoFaltas(
     async function carregar() {
       const sb = getSupabaseClient()
 
-      // ── Q1 e Q2 em paralelo: faltas brutas e agenda do paciente ─────────
-      // Nenhuma das tabelas relacionadas (controle_terapeutico, csv_grades_profissionais)
-      // tem FK declarada no schema, portanto nenhum join PostgREST é usado.
-      // csv_grades_profissionais é cruzado por data+hora no passo de montagem abaixo.
-      const [r1, r2] = await Promise.all([
+      // ── Q1, Q2 e Q_REPOSICAO em paralelo: faltas brutas, agenda do paciente e o
+      // snapshot da semana em csv_reposicao_faltas ────────────────────────────
+      // Nenhuma das tabelas relacionadas tem FK declarada no schema, portanto
+      // nenhum join PostgREST é usado — tudo é cruzado por data+hora abaixo.
+      const [r1, r2, r3] = await Promise.all([
         sb
           .from('fila_autorizacoes')
-          .select('id, paciente_id, paciente_nome, data_atendimento, horario, tipo_falta, tita_agendamento_id, terapia_nome, terapia_exibicao_id, justificativa_falta, cancelado_em, falta_revertida_em')
-          .eq('status', 'falta')
+          .select('id, paciente_id, paciente_nome, data_atendimento, horario, status, tipo_falta, tita_agendamento_id, terapia_nome, terapia_exibicao_id, justificativa_falta, cancelado_em, falta_revertida_em')
+          // 'glosa' conta como comparecimento (convênio negou/questionou o pagamento
+          // depois, não afeta se a sessão ocorreu) — sem isso, essas linhas ficavam de
+          // fora tanto de FALTA quanto de CONCLUÍDO, e a sessão (já no passado) caía no
+          // reforço de "futuro" por não ter nenhum card mais específico cobrindo-a.
+          .in('status', ['falta', 'concluido', 'glosa'])
           .is('cancelado_em', null)
-          .is('falta_revertida_em', null)
           .eq('paciente_id', pacienteId)
           .gte('data_atendimento', semanaInicio)
           .lte('data_atendimento', semanaFim),
@@ -94,16 +99,57 @@ export function useReposicaoFaltas(
           .ilike('paciente_nome', pacienteNome ?? '')
           .gte('data', semanaInicio)
           .lte('data', semanaFim),
+
+        // csv_reposicao_faltas: snapshot diário da grade INTEIRA da clínica (todo mundo,
+        // qualquer status), gerado especificamente para este módulo. Ao contrário de
+        // csv_grades_profissionais (só "hoje em diante"), essa tabela cobre a semana
+        // corrente inteira — inclusive dias já passados — então é a única fonte que tem
+        // a linha original de uma FALTA (profissional/sala de antes de faltar).
+        sb
+          .from('csv_reposicao_faltas')
+          .select('data, hora_inicial, sala_nome, terapia_nome, terapia_exibicao_nome, profissional_nome, status_agendamento')
+          .ilike('paciente_nome', pacienteNome ?? '')
+          .gte('data', semanaInicio)
+          .lte('data', semanaFim),
       ])
 
-      if (r1.error || r2.error || cancelled) {
-        if (!cancelled) setError((r1.error ?? r2.error)?.message ?? 'Erro ao carregar dados')
+      if (r1.error || r2.error || r3.error || cancelled) {
+        if (!cancelled) setError((r1.error ?? r2.error ?? r3.error)?.message ?? 'Erro ao carregar dados')
         if (!cancelled) setLoading(false)
         return
       }
 
+      // Lookup data|hora → linha original da grade (antes da falta), casado por
+      // paciente_nome+data+hora — não depende de tita_agendamento_id nem de
+      // controle_terapeutico, então cobre inclusive faltas sem CT vinculado.
+      const origemPorDataHora: Record<string, { profissional_nome: string; sala_nome: string; terapia_nome: string; terapia_exibicao_nome: string }> = {}
+      ;(r3.data ?? []).forEach((r: any) => {
+        const k = `${r.data ?? ''}|${horaStr(r.hora_inicial)}`
+        if (!origemPorDataHora[k]) {
+          origemPorDataHora[k] = {
+            profissional_nome: r.profissional_nome ?? '',
+            sala_nome: r.sala_nome ?? '',
+            terapia_nome: r.terapia_nome ?? '',
+            terapia_exibicao_nome: r.terapia_exibicao_nome ?? '',
+          }
+        }
+      })
+
+      // ── Separa faltas x concluídos (Q1 agora traz os dois status) ────────
+      // falta_revertida_em é um campo específico de falta e é aplicado aqui
+      // (client-side) em vez de no filtro da query, pois não deve afetar
+      // linhas 'concluido'.
+      const r1Faltas     = (r1.data ?? []).filter((r: any) => r.status === 'falta' && !r.falta_revertida_em)
+      // 'glosa' é tratada como concluído (ver comentário na query de r1 acima) —
+      // mesmo card, só com rótulo diferente (SessaoConcluida.glosa).
+      const r1Concluidos = (r1.data ?? []).filter((r: any) => r.status === 'concluido' || r.status === 'glosa')
+
       // ── Q_CT: busca controle_terapeutico pelos tita_agendamento_id ────────
-      const titaIds = (r1.data ?? [])
+      // Inclui faltas e concluídos — CT é usado aqui só como fonte de enriquecimento
+      // (profissional/terapia vinculados ao agendamento), não como filtro de
+      // elegibilidade. Por isso não restringe por status='indisponivel': mesmo um
+      // CT com status='disponivel' ainda diz quem era o profissional daquele slot.
+      const titaIds = [...r1Faltas, ...r1Concluidos]
         .map((r: any) => r.tita_agendamento_id)
         .filter(Boolean)
 
@@ -114,7 +160,6 @@ export function useReposicaoFaltas(
           .from('controle_terapeutico')
           .select('tita_agendamento_id, status, profissional_id, profissional_nome, terapia_nome')
           .in('tita_agendamento_id', titaIds)
-          .eq('status', 'indisponivel')
 
         if (ctError || cancelled) {
           if (!cancelled) setError(ctError?.message ?? 'Erro ao carregar controle terapêutico')
@@ -127,85 +172,40 @@ export function useReposicaoFaltas(
         )
       }
 
-      // ── Q2b: sala_nome dos slots faltados (agora 'Livre', sem paciente_nome) ─
-      // Quando o paciente falta, o slot é liberado: paciente_nome é removido e
-      // status_agendamento vira 'Livre'. Q2 filtra por paciente_nome e não retorna
-      // mais esses registros. Q2b busca pelo profissional + data + hora para obter
-      // sala_nome e dia_semana sem depender do campo paciente_nome.
-      let slotsProfMap: Record<string, { sala_nome: string; dia_semana: string; terapia_nome: string; terapia_exibicao_nome: string }> = {}
-
-      if (Object.keys(ctMap).length > 0) {
-        const profissionaisNomes = [
-          ...new Set(Object.values(ctMap).map((ct: any) => ct.profissional_nome).filter(Boolean)),
-        ]
-        if (profissionaisNomes.length > 0) {
-          const { data: slotsProf } = await sb
-            .from('csv_grades_profissionais')
-            .select('profissional_nome, data, hora_inicial, sala_nome, dia_semana, terapia_nome, terapia_exibicao_nome')
-            .in('profissional_nome', profissionaisNomes)
-            .gte('data', semanaInicio)
-            .lte('data', semanaFim)
-
-          slotsProfMap = Object.fromEntries(
-            (slotsProf ?? []).map((r: any) => [
-              `${r.profissional_nome}|${r.data}|${horaStr(r.hora_inicial)}`,
-              {
-                sala_nome:            r.sala_nome            ?? '',
-                dia_semana:           r.dia_semana           ?? '',
-                terapia_nome:         r.terapia_nome         ?? '',
-                terapia_exibicao_nome: r.terapia_exibicao_nome ?? '',
-              },
-            ]),
-          )
-        }
-      }
-
       if (cancelled) return
 
       // ── Monta SessaoFaltada[] ─────────────────────────────────────────────
-      // Exclui faltas com tita_agendamento_id cujo CT não é 'indisponivel'.
       // csv_grades_profissionais é cruzado por data + hora (Q2 já trouxe esses dados).
       const csvRows = r2.data ?? []
 
-      const faltas: SessaoFaltada[] = (r1.data ?? [])
-        .filter((r: any) => !r.tita_agendamento_id || ctMap[String(r.tita_agendamento_id)])
+      // csv_grades_profissionais nunca tem a linha de uma FALTA (só cobre "hoje em
+      // diante" — ver sync-grade-csv-daily), mas csv_reposicao_faltas (origemPorDataHora)
+      // cobre a semana inteira e tem a linha original de antes da falta acontecer.
+      // Todas as faltas (status='falta', não canceladas/revertidas) são elegíveis para
+      // reposição, independente do motivo (indisponibilidade do profissional ou não
+      // comparecimento do paciente).
+      const faltas: SessaoFaltada[] = r1Faltas
         .map((r: any) => {
           const ct  = r.tita_agendamento_id ? ctMap[String(r.tita_agendamento_id)] ?? null : null
           const hora = horaStr(r.horario)
-          const csv = csvRows.find(
-            (c: any) => c.data === r.data_atendimento && horaStr(c.hora_inicial) === hora,
-          ) ?? null
+          const origem = origemPorDataHora[`${r.data_atendimento ?? ''}|${hora}`] ?? null
 
-          // Q2b: fallback para slots liberados após a falta (paciente_nome removido)
-          const profSlotKey = ct?.profissional_nome
-            ? `${ct.profissional_nome}|${r.data_atendimento}|${hora}`
-            : null
-          const profSlot = profSlotKey ? (slotsProfMap[profSlotKey] ?? null) : null
+          // Profissional: origem (linha real de antes da falta) → CT
+          const profissional = origem?.profissional_nome || ct?.profissional_nome || ''
 
-          // Profissional: CT → CSV → Q2b
-          const profissional    = ct?.profissional_nome ?? csv?.profissional_nome ?? ''
+          // Terapia: origem → CT → fila
+          const terapia = origem?.terapia_nome || ct?.terapia_nome || r.terapia_nome || ''
 
-          // Terapia: csv (sessão não liberada) > Q2b (slot liberado, lookup por profissional) > CT > fila
-          // Nota: fila_autorizacoes.terapia_nome pode divergir do csv — csv/profSlot são mais confiáveis.
-          const terapia = csv?.terapia_nome || profSlot?.terapia_nome || ct?.terapia_nome || r.terapia_nome || ''
-
-          // Exibição: EXIB_NOME (IDs especiais ABA) > csv > Q2b > CT > fila
+          // Exibição: EXIB_NOME (IDs especiais ABA) > origem > CT > fila
           const exibNome        = r.terapia_exibicao_id ? (EXIB_NOME[Number(r.terapia_exibicao_id)] ?? '') : ''
-          const terapiaExibicao = exibNome
-            || csv?.terapia_exibicao_nome
-            || profSlot?.terapia_exibicao_nome
-            || profSlot?.terapia_nome
-            || ct?.terapia_nome
-            || r.terapia_nome
-            || ''
+          const terapiaExibicao = exibNome || origem?.terapia_exibicao_nome || origem?.terapia_nome || ct?.terapia_nome || r.terapia_nome || ''
 
-          // dia: csv → Q2b → derivado da data_atendimento
-          const dia = normalizarDia(csv?.dia_semana)
-            || normalizarDia(profSlot?.dia_semana)
-            || diaDaSemana(r.data_atendimento)
+          const dia = diaDaSemana(r.data_atendimento)
 
-          // unidade: csv → Q2b (slot pode estar 'Livre' após a falta)
-          const unidade = csv?.sala_nome || profSlot?.sala_nome || ''
+          // unidade: origem (única fonte confiável de sala para uma FALTA — CT não tem
+          // coluna de sala). Fica em branco só quando csv_reposicao_faltas também não
+          // tiver a linha (dado fora da cobertura da semana, caso raro).
+          const unidade = origem?.sala_nome || ''
 
           // semJoin apenas se nenhuma fonte forneceu a terapia
           const semJoin = !terapia
@@ -229,34 +229,157 @@ export function useReposicaoFaltas(
         })
 
       // ── Monta AgendaPacienteSlot[] (para algoritmo) ──────────────────────
-      const agendaPaciente: AgendaPacienteSlot[] = csvRows.map((r: any) => ({
+      // Inclui tanto a grade futura (csv) quanto sessões já concluídas (fila),
+      // para que o algoritmo de reposição nunca sugira um slot que colide com
+      // um atendimento que o paciente já realizou naquela data+hora.
+      const agendaFromCsv: AgendaPacienteSlot[] = csvRows.map((r: any) => ({
         data:    r.data ?? '',
         dia:     normalizarDia(r.dia_semana),
         hora:    horaStr(r.hora_inicial),
         unidade: r.sala_nome ?? '',
       }))
 
+      // fila_autorizacoes não tem sala_nome; recupera por lookup em csvRows
+      // (data+hora), mesmo padrão usado para profByHora mais abaixo.
+      const salaByDataHora: Record<string, string> = {}
+      csvRows.forEach((r: any) => {
+        const k = `${r.data ?? ''}|${horaStr(r.hora_inicial)}`
+        if (!salaByDataHora[k] && r.sala_nome) salaByDataHora[k] = r.sala_nome
+      })
+
+      const agendaFromConcluidos: AgendaPacienteSlot[] = r1Concluidos.map((r: any) => {
+        const hora = horaStr(r.horario)
+        const k = `${r.data_atendimento ?? ''}|${hora}`
+        return {
+          data:    r.data_atendimento ?? '',
+          dia:     diaDaSemana(r.data_atendimento ?? ''),
+          hora,
+          unidade: salaByDataHora[k] ?? '',
+        }
+      })
+
+      // Faltas do próprio paciente também ocupam a agenda: em produção, o slot original
+      // de uma falta continua "Agendado" (não liberado) até a reposição ser decidida —
+      // então uma sugestão para OUTRA falta não pode cair em cima dele. Sem isso, o
+      // algoritmo já sugeriu mover uma falta para o data+hora exato de outra falta do
+      // mesmo paciente ainda não resolvida (conflito real, paciente não pode estar em
+      // dois lugares na mesma hora).
+      const agendaFromFaltas: AgendaPacienteSlot[] = r1Faltas.map((r: any) => {
+        const hora = horaStr(r.horario)
+        const origem = origemPorDataHora[`${r.data_atendimento ?? ''}|${hora}`] ?? null
+        return {
+          data:    r.data_atendimento ?? '',
+          dia:     diaDaSemana(r.data_atendimento ?? ''),
+          hora,
+          unidade: origem?.sala_nome ?? '',
+        }
+      })
+
+      const csvKeySet = new Set(agendaFromCsv.map(s => `${s.data}|${s.hora}`))
+      const agendaPaciente: AgendaPacienteSlot[] = [
+        ...agendaFromCsv,
+        ...agendaFromConcluidos.filter(s => !csvKeySet.has(`${s.data}|${s.hora}`)),
+      ]
+      const agendaKeySet = new Set(agendaPaciente.map(s => `${s.data}|${s.hora}`))
+      agendaFromFaltas.forEach(s => {
+        const k = `${s.data}|${s.hora}`
+        if (!agendaKeySet.has(k)) {
+          agendaKeySet.add(k)
+          agendaPaciente.push(s)
+        }
+      })
+
+      // ── filaKeySet: slots que a automação já processou (falta ou concluído) ─
+      // Usado para excluir da grade "futuro" qualquer linha do csv que já tenha
+      // um card mais específico (falta/concluído) no mesmo data+hora.
+      const filaKeySet = new Set(
+        [...r1Faltas, ...r1Concluidos].map((r: any) => `${r.data_atendimento ?? ''}|${horaStr(r.horario)}`)
+      )
+
+      // ── Reforço de "futuro" via csv_reposicao_faltas ─────────────────────
+      // csv_grades_profissionais pode ter buracos de sincronização pontuais (ex.: um
+      // dia sincronizado só até certo horário, faltando o resto — confirmado em
+      // produção: zero linhas de QUALQUER paciente em alguns horários do próprio dia
+      // corrente). csv_reposicao_faltas cobre a semana inteira e tem
+      // status_agendamento, então preenche essas lacunas sem duplicar o que
+      // csv_grades_profissionais já trouxe nem o que já virou falta/concluído.
+      const agendadosReforco = (r3.data ?? []).filter((r: any) => {
+        const k = `${r.data ?? ''}|${horaStr(r.hora_inicial)}`
+        return r.status_agendamento === 'Agendado' && !csvKeySet.has(k) && !filaKeySet.has(k)
+      })
+      agendadosReforco.forEach((r: any) => {
+        const k = `${r.data ?? ''}|${horaStr(r.hora_inicial)}`
+        if (!agendaKeySet.has(k)) {
+          agendaKeySet.add(k)
+          agendaPaciente.push({
+            data:    r.data ?? '',
+            dia:     diaDaSemana(r.data ?? ''),
+            hora:    horaStr(r.hora_inicial),
+            unidade: r.sala_nome ?? '',
+          })
+        }
+      })
+
+      // ── Monta SessaoConcluida[] (para visualização do status CONCLUÍDO) ──
+      const sessoesConcluidas: SessaoConcluida[] = r1Concluidos.map((r: any) => {
+        const ct = r.tita_agendamento_id ? ctMap[String(r.tita_agendamento_id)] ?? null : null
+        const hora = horaStr(r.horario)
+        const csv = csvRows.find(
+          (c: any) => c.data === r.data_atendimento && horaStr(c.hora_inicial) === hora,
+        ) ?? null
+        const origem = origemPorDataHora[`${r.data_atendimento ?? ''}|${hora}`] ?? null
+        return {
+          data:            r.data_atendimento ?? '',
+          dia:             normalizarDia(csv?.dia_semana) || diaDaSemana(r.data_atendimento ?? ''),
+          hora,
+          unidade:         csv?.sala_nome || origem?.sala_nome || '',
+          // Terapia de ação: a mesma fonte usada para decidir elegibilidade de reposição
+          // (ex.: regra de Coordenador de Caso) — csv/origem/CT/fila, sem preferir exibição.
+          terapia:         csv?.terapia_nome || origem?.terapia_nome || ct?.terapia_nome || r.terapia_nome || '',
+          terapiaExibicao: csv?.terapia_exibicao_nome || origem?.terapia_exibicao_nome || origem?.terapia_nome || ct?.terapia_nome || r.terapia_nome || '',
+          // Profissional: CT (independente de status) → csv → origem
+          profissional:    ct?.profissional_nome || csv?.profissional_nome || origem?.profissional_nome || '',
+          glosa:           r.status === 'glosa',
+        }
+      })
+
       // ── Monta SessaoAgendada[] (para visualização) ────────────────────────
-      const sessoesAgendadas: SessaoAgendada[] = csvRows.map((r: any) => ({
-        data:            r.data                   ?? '',
-        dia:             normalizarDia(r.dia_semana),
-        hora:            horaStr(r.hora_inicial),
-        unidade:         r.sala_nome              ?? '',
-        terapia:         r.terapia_nome           ?? '',
-        terapiaExibicao: r.terapia_exibicao_nome  ?? r.terapia_nome ?? '',
-        profissional:    r.profissional_nome       ?? '',
-      }))
+      // Inclui o reforço de csv_reposicao_faltas (agendadosReforco) — sessões futuras
+      // reais que csv_grades_profissionais não capturou por buraco de sincronização.
+      const sessoesAgendadas: SessaoAgendada[] = [
+        ...csvRows.map((r: any) => ({
+          data:            r.data                   ?? '',
+          dia:             normalizarDia(r.dia_semana),
+          hora:            horaStr(r.hora_inicial),
+          unidade:         r.sala_nome              ?? '',
+          terapia:         r.terapia_nome           ?? '',
+          terapiaExibicao: r.terapia_exibicao_nome  ?? r.terapia_nome ?? '',
+          profissional:    r.profissional_nome       ?? '',
+        })),
+        ...agendadosReforco.map((r: any) => ({
+          data:            r.data                   ?? '',
+          dia:             diaDaSemana(r.data ?? ''),
+          hora:            horaStr(r.hora_inicial),
+          unidade:         r.sala_nome              ?? '',
+          terapia:         r.terapia_nome           ?? '',
+          terapiaExibicao: r.terapia_exibicao_nome  ?? r.terapia_nome ?? '',
+          profissional:    r.profissional_nome       ?? '',
+        })),
+      ]
 
       // ── Query 3: slots livres por terapia (inclui P1 e P2) ───────────────
       // Usa todas as faltas com terapia conhecida (CT ou fallback CSV)
       const faltasComTerapia = faltas.filter(f => !f.semJoin)
-      const terapias = [...new Set(faltasComTerapia.map(f => f.terapia))]
+      const terapiasSet = new Set(faltasComTerapia.map(f => f.terapia))
+      // Coordenador de Caso repõe com Aplicador ABA (PS) como substituto (ver
+      // terapiaElegivel em lib/cronograma/reposicao.ts) — busca essas vagas também,
+      // mesmo que nenhuma falta da semana seja literalmente dessa terapia.
+      if (terapiasSet.has(TERAPIA_COORDENADOR_DE_CASO)) {
+        terapiasSet.add(TERAPIA_APLICADOR_SUBSTITUTO)
+      }
+      const terapias = [...terapiasSet]
 
       let slotsLivres: SlotLivre[] = []
-      // Lookup data|hora → { profissional_nome, sala_nome } dos slots libertos pela falta.
-      // Chave sem terapia_nome: o código diverge entre fila_autorizacoes e csv para algumas terapias.
-      // Um paciente não tem duas sessões no mesmo horário, então data+hora é unívoco para ele.
-      const profLivreMap: Record<string, { prof: string; sala: string }> = {}
 
       if (terapias.length > 0) {
         // Usa vw_reposicao_faltas: view criada especificamente para este módulo,
@@ -294,138 +417,39 @@ export function useReposicaoFaltas(
             unidade:         r.sala_nome         ?? '',
           }
         })
-
-        // Constrói lookup para enriquecer faltas sem profissional e sem unidade.
-        // Chave: data|hora (sem terapia_nome — diverge entre tabelas para algumas terapias).
-        ;(slotsRaw ?? []).forEach((r: any) => {
-          const k = `${r.data ?? ''}|${horaStr(r.hora_inicial)}`
-          if (!profLivreMap[k]) {
-            profLivreMap[k] = {
-              prof: r.profissional_nome ?? '',
-              sala: r.sala_nome         ?? '',
-            }
-          }
-        })
       }
 
-      // ── Enriquece faltas sem profissional/unidade usando o slot liberado (Q3) ─
-      let faltasEnriquecidas = faltas.map(f => {
-        const needProf  = !f.profissional
-        const needSala  = !f.unidade
-        if (!needProf && !needSala) return f
-        const info = profLivreMap[`${f.dataOriginal}|${f.hora}`]
-        if (!info) return f
-        return {
-          ...f,
-          profissional: needProf && info.prof ? info.prof : f.profissional,
-          unidade:      needSala && info.sala ? info.sala : f.unidade,
-        }
-      })
+      // Profissional/unidade de uma FALTA já vêm de origem (csv_reposicao_faltas) → CT,
+      // fontes confiáveis por serem a linha real da própria sessão. Não há mais um
+      // enriquecimento por "slot livre" (Q3) aqui de propósito: um slot livre no mesmo
+      // data+hora+terapia pode pertencer a outro profissional/sala completamente
+      // diferentes (foi exatamente esse tipo de adivinhação — vaga de outra pessoa
+      // sendo atribuída à falta — que gerou o card com unidade errada em produção).
+      const faltasEnriquecidas = faltas
 
-      // ── Q_PROF: fallback — busca profissional_nome e sala_nome direto em csv_grades_profissionais
-      // para faltas sem profissional ou unidade após todas as queries anteriores.
-      // Usa csv_grades_profissionais (não vw_reposicao_faltas) para cobrir slots já re-ocupados:
-      // a view só expõe status='Livre', mas profissional_nome e sala_nome permanecem no CSV
-      // independente do status atual do slot.
-      const faltasSemDados = faltasEnriquecidas.filter(f => (!f.profissional || !f.unidade) && !f.semJoin)
-      if (faltasSemDados.length > 0) {
-        const datasNeeded = [...new Set(faltasSemDados.map(f => f.dataOriginal))]
-
-        const { data: profRows } = await sb
-          .from('csv_grades_profissionais')
-          .select('profissional_nome, sala_nome, hora_inicial, data, terapia_nome')
-          .in('data', datasNeeded)
-
-        if (!cancelled && profRows && profRows.length > 0) {
-          // Mapa primário: data|hora|terapia — evita ambiguidade quando vários profissionais
-          // têm terapias diferentes no mesmo horário.
-          const profByTerapia: Record<string, { prof: string; sala: string }> = {}
-          // Mapa secundário: data|hora — fallback quando terapia_nome diverge entre tabelas.
-          const profByHora: Record<string, { prof: string; sala: string }> = {}
-
-          profRows.forEach((r: any) => {
-            const k1 = `${r.data ?? ''}|${horaStr(r.hora_inicial)}|${r.terapia_nome ?? ''}`
-            if (!profByTerapia[k1]) {
-              profByTerapia[k1] = { prof: r.profissional_nome ?? '', sala: r.sala_nome ?? '' }
-            }
-            const k2 = `${r.data ?? ''}|${horaStr(r.hora_inicial)}`
-            if (!profByHora[k2]) {
-              profByHora[k2] = { prof: r.profissional_nome ?? '', sala: r.sala_nome ?? '' }
-            }
-          })
-
-          faltasEnriquecidas = faltasEnriquecidas.map(f => {
-            const needProf = !f.profissional
-            const needSala = !f.unidade
-            if (!needProf && !needSala) return f
-
-            // Chave primária: data|hora|terapia — confiável; terapia garante que é o slot certo.
-            const byTerapia = profByTerapia[`${f.dataOriginal}|${f.hora}|${f.terapia}`]
-            // Chave secundária: data|hora sem terapia — ambígua (múltiplos pacientes no mesmo horário).
-            // Usada APENAS para unidade (sala), nunca para profissional, pois pode pegar o slot
-            // de outro paciente e atribuir o profissional errado.
-            const byHora = profByHora[`${f.dataOriginal}|${f.hora}`]
-
-            const novoProf = needProf && byTerapia?.prof ? byTerapia.prof : f.profissional
-            const novaSala = needSala
-              ? (byTerapia?.sala || byHora?.sala || f.unidade)
-              : f.unidade
-
-            if (novoProf === f.profissional && novaSala === f.unidade) return f
-            return { ...f, profissional: novoProf, unidade: novaSala }
-          })
-        }
-      }
-
-      // ── Q_HIST: histórico do paciente (últimas 4 semanas) para recuperar profissional ─
-      // Fallback final para faltas onde tita_agendamento_id é nulo e o slot liberado
-      // não preservou profissional_nome. Usa dia_semana+hora como chave (não a data
-      // exata) para tolerar variações de data e aproveitar o paciente_nome ainda intacto
-      // nos registros históricos. Ordena por data desc → profissional mais recente primeiro.
-      const faltasSemProf = faltasEnriquecidas.filter(f => !f.profissional && !f.semJoin)
-      if (faltasSemProf.length > 0) {
-        const histD = new Date(`${semanaInicio}T12:00:00`)
-        histD.setDate(histD.getDate() - 28)
-        const historicalStart = histD.toISOString().slice(0, 10)
-
-        const { data: histRows } = await sb
-          .from('csv_grades_profissionais')
-          .select('profissional_nome, sala_nome, hora_inicial, dia_semana')
-          .ilike('paciente_nome', pacienteNome ?? '')
-          .gte('data', historicalStart)
-          .lt('data', semanaInicio)
-          .order('data', { ascending: false })
-
-        if (!cancelled && histRows && histRows.length > 0) {
-          const histMap: Record<string, { prof: string; sala: string }> = {}
-          histRows.forEach((r: any) => {
-            const k = `${normalizarDia(r.dia_semana)}|${horaStr(r.hora_inicial)}`
-            if (!histMap[k]) {
-              histMap[k] = { prof: r.profissional_nome ?? '', sala: r.sala_nome ?? '' }
-            }
-          })
-
-          faltasEnriquecidas = faltasEnriquecidas.map(f => {
-            if (f.profissional) return f
-            const info = histMap[`${f.dia}|${f.hora}`]
-            if (!info) return f
-            return {
-              ...f,
-              profissional: info.prof || f.profissional,
-              unidade:      !f.unidade && info.sala ? info.sala : f.unidade,
-            }
-          })
-        }
-      }
-
-      // ── Sessões presentes (para empty state) ─────────────────────────────
-      const presentes: SessaoPresente[] = csvRows.map((r: any) => ({
-        data:            r.data            ?? '',
-        dia:             normalizarDia(r.dia_semana),
-        hora:            horaStr(r.hora_inicial),
-        unidade:         r.sala_nome       ?? '',
-        terapiaExibicao: r.terapia_exibicao_nome ?? '',
-      }))
+      // ── Sessões futuras (status FUTURO): csv sem card mais específico ────
+      // Exclui linhas já cobertas por um card de falta ou concluído no mesmo
+      // data+hora, para não duplicar a sessão na grade. Inclui o mesmo reforço de
+      // csv_reposicao_faltas usado em sessoesAgendadas (já vem sem duplicar/sem
+      // sobrepor falta ou concluído — ver agendadosReforco).
+      const presentes: SessaoPresente[] = [
+        ...csvRows
+          .filter((r: any) => !filaKeySet.has(`${r.data ?? ''}|${horaStr(r.hora_inicial)}`))
+          .map((r: any) => ({
+            data:            r.data            ?? '',
+            dia:             normalizarDia(r.dia_semana),
+            hora:            horaStr(r.hora_inicial),
+            unidade:         r.sala_nome       ?? '',
+            terapiaExibicao: r.terapia_exibicao_nome ?? '',
+          })),
+        ...agendadosReforco.map((r: any) => ({
+          data:            r.data            ?? '',
+          dia:             diaDaSemana(r.data ?? ''),
+          hora:            horaStr(r.hora_inicial),
+          unidade:         r.sala_nome       ?? '',
+          terapiaExibicao: r.terapia_exibicao_nome ?? '',
+        })),
+      ]
 
 
       // ── Executa algoritmo ─────────────────────────────────────────────────
@@ -436,6 +460,7 @@ export function useReposicaoFaltas(
         setSessoesSemana(presentes)
         setAgendaPaciente(agendaPaciente)
         setSessoesAgendadas(sessoesAgendadas)
+        setSessoesConcluidas(sessoesConcluidas)
         setLoading(false)
       }
     }
@@ -450,5 +475,5 @@ export function useReposicaoFaltas(
     return () => { cancelled = true }
   }, [pacienteId, pacienteNome, semanaInicio])
 
-  return { resultados, sessoesSemana, agendaPaciente, sessoesAgendadas, semanaFim, loading, error }
+  return { resultados, sessoesSemana, agendaPaciente, sessoesAgendadas, sessoesConcluidas, semanaFim, loading, error }
 }

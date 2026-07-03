@@ -154,11 +154,9 @@ alter table "public"."csv_reposicao_faltas" add constraint "csv_reposicao_faltas
 
 set check_function_bodies = off;
 
-create type "public"."http_header" as ("field" character varying, "value" character varying);
-
-create type "public"."http_request" as ("method" public.http_method, "uri" character varying, "headers" public.http_header[], "content_type" character varying, "content" character varying);
-
-create type "public"."http_response" as ("status" integer, "content_type" character varying, "headers" public.http_header[], "content" character varying);
+-- http_header/http_request/http_response já são criados automaticamente pela
+-- extensão "http" (linha 1 deste arquivo) — as declarações explícitas eram
+-- duplicatas geradas pelo pull do schema remoto e quebravam a aplicação local.
 
 create or replace view "public"."vw_reposicao_faltas" as  SELECT id,
     tita_agendamento_id,

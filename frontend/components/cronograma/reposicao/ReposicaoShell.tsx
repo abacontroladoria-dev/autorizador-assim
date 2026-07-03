@@ -175,39 +175,47 @@ function PacienteSearch({
 function WeekNav({
   semana,
   onChange,
+  bloquearAnterior,
 }: {
   semana: string
   onChange: (s: string) => void
+  bloquearAnterior: boolean
 }) {
   const atual = semanaAtual()
 
-  const NavBtn = ({ dir }: { dir: -1 | 1 }) => (
-    <button
-      onClick={() => onChange(addWeeks(semana, dir))}
-      style={{
-        width: 30,
-        height: 30,
-        borderRadius: 8,
-        border: "1px solid var(--border)",
-        background: "var(--card)",
-        color: "var(--foreground)",
-        cursor: "pointer",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        flexShrink: 0,
-      }}
-    >
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
-        stroke="currentColor" strokeWidth="2.5"
-        strokeLinecap="round" strokeLinejoin="round"
+  const NavBtn = ({ dir }: { dir: -1 | 1 }) => {
+    const disabled = dir === -1 && bloquearAnterior
+    return (
+      <button
+        onClick={() => !disabled && onChange(addWeeks(semana, dir))}
+        disabled={disabled}
+        title={disabled ? "Reposição só cobre a semana atual em diante" : undefined}
+        style={{
+          width: 30,
+          height: 30,
+          borderRadius: 8,
+          border: "1px solid var(--border)",
+          background: "var(--card)",
+          color: "var(--foreground)",
+          cursor: disabled ? "not-allowed" : "pointer",
+          opacity: disabled ? 0.4 : 1,
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          flexShrink: 0,
+        }}
       >
-        {dir === -1
-          ? <polyline points="15 18 9 12 15 6" />
-          : <polyline points="9 18 15 12 9 6" />}
-      </svg>
-    </button>
-  )
+        <svg width="12" height="12" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" strokeWidth="2.5"
+          strokeLinecap="round" strokeLinejoin="round"
+        >
+          {dir === -1
+            ? <polyline points="15 18 9 12 15 6" />
+            : <polyline points="9 18 15 12 9 6" />}
+        </svg>
+      </button>
+    )
+  }
 
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
@@ -326,7 +334,14 @@ export function ReposicaoShell() {
           </>
         )}
         <div style={{ marginLeft: "auto" }}>
-          <WeekNav semana={semana} onChange={setSemana} />
+          {/* Modo "paciente" não permite semanas antes de hoje: csv_grades_profissionais
+              (fonte primária da grade) só cobre "hoje em diante". A Visão geral não tem essa
+              restrição — ela só depende de fila_autorizacoes, que é histórico completo. */}
+          <WeekNav
+            semana={semana}
+            onChange={setSemana}
+            bloquearAnterior={modo === "paciente" && semana <= semanaAtual()}
+          />
         </div>
       </div>
 
@@ -335,18 +350,8 @@ export function ReposicaoShell() {
         <VisaoGeralPanel semanaInicio={semana} onSelectPaciente={handleSelectFromGeral} />
       ) : paciente ? (
         <div>
-          <div
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              letterSpacing: ".06em",
-              textTransform: "uppercase",
-              color: "var(--muted-foreground)",
-              marginBottom: 10,
-            }}
-          >
-            {paciente.nome}
-          </div>
+          {/* Nome do paciente agora é mostrado dentro de VisaoComparativa, junto do
+              botão "Sugestão automática" — evita duplicar o cabeçalho aqui. */}
           <FaltasSemanaPanel
             pacienteId={paciente.id}
             pacienteNome={paciente.nome}

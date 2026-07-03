@@ -110,12 +110,19 @@ function PacienteRow({
         {p.pacienteNome}
       </span>
 
-      {/* Contagem */}
-      {p.totalFaltas > 0 && (
-        <span style={{ fontSize: 11, color: "var(--muted-foreground)", whiteSpace: "nowrap" }}>
-          {p.totalResolvidas}/{p.totalFaltas} falta{p.totalFaltas !== 1 ? "s" : ""}
-        </span>
-      )}
+      {/* Contagem — evita contradizer o selo (ex.: "Resolvido" ao lado de "0 repostas"
+          quando a falta foi recusada, não reposta): mostra recusadas separado quando
+          existirem, em vez de só reportar repostas. */}
+      {p.totalFaltas > 0 && (() => {
+        const recusadas = p.totalResolvidas - p.totalRepostas
+        return (
+          <span style={{ fontSize: 11, color: "var(--muted-foreground)", whiteSpace: "nowrap" }}>
+            {recusadas > 0
+              ? `${p.totalRepostas} reposta${p.totalRepostas !== 1 ? "s" : ""} · ${recusadas} recusada${recusadas !== 1 ? "s" : ""}`
+              : `${p.totalRepostas} de ${p.totalFaltas} repostas`}
+          </span>
+        )
+      })()}
 
       {/* Badge irrecuperável */}
       {p.totalIrrecuperaveis > 0 && (
@@ -215,6 +222,11 @@ export function VisaoGeralPanel({ semanaInicio, onSelectPaciente }: VisaoGeralPa
     filtro === "com_irrecuperavel"? pacientes.filter(p => p.totalIrrecuperaveis > 0) :
     pacientes.filter(p => p.categoria === filtro)
 
+  // Resumo agregado — funciona para qualquer semana (inclusive passadas), já que a fonte
+  // (fila_autorizacoes) não depende da cobertura de csv_grades_profissionais.
+  const totalFaltasSemana   = pacientes.reduce((acc, p) => acc + p.totalFaltas, 0)
+  const totalRepostasSemana = pacientes.reduce((acc, p) => acc + p.totalRepostas, 0)
+
   if (loading) return <Skeleton />
 
   if (error) {
@@ -254,6 +266,14 @@ export function VisaoGeralPanel({ semanaInicio, onSelectPaciente }: VisaoGeralPa
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      {/* Resumo agregado da semana */}
+      <div style={{
+        fontSize: 10, fontWeight: 700, letterSpacing: "0.07em",
+        textTransform: "uppercase", color: "var(--muted-foreground)",
+      }}>
+        Faltas · {totalFaltasSemana} &nbsp;/&nbsp; Repostas · {totalRepostasSemana}
+      </div>
+
       {/* Chips de filtro */}
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
         <Chip
