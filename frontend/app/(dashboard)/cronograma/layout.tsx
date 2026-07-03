@@ -33,7 +33,9 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const pathname = usePathname()
   // Páginas que gerenciam rightContent por conta própria (não precisam do badge de Laudos no header)
-  const isOcupacaoPage = !!pathname?.includes('/ocupacao') || !!pathname?.includes('/indicadores')
+  const isOcupacaoPage =
+    pathname === '/cronograma/ocupacao' || !!pathname?.startsWith('/cronograma/ocupacao/') ||
+    pathname === '/cronograma/indicadores' || !!pathname?.startsWith('/cronograma/indicadores/')
   const gradeFetchedRef = useRef(false)
 
   // Carrega a grade (csv_grades_profissionais, sincronizada diariamente) automaticamente
