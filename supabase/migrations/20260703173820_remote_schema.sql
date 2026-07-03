@@ -1,75 +1,14 @@
-create extension if not exists "http" with schema "public";
-
-create sequence "public"."csv_reposicao_faltas_id_seq";
-
-drop policy "usuario pode atualizar proprio estado" on "public"."cronograma_estado";
-
-drop policy "usuario pode gravar proprio estado" on "public"."cronograma_estado";
-
-drop policy "usuario pode ler proprio estado" on "public"."cronograma_estado";
-
-revoke delete on table "public"."cronograma_estado" from "anon";
-
-revoke insert on table "public"."cronograma_estado" from "anon";
-
-revoke references on table "public"."cronograma_estado" from "anon";
-
-revoke select on table "public"."cronograma_estado" from "anon";
-
-revoke trigger on table "public"."cronograma_estado" from "anon";
-
-revoke truncate on table "public"."cronograma_estado" from "anon";
-
-revoke update on table "public"."cronograma_estado" from "anon";
-
-revoke delete on table "public"."cronograma_estado" from "authenticated";
-
-revoke insert on table "public"."cronograma_estado" from "authenticated";
-
-revoke references on table "public"."cronograma_estado" from "authenticated";
-
-revoke select on table "public"."cronograma_estado" from "authenticated";
-
-revoke trigger on table "public"."cronograma_estado" from "authenticated";
-
-revoke truncate on table "public"."cronograma_estado" from "authenticated";
-
-revoke update on table "public"."cronograma_estado" from "authenticated";
-
-revoke delete on table "public"."cronograma_estado" from "service_role";
-
-revoke insert on table "public"."cronograma_estado" from "service_role";
-
-revoke references on table "public"."cronograma_estado" from "service_role";
-
-revoke select on table "public"."cronograma_estado" from "service_role";
-
-revoke trigger on table "public"."cronograma_estado" from "service_role";
-
-revoke truncate on table "public"."cronograma_estado" from "service_role";
-
-revoke update on table "public"."cronograma_estado" from "service_role";
-
-alter table "public"."cronograma_estado" drop constraint "cronograma_estado_user_id_fkey";
-
-alter table "public"."cronograma_estado" drop constraint "cronograma_estado_user_unique";
-
-drop function if exists "public"."list_all_occurrences"();
-
-drop function if exists "public"."log_job_execution"(p_job_name text, p_started_at timestamp with time zone, p_finished_at timestamp with time zone, p_status text, p_rows_processed integer, p_error_message text);
+drop policy "controle_terapeutico_therapeutic_select" on "public"."controle_terapeutico";
 
 drop view if exists "public"."agenda_classificada";
-
-drop function if exists "public"."test_occurrences_view"();
 
 drop view if exists "public"."vw_blocos_autorizaveis_assim";
 
 drop view if exists "public"."vw_central_autorizacoes";
 
 -- [ajuste manual] listar_central_pacientes (RETURNS SETOF vw_central_pacientes)
--- precisa ser dropada ANTES da view: esta migration dropa e recria vw_central_pacientes
--- (e agenda_tita_autorizacao, da qual a view depende), e o drop sem cascade quebraria
--- a reconstrução do shadow no `db pull`. A função é recriada no fim desta migration.
+-- depende do tipo da view; precisa ser dropada antes do drop da view (que é recriada
+-- mais abaixo, junto de agenda_tita_autorizacao). É recriada no fim desta migration.
 drop function if exists "public"."listar_central_pacientes"(date);
 
 drop view if exists "public"."vw_central_pacientes";
@@ -80,117 +19,76 @@ drop view if exists "public"."vw_match_autorizacoes_assim";
 
 drop view if exists "public"."agenda_tita_autorizacao";
 
-alter table "public"."cronograma_estado" drop constraint "cronograma_estado_pkey";
 
-drop index if exists "public"."agenda_tita_unico";
-
-drop index if exists "public"."cronograma_estado_pkey";
-
-drop index if exists "public"."cronograma_estado_user_unique";
-
-drop index if exists "cco"."idx_atend_orphaned_at";
-
-drop table "public"."cronograma_estado";
-
-
-  create table "public"."csv_reposicao_faltas" (
-    "id" bigint not null default nextval('public.csv_reposicao_faltas_id_seq'::regclass),
-    "tita_agendamento_id" bigint,
-    "paciente_id" bigint,
-    "paciente_nome" text,
-    "data" date not null,
-    "dia_semana" text,
-    "hora_inicial" time without time zone,
-    "hora_final" time without time zone,
-    "profissional_id" bigint,
-    "profissional_nome" text,
-    "profissional_cpf" text,
-    "terapia_id" bigint,
-    "terapia_nome" text,
-    "terapia_exibicao_id" bigint,
-    "terapia_exibicao_nome" text,
-    "sala_id" bigint,
-    "sala_nome" text,
-    "sala_observacoes" text,
-    "unidade_id" bigint,
-    "unidade_nome" text,
-    "convenio_nome" text,
-    "status_agendamento" text,
-    "updated_at" timestamp with time zone default now()
+  create table "public"."fila_autorizacoes_backup_titaid" (
+    "id" uuid,
+    "tita_agendamento_id" bigint
       );
 
 
-alter table "public"."csv_reposicao_faltas" enable row level security;
+alter table "public"."fila_autorizacoes_backup_titaid" enable row level security;
 
-alter table "public"."audit_logs" alter column "user_id" drop not null;
 
-alter table "public"."autorizacoes_assim" add column "biofacial" text;
+  create table "public"."fila_bkp_titaid_faltas_jun" (
+    "id" uuid,
+    "tita_agendamento_id" bigint
+      );
 
-alter sequence "public"."csv_reposicao_faltas_id_seq" owned by "public"."csv_reposicao_faltas"."id";
 
-CREATE UNIQUE INDEX agenda_tita_unico_active ON public.agenda_tita USING btree (tita_agendamento_id) WHERE (ativo = true);
-
-CREATE UNIQUE INDEX csv_reposicao_faltas_pkey ON public.csv_reposicao_faltas USING btree (id);
-
-CREATE INDEX idx_agenda_orbita_paciente_nome ON public.agenda_orbita USING btree (paciente_nome);
-
-CREATE INDEX idx_agenda_tita_fallback_lateral ON public.agenda_tita USING btree (paciente_id, ((origem = 'grade'::text)) DESC, (((cpf IS NOT NULL) AND (numero_carteirinha IS NOT NULL))) DESC, updated_at DESC) WHERE ((cpf IS NOT NULL) OR (numero_carteirinha IS NOT NULL));
-
-CREATE INDEX idx_agenda_tita_paciente_id ON public.agenda_tita USING btree (paciente_id);
-
-CREATE INDEX idx_autorizacoes_assim_date_exec ON public.autorizacoes_assim USING btree (date(data_execucao));
-
-CREATE INDEX idx_csv_reposicao_data ON public.csv_reposicao_faltas USING btree (data);
-
-CREATE INDEX idx_csv_reposicao_data_status ON public.csv_reposicao_faltas USING btree (data, status_agendamento);
-
-CREATE INDEX idx_csv_reposicao_profissional ON public.csv_reposicao_faltas USING btree (profissional_id);
-
-CREATE INDEX idx_csv_reposicao_profissional_data ON public.csv_reposicao_faltas USING btree (profissional_id, data);
-
-CREATE INDEX idx_csv_reposicao_status ON public.csv_reposicao_faltas USING btree (status_agendamento);
-
-CREATE INDEX idx_csv_reposicao_terapia ON public.csv_reposicao_faltas USING btree (terapia_id);
-
-CREATE INDEX idx_fila_data_atend ON public.fila_autorizacoes USING btree (data_atendimento, paciente_id, horario);
-
-CREATE INDEX idx_atend_orphaned_at ON cco.atendimentos USING btree (orphaned_at) WHERE (orphaned_at IS NOT NULL);
-
-alter table "public"."csv_reposicao_faltas" add constraint "csv_reposicao_faltas_pkey" PRIMARY KEY using index "csv_reposicao_faltas_pkey";
+alter table "public"."fila_bkp_titaid_faltas_jun" enable row level security;
 
 set check_function_bodies = off;
 
--- [ajuste manual] "create type http_header/http_request/http_response" removidos:
--- são tipos fornecidos pela extensão "http" (criada na linha 1 desta migration).
--- O db pull os dumpou como create type explícito, o que conflita ("type already
--- exists") na reconstrução do shadow.
-
-create or replace view "public"."vw_reposicao_faltas" as  SELECT id,
+create or replace view "public"."vw_controle_terapeutico" as  SELECT id,
     tita_agendamento_id,
-    paciente_id,
-    paciente_nome,
-    data,
-    dia_semana,
+    data_atendimento,
     hora_inicial,
     hora_final,
     profissional_id,
     profissional_nome,
-    profissional_cpf,
     terapia_id,
     terapia_nome,
-    terapia_exibicao_id,
-    terapia_exibicao_nome,
-    sala_id,
-    sala_nome,
-    sala_observacoes,
-    unidade_id,
-    unidade_nome,
-    convenio_nome,
-    status_agendamento,
+    status,
+    profissional_substituto_id,
+    profissional_substituto_nome,
+        CASE
+            WHEN (status = 'substituido'::text) THEN 'faltou_substituido'::text
+            WHEN (status = 'indisponivel'::text) THEN 'faltou_sem_substituto'::text
+            WHEN (status = 'disponivel'::text) THEN 'compareceu'::text
+            ELSE 'indefinido'::text
+        END AS situacao,
+    (status = ANY (ARRAY['substituido'::text, 'indisponivel'::text])) AS houve_falta,
+    (status = 'substituido'::text) AS foi_substituido,
+    (status = 'indisponivel'::text) AS falta_descoberta,
+    observacao,
+    confirmado_por_nome,
+    confirmado_em,
+    data_atualizacao,
+    created_at,
     updated_at
-   FROM public.csv_reposicao_faltas
-  WHERE (status_agendamento = 'Livre'::text)
-  ORDER BY data, hora_inicial, profissional_nome;
+   FROM public.controle_terapeutico;
+
+
+create or replace view "public"."vw_faltas_pacientes" as  SELECT id,
+    paciente_id,
+    paciente_nome,
+    data_atendimento,
+    horario,
+    data_horario,
+    terapia_falta,
+    terapia_nome,
+    justificativa_falta,
+    tipo_falta,
+    nome_medico,
+    crm,
+    machine_id,
+    tita_agendamento_id,
+    status_assim,
+    assim_updated_at,
+    created_at,
+    updated_at
+   FROM public.fila_autorizacoes
+  WHERE ((status = 'falta'::text) AND (tipo_falta = 'paciente'::text));
 
 
 create or replace view "public"."agenda_classificada" as  SELECT id,
@@ -576,6 +474,25 @@ END;
 $function$
 ;
 
+CREATE OR REPLACE FUNCTION public.fn_match_tita_agendamento_id(p_paciente_id text, p_data date, p_horario time without time zone, p_terapia_nome text)
+ RETURNS bigint
+ LANGUAGE sql
+ STABLE
+AS $function$
+  select at.tita_agendamento_id
+  from public.agenda_tita at
+  where at.ativo = true
+    and p_paciente_id is not null
+    and p_paciente_id ~ '^\d+$'                    -- evita erro de cast em texto não-numérico
+    and at.paciente_id = (p_paciente_id)::bigint
+    and at.data_atendimento = p_data
+    and at.hora_inicial = p_horario
+    and lower(trim(coalesce(at.terapia_nome, ''))) = lower(trim(coalesce(p_terapia_nome, '')))
+  order by at.updated_at desc nulls last
+  limit 1
+$function$
+;
+
 CREATE OR REPLACE FUNCTION public.fn_reconcile_tita_csv_after_grade()
  RETURNS trigger
  LANGUAGE plpgsql
@@ -598,34 +515,21 @@ END;
 $function$
 ;
 
-CREATE OR REPLACE FUNCTION public.fn_sync_tita_grade()
- RETURNS void
+CREATE OR REPLACE FUNCTION public.fn_set_tita_agendamento_id()
+ RETURNS trigger
  LANGUAGE plpgsql
 AS $function$
-DECLARE
-  _url  text := 'https://wmugemamnqxjfpxrlwes.supabase.co/functions/v1/sync_tita_grade';
-  _auth text := 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndtdWdlbWFtbnF4amZweHJsd2VzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjA5ODA0NywiZXhwIjoyMDkxNjc0MDQ3fQ.jNPXyxt6IqhZ-GCJBsmDqQOz9PKHuAXKf30aJfHYfoo';
-  seg0  date := date_trunc('week', CURRENT_DATE AT TIME ZONE 'America/Sao_Paulo')::date;
-BEGIN
-  -- Semana corrente (Seg–Sex)
-  PERFORM net.http_post(
-    url     := _url,
-    headers := jsonb_build_object('Authorization', _auth, 'Content-Type', 'application/json'),
-    body    := jsonb_build_object('data_inicio', seg0::text, 'data_fim', (seg0 + 4)::text)
-  );
-  -- Próxima semana (Seg–Sex)
-  PERFORM net.http_post(
-    url     := _url,
-    headers := jsonb_build_object('Authorization', _auth, 'Content-Type', 'application/json'),
-    body    := jsonb_build_object('data_inicio', (seg0 + 7)::text, 'data_fim', (seg0 + 11)::text)
-  );
-  -- Semana 2 à frente (Seg–Sex)
-  PERFORM net.http_post(
-    url     := _url,
-    headers := jsonb_build_object('Authorization', _auth, 'Content-Type', 'application/json'),
-    body    := jsonb_build_object('data_inicio', (seg0 + 14)::text, 'data_fim', (seg0 + 18)::text)
-  );
-END;
+begin
+  if new.tita_agendamento_id is null then
+    new.tita_agendamento_id := public.fn_match_tita_agendamento_id(
+      new.paciente_id,
+      new.data_atendimento,
+      new.horario,
+      new.terapia_nome
+    );
+  end if;
+  return new;
+end;
 $function$
 ;
 
@@ -1102,28 +1006,6 @@ END;
 $function$
 ;
 
-CREATE OR REPLACE FUNCTION public.handle_new_user()
- RETURNS trigger
- LANGUAGE plpgsql
- SECURITY DEFINER
-AS $function$
-begin
-  insert into public.usuarios (id, nome, email, role, ativo, primeiro_acesso)
-  values (
-    new.id,
-    coalesce(new.raw_user_meta_data->>'nome', ''),
-    new.email,
-    coalesce(new.raw_user_meta_data->>'role', 'recepcao'),
-    false,
-    true
-  )
-  ON CONFLICT (id) DO NOTHING;
-
-  return new;
-end;
-$function$
-;
-
 CREATE OR REPLACE FUNCTION public.is_admin()
  RETURNS boolean
  LANGUAGE plpgsql
@@ -1298,57 +1180,6 @@ BEGIN
       'falta_paciente', (SELECT COUNT(*) FROM cco.atendimentos WHERE status_agendamento = 'FALTA_PACIENTE'),
       'outros', (SELECT COUNT(*) FROM cco.atendimentos WHERE status_agendamento != 'FALTA_PACIENTE')
     );
-END;
-$function$
-;
-
-CREATE OR REPLACE FUNCTION public.sync_assim_results()
- RETURNS void
- LANGUAGE plpgsql
-AS $function$
-BEGIN
-  UPDATE fila_autorizacoes fa
-  SET
-    status_assim        = vm.status_assim,
-    status              = CASE
-      WHEN vm.status_assim = 'Liberado *'
-        AND fa.status <> 'concluido'
-        THEN 'cancelado'
-      WHEN vm.status_assim = 'Liberado'
-        AND fa.status = 'erro'
-        THEN 'concluido'
-      WHEN vm.status_assim IS NOT NULL
-        AND vm.status_assim NOT ILIKE '%Liberado%'
-        AND fa.status NOT IN ('concluido', 'falta', 'pendente')
-        THEN 'glosa'
-      ELSE fa.status
-    END,
-    numero_autorizacao  = vm.guia,
-    horario_autorizacao = vm.data_execucao,
-    error_message       = CASE
-      WHEN vm.status_assim ILIKE '%REINCIDENCIA%' THEN vm.status_assim
-      WHEN vm.status_assim ILIKE '%ERRO%'         THEN vm.status_assim
-      ELSE NULL
-    END,
-    assim_updated_at    = NOW()
-  FROM vw_match_autorizacoes_assim vm
-  WHERE fa.paciente_id::bigint = vm.paciente_id
-    AND fa.data_atendimento    = vm.data_atendimento
-    AND fa.horario             = vm.hora_inicial;
-END;
-$function$
-;
-
-CREATE OR REPLACE FUNCTION public.sync_user_activation()
- RETURNS trigger
- LANGUAGE plpgsql
- SECURITY DEFINER
-AS $function$
-BEGIN
-  UPDATE public.perfis
-  SET ativo = NEW.email_confirmed_at IS NOT NULL
-  WHERE id = NEW.id;
-  RETURN NEW;
 END;
 $function$
 ;
@@ -2151,63 +1982,112 @@ create or replace view "public"."vw_central_autorizacoes" as  WITH fallback_pat 
      LEFT JOIN ultima_fila uf ON ((((uf.paciente_id)::bigint = b.paciente_id) AND (uf.data_atendimento = b.data_atendimento) AND (uf.horario = b.horario))));
 
 
-grant delete on table "public"."csv_reposicao_faltas" to "anon";
+grant delete on table "public"."fila_autorizacoes_backup_titaid" to "anon";
 
-grant insert on table "public"."csv_reposicao_faltas" to "anon";
+grant insert on table "public"."fila_autorizacoes_backup_titaid" to "anon";
 
-grant references on table "public"."csv_reposicao_faltas" to "anon";
+grant references on table "public"."fila_autorizacoes_backup_titaid" to "anon";
 
-grant select on table "public"."csv_reposicao_faltas" to "anon";
+grant select on table "public"."fila_autorizacoes_backup_titaid" to "anon";
 
-grant trigger on table "public"."csv_reposicao_faltas" to "anon";
+grant trigger on table "public"."fila_autorizacoes_backup_titaid" to "anon";
 
-grant truncate on table "public"."csv_reposicao_faltas" to "anon";
+grant truncate on table "public"."fila_autorizacoes_backup_titaid" to "anon";
 
-grant update on table "public"."csv_reposicao_faltas" to "anon";
+grant update on table "public"."fila_autorizacoes_backup_titaid" to "anon";
 
-grant delete on table "public"."csv_reposicao_faltas" to "authenticated";
+grant delete on table "public"."fila_autorizacoes_backup_titaid" to "authenticated";
 
-grant insert on table "public"."csv_reposicao_faltas" to "authenticated";
+grant insert on table "public"."fila_autorizacoes_backup_titaid" to "authenticated";
 
-grant references on table "public"."csv_reposicao_faltas" to "authenticated";
+grant references on table "public"."fila_autorizacoes_backup_titaid" to "authenticated";
 
-grant select on table "public"."csv_reposicao_faltas" to "authenticated";
+grant select on table "public"."fila_autorizacoes_backup_titaid" to "authenticated";
 
-grant trigger on table "public"."csv_reposicao_faltas" to "authenticated";
+grant trigger on table "public"."fila_autorizacoes_backup_titaid" to "authenticated";
 
-grant truncate on table "public"."csv_reposicao_faltas" to "authenticated";
+grant truncate on table "public"."fila_autorizacoes_backup_titaid" to "authenticated";
 
-grant update on table "public"."csv_reposicao_faltas" to "authenticated";
+grant update on table "public"."fila_autorizacoes_backup_titaid" to "authenticated";
 
-grant delete on table "public"."csv_reposicao_faltas" to "service_role";
+grant delete on table "public"."fila_autorizacoes_backup_titaid" to "service_role";
 
-grant insert on table "public"."csv_reposicao_faltas" to "service_role";
+grant insert on table "public"."fila_autorizacoes_backup_titaid" to "service_role";
 
-grant references on table "public"."csv_reposicao_faltas" to "service_role";
+grant references on table "public"."fila_autorizacoes_backup_titaid" to "service_role";
 
-grant select on table "public"."csv_reposicao_faltas" to "service_role";
+grant select on table "public"."fila_autorizacoes_backup_titaid" to "service_role";
 
-grant trigger on table "public"."csv_reposicao_faltas" to "service_role";
+grant trigger on table "public"."fila_autorizacoes_backup_titaid" to "service_role";
 
-grant truncate on table "public"."csv_reposicao_faltas" to "service_role";
+grant truncate on table "public"."fila_autorizacoes_backup_titaid" to "service_role";
 
-grant update on table "public"."csv_reposicao_faltas" to "service_role";
+grant update on table "public"."fila_autorizacoes_backup_titaid" to "service_role";
+
+grant delete on table "public"."fila_bkp_titaid_faltas_jun" to "anon";
+
+grant insert on table "public"."fila_bkp_titaid_faltas_jun" to "anon";
+
+grant references on table "public"."fila_bkp_titaid_faltas_jun" to "anon";
+
+grant select on table "public"."fila_bkp_titaid_faltas_jun" to "anon";
+
+grant trigger on table "public"."fila_bkp_titaid_faltas_jun" to "anon";
+
+grant truncate on table "public"."fila_bkp_titaid_faltas_jun" to "anon";
+
+grant update on table "public"."fila_bkp_titaid_faltas_jun" to "anon";
+
+grant delete on table "public"."fila_bkp_titaid_faltas_jun" to "authenticated";
+
+grant insert on table "public"."fila_bkp_titaid_faltas_jun" to "authenticated";
+
+grant references on table "public"."fila_bkp_titaid_faltas_jun" to "authenticated";
+
+grant select on table "public"."fila_bkp_titaid_faltas_jun" to "authenticated";
+
+grant trigger on table "public"."fila_bkp_titaid_faltas_jun" to "authenticated";
+
+grant truncate on table "public"."fila_bkp_titaid_faltas_jun" to "authenticated";
+
+grant update on table "public"."fila_bkp_titaid_faltas_jun" to "authenticated";
+
+grant delete on table "public"."fila_bkp_titaid_faltas_jun" to "service_role";
+
+grant insert on table "public"."fila_bkp_titaid_faltas_jun" to "service_role";
+
+grant references on table "public"."fila_bkp_titaid_faltas_jun" to "service_role";
+
+grant select on table "public"."fila_bkp_titaid_faltas_jun" to "service_role";
+
+grant trigger on table "public"."fila_bkp_titaid_faltas_jun" to "service_role";
+
+grant truncate on table "public"."fila_bkp_titaid_faltas_jun" to "service_role";
+
+grant update on table "public"."fila_bkp_titaid_faltas_jun" to "service_role";
 
 
-  create policy "cco_admin_only"
-  on "cco"."atendimentos"
+  create policy "csv_reposicao_faltas_select_all"
+  on "public"."csv_reposicao_faltas"
   as permissive
-  for all
+  for select
+  to anon, authenticated
+using (true);
+
+
+
+  create policy "controle_terapeutico_therapeutic_select"
+  on "public"."controle_terapeutico"
+  as permissive
+  for select
   to authenticated
-using (public.is_admin());
-
-
-CREATE TRIGGER "controle-terapeutico-slack" AFTER INSERT OR UPDATE ON public.controle_terapeutico FOR EACH ROW EXECUTE FUNCTION supabase_functions.http_request('https://wmugemamnqxjfpxrlwes.supabase.co/functions/v1/msg-slack', 'POST', '{"Content-type":"application/json","Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndtdWdlbWFtbnF4amZweHJsd2VzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjA5ODA0NywiZXhwIjoyMDkxNjc0MDQ3fQ.jNPXyxt6IqhZ-GCJBsmDqQOz9PKHuAXKf30aJfHYfoo"}', '{}', '5000');
+using ((EXISTS ( SELECT 1
+   FROM public.usuarios u
+  WHERE ((u.id = auth.uid()) AND (u.role = ANY (ARRAY['terapeutico'::text, 'terapeuta'::text, 'admin'::text, 'diretoria'::text])) AND (u.ativo = true)))));
 
 
 -- [ajuste manual] Recria listar_central_pacientes após a view vw_central_pacientes
--- (dropada no topo desta migration por depender do tipo da view). Definição idêntica
--- à vigente em 20260614000000_extend_central_pacientes_substituicao.sql.
+-- (dropada no topo por depender do tipo da view). Definição idêntica à vigente.
 CREATE OR REPLACE FUNCTION public.listar_central_pacientes(p_data date)
 RETURNS SETOF public.vw_central_pacientes
 LANGUAGE sql STABLE SECURITY INVOKER
@@ -2452,6 +2332,5 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.listar_central_pacientes(date) TO anon, authenticated, service_role;
 
-drop trigger if exists "on_auth_user_confirmed" on "auth"."users";
 
 
