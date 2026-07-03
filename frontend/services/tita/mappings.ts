@@ -46,9 +46,12 @@ export interface GradeTerapeutaInfo {
  * 100% das linhas "Livre" (é a origem de todo csvGradeId — ver invariante em
  * OcupPacMode.tsx), e que terapia_id não mapeia 1:1 para terapia_exibicao_id (ex.:
  * "Psicologia" aparece com 3 terapia_exibicao_id distintos), então não é seguro
- * inferir. grade_profissionais_tita tem esses dois campos para ~9% das linhas
- * "Livre" — quando ausentes ali, retornam null e o chamador deve tratar como
- * "não é possível agendar esta grade", não adivinhar um valor.
+ * inferir a partir de terapia_id. id_sala vem sempre preenchido na linha casada;
+ * terapia_exibicao_id costuma vir NULL para horários vagos e é recuperado por
+ * fallback do MESMO grade_terapeuta_id em outra data, com guard de unicidade (ver
+ * bloco abaixo). Quando nem assim há um valor seguro, terapia_exibicao_id retorna
+ * null e o chamador deve tratar como "não é possível agendar esta grade", não
+ * adivinhar um valor.
  *
  * Retorna null (não lança) quando não encontrar correspondência: a causa mais
  * provável é o registro ainda não ter sido sincronizado por sync_tita_grade
@@ -83,10 +86,50 @@ export async function resolverGradeTerapeuta(
     return null
   }
 
+  const idSala = (row?.id_sala as number | null | undefined) ?? null
+  let terapiaExibicaoId = (row?.terapia_exibicao_id as number | null | undefined) ?? null
+
+  // Fallback de terapia_exibicao_id (achado real: a TiTa não publica esse campo
+  // para horários vagos — em agosto/2026, 3073 de 3194 slots "Livre" vinham com
+  // terapia_exibicao_id NULL, embora id_sala estivesse 100% presente). Não é
+  // inferência: grade_terapeuta_id identifica o mesmo slot-template recorrente do
+  // terapeuta, e sua terapia_exibicao_id é estável entre datas — validado com
+  // dados reais que 98,2% dos grade_terapeuta_id mapeiam para um único
+  // terapia_exibicao_id. Recupera-se o valor de OUTRA data do MESMO
+  // grade_terapeuta_id, e só quando há exatamente um valor distinto (guard de
+  // unicidade). Se o template for ambíguo (>1 valor) ou nunca tiver exibição
+  // sincronizada, permanece NULL e o chamador bloqueia — nunca chuta um valor,
+  // porque enviar sala/terapia errada criaria um agendamento errado na TiTa.
+  if (terapiaExibicaoId == null) {
+    const { data: exibRows, error: exibError } = await supabase
+      .from("grade_profissionais_tita")
+      .select("terapia_exibicao_id")
+      .eq("grade_terapeuta_id", gradeTerapeutaId)
+      .not("terapia_exibicao_id", "is", null)
+
+    if (exibError) throw exibError
+
+    const distintos = Array.from(
+      new Set(
+        (exibRows ?? [])
+          .map(r => r.terapia_exibicao_id as number | null | undefined)
+          .filter((v): v is number => v != null),
+      ),
+    )
+    if (distintos.length === 1) {
+      terapiaExibicaoId = distintos[0]
+    } else {
+      console.warn(
+        "[tita:resolverGradeTerapeuta] terapia_exibicao_id não recuperável (template ambíguo ou sem referência)",
+        JSON.stringify({ gradeTerapeutaId, valores_distintos: distintos.length }),
+      )
+    }
+  }
+
   return {
     gradeTerapeutaId,
-    idSala: (row?.id_sala as number | null | undefined) ?? null,
-    terapiaExibicaoId: (row?.terapia_exibicao_id as number | null | undefined) ?? null,
+    idSala,
+    terapiaExibicaoId,
   }
 }
 

@@ -11,29 +11,19 @@ export const FREQUENCIA_SEMANAL = 4
 export const DATA_FINAL_FIXA = "2026-12-31"
 
 /**
- * Regra: primeira ocorrência do mesmo dia da semana da sugestão, no mês seguinte.
- * Cálculo em UTC puro a partir dos componentes Y-M-D da string (evita depender do
- * fuso horário local do processo, o que deslocaria o dia da semana perto da meia-noite).
+ * data_inicial é a própria data do slot consultado (grade.data). A página de
+ * Ocupação de Paciente já escopa as sugestões para a primeira semana do mês
+ * seguinte, então a data do slot já é o início desejado da série; a frequência
+ * semanal (FREQUENCIA_SEMANAL) cobre as ocorrências seguintes do mesmo dia da
+ * semana até data_final.
+ *
+ * Correção 2026-07-03: antes esta função pulava para o mês seguinte ao da
+ * sugestão, o que causava um duplo salto (sugestão de agosto → série começando em
+ * setembro), já que a própria página projeta as sugestões para o próximo mês. O
+ * início deve ser exatamente o slot consultado. Normaliza para YYYY-MM-DD.
  */
 export function calcularDataInicial(dataSugestao: string): string {
-  const [anoStr, mesStr, diaStr] = dataSugestao.split("-")
-  const ano = Number(anoStr)
-  const mes = Number(mesStr)
-  const dia = Number(diaStr)
-
-  const diaSemanaAlvo = new Date(Date.UTC(ano, mes - 1, dia)).getUTCDay()
-
-  const proximoMes    = mes === 12 ? 1 : mes + 1
-  const anoProximoMes = mes === 12 ? ano + 1 : ano
-
-  for (let d = 1; d <= 7; d++) {
-    const candidato = new Date(Date.UTC(anoProximoMes, proximoMes - 1, d))
-    if (candidato.getUTCDay() === diaSemanaAlvo) {
-      return candidato.toISOString().slice(0, 10)
-    }
-  }
-  // Inatingível: os 7 dias da semana sempre aparecem nos primeiros 7 dias de um mês.
-  throw new Error(`Não foi possível calcular data_inicial para "${dataSugestao}"`)
+  return dataSugestao.slice(0, 10)
 }
 
 /** data_final é uma regra fixa do projeto — sempre DATA_FINAL_FIXA. */
