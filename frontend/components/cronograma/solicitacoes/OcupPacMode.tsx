@@ -21,11 +21,11 @@ import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 type Estrategia = "S1" | "S2" | "S3"
 type Status     = "acompanhamento" | "inviavel"
 
-interface VComp { tP: string; prof: string; hora: string }
-interface ProfAlt { tP: string; prof: string; unidade: string }
+interface VComp { tP: string; prof: string; hora: string; csvGradeId: string }
+interface ProfAlt { tP: string; prof: string; unidade: string; csvGradeId: string }
 
 interface EspAlt {
-  esp: string; tP: string; prof: string; unidade: string
+  esp: string; tP: string; prof: string; unidade: string; csvGradeId: string
   profAlts: ProfAlt[]
   vComp: VComp[]
   vCompAlts: Record<string, VComp[]>
@@ -35,7 +35,7 @@ interface Sugestao {
   id: string
   esp: string
   tP: string
-  dia: string; hora: string; prof: string; unidade: string
+  dia: string; hora: string; prof: string; unidade: string; csvGradeId: string
   tipo: "adjacente" | "dia-novo"
   vComp: VComp[]
   vCompAlts: Record<string, VComp[]>
@@ -47,6 +47,8 @@ interface GapInfo { esp: string; aut: number; of: number; dif: number; reservado
 
 interface AceiteSessao {
   dia: string; hora: string; tP: string; prof: string; unidade: string
+  /** UUID da linha em csv_grades_profissionais de origem — usado para resolver o agendamento na TiTa. */
+  csvGradeId: string
 }
 
 interface AceitePacBundle {
@@ -333,10 +335,12 @@ function buildSugestoes(
       // causaria duas sessões consecutivas em unidades diferentes (viola R5.4).
       const profAlts = altRows
         .filter(r => !hasDay ? rowUnid(r) === unid : true)
-        .map(r => ({ tP: r.Terapia, prof: r.Profissional, unidade: rowUnid(r) }))
+        // Invariante: toda linha aqui vem de cRows (Status=Livre), sempre com CsvGradeId
+        // preenchido — a grade é sempre carregada via buscarGradeComoCSVRows.
+        .map(r => ({ tP: r.Terapia, prof: r.Profissional, unidade: rowUnid(r), csvGradeId: r.CsvGradeId! }))
       if (!hasDay) {
         const seenComp = new Set<string>()
-        const compRows: Array<{ tP: string; prof: string; hora: string }> = []
+        const compRows: Array<{ tP: string; prof: string; hora: string; csvGradeId: string }> = []
         for (const r of cRows) {
           if (r["Status do Agendamento"] !== "Livre") continue
           if (isProfBloqueadoTemp(r.Profissional)) continue
@@ -353,7 +357,7 @@ function buildSugestoes(
           const ck = `${r.Terapia}|||${r.Profissional}|||${cHora}`
           if (seenComp.has(ck)) continue
           seenComp.add(ck)
-          compRows.push({ tP: r.Terapia, prof: r.Profissional, hora: cHora })
+          compRows.push({ tP: r.Terapia, prof: r.Profissional, hora: cHora, csvGradeId: r.CsvGradeId! })
         }
         if (compRows.length === 0) return null
         // Ordena por déficit desc + taxa de preenchimento asc para que g[0] seja sempre
@@ -374,7 +378,8 @@ function buildSugestoes(
           byHora[c.hora].push(c)
         }
         return {
-          esp, tP: primaryRow.Terapia, prof: primaryRow.Profissional, unidade: unid, profAlts,
+          esp, tP: primaryRow.Terapia, prof: primaryRow.Profissional, unidade: unid,
+          csvGradeId: primaryRow.CsvGradeId!, profAlts,
           vComp: Object.values(byHora).map(g => g[0]),
           vCompAlts: byHora,
         }
@@ -390,11 +395,15 @@ function buildSugestoes(
         const [vPrimary, ...vAlts] = validRows
         return {
           esp, tP: vPrimary.Terapia, prof: vPrimary.Profissional, unidade: existingUnid,
-          profAlts: vAlts.map(r => ({ tP: r.Terapia, prof: r.Profissional, unidade: rowUnid(r) })),
+          csvGradeId: vPrimary.CsvGradeId!,
+          profAlts: vAlts.map(r => ({ tP: r.Terapia, prof: r.Profissional, unidade: rowUnid(r), csvGradeId: r.CsvGradeId! })),
           vComp: [], vCompAlts: {},
         }
       }
-      return { esp, tP: primaryRow.Terapia, prof: primaryRow.Profissional, unidade: unid, profAlts, vComp: [], vCompAlts: {} }
+      return {
+        esp, tP: primaryRow.Terapia, prof: primaryRow.Profissional, unidade: unid,
+        csvGradeId: primaryRow.CsvGradeId!, profAlts, vComp: [], vCompAlts: {},
+      }
     }
 
     // Encontra a esp default (maior gap com dados válidos) e coleta espAlts.
@@ -417,6 +426,7 @@ function buildSugestoes(
         id: `${dia}|||${hora}|||${defaultEntry.esp}`,
         esp: defaultEntry.esp, tP: defaultEntry.tP,
         dia, hora, prof: defaultEntry.prof, unidade: defaultEntry.unidade,
+        csvGradeId: defaultEntry.csvGradeId,
         tipo: "adjacente", vComp: [], vCompAlts: {},
         profAlts: defaultEntry.profAlts,
         espAlts: altEntries,
@@ -427,6 +437,7 @@ function buildSugestoes(
         id: `${dia}|||${hora}|||${defaultEntry.esp}`,
         esp: defaultEntry.esp, tP: defaultEntry.tP,
         dia, hora, prof: defaultEntry.prof, unidade: defaultEntry.unidade,
+        csvGradeId: defaultEntry.csvGradeId,
         tipo: "dia-novo",
         vComp: defaultEntry.vComp, vCompAlts: defaultEntry.vCompAlts,
         profAlts: defaultEntry.profAlts,
@@ -463,7 +474,7 @@ function buildSugestoes(
 
 type AcaoDiretaType = "aceitar" | "recusar" | "inviavel"
 interface PendingAcaoInfo {
-  sugestao: Sugestao; hora: string; tP: string; prof: string; unidade: string; acao: AcaoDiretaType
+  sugestao: Sugestao; hora: string; tP: string; prof: string; unidade: string; csvGradeId: string; acao: AcaoDiretaType
 }
 
 interface TodasSugestoesModalProps {
@@ -572,13 +583,16 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
   function getActiveEspData(s: Sugestao): EspAlt {
     const idx = espSelIdx[s.id] ?? 0
     if (idx > 0 && s.espAlts[idx - 1]) return s.espAlts[idx - 1]
-    return { esp: s.esp, tP: s.tP, prof: s.prof, unidade: s.unidade, profAlts: s.profAlts, vComp: s.vComp, vCompAlts: s.vCompAlts }
+    return {
+      esp: s.esp, tP: s.tP, prof: s.prof, unidade: s.unidade, csvGradeId: s.csvGradeId,
+      profAlts: s.profAlts, vComp: s.vComp, vCompAlts: s.vCompAlts,
+    }
   }
 
-  function getActiveEntry(s: Sugestao): { tP: string; prof: string; unidade: string } {
+  function getActiveEntry(s: Sugestao): { tP: string; prof: string; unidade: string; csvGradeId: string } {
     const ed  = getActiveEspData(s)
     const idx = profSelIdx[s.id] ?? 0
-    if (idx === 0 || !ed.profAlts[idx - 1]) return { tP: ed.tP, prof: ed.prof, unidade: ed.unidade }
+    if (idx === 0 || !ed.profAlts[idx - 1]) return { tP: ed.tP, prof: ed.prof, unidade: ed.unidade, csvGradeId: ed.csvGradeId }
     return ed.profAlts[idx - 1]
   }
 
@@ -603,13 +617,13 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
         const vc = getActiveVComps(s).find(v => v.hora === hora)
         if (!vc) continue
         const ae = getActiveEntry(s)
-        sessoes.push({ dia: s.dia, hora, tP: vc.tP, prof: vc.prof, unidade: ae.unidade })
+        sessoes.push({ dia: s.dia, hora, tP: vc.tP, prof: vc.prof, unidade: ae.unidade, csvGradeId: vc.csvGradeId })
       } else {
         const s = sugestoes.find(x => x.id === id)
         if (!s || stOf(s) === "inviavel") continue
         const ae = getActiveEntry(s)
         if (!isVCompExcluded(s.id, s.hora)) {
-          sessoes.push({ dia: s.dia, hora: s.hora, tP: ae.tP, prof: ae.prof, unidade: ae.unidade })
+          sessoes.push({ dia: s.dia, hora: s.hora, tP: ae.tP, prof: ae.prof, unidade: ae.unidade, csvGradeId: ae.csvGradeId })
         }
       }
     }
@@ -1025,7 +1039,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                               <span style={{ color: c.tipo === "aceito" ? B.blue : "#374151" }}>{cs.label}</span>
                                             ) : null}
                                             {isClickable && c.sugestaoId && (
-                                              <button onClick={e => { e.stopPropagation(); const sid = isVCompCard ? c.sugestaoId!.slice(0, c.sugestaoId!.indexOf("|||vc|||")) : c.sugestaoId!; const sug = sugestoes.find(x => x.id === sid); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, acao: "recusar" }); setAcaoMotivo("") }}
+                                              <button onClick={e => { e.stopPropagation(); const sid = isVCompCard ? c.sugestaoId!.slice(0, c.sugestaoId!.indexOf("|||vc|||")) : c.sugestaoId!; const sug = sugestoes.find(x => x.id === sid); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, csvGradeId: ae.csvGradeId, acao: "recusar" }); setAcaoMotivo("") }}
                                                 style={{ fontSize: "9px", padding: "1px 6px", borderRadius: "3px", border: "1px solid #fca5a5", background: "#fee2e2", color: "#dc2626", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, lineHeight: "1.4", flexShrink: 0, marginLeft: "auto" }}>Recusar</button>
                                             )}
                                             {isRecusadaCard && c.sugestaoId && (
@@ -1053,7 +1067,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                                 ⚠ Escolher terapia
                                               </button>
                                               <button
-                                                onClick={e => { e.stopPropagation(); const sug = sugestoes.find(x => x.id === c.sugestaoId!); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, acao: "recusar" }); setAcaoMotivo("") }}
+                                                onClick={e => { e.stopPropagation(); const sug = sugestoes.find(x => x.id === c.sugestaoId!); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, csvGradeId: ae.csvGradeId, acao: "recusar" }); setAcaoMotivo("") }}
                                                 style={{ fontSize: "9px", padding: "2px 4px", borderRadius: "3px", border: "1px solid #fca5a5", background: "#fee2e2", color: "#dc2626", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, lineHeight: "1.4", textAlign: "center" }}>
                                                 Recusar
                                               </button>
@@ -1118,7 +1132,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                                 Alterar terapia
                                               </button>
                                               <button
-                                                onClick={e => { e.stopPropagation(); const sug = sugestoes.find(x => x.id === c.sugestaoId!); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, acao: "recusar" }); setAcaoMotivo("") }}
+                                                onClick={e => { e.stopPropagation(); const sug = sugestoes.find(x => x.id === c.sugestaoId!); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, csvGradeId: ae.csvGradeId, acao: "recusar" }); setAcaoMotivo("") }}
                                                 style={{ fontSize: "9px", padding: "1px 6px", borderRadius: "3px", border: "1px solid #fca5a5", background: "#fee2e2", color: "#dc2626", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, lineHeight: "1.4", flexShrink: 0, marginLeft: "auto" }}>
                                                 Recusar
                                               </button>
@@ -1310,7 +1324,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
       const motivoFaltando = isInvAcao && !acaoMotivo.trim()
       const handleConfirmar = () => {
         if (motivoFaltando) return
-        const sessao: AceiteSessao = { dia: pendingAcao.sugestao.dia, hora: pendingAcao.hora, tP: pendingAcao.tP, prof: pendingAcao.prof, unidade: pendingAcao.unidade }
+        const sessao: AceiteSessao = { dia: pendingAcao.sugestao.dia, hora: pendingAcao.hora, tP: pendingAcao.tP, prof: pendingAcao.prof, unidade: pendingAcao.unidade, csvGradeId: pendingAcao.csvGradeId }
         const statusFinal = pendingAcao.acao === "aceitar" ? "pendente" : pendingAcao.acao === "recusar" ? "recusado" : "inviavel"
         onAcaoDireta([sessao], statusFinal, acaoMotivo || undefined)
         if (pendingAcao.acao === "inviavel") {
@@ -1666,6 +1680,9 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
   const listboxRef = useRef<HTMLDivElement>(null)
   // CRON-008: sessões aguardando confirmação no modal premium de implantação
   const [pendingConfirm, setPendingConfirm] = useState<{ sessoes: AceiteSessao[]; beforeCount: number } | null>(null)
+  // Confirmação agora chama a API da TiTa (fetch assíncrono) — usado para desabilitar
+  // o modal e impedir cancelar/duplo-clique enquanto a chamada está em andamento.
+  const [confirmando, setConfirmando] = useState(false)
 
   // CRON-008: sessões já reservadas (implantação imediata) deste paciente — exibidas
   // diretamente na grade do TodasSugestoesModal como "Reservado".
@@ -1705,6 +1722,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
   }
 
   function cancelarImplantacao() {
+    if (confirmando) return // chamada à TiTa em andamento — não permite fechar no meio
     setPendingConfirm(null)
   }
 
@@ -1714,28 +1732,67 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
   // conhecia um dos dois lados. Grade ("Reservado"), bloqueio cross-paciente
   // (slotsReservadosOutros/aqui e confirmedItems em OcupacaoShell) e a aba
   // Confirmados (via pacConfDerived em AcompanhamentoTab) leem todos direto daqui.
-  function confirmarImplantacao() {
-    if (!pendingConfirm) return
+  //
+  // A implantação local (persistAceites) só acontece se a TiTa confirmar TODAS as
+  // sessões do bundle (tudo ou nada) — ver app/api/tita/confirmar-agendamento.
+  // Isso evita que a Reserva Pendente exista localmente sem o agendamento real ter
+  // sido criado na TiTa. Se a chamada falhar, o modal permanece aberto com a
+  // seleção intacta para o usuário tentar de novo.
+  async function confirmarImplantacao() {
+    if (!pendingConfirm || confirmando) return
     const { sessoes } = pendingConfirm
 
-    const bundle: AceitePacBundle = {
-      id: `${Date.now()}_${pac.slice(0, 8)}`,
-      pac, ts: Date.now(),
-      origem: "ocp-paciente",
-      sessoes,
-      status: "confirmado",
-      inviavelSlots: [],
-    }
-    persistAceites([...aceites, bundle])
+    setConfirmando(true)
+    try {
+      const resp = await fetch("/api/tita/confirmar-agendamento", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pac, sessoes }),
+      })
+      const body = await resp.json().catch(() => null) as {
+        ok: boolean
+        error?: string
+        mensagem?: string
+        resultados?: Array<{ csvGradeId: string; ok: boolean; codigoErro?: string }>
+      } | null
 
-    // 2. Contexto já atualizado pelo persist acima. 3. Limpar seleção.
-    modalRef.current?.clearAll()
-    // 4. Fechar modal.
-    setPendingConfirm(null)
-    // 5. Permanece no paciente selecionado: a grade e o painel lateral já reagem
-    //    sozinhos (reservasConfirmadas/sugestoes derivam de `aceites`), então o
-    //    "Reservado" aparece imediatamente sem precisar sair da tela do paciente.
-    toast(`✅ ${sessoes.length} ${sessoes.length === 1 ? "sessão reservada" : "sessões reservadas"} para ${pac}. Aguardando sincronização da grade.`)
+      if (!resp.ok || !body?.ok) {
+        const falhas = body?.resultados?.filter(r => !r.ok) ?? []
+        // Mensagem amigável já vem traduzida do backend (mensagemAmigavel/
+        // mensagemResumoCriacao em services/tita/confirmar.ts) — nunca expõe
+        // código técnico/stack ao usuário.
+        const mensagem = body?.mensagem ?? "Não foi possível concluir a integração com a TiTa. Tente novamente."
+        const contagem = falhas.length || sessoes.length
+        toast.error(`❌ ${mensagem} (${contagem}/${sessoes.length} sessões afetadas)`)
+        return
+      }
+
+      const bundle: AceitePacBundle = {
+        id: `${Date.now()}_${pac.slice(0, 8)}`,
+        pac, ts: Date.now(),
+        origem: "ocp-paciente",
+        sessoes,
+        status: "confirmado",
+        inviavelSlots: [],
+      }
+      persistAceites([...aceites, bundle])
+
+      modalRef.current?.clearAll()
+      setPendingConfirm(null)
+      // Permanece no paciente selecionado: a grade e o painel lateral já reagem
+      // sozinhos (reservasConfirmadas/sugestoes derivam de `aceites`), então o
+      // "Reservado" aparece imediatamente sem precisar sair da tela do paciente.
+      // body.mensagem já vem orientada ao negócio (ex.: "16 sessões criadas. 6 não
+      // puderam ser criadas porque já estavam ocupadas.") — cai no texto genérico
+      // anterior só se o backend não enviar mensagem por algum motivo.
+      const mensagemSucesso = body?.mensagem
+        ?? `${sessoes.length} ${sessoes.length === 1 ? "sessão reservada" : "sessões reservadas"} para ${pac}. Aguardando sincronização da grade.`
+      toast(`✅ ${mensagemSucesso}`)
+    } catch (err) {
+      toast.error(`❌ Falha ao comunicar com a TiTa: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setConfirmando(false)
+    }
   }
 
   function handleInviavel(sessoes: AceiteSessao[], motivo: string) {
@@ -2494,6 +2551,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
           pac={pac}
           sessoesAtuais={pendingConfirm.beforeCount}
           sessoes={pendingConfirm.sessoes}
+          confirming={confirmando}
           onConfirm={confirmarImplantacao}
           onCancel={cancelarImplantacao}
         />
@@ -2628,7 +2686,7 @@ function SugestaoCard({
             <button
               onClick={() => {
                 setSt(sugestao, "inviavel")
-                onInviavel?.([{ dia: sugestao.dia, hora: sugestao.hora, tP: sugestao.tP, prof: sugestao.prof, unidade: sugestao.unidade }], invMotivo)
+                onInviavel?.([{ dia: sugestao.dia, hora: sugestao.hora, tP: sugestao.tP, prof: sugestao.prof, unidade: sugestao.unidade, csvGradeId: sugestao.csvGradeId }], invMotivo)
                 setPendingInv(false); setInvMotivo("")
               }}
               style={{ flex: 1, padding: "10px 14px", borderRadius: "10px", background: "#dc2626", color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: "13px" }}>

@@ -11,6 +11,8 @@ export interface CsvRow {
   "Convênio"?: string
   "Sala"?: string
   "Data"?: string
+  /** UUID da linha em csv_grades_profissionais (coluna id) — identifica o registro de origem. */
+  CsvGradeId?: string
   [key: string]: string | number | null | undefined
 }
 
