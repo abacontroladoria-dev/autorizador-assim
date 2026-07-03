@@ -93,10 +93,10 @@ export function ConfirmarImplantacaoModal({ pac, sessoesAtuais, sessoes, confirm
           </div>
 
           {/* Aviso */}
-          <div style={{ display: "flex", gap: "8px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: "10px", padding: "10px 12px" }}>
-            <span style={{ fontSize: "15px", lineHeight: 1 }}>⏳</span>
-            <span style={{ fontSize: "11.5px", color: "#92400e", lineHeight: 1.4 }}>
-              As sessões serão reservadas <strong>imediatamente</strong> e aguardarão a próxima sincronização da grade oficial (API/CSV) para serem exibidas como implantadas.
+          <div style={{ display: "flex", gap: "8px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "10px", padding: "10px 12px" }}>
+            <span style={{ fontSize: "15px", lineHeight: 1 }}>✅</span>
+            <span style={{ fontSize: "11.5px", color: "#15803d", lineHeight: 1.4 }}>
+              As sessões serão implantadas <strong>imediatamente</strong> na TiTa. Após a confirmação, a ocupação será atualizada automaticamente.
             </span>
           </div>
         </div>
@@ -116,7 +116,7 @@ export function ConfirmarImplantacaoModal({ pac, sessoesAtuais, sessoes, confirm
             disabled={confirming}
             style={{ flex: 2, padding: "10px 16px", borderRadius: "10px", background: "#16a34a", color: "white", border: "none", cursor: confirming ? "not-allowed" : "pointer", opacity: confirming ? 0.75 : 1, fontFamily: "inherit", fontWeight: 800, fontSize: "13px", boxShadow: "0 2px 10px rgba(22,163,74,.3)" }}
           >
-            {confirming ? "⏳ Enviando para a TiTa…" : "🔒 Confirmar implantação"}
+            {confirming ? "⏳ Implantando sessões na TiTa…" : "🔒 Confirmar implantação"}
           </button>
         </div>
       </div>

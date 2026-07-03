@@ -95,19 +95,22 @@ export async function prepararAgendamento(
  * Códigos não mapeados caem no fallback genérico — nunca expõe mensagem técnica
  * bruta (stack, JSON de resposta HTTP, etc.) na interface.
  */
+// Mensagens orientadas ao usuário — falam de "implantação" (fluxo atual, imediato)
+// e nunca expõem termos técnicos internos (nomes de tabela, IDs, "sincronização",
+// "CSV", "API"). Cada código interno mapeia para a causa como o usuário a percebe.
 const MENSAGENS_AMIGAVEIS: Record<string, string> = {
-  grade_nao_encontrada: "Não foi possível localizar esse horário na grade oficial. Atualize a página e tente novamente.",
-  grade_sem_profissional_id_ou_hora_inicial: "O registro dessa vaga está incompleto. Contate o suporte.",
-  id_grade_terapeuta_nao_encontrado: "Este horário ainda não foi sincronizado com a agenda oficial da TiTa. Tente novamente em alguns minutos.",
-  id_favorecido_nao_encontrado: "Este paciente ainda não está cadastrado como favorecido na TiTa. Contate o suporte.",
-  grade_terapeuta_sem_sala_ou_exibicao: "Este horário ainda não está totalmente configurado na TiTa (sala ou terapia de exibição ausente). Escolha outro horário ou contate o suporte.",
-  indisponivel_na_tita: "Este horário não está mais disponível na TiTa. Escolha outro horário.",
-  erro_ao_verificar_disponibilidade: "Não foi possível verificar a disponibilidade deste horário na TiTa agora. Tente novamente em instantes.",
+  grade_nao_encontrada: "Este horário ainda não está disponível para implantação. Aguarde alguns minutos e tente novamente.",
+  grade_sem_profissional_id_ou_hora_inicial: "Este horário ainda não está totalmente configurado para implantação. Tente novamente mais tarde.",
+  id_grade_terapeuta_nao_encontrado: "Este horário ainda não está disponível para implantação. Aguarde alguns minutos e tente novamente.",
+  id_favorecido_nao_encontrado: "Não foi possível preparar este paciente para implantação. Contate o suporte.",
+  grade_terapeuta_sem_sala_ou_exibicao: "Este horário ainda não está totalmente configurado para implantação. Tente novamente mais tarde.",
+  indisponivel_na_tita: "Este horário não está mais disponível para implantação. Gere uma nova sugestão.",
+  erro_ao_verificar_disponibilidade: "Não foi possível verificar a disponibilidade deste horário agora. Tente novamente em instantes.",
 }
 
 export function mensagemAmigavel(codigoErro: string | undefined): string {
-  if (!codigoErro) return "Não foi possível concluir a integração com a TiTa. Tente novamente."
-  return MENSAGENS_AMIGAVEIS[codigoErro] ?? "Falha ao criar o agendamento na TiTa. Tente novamente ou contate o suporte."
+  if (!codigoErro) return "Não foi possível concluir a implantação. Tente novamente."
+  return MENSAGENS_AMIGAVEIS[codigoErro] ?? "Não foi possível concluir a implantação. Tente novamente ou contate o suporte."
 }
 
 /**
@@ -182,23 +185,25 @@ export function interpretarResultadoCriacao(resultado: TitaApiResult<AgendaFavor
 }
 
 /**
- * Mensagem de negócio para o resultado da criação — substitui mensagens técnicas
- * genéricas por frases orientadas ao que aconteceu com as sessões (Sprint 3).
+ * Mensagem de negócio para o resultado da implantação — frases orientadas ao que
+ * aconteceu com as sessões (Sprint 3), alinhadas ao fluxo de implantação imediata
+ * na TiTa (Sprint 4.1). É o texto exibido no toast; sucesso total usa a frase
+ * padrão, sucesso parcial detalha quantas foram implantadas × ocupadas.
  */
 export function mensagemResumoCriacao(resumo: ResumoCriacao): string {
   if (resumo.status === "erro_api") {
-    return "Não foi possível concluir a criação na TiTa. Tente novamente ou contate o suporte."
+    return "Não foi possível concluir a implantação. Tente novamente ou contate o suporte."
   }
 
-  const naoCriadas = resumo.conflitos + resumo.rejeitadas
-  if (naoCriadas === 0) {
-    return `${resumo.criadas} ${resumo.criadas === 1 ? "sessão criada" : "sessões criadas"} com sucesso.`
+  const naoImplantadas = resumo.conflitos + resumo.rejeitadas
+  if (naoImplantadas === 0) {
+    return "Implantação realizada com sucesso."
   }
   if (resumo.criadas === 0) {
-    return "Nenhuma sessão pôde ser criada porque os horários já estavam ocupados."
+    return "Nenhuma sessão pôde ser implantada porque os horários já estavam ocupados."
   }
   return (
-    `${resumo.criadas} ${resumo.criadas === 1 ? "sessão criada" : "sessões criadas"}. ` +
-    `${naoCriadas} ${naoCriadas === 1 ? "não pôde ser criada" : "não puderam ser criadas"} porque já ${naoCriadas === 1 ? "estava ocupada" : "estavam ocupadas"}.`
+    `${resumo.criadas} ${resumo.criadas === 1 ? "sessão implantada" : "sessões implantadas"}. ` +
+    `${naoImplantadas} ${naoImplantadas === 1 ? "não pôde ser implantada" : "não puderam ser implantadas"} porque já ${naoImplantadas === 1 ? "estava ocupada" : "estavam ocupadas"}.`
   )
 }

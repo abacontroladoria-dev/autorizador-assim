@@ -43,7 +43,7 @@ interface Sugestao {
   espAlts: EspAlt[]
 }
 
-interface GapInfo { esp: string; aut: number; of: number; dif: number; reservado?: number }
+interface GapInfo { esp: string; aut: number; of: number; dif: number }
 
 interface AceiteSessao {
   dia: string; hora: string; tP: string; prof: string; unidade: string
@@ -110,7 +110,18 @@ const DIA_ABR: Record<string, string> = {
 
 function hiStr(r: CsvRow): string { return String(r.HI_str || "") }
 function hiMin(r: CsvRow): number { return Number(r.HI || 0) }
-function rowUnid(r: CsvRow): string { return String(r.Unidade || "Desconhecida") }
+function rowUnid(r: CsvRow): string {
+  const unidade = String(r.Unidade || "").trim()
+  // "Notificação Prévia" (paciente-teste da homologação TiTa) usa salas que não
+  // resolvem para uma unidade real — "Sala Teste" faz exU() retornar a string
+  // "Desconhecida" (não vazio). Sem forçar Realengo aqui, pacUnidades vira
+  // {"Desconhecida"} e nenhum horário Livre (todos em unidades reais) casa no
+  // filtro de unidade de buildSugestoes → zero sugestões. Cobre vazio E "Desconhecida".
+  if (r["Nome Favorecido"] === "Notificação Prévia" && (!unidade || unidade === "Desconhecida")) {
+    return "Realengo"
+  }
+  return unidade || "Desconhecida"
+}
 
 // Normaliza variações de encoding comuns entre os dois CSVs (apóstrofo curvo vs reto,
 // espaços duplos, NFC vs NFD) para permitir junção tolerante de nomes.
@@ -662,13 +673,6 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     return res
   }, [pac, cRows])
 
-  // CRON-008: reservas confirmadas que ainda não apareceram sincronizadas em cRows —
-  // usado pelo painel lateral para o aviso "aguardando sincronização".
-  const reservaPendenteCount = useMemo(() => {
-    const implantadas = new Set(sessPac.map(s => `${s.dia}|||${s.hora}|||${s.tP}|||${s.prof}`))
-    return reservasConfirmadas.filter(s => !implantadas.has(`${s.dia}|||${s.hora}|||${s.tP}|||${s.prof}`)).length
-  }, [reservasConfirmadas, sessPac])
-
   type CellInfo = {
     tP: string; tE?: string; prof: string
     tipo: "proposta" | "aceito" | "exist" | "adminSuperv" | "adminWarn" | "supervDesloc" | "recusada" | "reservado"
@@ -686,9 +690,10 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     }
   }
 
-  // CRON-008: reservas já implantadas (aguardando sincronização) — não são mais
-  // sugestões (buildSugestoes já as bloqueia via dayHours), entram direto na grade
-  // como "Reservado": não clicáveis, sem opção de trocar terapia ou remover.
+  // CRON-008/Sprint 4: reservas já implantadas na TiTa (definitivas, não mais um
+  // estado provisório) — não são mais sugestões (buildSugestoes já as bloqueia via
+  // dayHours), entram direto na grade como "Reservado": não clicáveis, sem opção
+  // de trocar terapia ou remover.
   for (const s of reservasConfirmadas) {
     const k = `${s.dia}|||${s.hora}`
     if (!cMap[k]) cMap[k] = []
@@ -818,7 +823,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     if (tipo === "aceito")       return { bg: B.blueLt,  bd: B.blue,    label: "Aceito"   }
     if (tipo === "proposta")     return { bg: B.blueLt,  bd: B.blue,    label: null       }
     if (tipo === "recusada")     return { bg: "#fff5f5", bd: "#fca5a5", label: null       }
-    if (tipo === "reservado")    return { bg: "#f0fdf4", bd: "#16a34a", label: "🔒 Reservado" }
+    if (tipo === "reservado")    return { bg: "#f0fdf4", bd: "#16a34a", label: "✅ Implantado" }
     return                              { bg: "#f8fafc", bd: "#e2e8f0", label: null       }
   }
 
@@ -977,7 +982,9 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                     onClick={cardClickable ? () => toggleSelected(c.sugestaoId!) : undefined}
                                     style={{
                                       background: bg,
-                                      border: `1px ${c.tipo === "reservado" ? "dashed" : "solid"} ${isDisc ? "#f97316" : bd}`,
+                                      // Sprint 4: borda sólida também para "reservado" — a implantação na TiTa é
+                                      // definitiva, não há mais um estado "pendente" a distinguir visualmente.
+                                      border: `1px solid ${isDisc ? "#f97316" : bd}`,
                                       borderRadius: "8px", padding: "5px 7px",
                                       flex: (isExpanded || isEspExpanded) ? "none" : "1",
                                       boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "2px",
@@ -1258,12 +1265,6 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                     </div>
                   </div>
 
-                  {reservaPendenteCount > 0 && (
-                    <div style={{ marginTop: "8px", fontSize: "11px", fontWeight: 700, color: "#15803d", display: "flex", alignItems: "center", gap: "4px" }}>
-                      ⏳ +{reservaPendenteCount} aguardando sincronização
-                    </div>
-                  )}
-
                   <div style={{ height: "1px", background: "var(--border)", margin: "12px 0 0" }} />
                 </div>
               )
@@ -1275,8 +1276,6 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
               )}
               {pacAllEsp.map((g, i) => {
                 const sel = selectedByEsp[g.esp] || 0
-                const reservado = g.reservado || 0
-                const sincronizado = g.of - reservado
                 const total = g.of + sel
                 const excesso = total > g.aut
                 const completo = total === g.aut
@@ -1287,8 +1286,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                     <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--card-foreground)", marginBottom: "3px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={g.esp}>{g.esp}</div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
                       <span key={`${pac}|||${g.esp}|||${total}`} className="ocup-num-tick" style={{ fontSize: "15px", fontWeight: 900, color: cor, transition: "color 180ms ease", display: "inline-flex", alignItems: "baseline", gap: "3px" }}>
-                        <span>{sincronizado}</span>
-                        {reservado > 0 && <span title="Reservado — aguardando sincronização com o cronograma" style={{ color: "#d97706" }}>+{reservado}</span>}
+                        <span>{g.of}</span>
                         <span>/{g.aut}</span>
                       </span>
                       {excesso && <span className="ocup-badge-pop" style={{ fontSize: "11px", background: "#fee2e2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 4px", fontWeight: 700 }}>acima</span>}
@@ -1661,6 +1659,13 @@ interface Props {
   sInv?: (inv: InvItem[]) => void
 }
 
+// "Notificação Prévia" é o paciente-teste oficial usado na homologação da
+// integração com a TiTa — habilitado como paciente normal só nesta página, para
+// permitir testar o fluxo real de implantação (Sprint 4) sem afetar as demais
+// páginas do Cronograma, que continuam tratando-o como registro administrativo.
+const PACS_ADMIN_OCUP_PAC = new Set(PACS_ADMIN)
+PACS_ADMIN_OCUP_PAC.delete("Notificação Prévia")
+
 export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGlobal = [], sRec, sInv }: Props) {
   const modalRef = useRef<TodasSugestoesModalHandle>(null)
   const [pac, setPac]           = useState("")
@@ -1779,17 +1784,18 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
 
       modalRef.current?.clearAll()
       setPendingConfirm(null)
-      // Permanece no paciente selecionado: a grade e o painel lateral já reagem
-      // sozinhos (reservasConfirmadas/sugestoes derivam de `aceites`), então o
-      // "Reservado" aparece imediatamente sem precisar sair da tela do paciente.
-      // body.mensagem já vem orientada ao negócio (ex.: "16 sessões criadas. 6 não
-      // puderam ser criadas porque já estavam ocupadas.") — cai no texto genérico
-      // anterior só se o backend não enviar mensagem por algum motivo.
-      const mensagemSucesso = body?.mensagem
-        ?? `${sessoes.length} ${sessoes.length === 1 ? "sessão reservada" : "sessões reservadas"} para ${pac}. Aguardando sincronização da grade.`
-      toast(`✅ ${mensagemSucesso}`)
+      // Sprint 4/4.1: a implantação na TiTa já aconteceu (é o que "ok" confirma) —
+      // não existe mais estado "aguardando sincronização" depois disso. A grade e o
+      // painel lateral já reagem sozinhos (reservasConfirmadas/sugestoes/pacAllEsp
+      // derivam de `aceites`), então ocupação e indicadores aparecem imediatamente,
+      // sem precisar sair da tela nem atualizar a página. body.mensagem já vem pronta
+      // do backend: "Implantação realizada com sucesso." no total, ou o detalhe de
+      // sucesso parcial ("16 sessões implantadas. 6 não puderam...").
+      toast(`✅ ${body?.mensagem ?? "Implantação realizada com sucesso."}`)
     } catch (err) {
-      toast.error(`❌ Falha ao comunicar com a TiTa: ${err instanceof Error ? err.message : String(err)}`)
+      // Detalhe técnico só no console — o usuário vê uma mensagem amigável.
+      console.error("[ocupacao-paciente] falha ao implantar na TiTa", err)
+      toast.error("❌ Não foi possível concluir a implantação agora. Verifique a conexão e tente novamente.")
     } finally {
       setConfirmando(false)
     }
@@ -1874,7 +1880,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
 
   const agend = useMemo(() => cRows.filter(r => r["Status do Agendamento"] === "Agendado"), [cRows])
   const agendClin = useMemo(() =>
-    agend.filter(r => r["Nome Favorecido"] && !PACS_ADMIN.has(r["Nome Favorecido"]) && !EXCLUIR_GAPS.has(r.Terapia)),
+    agend.filter(r => r["Nome Favorecido"] && !PACS_ADMIN_OCUP_PAC.has(r["Nome Favorecido"]) && !EXCLUIR_GAPS.has(r.Terapia)),
     [agend])
 
   // Lista de nomes canônicos do agend ordenados por comprimento decrescente.
@@ -1883,7 +1889,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     const s = new Set<string>()
     for (const r of agend) {
       const p = r["Nome Favorecido"]
-      if (p && !PACS_ADMIN.has(p)) s.add(p)
+      if (p && !PACS_ADMIN_OCUP_PAC.has(p)) s.add(p)
     }
     return [...s].sort((a, b) => b.length - a.length)
   }, [agend])
@@ -1917,7 +1923,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     for (const r of agend) {
       const id  = String(r["Id Favorecido"] ?? r["ID Favorecido"] ?? "").trim()
       const rawP = r["Nome Favorecido"]
-      if (id && rawP && !PACS_ADMIN.has(rawP)) {
+      if (id && rawP && !PACS_ADMIN_OCUP_PAC.has(rawP)) {
         const p = agendMergeMap.get(rawP) ?? rawP
         if (!m.has(id)) m.set(id, p)
       }
@@ -1931,7 +1937,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     const seenOf = new Set<string>()
     for (const r of agend) {
       const rawP = r["Nome Favorecido"]
-      if (!rawP || PACS_ADMIN.has(rawP) || EXCLUIR_GAPS.has(r.Terapia)) continue
+      if (!rawP || PACS_ADMIN_OCUP_PAC.has(rawP) || EXCLUIR_GAPS.has(r.Terapia)) continue
       const p = agendMergeMap.get(rawP) ?? rawP
       const esp = TERAPIA_TO_ESP[r.Terapia]
       if (!esp) continue
@@ -1946,7 +1952,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     // resta de autorização. `seenOf` evita dupla contagem após a sincronização.
     for (const b of aceites) {
       if (b.status !== "pendente" && b.status !== "confirmado") continue
-      if (PACS_ADMIN.has(b.pac)) continue
+      if (PACS_ADMIN_OCUP_PAC.has(b.pac)) continue
       for (const s of b.sessoes) {
         if (EXCLUIR_GAPS.has(s.tP)) continue
         const esp = TERAPIA_TO_ESP[s.tP]
@@ -1965,7 +1971,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       const idFav = String(l["ID Favorecido"] ?? l["Id Favorecido"] ?? "").trim()
       const p     = (idFav ? agendIdMap.get(idFav) : undefined) ?? String(l["Paciente"] || "").trim()
       const esp   = String(l["Especialidade"] || "").trim()
-      if (!p || PACS_ADMIN.has(p) || !esp) continue
+      if (!p || PACS_ADMIN_OCUP_PAC.has(p) || !esp) continue
       if (isLaudoComAlta(l)) { altaSet.add(`${p}|||${esp}`); continue }
       const aut = parseFloat(String(l["Qtd autorizada"] || "0").replace(",", ".")) || 0
       if (aut <= 0) continue
@@ -1986,7 +1992,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     const pacs = new Set<string>()
     for (const r of agend) {
       const rawP = r["Nome Favorecido"]
-      if (!rawP || PACS_ADMIN.has(rawP)) continue
+      if (!rawP || PACS_ADMIN_OCUP_PAC.has(rawP)) continue
       pacs.add(agendMergeMap.get(rawP) ?? rawP)
     }
     return [...pacs].sort()
@@ -1998,7 +2004,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     for (const l of lRows) {
       const idFav = String(l["ID Favorecido"] ?? l["Id Favorecido"] ?? "").trim()
       const p     = (idFav ? agendIdMap.get(idFav) : undefined) ?? String(l["Paciente"] || "").trim()
-      if (!p || PACS_ADMIN.has(p)) continue
+      if (!p || PACS_ADMIN_OCUP_PAC.has(p)) continue
       const aut = parseFloat(String(l["Qtd autorizada"] || "0").replace(",", ".")) || 0
       if (aut > 0) temLaudo.add(p)
     }
@@ -2124,7 +2130,6 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
   const pacAllEsp = useMemo((): GapInfo[] => {
     if (!pac) return []
     const qtdOf: Record<string, number> = {}
-    const qtdReserva: Record<string, number> = {}
     const seenOf = new Set<string>()
     for (const r of agend) {
       const rawP = r["Nome Favorecido"]
@@ -2138,12 +2143,10 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       seenOf.add(dk)
       qtdOf[esp] = (qtdOf[esp] || 0) + 1
     }
-    // Reservas ainda não sincronizadas com a grade (aguardando resposta/confirmação)
-    // já ocupam a vaga — sem isso o painel mostra menos sessões do que a grade real.
-    // `seenOf` evita dupla contagem quando a sessão já sincronizou e apareceu em `agend`.
-    // `qtdReserva` isola a parte "reservada" para exibir separado do que já sincronizou
-    // (ex.: "6 +2 / 30") — some automaticamente após a sincronização, quando a mesma
-    // sessão passa a bater com `agend` e cai no `seenOf.has(dk)` acima.
+    // Sprint 4: implantação na TiTa é imediata e definitiva — reservas confirmadas
+    // contam junto com o que já veio de `agend`, num único total (sem "+N" separado
+    // à espera de sincronização). `seenOf` evita dupla contagem quando a mesma sessão
+    // também aparecer em `agend` após o próximo sync do CSV.
     for (const b of aceites) {
       if (b.pac !== pac || (b.status !== "pendente" && b.status !== "confirmado")) continue
       for (const s of b.sessoes) {
@@ -2156,7 +2159,6 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
         if (seenOf.has(dk)) continue
         seenOf.add(dk)
         qtdOf[esp] = (qtdOf[esp] || 0) + 1
-        qtdReserva[esp] = (qtdReserva[esp] || 0) + 1
       }
     }
     const qtdAut: Record<string, number> = {}
@@ -2174,7 +2176,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     }
     for (const esp of altaSet) delete qtdAut[esp]
     return Object.entries(qtdAut)
-      .map(([esp, aut]) => ({ esp, aut, of: qtdOf[esp] || 0, reservado: qtdReserva[esp] || 0, dif: Math.round((aut - (qtdOf[esp] || 0)) * 10) / 10 }))
+      .map(([esp, aut]) => ({ esp, aut, of: qtdOf[esp] || 0, dif: Math.round((aut - (qtdOf[esp] || 0)) * 10) / 10 }))
       .sort((a, b) => b.dif - a.dif)
   }, [pac, agend, lRows, agendIdMap, agendMergeMap, aceites])
 
@@ -2458,7 +2460,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
                 ?? normNameMap[normalizeName(rawPac)]
                 ?? agendMergeMap.get(rawPac)
                 ?? rawPac
-              if (!p || PACS_ADMIN.has(p)) continue
+              if (!p || PACS_ADMIN_OCUP_PAC.has(p)) continue
               // Tenta o campo em variações de capitalização
               const autRaw = l["Autorizado em"] ?? l["Autorizado Em"] ?? l["autorizado em"]
               const raw = normalizeDate(String(autRaw || "").trim())

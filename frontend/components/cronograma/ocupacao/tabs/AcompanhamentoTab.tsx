@@ -3,11 +3,11 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import {
   Ban, BarChart3, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronUp,
-  ClipboardList, Clock, Download, DoorOpen, Inbox, Lock, Search, User, X,
+  ClipboardList, Clock, Download, DoorOpen, Inbox, Search, User, X,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { B, SK_SAIDA, HORAS_GRID, DIAS_LIST, DIAS_ORD } from "@/lib/cronograma/constants"
-import { waKey, fmtName, isReservaImplantada, parseSlotReservado } from "@/lib/cronograma/helpers"
+import { waKey, fmtName, parseSlotReservado } from "@/lib/cronograma/helpers"
 import { useCronogramaData, genConfId } from "@/contexts/CronogramaDataContext"
 import { RecusadosTab } from "./RecusadosTab"
 import { InviavelTab } from "./InviavelTab"
@@ -639,7 +639,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
       )}
 
       {sub === "confirmados" && (
-        <ConfirmadosTab conf={allConf} cRows={cRows} onRemove={handleRemoverConfirmado} />
+        <ConfirmadosTab conf={allConf} onRemove={handleRemoverConfirmado} />
       )}
       {sub === "recusados" && (
         <RecusadosTab rec={allRec} inv={allInv} waMap={waMap}
@@ -711,7 +711,7 @@ function InviavelModal({ pac, motivo, onMotivoChange, onConfirmar, onClose }: {
   )
 }
 
-function ConfirmadosTab({ conf, cRows, onRemove }: { conf: ConfItem[]; cRows: CsvRow[]; onRemove: (item: ConfItem) => void }) {
+function ConfirmadosTab({ conf, onRemove }: { conf: ConfItem[]; onRemove: (item: ConfItem) => void }) {
   const [removendo, setRemovendo] = useState<ConfItem | null>(null)
   const [filtro, setFiltro] = useState("")
   const [diasFechados, setDiasFechados] = useState<Set<string>>(new Set())
@@ -760,8 +760,6 @@ function ConfirmadosTab({ conf, cRows, onRemove }: { conf: ConfItem[]; cRows: Cs
             <div key={dia}>
               <GroupHeader label={dia} count={items.length} open={!diasFechados.has(dia)} onToggle={() => toggleDia(dia)} />
               {!diasFechados.has(dia) && items.map((c, i) => {
-                const isReservaPendente = isReservaPendenteItem(c)
-                const aguardandoSync = isReservaPendente && !isReservaImplantada(c, cRows)
                 const origemMeta = CONF_ORIGEM_META[c.origem] ?? DEFAULT_ORIGEM_META
                 return (
                   <div key={c.id || i} className={rowClass} style={rowStyle}>
@@ -771,14 +769,6 @@ function ConfirmadosTab({ conf, cRows, onRemove }: { conf: ConfItem[]; cRows: Cs
                       <div style={{ fontSize: "var(--text-sm)", color: "var(--muted-foreground)", marginTop: "2px" }}>
                         {c.esp || "—"} · {fmtName(c.prof)}
                       </div>
-                      {aguardandoSync && (
-                        <div
-                          title="Sessão reservada imediatamente pelo coordenador — ainda não refletida na grade oficial."
-                          style={{ display: "inline-flex", alignItems: "center", gap: "4px", marginTop: "4px", color: "#b45309", fontSize: "var(--text-xs)", fontWeight: "var(--weight-semibold)" }}
-                        >
-                          <Lock size={10} /> Aguardando sincronização com a grade
-                        </div>
-                      )}
                       {c.obs && (
                         <div style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)", fontStyle: "italic", marginTop: "4px" }}>{`"${c.obs}"`}</div>
                       )}
