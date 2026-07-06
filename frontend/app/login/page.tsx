@@ -21,18 +21,17 @@ export default function Login() {
       let emailParaLogin = login
 
       if (!login.includes("@")) {
-        const { data: usuario } = await supabase
-          .from("usuarios")
-          .select("email")
-          .eq("username", login)
-          .maybeSingle()
+        // Resolve username -> e-mail via RPC SECURITY DEFINER (a tabela usuarios
+        // não é mais legível pelo papel anon). Retorna null se não houver match.
+        const { data: emailResolvido } = await supabase
+          .rpc("resolver_email_por_username", { p_username: login })
 
-        if (!usuario?.email) {
-          setErro("Usuário não encontrado. Verifique e tente novamente.");
+        if (!emailResolvido) {
+          setErro("Login ou senha incorretos. Verifique e tente novamente.");
           setLoading(false);
           return;
         }
-        emailParaLogin = usuario.email
+        emailParaLogin = emailResolvido as string
       }
 
       const { data, error } = await supabase.auth.signInWithPassword({
