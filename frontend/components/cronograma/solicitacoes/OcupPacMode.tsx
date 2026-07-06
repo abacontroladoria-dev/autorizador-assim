@@ -488,6 +488,10 @@ interface PendingAcaoInfo {
   sugestao: Sugestao; hora: string; tP: string; prof: string; unidade: string; csvGradeId: string; acao: AcaoDiretaType
 }
 
+// Paciente-teste oficial da homologação TiTa (habilitado como paciente normal
+// só nesta página — ver PACS_ADMIN_OCUP_PAC abaixo).
+const PACIENTE_TESTE_TITA = "Notificação Prévia"
+
 interface TodasSugestoesModalProps {
   pac: string; conv: string; cRows: CsvRow[]; sugestoes: Sugestao[]; pacGaps: GapInfo[]; pacAllEsp: GapInfo[]
   stOf: (s: Sugestao) => Status | null
@@ -1664,7 +1668,7 @@ interface Props {
 // permitir testar o fluxo real de implantação (Sprint 4) sem afetar as demais
 // páginas do Cronograma, que continuam tratando-o como registro administrativo.
 const PACS_ADMIN_OCUP_PAC = new Set(PACS_ADMIN)
-PACS_ADMIN_OCUP_PAC.delete("Notificação Prévia")
+PACS_ADMIN_OCUP_PAC.delete(PACIENTE_TESTE_TITA)
 
 export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGlobal = [], sRec, sInv }: Props) {
   const modalRef = useRef<TodasSugestoesModalHandle>(null)

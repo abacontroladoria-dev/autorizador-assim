@@ -1,6 +1,12 @@
 import "server-only"
 
-import type { AgendaFavorecidoTita, AgendamentoTitaPayload, DisponibilidadeRequest, DisponibilidadeResponse, TitaApiResult } from "./types"
+import type {
+  AgendaFavorecidoTita,
+  AgendamentoTitaPayload,
+  DisponibilidadeRequest,
+  DisponibilidadeResponse,
+  TitaApiResult,
+} from "./types"
 
 // Base URL e header confirmados em "Integração - Documentação API TITA.pdf" (seção
 // "Configuração de Acesso") e usados de forma consistente em todas as Edge
@@ -76,3 +82,4 @@ export function verificarDisponibilidade(payload: DisponibilidadeRequest): Promi
 export function criarAgendamento(payload: AgendamentoTitaPayload): Promise<TitaApiResult<AgendaFavorecidoTita[]>> {
   return postTita("/integracao/agendamento/create", payload)
 }
+
