@@ -31,6 +31,10 @@ import {
   Settings,
   CalendarRange,
   RotateCcw,
+  Handshake,
+  Wallet,
+  LineChart,
+  Download,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -79,6 +83,12 @@ const pathIconMap: Record<string, any> = {
   "/cronograma/ocupacao?tab=guia": BookOpen,
   "/cronograma/ocupacao?tab=config": Settings,
   "/cronograma/indicadores": BarChart3,
+  "/relacionamento-prestador/analise": TrendingUp,
+  "/relacionamento-prestador/rp": Wallet,
+  "/relacionamento-prestador/individual": UserRound,
+  "/relacionamento-prestador/config": Settings,
+  "/relacionamento-prestador/historico": LineChart,
+  "/relacionamento-prestador/legenda": BookOpen,
 }
 
 export default function Sidebar() {
@@ -483,6 +493,32 @@ export default function Sidebar() {
           {canAccess("/cronograma/indicadores") && (
             <SidebarGroup title="Indicadores" icon={TrendingUp}>
               <MenuItem label="Ocupação de Profissionais" icon={BarChart3} path="/cronograma/indicadores" />
+            </SidebarGroup>
+          )}
+
+          {/* Relacionamento Prestador */}
+          {(canAccess("/relacionamento-prestador/analise") || canAccess("/relacionamento-prestador/rp") ||
+            canAccess("/relacionamento-prestador/individual") || canAccess("/relacionamento-prestador/config") ||
+            canAccess("/relacionamento-prestador/historico") || canAccess("/relacionamento-prestador/legenda")) && (
+            <SidebarGroup title="Relacionamento Prestador" icon={Handshake}>
+              {canAccess("/relacionamento-prestador/analise") && (
+                <MenuItem label="Rem. Mês - Previsão" icon={TrendingUp} path="/relacionamento-prestador/analise" />
+              )}
+              {canAccess("/relacionamento-prestador/rp") && (
+                <MenuItem label="Rem. Mês - Total" icon={Wallet} path="/relacionamento-prestador/rp" />
+              )}
+              {canAccess("/relacionamento-prestador/individual") && (
+                <MenuItem label="Rem. Mês - Individual" icon={Download} path="/relacionamento-prestador/individual" />
+              )}
+              {canAccess("/relacionamento-prestador/config") && (
+                <MenuItem label="Config" icon={Settings} path="/relacionamento-prestador/config" />
+              )}
+              {canAccess("/relacionamento-prestador/historico") && (
+                <MenuItem label="Histórico" icon={LineChart} path="/relacionamento-prestador/historico" />
+              )}
+              {canAccess("/relacionamento-prestador/legenda") && (
+                <MenuItem label="Legenda" icon={BookOpen} path="/relacionamento-prestador/legenda" />
+              )}
             </SidebarGroup>
           )}
 

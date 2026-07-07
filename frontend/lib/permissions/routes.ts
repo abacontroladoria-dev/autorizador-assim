@@ -13,6 +13,9 @@ export const roleDefaults: Record<string, string[]> = {
     'autorizacoes', 'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'ocupacao_clinica', 'ocupacao_profissionais',
     'reposicao_faltas',
+    'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
+    'relacionamento_prestador_individual', 'relacionamento_prestador_config',
+    'relacionamento_prestador_historico', 'relacionamento_prestador_legenda',
   ],
   diretoria: [
     'dashboard', 'atendimentos', 'gestao', 'cronograma',
@@ -21,6 +24,9 @@ export const roleDefaults: Record<string, string[]> = {
     'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'ocupacao_clinica', 'ocupacao_profissionais',
     'reposicao_faltas',
+    'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
+    'relacionamento_prestador_individual', 'relacionamento_prestador_config',
+    'relacionamento_prestador_historico', 'relacionamento_prestador_legenda',
   ],
   recepcao: [
     'dashboard', 'atendimentos', 'gestao', 'cronograma', 'auditoria_assim',
@@ -32,7 +38,12 @@ export const roleDefaults: Record<string, string[]> = {
   ],
   terapeutico: ['dashboard', 'escala_terapeutica', 'salas', 'agenda_terapeutica'],
   faturamento: ['dashboard', 'guias_digitais', 'cronograma', 'agenda_terapeutica', 'salas', 'cco'],
-  rp: ['dashboard', 'escala_terapeutica'],
+  rp: [
+    'dashboard', 'escala_terapeutica',
+    'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
+    'relacionamento_prestador_individual', 'relacionamento_prestador_config',
+    'relacionamento_prestador_historico', 'relacionamento_prestador_legenda',
+  ],
   cronograma: ['dashboard', 'cronograma_solicitacoes', 'ocupacao_clinica', 'ocupacao_profissionais', 'reposicao_faltas'],
 }
 
@@ -61,6 +72,12 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   ocupacao_clinica: ['/cronograma/ocupacao'],
   ocupacao_profissionais: ['/cronograma/indicadores'],
   reposicao_faltas: ['/cronograma/reposicao'],
+  relacionamento_prestador_analise: ['/relacionamento-prestador/analise'],
+  relacionamento_prestador_rp: ['/relacionamento-prestador/rp'],
+  relacionamento_prestador_individual: ['/relacionamento-prestador/individual'],
+  relacionamento_prestador_config: ['/relacionamento-prestador/config'],
+  relacionamento_prestador_historico: ['/relacionamento-prestador/historico'],
+  relacionamento_prestador_legenda: ['/relacionamento-prestador/legenda'],
 }
 
 // Converte um conjunto de códigos de permissão em rotas permitidas,

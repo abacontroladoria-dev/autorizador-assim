@@ -8,7 +8,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "sync:local": "node scripts/sync-local.mjs"
+    "sync:local": "node scripts/sync-local.mjs",
+    "test": "vitest run"
   },
   "dependencies": {
     "@fullcalendar/core": "^6.1.20",
@@ -51,6 +52,7 @@
     "postcss": "^8.5.15",
     "supabase": "^2.98.2",
     "tailwindcss": "^4.3.0",
-    "typescript": "^5"
+    "typescript": "^5",
+    "vitest": "^4.1.10"
   }
 }
