@@ -7,6 +7,7 @@ import { useRemuneracaoRPContext } from "@/contexts/RemuneracaoRPContext"
 import { useRemuneracaoConfig } from "@/hooks/useRemuneracaoConfig"
 import { exportResumoSessoesPdf } from "@/lib/remuneracao/exportResumoSessoesPdf"
 import { gerarPDF, gerarWord, montarInfoDocumentoPrestador, type PdfOpts } from "@/lib/remuneracao/documento"
+import { parseDateBR } from "@/lib/remuneracao/datas"
 import { B } from "@/lib/cronograma/constants"
 import { RemuneracaoUploadBadges } from "./RemuneracaoUploadBadges"
 
@@ -76,9 +77,18 @@ export function RemunIndividualTab() {
     [resultado, profSelecionado]
   )
 
+  const remPeriodo = useMemo(() => {
+    const datas = evoRows.map(r => parseDateBR(r.data)).filter((d): d is Date => d !== null)
+    if (!datas.length) return null
+    const min = datas.reduce((a, b) => (b < a ? b : a))
+    const max = datas.reduce((a, b) => (b > a ? b : a))
+    const fmt = (d: Date) => `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`
+    return { inicio: fmt(min), fim: fmt(max) }
+  }, [evoRows])
+
   const pdfOpts: PdfOpts = {
     remunIndPfPj:       tipoDoc,
-    remPeriodo:         null, // expandir futuramente com config de período
+    remPeriodo,
     ccPA, ccPE, etaBonus, taxasPA,
     cadastroPrestadores: {},  // expandir futuramente com contratos do Supabase
   }

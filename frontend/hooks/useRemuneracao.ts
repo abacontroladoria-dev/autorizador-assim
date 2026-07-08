@@ -6,13 +6,13 @@ import { buscarGradeParaAnalise } from "@/lib/remuneracao/gradeRemuneracao"
 import {
   calcularAnaliseFutura, calcularRemuneracaoReal, calcularPEProporcional,
   normalizarRelatorioPE, parsePeriodoArquivo, PE_INATIVO,
-  type AnaliseFuturaResult, type ProfRemunReal, type PERow, type ContratoAntigoInfo,
+  type AnaliseFuturaResult, type ProfRemunReal, type PERow, type ContratoAntigoInfo, type CadastroContratual,
 } from "@/lib/remuneracao/calculo"
 import { normalizarGradeParaSessao, classificarSessaoReal, type SessaoReal, type CsvGradeRow } from "@/lib/remuneracao/relatorio"
 import { buscarPresencaFilaAutorizacoes, presencaDaSessao, type PresencaIndice } from "@/lib/remuneracao/presencaReal"
 import { dataParaISO, mesAnoDeLinhas } from "@/lib/remuneracao/datas"
 import type { CapacidadeOverride } from "@/lib/remuneracao/ocupacao"
-import { getContratosAntigos, getCapacidades } from "@/services/remuneracao.service"
+import { getContratosAntigos, getContratosAtuais, getCapacidades } from "@/services/remuneracao.service"
 import { useRemuneracaoConfig } from "./useRemuneracaoConfig"
 import type { CsvRow } from "@/types/cronograma"
 
@@ -112,6 +112,39 @@ export function useRemunRP() {
   const [csvName, setCsvName] = useState<string | null>(null)
   const [peRows, setPeRows] = useState<PERow[]>([])
   const [peName, setPeName] = useState<string | null>(null)
+  const [antigos, setAntigos] = useState<Record<string, ContratoAntigoInfo>>({})
+  const [cadastroPrestadores, setCadastroPrestadores] = useState<Record<string, CadastroContratual>>({})
+
+  // Contratos antigos (comparação) e cadastro contratual atual (PA por contrato) —
+  // cadastrados em Config, não dependem da grade importada.
+  useEffect(() => {
+    let isMounted = true
+    async function loadContratuais() {
+      const [{ data: antigosData }, { data: atuaisData }] = await Promise.all([
+        getContratosAntigos(),
+        getContratosAtuais(),
+      ])
+      if (!isMounted) return
+
+      const antigosMap: Record<string, ContratoAntigoInfo> = {}
+      ;(antigosData ?? []).forEach((r: any) => {
+        antigosMap[r.profissional_nome] = { salario: r.salario, chSemanal: r.ch_semanal, contrato: r.contrato }
+      })
+
+      const cadastroMap: Record<string, CadastroContratual> = {}
+      ;(atuaisData ?? []).forEach((r: any) => {
+        cadastroMap[r.profissional_nome] = {
+          nome: r.profissional_nome,
+          contratosAtuais: Array.isArray(r.contratos_atuais) ? r.contratos_atuais : [],
+        }
+      })
+
+      setAntigos(antigosMap)
+      setCadastroPrestadores(cadastroMap)
+    }
+    loadContratuais()
+    return () => { isMounted = false }
+  }, [])
 
   const carregarGrade = useCallback((rows: Record<string, unknown>[]) => {
     setEvoRowsBase(normalizarGradeParaSessao(rows))
@@ -195,14 +228,13 @@ export function useRemunRP() {
       etaBonus: config.eta_bonus_default,
       ccPA: config.cc_pa_default,
       ccPE: config.cc_pe_default,
-      // antigos/cadastroPrestadores chegam vazios até o Passo 9.
-      antigos: {},
-      cadastroPrestadores: {},
+      antigos,
+      cadastroPrestadores,
       peAnaliseCompleta,
       peProporcional,
       peStatusMensagem,
     })
-  }, [config, evoRows, peAnaliseCompleta, peProporcional, peStatusMensagem])
+  }, [config, evoRows, antigos, cadastroPrestadores, peAnaliseCompleta, peProporcional, peStatusMensagem])
 
   return {
     resultado,

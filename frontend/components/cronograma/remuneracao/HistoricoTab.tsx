@@ -5,6 +5,7 @@ import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsi
 import { Loader2, Save, Trash2, Calendar, TrendingUp } from "lucide-react"
 import { B } from "@/lib/cronograma/constants"
 import { useRemuneracaoRPContext } from "@/contexts/RemuneracaoRPContext"
+import { useAnaliseFutura } from "@/hooks/useRemuneracao"
 import { getHistoricoSnapshots, saveHistoricoSnapshot, deleteHistoricoSnapshot } from "@/services/remuneracao.service"
 import type { HistoricoSnapshot } from "@/types/remuneracao"
 import { useHeader } from "@/contexts/HeaderContext"
@@ -17,7 +18,8 @@ const formatCurrency = (v: number | null) => {
 export function HistoricoTab() {
   const { setHeader } = useHeader()
   const { resultado: dadosPorProf, presenca, loading: calcLoading } = useRemuneracaoRPContext()
-  
+  const { resultado: analiseFutura } = useAnaliseFutura()
+
   const [historico, setHistorico] = useState<HistoricoSnapshot[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
@@ -45,15 +47,21 @@ export function HistoricoTab() {
     if (!mesStr) return
 
     setSaving(true)
+    const projecaoPorProf = new Map((analiseFutura?.dadosPorProf ?? []).map(p => [p.prof, p]))
     const { data, error } = await saveHistoricoSnapshot({
       mes_ano: mesStr,
       dados: {
         presenca,
-        profs: dadosPorProf.map(p => ({
-          prof: p.prof,
-          totalReal: p.valorConfirmado,
-          salAntigo: p.salAntigo,
-        }))
+        profs: dadosPorProf.map(p => {
+          const proj = projecaoPorProf.get(p.prof)
+          return {
+            prof: p.prof,
+            totalReal: p.valorConfirmado,
+            salAntigo: p.salAntigo,
+            total100: proj?.total100 ?? null,
+            totalX: proj?.totalX ?? null,
+          }
+        })
       }
     })
     
@@ -94,12 +102,12 @@ export function HistoricoTab() {
       const p = ((s.dados as any)?.profs || []).find((x: any) => x.prof === profSel)
       if (!p) return null
       
-      const pres = (s.dados as any)?.presenca || 80
-      
       return {
         mes: s.mes_ano,
         Real: p.totalReal ? Number(p.totalReal.toFixed(2)) : 0,
-        Antigo: p.salAntigo ? Number(p.salAntigo) : undefined
+        Antigo: p.salAntigo ? Number(p.salAntigo) : undefined,
+        Presenca100: p.total100 != null ? Number(p.total100.toFixed(2)) : undefined,
+        PresencaConfig: p.totalX != null ? Number(p.totalX.toFixed(2)) : undefined,
       }
     }).filter(Boolean)
   }, [historico, profSel])
@@ -224,14 +232,38 @@ export function HistoricoTab() {
                       />
                       
                       {chartData.some(d => d && d.Antigo !== undefined) && (
-                        <Line 
-                          type="monotone" 
-                          dataKey="Antigo" 
+                        <Line
+                          type="monotone"
+                          dataKey="Antigo"
                           name="Salário Antigo (Ref)"
-                          stroke={B.gray} 
-                          strokeWidth={2} 
-                          strokeDasharray="5 5" 
-                          dot={{ r: 3 }} 
+                          stroke={B.gray}
+                          strokeWidth={2}
+                          strokeDasharray="5 5"
+                          dot={{ r: 3 }}
+                        />
+                      )}
+
+                      {chartData.some(d => d && d.Presenca100 !== undefined) && (
+                        <Line
+                          type="monotone"
+                          dataKey="Presenca100"
+                          name="100% Presença (Projeção)"
+                          stroke={B.blue}
+                          strokeWidth={2}
+                          strokeDasharray="4 4"
+                          dot={{ r: 3 }}
+                        />
+                      )}
+
+                      {chartData.some(d => d && d.PresencaConfig !== undefined) && (
+                        <Line
+                          type="monotone"
+                          dataKey="PresencaConfig"
+                          name="Presença Configurada (Projeção)"
+                          stroke={B.purple}
+                          strokeWidth={2}
+                          strokeDasharray="4 4"
+                          dot={{ r: 3 }}
                         />
                       )}
                     </LineChart>

@@ -73,6 +73,23 @@ export async function getProfissionaisRoster(): Promise<{ data: string[] | null;
   return { data: (data ?? []).map((r: any) => r.profissional_nome as string), error: null }
 }
 
+// Mesma view do roster, mas incluindo a terapia mais recente de cada profissional
+// (coluna terapia_principal, adicionada em 20260708140000_...) — usada em
+// Config → Capacidade do profissional para exibir a "terapia base".
+export async function getProfissionaisRosterComTerapia(): Promise<{ data: { profissional_nome: string; terapia_principal: string | null }[] | null; error: unknown }> {
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase
+    .from('vw_remuneracao_profissionais_roster')
+    .select('profissional_nome, terapia_principal')
+    .order('profissional_nome')
+
+  if (error) {
+    console.error('Erro getProfissionaisRosterComTerapia:', error)
+    return { data: null, error }
+  }
+  return { data: data as { profissional_nome: string; terapia_principal: string | null }[], error: null }
+}
+
 export async function getContratosAtuais() {
   const supabase = getSupabaseClient()
   const { data, error } = await supabase.from('remuneracao_contratos_atuais').select('*').order('profissional_nome')

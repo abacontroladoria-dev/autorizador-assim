@@ -491,7 +491,15 @@ export type SessaoComPapel = SessaoReal & {
   funcaoPA?: string; contratoAtualPA?: string; cadastroContratoPendente?: boolean; explicacaoPA?: string
 }
 
-export type PEDetalheItem = { paciente: string; situacao: string; valor: number | null | undefined }
+export type PEDetalheItem = {
+  paciente: string; situacao: string; valor: number | null | undefined
+  idFavorecido?: string
+  inicio?: Date | null; fim?: Date | null; fimUsado?: Date | null
+  dias?: number; diasEfetivos?: number; diasMes?: number
+  temEvolucao?: boolean; nSessoesEvoluidas?: number
+  arredondouFimMes?: boolean; trocaCoordenador?: boolean; conflitoSemana?: boolean
+  observacao?: string
+}
 
 export type PEProporcionalResultado = {
   ativo: boolean
@@ -1037,7 +1045,15 @@ export function calcularPEProporcional(
     else if (regra.situacao.includes("Diretoria") || regra.situacao.includes("Conflito")) porProf[g.prof].aguardaDiretoria = (porProf[g.prof].aguardaDiretoria || 0) + 1
     else porProf[g.prof].emAberto = (porProf[g.prof].emAberto || 0) + 1
     porProf[g.prof].pacientes.add(g.idFavorecido || g.paciente)
-    porProf[g.prof].detalhe.push({ paciente: g.paciente, situacao: regra.situacao, valor })
+    porProf[g.prof].detalhe.push({
+      paciente: g.paciente, situacao: regra.situacao, valor,
+      idFavorecido: g.idFavorecido,
+      inicio: g.inicio, fim: max, fimUsado,
+      dias, diasEfetivos: regra.diasEfetivos, diasMes,
+      temEvolucao: evs.length > 0, nSessoesEvoluidas: evs.length,
+      arredondouFimMes, trocaCoordenador: !!troca, conflitoSemana: conflitos.length > 0,
+      observacao: regra.observacao,
+    })
   })
 
   return {

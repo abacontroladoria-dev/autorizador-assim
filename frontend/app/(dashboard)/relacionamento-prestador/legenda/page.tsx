@@ -1,5 +1,5 @@
-import { RemuneracaoPlaceholderTab } from "@/components/cronograma/remuneracao/RemuneracaoPlaceholderTab"
+import { LegendaTab } from "@/components/cronograma/remuneracao/LegendaTab"
 
 export default function RelacionamentoPrestadorLegendaPage() {
-  return <RemuneracaoPlaceholderTab title="Legenda" />
+  return <LegendaTab />
 }

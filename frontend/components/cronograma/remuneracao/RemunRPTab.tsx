@@ -1,15 +1,19 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { HelpCircle } from "lucide-react"
+import { HelpCircle, Download } from "lucide-react"
 
 import { useHeader } from "@/contexts/HeaderContext"
 import { useRemuneracaoRPContext } from "@/contexts/RemuneracaoRPContext"
 import { RemuneracaoUploadBadges } from "./RemuneracaoUploadBadges"
 import { RemuneracaoRPDashboard } from "./RemuneracaoRPDashboard"
+import { PeCoordenadoresPanel, profTemPe, type PeFiltroKey } from "./PeCoordenadoresPanel"
+import { ContratosPendentesPanel } from "./ContratosPendentesPanel"
 import { useRemuneracaoConfig } from "@/hooks/useRemuneracaoConfig"
 import { validarModeloRelatorio, parseHtmlTable, type CsvGradeRow } from "@/lib/remuneracao/relatorio"
 import { calcularTotalPorEspecialidade } from "@/lib/remuneracao/dashboardRP"
+import { exportarRemuneracaoRPXlsx } from "@/lib/remuneracao/exportRemuneracaoRP"
+import { B } from "@/lib/cronograma/constants"
 import CardRemun, { type ExpandidoState } from "./CardRemun"
 
 
@@ -26,6 +30,7 @@ export function RemunRPTab() {
   const [remBusca, setRemBusca] = useState("")
   const [apenasInconsistencia, setApenasInconsistencia] = useState(false)
   const [especialidadeFiltro, setEspecialidadeFiltro] = useState<string | null>(null)
+  const [peFiltro, setPeFiltro] = useState<PeFiltroKey | null>(null)
   const { setHeader, setRightContent } = useHeader()
 
   const profissionaisComInconsistencia = useMemo(
@@ -43,8 +48,9 @@ export function RemunRPTab() {
   const resultadoExibido = useMemo(() => {
     let r = apenasInconsistencia ? profissionaisComInconsistencia : resultado
     if (profissionaisPorEspecialidade) r = r ? r.filter(p => profissionaisPorEspecialidade.has(p.prof)) : r
+    if (peFiltro) r = r ? r.filter(p => profTemPe(p, peFiltro)) : r
     return r
-  }, [apenasInconsistencia, profissionaisComInconsistencia, resultado, profissionaisPorEspecialidade])
+  }, [apenasInconsistencia, profissionaisComInconsistencia, resultado, profissionaisPorEspecialidade, peFiltro])
 
   useEffect(() => {
     setHeader("Rem. Mês - Total", "Relacionamento Prestador")
@@ -77,6 +83,14 @@ export function RemunRPTab() {
           especialidadeFiltro={especialidadeFiltro}
           onFiltroEspecialidade={setEspecialidadeFiltro}
         />
+      )}
+
+      {resultado && resultado.length > 0 && (
+        <PeCoordenadoresPanel resultado={resultado} filtroAtivo={peFiltro} onFiltro={setPeFiltro} />
+      )}
+
+      {resultado && resultado.length > 0 && (
+        <ContratosPendentesPanel resultado={resultado} />
       )}
 
       <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
@@ -124,6 +138,15 @@ export function RemunRPTab() {
               {csvName}{peName ? ` · ${peName}` : ""}
             </p>
           )}
+          <button
+            type="button"
+            onClick={() => resultado && exportarRemuneracaoRPXlsx({ resultado, evoRows, csvName })}
+            className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white shadow-sm hover:opacity-90 active:scale-95 transition-all"
+            style={{ background: B.green }}
+          >
+            <Download size={13} />
+            Exportar XLSX
+          </button>
         </div>
       )}
 
@@ -137,7 +160,9 @@ export function RemunRPTab() {
         <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
           {especialidadeFiltro
             ? `Nenhum profissional com remuneração em "${especialidadeFiltro}" nesta grade.`
-            : "Nenhum profissional com inconsistência nesta grade."}
+            : peFiltro
+              ? "Nenhum profissional com PE nessa situação nesta grade."
+              : "Nenhum profissional com inconsistência nesta grade."}
         </div>
       )}
 
