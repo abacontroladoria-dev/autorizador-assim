@@ -250,6 +250,7 @@ export function useRemunRP() {
     limparPE,
     peAnaliseCompleta,
     peStatusMensagem,
+    cadastroPrestadores,
     loading: configLoading,
     error: configError,
   }

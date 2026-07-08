@@ -24,9 +24,10 @@ const TIPOS_DOC: { k: TipoDoc; label: string; desc: string }[] = [
 // ─── Componente principal ─────────────────────────────────────────────────────
 
 export function RemunIndividualTab() {
-  const { 
-    resultado, evoRows, loading, error, 
-    peRows, carregarGrade, carregarPE, limparGrade, limparPE, setCsvName 
+  const {
+    resultado, evoRows, loading, error,
+    peRows, carregarGrade, carregarPE, limparGrade, limparPE, setCsvName,
+    cadastroPrestadores,
   } = useRemuneracaoRPContext()
   const { config } = useRemuneracaoConfig()
   const { setHeader, setRightContent } = useHeader()
@@ -90,7 +91,7 @@ export function RemunIndividualTab() {
     remunIndPfPj:       tipoDoc,
     remPeriodo,
     ccPA, ccPE, etaBonus, taxasPA,
-    cadastroPrestadores: {},  // expandir futuramente com contratos do Supabase
+    cadastroPrestadores,
   }
 
   // ── Estado: sem dados ──
