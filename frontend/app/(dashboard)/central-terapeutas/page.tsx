@@ -69,6 +69,7 @@ export default function ControleTerapeuticoPage() {
 
   const [dados, setDados] = useState<ControleTerapeuticoItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [erro, setErro] = useState<string | null>(null)
   const [sincronizando, setSincronizando] = useState(false)
   const [grupoCobertura, setGrupoCobertura] = useState<GrupoTerapeutaMobile | null>(null)
   const [pagina, setPagina] = useState(0)
@@ -96,6 +97,14 @@ export default function ControleTerapeuticoPage() {
     try {
       const response = await listarCentralTerapeutica(filters.data)
       setDados(response || [])
+      setErro(null)
+    } catch (e) {
+      console.error('Erro ao carregar central terapêutica:', e)
+      // Só bloqueia a tela com o estado de erro no carregamento em primeiro
+      // plano. Falha em refresh de fundo (realtime) mantém os dados na tela.
+      if (showLoading) {
+        setErro('Não foi possível carregar os atendimentos. Verifique sua conexão e tente novamente.')
+      }
     } finally {
       if (showLoading) setLoading(false)
     }
@@ -390,14 +399,27 @@ return (
           </div>
         )}
 
-        {!loading &&
+        {!loading && erro && (
+          <div className="bg-white rounded-2xl p-10 text-center space-y-4">
+            <p className="text-rose-600 font-medium">{erro}</p>
+            <button
+              type="button"
+              onClick={() => carregarDados(true)}
+              className="px-4 h-9 rounded-lg bg-[#3A8FB7] text-white text-sm font-semibold hover:bg-[#327ea1] transition"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        )}
+
+        {!loading && !erro &&
           filtrados.length === 0 && (
             <div className="bg-white rounded-2xl p-10 text-center text-slate-400">
               Nenhum atendimento encontrado
             </div>
           )}
 
-        {!loading &&
+        {!loading && !erro &&
           gruposPaginados.map((grupo) => (
             <ControleTerapeutaMobileCard
               key={grupo.terapeuta}
@@ -408,7 +430,7 @@ return (
             />
           ))}
 
-        {!loading && totalPaginas > 1 && (
+        {!loading && !erro && totalPaginas > 1 && (
           <div className="flex items-center justify-center gap-2 pt-2 pb-1">
             <button
               disabled={pagina === 0}

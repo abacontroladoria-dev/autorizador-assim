@@ -93,7 +93,10 @@ export async function listarCentralTerapeutica(data: string): Promise<Atendiment
       details: error.details,
       hint: error.hint,
     })
-    return []
+    // Propaga o erro para a página distinguir "falha no carregamento" (ex.:
+    // timeout) de "dia sem atendimentos". Retornar [] mascarava o timeout como
+    // estado vazio e o usuário via "nenhum terapeuta" sem saber que foi erro.
+    throw new Error(error.message || 'Falha ao carregar central terapêutica')
   }
 
   return (response || []) as AtendimentoTerapeutico[]
