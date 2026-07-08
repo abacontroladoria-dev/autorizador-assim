@@ -6,8 +6,10 @@ import { HelpCircle } from "lucide-react"
 import { useHeader } from "@/contexts/HeaderContext"
 import { useRemuneracaoRPContext } from "@/contexts/RemuneracaoRPContext"
 import { RemuneracaoUploadBadges } from "./RemuneracaoUploadBadges"
+import { RemuneracaoRPDashboard } from "./RemuneracaoRPDashboard"
 import { useRemuneracaoConfig } from "@/hooks/useRemuneracaoConfig"
 import { validarModeloRelatorio, parseHtmlTable, type CsvGradeRow } from "@/lib/remuneracao/relatorio"
+import { calcularTotalPorEspecialidade } from "@/lib/remuneracao/dashboardRP"
 import CardRemun, { type ExpandidoState } from "./CardRemun"
 
 
@@ -23,13 +25,26 @@ export function RemunRPTab() {
   const [expandido, setExpandido] = useState<ExpandidoState>({})
   const [remBusca, setRemBusca] = useState("")
   const [apenasInconsistencia, setApenasInconsistencia] = useState(false)
+  const [especialidadeFiltro, setEspecialidadeFiltro] = useState<string | null>(null)
   const { setHeader, setRightContent } = useHeader()
 
   const profissionaisComInconsistencia = useMemo(
     () => resultado?.filter(p => p.inconsistencias > 0) ?? [],
     [resultado]
   )
-  const resultadoExibido = apenasInconsistencia ? profissionaisComInconsistencia : resultado
+
+  const profissionaisPorEspecialidade = useMemo(() => {
+    if (!especialidadeFiltro) return null
+    const { porEspecialidade } = calcularTotalPorEspecialidade(resultado ?? [])
+    const alvo = porEspecialidade.find(e => e.especialidade === especialidadeFiltro)
+    return new Set(alvo?.profissionais ?? [])
+  }, [resultado, especialidadeFiltro])
+
+  const resultadoExibido = useMemo(() => {
+    let r = apenasInconsistencia ? profissionaisComInconsistencia : resultado
+    if (profissionaisPorEspecialidade) r = r ? r.filter(p => profissionaisPorEspecialidade.has(p.prof)) : r
+    return r
+  }, [apenasInconsistencia, profissionaisComInconsistencia, resultado, profissionaisPorEspecialidade])
 
   useEffect(() => {
     setHeader("Rem. Mês - Total", "Relacionamento Prestador")
@@ -56,6 +71,14 @@ export function RemunRPTab() {
 
   return (
     <div className="space-y-4">
+      {resultado && resultado.length > 0 && (
+        <RemuneracaoRPDashboard
+          resultado={resultado}
+          especialidadeFiltro={especialidadeFiltro}
+          onFiltroEspecialidade={setEspecialidadeFiltro}
+        />
+      )}
+
       <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
         A coluna <strong>Presença Recep.</strong> é cruzada com <code>fila_autorizacoes</code> (mesma fonte usada em Reposição de Faltas). Sessões sem nenhum registro correspondente na fila mantêm presença assumida como &quot;Sim&quot;.
       </div>
@@ -112,7 +135,9 @@ export function RemunRPTab() {
 
       {resultado && resultado.length > 0 && resultadoExibido && resultadoExibido.length === 0 && (
         <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
-          Nenhum profissional com inconsistência nesta grade.
+          {especialidadeFiltro
+            ? `Nenhum profissional com remuneração em "${especialidadeFiltro}" nesta grade.`
+            : "Nenhum profissional com inconsistência nesta grade."}
         </div>
       )}
 

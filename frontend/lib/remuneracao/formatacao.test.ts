@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest"
 import {
   fmt, fmtPct, fmtH, fmtHDec, fmtNumBR, fmtPctOcup,
   hhmm, timeToMin, minToH, cleanTxt, isSim, isCancelado,
-  htmlEsc, onlyDigits,
+  htmlEsc, onlyDigits, parseNumeroBR, numeroParaTextoBR,
 } from "./formatacao"
 
 // Node/ICU formata moeda pt-BR com NBSP ( ) entre "R$" e o valor,
@@ -226,6 +226,24 @@ describe("htmlEsc", () => {
   })
   it("não altera texto sem caracteres especiais", () => {
     expect(htmlEsc("texto normal")).toBe("texto normal")
+  })
+})
+
+describe("numeroParaTextoBR / parseNumeroBR (round-trip para inputs editáveis)", () => {
+  it("numeroParaTextoBR converte ponto decimal para vírgula", () => {
+    expect(numeroParaTextoBR(4266.67)).toBe("4266,67")
+  })
+  it("numeroParaTextoBR mantém inteiro sem casas decimais", () => {
+    expect(numeroParaTextoBR(10)).toBe("10")
+  })
+  it("numeroParaTextoBR retorna string vazia para null/undefined", () => {
+    expect(numeroParaTextoBR(null)).toBe("")
+    expect(numeroParaTextoBR(undefined)).toBe("")
+  })
+  it("round-trip: numeroParaTextoBR -> parseNumeroBR preserva o valor", () => {
+    for (const v of [0, 10, 19.33, 4266.67, 16000, 22.5]) {
+      expect(parseNumeroBR(numeroParaTextoBR(v))).toBeCloseTo(v, 6)
+    }
   })
 })
 

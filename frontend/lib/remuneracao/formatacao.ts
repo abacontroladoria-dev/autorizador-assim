@@ -72,6 +72,14 @@ export function parseNumeroBR(v: string | undefined | null): number | null {
   return Number.isFinite(n) ? n : null
 }
 
+// Número → texto editável em formato BR (vírgula decimal, sem separador de
+// milhar) — pensado pra popular um <input> que o usuário continua editando,
+// não pra exibição final (essa é a fmt/fmtNumBR).
+export function numeroParaTextoBR(v: number | null | undefined): string {
+  if (v === null || v === undefined || Number.isNaN(v)) return ""
+  return String(v).replace(".", ",")
+}
+
 export function validarCpfCnpj(v: unknown): boolean {
   const digitos = onlyDigits(v)
   if (!digitos) return true

@@ -9,7 +9,7 @@ import {
   type AnaliseFuturaResult, type ProfRemunReal, type PERow, type ContratoAntigoInfo,
 } from "@/lib/remuneracao/calculo"
 import { normalizarGradeParaSessao, classificarSessaoReal, type SessaoReal, type CsvGradeRow } from "@/lib/remuneracao/relatorio"
-import { buscarPresencaFilaAutorizacoes, chavePresenca } from "@/lib/remuneracao/presencaReal"
+import { buscarPresencaFilaAutorizacoes, presencaDaSessao, type PresencaIndice } from "@/lib/remuneracao/presencaReal"
 import { dataParaISO, mesAnoDeLinhas } from "@/lib/remuneracao/datas"
 import type { CapacidadeOverride } from "@/lib/remuneracao/ocupacao"
 import { getContratosAntigos, getCapacidades } from "@/services/remuneracao.service"
@@ -108,7 +108,7 @@ export function useAnaliseFutura() {
 export function useRemunRP() {
   const { config, loading: configLoading, error: configError } = useRemuneracaoConfig()
   const [evoRowsBase, setEvoRowsBase] = useState<SessaoReal[]>([])
-  const [presencaMap, setPresencaMap] = useState<Map<string, boolean>>(new Map())
+  const [presencaIndice, setPresencaIndice] = useState<PresencaIndice>({ porId: new Map(), porChave: new Map() })
   const [csvName, setCsvName] = useState<string | null>(null)
   const [peRows, setPeRows] = useState<PERow[]>([])
   const [peName, setPeName] = useState<string | null>(null)
@@ -119,7 +119,7 @@ export function useRemunRP() {
 
   const limparGrade = useCallback(() => {
     setEvoRowsBase([])
-    setPresencaMap(new Map())
+    setPresencaIndice({ porId: new Map(), porChave: new Map() })
     setCsvName(null)
   }, [])
 
@@ -130,24 +130,26 @@ export function useRemunRP() {
   useEffect(() => {
     const datasIso = evoRowsBase.map(r => dataParaISO(r.data)).filter(Boolean)
     if (datasIso.length === 0) {
-      setPresencaMap(new Map())
+      setPresencaIndice({ porId: new Map(), porChave: new Map() })
       return
     }
     let cancelled = false
     const dataMin = datasIso.reduce((a, b) => (b < a ? b : a))
     const dataMax = datasIso.reduce((a, b) => (b > a ? b : a))
-    buscarPresencaFilaAutorizacoes(dataMin, dataMax).then(mapa => {
-      if (!cancelled) setPresencaMap(mapa)
+    buscarPresencaFilaAutorizacoes(dataMin, dataMax).then(indice => {
+      if (!cancelled) setPresencaIndice(indice)
     })
     return () => { cancelled = true }
   }, [evoRowsBase])
 
-  // evoRows final: sobrepõe presencaOrbita conforme fila_autorizacoes. Chaves sem
-  // registro na fila mantêm o fallback "Sim" (mesmo comportamento de antes).
+  // evoRows final: sobrepõe presencaOrbita conforme fila_autorizacoes — casando
+  // primeiro pelo id do agendamento (mais confiável) e só then por
+  // paciente+data+hora. Sessões sem registro na fila mantêm o fallback "Sim"
+  // (mesmo comportamento de antes).
   const evoRows = useMemo(() => {
-    if (presencaMap.size === 0) return evoRowsBase
+    if (presencaIndice.porId.size === 0 && presencaIndice.porChave.size === 0) return evoRowsBase
     return evoRowsBase.map(r => {
-      const presente = presencaMap.get(chavePresenca(r.paciente, r.data, r.hora))
+      const presente = presencaDaSessao(r.id, r.paciente, r.data, r.hora, presencaIndice)
       if (presente === undefined) return r
       const presencaOrbita = presente ? "Sim" : "Não"
       if (presencaOrbita === r.presencaOrbita) return r
@@ -155,7 +157,7 @@ export function useRemunRP() {
       atualizado.classificacao = classificarSessaoReal(atualizado)
       return atualizado
     })
-  }, [evoRowsBase, presencaMap])
+  }, [evoRowsBase, presencaIndice])
 
   const carregarPE = useCallback((rows: CsvGradeRow[], fileName: string) => {
     setPeRows(normalizarRelatorioPE(rows, parsePeriodoArquivo(fileName)))

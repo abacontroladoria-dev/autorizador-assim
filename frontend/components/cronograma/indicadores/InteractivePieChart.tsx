@@ -55,7 +55,7 @@ export function InteractivePieChart({
   const fsSub   = centerFontSize != null ? Math.min(Math.round(fs * 0.72), maxFont - 2) : 8.5
 
   if (!total) return (
-    <div style={{ width: size, textAlign: 'center', fontSize: 10, color: '#aaa', paddingTop: size / 2 - 10 }}>
+    <div className="text-slate-400 dark:text-slate-500" style={{ width: size, textAlign: 'center', fontSize: 10, paddingTop: size / 2 - 10 }}>
       Sem dados
     </div>
   )
@@ -68,7 +68,7 @@ export function InteractivePieChart({
     const isHov = hov === 0
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: legendAlign === 'left' ? 'flex-start' : 'center', gap: 4 }}>
-        {title && <div style={{ fontSize: 10, fontWeight: 'bold', color: '#555', textAlign: legendAlign, marginBottom: 2 }}>{title}</div>}
+        {title && <div className="text-slate-500 dark:text-slate-400" style={{ fontSize: 10, fontWeight: 'bold', textAlign: legendAlign, marginBottom: 2 }}>{title}</div>}
         <div style={{ position: 'relative', width: size, height: size }}>
           <svg width={size} height={size} style={{ overflow: 'visible' }}>
             <defs>
@@ -80,22 +80,23 @@ export function InteractivePieChart({
               opacity={isHov ? 0.92 : 1}
               onMouseEnter={() => setHov(0)} onMouseLeave={() => setHov(null)}
               style={{ cursor: 'pointer', transition: 'opacity 0.15s ease' }} />
-            <circle cx={cx} cy={cy} r={rInner} fill="white" />
+            <circle className="fill-white dark:fill-slate-900" cx={cx} cy={cy} r={rInner} />
             {/* Texto clippado dentro do buraco */}
             <g clipPath={`url(#${clipId}-s)`}>
-              <text x={cx} y={cy - (isHov ? Math.round(fs * 0.4) : 2)} textAnchor="middle"
-                fontSize={isHov ? fsHov : fs} fontWeight="bold" fill="#222">
+              <text className="fill-slate-900 dark:fill-slate-50" x={cx} y={cy - (isHov ? Math.round(fs * 0.4) : 2)} textAnchor="middle"
+                fontSize={isHov ? fsHov : fs} fontWeight="bold">
                 {isHov ? '100.0%' : (centerLabel ?? '100%')}
               </text>
               {isHov && (
-                <text x={cx} y={cy + Math.round(fs * 0.85)} textAnchor="middle" fontSize={fsSub} fill="#555">
+                <text className="fill-slate-500 dark:fill-slate-400" x={cx} y={cy + Math.round(fs * 0.85)} textAnchor="middle" fontSize={fsSub}>
                   {valueFormatter(seg.value, seg, total)}
                 </text>
               )}
             </g>
           </svg>
         </div>
-        <div style={{ fontSize: legendFontSize + 1, fontWeight: 'bold', color: isHov ? seg.color : '#555', textAlign: legendAlign, minHeight: 14 }}
+        <div className={isHov ? undefined : "text-slate-500 dark:text-slate-400"}
+          style={{ fontSize: legendFontSize + 1, fontWeight: 'bold', color: isHov ? seg.color : undefined, textAlign: legendAlign, minHeight: 14 }}
           onMouseEnter={() => setHov(0)} onMouseLeave={() => setHov(null)}>
           {seg.label} (100%)
         </div>
@@ -124,7 +125,7 @@ export function InteractivePieChart({
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: legendAlign === 'left' ? 'flex-start' : 'center', gap: 4 }}>
-      {title && <div style={{ fontSize: 10, fontWeight: 'bold', color: '#555', textAlign: legendAlign, marginBottom: 2 }}>{title}</div>}
+      {title && <div className="text-slate-500 dark:text-slate-400" style={{ fontSize: 10, fontWeight: 'bold', textAlign: legendAlign, marginBottom: 2 }}>{title}</div>}
       <div style={{ position: 'relative', width: size, height: size }}>
         <svg width={size} height={size} style={{ overflow: 'visible' }}>
           <defs>
@@ -146,36 +147,37 @@ export function InteractivePieChart({
                 onMouseEnter={() => setHov(a.idx)} onMouseLeave={() => setHov(null)}
                 style={{ cursor: 'pointer' }}>
                 <path d={a.path}
+                  className="stroke-white dark:stroke-slate-900"
                   fill={a.color}
                   opacity={(hov === null && !highlightGroup) || isHov ? 1 : 0.35}
-                  stroke="white" strokeWidth={isHov ? 2 : 0.8}
+                  strokeWidth={isHov ? 2 : 0.8}
                   style={{ transition: 'all 0.15s ease' }} />
               </g>
             )
           })}
 
-          {/* Buraco branco */}
-          <circle cx={cx} cy={cy} r={rInner} fill="white" />
+          {/* Buraco (branco no claro, superfície escura no dark) */}
+          <circle className="fill-white dark:fill-slate-900" cx={cx} cy={cy} r={rInner} />
 
           {/* Texto central — clipPath garante que nunca ultrapassa o buraco */}
           <g clipPath={`url(#${clipId})`}>
             <text
+              className="fill-slate-900 dark:fill-slate-50"
               x={cx}
               y={cy - (hovSeg ? Math.round(fs * 0.4) : 2)}
               textAnchor="middle"
               fontSize={hovSeg ? fsHov : fs}
               fontWeight="bold"
-              fill="#222"
             >
               {hovSeg ? `${hovSeg.pct.toFixed(1)}%` : (centerLabel ?? String(total))}
             </text>
             {hovSeg && (
               <text
+                className="fill-slate-500 dark:fill-slate-400"
                 x={cx}
                 y={cy + Math.round(fs * 0.85)}
                 textAnchor="middle"
                 fontSize={fsSub}
-                fill="#555"
               >
                 {valueFormatter(hovSeg.value, hovSeg, total)}
               </text>
@@ -206,7 +208,7 @@ export function InteractivePieChart({
             }}
             onMouseEnter={() => setHov(a.idx)} onMouseLeave={() => setHov(null)}>
             <span style={{ width: 9, height: 9, borderRadius: '50%', background: a.color, flexShrink: 0, display: 'inline-block' }} />
-            <span style={{ color: hov === a.idx ? a.color : '#555' }}>{a.label} ({a.pct.toFixed(0)}%)</span>
+            <span className={hov === a.idx ? undefined : "text-slate-500 dark:text-slate-400"} style={hov === a.idx ? { color: a.color } : undefined}>{a.label} ({a.pct.toFixed(0)}%)</span>
           </div>
         ))}
       </div>

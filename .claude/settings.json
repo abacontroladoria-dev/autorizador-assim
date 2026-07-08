@@ -21,7 +21,11 @@
       "Bash(npx --yes playwright install chromium)",
       "Bash(npm init *)",
       "Bash(npm install *)",
-      "Bash(node screenshot-analise.mjs)"
+      "Bash(node screenshot-analise.mjs)",
+      "Bash(git push *)",
+      "Skill(dataviz)",
+      "Skill(dataviz:*)",
+      "Bash(git rev-list *)"
     ]
   }
 }

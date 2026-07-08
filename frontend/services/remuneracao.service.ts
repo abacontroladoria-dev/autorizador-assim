@@ -56,6 +56,23 @@ export async function upsertCapacidade(record: any) {
   return !error
 }
 
+// Lista de profissionais distintos vindos da grade (vw_remuneracao_profissionais_roster),
+// usada para popular a lista completa de cadastro mesmo para quem ainda não tem
+// contrato antigo/atual cadastrado.
+export async function getProfissionaisRoster(): Promise<{ data: string[] | null; error: unknown }> {
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase
+    .from('vw_remuneracao_profissionais_roster')
+    .select('profissional_nome')
+    .order('profissional_nome')
+
+  if (error) {
+    console.error('Erro getProfissionaisRoster:', error)
+    return { data: null, error }
+  }
+  return { data: (data ?? []).map((r: any) => r.profissional_nome as string), error: null }
+}
+
 export async function getContratosAtuais() {
   const supabase = getSupabaseClient()
   const { data, error } = await supabase.from('remuneracao_contratos_atuais').select('*').order('profissional_nome')

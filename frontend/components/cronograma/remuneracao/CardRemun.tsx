@@ -630,8 +630,7 @@ export default function CardRemun({
 
               {/* Donuts premium — painel esquerdo mais largo */}
               {modoRP && p.agendadas > 0 && (
-                <div className="flex gap-10 shrink-0 rounded-[20px] p-5 shadow-sm"
-                     style={{ background: "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)", border: "1px solid #e2e8f0" }}>
+                <div className="flex gap-10 shrink-0 rounded-[20px] p-5 shadow-sm bg-gradient-to-br from-muted/70 to-muted/30 border border-border">
                   <div className="w-[200px]">
                     <DonutCard
                       title="Base total"
@@ -644,7 +643,7 @@ export default function CardRemun({
                       highlightGroup={cardHover}
                     />
                   </div>
-                  <div className="w-px self-stretch" style={{ background: "#cbd5e1" }} />
+                  <div className="w-px self-stretch bg-border" />
                   <div className="w-[200px]">
                     <DonutCard
                       title="Base corrigida"
