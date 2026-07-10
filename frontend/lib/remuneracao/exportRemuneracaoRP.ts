@@ -98,7 +98,7 @@ export function exportarRemuneracaoRPXlsx(opts: ExportarRemuneracaoRPOpts): void
     })))
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(sessoesPerdidas), "Perdidas para substituicao")
 
-  const sessoesInc = evoRows.filter(r => ["Evolução sem presença", "Cancelado evoluído"].includes(r.classificacao))
+  const sessoesInc = evoRows.filter(r => ["Evolução sem presença", "Cancelado evoluído", "Evolução sem agendamento"].includes(r.classificacao))
     .map(r => ({
       Data: formatDateBR(r.data), Hora: r.hora, Paciente: r.paciente, Especialidade: r.especialidade,
       Profissional_Agenda: r.profAgenda, Profissional_Evolucao: r.profCsv,

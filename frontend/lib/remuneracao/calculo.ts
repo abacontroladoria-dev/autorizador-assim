@@ -11,9 +11,11 @@ import { isFakePatient, isEtaAdminPatient } from "./pacientes"
 import { normKey, PROFS_IGNORAR } from "./constants"
 import { getCol, type SessaoReal, type CsvGradeRow } from "./relatorio"
 import {
-  calcularOcupacaoSemanal, parseUnidadeSala, resumirJornadaAgenda,
-  type SlotData, type DiaInfo, type OcupacaoAgregada, type CapacidadeOverride,
+  parseUnidadeSala,
+  type SlotData, type DiaInfo,
 } from "./ocupacao"
+import { buildAllSlotsFromRows, calcularOcupacaoSemanal as calcularOcupacaoSemanalIndicadores } from "@/lib/cronograma/ocupacaoProf"
+import type { OcupacaoAgregada } from "@/types/ocupacaoProf"
 
 // ─── Especialidades / contrato (App.jsx linhas 34-46, 153-252) ───────────────
 
@@ -69,9 +71,14 @@ function labelFuncaoContrato(funcao: string): string {
   return ""
 }
 
+// Valor histórico usado antes da tabela de taxas por especialidade existir —
+// some como fallback só se a config não tiver a chave "Aplicador ABA (PS)"
+// cadastrada (não deveria acontecer em uso normal; ver Config > Variáveis & Taxas).
+const FALLBACK_PA_PS_SEM_CONFIG = 30
+
 function taxaPorFuncao(funcao: string, { ccPA, taxasPA }: { ccPA: number; taxasPA: Record<string, number> }): number {
   if (funcao === FUNCAO_AC) return ccPA
-  if (funcao === FUNCAO_PS) return taxasPA["Aplicador ABA (PS)"] ?? 30
+  if (funcao === FUNCAO_PS) return taxasPA["Aplicador ABA (PS)"] ?? FALLBACK_PA_PS_SEM_CONFIG
   return 0
 }
 
@@ -122,7 +129,11 @@ export function resolverPARow(
   const contratosAtuais = contratosAtuaisDoCadastro(cadastroContratual)
   if (contratosAtuais.length === 1) {
     const c = contratosAtuais[0]
-    const valor = c.valorPA != null ? c.valorPA : taxaPorFuncao(c.funcao, { ccPA, taxasPA })
+    const valor = c.valorPA != null
+      ? c.valorPA
+      : (c.funcao === FUNCAO_AC || c.funcao === FUNCAO_PS)
+        ? taxaPorFuncao(c.funcao, { ccPA, taxasPA })
+        : (taxasPA[r.especialidade] ?? 0)
     return {
       valor, funcao: c.funcao, label: labelFuncaoContrato(c.funcao), contratoAtual: contratoLabel(c),
       cadastroContratoPendente: false,
@@ -152,12 +163,15 @@ export function resolverPARow(
   const funcaoAplicada = temDuploAcPs ? funcaoLinha : (funcoes[0] || funcaoLinha)
   const valor = taxaPorFuncao(funcaoAplicada, { ccPA, taxasPA })
   const substituicao = !!(r.profAgenda && r.profCsv && normKey(r.profAgenda) !== normKey(r.profCsv))
+  const cadastroSemFuncaoCorrespondente = contratosAtuais.length > 0
   const explicacao = temDuploAcPs && substituicao
     ? `Contrato duplo AC+PS: na substituição predomina a função do profissional substituído na agenda (${labelFuncaoContrato(funcaoLinha)}).`
     : temDuploAcPs
       ? `Contrato duplo AC+PS: PA aplicado conforme a função registrada na agenda (${labelFuncaoContrato(funcaoLinha)}).`
-      : `Contrato único ${labelFuncaoContrato(funcaoAplicada)}: o PA do profissional prevalece mesmo em substituições.`
-  return { valor, funcao: funcaoAplicada, label: labelFuncaoContrato(funcaoAplicada), cadastroContratoPendente: true, explicacao: `${explicacao} Cadastro de contrato atual pendente: regra aplicada por inferencia do relatorio ate a base ser preenchida.` }
+      : cadastroSemFuncaoCorrespondente
+        ? `Contrato atual multiplo, nenhum casando com a funcao ${labelFuncaoContrato(funcaoLinha)}: PA aplicado pela tabela padrao ate o cadastro ser ajustado.`
+        : `Contrato único ${labelFuncaoContrato(funcaoAplicada)}: o PA do profissional prevalece mesmo em substituições.`
+  return { valor, funcao: funcaoAplicada, label: labelFuncaoContrato(funcaoAplicada), cadastroContratoPendente: !cadastroSemFuncaoCorrespondente, explicacao: cadastroSemFuncaoCorrespondente ? explicacao : `${explicacao} Cadastro de contrato atual pendente: regra aplicada por inferencia do relatorio ate a base ser preenchida.` }
 }
 
 export type ContratoAntigoInfo = { salario: number; chSemanal: number; contrato?: string | null }
@@ -174,7 +188,7 @@ export type AnaliseFuturaConfig = {
   extraHols?: Feriado[]
   limites?: Record<string, number> // profissional -> override do limite de pacientes CC
   antigos?: Record<string, ContratoAntigoInfo> // profissional -> contrato antigo (Passo 9; vazio até lá)
-  capacidadesProfissionais?: Record<string, CapacidadeOverride>
+  cadastroPrestadores?: Record<string, CadastroContratual> // profissional -> contrato(s) atual(is)/novo(s) cadastrados em Config
 }
 
 export type DowBreakItem = { dow: number; cnt: number; occ: number; mensal: number; feriados: Feriado[] }
@@ -213,6 +227,7 @@ export type ProfissionalAnalise = {
   totalX: number
   salAntigo: number | null
   contrato: string | null
+  contratoNovo: string | null
   chSemanal: number | null
   valorHoraSemAntigo: number | null
   salAntigoProporcional: number | null
@@ -231,8 +246,10 @@ export type ProfissionalAnalise = {
   horasComPac: number
   taxaOcupacao: number | null
   ocupacao: OcupacaoAgregada
-  jornadaResumo: string
+  diasTrabalhados: DiaTrabalhadoItem[]
 }
+
+export type DiaTrabalhadoItem = { dow: number; horas: number }
 
 export type AnaliseFuturaResult = {
   dadosPorProf: ProfissionalAnalise[]
@@ -253,13 +270,25 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
 
   const {
     taxasPA, diarias, etaBonus, ccPA, ccPE, ccLimDefault, presenca, feriados,
-    extraHols = [], limites = {}, antigos = {}, capacidadesProfissionais = {},
+    extraHols = [], limites = {}, antigos = {}, cadastroPrestadores = {},
   } = config
 
   const datas = rows.map(r => r["Data"]).filter(Boolean).sort() as string[]
   const [yr, mo] = (datas[0] || "2026-06-01").split("-").map(Number)
   const cal = getCalendario(yr, mo, feriados, extraHols)
   const pct = presenca / 100
+
+  // Ocupação (donut / % de vagas) usa o mesmo motor de cronograma/indicadores/
+  // (buildAllSlotsFromRows + calcularOcupacaoSemanal de ocupacaoProf.ts), para
+  // que os dois lugares mostrem exatamente o mesmo número por profissional.
+  // Só precisa de HI/HF numéricos (minutos), que essa query não seleciona por
+  // padrão — derivados aqui a partir das colunas de horário já existentes.
+  const rowsParaOcupacao: CsvRow[] = rows.map(r => ({
+    ...r,
+    HI: timeToMin(r["Hora Inicial"] as string | undefined),
+    HF: timeToMin(r["Hora Final"] as string | undefined),
+  }))
+  const allSlotsOcupacao = buildAllSlotsFromRows(rowsParaOcupacao)
 
   const allSlots: Record<string, AllSlotsEntry> = {}
   rows.forEach(r => {
@@ -353,6 +382,9 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
   const profs: ProfissionalAnalise[] = Object.values(mapa).map(d => {
     const slotData: SlotData = allSlots[d.prof] || { diasInfo: {}, terpDays: {} }
     let horasSemanaTotal = 0, horasAbertas = 0, horasComPac = 0
+    // Um span por DATA real da semana de referência (não por dia da semana
+    // multiplicado) — cada dia soma só a própria carga, então um dia com menos
+    // horas que outro nunca "puxa" o total do outro dia junto.
     Object.values(slotData.diasInfo).forEach(di => {
       let fim = di.fimMin
       if (fim >= 17 * 60 + 40 && fim < 18 * 60) fim = 18 * 60
@@ -364,11 +396,22 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
       horasComPac += di.ag * 40 / 60
     })
 
-    const ocupacao = calcularOcupacaoSemanal(slotData, d.prof, capacidadesProfissionais)
+    const slotDataOcupacao = allSlotsOcupacao[d.prof] || { diasInfo: {} }
+    const ocupacao = calcularOcupacaoSemanalIndicadores(slotDataOcupacao, d.prof)
     const taxaOcupacao = ocupacao.pct
+    // Contagem de dias/horas trabalhados vem do mesmo motor de ocupação usado em
+    // cronograma/indicadores (ocupacao.porDia) — evita o card de Rem. Mês mostrar
+    // um total de horas por dia diferente do que a tela de indicadores mostra.
+    const diasTrabalhados: DiaTrabalhadoItem[] = ocupacao.porDia
+      .filter(pd => pd.horasTotal > 0)
+      .map(pd => ({ dow: pd.dow, horas: pd.horasTotal }))
+      .sort((a, b) => a.dow - b.dow)
     const pacCC = d.pacCC.size, hasCC = "Coordenador de Caso" in d.terapias
     const limCC = limites[d.prof] ?? ccLimDefault
     const alertCC = hasCC && pacCC > limCC
+    // Acumulado em float sem arredondar centavos a cada soma — diferença de
+    // até R$ 0,01 entre este total e a soma dos valores já arredondados
+    // exibidos na UI é possível e aceitável (não é bug, é ordem de arredondamento).
     let total100 = 0, totalX = 0
 
     const terapiaDetails: TerapiaDetalhe[] = Object.values(d.terapias).map(td => {
@@ -441,7 +484,6 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
     const salA = cF?.salario ?? null, temA = salA !== null && salA > 0
     const chAntiga = Number(cF?.chSemanal || 0)
     const chAtual = Number(horasSemanaTotal || 0)
-    const jornadaResumo = resumirJornadaAgenda(slotData)
     const valorHoraSemAntigo = temA && chAntiga > 0 ? salA! / chAntiga : null
     const salAntigoProporcional = valorHoraSemAntigo !== null && chAtual > 0 ? valorHoraSemAntigo * chAtual : salA
     const d100 = temA ? ((total100 - salA!) / salA!) * 100 : null
@@ -449,18 +491,20 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
     const dProp100 = temA && salAntigoProporcional! > 0 ? ((total100 - salAntigoProporcional!) / salAntigoProporcional!) * 100 : null
     const dPropX = temA && salAntigoProporcional! > 0 ? ((totalX - salAntigoProporcional!) / salAntigoProporcional!) * 100 : null
     const terpN = terapiaDetails.map(t => t.terp)
+    const contratosVigentes = contratosAtuaisDoCadastro(buscarCadastroContratual(cadastroPrestadores, d.prof))
+    const contratoNovo = contratosVigentes.map(c => c.numero).filter(Boolean).join(" / ") || null
 
     return {
       prof: d.prof, terapiaDetails, hasCC, pacCC, pe,
       total100, totalX,
-      salAntigo: salA, contrato: cF?.contrato ?? null, chSemanal: chAntiga || null,
+      salAntigo: salA, contrato: cF?.contrato ?? null, contratoNovo, chSemanal: chAntiga || null,
       valorHoraSemAntigo, salAntigoProporcional,
       temAntigo: temA, delta100: d100, deltaX: dX, deltaProp100: dProp100, deltaPropX: dPropX,
       limiteCC: limCC, alertaCC: alertCC,
       hasAE: terpN.some(t => t.includes("Aplicador ABA")),
       hasTA: terpN.includes("Terapia Alimentar"),
       allPacs: [...new Set(terapiaDetails.flatMap(t => t.pacientesList))].sort(),
-      horasSemanaTotal, horasAbertas, horasComPac, taxaOcupacao, ocupacao, jornadaResumo,
+      horasSemanaTotal, horasAbertas, horasComPac, taxaOcupacao, ocupacao, diasTrabalhados,
     }
   }).sort((a, b) => a.prof.localeCompare(b.prof))
 
@@ -540,6 +584,7 @@ export type ProfRemunReal = {
   pacientesQtd: number
   pacientesCCQtd: number
   contrato: string
+  contratoNovo: string | null
   salAntigo: number
   temAntigo: boolean
   pe: number
@@ -599,9 +644,9 @@ export function calcularRemuneracaoReal(evoRows: SessaoReal[], config: Remunerac
     const same = !!(agenda && csv && normKey(agenda) === normKey(csv))
     const possui = isSim(r.possuiTratativa)
     const cancelado = isCancelado(r.statusFinal) || isCancelado(r.statusCsv)
-    const isEtaAdminRow = r.especialidade === "Especialista Técnico de Área" && isEtaAdminPatient(r.paciente)
+    const isEtaAdminRow = r.especialidade === "Especialista Técnico de Área" && isEtaAdminPatient(r.paciente, r.idFavorecido)
     if (!csv || !same || !possui || cancelado) return
-    if (!isEtaAdminRow && isFakePatient(r.paciente)) return
+    if (!isEtaAdminRow && isFakePatient(r.paciente, r.idFavorecido)) return
     const fn = funcaoContratoPorEspecialidade(r.especialidade)
     if (!fn) return
     if (!funcoesContratoPorProf[csv]) funcoesContratoPorProf[csv] = new Set()
@@ -639,24 +684,28 @@ export function calcularRemuneracaoReal(evoRows: SessaoReal[], config: Remunerac
     const possui = isSim(r.possuiTratativa)
     const presencaRow = isSim(r.presencaOrbita)
     const cancelado = isCancelado(r.statusFinal) || isCancelado(r.statusCsv)
-    const isEtaAdminRow = r.especialidade === "Especialista Técnico de Área" && isEtaAdminPatient(r.paciente)
-    if (!isEtaAdminRow && isFakePatient(r.paciente)) return
+    const isEtaAdminRow = r.especialidade === "Especialista Técnico de Área" && isEtaAdminPatient(r.paciente, r.idFavorecido)
+    if (!isEtaAdminRow && isFakePatient(r.paciente, r.idFavorecido)) return
     const fallbackPA = isEspecialidadeSemPA(r.especialidade)
       ? 0
       : isEtaAdminRow ? (taxasPA["Especialista Técnico de Área"] ?? 50) : (taxasPA[r.especialidade] ?? 0)
-    const eInc = ["Evolução sem presença", "Cancelado evoluído"].includes(r.classificacao)
+    const eInc = ["Evolução sem presença", "Cancelado evoluído", "Evolução sem agendamento"].includes(r.classificacao)
     if (agenda) {
       const a = ensure(agenda)
       a.agendadas++
-      if (r.paciente && !isFakePatient(r.paciente)) {
+      if (r.paciente && !isFakePatient(r.paciente, r.idFavorecido)) {
         a.pacientes.add(r.paciente)
         if (r.especialidade === "Coordenador de Caso") a.pacientesCC.add(r.paciente)
       }
-      if (r.especialidade && r.data) {
-        if (!a.diasPorEsp[r.especialidade]) a.diasPorEsp[r.especialidade] = new Set()
-        a.diasPorEsp[r.especialidade].add(r.data)
+      // Dia efetivamente trabalhado: não conta diária/ETA de sessão cancelada
+      // (um dia com todas as sessões canceladas não deve somar diária).
+      if (!cancelado) {
+        if (r.especialidade && r.data) {
+          if (!a.diasPorEsp[r.especialidade]) a.diasPorEsp[r.especialidade] = new Set()
+          a.diasPorEsp[r.especialidade].add(r.data)
+        }
+        if (isEtaAdminRow && r.data) a.etaAdminDatas.add(r.data)
       }
-      if (isEtaAdminRow && r.data) a.etaAdminDatas.add(r.data)
       a.sessoes.push({ ...r, papel: "Agenda" })
       if (eInc) { a.inconsistencias++ }
       else if (possui && same) {
@@ -671,7 +720,14 @@ export function calcularRemuneracaoReal(evoRows: SessaoReal[], config: Remunerac
         a.sessoes[a.sessoes.length - 1] = { ...a.sessoes[a.sessoes.length - 1], valorPA: pa, valorPATexto: paInfo.valorTexto || "", semPA: paInfo.semPA || false, funcaoPA: paInfo.label, contratoAtualPA: paInfo.contratoAtual || "", cadastroContratoPendente: paInfo.cadastroContratoPendente, explicacaoPA: paInfo.explicacao }
       }
       else if (possui && csv && !same) { a.substituidoPorOutro++ }
-      else if (presencaRow && !possui && !cancelado) { a.pendentes++; a.valorRecuperavel += fallbackPA }
+      else if (presencaRow && !possui && !cancelado) {
+        a.pendentes++
+        const paInfo = resolverPARow(r, a.funcoesContrato, {
+          ccPA, taxasPA,
+          cadastroContratual: buscarCadastroContratual(cadastroPrestadores, agenda),
+        })
+        a.valorRecuperavel += paInfo.valor ?? fallbackPA
+      }
       else if (cancelado && !possui) { a.canceladas++ }
       else { a.naoEvoluidas++ }
     }
@@ -722,18 +778,24 @@ export function calcularRemuneracaoReal(evoRows: SessaoReal[], config: Remunerac
       p.etaAdminDatas.forEach(dataStr => {
         const d = parseDateBR(dataStr)
         if (!d) return
-        const wk = Math.ceil(((d.getTime() - new Date(d.getFullYear(), 0, 1).getTime()) / 86400000 + new Date(d.getFullYear(), 0, 1).getDay() + 1) / 7)
-        weekSet.add(`${d.getFullYear()}-W${wk}`)
+        // Semana ISO (mesma função usada no agrupamento de PE mais abaixo) —
+        // uma fórmula de semana civil domingo-based aqui poderia contar a
+        // mesma semana civil como duas na virada do ano.
+        weekSet.add(semanaISODateLocal(d))
       })
       etaWeeksPeriodo = weekSet.size
       etaBonusPeriodo = etaWeeksPeriodo * etaBonus
     }
+
+    const contratosVigentes = contratosAtuaisDoCadastro(buscarCadastroContratual(cadastroPrestadores, p.prof))
+    const contratoNovo = contratosVigentes.map(ct => ct.numero).filter(Boolean).join(" / ") || null
 
     return {
       ...p,
       pacientesQtd: p.pacientes.size,
       pacientesCCQtd,
       contrato: c?.contrato || "",
+      contratoNovo,
       salAntigo: c?.salario || 0,
       temAntigo: (c?.salario || 0) > 0,
       pe, diariaPeriodo, diariaDetalhe, etaWeeksPeriodo, etaBonusPeriodo,
@@ -769,7 +831,6 @@ export function calcularRemuneracaoReal(evoRows: SessaoReal[], config: Remunerac
 
 const PE_DIAS_ARRED_7 = 7
 const PE_DIAS_INTEGRAL = 21
-const PE_NOVA_REGRA_INICIO = new Date(2026, 5, 1)
 
 function parseDateAny(v: unknown): Date | null {
   if (v instanceof Date && !Number.isNaN(v.getTime())) return v
@@ -898,6 +959,7 @@ export function calcularPEProporcional(
   const inicio = datas[0]
   const fim = datas[datas.length - 1]
   const diasMes = new Date(inicio.getFullYear(), inicio.getMonth() + 1, 0).getDate()
+  const diasMesDoGrupo = (d: Date) => new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
   const porProf: PEProporcionalResultado["porProf"] = {}
 
   const ativosSet = new Set((coordsAtivos || []).map(normKey).filter(Boolean))
@@ -1002,7 +1064,7 @@ export function calcularPEProporcional(
     const dias = diasCorridosLocal(g.inicio, g.fimUsado)
     const parKey = `${g.profKey}||${g.pacienteKey}`
     const evs = paresEvolucao[parKey] || []
-    const regraBase = aplicarFaixasPE(dias, diasMes, evs.length > 0, ccPE)
+    const regraBase = aplicarFaixasPE(dias, diasMesDoGrupo(g.inicio), evs.length > 0, ccPE)
     regrasBasePorPar[parKey] = regraBase
     if (regraBase.situacao === "PE integral") pacientesComPEIntegral.add(g.pacienteKey)
   })
@@ -1016,7 +1078,7 @@ export function calcularPEProporcional(
     const fimUsado = g.fimUsado
     const dias = diasCorridosLocal(g.inicio, fimUsado)
     const evs = paresEvolucao[parKey] || []
-    let regra = regrasBasePorPar[parKey] || aplicarFaixasPE(dias, diasMes, evs.length > 0, ccPE)
+    let regra = regrasBasePorPar[parKey] || aplicarFaixasPE(dias, diasMesDoGrupo(g.inicio), evs.length > 0, ccPE)
     const conflitos = conflitosPorPaciente[pacienteKey] || []
     const troca = trocasPorPaciente[pacienteKey]?.has(profKey)
     if (conflitos.length) {

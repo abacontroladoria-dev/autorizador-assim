@@ -19,6 +19,11 @@ interface Props {
   legendFontSize?: number
   valueFormatter?: (v: number, seg: PieSegment, total: number) => string
   highlightGroup?: string | null
+  // Cor do disco central — por padrão casa com bg-card (a maioria dos
+  // chamadores fica sobre esse fundo). Sobrescreva quando o donut é embutido
+  // num container tintado diferente (ex.: StatCardShell tone="slate") para o
+  // disco não destoar do fundo ao redor.
+  centerFillClassName?: string
 }
 
 export function InteractivePieChart({
@@ -31,6 +36,7 @@ export function InteractivePieChart({
   legendFontSize = 9,
   valueFormatter = (v) => `${v} sess.`,
   highlightGroup = null,
+  centerFillClassName = 'fill-white dark:fill-card',
 }: Props) {
   const uid = useId()
   const clipId = `pie-inner-${uid.replace(/:/g, '')}`
@@ -80,7 +86,7 @@ export function InteractivePieChart({
               opacity={isHov ? 0.92 : 1}
               onMouseEnter={() => setHov(0)} onMouseLeave={() => setHov(null)}
               style={{ cursor: 'pointer', transition: 'opacity 0.15s ease' }} />
-            <circle className="fill-white dark:fill-slate-900" cx={cx} cy={cy} r={rInner} />
+            <circle className={centerFillClassName} cx={cx} cy={cy} r={rInner} />
             {/* Texto clippado dentro do buraco */}
             <g clipPath={`url(#${clipId}-s)`}>
               <text className="fill-slate-900 dark:fill-slate-50" x={cx} y={cy - (isHov ? Math.round(fs * 0.4) : 2)} textAnchor="middle"
@@ -147,7 +153,7 @@ export function InteractivePieChart({
                 onMouseEnter={() => setHov(a.idx)} onMouseLeave={() => setHov(null)}
                 style={{ cursor: 'pointer' }}>
                 <path d={a.path}
-                  className="stroke-white dark:stroke-slate-900"
+                  className="stroke-white dark:stroke-card"
                   fill={a.color}
                   opacity={(hov === null && !highlightGroup) || isHov ? 1 : 0.35}
                   strokeWidth={isHov ? 2 : 0.8}
@@ -157,7 +163,7 @@ export function InteractivePieChart({
           })}
 
           {/* Buraco (branco no claro, superfície escura no dark) */}
-          <circle className="fill-white dark:fill-slate-900" cx={cx} cy={cy} r={rInner} />
+          <circle className={centerFillClassName} cx={cx} cy={cy} r={rInner} />
 
           {/* Texto central — clipPath garante que nunca ultrapassa o buraco */}
           <g clipPath={`url(#${clipId})`}>

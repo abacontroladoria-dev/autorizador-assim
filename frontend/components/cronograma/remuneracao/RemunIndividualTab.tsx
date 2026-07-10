@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { UserRound, FileText, FileSpreadsheet, XCircle, ChevronDown, Search } from "lucide-react"
 import { useHeader } from "@/contexts/HeaderContext"
 import { useRemuneracaoRPContext } from "@/contexts/RemuneracaoRPContext"
@@ -8,7 +8,6 @@ import { useRemuneracaoConfig } from "@/hooks/useRemuneracaoConfig"
 import { exportResumoSessoesPdf } from "@/lib/remuneracao/exportResumoSessoesPdf"
 import { gerarPDF, gerarWord, montarInfoDocumentoPrestador, type PdfOpts } from "@/lib/remuneracao/documento"
 import { parseDateBR } from "@/lib/remuneracao/datas"
-import { B } from "@/lib/cronograma/constants"
 import { RemuneracaoUploadBadges } from "./RemuneracaoUploadBadges"
 
 // ─── Tipo de documento ────────────────────────────────────────────────────────
@@ -36,6 +35,8 @@ export function RemunIndividualTab() {
   const [tipoDoc, setTipoDoc]               = useState<TipoDoc>("auto")
   const [selectOpen, setSelectOpen]         = useState(false)
   const [searchQuery, setSearchQuery]       = useState("")
+  const [highlightIdx, setHighlightIdx]     = useState(0)
+  const selectRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     setHeader("Rem. Mês - Individual", "Relacionamento Prestador")
@@ -55,7 +56,25 @@ export function RemunIndividualTab() {
   }, [setHeader, setRightContent, evoRows, peRows, carregarGrade, carregarPE, limparGrade, limparPE, setCsvName])
 
   // Limpa a seleção quando o resultado muda (novo CSV carregado)
-  useEffect(() => { setProfSelecionado("") }, [resultado])
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- reage a uma prop assíncrona externa (novo CSV), não há valor derivável no primeiro render
+    setProfSelecionado("")
+  }, [resultado])
+
+  // Fecha o dropdown ao clicar fora ou pressionar Escape
+  useEffect(() => {
+    if (!selectOpen) return
+    const onPointerDown = (e: MouseEvent) => {
+      if (selectRef.current && !selectRef.current.contains(e.target as Node)) setSelectOpen(false)
+    }
+    const onKeyDown = (e: KeyboardEvent) => { if (e.key === "Escape") setSelectOpen(false) }
+    document.addEventListener("mousedown", onPointerDown)
+    document.addEventListener("keydown", onKeyDown)
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown)
+      document.removeEventListener("keydown", onKeyDown)
+    }
+  }, [selectOpen])
 
   const ccPA     = config?.cc_pa_default ?? 50
   const ccPE     = config?.cc_pe_default ?? 100
@@ -124,16 +143,16 @@ export function RemunIndividualTab() {
 
           {/* Select estilizado */}
           <div>
-            <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-              Profissional
+            <label htmlFor="select-profissional" className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
+              Profissional ({profissionais.length})
             </label>
-            <div className="relative">
+            <div className="relative" ref={selectRef}>
               <button
                 type="button"
                 id="select-profissional"
                 aria-haspopup="listbox"
                 aria-expanded={selectOpen}
-                onClick={() => { setSelectOpen(o => !o); setSearchQuery("") }}
+                onClick={() => { setSelectOpen(o => !o); setSearchQuery(""); setHighlightIdx(0) }}
                 className="w-full flex items-center justify-between gap-2 rounded-xl border border-border bg-background px-4 py-2.5 text-sm font-medium text-foreground hover:bg-muted/50 focus:outline-none focus:ring-2 focus:ring-ring transition-colors"
               >
                 <span className="flex items-center gap-2 min-w-0">
@@ -150,29 +169,44 @@ export function RemunIndividualTab() {
                   <div className="p-2 border-b border-border">
                     <div className="relative">
                       <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" size={14} />
-                      <input 
+                      <input
                         type="text"
                         autoFocus
                         placeholder="Buscar profissional..."
                         value={searchQuery}
-                        onChange={e => setSearchQuery(e.target.value)}
+                        onChange={e => { setSearchQuery(e.target.value); setHighlightIdx(0) }}
+                        onKeyDown={e => {
+                          if (e.key === "ArrowDown") { e.preventDefault(); setHighlightIdx(i => Math.min(i + 1, profissionaisFiltrados.length - 1)) }
+                          else if (e.key === "ArrowUp") { e.preventDefault(); setHighlightIdx(i => Math.max(i - 1, 0)) }
+                          else if (e.key === "Enter") {
+                            e.preventDefault()
+                            const prof = profissionaisFiltrados[highlightIdx]
+                            if (prof) { setProfSelecionado(prof); setSelectOpen(false) }
+                          }
+                        }}
+                        role="combobox"
+                        aria-expanded={selectOpen}
+                        aria-controls="lista-profissionais"
+                        aria-activedescendant={profissionaisFiltrados[highlightIdx] ? `prof-opt-${profissionaisFiltrados[highlightIdx]}` : undefined}
                         className="w-full pl-8 pr-3 py-1.5 text-sm bg-muted/40 border-none focus:ring-1 focus:ring-ring rounded-lg outline-none transition-shadow"
                       />
                     </div>
                   </div>
-                  <div className="overflow-y-auto">
+                  <div id="lista-profissionais" role="listbox" aria-label="Profissionais" className="overflow-y-auto">
                     {profissionaisFiltrados.length === 0 ? (
                       <div className="p-4 text-center text-sm text-muted-foreground">Nenhum profissional encontrado.</div>
                     ) : (
-                      profissionaisFiltrados.map(prof => (
+                      profissionaisFiltrados.map((prof, i) => (
                         <button
                           key={prof}
+                          id={`prof-opt-${prof}`}
                           type="button"
                           role="option"
                           aria-selected={prof === profSelecionado}
                           onClick={() => { setProfSelecionado(prof); setSelectOpen(false) }}
+                          onMouseEnter={() => setHighlightIdx(i)}
                           className={`w-full text-left px-4 py-2.5 text-sm hover:bg-muted/60 transition-colors flex items-center gap-2
-                            ${prof === profSelecionado ? "bg-muted font-semibold text-foreground" : "text-muted-foreground"}`}
+                            ${prof === profSelecionado ? "bg-muted font-semibold text-foreground" : i === highlightIdx ? "bg-muted/60 text-foreground" : "text-muted-foreground"}`}
                         >
                           <UserRound size={13} className="shrink-0" />
                           <span className="truncate">{prof}</span>
@@ -210,9 +244,8 @@ export function RemunIndividualTab() {
                     title={desc}
                     className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all
                       ${tipoDoc === k
-                        ? "text-white shadow-sm"
+                        ? "text-white shadow-sm bg-[#222847] border-[#222847] dark:bg-slate-600 dark:border-slate-500"
                         : "border-border text-foreground bg-background hover:bg-muted/50"}`}
-                    style={tipoDoc === k ? { background: B.navy, borderColor: B.navy } : {}}
                   >
                     {label}
                   </button>
@@ -233,8 +266,7 @@ export function RemunIndividualTab() {
                 type="button"
                 id="btn-gerar-pdf"
                 onClick={() => gerarPDF(dadosProfSelecionado, pdfOpts)}
-                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white shadow-sm hover:opacity-90 active:scale-95 transition-all"
-                style={{ background: B.navy }}
+                className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold text-white shadow-sm hover:opacity-90 active:scale-95 transition-all bg-[#222847] dark:bg-slate-600"
               >
                 <FileText size={15} />
                 PDF - Apuração do Faturamento

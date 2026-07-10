@@ -11,12 +11,54 @@
 // • tabular-nums em todos os valores monetários
 
 import { useMemo, useCallback, memo, useState } from "react"
-import { ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, XCircle, HelpCircle, FileText, Download } from "lucide-react"
+import { ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, XCircle, HelpCircle, Users, Lock } from "lucide-react"
 import { B } from "@/lib/cronograma/constants"
 import { fmt, isSim } from "@/lib/remuneracao/formatacao"
 import { formatDateBR } from "@/lib/remuneracao/datas"
+import { useTheme } from "@/contexts/ThemeContext"
 import { InteractivePieChart } from "@/components/cronograma/indicadores/InteractivePieChart"
 import type { ProfRemunReal, SessaoComPapel } from "@/lib/remuneracao/calculo"
+
+// ─── Tons semânticos (chip/pill) — substitui pares "bg clara + texto escuro"
+// inline (invisíveis em fundo escuro) por classes Tailwind com par dark: ────
+
+export type Tone = "green" | "amber" | "red" | "purple" | "blue" | "gray"
+
+const TONE_CHIP: Record<Tone, { bg: string; text: string; border: string }> = {
+  green:  { bg: "bg-emerald-100 dark:bg-emerald-900/40", text: "text-emerald-700 dark:text-emerald-300", border: "border-emerald-200 dark:border-emerald-800" },
+  amber:  { bg: "bg-amber-100 dark:bg-amber-900/40",     text: "text-amber-700 dark:text-amber-300",     border: "border-amber-200 dark:border-amber-800" },
+  red:    { bg: "bg-rose-100 dark:bg-rose-900/40",       text: "text-rose-700 dark:text-rose-300",       border: "border-rose-200 dark:border-rose-800" },
+  purple: { bg: "bg-purple-100 dark:bg-purple-900/40",   text: "text-purple-700 dark:text-purple-300",   border: "border-purple-200 dark:border-purple-800" },
+  blue:   { bg: "bg-sky-100 dark:bg-sky-900/40",         text: "text-sky-700 dark:text-sky-300",         border: "border-sky-200 dark:border-sky-800" },
+  gray:   { bg: "bg-slate-100 dark:bg-slate-800/60",     text: "text-slate-600 dark:text-slate-400",     border: "border-slate-200 dark:border-slate-700" },
+}
+
+function StatusChip({ tone, children, className = "", dense = false }: { tone: Tone; children: React.ReactNode; className?: string; dense?: boolean }) {
+  const c = TONE_CHIP[tone]
+  const sizing = dense ? "text-[10px] px-1.5 py-0.5" : "text-[11px] px-2 py-0.5"
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full font-semibold whitespace-nowrap ${sizing} ${c.bg} ${c.text} ${className}`}>
+      {children}
+    </span>
+  )
+}
+
+// Cores literais (não são classe) para props que exigem string de cor (SVG
+// fill/stroke, DonutCard) — variam por tema porque B.amber/B.purple (feitos
+// para fundo claro) ficam com contraste baixo (~3:1) sobre bg-card escuro.
+const TONE_HEX: Record<Tone, { light: string; dark: string }> = {
+  green:  { light: "#15803d", dark: "#34d399" },
+  amber:  { light: "#b45309", dark: "#fbbf24" },
+  red:    { light: "#dc2626", dark: "#fb7185" },
+  purple: { light: "#7c3aed", dark: "#c4b5fd" },
+  blue:   { light: "#2563eb", dark: "#60a5fa" },
+  gray:   { light: "#6b7280", dark: "#9ca3af" },
+}
+
+function useToneColor() {
+  const { theme } = useTheme()
+  return useCallback((tone: Tone) => TONE_HEX[tone][theme], [theme])
+}
 
 // ─── Tipos ────────────────────────────────────────────────────────────────────
 
@@ -37,18 +79,15 @@ interface PeLinhaItem {
 
 interface CardRemunProps {
   p: ProfRemunReal
-  modoRP: boolean
   expandido: ExpandidoState
   setExpandido: React.Dispatch<React.SetStateAction<ExpandidoState>>
   remBusca?: string
-  remPeriodo?: { inicio: string; fim: string } | null
+  forceOpen?: boolean
   ccPA: number
   ccPE: number
   etaBonus: number
   taxasPA: Record<string, number>
   dadosPorProf: Array<{ prof: string; limiteCC?: number; alertaCC?: boolean }>
-  onGerarPDF?: () => void
-  onGerarWord?: () => void
 }
 
 const DEFAULT_CC_LIM = 8
@@ -67,26 +106,19 @@ function fmtDataPE(d: Date | string | null | undefined): string {
 
 // ─── Badge de classificação de sessão ─────────────────────────────────────────
 
-const BADGE_COLORS: Record<string, [string, string]> = {
-  "Evolução normal":        [B.limeLt,  B.green],
-  "Substituição":           [B.blueLt,  B.blue],
-  "Pendente retroativa":    [B.amberLt, B.amber],
-  "Evolução sem presença":  ["#fee2e2",  B.red],
-  "Cancelado evoluído":     ["#fee2e2",  B.red],
-  "Cancelado":              ["#f3f4f6",  B.gray],
-  "Não evoluído":           ["#fef3c7",  "#92400e"],
+const CLASS_TONE: Record<string, Tone> = {
+  "Evolução normal":        "green",
+  "Substituição":           "blue",
+  "Pendente retroativa":    "amber",
+  "Evolução sem presença":  "red",
+  "Cancelado evoluído":     "red",
+  "Evolução sem agendamento": "red",
+  "Cancelado":              "gray",
+  "Não evoluído":           "amber",
 }
 
 function ClassBadge({ cls }: { cls: string }) {
-  const [bg, cor] = BADGE_COLORS[cls] ?? ["#f3f4f6", B.gray]
-  return (
-    <span
-      className="px-2 py-0.5 rounded-full text-[11px] font-semibold whitespace-nowrap"
-      style={{ background: bg, color: cor }}
-    >
-      {cls}
-    </span>
-  )
+  return <StatusChip tone={CLASS_TONE[cls] ?? "gray"}>{cls}</StatusChip>
 }
 
 // ─── Tooltip informativo inline ───────────────────────────────────────────────
@@ -94,7 +126,8 @@ function ClassBadge({ cls }: { cls: string }) {
 function InfoTooltip({ text }: { text: string }) {
   return (
     <span
-      className="ml-1 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-muted text-muted-foreground text-[9px] cursor-help align-middle"
+      tabIndex={0}
+      className="ml-1 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-muted text-muted-foreground text-[9px] cursor-help align-middle focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       title={text}
       aria-label={text}
     >
@@ -108,13 +141,14 @@ function InfoTooltip({ text }: { text: string }) {
 interface SessoesProps {
   sessoes: SessaoComPapel[]
   mostrarPapel?: boolean
-  valorCor?: string
+  tone?: Tone
   getPARow: (s: SessaoComPapel) => number
 }
 
 const SessoesTabela = memo(function SessoesTabela({
-  sessoes, mostrarPapel = false, valorCor = B.green, getPARow,
+  sessoes, mostrarPapel = false, tone = "green", getPARow,
 }: SessoesProps) {
+  const valorCls = TONE_CHIP[tone].text
   return (
     <div className="overflow-x-auto mt-1">
       <table className="w-full text-xs">
@@ -131,19 +165,13 @@ const SessoesTabela = memo(function SessoesTabela({
             <th className="text-center p-1.5">Presença Recep.</th>
             <th className="text-center p-1.5">Presença TiTa</th>
             <th className="text-center p-1.5">Tratativa</th>
-            <th className="text-right p-1.5 whitespace-nowrap font-semibold tabular-nums" style={{ color: valorCor }}>Valor PA</th>
+            <th className={`text-right p-1.5 whitespace-nowrap font-semibold tabular-nums ${valorCls}`}>Valor PA</th>
             <th className="text-left p-1.5">Motivo</th>
           </tr>
         </thead>
         <tbody>
           {sessoes.map((s: SessaoComPapel, i: number) => {
             const paVal = getPARow(s)
-            const presRecBg  = isSim(s.presencaOrbita) ? "#dcfce7" : "#fee2e2"
-            const presRecCor = isSim(s.presencaOrbita) ? "#166534" : "#991b1b"
-            const presTitBg  = isSim(s.presencaTita)   ? "#dcfce7" : "#fee2e2"
-            const presTitCor = isSim(s.presencaTita)   ? "#166534" : "#991b1b"
-            const tratBg  = isSim(s.possuiTratativa) ? "#dcfce7" : "#fef3c7"
-            const tratCor = isSim(s.possuiTratativa) ? "#166534" : "#92400e"
             return (
               <tr key={`${s._idx ?? i}-${i}`} className="border-t border-border hover:bg-muted/40">
                 <td className="p-1.5 whitespace-nowrap text-muted-foreground">{s.id || "—"}</td>
@@ -155,24 +183,21 @@ const SessoesTabela = memo(function SessoesTabela({
                 <td className="p-1.5 text-muted-foreground">{s.profAgenda}</td>
                 <td className="p-1.5 text-muted-foreground">{s.profCsv || "—"}</td>
                 <td className="p-1.5 text-center">
-                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
-                        style={{ background: presRecBg, color: presRecCor }}>
+                  <StatusChip tone={isSim(s.presencaOrbita) ? "green" : "red"} dense>
                     {s.presencaOrbita || "—"}
-                  </span>
+                  </StatusChip>
                 </td>
                 <td className="p-1.5 text-center">
-                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
-                        style={{ background: presTitBg, color: presTitCor }}>
+                  <StatusChip tone={isSim(s.presencaTita) ? "green" : "red"} dense>
                     {s.presencaTita || "—"}
-                  </span>
+                  </StatusChip>
                 </td>
                 <td className="p-1.5 text-center">
-                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full"
-                        style={{ background: tratBg, color: tratCor }}>
+                  <StatusChip tone={isSim(s.possuiTratativa) ? "green" : "amber"} dense>
                     {s.possuiTratativa || "—"}
-                  </span>
+                  </StatusChip>
                 </td>
-                <td className="p-1.5 text-right font-bold whitespace-nowrap tabular-nums" style={{ color: valorCor }}>
+                <td className={`p-1.5 text-right font-bold whitespace-nowrap tabular-nums ${valorCls}`}>
                   {s.valorPATexto || (paVal > 0 ? fmt(paVal) : "—")}
                   {s.explicacaoPA && <InfoTooltip text={s.explicacaoPA} />}
                 </td>
@@ -192,6 +217,7 @@ const SessoesTabela = memo(function SessoesTabela({
 // ─── Linha de detalhe PE ──────────────────────────────────────────────────────
 
 function PeLinha({ x }: { x: PeLinhaItem }) {
+  const toneColor = useToneColor()
   const inicio  = fmtDataPE(x.inicio)
   const fim     = fmtDataPE(x.fim)
   const fimUsado = fmtDataPE(x.fimUsado)
@@ -202,7 +228,7 @@ function PeLinha({ x }: { x: PeLinhaItem }) {
       <div className="col-span-12 md:col-span-5 font-semibold min-w-0 text-foreground">{x.paciente}</div>
       <div className="col-span-4 md:col-span-2 text-muted-foreground">{x.diasEfetivos ?? x.dias}/{x.diasMes} dias</div>
       <div className="col-span-4 md:col-span-2 font-bold tabular-nums"
-           style={{ color: x.valor == null ? B.amber : B.purple }}>
+           style={{ color: x.valor == null ? toneColor("amber") : toneColor("purple") }}>
         {x.valor == null ? "Em aberto" : fmt(x.valor)}
       </div>
       <div className="col-span-4 md:col-span-3 text-muted-foreground">{x.situacao}</div>
@@ -212,32 +238,55 @@ function PeLinha({ x }: { x: PeLinhaItem }) {
   )
 }
 
+// ─── Header colapsável genérico — reutilizado pelo bloco de PE e pelos
+// blocos de sessões (mesmo padrão: ícone/título + contagem, valor extra,
+// chevron) ──────────────────────────────────────────────────────────────────
+
+interface BlocoHeaderProps {
+  tone: Tone
+  titulo: React.ReactNode
+  extra?: React.ReactNode
+  open: boolean
+  onToggle: () => void
+}
+
+function BlocoHeader({ tone, titulo, extra, open, onToggle }: BlocoHeaderProps) {
+  const c = TONE_CHIP[tone]
+  return (
+    <button type="button" onClick={onToggle}
+            className={`w-full flex items-center gap-2 py-1.5 px-2 rounded-lg text-left transition-opacity hover:opacity-90 ${c.bg}`}>
+      <span className={`text-xs font-bold flex-1 flex items-center gap-1 min-w-0 ${c.text}`}>
+        {titulo}
+      </span>
+      {extra != null && (
+        <span className={`text-xs font-black tabular-nums flex-shrink-0 ${c.text}`}>{extra}</span>
+      )}
+      {open ? <ChevronDown size={12} className={c.text} /> : <ChevronRight size={12} className={c.text} />}
+    </button>
+  )
+}
+
 // ─── Bloco colapsável PE ──────────────────────────────────────────────────────
 
 interface PeBlocoProps {
   titulo: string
   lista: PeLinhaItem[]
-  cor: string
-  bg: string
+  tone: Tone
   total: number | null | undefined
   open: boolean
   onToggle: () => void
 }
 
-function PeBloco({ titulo, lista, cor, bg, total, open, onToggle }: PeBlocoProps) {
+function PeBloco({ titulo, lista, tone, total, open, onToggle }: PeBlocoProps) {
   return (
     <div>
-      <button type="button" onClick={onToggle}
-              className="w-full flex items-center gap-2 py-1.5 px-2 rounded-lg text-left transition-opacity hover:opacity-90"
-              style={{ background: bg }}>
-        <span className="text-xs font-bold flex-1" style={{ color: cor }}>
-          {titulo} · {lista.length} paciente(s)
-        </span>
-        {total != null && (
-          <span className="text-xs font-black tabular-nums" style={{ color: cor }}>{fmt(total)}</span>
-        )}
-        {open ? <ChevronDown size={12} style={{ color: cor }} /> : <ChevronRight size={12} style={{ color: cor }} />}
-      </button>
+      <BlocoHeader
+        tone={tone}
+        titulo={`${titulo} · ${lista.length} paciente(s)`}
+        extra={total != null ? fmt(total) : undefined}
+        open={open}
+        onToggle={onToggle}
+      />
       {open && (
         <div className="rounded-b-lg bg-card border-x border-b border-border overflow-hidden">
           {lista.length
@@ -364,9 +413,8 @@ function DonutCard({ title, statLabel, statColor, size, centerLabel, centerFontS
 // ─── Componente principal ─────────────────────────────────────────────────────
 
 export default function CardRemun({
-  p, modoRP, expandido, setExpandido, remBusca, remPeriodo,
+  p, expandido, setExpandido, remBusca, forceOpen,
   ccPA, ccPE, etaBonus, taxasPA, dadosPorProf,
-  onGerarPDF, onGerarWord,
 }: CardRemunProps) {
   const isCC = useMemo(
     () => p.sessoes.some(s => s.especialidade === "Coordenador de Caso"),
@@ -381,6 +429,8 @@ export default function CardRemun({
   const alertaCC = analProf?.alertaCC ?? false
   void alertaCC
 
+  const toneColor = useToneColor()
+
   const totalRecebeHoje = p.evoluidasProprias + p.substituicoesRealizadas
   const baseCalc = p.agendadas - p.canceladas
   const pctEv    = baseCalc > 0 ? (totalRecebeHoje / baseCalc * 100) : 0
@@ -390,7 +440,10 @@ export default function CardRemun({
     : totalRecebeHoje > 0                   ? B.green
     : B.gray
 
-  const aberto    = modoRP ? expandido[`rem:${p.prof}`] === true : expandido[`rem:${p.prof}`] !== false
+  const avatarTone: Tone = p.inconsistencias > 0 ? "red" : (p.pendentes ?? 0) > 0 ? "amber" : "green"
+  const pctEvTone: Tone = pctEv >= 80 ? "green" : pctEv >= 50 ? "amber" : "red"
+
+  const aberto    = forceOpen || expandido[`rem:${p.prof}`] === true
   const blocoAberto = (key: string) => expandido[`rem:${p.prof}:${key}`] === true
   const togBloco    = (key: string) =>
     setExpandido(e => ({ ...e, [`rem:${p.prof}:${key}`]: !blocoAberto(key) }))
@@ -398,27 +451,13 @@ export default function CardRemun({
   // Estado local de hover → propaga como highlightGroup para ambos os donuts
   const [cardHover, setCardHover] = useState<string | null>(null)
 
-  const peDetalheTela: PeLinhaItem[] = useMemo(() => modoRP
-    ? (p.peDetalhe ?? [])
-    : (p.peProporcionalAtivo
-        ? (p.peConfirmadoDetalhe ?? p.peIntegralConfirmadoDetalhe ?? [])
-        : (p.peDetalhe ?? [])), [modoRP, p.peDetalhe, p.peProporcionalAtivo, p.peConfirmadoDetalhe, p.peIntegralConfirmadoDetalhe])
+  const peDetalheTela: PeLinhaItem[] = useMemo(() => p.peDetalhe ?? [], [p.peDetalhe])
 
-  const pePacientesTela = modoRP
-    ? (p.pacientesCCQtd ?? 0)
-    : (p.peProporcionalAtivo
-        ? (p.peConfirmadoQtd ?? (p.peConfirmadoDetalhe ?? []).length)
-        : (p.pacientesCCQtd ?? 0))
+  const pePacientesTela = p.pacientesCCQtd ?? 0
 
-  const peValorTela = modoRP
-    ? (p.pe ?? 0)
-    : (p.peProporcionalAtivo
-        ? (p.peConfirmadoValor ?? (p.peConfirmadoDetalhe ?? []).reduce((s, x) => s + Number(x.valor ?? 0), 0))
-        : (p.pe ?? 0))
+  const peValorTela = p.pe ?? 0
 
-  const valorConfirmadoTela = modoRP
-    ? p.valorConfirmado
-    : (p.valorConfirmado - (p.pe ?? 0) + peValorTela)
+  const valorConfirmadoTela = p.valorConfirmado
 
   const peGrupos = useMemo(() => {
     const situacao = (x: PeLinhaItem) => String(x.situacao ?? "")
@@ -440,7 +479,7 @@ export default function CardRemun({
     const byData = (a: SessaoComPapel, b: SessaoComPapel) =>
       (a.data ?? "").localeCompare(b.data ?? "") || (a.hora ?? "").localeCompare(b.hora ?? "")
     const ehInc = (s: SessaoComPapel) =>
-      ["Evolução sem presença", "Cancelado evoluído"].includes(s.classificacao ?? "")
+      ["Evolução sem presença", "Cancelado evoluído", "Evolução sem agendamento"].includes(s.classificacao ?? "")
     return {
       sInc: p.sessoes.filter(ehInc).sort(byData),
       sRecebe: p.sessoes
@@ -492,77 +531,48 @@ export default function CardRemun({
 
       {/* ── Header ─────────────────────────────────────────────────────── */}
       <div
-        className={`p-4 ${modoRP
-          ? "grid grid-cols-1 xl:grid-cols-[520px_minmax(560px,1fr)] gap-4 items-start cursor-pointer hover:bg-muted/40 transition-colors"
-          : "flex items-start gap-3 flex-wrap justify-between"}`}
-        onClick={() => modoRP && setExpandido(e => ({ ...e, [`rem:${p.prof}`]: aberto ? null : true }))}
-        role={modoRP ? "button" : undefined}
-        tabIndex={modoRP ? 0 : undefined}
-        onKeyDown={modoRP ? (e) => (e.key === "Enter" || e.key === " ") &&
-          setExpandido(prev => ({ ...prev, [`rem:${p.prof}`]: aberto ? null : true })) : undefined}
-        aria-expanded={modoRP ? aberto : undefined}
+        className="p-4 grid grid-cols-1 xl:grid-cols-[520px_minmax(560px,1fr)] gap-4 items-start cursor-pointer hover:bg-muted/40 transition-colors"
+        onClick={() => setExpandido(e => ({ ...e, [`rem:${p.prof}`]: aberto ? null : true }))}
+        role="button"
+        tabIndex={0}
+        onKeyDown={(e) => (e.key === "Enter" || e.key === " ") &&
+          setExpandido(prev => ({ ...prev, [`rem:${p.prof}`]: aberto ? null : true }))}
+        aria-expanded={aberto}
       >
         {/* Avatar + nome + meta */}
         <div className="flex items-center gap-3">
-          {modoRP ? (
-            <div className="w-16 h-16 rounded-xl flex items-center justify-center flex-col text-center flex-shrink-0"
-                 style={{ background: p.inconsistencias > 0 ? "#fee2e2" : (p.pendentes ?? 0) > 0 ? B.amberLt : B.limeLt, color: corBorda }}>
-              <div className="text-xl font-bold leading-none">{p.agendadas}</div>
-              <div className="text-[9px] mt-0.5 font-medium opacity-70">ag.</div>
-            </div>
-          ) : (
-            <div className="w-16 h-16 rounded-xl flex items-center justify-center flex-shrink-0 bg-muted">
-              <span className="text-2xl" aria-hidden>👤</span>
-            </div>
-          )}
+          <div className={`w-16 h-16 rounded-xl flex items-center justify-center flex-col text-center flex-shrink-0 ${TONE_CHIP[avatarTone].bg} ${TONE_CHIP[avatarTone].text}`}>
+            <div className="text-xl font-bold leading-none">{p.agendadas}</div>
+            <div className="text-[9px] mt-0.5 font-medium opacity-70">ag.</div>
+          </div>
 
           <div>
             <div className="font-bold text-base flex items-center gap-2 text-foreground">
-              {modoRP && (aberto
+              {aberto
                 ? <ChevronDown size={12} className="text-muted-foreground" />
                 : <ChevronRight size={12} className="text-muted-foreground" />
-              )}
+              }
               <span>{p.prof}</span>
             </div>
             <div className="text-xs text-muted-foreground mt-0.5 flex flex-wrap items-center gap-1">
-              {modoRP && (p.contrato
-                ? <>
-                    <span>{p.contrato}</span>
-                    <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded"
-                          style={{ background: "#fef3c7", color: "#92400e" }}>
-                      contrato antigo
-                    </span>
-                  </>
-                : <span>sem contrato cadastrado</span>
-              )}
+              <span>{p.contratoNovo ?? "PS.ABA-PENDENTE"}</span>
               {isCC
                 ? <span>· <span style={{ color: B.purple }}>
-                    {modoRP
-                      ? `${p.pacientesCCQtd} pac. CC analisado(s)`
-                      : `${pePacientesTela} PE confirmado`}
+                    {p.pacientesCCQtd} pac. CC analisado(s)
                   </span></span>
                 : <span>· {p.agendadas} sessões agendadas</span>
               }
             </div>
-            {remPeriodo && (
-              <div className="text-xs mt-0.5" style={{ color: B.gray }}>
-                Período: {remPeriodo.inicio} a {remPeriodo.fim}
-              </div>
-            )}
-            {modoRP && (
-              <div className="text-xs mt-1 font-semibold"
-                   style={{ color: pctEv >= 80 ? B.green : pctEv >= 50 ? B.amber : B.red }}>
-                {pctEv.toFixed(1)}% base corrigida
-                <span className="font-normal text-muted-foreground ml-1">
-                  ({totalRecebeHoje} remun. / {baseCalc} válidas)
-                </span>
-              </div>
-            )}
-            {p.inconsistencias > 0 && (
-              <span className="text-xs font-bold px-2 py-0.5 rounded-full mt-1 inline-block"
-                    style={{ background: "#fee2e2", color: B.red }}>
-                ⚠ {p.inconsistencias} inconsistência(s)
+            <div className="text-xs mt-1 font-semibold" style={{ color: toneColor(pctEvTone) }}>
+              {pctEv.toFixed(1)}% base corrigida
+              <span className="font-normal text-muted-foreground ml-1">
+                ({totalRecebeHoje} remun. / {baseCalc} válidas)
               </span>
+            </div>
+            {p.inconsistencias > 0 && (
+              <StatusChip tone="red" className="mt-1 text-xs px-2">
+                ⚠ {p.inconsistencias} inconsistência(s)
+              </StatusChip>
             )}
           </div>
         </div>
@@ -570,9 +580,9 @@ export default function CardRemun({
         {/* Donuts ficam no corpo expandido — ver abaixo */}
 
         {/* Resumo compacto (recolhido) */}
-        {modoRP && !aberto && (
-          <div className="grid grid-cols-[minmax(220px,1fr)_110px_90px_90px_100px] gap-3 items-center min-w-0 w-full">
-            <div>
+        {!aberto && (
+          <div className="flex flex-wrap gap-3 items-center min-w-0 w-full">
+            <div className="min-w-[140px] flex-1 basis-[140px]">
               <div className="h-2 rounded-full overflow-hidden border border-border bg-muted">
                 <div className="h-full rounded-full transition-all"
                      style={{ width: `${Math.max(0, Math.min(100, pctEv))}%`, background: corBorda }} />
@@ -581,42 +591,22 @@ export default function CardRemun({
                 {totalRecebeHoje} remun. / {baseCalc} válidas
               </div>
             </div>
-            <div className="text-right">
+            <div className="text-right shrink-0">
               <div className="text-[10px] text-muted-foreground">Recebe</div>
               <div className="text-sm font-black tabular-nums" style={{ color: B.green }}>{fmt(valorConfirmadoTela)}</div>
             </div>
-            <div className="text-right">
+            <div className="text-right shrink-0">
               <div className="text-[10px] text-muted-foreground">Pendente</div>
-              <div className="text-sm font-black tabular-nums" style={{ color: B.amber }}>{(p.pendentes ?? 0) + (p.naoEvoluidas ?? 0)}</div>
+              <div className="text-sm font-black tabular-nums" style={{ color: toneColor("amber") }}>{(p.pendentes ?? 0) + (p.naoEvoluidas ?? 0)}</div>
             </div>
-            <div className="text-right">
+            <div className="text-right shrink-0">
               <div className="text-[10px] text-muted-foreground">Não recebe</div>
               <div className="text-sm font-black tabular-nums" style={{ color: B.red }}>{(p.substituidoPorOutro ?? 0) + p.canceladas}</div>
             </div>
-            <div className="text-right">
+            <div className="text-right shrink-0">
               <div className="text-[10px] text-muted-foreground">Inconsistência</div>
               <div className="text-sm font-black tabular-nums" style={{ color: B.red }}>{p.inconsistencias}</div>
             </div>
-          </div>
-        )}
-
-        {/* Botões Individual */}
-        {!modoRP && (onGerarPDF || onGerarWord) && (
-          <div className="flex gap-2 flex-wrap justify-end">
-            {onGerarPDF && (
-              <button type="button" onClick={onGerarPDF}
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-white transition-opacity hover:opacity-90"
-                      style={{ background: B.navy }}>
-                <FileText size={13} aria-hidden /> Gerar PDF
-              </button>
-            )}
-            {onGerarWord && (
-              <button type="button" onClick={onGerarWord}
-                      className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold text-white transition-opacity hover:opacity-90"
-                      style={{ background: B.blue }}>
-                <Download size={13} aria-hidden /> Exportar Word
-              </button>
-            )}
           </div>
         )}
       </div>
@@ -626,16 +616,16 @@ export default function CardRemun({
         <>
           {/* ── Donuts + KPI cards — layout unificado horizontal ─────────── */}
           <div className="px-4 pb-4 border-t border-border/50 pt-4">
-            <div className="flex gap-5 items-start">
+            <div className="flex flex-wrap gap-5 items-start">
 
               {/* Donuts premium — painel esquerdo mais largo */}
-              {modoRP && p.agendadas > 0 && (
-                <div className="flex gap-10 shrink-0 rounded-[20px] p-5 shadow-sm bg-gradient-to-br from-muted/70 to-muted/30 border border-border">
+              {p.agendadas > 0 && (
+                <div className="flex gap-10 justify-center flex-wrap w-full lg:w-auto lg:shrink-0 rounded-[20px] p-5 shadow-sm bg-gradient-to-br from-muted/70 to-muted/30 border border-border">
                   <div className="w-[200px]">
                     <DonutCard
                       title="Base total"
                       statLabel={`${p.agendadas} ag.`}
-                      statColor={B.navy}
+                      statColor="var(--foreground)"
                       size={200}
                       centerLabel={`${(p.agendadas > 0 ? pctEv * (p.agendadas - p.canceladas) / p.agendadas : 0).toFixed(1)}%`}
                       centerFontSize={28}
@@ -643,12 +633,12 @@ export default function CardRemun({
                       highlightGroup={cardHover}
                     />
                   </div>
-                  <div className="w-px self-stretch bg-border" />
+                  <div className="w-px self-stretch bg-border hidden sm:block" />
                   <div className="w-[200px]">
                     <DonutCard
                       title="Base corrigida"
                       statLabel={`${p.agendadas - p.canceladas} ag.`}
-                      statColor={pctEv >= 80 ? B.green : pctEv >= 50 ? B.amber : B.red}
+                      statColor={toneColor(pctEvTone)}
                       size={200}
                       centerLabel={`${pctEv.toFixed(1)}%`}
                       centerFontSize={28}
@@ -660,7 +650,7 @@ export default function CardRemun({
               )}
 
               {/* 4 KPI cards — grade 2×2, ocupa o restante */}
-              <div className="grid grid-cols-2 gap-2.5 flex-1 min-w-0">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 flex-1 min-w-[260px]">
 
             {/* Recebe agora */}
             <KpiStatCard
@@ -677,22 +667,20 @@ export default function CardRemun({
               {p.evoluidasProprias > 0 && <div>• {p.evoluidasProprias} evolução(ões) própria(s)</div>}
               {p.substituicoesRealizadas > 0 && <div>• {p.substituicoesRealizadas} substituição(ões)</div>}
               {isCC && pePacientesTela > 0 && (
-                <div>• PE: {modoRP
-                  ? (p.peProporcionalAtivo
-                      ? `${p.pacientesCCQtd} pac. analisado(s)`
-                      : `${p.pacientesCCQtd} pac. × ${fmt(ccPE)}`)
-                  : `${pePacientesTela} pac. confirmado(s) · ${fmt(peValorTela)}`}
+                <div>• PE: {p.peProporcionalAtivo
+                  ? `${p.pacientesCCQtd} pac. analisado(s)`
+                  : `${p.pacientesCCQtd} pac. × ${fmt(ccPE)}`}
                 </div>
               )}
                 {isCC && p.peBloqueado && (
                   <div className="font-semibold" style={{ color: B.amber }}>• PE bloqueado: falta relatório 1 ou 2.</div>
                 )}
-                {modoRP && isCC && ((p.peEmAberto ?? 0) + (p.peAguardaDiretoria ?? 0)) > 0 && (
+                {isCC && ((p.peEmAberto ?? 0) + (p.peAguardaDiretoria ?? 0)) > 0 && (
                   <div>• PE em aberto: {(p.peEmAberto ?? 0) + (p.peAguardaDiretoria ?? 0)} paciente(s)</div>
                 )}
                 {(p.diariaPeriodo ?? 0) > 0 && <div>• PPD: {fmt(p.diariaPeriodo ?? 0)}</div>}
                 {(p.etaBonusPeriodo ?? 0) > 0 && <div>• Bônus ETA: {p.etaWeeksPeriodo}sem × {fmt(etaBonus)}</div>}
-                <div className="font-semibold border-t pt-1 mt-1" style={{ borderColor: "#bbf7d0", color: "#15803d" }}>
+                <div className="font-semibold border-t border-emerald-200 dark:border-emerald-800 pt-1 mt-1 text-emerald-700 dark:text-emerald-400">
                   {totalRecebeHoje} sessão(ões) elegível(is) ao PA
                 </div>
             </KpiStatCard>
@@ -709,8 +697,7 @@ export default function CardRemun({
               onHover={setCardHover}
             >
               <div>• {(p.pendentes ?? 0) + (p.naoEvoluidas ?? 0)} registro(s) não realizado(s)</div>
-              <div className="rounded-xl px-2.5 py-1.5 mt-2 text-xs leading-snug"
-                   style={{ background: "#fef3c7", color: "#92400e" }}>
+              <div className={`rounded-xl px-2.5 py-1.5 mt-2 text-xs leading-snug ${TONE_CHIP.amber.bg} ${TONE_CHIP.amber.text}`}>
                 Verifique a coluna Presença Recep. linha a linha.
               </div>
               {((p.pendentes ?? 0) + (p.naoEvoluidas ?? 0)) === 0 && (
@@ -744,7 +731,7 @@ export default function CardRemun({
               iconColor="#7c3aed"
               icon={<HelpCircle size={16} />}
               titulo="Inconsistências"
-              tooltip="Presença Recep. ≠ Possui Tratativa: a recepção marcou falta mas há tratativa registrada (ou a sessão foi cancelada mas ainda assim evoluída). Confirme antes de pagar."
+              tooltip="Presença Recep. ≠ Possui Tratativa: a recepção marcou falta mas há tratativa registrada (ou a sessão foi cancelada mas ainda assim evoluída, ou há evolução registrada sem ID Agendamento). Confirme antes de pagar."
               valor={String(p.inconsistencias)}
               onHover={setCardHover}
             >
@@ -760,18 +747,14 @@ export default function CardRemun({
           {/* ── Bloco CC / PE ────────────────────────────────────── */}
           {isCC && (pePacientesTela > 0 || p.peBloqueado) && (
             <div className="px-4 pb-4">
-              <div className="rounded-2xl overflow-hidden shadow-sm"
-                   style={{ border: "1px solid #e9d5ff" }}>
+              <div className="rounded-2xl overflow-hidden shadow-sm border border-purple-200 dark:border-purple-800/60">
 
                 {/* Cabeçalho */}
                 <div className="px-4 py-2.5 flex items-center gap-2.5"
                      style={{ background: "linear-gradient(90deg, #7c3aed18 0%, #a855f718 100%)" }}>
                   <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0"
                        style={{ background: "#7c3aed20" }}>
-                    <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#7c3aed" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/>
-                      <path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>
-                    </svg>
+                    <Users size={13} strokeWidth={2.5} style={{ color: "#7c3aed" }} />
                   </div>
                   <span className="text-xs font-bold tracking-wide" style={{ color: "#6d28d9" }}>
                     Psicólogo Analista (CC) — PA + PE
@@ -806,47 +789,37 @@ export default function CardRemun({
                   <div className="lg:col-span-6 px-4 py-3 space-y-2">
                     <div className="flex items-center justify-between gap-2">
                       <p className="text-[10px] font-bold uppercase tracking-wider text-purple-400">
-                        {modoRP
-                          ? (p.peProporcionalAtivo ? "PE por regra 2026" : "PE bloqueado")
-                          : "PE confirmado"}
+                        {p.peProporcionalAtivo ? "PE por regra 2026" : "PE bloqueado"}
                         {p.peInfoTexto && <InfoTooltip text={p.peInfoTexto} />}
                       </p>
                       {p.peDiasMes && (
-                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full"
-                              style={{ background: "#ede9fe", color: "#6d28d9" }}>
+                        <StatusChip tone="purple">
                           mês-base {p.peDiasMes}d
-                        </span>
+                        </StatusChip>
                       )}
                     </div>
 
                     {p.peBloqueado ? (
                       /* ── PE bloqueado: banner elegante ── */
-                      <div className="rounded-xl px-4 py-3 flex items-start gap-3"
-                           style={{ background: "linear-gradient(135deg, #fff7ed 0%, #fef3c7 100%)", border: "1px solid #fed7aa" }}>
-                        <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5"
-                             style={{ background: "#fde68a" }}>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#b45309" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                            <rect width="18" height="11" x="3" y="11" rx="2" ry="2"/>
-                            <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
-                          </svg>
+                      <div className={`rounded-xl px-4 py-3 flex items-start gap-3 border ${TONE_CHIP.amber.border} bg-gradient-to-br from-orange-50 to-amber-100 dark:from-orange-950/30 dark:to-amber-900/20`}>
+                        <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 bg-amber-200 dark:bg-amber-800/60">
+                          <Lock size={16} strokeWidth={2.5} className={TONE_CHIP.amber.text} />
                         </div>
                         <div className="min-w-0">
-                          <div className="text-sm font-black" style={{ color: "#92400e" }}>
+                          <div className="text-sm font-black text-amber-900 dark:text-amber-200">
                             PE não calculado
                           </div>
-                          <div className="text-xs mt-0.5 leading-snug" style={{ color: "#b45309" }}>
+                          <div className={`text-xs mt-0.5 leading-snug ${TONE_CHIP.amber.text}`}>
                             Importe os relatórios 1 e 2 para liberar a análise completa.
                           </div>
                         </div>
                       </div>
                     ) : p.peProporcionalAtivo ? (
                       <>
-                        <PeBloco titulo="PE integral confirmado"    lista={peGrupos.integral}    cor={B.green}  bg="#f0fdf4" total={peGrupos.totalIntegral}    open={blocoAberto("pe_integral")}    onToggle={() => togBloco("pe_integral")} />
-                        {(modoRP || peGrupos.proporcional.length > 0) && (
-                          <PeBloco titulo="PE proporcional confirmado" lista={peGrupos.proporcional} cor={B.blue}  bg="#eff6ff" total={peGrupos.totalProporcional} open={blocoAberto("pe_proporcional")} onToggle={() => togBloco("pe_proporcional")} />
-                        )}
-                        {modoRP && <PeBloco titulo="PE em aberto / Diretoria" lista={peGrupos.aberto} cor={B.amber} bg="#fff7ed" total={null} open={blocoAberto("pe_aberto")} onToggle={() => togBloco("pe_aberto")} />}
-                        {modoRP && <PeBloco titulo="PE zero automático"        lista={peGrupos.zero}   cor={B.red}   bg="#fff1f2" total={0}    open={blocoAberto("pe_zero")}   onToggle={() => togBloco("pe_zero")} />}
+                        <PeBloco titulo="PE integral confirmado"    lista={peGrupos.integral}    tone="green" total={peGrupos.totalIntegral}    open={blocoAberto("pe_integral")}    onToggle={() => togBloco("pe_integral")} />
+                        <PeBloco titulo="PE proporcional confirmado" lista={peGrupos.proporcional} tone="blue"  total={peGrupos.totalProporcional} open={blocoAberto("pe_proporcional")} onToggle={() => togBloco("pe_proporcional")} />
+                        <PeBloco titulo="PE em aberto / Diretoria" lista={peGrupos.aberto} tone="amber" total={null} open={blocoAberto("pe_aberto")} onToggle={() => togBloco("pe_aberto")} />
+                        <PeBloco titulo="PE zero automático"        lista={peGrupos.zero}   tone="red"   total={0}    open={blocoAberto("pe_zero")}   onToggle={() => togBloco("pe_zero")} />
                       </>
                     ) : (
                       <div className="text-xs font-bold tabular-nums" style={{ color: "#7c3aed" }}>
@@ -856,10 +829,9 @@ export default function CardRemun({
                   </div>
 
                   {/* Coluna 3 — Totais */}
-                  <div className="lg:col-span-3 px-4 py-3 space-y-3"
-                       style={{ background: "linear-gradient(135deg, #faf5ff 0%, #f5f3ff 100%)" }}>
+                  <div className="lg:col-span-3 px-4 py-3 space-y-3 bg-gradient-to-br from-purple-50 to-violet-50 dark:from-purple-950/30 dark:to-violet-950/30">
                     <div>
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-purple-400 mb-1">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 mb-1">
                         Total confirmado
                       </p>
                       <div className="text-xl font-black tabular-nums" style={{ color: B.green }}>
@@ -867,10 +839,10 @@ export default function CardRemun({
                       </div>
                     </div>
                     <div className="border-t border-purple-100 dark:border-purple-900/40 pt-3">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-purple-400 mb-1">
+                      <p className="text-[10px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 mb-1">
                         PE confirmado
                       </p>
-                      <div className="text-base font-black tabular-nums" style={{ color: "#7c3aed" }}>
+                      <div className="text-base font-black tabular-nums text-violet-600 dark:text-violet-400">
                         {fmt(peValorTela)}
                       </div>
                     </div>
@@ -888,9 +860,9 @@ export default function CardRemun({
                     style={{ color: B.blue }}
                     onClick={() => setExpandido(e => ({
                       ...e,
-                      [`rem:${p.prof}`]: modoRP ? (aberto ? null : true) : (aberto ? false : true)
+                      [`rem:${p.prof}`]: aberto ? null : true
                     }))}>
-              {aberto ? "▲ Ocultar sessões" : "▼ Ver sessões detalhadas"}
+              {aberto ? "▲ Recolher" : "▼ Ver sessões detalhadas"}
             </button>
             {aberto && <span className="text-xs text-muted-foreground pt-2">{p.sessoes.length} registro(s)</span>}
           </div>
@@ -899,10 +871,10 @@ export default function CardRemun({
           {aberto && (
             <div className="px-4 pb-4 space-y-2">
               {([
-                { key: "recebe",    list: sRecebe,          cor: B.green,  bg: B.limeLt,  icon: <CheckCircle2 size={12} />, titulo: "Recebe agora",           mostrarPapel: true,  extra: (ss: SessaoComPapel[]) => fmt(ss.reduce((a, s) => a + getPARow(s), 0)) },
-                { key: "registro",  list: sRegNaoRealizado, cor: B.amber,  bg: B.amberLt, icon: <AlertTriangle size={12} />, titulo: "Registro não realizado", mostrarPapel: false, extra: undefined },
-                { key: "naoRecebe", list: sNaoRecebe,       cor: B.red,    bg: "#fee2e2",  icon: <XCircle size={12} />,     titulo: "Não recebe",              mostrarPapel: true,  extra: undefined },
-                { key: "inc",       list: sInc,             cor: B.red,    bg: "#fee2e2",  icon: <HelpCircle size={12} />,  titulo: "Analisar Inconsistência", mostrarPapel: true,  extra: undefined, always: true },
+                { key: "recebe",    list: sRecebe,          tone: "green" as Tone, icon: <CheckCircle2 size={12} />, titulo: "Recebe agora",           mostrarPapel: true,  extra: (ss: SessaoComPapel[]) => fmt(ss.reduce((a, s) => a + getPARow(s), 0)) },
+                { key: "registro",  list: sRegNaoRealizado, tone: "amber" as Tone, icon: <AlertTriangle size={12} />, titulo: "Registro não realizado", mostrarPapel: false, extra: undefined },
+                { key: "naoRecebe", list: sNaoRecebe,       tone: "red" as Tone,   icon: <XCircle size={12} />,     titulo: "Não recebe",              mostrarPapel: true,  extra: undefined },
+                { key: "inc",       list: sInc,             tone: "red" as Tone,   icon: <HelpCircle size={12} />,  titulo: "Analisar Inconsistência", mostrarPapel: true,  extra: undefined, always: true },
               ] as const).map(bloco => {
                 const lista = bloco.list as SessaoComPapel[]
                 if (!lista.length && !("always" in bloco && bloco.always)) return null
@@ -910,31 +882,19 @@ export default function CardRemun({
                 const open = blocoAberto(bloco.key)
                 return (
                   <div key={bloco.key}>
-                    <button type="button"
-                            className="w-full flex items-center gap-2 py-1.5 px-2 rounded-lg text-left transition-opacity hover:opacity-90"
-                            style={{ background: bloco.bg }}
-                            onClick={() => togBloco(bloco.key)}>
-                      <div className="flex flex-col flex-1 min-w-0">
-                        <span className="text-xs font-bold flex items-center gap-1" style={{ color: bloco.cor }}>
-                          {bloco.icon} {bloco.titulo} · {filt.length} sessão(ões)
-                        </span>
-                      </div>
-                      {bloco.extra && (
-                        <span className="text-xs font-bold flex-shrink-0 tabular-nums" style={{ color: bloco.cor }}>
-                          {bloco.extra(filt)}
-                        </span>
-                      )}
-                      {open
-                        ? <ChevronDown size={12} style={{ color: bloco.cor }} />
-                        : <ChevronRight size={12} style={{ color: bloco.cor }} />
-                      }
-                    </button>
+                    <BlocoHeader
+                      tone={bloco.tone}
+                      titulo={<>{bloco.icon} {bloco.titulo} · {filt.length} sessão(ões)</>}
+                      extra={bloco.extra ? bloco.extra(filt) : undefined}
+                      open={open}
+                      onToggle={() => togBloco(bloco.key)}
+                    />
                     {open && bloco.key === "inc" && (
                       <div className="text-xs p-2 rounded mb-1 bg-red-50 dark:bg-red-950/40 text-red-700 dark:text-red-400">
                         Presença Órbita ≠ Possui Tratativa. Confirme antes de pagar.
                       </div>
                     )}
-                    {open && <SessoesTabela sessoes={filt} mostrarPapel={bloco.mostrarPapel} valorCor={bloco.cor} getPARow={getPARow} />}
+                    {open && <SessoesTabela sessoes={filt} mostrarPapel={bloco.mostrarPapel} tone={bloco.tone} getPARow={getPARow} />}
                   </div>
                 )
               })}

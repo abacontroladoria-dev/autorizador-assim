@@ -1,19 +1,23 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { Save, AlertCircle, Loader2 } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import toast from "react-hot-toast"
+import { AlertCircle, Loader2, Save } from "lucide-react"
 import { useRemuneracaoConfig } from "@/hooks/useRemuneracaoConfig"
 import { updateRemuneracaoConfig } from "@/services/remuneracao.service"
 import { B } from "@/lib/cronograma/constants"
 import { useHeader } from "@/contexts/HeaderContext"
+import { useUnsavedChangesGuard } from "@/contexts/UnsavedChangesContext"
+import { UnsavedChangesModal } from "@/components/UnsavedChangesModal"
 
 function InfoTooltip({ text }: { text: string }) {
   return (
-    <div className="group relative inline-flex items-center justify-center cursor-help ml-1">
+    <div tabIndex={0} aria-label={text}
+         className="group relative inline-flex items-center justify-center cursor-help ml-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 rounded-full">
       <div className="w-4 h-4 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-[10px] font-bold text-slate-500 dark:text-slate-400">
         ?
       </div>
-      <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 opacity-0 transition-opacity group-hover:opacity-100 z-50">
+      <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 opacity-0 transition-opacity group-hover:opacity-100 group-focus:opacity-100 z-50">
         <div className="rounded-lg bg-slate-800 dark:bg-slate-200 p-2 text-xs text-white dark:text-slate-900 shadow-xl text-center">
           {text}
         </div>
@@ -28,34 +32,132 @@ import { ContratosAntigosConfig } from "./config/ContratosAntigosConfig"
 import { ContratosAtuaisConfig } from "./config/ContratosAtuaisConfig"
 import { FeriadosConfig } from "./config/FeriadosConfig"
 
+type GeralValor = {
+  presenca: number
+  ccPA: number
+  ccPE: number
+  etaBonus: number
+  taxas: Record<string, number>
+  diarias: Record<string, number>
+}
+
 export function ConfigTab() {
   const { config, loading: configLoading, error: configError } = useRemuneracaoConfig()
   const { setHeader } = useHeader()
 
-  const [saving, setSaving] = useState(false)
-  const [saveSuccess, setSaveSuccess] = useState(false)
   const [activeTab, setActiveTab] = useState("geral")
+  const [pendingTab, setPendingTab] = useState<string | null>(null)
 
-  // Estado local para edição
-  const [presenca, setPresenca] = useState(80)
-  const [ccPA, setCcPA] = useState(0)
-  const [ccPE, setCcPE] = useState(0)
-  const [etaBonus, setEtaBonus] = useState(0)
-  
-  const [taxas, setTaxas] = useState<Record<string, number>>({})
-  const [diarias, setDiarias] = useState<Record<string, number>>({})
-
-  // Inicializa estado local quando config carrega
-  useEffect(() => {
-    if (config) {
-      setPresenca(config.presenca_padrao)
-      setCcPA(config.cc_pa_default)
-      setCcPE(config.cc_pe_default)
-      setEtaBonus(config.eta_bonus_default)
-      setTaxas(config.taxas_pa || {})
-      setDiarias(config.diarias || {})
-    }
+  const saveGeral = useCallback(async (v: GeralValor) => {
+    if (!config) return false
+    return updateRemuneracaoConfig(config.id, {
+      presenca_padrao: v.presenca,
+      cc_pa_default: v.ccPA,
+      cc_pe_default: v.ccPE,
+      eta_bonus_default: v.etaBonus,
+      taxas_pa: v.taxas,
+      diarias: v.diarias,
+    })
   }, [config])
+
+  const initialGeral = useMemo<GeralValor>(() => ({
+    presenca: config?.presenca_padrao ?? 80,
+    ccPA: config?.cc_pa_default ?? 0,
+    ccPE: config?.cc_pe_default ?? 0,
+    etaBonus: config?.eta_bonus_default ?? 0,
+    taxas: config?.taxas_pa || {},
+    diarias: config?.diarias || {},
+  }), [config])
+
+  const [geral, setGeral] = useState<GeralValor>(initialGeral)
+  const [savingGeral, setSavingGeral] = useState(false)
+  const [savedGeral, setSavedGeral] = useState<GeralValor>(initialGeral)
+
+  // Ressincroniza com "config" assíncrono quando ele chega/muda — padrão
+  // recomendado do React para ajustar estado a partir de props sem efeito
+  // (evita o cascading-render de setState dentro de useEffect).
+  const [prevConfig, setPrevConfig] = useState(config)
+  if (config && config !== prevConfig) {
+    setPrevConfig(config)
+    setGeral(initialGeral)
+    setSavedGeral(initialGeral)
+  }
+
+  const updateGeral = useCallback((patch: Partial<GeralValor>) => {
+    setGeral(prev => ({ ...prev, ...patch }))
+  }, [])
+
+  const { presenca, ccPA, ccPE, etaBonus, taxas, diarias } = geral
+  const geralDirty = JSON.stringify(geral) !== JSON.stringify(savedGeral)
+
+  const handleSalvarGeral = useCallback(async () => {
+    setSavingGeral(true)
+    const ok = await saveGeral(geral)
+    setSavingGeral(false)
+    if (ok) {
+      setSavedGeral(geral)
+      toast.success("Configurações salvas.")
+    } else {
+      toast.error("Erro ao salvar configurações.")
+    }
+    return ok
+  }, [saveGeral, geral])
+
+  // Só a aba ativa fica montada por vez — "sujo" reflete sempre a aba
+  // corrente. Cada tabela (Capacidade/Contratos/Feriados) reporta seu
+  // próprio dirty + uma função de salvar via registerSave; a Geral já
+  // mora aqui, direto.
+  const [otherTabDirty, setOtherTabDirty] = useState(false)
+  const otherTabSaveRef = useRef<(() => Promise<boolean>) | null>(null)
+  const registerOtherTabSave = useCallback((save: (() => Promise<boolean>) | null) => {
+    otherTabSaveRef.current = save
+  }, [])
+
+  const isTabDirty = activeTab === "geral" ? geralDirty : otherTabDirty
+
+  const saveActiveTab = useCallback(async () => {
+    if (activeTab === "geral") return handleSalvarGeral()
+    return otherTabSaveRef.current ? otherTabSaveRef.current() : true
+  }, [activeTab, handleSalvarGeral])
+
+  // Registra esta tela no guard global (Sidebar/navegação entre páginas
+  // passa por ele — D.4, item pedido pelo usuário: o aviso de "sair sem
+  // salvar" precisa valer pra qualquer página do sistema, não só entre
+  // as abas internas do Config).
+  const { registerGuard } = useUnsavedChangesGuard()
+  useEffect(() => {
+    registerGuard({ isDirty: isTabDirty, save: saveActiveTab })
+    return () => registerGuard(null)
+  })
+
+  const [switchingTab, setSwitchingTab] = useState(false)
+
+  function handleTabClick(id: string) {
+    if (id === activeTab) return
+    if (isTabDirty) { setPendingTab(id); return }
+    setActiveTab(id)
+  }
+  async function handleTabSwitchSaveAndGo() {
+    if (!pendingTab) return
+    setSwitchingTab(true)
+    const ok = await saveActiveTab()
+    setSwitchingTab(false)
+    if (ok) {
+      setActiveTab(pendingTab)
+      setOtherTabDirty(false)
+      setPendingTab(null)
+    }
+  }
+  function handleTabSwitchDiscardAndGo() {
+    if (pendingTab) {
+      setActiveTab(pendingTab)
+      setOtherTabDirty(false)
+      setPendingTab(null)
+    }
+  }
+  function cancelTabSwitch() {
+    setPendingTab(null)
+  }
 
   useEffect(() => {
     setHeader("Configurações Globais", "Relacionamento Prestador")
@@ -72,7 +174,7 @@ export function ConfigTab() {
   if (configError || !config) {
     return (
       <div className="p-8">
-        <div className="rounded-xl border border-red-200 bg-red-50 p-4 flex gap-3 text-red-800">
+        <div className="rounded-xl border border-red-200 bg-red-50 p-4 flex gap-3 text-red-800 dark:text-red-300">
           <AlertCircle className="w-5 h-5 shrink-0" />
           <div>
             <div className="font-bold">Erro ao carregar configurações</div>
@@ -81,28 +183,6 @@ export function ConfigTab() {
         </div>
       </div>
     )
-  }
-
-  const handleSave = async () => {
-    setSaving(true)
-    setSaveSuccess(false)
-    const patch = {
-      presenca_padrao: presenca,
-      cc_pa_default: ccPA,
-      cc_pe_default: ccPE,
-      eta_bonus_default: etaBonus,
-      taxas_pa: taxas,
-      diarias: diarias,
-    }
-    
-    const ok = await updateRemuneracaoConfig(config.id, patch)
-    setSaving(false)
-    if (ok) {
-      setSaveSuccess(true)
-      setTimeout(() => setSaveSuccess(false), 3000)
-    } else {
-      alert("Erro ao salvar configurações no banco de dados.")
-    }
   }
 
   const allEspecialidades = Array.from(new Set([
@@ -116,24 +196,32 @@ export function ConfigTab() {
       {/* Cabeçalho da página de config */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4">
         <div>
-          <h2 className="text-2xl font-black tracking-tight" style={{ color: B.navy }}>
+          <h2 className="text-2xl font-black tracking-tight text-foreground">
             Parâmetros de Cálculo
           </h2>
-          <p className="text-sm text-slate-500 mt-1">
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
             As alterações aqui refletem imediatamente em todas as novas análises da calculadora.
           </p>
         </div>
         
         {activeTab === "geral" && (
-          <button
-            onClick={handleSave}
-            disabled={saving}
-            className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-xl font-bold text-white shadow-sm transition-all disabled:opacity-50"
-            style={{ background: saveSuccess ? B.green : B.blue }}
-          >
-            {saving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
-            {saving ? "Salvando..." : saveSuccess ? "Salvo com sucesso!" : "Salvar Globais"}
-          </button>
+          <div className="flex items-center gap-3 shrink-0">
+            {geralDirty && (
+              <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">
+                alterações não salvas
+              </span>
+            )}
+            <button
+              type="button"
+              onClick={handleSalvarGeral}
+              disabled={savingGeral || !geralDirty}
+              className="inline-flex items-center justify-center gap-2 px-6 py-2.5 rounded-lg font-bold text-white shadow-sm transition-all disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{ background: B.blue }}
+            >
+              {savingGeral ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+              Salvar
+            </button>
+          </div>
         )}
       </div>
 
@@ -148,10 +236,10 @@ export function ConfigTab() {
         ].map(t => (
           <button
             key={t.id}
-            onClick={() => setActiveTab(t.id)}
+            onClick={() => handleTabClick(t.id)}
             className={`px-4 py-2 rounded-lg text-sm font-bold whitespace-nowrap transition-colors ${
-              activeTab === t.id 
-                ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm" 
+              activeTab === t.id
+                ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 shadow-sm"
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-400 dark:hover:bg-slate-700"
             }`}
           >
@@ -166,19 +254,20 @@ export function ConfigTab() {
           
           {/* Bloco 1: Globais */}
           <div className="space-y-4">
-            <h3 className="font-bold text-lg" style={{ color: B.navy }}>Valores Padrão</h3>
+            <h3 className="font-bold text-lg text-foreground">Valores Padrão</h3>
             
             <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-5 shadow-sm">
               
               <div>
-                <label className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.navy }}>
+                <label htmlFor="config-presenca" className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.navy }}>
                   Taxa de Presença Projetada (%)
                   <InfoTooltip text="Usado na Análise Futura para estimar o ganho real descontando faltas. Padrão 80%." />
                 </label>
-                <input 
-                  type="number" min="0" max="100" 
-                  value={presenca} 
-                  onChange={e => setPresenca(Number(e.target.value))}
+                <input
+                  id="config-presenca"
+                  type="number" min="0" max="100"
+                  value={presenca}
+                  onChange={e => updateGeral({ presenca: Number(e.target.value) })}
                   className="w-full sm:w-32 rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50 transition-shadow"
                 />
               </div>
@@ -186,32 +275,34 @@ export function ConfigTab() {
               <div className="h-px bg-slate-100 dark:bg-slate-800" />
 
               <div>
-                <label className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.purple }}>
+                <label htmlFor="config-cc-pa" className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.purple }}>
                   Coordenador de Caso — PA base
                   <InfoTooltip text="Valor por sessão (40min) evoluída de AC." />
                 </label>
                 <div className="relative w-full sm:w-40">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">R$</span>
-                  <input 
-                    type="number" min="0" step="0.01" 
-                    value={ccPA} 
-                    onChange={e => setCcPA(Number(e.target.value))}
+                  <input
+                    id="config-cc-pa"
+                    type="number" min="0" step="0.01"
+                    value={ccPA}
+                    onChange={e => updateGeral({ ccPA: Number(e.target.value) })}
                     className="w-full rounded-lg border border-purple-200 dark:border-purple-900 bg-purple-50/50 dark:bg-purple-900/10 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-shadow"
                   />
                 </div>
               </div>
 
               <div>
-                <label className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.purple }}>
+                <label htmlFor="config-cc-pe" className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.purple }}>
                   Coordenador de Caso — PE base
                   <InfoTooltip text="Valor por Paciente Único no mês, para a função de Coordenador." />
                 </label>
                 <div className="relative w-full sm:w-40">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">R$</span>
-                  <input 
-                    type="number" min="0" step="0.01" 
-                    value={ccPE} 
-                    onChange={e => setCcPE(Number(e.target.value))}
+                  <input
+                    id="config-cc-pe"
+                    type="number" min="0" step="0.01"
+                    value={ccPE}
+                    onChange={e => updateGeral({ ccPE: Number(e.target.value) })}
                     className="w-full rounded-lg border border-purple-200 dark:border-purple-900 bg-purple-50/50 dark:bg-purple-900/10 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-shadow"
                   />
                 </div>
@@ -220,16 +311,17 @@ export function ConfigTab() {
               <div className="h-px bg-slate-100 dark:bg-slate-800" />
 
               <div>
-                <label className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.orange }}>
+                <label htmlFor="config-eta-bonus" className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.orange }}>
                   Especialista Técnico de Área — Bônus
                   <InfoTooltip text="Valor fixo por semana trabalhada." />
                 </label>
                 <div className="relative w-full sm:w-40">
                   <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">R$</span>
-                  <input 
-                    type="number" min="0" step="0.01" 
-                    value={etaBonus} 
-                    onChange={e => setEtaBonus(Number(e.target.value))}
+                  <input
+                    id="config-eta-bonus"
+                    type="number" min="0" step="0.01"
+                    value={etaBonus}
+                    onChange={e => updateGeral({ etaBonus: Number(e.target.value) })}
                     className="w-full rounded-lg border border-orange-200 dark:border-orange-900/50 bg-orange-50/50 dark:bg-orange-900/10 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-500/50 transition-shadow"
                   />
                 </div>
@@ -240,11 +332,11 @@ export function ConfigTab() {
 
           {/* Bloco 2: Especialidades */}
           <div className="space-y-4">
-            <h3 className="font-bold text-lg" style={{ color: B.navy }}>Taxas por Especialidade</h3>
+            <h3 className="font-bold text-lg text-foreground">Taxas por Especialidade</h3>
             
             <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col max-h-[600px]">
               
-              <div className="grid grid-cols-12 gap-2 p-3 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-500 uppercase tracking-wider">
+              <div className="grid grid-cols-12 gap-2 p-3 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
                 <div className="col-span-6">Especialidade</div>
                 <div className="col-span-3 text-right">PA (R$)</div>
                 <div className="col-span-3 text-right">Diária (R$)</div>
@@ -262,7 +354,7 @@ export function ConfigTab() {
                         <input 
                           type="number" min="0" step="0.01"
                           value={taxas[esp] || 0}
-                          onChange={e => setTaxas(t => ({ ...t, [esp]: Number(e.target.value) }))}
+                          onChange={e => updateGeral({ taxas: { ...taxas, [esp]: Number(e.target.value) } })}
                           className="w-full text-right rounded-md border border-slate-200 dark:border-slate-700 bg-transparent px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
                         />
                       </div>
@@ -270,7 +362,7 @@ export function ConfigTab() {
                         <input 
                           type="number" min="0" step="0.01"
                           value={diarias[esp] || 0}
-                          onChange={e => setDiarias(d => ({ ...d, [esp]: Number(e.target.value) }))}
+                          onChange={e => updateGeral({ diarias: { ...diarias, [esp]: Number(e.target.value) } })}
                           className="w-full text-right rounded-md border border-slate-200 dark:border-slate-700 bg-transparent px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
                         />
                       </div>
@@ -286,16 +378,24 @@ export function ConfigTab() {
       )}
 
       {/* Conteúdo: Cadastros Atuais */}
-      {activeTab === "cadastros" && <ContratosAtuaisConfig />}
+      {activeTab === "cadastros" && <ContratosAtuaisConfig onDirtyChange={setOtherTabDirty} registerSave={registerOtherTabSave} />}
 
       {/* Conteúdo: Contratos Antigos */}
-      {activeTab === "antigos" && <ContratosAntigosConfig />}
+      {activeTab === "antigos" && <ContratosAntigosConfig onDirtyChange={setOtherTabDirty} registerSave={registerOtherTabSave} />}
 
       {/* Conteúdo: Capacidade */}
-      {activeTab === "capacidade" && <CapacidadeConfig />}
+      {activeTab === "capacidade" && <CapacidadeConfig onDirtyChange={setOtherTabDirty} registerSave={registerOtherTabSave} />}
 
       {/* Conteúdo: Feriados */}
-      {activeTab === "feriados" && <FeriadosConfig />}
+      {activeTab === "feriados" && <FeriadosConfig onDirtyChange={setOtherTabDirty} registerSave={registerOtherTabSave} />}
+
+      <UnsavedChangesModal
+        open={pendingTab !== null}
+        saving={switchingTab}
+        onCancel={cancelTabSwitch}
+        onSaveAndLeave={handleTabSwitchSaveAndGo}
+        onDiscardAndLeave={handleTabSwitchDiscardAndGo}
+      />
 
     </div>
   )

@@ -1,12 +1,12 @@
 "use client"
 
 import { Check, Loader2, AlertCircle } from "lucide-react"
-import type { SaveStatus } from "@/hooks/useAutoSaveRow"
+import type { SaveStatus } from "@/hooks/useDraftRow"
 
 export function SaveStatusBadge({ status }: { status: SaveStatus }) {
   if (status === "idle") return <span className="inline-block w-16" />
   if (status === "dirty") {
-    return <span className="text-[10px] text-muted-foreground w-16 inline-block">editando…</span>
+    return <span className="text-[10px] font-semibold text-amber-600 dark:text-amber-400 w-16 inline-block">não salvo</span>
   }
   if (status === "saving") {
     return (

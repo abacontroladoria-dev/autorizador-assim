@@ -12,6 +12,7 @@ import {
 } from '@/contexts/HeaderContext'
 import { ThemeProvider } from '@/contexts/ThemeContext'
 import { ImpersonationProvider, useImpersonation } from '@/contexts/ImpersonationContext'
+import { UnsavedChangesProvider } from '@/contexts/UnsavedChangesContext'
 
 const supabase = getSupabaseClient()
 
@@ -48,15 +49,17 @@ export default function DashboardLayout({
     <ImpersonationProvider>
       <ThemeProvider>
         <HeaderProvider>
-          <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
-            <ImpersonationBar />
-            <Suspense fallback={null}>
-              <Sidebar />
-            </Suspense>
-            <DashboardShellContent>
-              {children}
-            </DashboardShellContent>
-          </div>
+          <UnsavedChangesProvider>
+            <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
+              <ImpersonationBar />
+              <Suspense fallback={null}>
+                <Sidebar />
+              </Suspense>
+              <DashboardShellContent>
+                {children}
+              </DashboardShellContent>
+            </div>
+          </UnsavedChangesProvider>
         </HeaderProvider>
       </ThemeProvider>
     </ImpersonationProvider>

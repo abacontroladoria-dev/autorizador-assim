@@ -115,6 +115,56 @@ describe("normalizarGradeParaSessao", () => {
     expect(sessao.classificacao).toBe("Cancelado")
   })
 
+  it("identifica o caso real 'Status do Agendamento = Sem Agendamento' com evolução (Pauline Mazzei Ventura Silveira, id 8594)", () => {
+    const rows = normalizarGradeParaSessao([{
+      "Id Unidade": "280",
+      "Nome Unidade": "CLÍNICA UNIVERSO ABA",
+      "Id Profissional": "8594",
+      Profissional: "Pauline Mazzei Ventura Silveira",
+      "Dia da Semana": "Quinta-feira",
+      Data: "11/06/2026",
+      "Hora Inicial": "14:20:00",
+      "Hora Final": "15:00:00",
+      "Status do Agendamento": "Sem Agendamento",
+      "Id Favorecido": "11610",
+      "Nome Favorecido": "Guilherme De Carvalho Tiburcio",
+      "Convênio": "ASSIM Saúde",
+      "Id Terapia": "2259",
+      Terapia: "Psicologia",
+      "Id Sala": "Ainda não selecionado",
+      Sala: "Ainda não selecionado",
+      "Observações da Sala": "Ainda não informado",
+      "ID Agendamento": "",
+      Status: "",
+      Justificativa: "",
+      "Possui Tratativa": "Sim",
+      "Id Profissional Tratativa": "8594",
+      "Nome Profissional Tratativa": "Pauline Mazzei Ventura Silveira",
+      "Criação Tratativa": "12/06/2026 15:11",
+      "Origem Tratativa": "Feedback",
+      "Vínculo da Evolução": "Sem agendamento",
+    }])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].id).toBe("")
+    expect(rows[0].classificacao).toBe("Evolução sem agendamento")
+    // Sem ID Agendamento não há sessão real — não assume presença confirmada.
+    expect(rows[0].presencaOrbita).toBe("")
+    expect(rows[0].presencaTita).toBe("")
+  })
+
+  it("mantém e classifica como 'Evolução sem agendamento' quando há tratativa em horário Livre (sem ID Agendamento)", () => {
+    const rows = normalizarGradeParaSessao([{
+      "Status do Agendamento": "Livre",
+      Profissional: "Pauline Mazzei Ventura Silveira",
+      "Nome Favorecido": "Ainda não selecionado",
+      "ID Agendamento": "",
+      "Possui Tratativa": "Sim",
+      "Nome Profissional Tratativa": "Pauline Mazzei Ventura Silveira",
+    }])
+    expect(rows).toHaveLength(1)
+    expect(rows[0].classificacao).toBe("Evolução sem agendamento")
+  })
+
   it("mantém presencaTita Sim quando cancelado por falta do profissional (não é falta do paciente)", () => {
     const [sessao] = normalizarGradeParaSessao([{
       "Status do Agendamento": "Agendado",

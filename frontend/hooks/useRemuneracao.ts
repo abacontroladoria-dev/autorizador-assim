@@ -11,7 +11,6 @@ import {
 import { normalizarGradeParaSessao, classificarSessaoReal, type SessaoReal, type CsvGradeRow } from "@/lib/remuneracao/relatorio"
 import { buscarPresencaFilaAutorizacoes, presencaDaSessao, type PresencaIndice } from "@/lib/remuneracao/presencaReal"
 import { dataParaISO, mesAnoDeLinhas } from "@/lib/remuneracao/datas"
-import type { CapacidadeOverride } from "@/lib/remuneracao/ocupacao"
 import { getContratosAntigos, getContratosAtuais, getCapacidades } from "@/services/remuneracao.service"
 import { useRemuneracaoConfig } from "./useRemuneracaoConfig"
 import type { CsvRow } from "@/types/cronograma"
@@ -22,8 +21,8 @@ export function useAnaliseFutura() {
   const [rowsLoading, setRowsLoading] = useState(true)
   const [rowsError, setRowsError] = useState<string | null>(null)
   const [antigos, setAntigos] = useState<Record<string, ContratoAntigoInfo>>({})
-  const [capacidadesProfissionais, setCapacidadesProfissionais] = useState<Record<string, CapacidadeOverride>>({})
   const [limites, setLimites] = useState<Record<string, number>>({})
+  const [cadastroPrestadores, setCadastroPrestadores] = useState<Record<string, CadastroContratual>>({})
   const refWeek = useMemo(() => getRefWeek(), [])
 
   useEffect(() => {
@@ -48,9 +47,10 @@ export function useAnaliseFutura() {
   useEffect(() => {
     let isMounted = true
     async function loadContratuais() {
-      const [{ data: antigosData }, { data: capacidadesData }] = await Promise.all([
+      const [{ data: antigosData }, { data: capacidadesData }, { data: atuaisData }] = await Promise.all([
         getContratosAntigos(),
         getCapacidades(),
+        getContratosAtuais(),
       ])
       if (!isMounted) return
 
@@ -59,16 +59,22 @@ export function useAnaliseFutura() {
         antigosMap[r.profissional_nome] = { salario: r.salario, chSemanal: r.ch_semanal, contrato: r.contrato }
       })
 
-      const capacidadesMap: Record<string, CapacidadeOverride> = {}
       const limitesMap: Record<string, number> = {}
       ;(capacidadesData ?? []).forEach((r: any) => {
-        capacidadesMap[r.profissional_nome] = { dias: r.dias, padrao: r.padrao ?? undefined }
         if (r.limite_cc != null) limitesMap[r.profissional_nome] = r.limite_cc
       })
 
+      const cadastroMap: Record<string, CadastroContratual> = {}
+      ;(atuaisData ?? []).forEach((r: any) => {
+        cadastroMap[r.profissional_nome] = {
+          nome: r.profissional_nome,
+          contratosAtuais: Array.isArray(r.contratos_atuais) ? r.contratos_atuais : [],
+        }
+      })
+
       setAntigos(antigosMap)
-      setCapacidadesProfissionais(capacidadesMap)
       setLimites(limitesMap)
+      setCadastroPrestadores(cadastroMap)
     }
     loadContratuais()
     return () => { isMounted = false }
@@ -87,9 +93,9 @@ export function useAnaliseFutura() {
       feriados: config.feriados,
       limites,
       antigos,
-      capacidadesProfissionais,
+      cadastroPrestadores,
     })
-  }, [config, rows, antigos, limites, capacidadesProfissionais])
+  }, [config, rows, antigos, limites, cadastroPrestadores])
 
   const analMes = useMemo(() => (rows.length ? mesAnoDeLinhas(rows as unknown as Record<string, unknown>[]) : null), [rows])
 

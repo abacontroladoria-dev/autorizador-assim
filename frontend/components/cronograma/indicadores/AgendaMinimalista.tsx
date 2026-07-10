@@ -50,7 +50,7 @@ const slots = [...(ocupacao?.slots ?? [])]
     .sort((a, b) => a.dow - b.dow || a.ini - b.ini || String(a.terp ?? '').localeCompare(String(b.terp ?? '')))
 
   if (!slots.length) return (
-    <div className="rounded-xl p-3 text-xs text-gray-400" style={{ background: '#fff', border: '1px solid #eef2f7' }}>
+    <div className="rounded-xl p-3 text-xs text-gray-400 dark:text-slate-500 bg-white dark:bg-slate-900 border border-[#eef2f7] dark:border-slate-800">
       Sem agenda detalhada para exibir.
     </div>
   )
@@ -65,10 +65,10 @@ const slots = [...(ocupacao?.slots ?? [])]
   horarios.sort((a, b) => a - b)
 
   return (
-    <div className="rounded-2xl p-4 h-full" style={{ background: '#fbfcfe', border: '1px solid #eef2f7', width: '320px' }}>
+    <div className="rounded-2xl p-4 h-full bg-[#fbfcfe] dark:bg-slate-900 border border-[#eef2f7] dark:border-slate-800" style={{ width: '320px' }}>
       <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="font-bold text-xs" style={{ color: B.navy }}>Agenda livre/ocupada</div>
-        <div className="flex items-center gap-2 text-[10px] text-gray-500">
+        <div className="font-bold text-xs text-foreground">Agenda livre/ocupada</div>
+        <div className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-slate-400">
           <span>
             <i className="inline-block w-2.5 h-2.5 rounded-sm mr-1 align-[-1px]" style={{ background: B.red }} />
             ocupado
@@ -87,16 +87,16 @@ const slots = [...(ocupacao?.slots ?? [])]
         <div className="grid gap-1 text-[10px]" style={{ gridTemplateColumns: '44px repeat(5, 42px)' }}>
           <div />
           {[1, 2, 3, 4, 5].map(dow => (
-            <div key={dow} className="font-bold text-center" style={{ color: B.navy }}>
+            <div key={dow} className="font-bold text-center text-foreground">
               {DOW_PT[dow]}
             </div>
           ))}
           {horarios.flatMap(h => [
-            <div key={`h-${h}`} className="text-[10px] text-gray-500 py-1">{hhmm(h)}</div>,
+            <div key={`h-${h}`} className="text-[10px] text-gray-500 dark:text-slate-400 py-1">{hhmm(h)}</div>,
             ...[1, 2, 3, 4, 5].map(dow => {
               const s = (porDia[dow] ?? []).find(x => x.ini === h)
               if (!s) return (
-                <div key={`${dow}-${h}`} className="h-6 rounded-md bg-gray-50 border border-gray-100" />
+                <div key={`${dow}-${h}`} className="h-6 rounded-md bg-gray-50 border border-gray-100 dark:!bg-transparent dark:!border-transparent dark:!shadow-none" />
               )
               const ocupado      = (s.horariosOcupados ?? 0) > 0 || (s.ocupados ?? 0) > 0 || (s.ag ?? 0) > 0
               const administrativo = !!s.horarioAdministrativoEta

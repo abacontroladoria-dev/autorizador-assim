@@ -1,40 +1,27 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import {
   CalendarDays, CheckCircle2, Search, X, ChevronDown, ChevronUp,
   AlertTriangle, Users, TrendingUp, TrendingDown, Building2, FileQuestion,
-  FileText, Download,
+  Download, Wallet, PieChart, Clock,
 } from "lucide-react"
 import { useHeader } from "@/contexts/HeaderContext"
 import { useAnaliseFutura } from "@/hooks/useRemuneracao"
 import { useRemuneracaoConfig } from "@/hooks/useRemuneracaoConfig"
-import { fmt, fmtH, fmtPct, fmtPctOcup, fmtNumBR } from "@/lib/remuneracao/formatacao"
+import { fmt, fmtH, fmtPct, fmtNumBR } from "@/lib/remuneracao/formatacao"
 import { B } from "@/lib/cronograma/constants"
 import { DOW_PT } from "@/lib/cronograma/ocupacaoConst"
-import {
-  resumoOcupacaoProfissional, regrasCapacidadeTexto, temBaseOcupacaoLinha,
-} from "@/lib/remuneracao/ocupacao"
-import { gerarPDFAnaliseFuturaProfissional, exportarAnaliseXlsx, type AnaliseFuturaPdfOpts } from "@/lib/remuneracao/exportAnaliseFutura"
+// regrasCapacidadeTexto vem de ocupacaoProf.ts (não de lib/remuneracao/ocupacao.ts)
+// porque a ocupação em si agora é calculada por esse mesmo motor — ver calculo.ts.
+import { regrasCapacidadeTexto } from "@/lib/cronograma/ocupacaoProf"
+import { OcupacaoDonut } from "@/components/cronograma/indicadores/OcupacaoDonut"
+// Mesmo componente usado em cronograma/indicadores — clonado aqui (não
+// reimplementado) para garantir que "Agenda Disponibilizada" mostre exatamente
+// a mesma grade/contagem daquela tela, sem duplicar a lógica de agregação.
+import { AgendaMinimalista } from "@/components/cronograma/indicadores/AgendaMinimalista"
+import { exportarAnaliseXlsx } from "@/lib/remuneracao/exportAnaliseFutura"
 import type { ProfissionalAnalise, TerapiaDetalhe } from "@/lib/remuneracao/calculo"
-
-// ─── Tooltip de info (mesmo padrão de CardRemun.tsx / ConfigTab.tsx) ──────────
-
-function InfoTooltip({ text }: { text: string }) {
-  return (
-    <div className="group relative inline-flex items-center justify-center cursor-help ml-1">
-      <div className="w-3.5 h-3.5 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-[9px] font-bold text-slate-500 dark:text-slate-400">
-        ?
-      </div>
-      <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 opacity-0 transition-opacity group-hover:opacity-100 z-50">
-        <div className="rounded-lg bg-slate-800 dark:bg-slate-200 p-2 text-xs text-white dark:text-slate-900 shadow-xl text-center">
-          {text}
-        </div>
-        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-slate-800 dark:border-t-slate-200" />
-      </div>
-    </div>
-  )
-}
 
 // ─── Chip / badge tonal (dark-mode aware — mesma convenção do item 7) ─────────
 
@@ -52,9 +39,123 @@ const TONE_CLS: Record<Tone, { bg: string; text: string }> = {
 function Chip({ tone, children, title }: { tone: Tone; children: React.ReactNode; title?: string }) {
   const c = TONE_CLS[tone]
   return (
-    <span title={title} className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold ${c.bg} ${c.text}`}>
+    <span title={title} className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-xs font-semibold ${c.bg} ${c.text}`}>
       {children}
     </span>
+  )
+}
+
+// ─── Dropdown de checkboxes para adicionar filtros de especialidade ──────────
+
+function EspecialidadeCheckboxDropdown({
+  options, selected, onToggle,
+}: { options: string[]; selected: string[]; onToggle: (v: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [busca, setBusca] = useState("")
+  const ref = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const onDocClick = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false)
+    }
+    document.addEventListener("mousedown", onDocClick)
+    return () => document.removeEventListener("mousedown", onDocClick)
+  }, [open])
+
+  useEffect(() => {
+    if (!open) setBusca("")
+  }, [open])
+
+  const filtrados = options.filter(t => t.toLowerCase().includes(busca.toLowerCase()))
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+        className="inline-flex items-center gap-1 rounded-full border border-dashed border-border bg-popover px-3 py-1 text-xs text-muted-foreground hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+      >
+        + especialidade
+        <ChevronDown size={12} className={`transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute left-0 top-full z-20 mt-1 w-64 rounded-lg border border-border bg-popover p-1.5 shadow-lg">
+          <div className="relative mb-1.5">
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input
+              autoFocus
+              value={busca}
+              onChange={e => setBusca(e.target.value)}
+              placeholder="Buscar especialidade…"
+              aria-label="Buscar especialidade"
+              className="w-full rounded-md border border-border bg-muted/50 pl-7 pr-2 py-1 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+            />
+          </div>
+          <div role="listbox" aria-label="Filtrar por especialidade" className="max-h-56 overflow-y-auto">
+            {filtrados.length === 0 && (
+              <div className="px-2 py-1.5 text-xs text-muted-foreground">Nenhuma especialidade encontrada.</div>
+            )}
+            {filtrados.map(t => (
+              <label
+                key={t}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-2 py-1.5 text-xs text-popover-foreground hover:bg-muted/70"
+              >
+                <input
+                  type="checkbox"
+                  checked={selected.includes(t)}
+                  onChange={() => onToggle(t)}
+                  className="h-3.5 w-3.5 rounded border-border accent-sky-600 dark:accent-sky-500"
+                />
+                {t}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ─── Card premium (mesmo tratamento visual do CardRemun.tsx usado em
+// relacionamento-prestador/rp/): faixa de gradiente no topo + ícone circular
+// tonal + rótulo. Reaproveitado pelos 4 cards de resumo do profissional. ─────
+
+const ICON_BG: Record<Tone, string> = {
+  green:  "bg-emerald-100 dark:bg-emerald-900/40",
+  amber:  "bg-amber-100 dark:bg-amber-900/40",
+  blue:   "bg-sky-100 dark:bg-sky-900/40",
+  purple: "bg-violet-100 dark:bg-violet-900/40",
+  red:    "bg-rose-100 dark:bg-rose-900/40",
+  slate:  "bg-slate-200 dark:bg-slate-800",
+}
+
+const TONE_ACCENT: Record<Tone, string> = {
+  // slate usa um cinza médio (não B.navy) — B.navy é escuro demais pra servir
+  // de cor de ícone/faixa em cima de fundo já escuro no dark mode.
+  green: B.green, amber: B.amber, blue: B.blue, purple: B.purple, red: B.red, slate: "#64748b",
+}
+
+function StatCardShell({
+  tone, icon, label, children,
+}: { tone: Tone; icon: React.ReactNode; label: string; children: React.ReactNode }) {
+  const c = TONE_CLS[tone]
+  const accent = TONE_ACCENT[tone]
+  return (
+    <div className={`rounded-2xl border border-border shadow-sm hover:shadow-md transition-shadow overflow-hidden h-full flex flex-col ${c.bg}`}>
+      <div className="h-1 w-full shrink-0" style={{ background: `linear-gradient(90deg, ${accent}cc, ${accent}33)` }} />
+      <div className="p-4 flex-1 flex flex-col">
+        <div className="flex items-center gap-2.5 mb-2">
+          <div className={`w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0 shadow-sm ${ICON_BG[tone]}`} style={{ color: accent }}>
+            {icon}
+          </div>
+          <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">{label}</span>
+        </div>
+        {children}
+      </div>
+    </div>
   )
 }
 
@@ -64,79 +165,92 @@ function SummaryTile({ label, value, tone = "slate" }: { label: string; value: R
   const c = TONE_CLS[tone]
   return (
     <div className={`rounded-2xl border border-border p-4 ${tone === "slate" ? "bg-card" : c.bg}`}>
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</div>
       <div className={`text-2xl font-bold mt-1 ${tone === "slate" ? "text-foreground" : c.text}`}>{value}</div>
     </div>
   )
 }
 
-// ─── Ocupação: badge principal por faixa ──────────────────────────────────────
-
-function toneOcupacao(pct: number | null): Tone {
-  if (pct === null) return "slate"
-  if (pct >= 0.8) return "green"
-  if (pct >= 0.6) return "blue"
-  if (pct >= 0.4) return "amber"
-  return "red"
-}
-
 // ─── Card: Contrato Antigo ─────────────────────────────────────────────────
+
+// Linha "valor em cima, descrição embaixo": empilhado e alinhado à esquerda —
+// não depende de quanto espaço sobra na linha, então nunca quebra de forma
+// imprevisível num card estreito. Escala fixa (text-md/text-xs) em vez de
+// tamanhos soltos em px, pra manter tudo consistente entre os cards.
+function LinhaValorDescricao({ valor, descricao, tone = "default" }: { valor: React.ReactNode; descricao: React.ReactNode; tone?: "default" | "muted" }) {
+  return (
+    <div>
+      <div className={`text-md font-bold tabular-nums leading-tight ${tone === "muted" ? "text-muted-foreground" : "text-foreground"}`}>{valor}</div>
+      <div className="text-xs text-muted-foreground leading-snug mt-0.5">{descricao}</div>
+    </div>
+  )
+}
 
 function ContratoAntigoCard({ d }: { d: ProfissionalAnalise }) {
   return (
-    <div className="rounded-2xl border border-border bg-muted/40 p-4 h-fit">
-      <div className="flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
-        <Building2 size={13} />
-        Contrato antigo / mês
-      </div>
-
+    <StatCardShell tone="slate" icon={<Building2 size={15} />} label="Contrato antigo / mês">
       {d.temAntigo ? (
         <>
           {d.contrato && (
-            <div className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] font-bold text-foreground mt-2">
+            <div className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-bold text-foreground self-start">
               {d.contrato}
             </div>
           )}
-          <div className="font-black text-xl leading-tight mt-2 text-foreground tabular-nums">{fmt(d.salAntigo!)}</div>
+          <div className="font-black text-3xl leading-tight mt-2 text-foreground tabular-nums">{fmt(d.salAntigo!)}</div>
 
-          <div className="mt-2 space-y-1.5 text-[13px]">
+          <div className="mt-3 grid grid-cols-2 gap-3">
             {(d.chSemanal ?? 0) > 0 && (
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">Carga contratada</span>
-                <strong className="text-foreground tabular-nums">{fmtNumBR(d.chSemanal!, d.chSemanal! % 1 ? 2 : 0)}h/sem</strong>
-              </div>
+              <LinhaValorDescricao
+                valor={`${fmtNumBR(d.chSemanal!, d.chSemanal! % 1 ? 2 : 0)}h/sem`}
+                descricao="carga contratada"
+              />
             )}
             {d.valorHoraSemAntigo !== null && (
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground/70">Valor anterior por h/sem</span>
-                <strong className="text-muted-foreground tabular-nums">{fmt(d.valorHoraSemAntigo)}</strong>
-              </div>
+              <LinhaValorDescricao
+                valor={fmt(d.valorHoraSemAntigo)}
+                descricao="valor anterior por h/sem"
+                tone="muted"
+              />
             )}
           </div>
 
           {d.salAntigoProporcional != null && (
-            <div className="mt-3 rounded-xl border border-border bg-card px-3 py-3 text-[13px] space-y-2">
-              <div className="flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">Carga agendada</span>
-                <strong className="text-foreground tabular-nums">{fmtH(d.horasSemanaTotal)}</strong>
+            <div className="mt-3 rounded-xl border border-border bg-card px-3.5 py-3.5 space-y-3">
+              <div className="flex items-center justify-between gap-2">
+                <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                  <Clock size={12} />
+                  Carga agendada
+                </span>
+                <strong className="text-sm font-bold tabular-nums text-foreground">{fmtH(d.horasSemanaTotal)}</strong>
               </div>
-              {d.jornadaResumo && <div className="text-[11px] leading-snug text-muted-foreground">{d.jornadaResumo}</div>}
-              <div className="pt-2 border-t border-border flex items-center justify-between gap-3">
-                <span className="text-muted-foreground">Antigo proporcional</span>
-                <strong className="text-foreground tabular-nums">{fmt(d.salAntigoProporcional)}</strong>
+
+              {d.diasTrabalhados.length > 0 && (
+                <div className="flex flex-wrap gap-1.5">
+                  {d.diasTrabalhados.map(dt => (
+                    <span key={dt.dow} className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs">
+                      <span className="font-semibold text-foreground">{DOW_PT[dt.dow]}</span>
+                      <span className="text-muted-foreground tabular-nums">{fmtH(dt.horas)}</span>
+                    </span>
+                  ))}
+                </div>
+              )}
+
+              <div className="pt-3 border-t border-border flex items-center justify-between gap-2">
+                <span className="text-xs text-muted-foreground">Antigo proporcional</span>
+                <strong className="text-sm font-bold tabular-nums text-foreground">{fmt(d.salAntigoProporcional)}</strong>
               </div>
             </div>
           )}
         </>
       ) : (
-        <div className="mt-4 flex flex-col items-center gap-1.5 py-3 text-center">
+        <div className="mt-4 flex flex-1 flex-col items-center justify-center gap-1.5 py-3 text-center">
           <FileQuestion size={20} className="text-muted-foreground/50" />
           <p className="text-xs text-muted-foreground italic">
             {d.contrato ? "Novo modelo" : "Sem contrato antigo cadastrado"}
           </p>
         </div>
       )}
-    </div>
+    </StatCardShell>
   )
 }
 
@@ -161,28 +275,49 @@ function PresencaCard({
   const c = TONE_CLS[tone]
 
   return (
-    <div className={`rounded-2xl border border-border p-4 h-fit ${c.bg}`}>
-      <div className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-        {is100 ? "100% presença / mês" : `${presenca ?? "—"}% presença / mês`}
+    <StatCardShell
+      tone={tone}
+      icon={<Wallet size={15} />}
+      label={`Contrato novo (PA) - ${is100 ? "100%" : `${presenca ?? "—"}%`} presença`}
+    >
+      <div className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-bold text-foreground self-start mb-2">
+        {d.contratoNovo ?? "PS.ABA-PENDENTE"}
       </div>
-      <div className={`font-bold text-xl mt-1 tabular-nums ${c.text}`}>{fmt(total)}</div>
-      <div className="text-xs text-muted-foreground mt-1 leading-relaxed">
-        {temPpd && <>PPD: {fmt(ppd)} · </>}
-        PA: {fmt(pa)}
-        {is100 && temEta && <> · Bônus ETA: {fmt(etaBonusTotal)}</>}
-        {d.pe > 0 && <> · PE: {fmt(d.pe)}</>}
+      <div className={`font-black text-3xl tabular-nums ${c.text}`}>{fmt(total)}</div>
+
+      <div className="mt-3 space-y-2.5">
+        <LinhaValorDescricao valor={fmt(pa)} descricao="PA · pagamento por atendimento" />
+        {temPpd && <LinhaValorDescricao valor={fmt(ppd)} descricao="PPD · pagamento por diária" />}
+        {temEta && <LinhaValorDescricao valor={fmt(etaBonusTotal)} descricao="Bônus ETA" />}
+        {d.pe > 0 && <LinhaValorDescricao valor={fmt(d.pe)} descricao="PE · pagamento por entrega" />}
       </div>
+
       {delta !== null && (
-        <div className={`flex items-center gap-1 text-xs font-semibold mt-2 ${delta >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+        <div className={`flex items-center gap-1 text-xs font-semibold mt-auto pt-3 ${delta >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
           {delta >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
           {fmtPct(delta)} vs antigo proporcional
         </div>
       )}
-    </div>
+    </StatCardShell>
   )
 }
 
 // ─── Expansível: dias trabalhados ─────────────────────────────────────────────
+
+// Larguras compartilhadas pela tabela principal (6 colunas) e pela sub-tabela
+// de PPD (que reusa as mesmas 6 colunas via colSpan) — garante que "Dia" e
+// "Ocorr." fiquem alinhados entre as duas tabelas do mesmo card e também
+// entre os cards de terapias diferentes empilhados na tela (table-fixed usa
+// % do próprio elemento, não o conteúdo, então não varia por bloco).
+const DIAS_COL_WIDTHS = ["24%", "12%", "14%", "14%", "18%", "18%"]
+
+function DiasColGroup() {
+  return (
+    <colgroup>
+      {DIAS_COL_WIDTHS.map((w, i) => <col key={i} style={{ width: w }} />)}
+    </colgroup>
+  )
+}
 
 function TerapiaDiasBloco({ td, presenca, ccPA, ccPE, etaBonus }: {
   td: TerapiaDetalhe; presenca: number; ccPA: number; ccPE: number; etaBonus: number
@@ -199,7 +334,8 @@ function TerapiaDiasBloco({ td, presenca, ccPA, ccPE, etaBonus }: {
       </div>
 
       <div className="overflow-x-auto">
-        <table className="w-full text-xs mb-1">
+        <table className="w-full table-fixed text-xs mb-1">
+          <DiasColGroup />
           <thead>
             <tr className="text-muted-foreground">
               <th className="text-left py-0.5 font-medium">Dia</th>
@@ -214,23 +350,25 @@ function TerapiaDiasBloco({ td, presenca, ccPA, ccPE, etaBonus }: {
             {td.dowBreak.map(b => (
               <tr key={b.dow} className="border-t border-white/40 dark:border-black/20">
                 <td className="py-1 font-medium text-foreground">{DOW_PT[b.dow]}</td>
-                <td className="text-center text-foreground">{b.cnt}</td>
-                <td className="text-center text-foreground">
-                  {b.occ}
-                  {b.feriados.length > 0 && (
-                    <span className="ml-1 text-amber-600 dark:text-amber-400" title={b.feriados.map(f => f.nome).join(", ")}>
-                      −{b.feriados.length}
-                    </span>
-                  )}
+                <td className="text-center text-foreground tabular-nums">{b.cnt}</td>
+                <td className="text-center text-foreground tabular-nums">
+                  <span className="inline-flex items-center justify-center gap-1">
+                    {b.occ}
+                    {b.feriados.length > 0 && (
+                      <span className="text-amber-600 dark:text-amber-400" title={b.feriados.map(f => f.nome).join(", ")}>
+                        −{b.feriados.length}
+                      </span>
+                    )}
+                  </span>
                 </td>
-                <td className="text-center font-semibold text-foreground">{b.mensal}</td>
+                <td className="text-center font-semibold text-foreground tabular-nums">{b.mensal}</td>
                 <td className="text-right text-foreground tabular-nums">{fmt(b.mensal * td.pa)}</td>
                 <td className="text-right text-foreground tabular-nums">{fmt(b.mensal * (presenca / 100) * td.pa)}</td>
               </tr>
             ))}
             {td.isCC && (
               <tr className={c.text}>
-                <td colSpan={3} className="text-xs pt-1.5">PE ({td.pacientes} pac. × {fmt(ccPE)})</td>
+                <td colSpan={3} className="text-xs pt-1.5 truncate">PE ({td.pacientes} pac. × {fmt(ccPE)})</td>
                 <td />
                 <td className="text-right font-bold tabular-nums">{fmt(td.pacientes * ccPE)}</td>
                 <td className="text-right font-bold tabular-nums">{fmt(td.pacientes * ccPE)}</td>
@@ -245,21 +383,25 @@ function TerapiaDiasBloco({ td, presenca, ccPA, ccPE, etaBonus }: {
           <div className="text-xs font-semibold mb-1 text-orange-700 dark:text-orange-400">
             PPD — Pagamento por Diária ({fmt(td.diar)}/dia)
           </div>
-          <table className="w-full text-xs">
+          <table className="w-full table-fixed text-xs">
+            <DiasColGroup />
             <tbody>
               {td.diariasDetalhe.map(dd => (
                 <tr key={dd.dow} className="border-t border-white/40 dark:border-black/20">
                   <td className="py-0.5 font-medium text-foreground">{DOW_PT[dd.dow]}</td>
-                  <td className="text-center text-foreground">
-                    {dd.occ}
-                    {dd.feriados.length > 0 && <span className="ml-1 text-amber-600 dark:text-amber-400">−{dd.feriados.length}</span>}
+                  <td />
+                  <td className="text-center text-foreground tabular-nums">
+                    <span className="inline-flex items-center justify-center gap-1">
+                      {dd.occ}
+                      {dd.feriados.length > 0 && <span className="text-amber-600 dark:text-amber-400">−{dd.feriados.length}</span>}
+                    </span>
                   </td>
-                  <td className="text-right font-semibold text-orange-700 dark:text-orange-400 tabular-nums">{fmt(dd.valor)}</td>
+                  <td colSpan={3} className="text-right font-semibold text-orange-700 dark:text-orange-400 tabular-nums">{fmt(dd.valor)}</td>
                 </tr>
               ))}
               <tr className="border-t-2 border-black/10 dark:border-white/10 font-bold">
-                <td colSpan={2} className="py-1 text-foreground">Total PPD/mês</td>
-                <td className="text-right text-orange-700 dark:text-orange-400 tabular-nums">{fmt(td.mensalDiaria)}</td>
+                <td colSpan={3} className="py-1 text-foreground">Total PPD/mês</td>
+                <td colSpan={3} className="text-right text-orange-700 dark:text-orange-400 tabular-nums">{fmt(td.mensalDiaria)}</td>
               </tr>
             </tbody>
           </table>
@@ -291,10 +433,10 @@ function TerapiaDiasBloco({ td, presenca, ccPA, ccPE, etaBonus }: {
 
 // ─── Card do profissional ──────────────────────────────────────────────────
 
-type SecaoExpandida = "dias" | "ocup" | "pacs" | null
+type SecaoExpandida = "dias" | "pacs" | "agenda" | null
 
 function ProfissionalCard({
-  d, exp, onToggle, presenca, ccPA, ccPE, etaBonus, feriadosMes, pdfOpts,
+  d, exp, onToggle, presenca, ccPA, ccPE, etaBonus, feriadosMes,
 }: {
   d: ProfissionalAnalise
   exp: SecaoExpandida
@@ -304,11 +446,11 @@ function ProfissionalCard({
   ccPE: number
   etaBonus: number
   feriadosMes: Array<{ date: string; nome: string; dow: number }>
-  pdfOpts: AnaliseFuturaPdfOpts
 }) {
-  const resumoOcup = resumoOcupacaoProfissional(d)
   const regraTexto = regrasCapacidadeTexto(d)
-  const corTopo = d.hasCC ? B.purple : d.hasTA ? B.blue : d.hasAE ? B.orange : B.navy
+  // B.navy é escuro demais pra faixa de gradiente em cima de fundo já escuro no
+  // dark mode (mesmo ajuste do TONE_ACCENT.slate acima).
+  const corTopo = d.hasCC ? B.purple : d.hasTA ? B.blue : d.hasAE ? B.orange : "#64748b"
 
   return (
     <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
@@ -327,27 +469,7 @@ function ProfissionalCard({
             ))}
           </div>
 
-          <div className="flex flex-wrap gap-1.5 mt-2 items-stretch">
-            <Chip tone="green">
-              <span className="flex flex-col leading-tight py-0.5">
-                <span>{resumoOcup.linha1}</span>
-                <span className="text-[10px] font-bold opacity-80">{resumoOcup.linha1Sub}</span>
-              </span>
-            </Chip>
-            <Chip tone={resumoOcup.modo === "capacidade" ? "purple" : "amber"}>
-              <span className="flex flex-col leading-tight py-0.5">
-                <span>{resumoOcup.linha2}</span>
-                <span className="text-[10px] font-bold opacity-80">{resumoOcup.linha2Sub}</span>
-              </span>
-            </Chip>
-            {d.taxaOcupacao !== null && (
-              <Chip tone={toneOcupacao(d.taxaOcupacao)} title={d.ocupacao?.baseTexto}>
-                {resumoOcup.principal}
-              </Chip>
-            )}
-          </div>
-
-          {regraTexto && <div className="text-[11px] mt-1.5 text-violet-700 dark:text-violet-400">{regraTexto}</div>}
+          {regraTexto && <div className="text-xs mt-1.5 text-violet-700 dark:text-violet-400">{regraTexto}</div>}
         </div>
 
         <div className="flex items-center gap-2 flex-wrap justify-end shrink-0">
@@ -357,22 +479,30 @@ function ProfissionalCard({
               CC: {d.pacCC}/{d.limiteCC} pac.
             </Chip>
           )}
-          <button
-            type="button"
-            onClick={() => gerarPDFAnaliseFuturaProfissional(d, pdfOpts)}
-            className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white shadow-sm hover:opacity-90 active:scale-95 transition-all"
-            style={{ background: B.navy }}
-          >
-            <FileText size={13} />
-            PDF individual
-          </button>
         </div>
       </div>
 
-      <div className="px-4 pb-4 grid grid-cols-1 sm:grid-cols-3 gap-3">
+      <div className="px-4 pb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-stretch">
         <ContratoAntigoCard d={d} />
         <PresencaCard d={d} variante="100" presenca={presenca} />
         <PresencaCard d={d} variante="x" presenca={presenca} />
+        <StatCardShell tone="slate" icon={<PieChart size={15} />} label="Resumo da ocupação">
+          <div className="flex-1 flex flex-col items-center justify-center">
+            <OcupacaoDonut item={d} size={128} centerFillClassName="fill-slate-100 dark:fill-slate-800" />
+          </div>
+          {d.ocupacao && (
+            <div className="grid grid-cols-2 gap-2 mt-2 text-xs">
+              <div className={`rounded-lg px-2.5 py-2 text-center ${TONE_CLS.red.bg} ${TONE_CLS.red.text}`}>
+                <strong className="block text-sm tabular-nums">{fmtH(d.ocupacao.horasOcupadas)}</strong>
+                ocupadas
+              </div>
+              <div className={`rounded-lg px-2.5 py-2 text-center ${TONE_CLS.green.bg} ${TONE_CLS.green.text}`}>
+                <strong className="block text-sm tabular-nums">{fmtH(d.ocupacao.horasLivres)}</strong>
+                livres
+              </div>
+            </div>
+          )}
+        </StatCardShell>
       </div>
 
       <div className="px-4 pb-3 pt-1 flex gap-4 flex-wrap border-t border-border">
@@ -386,19 +516,19 @@ function ProfissionalCard({
         </button>
         <button
           type="button"
-          onClick={() => onToggle("ocup")}
-          className="inline-flex items-center gap-1 text-xs font-semibold pt-2 text-sky-700 dark:text-sky-400 hover:opacity-70 transition-opacity"
-        >
-          {exp === "ocup" ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-          Ocupação detalhada
-        </button>
-        <button
-          type="button"
           onClick={() => onToggle("pacs")}
           className="inline-flex items-center gap-1 text-xs font-semibold pt-2 text-muted-foreground hover:opacity-70 transition-opacity"
         >
           {exp === "pacs" ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
           Pacientes ({d.allPacs.length})
+        </button>
+        <button
+          type="button"
+          onClick={() => onToggle("agenda")}
+          className="inline-flex items-center gap-1 text-xs font-semibold pt-2 text-muted-foreground hover:opacity-70 transition-opacity"
+        >
+          {exp === "agenda" ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          Agenda Disponibilizada
         </button>
       </div>
 
@@ -418,54 +548,6 @@ function ProfissionalCard({
         </div>
       )}
 
-      {exp === "ocup" && (
-        <div className="px-4 pb-4 space-y-3 pt-1">
-          <div className="rounded-xl p-3 bg-sky-50 dark:bg-sky-950/30">
-            <div className="font-bold text-xs mb-1 text-foreground">Base da ocupação semanal</div>
-            <div className="text-sm font-semibold text-sky-700 dark:text-sky-400">{d.ocupacao?.baseTexto}</div>
-            <div className="text-xs text-muted-foreground mt-1">
-              {d.ocupacao?.baseHorasTexto} · ociosidade {fmtPctOcup(d.ocupacao?.ociosidade)}
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="rounded-lg p-3 bg-card border border-border">
-              <div className="font-semibold text-xs mb-2 text-foreground">Por dia</div>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-muted-foreground"><th className="text-left font-medium">Dia</th><th className="text-right font-medium">Ocup.</th><th className="text-right font-medium">Livre</th></tr>
-                </thead>
-                <tbody>
-                  {(d.ocupacao?.porDia || []).filter(temBaseOcupacaoLinha).map(x => (
-                    <tr key={x.dow} className="border-t border-border">
-                      <td className="py-1 text-foreground">{x.dia}</td>
-                      <td className="text-right font-semibold text-foreground tabular-nums">{fmtH(x.horasOcupadas)}</td>
-                      <td className="text-right text-muted-foreground tabular-nums">{fmtH(x.horasLivres)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="rounded-lg p-3 bg-card border border-border">
-              <div className="font-semibold text-xs mb-2 text-foreground">Por turno</div>
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-muted-foreground"><th className="text-left font-medium">Recorte</th><th className="text-right font-medium">% ocup.</th><th className="text-right font-medium">Livre</th></tr>
-                </thead>
-                <tbody>
-                  {(d.ocupacao?.porTurno || []).filter(temBaseOcupacaoLinha).map(x => (
-                    <tr key={`${x.dow}-${x.turno}`} className="border-t border-border">
-                      <td className="py-1 text-foreground">{DOW_PT[x.dow]} · {x.turno}</td>
-                      <td className="text-right font-semibold text-foreground tabular-nums">{fmtPctOcup(x.pct)}</td>
-                      <td className="text-right text-muted-foreground tabular-nums">{fmtH(x.horasLivres)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        </div>
-      )}
-
       {exp === "pacs" && (
         <div className="px-4 pb-4 pt-1">
           {d.allPacs.length === 0 ? (
@@ -477,6 +559,12 @@ function ProfissionalCard({
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {exp === "agenda" && (
+        <div className="px-4 pb-4 pt-1">
+          <AgendaMinimalista ocupacao={d.ocupacao} />
         </div>
       )}
     </div>
@@ -505,8 +593,6 @@ export function AnaliseFuturaTab() {
   const etaBonus = config?.eta_bonus_default ?? 100
   const presencaNum = presenca ?? 80
 
-  const pdfOpts: AnaliseFuturaPdfOpts = { analMes, presenca: presencaNum, ccPA, ccPE, etaBonus }
-
   const [busca, setBusca] = useState("")
   const [filtrosEsp, setFiltrosEsp] = useState<string[]>(["todos"])
   const [sortKey, setSortKey] = useState<SortKey>("alpha")
@@ -518,7 +604,7 @@ export function AnaliseFuturaTab() {
       <div className="flex items-center gap-4">
         {totalGrade > 0 && (
           <span className="flex items-center gap-1.5 rounded-full border border-green-200 bg-green-50 text-green-700 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400 px-3 py-1 text-xs font-medium">
-            <CheckCircle2 size={11} className="text-green-500" />
+            <CheckCircle2 size={11} className="text-green-500 dark:text-green-400" />
             Grade · {totalGrade.toLocaleString("pt-BR")} horários
           </span>
         )}
@@ -613,7 +699,7 @@ export function AnaliseFuturaTab() {
       </p>
 
       <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
-        <SummaryTile label="Exibindo" value={dadosFiltrados.length} tone="blue" />
+        <SummaryTile label="Exibindo" value={`${dadosFiltrados.length} de ${dadosPorProf.length}`} tone="blue" />
         <SummaryTile label="Total 100% / mês" value={fmt(tot100)} tone="green" />
         <SummaryTile label={`Total ${presenca ?? "—"}% / mês`} value={fmt(totX)} tone="blue" />
         <SummaryTile label="Total antigo proporcional" value={fmt(totalAntigo)} tone="slate" />
@@ -636,7 +722,7 @@ export function AnaliseFuturaTab() {
         </div>
       )}
 
-      <div className="space-y-2.5">
+      <div className="rounded-2xl border border-border bg-card p-3 space-y-3">
         <div className="flex items-center gap-2">
           <div className="relative flex-1 max-w-xs">
             <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
@@ -644,6 +730,7 @@ export function AnaliseFuturaTab() {
               value={busca}
               onChange={e => setBusca(e.target.value)}
               placeholder="Buscar profissional…"
+              aria-label="Buscar profissional"
               className="w-full rounded-lg border border-border bg-muted/50 pl-8 pr-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             />
           </div>
@@ -652,68 +739,64 @@ export function AnaliseFuturaTab() {
               <X size={12} /> limpar
             </button>
           )}
+          {(busca || !filtroAtivo("todos")) && (
+            <button
+              type="button"
+              onClick={() => { setBusca(""); setFiltrosEsp(["todos"]) }}
+              className="inline-flex items-center gap-1 text-xs font-semibold text-foreground hover:opacity-70 transition-opacity"
+            >
+              <X size={12} /> limpar tudo
+            </button>
+          )}
         </div>
 
-        <div className="flex flex-wrap gap-1.5 items-center">
-          <span className="text-xs text-muted-foreground mr-1">Especialidade:</span>
-          <button
-            type="button"
-            onClick={() => toggleFiltro("todos")}
-            className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
-              filtroAtivo("todos")
-                ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 border-slate-900 dark:border-white"
-                : "bg-transparent text-foreground border-border hover:bg-muted/50"
-            }`}
-          >
-            Todos
-          </button>
-          <select
-            value=""
-            onChange={e => { if (e.target.value) toggleFiltro(e.target.value) }}
-            className="rounded-full border border-border bg-transparent px-3 py-1 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-          >
-            <option value="">+ Outra especialidade</option>
-            {allTerps.map(t => (
-              <option key={t} value={t}>{filtrosEsp.includes(t) ? "✓ " : ""}{t}</option>
+        <div className="flex items-center gap-3 flex-wrap justify-between border-t border-border pt-3">
+          <div className="flex flex-wrap gap-1.5 items-center">
+            <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground mr-0.5">Especialidade</span>
+            <button
+              type="button"
+              onClick={() => toggleFiltro("todos")}
+              className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
+                filtroAtivo("todos")
+                  ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 border-slate-900 dark:border-white"
+                  : "bg-transparent text-foreground border-border hover:bg-muted/50"
+              }`}
+            >
+              Todos
+            </button>
+            {filtrosEsp.filter(f => f !== "todos").map(f => (
+              <span key={f} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-sky-600 dark:bg-sky-500 text-white">
+                {f}
+                <button type="button" onClick={() => toggleFiltro(f)} className="opacity-70 hover:opacity-100 transition-opacity">
+                  <X size={11} />
+                </button>
+              </span>
             ))}
-          </select>
-          {filtrosEsp.filter(f => f !== "todos").map(f => (
-            <span key={f} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-semibold bg-sky-600 text-white">
-              {f}
-              <button type="button" onClick={() => toggleFiltro(f)} className="opacity-70 hover:opacity-100 transition-opacity">
-                <X size={11} />
-              </button>
-            </span>
-          ))}
-        </div>
-
-        <div className="flex items-center gap-2 flex-wrap justify-between">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-xs text-muted-foreground font-medium">Ordenar por:</span>
-            {SORT_OPTIONS.map(({ k, l }) => (
-              <button
-                key={k}
-                type="button"
-                onClick={() => setSortKey(k)}
-                className={`px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
-                  sortKey === k
-                    ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 border-slate-900 dark:border-white"
-                    : "bg-transparent text-foreground border-border hover:bg-muted/50"
-                }`}
-              >
-                {l}
-              </button>
-            ))}
+            <EspecialidadeCheckboxDropdown options={allTerps} selected={filtrosEsp} onToggle={toggleFiltro} />
           </div>
-          <button
-            type="button"
-            onClick={() => exportarAnaliseXlsx({ dadosFiltrados, analMes, presenca: presencaNum, etaBonus, ccPE })}
-            className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold text-white shadow-sm hover:opacity-90 active:scale-95 transition-all"
-            style={{ background: B.green }}
-          >
-            <Download size={13} />
-            Exportar XLSX
-          </button>
+
+          <div className="flex items-center gap-2 flex-wrap">
+            <label className="flex items-center gap-1.5 text-xs">
+              <span className="text-xs font-bold uppercase tracking-wide text-muted-foreground">Ordenar</span>
+              <select
+                value={sortKey}
+                onChange={e => setSortKey(e.target.value as SortKey)}
+                className="rounded-lg border border-border bg-popover px-2.5 py-1.5 text-xs font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+              >
+                {SORT_OPTIONS.map(({ k, l }) => (
+                  <option key={k} value={k} className="bg-popover text-popover-foreground">{l}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={() => exportarAnaliseXlsx({ dadosFiltrados, analMes, presenca: presencaNum, etaBonus, ccPE })}
+              className="inline-flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-xs font-bold text-white shadow-sm bg-emerald-700 hover:bg-emerald-800 dark:bg-emerald-600 dark:hover:bg-emerald-700 active:scale-95 transition-colors"
+            >
+              <Download size={13} />
+              Exportar XLSX
+            </button>
+          </div>
         </div>
       </div>
 
@@ -736,7 +819,6 @@ export function AnaliseFuturaTab() {
             ccPE={ccPE}
             etaBonus={etaBonus}
             feriadosMes={resultado.feriadosMes}
-            pdfOpts={pdfOpts}
           />
         ))}
       </div>

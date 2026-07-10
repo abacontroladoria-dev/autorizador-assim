@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import { HelpCircle, Download } from "lucide-react"
 
 import { useHeader } from "@/contexts/HeaderContext"
@@ -15,6 +15,10 @@ import { calcularTotalPorEspecialidade } from "@/lib/remuneracao/dashboardRP"
 import { exportarRemuneracaoRPXlsx } from "@/lib/remuneracao/exportRemuneracaoRP"
 import { B } from "@/lib/cronograma/constants"
 import CardRemun, { type ExpandidoState } from "./CardRemun"
+import type { ProfRemunReal } from "@/lib/remuneracao/calculo"
+
+const normKey = (v: unknown): string =>
+  String(v ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim()
 
 
 export function RemunRPTab() {
@@ -45,12 +49,24 @@ export function RemunRPTab() {
     return new Set(alvo?.profissionais ?? [])
   }, [resultado, especialidadeFiltro])
 
+  // Mesma lógica de match usada em CardRemun.filtrarSessoes — buscar aqui também
+  // permite recolher da lista os profissionais sem nenhuma sessão correspondente,
+  // em vez de a busca só filtrar dentro de cards já expandidos manualmente.
+  const buscaQ = useMemo(() => normKey(remBusca), [remBusca])
+  const profTemBusca = useCallback((p: ProfRemunReal) => {
+    if (!buscaQ) return true
+    return p.sessoes.some(s =>
+      normKey(`${s.paciente} ${s.especialidade} ${s.data} ${s.hora} ${s.profAgenda} ${s.profCsv}`).includes(buscaQ)
+    )
+  }, [buscaQ])
+
   const resultadoExibido = useMemo(() => {
     let r = apenasInconsistencia ? profissionaisComInconsistencia : resultado
     if (profissionaisPorEspecialidade) r = r ? r.filter(p => profissionaisPorEspecialidade.has(p.prof)) : r
     if (peFiltro) r = r ? r.filter(p => profTemPe(p, peFiltro)) : r
+    if (buscaQ) r = r ? r.filter(profTemBusca) : r
     return r
-  }, [apenasInconsistencia, profissionaisComInconsistencia, resultado, profissionaisPorEspecialidade, peFiltro])
+  }, [apenasInconsistencia, profissionaisComInconsistencia, resultado, profissionaisPorEspecialidade, peFiltro, buscaQ, profTemBusca])
 
   useEffect(() => {
     setHeader("Rem. Mês - Total", "Relacionamento Prestador")
@@ -93,11 +109,11 @@ export function RemunRPTab() {
         <ContratosPendentesPanel resultado={resultado} />
       )}
 
-      <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-        A coluna <strong>Presença Recep.</strong> é cruzada com <code>fila_autorizacoes</code> (mesma fonte usada em Reposição de Faltas). Sessões sem nenhum registro correspondente na fila mantêm presença assumida como &quot;Sim&quot;.
-      </div>
-
-
+      {resultado && resultado.length > 0 && (
+        <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
+          A coluna <strong>Presença Recep.</strong> é cruzada com <code>fila_autorizacoes</code> (mesma fonte usada em Reposição de Faltas). Sessões sem nenhum registro correspondente na fila mantêm presença assumida como &quot;Sim&quot;.
+        </div>
+      )}
 
       {!peAnaliseCompleta && (evoRows.length > 0 || peRows.length > 0) && (
         <p className="text-xs text-amber-700 dark:text-amber-400">{peStatusMensagem}</p>
@@ -150,6 +166,43 @@ export function RemunRPTab() {
         </div>
       )}
 
+      {resultado && resultado.length > 0 && (buscaQ || apenasInconsistencia || especialidadeFiltro || peFiltro) && (
+        <div className="flex items-center gap-2 flex-wrap text-xs">
+          <span className="font-bold uppercase tracking-wide text-muted-foreground">Filtros ativos:</span>
+          {buscaQ && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 font-semibold text-foreground">
+              Busca: {remBusca}
+              <button type="button" onClick={() => setRemBusca("")} className="opacity-70 hover:opacity-100">×</button>
+            </span>
+          )}
+          {apenasInconsistencia && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 font-semibold text-foreground">
+              Contém inconsistência
+              <button type="button" onClick={() => setApenasInconsistencia(false)} className="opacity-70 hover:opacity-100">×</button>
+            </span>
+          )}
+          {especialidadeFiltro && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 font-semibold text-foreground">
+              Especialidade: {especialidadeFiltro}
+              <button type="button" onClick={() => setEspecialidadeFiltro(null)} className="opacity-70 hover:opacity-100">×</button>
+            </span>
+          )}
+          {peFiltro && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 font-semibold text-foreground">
+              PE: {peFiltro}
+              <button type="button" onClick={() => setPeFiltro(null)} className="opacity-70 hover:opacity-100">×</button>
+            </span>
+          )}
+          <button
+            type="button"
+            onClick={() => { setRemBusca(""); setApenasInconsistencia(false); setEspecialidadeFiltro(null); setPeFiltro(null) }}
+            className="font-semibold text-foreground hover:opacity-70 transition-opacity"
+          >
+            limpar tudo
+          </button>
+        </div>
+      )}
+
       {!resultado && !loading && (
         <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
           Faça upload do relatório <code>csv_grade_profissionais</code> (mês completo) para calcular PA, PPD (diária) e ETA. Envie também <code>agendamentos_profissionais</code> para liberar o PE.
@@ -162,7 +215,9 @@ export function RemunRPTab() {
             ? `Nenhum profissional com remuneração em "${especialidadeFiltro}" nesta grade.`
             : peFiltro
               ? "Nenhum profissional com PE nessa situação nesta grade."
-              : "Nenhum profissional com inconsistência nesta grade."}
+              : buscaQ
+                ? `Nenhuma sessão encontrada para "${remBusca}".`
+                : "Nenhum profissional com inconsistência nesta grade."}
         </div>
       )}
 
@@ -172,10 +227,10 @@ export function RemunRPTab() {
             <CardRemun
               key={p.prof}
               p={p}
-              modoRP={true}
               expandido={expandido}
               setExpandido={setExpandido}
               remBusca={remBusca}
+              forceOpen={!!buscaQ}
               ccPA={ccPA}
               ccPE={ccPE}
               etaBonus={etaBonus}

@@ -55,19 +55,37 @@ export function PeCoordenadoresPanel({
 
   if (detalhes.length === 0) return null
 
+  const cardAtivo = filtroAtivo ? CARDS.find(c => c.key === filtroAtivo) : null
+
   return (
     <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
         onClick={() => setAberto(v => !v)}
-        className="w-full px-4 py-3 flex items-center justify-between text-left"
+        onKeyDown={e => (e.key === "Enter" || e.key === " ") && setAberto(v => !v)}
+        aria-expanded={aberto}
+        className="w-full px-4 py-3 flex items-center justify-between text-left gap-2 cursor-pointer hover:bg-muted/40 transition-colors"
       >
-        <span className="font-bold text-sm text-foreground inline-flex items-center gap-1.5">
+        <span className="font-bold text-sm text-foreground inline-flex items-center gap-1.5 min-w-0">
           {aberto ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-          PE dos Coordenadores — visão gerencial
+          <span className="truncate">PE dos Coordenadores — visão gerencial</span>
         </span>
-        <span className="text-xs text-muted-foreground">{detalhes.length} paciente(s) analisado(s)</span>
-      </button>
+        <span className="flex items-center gap-2 shrink-0">
+          {cardAtivo && (
+            <button
+              type="button"
+              className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold ${cardAtivo.bg}`}
+              style={{ color: cardAtivo.cor }}
+              onClick={e => { e.stopPropagation(); onFiltro(null) }}
+              title="Remover filtro de PE"
+            >
+              Filtro: {cardAtivo.label} ×
+            </button>
+          )}
+          <span className="text-xs text-muted-foreground">{detalhes.length} paciente(s) analisado(s)</span>
+        </span>
+      </div>
 
       {aberto && (
         <div className="px-4 pb-4 grid grid-cols-2 md:grid-cols-4 xl:grid-cols-7 gap-2">

@@ -48,6 +48,7 @@ import { SidebarGroup } from "@/components/sidebar/SidebarGroup"
 import { ThemeSwitcher } from "@/components/sidebar/ThemeSwitcher"
 import { useTheme } from "@/contexts/ThemeContext"
 import { useImpersonation } from "@/contexts/ImpersonationContext"
+import { useUnsavedChangesGuard } from "@/contexts/UnsavedChangesContext"
 import { ImpersonationSelector } from "@/components/admin/ImpersonationSelector"
 import { ROLE_LABELS } from "@/constants/roleLabels"
 import { getRoleDefaultPermissions, codigosToRotas } from "@/lib/permissions/routes"
@@ -98,6 +99,7 @@ export default function Sidebar() {
   const supabase = getSupabaseClient()
   const { theme } = useTheme()
   const { isImpersonating, impersonatedTarget, canImpersonate } = useImpersonation()
+  const { guardedNavigate } = useUnsavedChangesGuard()
   const [loadingLogout, setLoadingLogout] = useState(false)
   const [role, setRole] = useState<string | null>(null)
   const [loadingRole, setLoadingRole] = useState(true)
@@ -360,7 +362,7 @@ export default function Sidebar() {
 
     return (
       <button
-        onClick={() => router.push(path)}
+        onClick={() => guardedNavigate(path)}
         className={`group flex w-full items-center gap-2.5 py-2 pr-2 rounded-lg text-sm transition-all duration-150
         ${
           active

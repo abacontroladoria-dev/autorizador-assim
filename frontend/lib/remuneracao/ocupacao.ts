@@ -7,11 +7,10 @@
 import { normKey } from "./constants"
 import { cleanTxt, fmtNumBR, fmtPctOcup, fmtH, hhmm } from "./formatacao"
 
-export const DOW_PT_LONG: Record<number, string> = {
-  1: "Segunda-feira", 2: "Terça-feira", 3: "Quarta-feira", 4: "Quinta-feira", 5: "Sexta-feira",
-}
-
 // ─── Capacidade por profissional/especialidade (constants/capacidades.js) ─────
+// Só o padrão genérico é usado hoje (placeholder "base N" em CapacidadeConfig.tsx)
+// — a capacidade real usada no cálculo de ocupação vem de
+// lib/cronograma/ocupacaoProf.ts (ver calculo.ts).
 
 const SLOT_CAP_ESP: Record<string, number> = {
   "terapia ocupacional": 1,
@@ -25,26 +24,6 @@ export function capacidadePadraoProfissional(terapia = ""): number {
 }
 
 export type CapacidadeOverride = { dias?: Record<string, number>; padrao?: number }
-
-export function resolverCapacidadeProfissional(
-  profissional: string,
-  terapia = "",
-  dia = "",
-  capacidadesProfissionais: Record<string, CapacidadeOverride> = {}
-): number {
-  const base = capacidadePadraoProfissional(terapia)
-  const key = normKey(profissional)
-  const cfg = capacidadesProfissionais?.[key] || capacidadesProfissionais?.[profissional] || null
-  if (!cfg) return base
-  const diaValor = dia ? Number(cfg.dias?.[dia]) : NaN
-  if (Number.isFinite(diaValor) && diaValor > 0) return diaValor
-  const padrao = Number(cfg.padrao)
-  return Number.isFinite(padrao) && padrao > 0 ? padrao : base
-}
-
-function getSlotCap(prof: string, esp: string, capacidadesProfissionais: Record<string, CapacidadeOverride> = {}): number {
-  return resolverCapacidadeProfissional(prof, esp, "", capacidadesProfissionais)
-}
 
 // ─── Unidade ────────────────────────────────────────────────────────────────
 
@@ -170,97 +149,6 @@ type SlotDetalhe = {
   patients?: string[]
 }
 
-type RawSlot = SlotDetalhe & {
-  unidade: string
-  turno: string
-  capacidade: number
-  ocupados: number
-  livres: number
-  horariosTotal: number
-  horariosOcupados: number
-  horariosLivres: number
-  pct: number | null
-  horasTotal: number
-  horasOcupadas: number
-  horasLivres: number
-  horasTecnicas: number
-  horasAssistenciais: number
-  excluirBaseOcupacao: boolean
-  horarioAdministrativoEta: boolean
-}
-
-export type OcupacaoAgregada = OcupacaoFinalizada & {
-  porDia: Array<{ dow: number; dia: string } & OcupacaoFinalizada>
-  porTurno: Array<{ dow: number; turno: string } & OcupacaoFinalizada>
-  porEspecialidade: Array<{ terp: string } & OcupacaoFinalizada>
-  porUnidade: Array<{ unidade: string } & OcupacaoFinalizada>
-  slots: RawSlot[]
-}
-
-export function agregarOcupacaoDeSlots(rawSlots: RawSlot[]): OcupacaoAgregada {
-  const total = novaBaseOcup()
-  const porDia: Record<number, BaseOcup> = { 1: novaBaseOcup(), 2: novaBaseOcup(), 3: novaBaseOcup(), 4: novaBaseOcup(), 5: novaBaseOcup() }
-  const porTurno: Record<string, BaseOcup & { dow: number; turno: string }> = {}
-  const porEspecialidade: Record<string, BaseOcup & { terp: string }> = {}
-  const porUnidade: Record<string, BaseOcup & { unidade: string }> = {}
-  const slots: RawSlot[] = []
-
-  ;(rawSlots || []).forEach(s => {
-    const unidade = normalizarUnidadeOcupacao(s.unidade)
-    const item: BaseOcup = {
-      slotsTotal: s.capacidade ?? 0,
-      slotsOcupados: s.ocupados ?? 0,
-      slotsLivres: s.livres ?? 0,
-      horariosTotal: s.horariosTotal ?? 1,
-      horariosOcupados: s.horariosOcupados ?? ((s.ocupados ?? 0) > 0 ? 1 : 0),
-      horariosLivres: s.horariosLivres ?? ((s.ocupados ?? 0) > 0 ? 0 : 1),
-      horasTotal: s.horasTotal ?? 0,
-      horasOcupadas: s.horasOcupadas ?? 0,
-      horasLivres: s.horasLivres ?? 0,
-      horasTecnicas: s.horasTecnicas ?? 0,
-      horasAssistenciais: s.horasAssistenciais ?? 0,
-    }
-    const slotNormalizado: RawSlot = { ...s, unidade, turno: s.turno || turnoDoHorario(s.ini) }
-    const dow = s.dow as number
-    if (s.excluirBaseOcupacao) {
-      total.horasTecnicas += item.horasTecnicas || 0
-      if (porDia[dow]) porDia[dow].horasTecnicas += item.horasTecnicas || 0
-      const turno = slotNormalizado.turno
-      const tk = `${dow}-${turno}`
-      if (!porTurno[tk]) porTurno[tk] = { dow, turno, ...novaBaseOcup() }
-      porTurno[tk].horasTecnicas += item.horasTecnicas || 0
-      const terp = s.terp || "Sem especialidade"
-      if (!porEspecialidade[terp]) porEspecialidade[terp] = { terp, ...novaBaseOcup() }
-      porEspecialidade[terp].horasTecnicas += item.horasTecnicas || 0
-      if (!porUnidade[unidade]) porUnidade[unidade] = { unidade, ...novaBaseOcup() }
-      porUnidade[unidade].horasTecnicas += item.horasTecnicas || 0
-      slots.push(slotNormalizado)
-      return
-    }
-    somaBaseOcup(total, item)
-    if (porDia[dow]) somaBaseOcup(porDia[dow], item)
-    const turno = s.turno || turnoDoHorario(s.ini)
-    const tk = `${dow}-${turno}`
-    if (!porTurno[tk]) porTurno[tk] = { dow, turno, ...novaBaseOcup() }
-    somaBaseOcup(porTurno[tk], item)
-    const terp = s.terp || "Sem especialidade"
-    if (!porEspecialidade[terp]) porEspecialidade[terp] = { terp, ...novaBaseOcup() }
-    somaBaseOcup(porEspecialidade[terp], item)
-    if (!porUnidade[unidade]) porUnidade[unidade] = { unidade, ...novaBaseOcup() }
-    somaBaseOcup(porUnidade[unidade], item)
-    slots.push(slotNormalizado)
-  })
-
-  return {
-    ...finalizarBaseOcup(total),
-    porDia: Object.entries(porDia).map(([dow, b]) => ({ dow: +dow, dia: DOW_PT_LONG[+dow], ...finalizarBaseOcup(b) })),
-    porTurno: Object.values(porTurno).sort((a, b) => a.dow - b.dow || a.turno.localeCompare(b.turno)).map(b => ({ ...b, ...finalizarBaseOcup(b) })),
-    porEspecialidade: Object.values(porEspecialidade).sort((a, b) => a.terp.localeCompare(b.terp)).map(b => ({ ...b, ...finalizarBaseOcup(b) })),
-    porUnidade: Object.values(porUnidade).sort((a, b) => a.unidade.localeCompare(b.unidade)).map(b => ({ ...b, ...finalizarBaseOcup(b) })),
-    slots,
-  }
-}
-
 // ─── Slot data (estrutura intermediária vinda de calculo.ts) ─────────────────
 
 export type DiaInfo = {
@@ -277,116 +165,6 @@ export type DiaInfo = {
 export type SlotData = {
   diasInfo: Record<string, DiaInfo>
   terpDays: Record<string, Record<string, number>>
-}
-
-export function calcularOcupacaoSemanal(
-  slotData: SlotData,
-  prof: string,
-  capacidadesProfissionais: Record<string, CapacidadeOverride> = {}
-): OcupacaoAgregada {
-  const rawSlots: RawSlot[] = []
-  Object.values(slotData?.diasInfo || {}).forEach(di => {
-    Object.values(di.slotDetails || {}).forEach(sd => {
-      const dur = Math.max(((sd.fim || 0) - (sd.ini || 0)) / 60, 40 / 60)
-      const capPadrao = getSlotCap(prof, sd.terp || "", capacidadesProfissionais)
-      const etaAdminUnits = sd.terp === "Especialista Técnico de Área" ? (sd.technicalAg || 0) : 0
-      const temPacienteReal = (sd.realAg || 0) > 0
-      const temTecnico = etaAdminUnits > 0
-      const totalUnits = temTecnico && !temPacienteReal
-        ? Math.max(capPadrao, etaAdminUnits, 1)
-        : Math.max(capPadrao, (sd.ag || 0) + (sd.liv || 0), sd.ag || 0, 1)
-      const ocupUnits = Math.min((sd.ag || 0) + etaAdminUnits, totalUnits)
-      const livreUnits = Math.max(totalUnits - ocupUnits, 0)
-      const horarioOcupado = ocupUnits > 0 ? 1 : 0
-      const horarioLivre = horarioOcupado ? 0 : 1
-      const horarioAdministrativoEta = temTecnico && !temPacienteReal
-      const apenasHorarioAdministrativo = false
-      rawSlots.push({
-        ...sd,
-        unidade: normalizarUnidadeOcupacao(sd.unidade),
-        turno: turnoDoHorario(sd.ini),
-        capacidade: totalUnits,
-        ocupados: ocupUnits,
-        livres: livreUnits,
-        horariosTotal: 1,
-        horariosOcupados: horarioOcupado,
-        horariosLivres: horarioLivre,
-        pct: totalUnits > 0 ? ocupUnits / totalUnits : null,
-        horasTotal: dur,
-        horasOcupadas: horarioOcupado ? dur : 0,
-        horasLivres: horarioLivre ? dur : 0,
-        horasTecnicas: temTecnico ? dur : 0,
-        horasAssistenciais: temPacienteReal ? dur : 0,
-        excluirBaseOcupacao: apenasHorarioAdministrativo,
-        horarioAdministrativoEta,
-      })
-    })
-  })
-  return agregarOcupacaoDeSlots(rawSlots)
-}
-
-// ─── Resumos de ocupação para a UI (Análise Futura) ──────────────────────────
-// Migrado de calculadora-remuneracao/src/utils/ocupacao.js — os textos aqui não
-// levam emoji (o app antigo prefixava com 🟢/🟡/📊); a UI do Pulsar usa ícones
-// Lucide para o mesmo propósito, então essas funções devolvem só o texto.
-
-export type ResumoOcupacao = {
-  modo: "capacidade" | "horarios"
-  linha1: string
-  linha1Sub: string
-  linha2: string
-  linha2Sub: string
-  principal: string
-}
-
-export function resumoOcupacaoProfissional(d: { ocupacao?: OcupacaoAgregada | OcupacaoFinalizada | null }): ResumoOcupacao {
-  const oc = d?.ocupacao
-  if (oc?.capacidadeMultipla) {
-    const ocup = oc.slotsOcupados || 0
-    const livres = oc.slotsLivres || 0
-    return {
-      modo: "capacidade",
-      linha1: `${fmtH(oc.horasOcupadas || 0)} na agenda com paciente`,
-      linha1Sub: `${fmtNumBR(ocup, ocup % 1 ? 1 : 0)} vagas preenchidas`,
-      linha2: `${fmtNumBR(livres, livres % 1 ? 1 : 0)} vagas livres`,
-      linha2Sub: `capacidade total: ${fmtNumBR(oc.slotsTotal || 0, (oc.slotsTotal || 0) % 1 ? 1 : 0)} vagas`,
-      principal: oc.baseTexto || "—",
-    }
-  }
-  const ocup = oc?.horariosOcupados || 0
-  const livres = oc?.horariosLivres || 0
-  return {
-    modo: "horarios",
-    linha1: `${fmtH(oc?.horasOcupadas || 0)} ocupadas`,
-    linha1Sub: `${fmtNumBR(ocup, ocup % 1 ? 1 : 0)} sessões/horários ocupados`,
-    linha2: `${fmtH(oc?.horasLivres || 0)} livres`,
-    linha2Sub: `${fmtNumBR(livres, livres % 1 ? 1 : 0)} sessões/horários livres`,
-    principal: oc?.baseTexto || "—",
-  }
-}
-
-export function regraMusicoterapiaTexto(prof: string): string {
-  const cap = getSlotCap(prof, "Musicoterapia")
-  if (cap <= 1) return `Musicoterapia: capacidade de ${cap} paciente por horário.`
-  const thiago = normKey(prof) === "thiago henrique brito do nascimento"
-  return thiago
-    ? "Musicoterapia: capacidade de até 3 pacientes simultâneos por horário, aplicada de segunda a sexta em todos os horários da agenda."
-    : `Musicoterapia: capacidade de até ${cap} pacientes simultâneos por horário.`
-}
-
-export function regrasCapacidadeTexto(d: { prof: string; terapiaDetails: Array<{ terp: string }> }): string {
-  const terps = d?.terapiaDetails?.map(t => t.terp) || []
-  const partes: string[] = []
-  if (terps.includes("Musicoterapia")) partes.push(regraMusicoterapiaTexto(d.prof))
-  if (terps.some(t => normKey(t) === "aplicador aba (ef)" || normKey(t) === "aplicador aba ef")) {
-    partes.push("Aplicador ABA EF: capacidade de até 2 pacientes simultâneos por horário, aplicada em todos os horários da agenda.")
-  }
-  return partes.join(" ")
-}
-
-export function temBaseOcupacaoLinha(x: Pick<OcupacaoFinalizada, "horasTotal" | "slotsTotal" | "pct"> | null | undefined): boolean {
-  if (!x) return false
-  return (x.horasTotal || 0) > 0 || (x.slotsTotal || 0) > 0 || x.pct !== null
 }
 
 export function resumirJornadaAgenda(slotData: SlotData): string {

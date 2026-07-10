@@ -23,10 +23,11 @@ export function calcularTotalPorEspecialidade(resultado: ProfParaDashboard[]): T
   const mapa: Record<string, { valor: number; profs: Set<string> }> = {}
 
   const add = (esp: string | undefined | null, valor: number, prof: string) => {
-    if (!esp || !valor) return
-    if (!mapa[esp]) mapa[esp] = { valor: 0, profs: new Set() }
-    mapa[esp].valor += valor
-    mapa[esp].profs.add(prof)
+    if (!valor) return
+    const key = esp || "Sem especialidade"
+    if (!mapa[key]) mapa[key] = { valor: 0, profs: new Set() }
+    mapa[key].valor += valor
+    mapa[key].profs.add(prof)
   }
 
   resultado.forEach(p => {

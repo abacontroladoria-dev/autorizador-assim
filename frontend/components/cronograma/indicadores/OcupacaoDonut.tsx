@@ -6,9 +6,10 @@ import { InteractivePieChart } from './InteractivePieChart'
 interface Props {
   item: { ocupacao: OcupacaoAgregada } | null | undefined
   size?: number
+  centerFillClassName?: string
 }
 
-export function OcupacaoDonut({ item, size = 150 }: Props) {
+export function OcupacaoDonut({ item, size = 150, centerFillClassName }: Props) {
   const oc = item?.ocupacao
   if (!oc) return null
 
@@ -41,13 +42,13 @@ export function OcupacaoDonut({ item, size = 150 }: Props) {
           seg?.label === 'Horário Administrativo' ? fmtHDec(v) : fmtH(v)
         }
         segments={segments.filter(s => (s.value || 0) > 0)}
+        centerFillClassName={centerFillClassName}
       />
-      <div className="mt-1 text-center text-[11px] leading-snug text-gray-500">
-        <strong style={{ color: B.navy }}>CH total:</strong> {fmtH(totalHoras)}
+      <div className="mt-1 text-center text-xs leading-snug text-slate-500 dark:text-slate-400">
+        <strong className="text-foreground">CH total:</strong> {fmtH(totalHoras)}
       </div>
       {oc.capacidadeMultipla && (
-        <div className="mt-2 rounded-lg px-2 py-1 text-[11px] text-center"
-          style={{ background: B.purpleLt, color: B.purple }}>
+        <div className="mt-2 rounded-lg px-2 py-1 text-xs text-center bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-400">
           Capacidade: {oc.baseTexto}
         </div>
       )}

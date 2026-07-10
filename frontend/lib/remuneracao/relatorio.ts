@@ -175,12 +175,17 @@ export function validarModeloRelatorio(tipo: string, rowsOrHeaders: CsvGradeRow[
   }
 }
 
-export function classificarSessaoReal(r: Pick<SessaoReal, "profAgenda" | "profCsv" | "possuiTratativa" | "presencaOrbita" | "statusFinal" | "statusCsv">): string {
+export function classificarSessaoReal(r: Pick<SessaoReal, "id" | "profAgenda" | "profCsv" | "possuiTratativa" | "presencaOrbita" | "statusFinal" | "statusCsv">): string {
   const agenda = cleanTxt(r.profAgenda)
   const csv = cleanTxt(r.profCsv)
   const possui = isSim(r.possuiTratativa)
   const presenca = isSim(r.presencaOrbita)
   const cancelado = isCancelado(r.statusFinal) || isCancelado(r.statusCsv)
+  // Evolução registrada (Possui Tratativa = Sim) sem ID Agendamento correspondente:
+  // não há sessão real no sistema para essa tratativa. Precisa checagem manual
+  // antes de pagar — não pode ser silenciosamente descartada nem tratada como
+  // evolução normal.
+  if (possui && !cleanTxt(r.id)) return "Evolução sem agendamento"
   if (cancelado && possui) return "Cancelado evoluído"
   if (!presenca && possui) return "Evolução sem presença"
   if (possui && agenda && csv && normKey(agenda) !== normKey(csv)) return "Substituição"
@@ -192,13 +197,24 @@ export function classificarSessaoReal(r: Pick<SessaoReal, "profAgenda" | "profCs
 
 export function normalizarGradeParaSessao(rows: CsvGradeRow[]): SessaoReal[] {
   return rows
-    .filter(r => cleanTxt(getCol(r, ["Status do Agendamento"])) === "Agendado")
+    .filter(r => {
+      const statusAgendamento = cleanTxt(getCol(r, ["Status do Agendamento"]))
+      if (statusAgendamento === "Agendado") return true
+      // Horário sem agendamento real (ex.: "Livre"), mas com evolução registrada
+      // (Possui Tratativa = Sim) — mantém a linha para virar inconsistência
+      // "Evolução sem agendamento" em vez de desaparecer silenciosamente.
+      return isSim(getCol(r, ["Possui Tratativa"]))
+    })
     .map((r, idx) => {
       const status = cleanTxt(getCol(r, ["Status"]))
       const justificativa = cleanTxt(getCol(r, ["Justificativa"]))
       const faltaPaciente = isCancelado(status) && normKey(justificativa).includes("falta do paciente")
+      const id = cleanTxt(getCol(r, ["ID Agendamento"]))
+      // Sem ID Agendamento não existe sessão real na grade — não há o que a
+      // recepção/TiTa tenham confirmado presença, então não assumimos "Sim"
+      // (evita sugerir que um paciente compareceu a um horário que nunca existiu).
       const obj: SessaoReal = {
-        id: cleanTxt(getCol(r, ["ID Agendamento"])),
+        id,
         data: cleanTxt(getCol(r, ["Data"])),
         hora: cleanTxt(getCol(r, ["Hora Inicial"])),
         profAgenda: cleanTxt(getCol(r, ["Profissional"])),
@@ -206,8 +222,8 @@ export function normalizarGradeParaSessao(rows: CsvGradeRow[]): SessaoReal[] {
         convenio: cleanTxt(getCol(r, ["Convênio", "Convenio"])),
         unidade: cleanTxt(getCol(r, ["Nome Unidade"])),
         especialidade: cleanTxt(getCol(r, ["Terapia"])),
-        presencaOrbita: "Sim",
-        presencaTita: faltaPaciente ? "Não" : "Sim",
+        presencaOrbita: id ? "Sim" : "",
+        presencaTita: !id ? "" : (faltaPaciente ? "Não" : "Sim"),
         profCsv: cleanTxt(getCol(r, ["Nome Profissional Tratativa"])),
         possuiTratativa: cleanTxt(getCol(r, ["Possui Tratativa"])),
         statusCsv: status,

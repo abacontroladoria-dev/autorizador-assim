@@ -1,13 +1,13 @@
 "use client"
 
 import { memo, useCallback, useEffect, useMemo, useState } from "react"
-import { Loader2, Upload, Search, ListFilter } from "lucide-react"
-import Papa from "papaparse"
-import { B } from "@/lib/cronograma/constants"
+import toast from "react-hot-toast"
+import { Loader2, Search, ListFilter } from "lucide-react"
 import { getContratosAntigos, getProfissionaisRoster, upsertContratoAntigo } from "@/services/remuneracao.service"
 import { parseNumeroBR, numeroParaTextoBR } from "@/lib/remuneracao/formatacao"
-import { useAutoSaveRow } from "@/hooks/useAutoSaveRow"
+import { useDraftRow, useDraftTable, type DraftTable } from "@/hooks/useDraftRow"
 import { SaveStatusBadge } from "./SaveStatusBadge"
+import { SalvarTudoBar } from "./SalvarTudoBar"
 import type { ContratoAntigo } from "@/types/remuneracao"
 
 type LinhaBase = {
@@ -23,9 +23,24 @@ type LinhaValor = {
   salarioTexto: string
 }
 
-// ─── Linha da tabela: estado local + auto-save por linha (debounce 800ms) ────
+type CampoPendente = "contrato" | "salario" | "chSemanal"
 
-const LinhaContratoAntigo = memo(function LinhaContratoAntigo({ linha }: { linha: LinhaBase }) {
+const CAMPO_VAZIO: Record<CampoPendente, (l: LinhaBase) => boolean> = {
+  contrato: l => !l.contrato,
+  salario: l => !l.salario,
+  chSemanal: l => !l.chSemanal,
+}
+
+const FILTROS_PENDENTES: { campo: CampoPendente; label: string }[] = [
+  { campo: "contrato", label: "Sem contrato" },
+  { campo: "salario", label: "Sem salário" },
+  { campo: "chSemanal", label: "Sem CH semanal" },
+]
+
+// ─── Linha da tabela: estado local "rascunho" — só commita quando o botão
+// único "Salvar tudo" do pai é clicado (D.4) ──────────────────────────────
+
+const LinhaContratoAntigo = memo(function LinhaContratoAntigo({ linha, table }: { linha: LinhaBase; table: DraftTable }) {
   const save = useCallback(async (v: LinhaValor) => {
     return upsertContratoAntigo({
       profissional_nome: linha.profissionalNome,
@@ -41,7 +56,7 @@ const LinhaContratoAntigo = memo(function LinhaContratoAntigo({ linha }: { linha
     salarioTexto: numeroParaTextoBR(linha.salario),
   }), [linha.contrato, linha.chSemanal, linha.salario])
 
-  const { value, update, status } = useAutoSaveRow(initial, save)
+  const { value, update, status } = useDraftRow(linha.profissionalNome, initial, save, table)
 
   return (
     <tr className="border-t border-border hover:bg-muted/30 transition-colors">
@@ -51,6 +66,7 @@ const LinhaContratoAntigo = memo(function LinhaContratoAntigo({ linha }: { linha
           value={value.contrato}
           onChange={e => update({ contrato: e.target.value })}
           placeholder="—"
+          aria-label={`Contrato antigo de ${linha.profissionalNome}`}
           className="w-full min-w-[9rem] rounded-md border border-border bg-transparent px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         />
       </td>
@@ -60,6 +76,7 @@ const LinhaContratoAntigo = memo(function LinhaContratoAntigo({ linha }: { linha
           onChange={e => update({ chSemanalTexto: e.target.value })}
           placeholder="0"
           inputMode="decimal"
+          aria-label={`Carga horária semanal de ${linha.profissionalNome}`}
           className="w-20 rounded-md border border-border bg-transparent px-2 py-1 text-xs text-right text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         />
       </td>
@@ -71,6 +88,7 @@ const LinhaContratoAntigo = memo(function LinhaContratoAntigo({ linha }: { linha
             onChange={e => update({ salarioTexto: e.target.value })}
             placeholder="0"
             inputMode="decimal"
+            aria-label={`Salário de ${linha.profissionalNome}`}
             className="w-full rounded-md border border-border bg-transparent pl-7 pr-2 py-1 text-xs text-right text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
         </div>
@@ -84,13 +102,34 @@ const LinhaContratoAntigo = memo(function LinhaContratoAntigo({ linha }: { linha
 
 // ─── Tela ─────────────────────────────────────────────────────────────────
 
-export function ContratosAntigosConfig() {
+interface ContratosAntigosConfigProps {
+  onDirtyChange?: (dirty: boolean) => void
+  registerSave?: (save: (() => Promise<boolean>) | null) => void
+}
+
+export function ContratosAntigosConfig({ onDirtyChange, registerSave }: ContratosAntigosConfigProps = {}) {
   const [contratos, setContratos] = useState<ContratoAntigo[]>([])
   const [roster, setRoster] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
-  const [uploading, setUploading] = useState(false)
   const [busca, setBusca] = useState("")
-  const [apenasPendentes, setApenasPendentes] = useState(false)
+  const [filtrosPendentes, setFiltrosPendentes] = useState<Set<CampoPendente>>(new Set())
+  const { table, dirtyCount, saving, saveAll } = useDraftTable()
+
+  useEffect(() => { onDirtyChange?.(dirtyCount > 0) }, [dirtyCount, onDirtyChange])
+
+  const handleSalvarTudo = useCallback(async () => {
+    const { total, ok } = await saveAll()
+    if (!total) return true
+    const sucesso = ok === total
+    if (sucesso) toast.success(`${ok} ${ok === 1 ? "alteração salva" : "alterações salvas"}.`)
+    else toast.error(`${ok} de ${total} salvas — revise as linhas marcadas com erro.`)
+    return sucesso
+  }, [saveAll])
+
+  useEffect(() => {
+    registerSave?.(handleSalvarTudo)
+    return () => registerSave?.(null)
+  }, [handleSalvarTudo, registerSave])
 
   const carregar = async () => {
     setLoading(true)
@@ -104,6 +143,7 @@ export function ContratosAntigosConfig() {
   }
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- carga inicial via API, sem valor derivável no primeiro render
     carregar()
   }, [])
 
@@ -125,51 +165,24 @@ export function ContratosAntigosConfig() {
     let r = linhas
     const q = busca.trim().toLowerCase()
     if (q) r = r.filter(l => l.profissionalNome.toLowerCase().includes(q))
-    if (apenasPendentes) r = r.filter(l => !l.contrato)
+    if (filtrosPendentes.size > 0) {
+      r = r.filter(l => [...filtrosPendentes].some(campo => CAMPO_VAZIO[campo](l)))
+    }
     return r
-  }, [linhas, busca, apenasPendentes])
+  }, [linhas, busca, filtrosPendentes])
 
-  const pendentesQtd = useMemo(() => linhas.filter(l => !l.contrato).length, [linhas])
+  const pendentesQtd = useMemo(() => ({
+    contrato: linhas.filter(CAMPO_VAZIO.contrato).length,
+    salario: linhas.filter(CAMPO_VAZIO.salario).length,
+    chSemanal: linhas.filter(CAMPO_VAZIO.chSemanal).length,
+  }), [linhas])
 
-  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0]
-    if (!file) return
-
-    setUploading(true)
-    Papa.parse(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: async (results) => {
-        try {
-          const rows = results.data as any[]
-          const falhas: string[] = []
-          for (const row of rows) {
-            const nome = row["Profissional"] || row["Nome"] || row["profissional_nome"]
-            if (!nome) continue
-
-            const record = {
-              profissional_nome: nome.trim(),
-              salario: parseNumeroBR(row["Salário"]),
-              ch_semanal: row["CH Semanal"] ? Number(row["CH Semanal"]) : null,
-              contrato: row["Contrato"] || null,
-            }
-            const ok = await upsertContratoAntigo(record)
-            if (!ok) falhas.push(nome.trim())
-          }
-          await carregar()
-          if (falhas.length > 0) {
-            alert(`Importação concluída com ${falhas.length} erro(s). Linhas com falha: ${falhas.join(", ")}`)
-          } else {
-            alert("Importação concluída com sucesso!")
-          }
-        } catch (err) {
-          console.error(err)
-          alert("Erro ao processar CSV.")
-        } finally {
-          setUploading(false)
-          e.target.value = ""
-        }
-      }
+  const toggleFiltroPendente = (campo: CampoPendente) => {
+    setFiltrosPendentes(cur => {
+      const next = new Set(cur)
+      if (next.has(campo)) next.delete(campo)
+      else next.add(campo)
+      return next
     })
   }
 
@@ -178,18 +191,13 @@ export function ContratosAntigosConfig() {
 
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h3 className="font-bold text-lg" style={{ color: B.navy }}>Contratos Antigos (Histórico)</h3>
+          <h3 className="font-bold text-lg text-foreground">Contratos Antigos (Histórico)</h3>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Referência histórica de quanto os terapeutas recebiam antes. Edite direto na lista — cada campo salva
-            sozinho ao parar de digitar.
+            Referência histórica de quanto os terapeutas recebiam antes. Edite direto na lista e clique em
+            &ldquo;Salvar tudo&rdquo; para gravar as alterações.
           </p>
         </div>
-
-        <label className="cursor-pointer inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg font-bold text-white transition-all hover:opacity-90 shrink-0" style={{ background: B.blue }}>
-          {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
-          Importar CSV
-          <input type="file" accept=".csv" className="hidden" onChange={handleUpload} disabled={uploading} />
-        </label>
+        <SalvarTudoBar dirtyCount={dirtyCount} saving={saving} onSave={handleSalvarTudo} />
       </div>
 
       {loading ? (
@@ -206,32 +214,39 @@ export function ContratosAntigosConfig() {
                 value={busca}
                 onChange={e => setBusca(e.target.value)}
                 placeholder="Buscar profissional…"
+                aria-label="Buscar profissional"
                 className="w-full rounded-lg border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800/50 pl-8 pr-3 py-1.5 text-xs text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
               />
             </div>
-            <button
-              type="button"
-              onClick={() => setApenasPendentes(v => !v)}
-              aria-pressed={apenasPendentes}
-              className={`shrink-0 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold border transition-colors ${
-                apenasPendentes
-                  ? "bg-amber-500 border-amber-500 text-white"
-                  : "border-slate-200 dark:border-slate-700 text-foreground bg-transparent hover:bg-slate-50 dark:hover:bg-slate-800/50"
-              }`}
-            >
-              <ListFilter size={13} />
-              Sem contrato
-              <span className={`rounded-full px-1.5 text-[10px] font-bold ${apenasPendentes ? "bg-white/20" : "bg-slate-100 dark:bg-slate-800 text-slate-500"}`}>
-                {pendentesQtd}
-              </span>
-            </button>
+            {FILTROS_PENDENTES.map(({ campo, label }) => {
+              const ativo = filtrosPendentes.has(campo)
+              return (
+                <button
+                  key={campo}
+                  type="button"
+                  onClick={() => toggleFiltroPendente(campo)}
+                  aria-pressed={ativo}
+                  className={`shrink-0 inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold border transition-colors ${
+                    ativo
+                      ? "bg-amber-500 border-amber-500 text-white"
+                      : "border-slate-200 dark:border-slate-700 text-foreground bg-transparent hover:bg-slate-50 dark:hover:bg-slate-800/50"
+                  }`}
+                >
+                  <ListFilter size={13} />
+                  {label}
+                  <span className={`rounded-full px-1.5 text-[10px] font-bold ${ativo ? "bg-white/20" : "bg-slate-100 dark:bg-slate-800 text-slate-500"}`}>
+                    {pendentesQtd[campo]}
+                  </span>
+                </button>
+              )
+            })}
             <span className="text-[11px] text-muted-foreground shrink-0 ml-auto">
               {linhasFiltradas.length} de {linhas.length}
             </span>
           </div>
 
           {linhasFiltradas.length === 0 ? (
-            <div className="p-8 text-center text-slate-500 text-sm">Nenhum profissional encontrado.</div>
+            <div className="p-8 text-center text-slate-500 dark:text-slate-400 text-sm">Nenhum profissional encontrado.</div>
           ) : (
             <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
               <table className="w-full text-sm text-left">
@@ -246,7 +261,7 @@ export function ContratosAntigosConfig() {
                 </thead>
                 <tbody>
                   {linhasFiltradas.map(linha => (
-                    <LinhaContratoAntigo key={linha.profissionalNome} linha={linha} />
+                    <LinhaContratoAntigo key={linha.profissionalNome} linha={linha} table={table} />
                   ))}
                 </tbody>
               </table>
