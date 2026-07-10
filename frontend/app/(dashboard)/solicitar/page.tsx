@@ -15,6 +15,23 @@ import { Lock, CheckCircle, Megaphone, XCircle } from 'lucide-react'
 import { getMachineId } from '@/lib/machine'
 
 
+// =========================
+// TERAPIAS OCULTAS
+// (não exibidas na Central de Atendimentos)
+// =========================
+const TERAPIAS_OCULTAS = [
+  'equoterapia',
+  'fisioterapia aquática',
+  'fisioterapia aquatica',
+]
+
+function terapiaOculta(p: any) {
+  return (p.terapias || []).some((t: string) =>
+    TERAPIAS_OCULTAS.includes((t || '').toLowerCase().trim())
+  )
+}
+
+
 const CAMPOS_CENTRAL_AUTORIZACOES = `
     paciente_id,
     paciente_nome,
@@ -1293,6 +1310,9 @@ useEffect(() => {
 				)
 				.filter(
 				  (p) => p.mostrar_na_tela
+				)
+				.filter(
+				  (p) => !terapiaOculta(p)
 				)
 				.filter((p) => {
 				
