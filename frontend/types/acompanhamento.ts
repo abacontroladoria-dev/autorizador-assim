@@ -6,6 +6,8 @@ export interface AceiteSessao {
   tP: string
   prof: string
   unidade: string
+  /** UUID da linha em csv_grades_profissionais de origem — usado para resolver o agendamento na TiTa. */
+  csvGradeId: string
 }
 
 export type SlotStatus = "confirmado" | "recusado" | "inviavel"

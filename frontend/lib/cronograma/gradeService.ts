@@ -2,7 +2,7 @@ import { getSupabaseClient } from "@/lib/supabase/client"
 import { pm, exU } from "@/lib/cronograma/helpers"
 import type { CsvRow } from "@/types/cronograma"
 
-const FIELDS = "paciente_nome, dia_semana, hora_inicial, hora_final, profissional_nome, terapia_nome, terapia_exibicao_nome, status_agendamento, convenio_nome, sala_nome, data, unidade_nome"
+const FIELDS = "id, paciente_nome, dia_semana, hora_inicial, hora_final, profissional_nome, terapia_nome, terapia_exibicao_nome, status_agendamento, convenio_nome, sala_nome, data, unidade_nome"
 const PAGE = 1000
 
 // Padrão de dupla codificação UTF-8 (mojibake): byte líder C2/C3 seguido de byte
@@ -54,6 +54,7 @@ export async function buscarGradeComoCSVRows(dataInicio: string, dataFim: string
     const hi_str   = String(r.hora_inicial ?? "").slice(0, 5)
     const salaNome = fixMojibake(r.sala_nome)
     return {
+      CsvGradeId:               r.id ?? undefined,
       "Nome Favorecido":        fixMojibake(r.paciente_nome),
       "Dia da Semana":          r.dia_semana            ?? "",
       "Hora Inicial":           hi_str,
