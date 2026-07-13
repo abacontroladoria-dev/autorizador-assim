@@ -5,6 +5,7 @@ import { CheckCircle2, Upload, Loader2, X } from "lucide-react"
 import Papa from "papaparse"
 import * as XLSX from "xlsx"
 import { validarModeloRelatorio, parseHtmlTable, type CsvGradeRow, type SessaoReal } from "@/lib/remuneracao/relatorio"
+import { parseGradeCsv } from "@/lib/remuneracao/uploadParsers"
 
 interface Props {
   evoRows: SessaoReal[]
@@ -14,24 +15,6 @@ interface Props {
   limparGrade: () => void
   limparPE: () => void
   setCsvName: (name: string) => void
-}
-
-function parseGradeCsv(file: File): Promise<CsvGradeRow[]> {
-  return new Promise((resolve, reject) => {
-    Papa.parse<CsvGradeRow>(file, {
-      header: true,
-      skipEmptyLines: true,
-      complete: ({ data, meta }) => {
-        const validacao = validarModeloRelatorio("grade", meta?.fields?.length ? meta.fields : data)
-        if (!validacao.ok && validacao.faltantes.length) {
-          reject(new Error(`Modelo do arquivo mudou. Colunas esperadas não encontradas: ${validacao.faltantes.join(", ")}.`))
-          return
-        }
-        resolve(data)
-      },
-      error: (err: Error) => reject(err),
-    })
-  })
 }
 
 function parsePeFile(file: File): Promise<CsvGradeRow[]> {

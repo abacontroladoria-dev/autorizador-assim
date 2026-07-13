@@ -42,6 +42,26 @@ export async function updateRemuneracaoConfig(
   return true
 }
 
+// Busca APENAS os feriados da config de remuneração — nunca as taxas/diárias/
+// valores de CC. Usado pela tela "Análise de Tratativas" (escopo Terapêutico),
+// que precisa dos feriados para classificar sessões corretamente, mas jamais
+// pode carregar dados monetários no cliente. Ver lib/remuneracao/tratativas.ts.
+export async function getFeriadosConfig(): Promise<{ feriados: RemuneracaoConfig['feriados']; error: string | null }> {
+  const supabase = getSupabaseClient()
+  // Via RPC SECURITY DEFINER (migration 20260713130000): devolve SÓ a coluna
+  // feriados, sem expor taxas. Funciona para roles sem SELECT direto em
+  // remuneracao_config (ex.: 'terapeutico'), diferente de um select na tabela,
+  // que o RLS bloquearia silenciosamente (linhas vazias) e zeraria os feriados.
+  const { data, error } = await supabase.rpc('get_remuneracao_feriados')
+
+  if (error) {
+    console.error('Erro ao buscar feriados da configuração:', error)
+    return { feriados: {}, error: error.message }
+  }
+
+  return { feriados: (data ?? {}) as RemuneracaoConfig['feriados'], error: null }
+}
+
 export async function getCapacidades() {
   const supabase = getSupabaseClient()
   const { data, error } = await supabase.from('remuneracao_capacidades').select('*').order('profissional_nome')

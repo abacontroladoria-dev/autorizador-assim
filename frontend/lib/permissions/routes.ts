@@ -8,7 +8,7 @@
 export const roleDefaults: Record<string, string[]> = {
   admin: [
     'dashboard', 'atendimentos', 'gestao', 'cronograma',
-    'escala_terapeutica', 'agenda_terapeutica', 'salas',
+    'escala_terapeutica', 'analise_tratativas', 'agenda_terapeutica', 'salas',
     'guias_digitais', 'auditoria_assim', 'usuarios', 'permissoes', 'cco',
     'autorizacoes', 'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'ocupacao_clinica', 'ocupacao_profissionais',
@@ -19,7 +19,7 @@ export const roleDefaults: Record<string, string[]> = {
   ],
   diretoria: [
     'dashboard', 'atendimentos', 'gestao', 'cronograma',
-    'escala_terapeutica', 'agenda_terapeutica', 'salas',
+    'escala_terapeutica', 'analise_tratativas', 'agenda_terapeutica', 'salas',
     'guias_digitais', 'auditoria_assim', 'cco',
     'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'ocupacao_clinica', 'ocupacao_profissionais',
@@ -36,7 +36,7 @@ export const roleDefaults: Record<string, string[]> = {
     'dashboard', 'cronograma', 'agenda_terapeutica', 'salas', 'auditoria_assim',
     'autorizacoes', 'preauditoria',
   ],
-  terapeutico: ['dashboard', 'escala_terapeutica', 'salas', 'agenda_terapeutica'],
+  terapeutico: ['dashboard', 'escala_terapeutica', 'analise_tratativas', 'salas', 'agenda_terapeutica'],
   faturamento: ['dashboard', 'guias_digitais', 'cronograma', 'agenda_terapeutica', 'salas', 'cco'],
   rp: [
     'dashboard', 'escala_terapeutica',
@@ -58,6 +58,7 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   gestao: ['/central-pacientes'],
   cronograma: ['/agenda/pacientes'],
   escala_terapeutica: ['/central-terapeutas'],
+  analise_tratativas: ['/analise-tratativas'],
   agenda_terapeutica: ['/agenda/terapeutas'],
   salas: ['/agenda/salas'],
   guias_digitais: ['/guias-digitais'],

@@ -35,6 +35,7 @@ import {
   Wallet,
   LineChart,
   Download,
+  ClipboardCheck,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -61,6 +62,7 @@ const pathIconMap: Record<string, any> = {
   "/solicitar": PlusCircle,
   "/central-pacientes": Activity,
   "/central-terapeutas": UserRound,
+  "/analise-tratativas": ClipboardCheck,
   "/agenda/pacientes": CalendarDays,
   "/agenda/terapeutas": CalendarDays,
   "/agenda/salas": Building2,
@@ -452,10 +454,13 @@ export default function Sidebar() {
           )}
 
           {/* Terapêutico */}
-          {(canAccess("/central-terapeutas") || canAccess("/agenda/terapeutas") || canAccess("/agenda/salas")) && (
+          {(canAccess("/central-terapeutas") || canAccess("/analise-tratativas") || canAccess("/agenda/terapeutas") || canAccess("/agenda/salas")) && (
             <SidebarGroup title="Terapêutico" icon={Stethoscope}>
               {canAccess("/central-terapeutas") && (
                 <MenuItem label="Gestão" icon={UserRound} path="/central-terapeutas" />
+              )}
+              {canAccess("/analise-tratativas") && (
+                <MenuItem label="Análise de Tratativas" icon={ClipboardCheck} path="/analise-tratativas" />
               )}
               {canAccess("/agenda/terapeutas") && (
                 <MenuItem label="Agenda Terapêutica" icon={CalendarDays} path="/agenda/terapeutas" />
