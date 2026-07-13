@@ -2,6 +2,8 @@
 
 import { normKey } from "./constants"
 import { cleanTxt, isSim, isCancelado } from "./formatacao"
+import { dataParaISO } from "./datas"
+import type { FeriadoInfo } from "@/types/remuneracao"
 
 export type CsvGradeRow = Record<string, unknown>
 
@@ -175,7 +177,10 @@ export function validarModeloRelatorio(tipo: string, rowsOrHeaders: CsvGradeRow[
   }
 }
 
-export function classificarSessaoReal(r: Pick<SessaoReal, "id" | "profAgenda" | "profCsv" | "possuiTratativa" | "presencaOrbita" | "statusFinal" | "statusCsv">): string {
+export function classificarSessaoReal(
+  r: Pick<SessaoReal, "id" | "data" | "profAgenda" | "profCsv" | "possuiTratativa" | "presencaOrbita" | "statusFinal" | "statusCsv">,
+  feriados?: Record<string, FeriadoInfo>
+): string {
   const agenda = cleanTxt(r.profAgenda)
   const csv = cleanTxt(r.profCsv)
   const possui = isSim(r.possuiTratativa)
@@ -191,11 +196,11 @@ export function classificarSessaoReal(r: Pick<SessaoReal, "id" | "profAgenda" | 
   if (possui && agenda && csv && normKey(agenda) !== normKey(csv)) return "Substituição"
   if (possui) return "Evolução normal"
   if (presenca && !possui && !cancelado) return "Pendente retroativa"
-  if (cancelado) return "Cancelado"
+  if (cancelado) return feriados?.[dataParaISO(r.data)] ? "Feriado/Ponto Fac." : "Cancelado"
   return "Não evoluído"
 }
 
-export function normalizarGradeParaSessao(rows: CsvGradeRow[]): SessaoReal[] {
+export function normalizarGradeParaSessao(rows: CsvGradeRow[], feriados?: Record<string, FeriadoInfo>): SessaoReal[] {
   return rows
     .filter(r => {
       const statusAgendamento = cleanTxt(getCol(r, ["Status do Agendamento"]))
@@ -235,7 +240,7 @@ export function normalizarGradeParaSessao(rows: CsvGradeRow[]): SessaoReal[] {
         idFavorecido: cleanTxt(getCol(r, ["Id Favorecido"])),
         criacaoTratativa: cleanTxt(getCol(r, ["Criação Tratativa"])),
       }
-      obj.classificacao = classificarSessaoReal(obj)
+      obj.classificacao = classificarSessaoReal(obj, feriados)
       return obj
     }).filter(r => r.profAgenda || r.profCsv || r.paciente)
 }

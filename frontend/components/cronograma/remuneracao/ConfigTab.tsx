@@ -3,9 +3,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import toast from "react-hot-toast"
 import { AlertCircle, Loader2, Save } from "lucide-react"
-import { useRemuneracaoConfig } from "@/hooks/useRemuneracaoConfig"
+import { useRemuneracaoConfig, refetchRemuneracaoConfig } from "@/hooks/useRemuneracaoConfig"
 import { updateRemuneracaoConfig } from "@/services/remuneracao.service"
-import { B } from "@/lib/cronograma/constants"
+import { B, TERAPIA_CORES } from "@/lib/cronograma/constants"
 import { useHeader } from "@/contexts/HeaderContext"
 import { useUnsavedChangesGuard } from "@/contexts/UnsavedChangesContext"
 import { UnsavedChangesModal } from "@/components/UnsavedChangesModal"
@@ -27,8 +27,13 @@ function InfoTooltip({ text }: { text: string }) {
   )
 }
 
+function especialidadeCor(esp: string): string {
+  const hex = TERAPIA_CORES[esp]
+  if (!hex || hex.toLowerCase() === "#ffffff" || hex.toLowerCase() === "#f0f0f0") return B.gray
+  return hex
+}
+
 import { CapacidadeConfig } from "./config/CapacidadeConfig"
-import { ContratosAntigosConfig } from "./config/ContratosAntigosConfig"
 import { ContratosAtuaisConfig } from "./config/ContratosAtuaisConfig"
 import { FeriadosConfig } from "./config/FeriadosConfig"
 
@@ -96,6 +101,7 @@ export function ConfigTab() {
     setSavingGeral(false)
     if (ok) {
       setSavedGeral(geral)
+      await refetchRemuneracaoConfig()
       toast.success("Configurações salvas.")
     } else {
       toast.error("Erro ao salvar configurações.")
@@ -229,8 +235,7 @@ export function ConfigTab() {
       <div className="flex gap-2 overflow-x-auto pb-2 scrollbar-hide">
         {[
           { id: "geral", label: "Variáveis & Taxas" },
-          { id: "cadastros", label: "Contratos Atuais" },
-          { id: "antigos", label: "Contratos Antigos" },
+          { id: "cadastros", label: "Contratos" },
           { id: "capacidade", label: "Capacidade" },
           { id: "feriados", label: "Feriados" },
         ].map(t => (
@@ -273,23 +278,6 @@ export function ConfigTab() {
               </div>
 
               <div className="h-px bg-slate-100 dark:bg-slate-800" />
-
-              <div>
-                <label htmlFor="config-cc-pa" className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.purple }}>
-                  Coordenador de Caso — PA base
-                  <InfoTooltip text="Valor por sessão (40min) evoluída de AC." />
-                </label>
-                <div className="relative w-full sm:w-40">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">R$</span>
-                  <input
-                    id="config-cc-pa"
-                    type="number" min="0" step="0.01"
-                    value={ccPA}
-                    onChange={e => updateGeral({ ccPA: Number(e.target.value) })}
-                    className="w-full rounded-lg border border-purple-200 dark:border-purple-900 bg-purple-50/50 dark:bg-purple-900/10 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-shadow"
-                  />
-                </div>
-              </div>
 
               <div>
                 <label htmlFor="config-cc-pe" className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.purple }}>
@@ -343,27 +331,67 @@ export function ConfigTab() {
               </div>
 
               <div className="overflow-y-auto p-2 space-y-1">
-                {allEspecialidades.map(esp => {
-                  if (esp === "Coordenador de Caso") return null // Tem bloco próprio
+                {(() => {
+                  const ccHex = especialidadeCor("Coordenador de Caso")
                   return (
-                    <div key={esp} className="grid grid-cols-12 gap-2 items-center p-2 rounded-lg hover:bg-slate-50 dark:hover:bg-slate-800/50 transition-colors">
-                      <div className="col-span-6 text-sm font-medium truncate pr-2" title={esp}>
-                        {esp}
+                    <div
+                      className="grid grid-cols-12 gap-2 items-center p-2 rounded-lg border"
+                      style={{ background: ccHex + "14", borderColor: ccHex + "55" }}
+                    >
+                      <div className="col-span-6 flex items-center text-sm font-bold truncate pr-2" style={{ color: ccHex }} title="Coordenador de Caso">
+                        Coordenador de Caso
                       </div>
                       <div className="col-span-3">
-                        <input 
+                        <input
+                          id="config-cc-pa"
                           type="number" min="0" step="0.01"
-                          value={taxas[esp] || 0}
-                          onChange={e => updateGeral({ taxas: { ...taxas, [esp]: Number(e.target.value) } })}
-                          className="w-full text-right rounded-md border border-slate-200 dark:border-slate-700 bg-transparent px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                          value={ccPA}
+                          onChange={e => updateGeral({ ccPA: Number(e.target.value) })}
+                          className="w-full text-right rounded-md border bg-white dark:bg-transparent px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                          style={{ borderColor: ccHex + "55" }}
                         />
                       </div>
                       <div className="col-span-3">
-                        <input 
+                        <input
+                          id="config-cc-diaria"
+                          type="number" min="0" step="0.01"
+                          value={diarias["Coordenador de Caso"] || 0}
+                          onChange={e => updateGeral({ diarias: { ...diarias, "Coordenador de Caso": Number(e.target.value) } })}
+                          className="w-full text-right rounded-md border bg-white dark:bg-transparent px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                          style={{ borderColor: ccHex + "55" }}
+                        />
+                      </div>
+                    </div>
+                  )
+                })()}
+                {allEspecialidades.map(esp => {
+                  if (esp === "Coordenador de Caso") return null // Tem bloco próprio
+                  const hex = especialidadeCor(esp)
+                  return (
+                    <div
+                      key={esp}
+                      className="grid grid-cols-12 gap-2 items-center p-2 rounded-lg border border-transparent transition-colors"
+                      style={{ background: hex + "0d" }}
+                    >
+                      <div className="col-span-6 text-sm font-bold truncate pr-2" style={{ color: hex }} title={esp}>
+                        {esp}
+                      </div>
+                      <div className="col-span-3">
+                        <input
+                          type="number" min="0" step="0.01"
+                          value={taxas[esp] || 0}
+                          onChange={e => updateGeral({ taxas: { ...taxas, [esp]: Number(e.target.value) } })}
+                          className="w-full text-right rounded-md border bg-white dark:bg-transparent px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                          style={{ borderColor: hex + "55" }}
+                        />
+                      </div>
+                      <div className="col-span-3">
+                        <input
                           type="number" min="0" step="0.01"
                           value={diarias[esp] || 0}
                           onChange={e => updateGeral({ diarias: { ...diarias, [esp]: Number(e.target.value) } })}
-                          className="w-full text-right rounded-md border border-slate-200 dark:border-slate-700 bg-transparent px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                          className="w-full text-right rounded-md border bg-white dark:bg-transparent px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                          style={{ borderColor: hex + "55" }}
                         />
                       </div>
                     </div>
@@ -377,11 +405,8 @@ export function ConfigTab() {
         </div>
       )}
 
-      {/* Conteúdo: Cadastros Atuais */}
+      {/* Conteúdo: Contratos (atuais + antigos unificados) */}
       {activeTab === "cadastros" && <ContratosAtuaisConfig onDirtyChange={setOtherTabDirty} registerSave={registerOtherTabSave} />}
-
-      {/* Conteúdo: Contratos Antigos */}
-      {activeTab === "antigos" && <ContratosAntigosConfig onDirtyChange={setOtherTabDirty} registerSave={registerOtherTabSave} />}
 
       {/* Conteúdo: Capacidade */}
       {activeTab === "capacidade" && <CapacidadeConfig onDirtyChange={setOtherTabDirty} registerSave={registerOtherTabSave} />}

@@ -6,14 +6,26 @@ import { buscarGradeParaAnalise } from "@/lib/remuneracao/gradeRemuneracao"
 import {
   calcularAnaliseFutura, calcularRemuneracaoReal, calcularPEProporcional,
   normalizarRelatorioPE, parsePeriodoArquivo, PE_INATIVO,
-  type AnaliseFuturaResult, type ProfRemunReal, type PERow, type ContratoAntigoInfo, type CadastroContratual,
+  type AnaliseFuturaResult, type ProfRemunReal, type PERow, type ContratoAntigoInfo, type CadastroContratual, type ContratoAtualItem,
 } from "@/lib/remuneracao/calculo"
 import { normalizarGradeParaSessao, classificarSessaoReal, type SessaoReal, type CsvGradeRow } from "@/lib/remuneracao/relatorio"
 import { buscarPresencaFilaAutorizacoes, presencaDaSessao, type PresencaIndice } from "@/lib/remuneracao/presencaReal"
 import { dataParaISO, mesAnoDeLinhas } from "@/lib/remuneracao/datas"
-import { getContratosAntigos, getContratosAtuais, getCapacidades } from "@/services/remuneracao.service"
+import { getContratos, getCapacidades } from "@/services/remuneracao.service"
 import { useRemuneracaoConfig } from "./useRemuneracaoConfig"
 import type { CsvRow } from "@/types/cronograma"
+
+// Um "contrato antigo" agora é só um item não-vigente na mesma lista de
+// contratos (ver migration 20260710120000) — pega o de maior valorTotal
+// como referência de comparação (mesmo profissional pode ter mais de um
+// contrato antigo desativado ao longo do tempo).
+function deriveAntigoDeContratos(contratos: ContratoAtualItem[]): ContratoAntigoInfo | null {
+  const candidatos = (Array.isArray(contratos) ? contratos : [])
+    .filter(c => c && c.vigente === false && Number(c.valorTotal || 0) > 0)
+  if (!candidatos.length) return null
+  const maior = candidatos.reduce((a, b) => (Number(b.valorTotal) > Number(a.valorTotal) ? b : a))
+  return { salario: Number(maior.valorTotal), contrato: maior.numero || null }
+}
 
 export function useAnaliseFutura() {
   const { config, loading: configLoading, error: configError } = useRemuneracaoConfig()
@@ -42,34 +54,29 @@ export function useAnaliseFutura() {
     return () => { isMounted = false }
   }, [refWeek])
 
-  // Contratos antigos (comparação) e capacidade/limite de CC por profissional —
-  // cadastrados em Config, não dependem da semana de referência.
+  // Contratos (atuais + antigos, unificados) e capacidade/limite de CC por
+  // profissional — cadastrados em Config, não dependem da semana de referência.
   useEffect(() => {
     let isMounted = true
     async function loadContratuais() {
-      const [{ data: antigosData }, { data: capacidadesData }, { data: atuaisData }] = await Promise.all([
-        getContratosAntigos(),
+      const [{ data: contratosData }, { data: capacidadesData }] = await Promise.all([
+        getContratos(),
         getCapacidades(),
-        getContratosAtuais(),
       ])
       if (!isMounted) return
 
       const antigosMap: Record<string, ContratoAntigoInfo> = {}
-      ;(antigosData ?? []).forEach((r: any) => {
-        antigosMap[r.profissional_nome] = { salario: r.salario, chSemanal: r.ch_semanal, contrato: r.contrato }
+      const cadastroMap: Record<string, CadastroContratual> = {}
+      ;(contratosData ?? []).forEach(r => {
+        const contratos = Array.isArray(r.contratos) ? r.contratos : []
+        cadastroMap[r.profissional_nome] = { nome: r.profissional_nome, contratosAtuais: contratos }
+        const antigo = deriveAntigoDeContratos(contratos)
+        if (antigo) antigosMap[r.profissional_nome] = antigo
       })
 
       const limitesMap: Record<string, number> = {}
-      ;(capacidadesData ?? []).forEach((r: any) => {
+      ;(capacidadesData ?? []).forEach(r => {
         if (r.limite_cc != null) limitesMap[r.profissional_nome] = r.limite_cc
-      })
-
-      const cadastroMap: Record<string, CadastroContratual> = {}
-      ;(atuaisData ?? []).forEach((r: any) => {
-        cadastroMap[r.profissional_nome] = {
-          nome: r.profissional_nome,
-          contratosAtuais: Array.isArray(r.contratos_atuais) ? r.contratos_atuais : [],
-        }
       })
 
       setAntigos(antigosMap)
@@ -121,28 +128,21 @@ export function useRemunRP() {
   const [antigos, setAntigos] = useState<Record<string, ContratoAntigoInfo>>({})
   const [cadastroPrestadores, setCadastroPrestadores] = useState<Record<string, CadastroContratual>>({})
 
-  // Contratos antigos (comparação) e cadastro contratual atual (PA por contrato) —
-  // cadastrados em Config, não dependem da grade importada.
+  // Contratos (atuais + antigos, unificados) — cadastrados em Config, não
+  // dependem da grade importada.
   useEffect(() => {
     let isMounted = true
     async function loadContratuais() {
-      const [{ data: antigosData }, { data: atuaisData }] = await Promise.all([
-        getContratosAntigos(),
-        getContratosAtuais(),
-      ])
+      const { data: contratosData } = await getContratos()
       if (!isMounted) return
 
       const antigosMap: Record<string, ContratoAntigoInfo> = {}
-      ;(antigosData ?? []).forEach((r: any) => {
-        antigosMap[r.profissional_nome] = { salario: r.salario, chSemanal: r.ch_semanal, contrato: r.contrato }
-      })
-
       const cadastroMap: Record<string, CadastroContratual> = {}
-      ;(atuaisData ?? []).forEach((r: any) => {
-        cadastroMap[r.profissional_nome] = {
-          nome: r.profissional_nome,
-          contratosAtuais: Array.isArray(r.contratos_atuais) ? r.contratos_atuais : [],
-        }
+      ;(contratosData ?? []).forEach(r => {
+        const contratos = Array.isArray(r.contratos) ? r.contratos : []
+        cadastroMap[r.profissional_nome] = { nome: r.profissional_nome, contratosAtuais: contratos }
+        const antigo = deriveAntigoDeContratos(contratos)
+        if (antigo) antigosMap[r.profissional_nome] = antigo
       })
 
       setAntigos(antigosMap)
@@ -153,8 +153,8 @@ export function useRemunRP() {
   }, [])
 
   const carregarGrade = useCallback((rows: Record<string, unknown>[]) => {
-    setEvoRowsBase(normalizarGradeParaSessao(rows))
-  }, [])
+    setEvoRowsBase(normalizarGradeParaSessao(rows, config?.feriados))
+  }, [config])
 
   const limparGrade = useCallback(() => {
     setEvoRowsBase([])
@@ -193,10 +193,10 @@ export function useRemunRP() {
       const presencaOrbita = presente ? "Sim" : "Não"
       if (presencaOrbita === r.presencaOrbita) return r
       const atualizado = { ...r, presencaOrbita }
-      atualizado.classificacao = classificarSessaoReal(atualizado)
+      atualizado.classificacao = classificarSessaoReal(atualizado, config?.feriados)
       return atualizado
     })
-  }, [evoRowsBase, presencaIndice])
+  }, [evoRowsBase, presencaIndice, config])
 
   const carregarPE = useCallback((rows: CsvGradeRow[], fileName: string) => {
     setPeRows(normalizarRelatorioPE(rows, parsePeriodoArquivo(fileName)))

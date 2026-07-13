@@ -71,7 +71,13 @@
       "Bash(grep -q \"Ready in\\\\|✓ Ready\\\\|Local:\" /tmp/dev.log)",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/relacionamento-prestador/analise/)",
       "Bash(curl -s -o /dev/null -w \"warm-up: %{http_code}\\\\n\" http://localhost:3000/relacionamento-prestador/analise/)",
-      "Bash(cd \"c:\\\\Users\\\\Maquina001\\\\sistema-pulsar\\\\frontend\" && curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/relacionamento-prestador/analise/ && tail -6 /tmp/dev.log)"
+      "Bash(cd \"c:\\\\Users\\\\Maquina001\\\\sistema-pulsar\\\\frontend\" && curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:3000/relacionamento-prestador/analise/ && tail -6 /tmp/dev.log)",
+      "Bash(node -e \"console.log\\(require.resolve\\('playwright'\\)\\)\")",
+      "Bash(git stash *)",
+      "Bash(node -e ' *)",
+      "Bash(grep -rl \"SUPABASE_URL\\\\|SUPABASE_SERVICE\" --include=\"*.env*\" .)",
+      "Bash(ls -la .env*)",
+      "Bash(find . -maxdepth 2 -iname \"*.env*\")"
     ],
     "additionalDirectories": [
       "C:\\Users\\Users\\Maquina001\\AppData\\Local\\Temp",

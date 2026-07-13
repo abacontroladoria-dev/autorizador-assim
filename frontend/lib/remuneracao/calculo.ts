@@ -58,6 +58,26 @@ function paTratadoOutroContratoInfo(esp: string): PAInfo {
   }
 }
 
+// Contrato migrado para Banco de Horas (valor total pago no período, não por
+// sessão) — mesmo padrão de paTratadoOutroContratoInfo: zera o PA por sessão
+// e explica o motivo. O valor/hora é derivado só na Análise Futura (onde a
+// grade/horas agendadas estão disponíveis — ver calcularAnaliseFutura),
+// não aqui.
+function bancoDeHorasInfo(esp: string, valorTotal: number | undefined, contratoAtual?: string): PAInfo {
+  return {
+    valor: 0,
+    valorTexto: "Banco de Horas",
+    funcao: "",
+    label: esp || "Banco de Horas",
+    contratoAtual: contratoAtual || "",
+    cadastroContratoPendente: false,
+    semPA: true,
+    explicacao: valorTotal != null
+      ? `Modelo de faturamento: Banco de Horas (valor total R$ ${valorTotal} no contrato) — remunerado fora do PA por sessão desta calculadora.`
+      : "Modelo de faturamento: Banco de Horas — remunerado fora do PA por sessão desta calculadora.",
+  }
+}
+
 function funcaoContratoPorEspecialidade(esp: string): string | null {
   const n = normKey(esp)
   if (n === "coordenador de caso" || n.includes("analista do comportamento")) return FUNCAO_AC
@@ -89,9 +109,19 @@ function normalizarFuncaoContrato(v: string): string {
   return cleanTxt(v)
 }
 
-export type ContratoAtualItem = { numero?: string; funcao: string; valorPA?: number; vigente?: boolean }
+export type ContratoAtualItem = {
+  numero?: string
+  funcao: string
+  valorPA?: number
+  vigente?: boolean
+  modeloFaturamento?: "atendimento" | "banco_horas"
+  valorTotal?: number
+}
 export type CadastroContratual = { nome?: string; contratosAtuais?: ContratoAtualItem[] }
 
+// Só contratos vigentes pagam PA por sessão — um contrato "antigo" é apenas
+// um item com vigente=false (ver migration 20260710120000), então esse
+// filtro já exclui automaticamente o histórico sem precisar de outra tabela.
 function contratosAtuaisDoCadastro(cadastro: CadastroContratual | null): ContratoAtualItem[] {
   return (cadastro?.contratosAtuais || [])
     .filter(c => c && c.vigente !== false)
@@ -101,8 +131,11 @@ function contratosAtuaisDoCadastro(cadastro: CadastroContratual | null): Contrat
       // valorPA pode ser 0 de propósito ("sem PA por sessão, tratado em outro
       // contrato") — preserva a distinção entre "0 explícito" e "não informado".
       valorPA: c.valorPA != null ? Number(c.valorPA) : undefined,
+      // Ausente = "atendimento" (comportamento padrão de todo contrato já salvo).
+      modeloFaturamento: (c.modeloFaturamento === "banco_horas" ? "banco_horas" : "atendimento") as "atendimento" | "banco_horas",
+      valorTotal: c.valorTotal != null ? Number(c.valorTotal) : undefined,
     }))
-    .filter(c => c.funcao || c.valorPA != null || c.numero)
+    .filter(c => c.funcao || c.valorPA != null || c.valorTotal != null || c.numero)
 }
 
 function buscarCadastroContratual(cadastros: Record<string, CadastroContratual>, prof: string): CadastroContratual | null {
@@ -129,6 +162,7 @@ export function resolverPARow(
   const contratosAtuais = contratosAtuaisDoCadastro(cadastroContratual)
   if (contratosAtuais.length === 1) {
     const c = contratosAtuais[0]
+    if (c.modeloFaturamento === "banco_horas") return bancoDeHorasInfo(r.especialidade, c.valorTotal, contratoLabel(c))
     const valor = c.valorPA != null
       ? c.valorPA
       : (c.funcao === FUNCAO_AC || c.funcao === FUNCAO_PS)
@@ -143,6 +177,7 @@ export function resolverPARow(
   if (contratosAtuais.length > 1) {
     const c = contratosAtuais.find(x => x.funcao === funcaoLinha) || contratosAtuais.find(x => !x.funcao)
     if (c) {
+      if (c.modeloFaturamento === "banco_horas") return bancoDeHorasInfo(r.especialidade, c.valorTotal, contratoLabel(c))
       const valor = c.valorPA != null ? c.valorPA : taxaPorFuncao(c.funcao, { ccPA, taxasPA })
       const substituicao = !!(r.profAgenda && r.profCsv && normKey(r.profAgenda) !== normKey(r.profCsv))
       return {
@@ -174,7 +209,7 @@ export function resolverPARow(
   return { valor, funcao: funcaoAplicada, label: labelFuncaoContrato(funcaoAplicada), cadastroContratoPendente: !cadastroSemFuncaoCorrespondente, explicacao: cadastroSemFuncaoCorrespondente ? explicacao : `${explicacao} Cadastro de contrato atual pendente: regra aplicada por inferencia do relatorio ate a base ser preenchida.` }
 }
 
-export type ContratoAntigoInfo = { salario: number; chSemanal: number; contrato?: string | null }
+export type ContratoAntigoInfo = { salario: number; contrato?: string | null }
 
 export type AnaliseFuturaConfig = {
   taxasPA: Record<string, number>
@@ -228,14 +263,11 @@ export type ProfissionalAnalise = {
   salAntigo: number | null
   contrato: string | null
   contratoNovo: string | null
-  chSemanal: number | null
-  valorHoraSemAntigo: number | null
-  salAntigoProporcional: number | null
+  horasMensais: number | null
+  valorHoraDerivado: number | null
   temAntigo: boolean
   delta100: number | null
   deltaX: number | null
-  deltaProp100: number | null
-  deltaPropX: number | null
   limiteCC: number
   alertaCC: boolean
   hasAE: boolean
@@ -482,14 +514,13 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
 
     const cF = antigos[d.prof] || null
     const salA = cF?.salario ?? null, temA = salA !== null && salA > 0
-    const chAntiga = Number(cF?.chSemanal || 0)
-    const chAtual = Number(horasSemanaTotal || 0)
-    const valorHoraSemAntigo = temA && chAntiga > 0 ? salA! / chAntiga : null
-    const salAntigoProporcional = valorHoraSemAntigo !== null && chAtual > 0 ? valorHoraSemAntigo * chAtual : salA
+    // Valor/hora derivado do contrato antigo: valor total pago ÷ horas
+    // efetivamente agendadas no mês (mesma base de "Dias trabalhados" acima:
+    // horas por dia da semana × quantas vezes esse dia ocorre no mês).
+    const horasMensais = diasTrabalhados.reduce((s, dt) => s + dt.horas * (cal.counts[dt.dow as 1 | 2 | 3 | 4 | 5] || 0), 0)
+    const valorHoraDerivado = temA && horasMensais > 0 ? salA! / horasMensais : null
     const d100 = temA ? ((total100 - salA!) / salA!) * 100 : null
     const dX = temA ? ((totalX - salA!) / salA!) * 100 : null
-    const dProp100 = temA && salAntigoProporcional! > 0 ? ((total100 - salAntigoProporcional!) / salAntigoProporcional!) * 100 : null
-    const dPropX = temA && salAntigoProporcional! > 0 ? ((totalX - salAntigoProporcional!) / salAntigoProporcional!) * 100 : null
     const terpN = terapiaDetails.map(t => t.terp)
     const contratosVigentes = contratosAtuaisDoCadastro(buscarCadastroContratual(cadastroPrestadores, d.prof))
     const contratoNovo = contratosVigentes.map(c => c.numero).filter(Boolean).join(" / ") || null
@@ -497,9 +528,9 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
     return {
       prof: d.prof, terapiaDetails, hasCC, pacCC, pe,
       total100, totalX,
-      salAntigo: salA, contrato: cF?.contrato ?? null, contratoNovo, chSemanal: chAntiga || null,
-      valorHoraSemAntigo, salAntigoProporcional,
-      temAntigo: temA, delta100: d100, deltaX: dX, deltaProp100: dProp100, deltaPropX: dPropX,
+      salAntigo: salA, contrato: cF?.contrato ?? null, contratoNovo,
+      horasMensais: horasMensais || null, valorHoraDerivado,
+      temAntigo: temA, delta100: d100, deltaX: dX,
       limiteCC: limCC, alertaCC: alertCC,
       hasAE: terpN.some(t => t.includes("Aplicador ABA")),
       hasTA: terpN.includes("Terapia Alimentar"),

@@ -65,32 +65,36 @@ const LinhaCapacidade = memo(function LinhaCapacidade({ linha, table }: { linha:
 
   return (
     <tr className="border-t border-border hover:bg-muted/30 transition-colors">
-      <td className="p-2.5 font-medium text-foreground whitespace-nowrap">{linha.profissionalNome}</td>
-      <td className="p-2.5 text-xs text-muted-foreground whitespace-nowrap">{linha.terapiaPrincipal || "Sem terapia importada"}</td>
-      <td className="p-2.5">
+      <td className="p-2 font-medium text-foreground truncate" title={linha.profissionalNome}>
+        <span className="truncate block">{linha.profissionalNome}</span>
+      </td>
+      <td className="p-2 text-xs text-muted-foreground truncate" title={linha.terapiaPrincipal || "Sem terapia importada"}>
+        <span className="truncate block">{linha.terapiaPrincipal || "Sem terapia importada"}</span>
+      </td>
+      <td className="p-2">
         <input
           value={value.padraoTexto}
           onChange={e => update({ padraoTexto: e.target.value })}
           placeholder={String(padraoSistema)}
           inputMode="numeric"
           aria-label={`Padrão de capacidade de ${linha.profissionalNome}`}
-          className="w-16 rounded-md border border-border bg-transparent px-2 py-1 text-xs text-center text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          className="w-full rounded-md border border-border bg-transparent px-2 py-1 text-xs text-center text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         />
-        <div className="text-[10px] text-muted-foreground mt-0.5">base {padraoSistema}</div>
+        <div className="text-[10px] text-muted-foreground mt-0.5 text-center">base {padraoSistema}</div>
       </td>
       {DIAS_CAPACIDADE.map(({ key, label }) => (
-        <td key={key} className="p-2.5">
+        <td key={key} className="p-2">
           <input
             value={value.diasTexto[key]}
             onChange={e => update({ diasTexto: { ...value.diasTexto, [key]: e.target.value } })}
             placeholder="—"
             inputMode="numeric"
             aria-label={`Capacidade de ${linha.profissionalNome} em ${label}`}
-            className="w-14 rounded-md border border-border bg-transparent px-2 py-1 text-xs text-center text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+            className="w-full rounded-md border border-border bg-transparent px-2 py-1 text-xs text-center text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
           />
         </td>
       ))}
-      <td className="p-2.5">
+      <td className="p-2">
         <input
           value={value.limiteCCTexto}
           onChange={e => update({ limiteCCTexto: e.target.value })}
@@ -98,10 +102,10 @@ const LinhaCapacidade = memo(function LinhaCapacidade({ linha, table }: { linha:
           inputMode="numeric"
           title="Limite de pacientes de Coordenador de Caso"
           aria-label={`Limite de pacientes de Coordenador de Caso de ${linha.profissionalNome}`}
-          className="w-16 rounded-md border border-border bg-transparent px-2 py-1 text-xs text-center text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
+          className="w-full rounded-md border border-border bg-transparent px-2 py-1 text-xs text-center text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
         />
       </td>
-      <td className="p-2.5 text-right">
+      <td className="p-2 text-right">
         <SaveStatusBadge status={status} />
       </td>
     </tr>
@@ -216,18 +220,28 @@ export function CapacidadeConfig({ onDirtyChange, registerSave }: CapacidadeConf
           {linhasFiltradas.length === 0 ? (
             <div className="p-8 text-center text-slate-500 dark:text-slate-400 text-sm">Nenhum profissional encontrado.</div>
           ) : (
-            <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
-              <table className="min-w-[900px] w-full text-sm text-left">
+            <div className="max-h-[70vh] overflow-y-auto">
+              <table className="w-full table-fixed text-sm text-left">
+                <colgroup>
+                  <col className="w-[16%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[9%]" />
+                  {DIAS_CAPACIDADE.map(({ key }) => (
+                    <col key={key} className="w-[7.5%]" />
+                  ))}
+                  <col className="w-[9%]" />
+                  <col className="w-[7%]" />
+                </colgroup>
                 <thead className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700 text-slate-500 font-bold uppercase tracking-wider text-[11px] sticky top-0 z-10">
                   <tr>
-                    <th className="p-2.5">Profissional</th>
-                    <th className="p-2.5">Terapia base</th>
-                    <th className="p-2.5 text-center">Padrão</th>
+                    <th className="p-2">Profissional</th>
+                    <th className="p-2">Terapia base</th>
+                    <th className="p-2 text-center">Padrão</th>
                     {DIAS_CAPACIDADE.map(({ key, label }) => (
-                      <th key={key} className="p-2.5 text-center">{label}</th>
+                      <th key={key} className="p-2 text-center">{label}</th>
                     ))}
-                    <th className="p-2.5 text-center">Limite CC</th>
-                    <th className="p-2.5 w-16" />
+                    <th className="p-2 text-center">Limite CC</th>
+                    <th className="p-2" />
                   </tr>
                 </thead>
                 <tbody>

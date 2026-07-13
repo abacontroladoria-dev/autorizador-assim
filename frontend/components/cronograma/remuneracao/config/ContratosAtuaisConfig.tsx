@@ -3,14 +3,21 @@
 import { memo, useCallback, useEffect, useMemo, useState } from "react"
 import toast from "react-hot-toast"
 import { Loader2, Search, ListFilter, Plus, X } from "lucide-react"
-import { getContratosAtuais, getProfissionaisRoster, upsertContratoAtual } from "@/services/remuneracao.service"
+import { getContratos, getProfissionaisRoster, upsertContrato } from "@/services/remuneracao.service"
 import { parseNumeroBR, numeroParaTextoBR, validarCpfCnpj } from "@/lib/remuneracao/formatacao"
 import { useDraftRow, useDraftTable, type DraftTable } from "@/hooks/useDraftRow"
 import { SaveStatusBadge } from "./SaveStatusBadge"
 import { SalvarTudoBar } from "./SalvarTudoBar"
 import type { ContratoAtual, ContratoAtualItem } from "@/types/remuneracao"
 
-type ContratoItemEdit = { numero: string; funcao: string; valorPATexto: string; vigente: boolean }
+type ContratoItemEdit = {
+  numero: string
+  funcao: string
+  valorPATexto: string
+  vigente: boolean
+  modeloFaturamento: "atendimento" | "banco_horas"
+  valorTotalTexto: string
+}
 
 type LinhaBase = {
   profissionalNome: string
@@ -40,19 +47,21 @@ const LinhaContratoAtual = memo(function LinhaContratoAtual({ linha, table }: { 
     const cnpjValido = validarCpfCnpj(v.cnpj)
     if ((v.cpf.trim() && !cpfValido) || (v.cnpj.trim() && !cnpjValido)) return false
 
-    return upsertContratoAtual({
+    return upsertContrato({
       profissional_nome: linha.profissionalNome,
       documento_tipo: v.documentoTipo.trim() || null,
       cpf: v.cpf.trim() || null,
       cnpj: v.cnpj.trim() || null,
       observacoes: v.observacoes.trim() || null,
-      contratos_atuais: v.contratos
-        .filter(it => it.numero.trim() || it.funcao.trim() || it.valorPATexto.trim())
+      contratos: v.contratos
+        .filter(it => it.numero.trim() || it.funcao.trim() || it.valorPATexto.trim() || it.valorTotalTexto.trim())
         .map(it => ({
           numero: it.numero.trim(),
           funcao: it.funcao.trim(),
           valorPA: parseNumeroBR(it.valorPATexto) ?? 0,
           vigente: it.vigente,
+          modeloFaturamento: it.modeloFaturamento,
+          valorTotal: parseNumeroBR(it.valorTotalTexto) ?? 0,
         })),
     })
   }, [linha.profissionalNome])
@@ -67,6 +76,8 @@ const LinhaContratoAtual = memo(function LinhaContratoAtual({ linha, table }: { 
       funcao: it.funcao ?? "",
       valorPATexto: numeroParaTextoBR(it.valorPA),
       vigente: it.vigente ?? true,
+      modeloFaturamento: it.modeloFaturamento === "banco_horas" ? "banco_horas" : "atendimento",
+      valorTotalTexto: numeroParaTextoBR(it.valorTotal),
     })),
   }), [linha.cpf, linha.cnpj, linha.documentoTipo, linha.observacoes, linha.contratosAtuais])
 
@@ -76,7 +87,7 @@ const LinhaContratoAtual = memo(function LinhaContratoAtual({ linha, table }: { 
     update({ contratos: value.contratos.map((c, i) => (i === idx ? { ...c, ...patch } : c)) })
   }
   const addContrato = () => {
-    update({ contratos: [...value.contratos, { numero: "", funcao: "", valorPATexto: "", vigente: true }] })
+    update({ contratos: [...value.contratos, { numero: "", funcao: "", valorPATexto: "", vigente: true, modeloFaturamento: "atendimento", valorTotalTexto: "" }] })
   }
   const removeContrato = (idx: number) => {
     update({ contratos: value.contratos.filter((_, i) => i !== idx) })
@@ -97,81 +108,105 @@ const LinhaContratoAtual = memo(function LinhaContratoAtual({ linha, table }: { 
         const isLast = idx === rows.length - 1
         return (
           <tr key={idx} className="border-t border-border hover:bg-muted/30 transition-colors align-top">
-            <td className="p-2.5 font-medium text-foreground whitespace-nowrap">
-              {linha.profissionalNome}
+            <td className="p-2 font-medium text-foreground truncate" title={linha.profissionalNome}>
+              <span className="truncate block">{linha.profissionalNome}</span>
               {isFirst && !documentoPreenchido && (
-                <span className="ml-2 inline-block rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
+                <span className="inline-block mt-0.5 rounded-full px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-wide bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-400">
                   doc. pendente
                 </span>
               )}
             </td>
-            <td className="p-2.5">
+            <td className="p-2">
               <input
                 value={value.cpf}
                 onChange={e => update({ cpf: e.target.value })}
                 placeholder="CPF"
                 aria-label={`CPF de ${linha.profissionalNome}`}
-                className={`${inputCls} w-32 font-mono`}
+                className={`${inputCls} w-full font-mono`}
               />
             </td>
-            <td className="p-2.5">
+            <td className="p-2">
               <input
                 value={value.cnpj}
                 onChange={e => update({ cnpj: e.target.value })}
                 placeholder="CNPJ"
                 aria-label={`CNPJ de ${linha.profissionalNome}`}
-                className={`${inputCls} w-36 font-mono`}
+                className={`${inputCls} w-full font-mono`}
               />
             </td>
-            <td className="p-2.5">
+            <td className="p-2">
               <input
                 value={value.observacoes}
                 onChange={e => update({ observacoes: e.target.value })}
                 placeholder="—"
                 aria-label={`Observações de ${linha.profissionalNome}`}
-                className={`${inputCls} w-full min-w-[9rem]`}
+                className={`${inputCls} w-full`}
               />
             </td>
-            <td className="p-2.5">
+            <td className="p-2">
               {c ? (
                 <input
                   value={c.numero}
                   onChange={e => updateContrato(idx, { numero: e.target.value })}
                   placeholder="Nº do contrato"
                   aria-label={`Número do contrato ${idx + 1} de ${linha.profissionalNome}`}
-                  className={`${inputCls} w-32`}
+                  className={`${inputCls} w-full`}
                 />
               ) : (
                 <span className="text-xs text-muted-foreground">Nenhum contrato ainda</span>
               )}
             </td>
-            <td className="p-2.5">
+            <td className="p-2">
               {c && (
                 <input
                   value={c.funcao}
                   onChange={e => updateContrato(idx, { funcao: e.target.value })}
-                  placeholder="Função (AC/PS/outra)"
+                  placeholder="Função"
                   aria-label={`Função do contrato ${idx + 1} de ${linha.profissionalNome}`}
-                  className={`${inputCls} w-32`}
+                  className={`${inputCls} w-full`}
                 />
               )}
             </td>
-            <td className="p-2.5">
+            <td className="p-2">
               {c && (
-                <div className="relative w-24">
+                <select
+                  value={c.modeloFaturamento}
+                  onChange={e => updateContrato(idx, { modeloFaturamento: e.target.value as "atendimento" | "banco_horas" })}
+                  aria-label={`Modelo de faturamento do contrato ${idx + 1} de ${linha.profissionalNome}`}
+                  className={`${inputCls} w-full`}
+                >
+                  <option value="atendimento">Por Atendimento</option>
+                  <option value="banco_horas">Por Banco de Horas</option>
+                </select>
+              )}
+            </td>
+            <td className="p-2">
+              {c && (
+                <div className="relative w-full">
                   <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[11px] text-muted-foreground">R$</span>
-                  <input
-                    value={c.valorPATexto}
-                    onChange={e => updateContrato(idx, { valorPATexto: e.target.value })}
-                    placeholder="PA"
-                    inputMode="decimal"
-                    aria-label={`Valor PA do contrato ${idx + 1} de ${linha.profissionalNome}`}
-                    className={`${inputCls} w-full pl-7 text-right`}
-                  />
+                  {c.modeloFaturamento === "banco_horas" ? (
+                    <input
+                      value={c.valorTotalTexto}
+                      onChange={e => updateContrato(idx, { valorTotalTexto: e.target.value })}
+                      placeholder="Valor total pago"
+                      inputMode="decimal"
+                      aria-label={`Valor total pago do contrato ${idx + 1} de ${linha.profissionalNome}`}
+                      className={`${inputCls} w-full pl-6 pr-1 text-right`}
+                    />
+                  ) : (
+                    <input
+                      value={c.valorPATexto}
+                      onChange={e => updateContrato(idx, { valorPATexto: e.target.value })}
+                      placeholder="PA"
+                      inputMode="decimal"
+                      aria-label={`Valor PA do contrato ${idx + 1} de ${linha.profissionalNome}`}
+                      className={`${inputCls} w-full pl-6 pr-1 text-right`}
+                    />
+                  )}
                 </div>
               )}
             </td>
-            <td className="p-2.5 text-center">
+            <td className="p-2 text-center">
               {c && (
                 <input
                   type="checkbox"
@@ -182,8 +217,8 @@ const LinhaContratoAtual = memo(function LinhaContratoAtual({ linha, table }: { 
                 />
               )}
             </td>
-            <td className="p-2.5 text-right whitespace-nowrap">
-              <div className="flex items-center justify-end gap-2">
+            <td className="p-2 text-right">
+              <div className="flex items-center justify-end gap-1.5 flex-wrap">
                 {isFirst && <SaveStatusBadge status={status} />}
                 {c && (
                   <button
@@ -248,7 +283,7 @@ export function ContratosAtuaisConfig({ onDirtyChange, registerSave }: Contratos
   const carregar = async () => {
     setLoading(true)
     const [{ data: contratosData }, { data: rosterData }] = await Promise.all([
-      getContratosAtuais(),
+      getContratos(),
       getProfissionaisRoster(),
     ])
     if (contratosData) setContratos(contratosData as ContratoAtual[])
@@ -272,7 +307,7 @@ export function ContratosAtuaisConfig({ onDirtyChange, registerSave }: Contratos
         cnpj: c?.cnpj ?? null,
         documentoTipo: c?.documento_tipo ?? null,
         observacoes: c?.observacoes ?? null,
-        contratosAtuais: Array.isArray(c?.contratos_atuais) ? c!.contratos_atuais : [],
+        contratosAtuais: Array.isArray(c?.contratos) ? c!.contratos : [],
       }
     })
   }, [roster, contratos])
@@ -292,10 +327,11 @@ export function ContratosAtuaisConfig({ onDirtyChange, registerSave }: Contratos
 
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
-          <h3 className="font-bold text-lg text-foreground">Cadastros de contratos atuais</h3>
+          <h3 className="font-bold text-lg text-foreground">Contratos</h3>
           <p className="text-sm text-slate-500 dark:text-slate-400 mt-1 max-w-3xl">
-            A calculadora usa estes contratos vigentes para definir o PA que o prestador deve receber caso ele
-            substitua ou preste horas. Edite direto na lista e clique em &ldquo;Salvar tudo&rdquo; para gravar as alterações.
+            A calculadora usa os contratos <strong>vigentes</strong> para definir o PA que o prestador deve receber.
+            Desmarque &ldquo;Vigente&rdquo; para manter um contrato antigo só como histórico/comparação, sem que ele
+            afete o cálculo atual. Edite direto na lista e clique em &ldquo;Salvar tudo&rdquo; para gravar as alterações.
           </p>
         </div>
         <SalvarTudoBar dirtyCount={dirtyCount} saving={saving} onSave={handleSalvarTudo} />
@@ -343,19 +379,32 @@ export function ContratosAtuaisConfig({ onDirtyChange, registerSave }: Contratos
           {linhasFiltradas.length === 0 ? (
             <div className="p-8 text-center text-slate-500 dark:text-slate-400 text-sm">Nenhum profissional encontrado.</div>
           ) : (
-            <div className="overflow-x-auto max-h-[70vh] overflow-y-auto">
-              <table className="min-w-[980px] w-full text-sm text-left">
+            <div className="max-h-[70vh] overflow-y-auto">
+              <table className="w-full table-fixed text-sm text-left">
+                <colgroup>
+                  <col className="w-[13%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[11%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[9%]" />
+                  <col className="w-[13%]" />
+                  <col className="w-[10%]" />
+                  <col className="w-[6%]" />
+                  <col className="w-[10%]" />
+                </colgroup>
                 <thead className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700 text-slate-500 font-bold uppercase tracking-wider text-[11px] sticky top-0 z-10">
                   <tr>
-                    <th className="p-2.5">Profissional</th>
-                    <th className="p-2.5">CPF</th>
-                    <th className="p-2.5">CNPJ</th>
-                    <th className="p-2.5">Observações</th>
-                    <th className="p-2.5">Contrato Nº</th>
-                    <th className="p-2.5">Função</th>
-                    <th className="p-2.5 text-right">PA (R$)</th>
-                    <th className="p-2.5 text-center">Vigente</th>
-                    <th className="p-2.5 w-20" />
+                    <th className="p-2">Profissional</th>
+                    <th className="p-2">CPF</th>
+                    <th className="p-2">CNPJ</th>
+                    <th className="p-2">Observações</th>
+                    <th className="p-2">Contrato Nº</th>
+                    <th className="p-2">Função</th>
+                    <th className="p-2">Modelo</th>
+                    <th className="p-2 text-right">Valor (R$)</th>
+                    <th className="p-2 text-center">Vigente</th>
+                    <th className="p-2" />
                   </tr>
                 </thead>
                 <tbody>

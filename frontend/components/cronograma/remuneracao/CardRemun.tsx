@@ -115,6 +115,7 @@ const CLASS_TONE: Record<string, Tone> = {
   "Evolução sem agendamento": "red",
   "Cancelado":              "gray",
   "Não evoluído":           "amber",
+  "Feriado/Ponto Fac.":     "gray",
 }
 
 function ClassBadge({ cls }: { cls: string }) {
@@ -159,7 +160,7 @@ const SessoesTabela = memo(function SessoesTabela({
             <th className="text-left p-1.5">Hora</th>
             <th className="text-left p-1.5">Paciente</th>
             <th className="text-left p-1.5">Especialidade</th>
-            {mostrarPapel && <th className="text-left p-1.5">Papel</th>}
+            {mostrarPapel && <th className="text-left p-1.5">Situação</th>}
             <th className="text-left p-1.5 whitespace-nowrap">Prof. Agenda</th>
             <th className="text-left p-1.5 whitespace-nowrap">Evoluído por</th>
             <th className="text-center p-1.5">Presença Recep.</th>
@@ -172,6 +173,7 @@ const SessoesTabela = memo(function SessoesTabela({
         <tbody>
           {sessoes.map((s: SessaoComPapel, i: number) => {
             const paVal = getPARow(s)
+            const isFeriado = s.classificacao === "Feriado/Ponto Fac."
             return (
               <tr key={`${s._idx ?? i}-${i}`} className="border-t border-border hover:bg-muted/40">
                 <td className="p-1.5 whitespace-nowrap text-muted-foreground">{s.id || "—"}</td>
@@ -183,14 +185,18 @@ const SessoesTabela = memo(function SessoesTabela({
                 <td className="p-1.5 text-muted-foreground">{s.profAgenda}</td>
                 <td className="p-1.5 text-muted-foreground">{s.profCsv || "—"}</td>
                 <td className="p-1.5 text-center">
-                  <StatusChip tone={isSim(s.presencaOrbita) ? "green" : "red"} dense>
-                    {s.presencaOrbita || "—"}
-                  </StatusChip>
+                  {isFeriado ? "—" : (
+                    <StatusChip tone={isSim(s.presencaOrbita) ? "green" : "red"} dense>
+                      {s.presencaOrbita || "—"}
+                    </StatusChip>
+                  )}
                 </td>
                 <td className="p-1.5 text-center">
-                  <StatusChip tone={isSim(s.presencaTita) ? "green" : "red"} dense>
-                    {s.presencaTita || "—"}
-                  </StatusChip>
+                  {isFeriado ? "—" : (
+                    <StatusChip tone={isSim(s.presencaTita) ? "green" : "red"} dense>
+                      {s.presencaTita || "—"}
+                    </StatusChip>
+                  )}
                 </td>
                 <td className="p-1.5 text-center">
                   <StatusChip tone={isSim(s.possuiTratativa) ? "green" : "amber"} dense>
@@ -201,7 +207,7 @@ const SessoesTabela = memo(function SessoesTabela({
                   {s.valorPATexto || (paVal > 0 ? fmt(paVal) : "—")}
                   {s.explicacaoPA && <InfoTooltip text={s.explicacaoPA} />}
                 </td>
-                <td className="p-1.5 text-muted-foreground text-[11px]">{s.motivo}</td>
+                <td className="p-1.5 text-muted-foreground text-[11px]">{isFeriado ? "Feriado/Ponto Fac." : s.motivo}</td>
               </tr>
             )
           })}
@@ -432,7 +438,7 @@ export default function CardRemun({
   const toneColor = useToneColor()
 
   const totalRecebeHoje = p.evoluidasProprias + p.substituicoesRealizadas
-  const baseCalc = p.agendadas - p.canceladas
+  const baseCalc = p.agendadas - p.canceladas - (p.substituidoPorOutro ?? 0)
   const pctEv    = baseCalc > 0 ? (totalRecebeHoje / baseCalc * 100) : 0
 
   const corBorda = p.inconsistencias > 0 ? B.red
@@ -492,7 +498,7 @@ export default function CardRemun({
         .sort(byData),
       sNaoRecebe: p.sessoes
         .filter(s => !ehInc(s) && s.papel === "Agenda" &&
-          (s.classificacao === "Substituição" || s.classificacao === "Cancelado"))
+          (s.classificacao === "Substituição" || s.classificacao === "Cancelado" || s.classificacao === "Feriado/Ponto Fac."))
         .sort(byData),
     }
   }, [p.sessoes])
@@ -523,7 +529,7 @@ export default function CardRemun({
     { value: p.canceladas,              color: "#ef4444", label: "Canceladas",           group: "nao"      },
     { value: p.inconsistencias,         color: "#991b1b", label: "Inconsistências",      group: "inc"      },
   ]
-  const segmentosCorrigida = segmentosTotal.filter(s => s.label !== "Canceladas")
+  const segmentosCorrigida = segmentosTotal.filter(s => s.label !== "Canceladas" && s.label !== "Cedidas p/ outro")
 
   return (
     <div className="bg-card rounded-xl shadow-sm overflow-hidden mb-3"
@@ -627,7 +633,7 @@ export default function CardRemun({
                       statLabel={`${p.agendadas} ag.`}
                       statColor="var(--foreground)"
                       size={200}
-                      centerLabel={`${(p.agendadas > 0 ? pctEv * (p.agendadas - p.canceladas) / p.agendadas : 0).toFixed(1)}%`}
+                      centerLabel={`${(p.agendadas > 0 ? pctEv * baseCalc / p.agendadas : 0).toFixed(1)}%`}
                       centerFontSize={28}
                       segments={segmentosTotal}
                       highlightGroup={cardHover}
@@ -637,7 +643,7 @@ export default function CardRemun({
                   <div className="w-[200px]">
                     <DonutCard
                       title="Base corrigida"
-                      statLabel={`${p.agendadas - p.canceladas} ag.`}
+                      statLabel={`${baseCalc} ag.`}
                       statColor={toneColor(pctEvTone)}
                       size={200}
                       centerLabel={`${pctEv.toFixed(1)}%`}

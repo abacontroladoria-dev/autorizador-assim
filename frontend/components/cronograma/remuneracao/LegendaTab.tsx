@@ -26,7 +26,6 @@ const CLASSIFICACOES = [
   { label: "🚫 Cancelada", cor: B.gray, recebe: "Não recebe", cond: "Status cancelado no sistema e sem tratativa." },
   { label: "⬜ Não evoluída", cor: "#92400e", recebe: "Não recebe", cond: "Paciente ausente e sessão sem tratativa." },
   { label: "⚠️ Evolução sem presença", cor: B.red, recebe: "⚠️ Investigar", cond: "INCONSISTÊNCIA: recepção marcou ausência, mas profissional registrou evolução." },
-  { label: "⚠️ Cancelado evoluído", cor: B.red, recebe: "⚠️ Investigar", cond: "INCONSISTÊNCIA: sessão foi cancelada, mas há evolução registrada." },
   { label: "⚠️ Evolução sem agendamento", cor: B.red, recebe: "⚠️ Investigar", cond: "INCONSISTÊNCIA: Possui Tratativa = Sim, mas a linha não tem ID Agendamento (não existe sessão real na grade). Verificar antes de pagar." },
 ]
 

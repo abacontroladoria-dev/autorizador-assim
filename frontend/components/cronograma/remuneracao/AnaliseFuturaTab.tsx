@@ -9,7 +9,7 @@ import {
 import { useHeader } from "@/contexts/HeaderContext"
 import { useAnaliseFutura } from "@/hooks/useRemuneracao"
 import { useRemuneracaoConfig } from "@/hooks/useRemuneracaoConfig"
-import { fmt, fmtH, fmtPct, fmtNumBR } from "@/lib/remuneracao/formatacao"
+import { fmt, fmtH, fmtPct } from "@/lib/remuneracao/formatacao"
 import { B } from "@/lib/cronograma/constants"
 import { DOW_PT } from "@/lib/cronograma/ocupacaoConst"
 // regrasCapacidadeTexto vem de ocupacaoProf.ts (não de lib/remuneracao/ocupacao.ts)
@@ -198,49 +198,36 @@ function ContratoAntigoCard({ d }: { d: ProfissionalAnalise }) {
           )}
           <div className="font-black text-3xl leading-tight mt-2 text-foreground tabular-nums">{fmt(d.salAntigo!)}</div>
 
-          <div className="mt-3 grid grid-cols-2 gap-3">
-            {(d.chSemanal ?? 0) > 0 && (
+          {d.valorHoraDerivado !== null && (
+            <div className="mt-3">
               <LinhaValorDescricao
-                valor={`${fmtNumBR(d.chSemanal!, d.chSemanal! % 1 ? 2 : 0)}h/sem`}
-                descricao="carga contratada"
-              />
-            )}
-            {d.valorHoraSemAntigo !== null && (
-              <LinhaValorDescricao
-                valor={fmt(d.valorHoraSemAntigo)}
-                descricao="valor anterior por h/sem"
+                valor={fmt(d.valorHoraDerivado)}
+                descricao="valor/hora (calculado: valor total ÷ horas agendadas no mês)"
                 tone="muted"
               />
-            )}
-          </div>
-
-          {d.salAntigoProporcional != null && (
-            <div className="mt-3 rounded-xl border border-border bg-card px-3.5 py-3.5 space-y-3">
-              <div className="flex items-center justify-between gap-2">
-                <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                  <Clock size={12} />
-                  Carga agendada
-                </span>
-                <strong className="text-sm font-bold tabular-nums text-foreground">{fmtH(d.horasSemanaTotal)}</strong>
-              </div>
-
-              {d.diasTrabalhados.length > 0 && (
-                <div className="flex flex-wrap gap-1.5">
-                  {d.diasTrabalhados.map(dt => (
-                    <span key={dt.dow} className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs">
-                      <span className="font-semibold text-foreground">{DOW_PT[dt.dow]}</span>
-                      <span className="text-muted-foreground tabular-nums">{fmtH(dt.horas)}</span>
-                    </span>
-                  ))}
-                </div>
-              )}
-
-              <div className="pt-3 border-t border-border flex items-center justify-between gap-2">
-                <span className="text-xs text-muted-foreground">Antigo proporcional</span>
-                <strong className="text-sm font-bold tabular-nums text-foreground">{fmt(d.salAntigoProporcional)}</strong>
-              </div>
             </div>
           )}
+
+          <div className="mt-3 rounded-xl border border-border bg-card px-3.5 py-3.5 space-y-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Clock size={12} />
+                Carga agendada
+              </span>
+              <strong className="text-sm font-bold tabular-nums text-foreground">{fmtH(d.horasSemanaTotal)}</strong>
+            </div>
+
+            {d.diasTrabalhados.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {d.diasTrabalhados.map(dt => (
+                  <span key={dt.dow} className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs">
+                    <span className="font-semibold text-foreground">{DOW_PT[dt.dow]}</span>
+                    <span className="text-muted-foreground tabular-nums">{fmtH(dt.horas)}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+          </div>
         </>
       ) : (
         <div className="mt-4 flex flex-1 flex-col items-center justify-center gap-1.5 py-3 text-center">
@@ -265,7 +252,7 @@ function PresencaCard({
 }) {
   const is100 = variante === "100"
   const total = is100 ? d.total100 : d.totalX
-  const delta = is100 ? d.deltaProp100 : d.deltaPropX
+  const delta = is100 ? d.delta100 : d.deltaX
   const ppd = d.terapiaDetails.filter(t => !t.isCC).reduce((s, t) => s + (t.mensalDiaria || 0), 0)
   const pa = d.terapiaDetails.reduce((s, t) => s + (is100 ? t.mensalPA100 : t.mensalPAX), 0)
   const etaBonusTotal = d.terapiaDetails.reduce((s, t) => s + (t.mensalETA100 || 0), 0)
@@ -295,7 +282,7 @@ function PresencaCard({
       {delta !== null && (
         <div className={`flex items-center gap-1 text-xs font-semibold mt-auto pt-3 ${delta >= 0 ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
           {delta >= 0 ? <TrendingUp size={13} /> : <TrendingDown size={13} />}
-          {fmtPct(delta)} vs antigo proporcional
+          {fmtPct(delta)} vs contrato antigo
         </div>
       )}
     </StatCardShell>
@@ -638,10 +625,10 @@ export function AnaliseFuturaTab() {
   const dadosOrdenados = useMemo(() => {
     return [...dadosFiltrados].sort((a, b) => {
       if (sortKey === "delta_desc" || sortKey === "delta_asc") {
-        if (a.deltaProp100 === null && b.deltaProp100 === null) return a.prof.localeCompare(b.prof)
-        if (a.deltaProp100 === null) return 1
-        if (b.deltaProp100 === null) return -1
-        return sortKey === "delta_desc" ? b.deltaProp100 - a.deltaProp100 : a.deltaProp100 - b.deltaProp100
+        if (a.delta100 === null && b.delta100 === null) return a.prof.localeCompare(b.prof)
+        if (a.delta100 === null) return 1
+        if (b.delta100 === null) return -1
+        return sortKey === "delta_desc" ? b.delta100 - a.delta100 : a.delta100 - b.delta100
       }
       if (sortKey === "ocup_desc" || sortKey === "ocup_asc") {
         if (a.taxaOcupacao === null && b.taxaOcupacao === null) return a.prof.localeCompare(b.prof)
@@ -657,7 +644,7 @@ export function AnaliseFuturaTab() {
     tot100: dadosFiltrados.reduce((s, d) => s + d.total100, 0),
     totX: dadosFiltrados.reduce((s, d) => s + d.totalX, 0),
     alerts: dadosPorProf.filter(d => d.alertaCC).length,
-    totalAntigo: dadosFiltrados.filter(d => d.temAntigo).reduce((s, d) => s + (d.salAntigoProporcional || d.salAntigo || 0), 0),
+    totalAntigo: dadosFiltrados.filter(d => d.temAntigo).reduce((s, d) => s + (d.salAntigo || 0), 0),
     pendContr: dadosFiltrados.filter(d => !d.temAntigo).length,
   }), [dadosFiltrados, dadosPorProf])
 

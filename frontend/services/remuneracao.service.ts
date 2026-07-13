@@ -90,31 +90,20 @@ export async function getProfissionaisRosterComTerapia(): Promise<{ data: { prof
   return { data: data as { profissional_nome: string; terapia_principal: string | null }[], error: null }
 }
 
-export async function getContratosAtuais() {
+// Tabela única de contratos (substitui remuneracao_contratos_atuais +
+// remuneracao_contratos_antigos — ver migration 20260710120000): 1 linha por
+// profissional, lista de contratos onde "antigo" é só um item vigente=false.
+export async function getContratos() {
   const supabase = getSupabaseClient()
-  const { data, error } = await supabase.from('remuneracao_contratos_atuais').select('*').order('profissional_nome')
-  if (error) console.error('Erro getContratosAtuais:', error)
+  const { data, error } = await supabase.from('remuneracao_contratos').select('*').order('profissional_nome')
+  if (error) console.error('Erro getContratos:', error)
   return { data, error }
 }
 
-export async function upsertContratoAtual(record: any) {
+export async function upsertContrato(record: any) {
   const supabase = getSupabaseClient()
-  const { error } = await supabase.from('remuneracao_contratos_atuais').upsert(record, { onConflict: 'profissional_nome' })
-  if (error) console.error('Erro ao salvar contrato atual:', error)
-  return !error
-}
-
-export async function getContratosAntigos() {
-  const supabase = getSupabaseClient()
-  const { data, error } = await supabase.from('remuneracao_contratos_antigos').select('*').order('profissional_nome')
-  if (error) console.error('Erro getContratosAntigos:', error)
-  return { data, error }
-}
-
-export async function upsertContratoAntigo(record: any) {
-  const supabase = getSupabaseClient()
-  const { error } = await supabase.from('remuneracao_contratos_antigos').upsert(record, { onConflict: 'profissional_nome' })
-  if (error) console.error('Erro ao salvar contrato antigo:', error)
+  const { error } = await supabase.from('remuneracao_contratos').upsert(record, { onConflict: 'profissional_nome' })
+  if (error) console.error('Erro ao salvar contrato:', error)
   return !error
 }
 

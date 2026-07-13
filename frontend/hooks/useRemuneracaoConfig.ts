@@ -38,6 +38,16 @@ function fetchConfig(): Promise<void> {
   return inflightFetch
 }
 
+// Invalida o cache compartilhado e busca a config atualizada de novo, propagando
+// para todas as instâncias do hook já montadas (outras abas abertas na mesma sessão
+// do navegador, sem precisar de reload) — chamar depois de qualquer salvamento em
+// Config que afete presença/taxas/contratos/capacidade/feriados.
+export function refetchRemuneracaoConfig(): Promise<void> {
+  cachedState = null
+  inflightFetch = null
+  return fetchConfig()
+}
+
 // Compartilha uma única busca/cache de remuneracao_config entre todas as instâncias
 // do hook montadas ao mesmo tempo, evitando refetches redundantes ao navegar entre abas.
 export function useRemuneracaoConfig() {

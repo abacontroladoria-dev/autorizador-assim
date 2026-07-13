@@ -91,10 +91,9 @@ export function exportarAnaliseXlsx(opts: ExportarAnaliseOpts): void {
   const resumo = dadosFiltrados.map(d => ({
     Profissional: d.prof,
     Contrato: d.contrato || "",
-    CH_Semanal_Contrato: d.chSemanal || 0,
-    CH_Semanal_Atual: +(d.horasSemanaTotal || 0).toFixed(2),
+    Horas_Agendadas_Mes: d.horasMensais != null ? +d.horasMensais.toFixed(2) : 0,
     Contrato_Antigo: d.salAntigo || 0,
-    Contrato_Antigo_Proporcional: d.salAntigoProporcional != null ? +d.salAntigoProporcional.toFixed(2) : null,
+    Contrato_Antigo_Valor_Hora: d.valorHoraDerivado != null ? +d.valorHoraDerivado.toFixed(2) : null,
     Terapias: d.terapiaDetails.map(t => t.terp).join("; "),
     Sessoes_Mes_100: d.terapiaDetails.reduce((s, t) => s + (t.sessoesMes100 || 0), 0),
     Pacientes: d.allPacs.length,
@@ -106,8 +105,8 @@ export function exportarAnaliseXlsx(opts: ExportarAnaliseOpts): void {
     Valor_100: +d.total100.toFixed(2),
     Valor_Presenca_Config: +d.totalX.toFixed(2),
     Percentual_Presenca_Config: presenca,
-    Variacao_100_Prop_pct: d.deltaProp100 !== null ? +d.deltaProp100.toFixed(1) : null,
-    Variacao_Presenca_Prop_pct: d.deltaPropX !== null ? +d.deltaPropX.toFixed(1) : null,
+    Variacao_100_pct: d.delta100 !== null ? +d.delta100.toFixed(1) : null,
+    Variacao_Presenca_pct: d.deltaX !== null ? +d.deltaX.toFixed(1) : null,
     Alerta_CC: d.alertaCC ? "Sim" : "Não",
     Pacientes_CC: d.pacCC || 0,
   }))
