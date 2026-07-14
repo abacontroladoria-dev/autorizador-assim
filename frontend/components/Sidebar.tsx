@@ -30,10 +30,6 @@ import {
   BookOpen,
   Settings,
   CalendarRange,
-  ClipboardCheck,
-  Handshake,
-  Wallet,
-  LineChart,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -81,13 +77,6 @@ const pathIconMap: Record<string, any> = {
   "/cronograma/ocupacao?tab=inconsistencias": AlertTriangle,
   "/cronograma/ocupacao?tab=guia": BookOpen,
   "/cronograma/ocupacao?tab=config": Settings,
-  "/analise-tratativas": ClipboardCheck,
-  "/relacionamento-prestador/analise": TrendingUp,
-  "/relacionamento-prestador/rp": Wallet,
-  "/relacionamento-prestador/individual": UserRound,
-  "/relacionamento-prestador/config": Settings,
-  "/relacionamento-prestador/historico": LineChart,
-  "/relacionamento-prestador/legenda": BookOpen,
   "/cronograma/indicadores": BarChart3,
 }
 
@@ -450,13 +439,10 @@ export default function Sidebar() {
           )}
 
           {/* Terapêutico */}
-          {(canAccess("/central-terapeutas") || canAccess("/analise-tratativas") || canAccess("/agenda/terapeutas") || canAccess("/agenda/salas")) && (
+          {(canAccess("/central-terapeutas") || canAccess("/agenda/terapeutas") || canAccess("/agenda/salas")) && (
             <SidebarGroup title="Terapêutico" icon={Stethoscope}>
               {canAccess("/central-terapeutas") && (
                 <MenuItem label="Gestão" icon={UserRound} path="/central-terapeutas" />
-              )}
-              {canAccess("/analise-tratativas") && (
-                <MenuItem label="Análise de Tratativas" icon={ClipboardCheck} path="/analise-tratativas" />
               )}
               {canAccess("/agenda/terapeutas") && (
                 <MenuItem label="Agenda Terapêutica" icon={CalendarDays} path="/agenda/terapeutas" />
@@ -495,32 +481,6 @@ export default function Sidebar() {
           {canAccess("/cronograma/indicadores") && (
             <SidebarGroup title="Indicadores" icon={TrendingUp}>
               <MenuItem label="Ocupação de Profissionais" icon={BarChart3} path="/cronograma/indicadores" />
-            </SidebarGroup>
-          )}
-
-          {/* Relacionamento Prestador */}
-          {(canAccess("/relacionamento-prestador/analise") || canAccess("/relacionamento-prestador/rp") ||
-            canAccess("/relacionamento-prestador/individual") || canAccess("/relacionamento-prestador/config") ||
-            canAccess("/relacionamento-prestador/historico") || canAccess("/relacionamento-prestador/legenda")) && (
-            <SidebarGroup title="Relacionamento Prestador" icon={Handshake}>
-              {canAccess("/relacionamento-prestador/analise") && (
-                <MenuItem label="Rem. Mês - Previsão" icon={TrendingUp} path="/relacionamento-prestador/analise" />
-              )}
-              {canAccess("/relacionamento-prestador/rp") && (
-                <MenuItem label="Rem. Mês - Total" icon={Wallet} path="/relacionamento-prestador/rp" />
-              )}
-              {canAccess("/relacionamento-prestador/individual") && (
-                <MenuItem label="Rem. Mês - Individual" icon={UserRound} path="/relacionamento-prestador/individual" />
-              )}
-              {canAccess("/relacionamento-prestador/config") && (
-                <MenuItem label="Config" icon={Settings} path="/relacionamento-prestador/config" />
-              )}
-              {canAccess("/relacionamento-prestador/historico") && (
-                <MenuItem label="Histórico" icon={LineChart} path="/relacionamento-prestador/historico" />
-              )}
-              {canAccess("/relacionamento-prestador/legenda") && (
-                <MenuItem label="Legenda" icon={BookOpen} path="/relacionamento-prestador/legenda" />
-              )}
             </SidebarGroup>
           )}
 

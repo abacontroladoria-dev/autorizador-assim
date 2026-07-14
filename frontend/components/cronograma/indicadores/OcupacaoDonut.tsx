@@ -6,11 +6,9 @@ import { InteractivePieChart } from './InteractivePieChart'
 interface Props {
   item: { ocupacao: OcupacaoAgregada } | null | undefined
   size?: number
-  /** Repassado ao disco central do donut (útil quando embutido em card tintado). */
-  centerFillClassName?: string
 }
 
-export function OcupacaoDonut({ item, size = 150, centerFillClassName }: Props) {
+export function OcupacaoDonut({ item, size = 150 }: Props) {
   const oc = item?.ocupacao
   if (!oc) return null
 
@@ -38,7 +36,6 @@ export function OcupacaoDonut({ item, size = 150, centerFillClassName }: Props) 
       <InteractivePieChart
         size={size}
         title="Carga semanal"
-        centerFillClassName={centerFillClassName}
         centerLabel={fmtPctOcup(pctTempo)}
         valueFormatter={(v, seg) =>
           seg?.label === 'Horário Administrativo' ? fmtHDec(v) : fmtH(v)
