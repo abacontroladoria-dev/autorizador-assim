@@ -25,6 +25,12 @@ export interface AceitePacBundle {
   inviavelSlots: string[]
   motivo?: string
   slotStatus?: Record<string, SlotStatus>
+  // Auditoria da implantação (imutável, gravado no momento da confirmação a partir
+  // do usuário autenticado no servidor). Distinto de atualizado_por, que é um carimbo
+  // coletivo do último a sincronizar a tabela. implantadoPorEmail é um snapshot do
+  // email na hora da ação — sobrevive a troca/exclusão do usuário.
+  implantadoPor?: string
+  implantadoPorEmail?: string
 }
 
 export interface ConfItem {
