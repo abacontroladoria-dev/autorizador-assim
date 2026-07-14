@@ -15,6 +15,9 @@ export const B = {
   limeLt: "#f3f8e6",
   pinkLt: "#fdf0f6",
   navyLt: "#e8e9f0",
+  gray: "#6b7280",
+  amber: "#b45309",
+  amberLt: "#fff8e1",
 } as const
 
 // ─── MAPEAMENTOS DE TERAPIA ───────────────────────────────────────────────────
