@@ -1,0 +1,152 @@
+-- Resgate dos contratos antigos migrados da ferramenta calculadora-remuneracao (app JSX
+-- original), fonte: pendencias_contratos_atuais.md/.xlsx exportado em 2026-07-07. Esses dados
+-- já estavam completos e corretos na ferramenta antiga; nunca chegaram ao Supabase porque
+-- frontend/services/remuneracao.service.ts apontava para tabelas inexistentes
+-- (remun_contratos_antigos/remun_contratos_atuais/remun_capacidades_prof/remun_historico_snapshots
+-- em vez de remuneracao_contratos_antigos/remuneracao_contratos_atuais/remuneracao_capacidades/
+-- remuneracao_historico, que são as tabelas de fato criadas em
+-- 20260706000002_create_remuneracao_schema.sql) — todo upsert das telas de Config falhava
+-- silenciosamente desde a migração. Corrigido no código nesta mesma entrega.
+--
+-- 115 profissionais com contrato antigo cadastrado na ferramenta original.
+-- Profissionais sem nenhum dado de contrato antigo na planilha de origem (ex.: inativos,
+-- cadastros nunca preenchidos) foram deliberadamente omitidos aqui.
+
+INSERT INTO remuneracao_contratos_antigos (profissional_nome, salario, ch_semanal, contrato)
+VALUES
+  ('Agatacryst Moreira Silva', 700, 10, 'PS.ABA-2024-0508'),
+  ('Aline De Miranda Costa', 0, 0, 'PS.ABA-01-00000001'),
+  ('Aline De Souza Silva Cassin', 0, 0, 'PS.ABA-03-00000036'),
+  ('Amanda Martins Rodrigues', 4000, 45, 'PS.ABA-2024-0394'),
+  ('Amanda Ribeiro Campos', 8400, 45, 'PS.ABA-2024-0418'),
+  ('Ana Beatriz da Silva Cardoso', 1800, 20, 'PS.ABA-2024-0469'),
+  ('Ana Beatriz Virginio Da Silva', 4266.67, 32, 'PS.ABA-2024-0369'),
+  ('Ana Carolina Mendes França', 1866.67, 14, 'PS.ABA-2024-0517'),
+  ('Ana Carolyna Barros Leal', 2400, 18, 'PS.ABA-2024-0463'),
+  ('Ana Tereza Rezende Nascimento', 5355.56, 28, 'PS.ABA-2024-0402'),
+  ('Andressa Marçal Rodrigues Mello', 0, 0, 'PS.ABA-03-000000017'),
+  ('Angela Rocha Miranda De Oliveira', 0, 0, 'PS.ABA-03.00000021'),
+  ('Bárbara Costa de Sá Barreto', 3400, 9, 'PS.ABA-2024-0382'),
+  ('Beatriz Pinheiro Lopes Machado', 1400, 20, 'PS.ABA-2024-0396'),
+  ('Brena Alves Soares de Barros', 4800, 36, 'PS.ABA-2024-0304'),
+  ('Brenda Rayanne Ferreira', 1967.02, 19.33, 'PS.ABA-2024-0327'),
+  ('Bruna Ferreira Araujo', 3150, 45, 'PS.ABA-2024-0485'),
+  ('Camila Batista Ferreira', 0, 0, 'PS.ABA-01-00000002'),
+  ('Camila Ferreira Rios Gomes', 3600, 27, 'PS.ABA-2024-0461'),
+  ('Camila Santos De Souza Monteiro', 2400, 18, 'PS.ABA-2024-0364'),
+  ('Carla Cristina Abreu Dos Santos', 778, 5, 'PS.ABA-2024-0357'),
+  ('Chayenne Souza Grijo', 1920, 24, 'PS.ABA-2024-0480'),
+  ('Crislaine Neves da Silva', 600, 1, 'PS.ABA-2024-0495'),
+  ('Danielle Galvão Nogueira', 16000, 45, 'PS.ABA-2024-0415'),
+  ('Davi da Silva Santos', 1400, 20, 'PS.ABA-2024-0499'),
+  ('Débora Anastacia Pires Porto Jensen', 3600, 27, 'PS.ABA-2024-0365'),
+  ('Djinane Ferreira Da Silva', 4800, 18, 'PS.ABA-2024-0503'),
+  ('Elaine Ferreira Nunes', 2300, 9, 'PS.ABA-2024-0457'),
+  ('Elisangela Motta Do Valle', 9738.95, 29.33, 'PS.ABA-2024-0374'),
+  ('Ester Praxedes de Souza', 950, 18, 'TCE.ABA-0004'),
+  ('Evelyn Andressa Alves Do Nascimento De Souza', 0, 0, 'PS.ABA-01-00000004'),
+  ('Gabriel Rodrigues Miguel', 2555.56, 23, 'PS.ABA-2024-0310'),
+  ('Gabriela Pereira Ramos', 2000, 20, 'PS.ABA-2024-0492'),
+  ('Gabrielle de Lima Augusto Gonçalves', 1866.67, 14, 'PS.ABA-2024-0460'),
+  ('Gabrielly De Souza Silveira Dos Reis', 4800, 18, 'PS.ABA-2024-0378'),
+  ('Germana Santos da Silva', 9200, 36, 'PS.ABA-2024-0516'),
+  ('Gracielle Rayane Faria Miranda', 8400, 45, 'PS.ABA-2024-0417'),
+  ('Ianca Aparecida Gonçalves Izidório', 3000, 9, 'PS.ABA-2024-0478'),
+  ('Ingrid Cassia de Andrade', 1400, 9, 'PS.ABA-2024-0375'),
+  ('Ingrid Cristina Mello da Costa Dutra', 4266.67, 32, 'PS.ABA-2024-0501'),
+  ('Isabela Suzana De Andrade Barbosa', 0, 0, 'PS.ABA-01-000000011'),
+  ('Isabella Alves De Oliveira Marciano', 6600, 27, 'PS.ABA-2024-0383'),
+  ('Izabelle Soares Da Silva', 0, 0, 'PS.ABA-01-00000005'),
+  ('Janine Lara Da Conceição Silva', 0, 0, 'PS.ABA-01-00000006'),
+  ('Jean Gabriel De Lima Magalhães', 3500, 35, 'PS.ABA-2024-0309'),
+  ('Jhenifer Matos De Souza Montes', 2600, 9, 'PS.ABA-2024-0498'),
+  ('João Gabriel Barbosa De Souza', 1679.76, 18, 'PS.ABA-2024-0331'),
+  ('Joice Indiara De Oliveira Medeiros', 950, 12, 'TCE.ABA-0006'),
+  ('Jonathas Pereira Fernandes Maia', 2800, 40, 'PS.ABA-2024-0376'),
+  ('Joseane Bezerra Dos Santos De Castro', 0, 0, 'PS.ABA-03.00000037'),
+  ('Joyce Bastos Nunes', 1200, 13.33, 'PS.ABA-2024-0470'),
+  ('Julia Silva De Sousa', 8000, 45, 'PS.ABA-2024-0342'),
+  ('Juliana Arcanjo Carvalho Moreira', 2300, 9, 'PS.ABA-2024-0324'),
+  ('Juliana da Cunha Octaviano', 2520, 36, 'PS.ABA-2024-0444'),
+  ('Juliana Fraga Sampaio', 3600, 27, 'PS.ABA-2024-0344'),
+  ('Juliana Soares Rodrigues', 4100, 27, 'PS.ABA-2024-0366'),
+  ('Julliana de Oliveira Mota', 5200, 18, 'PS.ABA-2024-0518'),
+  ('Keila de Oliveira Garcia', 1650, 15, 'PS.ABA-2024-0491'),
+  ('Kesia Passos Antunes Fabiano', 4800, 18, 'PS.ABA-2024-0514'),
+  ('Lais de Castro Cerqueira Monteiro', 0, 0, 'PS.ABA-03.000000018'),
+  ('Larissa Neivane Caslow Assunção', 1200, 9, 'PS.ABA-2024-0337'),
+  ('Leonardo Nascimento Bassi', 4800, 36, 'PS.ABA-2024-0420'),
+  ('Leticia Marques Moreira', 1600, 20, 'PS.ABA-2024-0468'),
+  ('Ligia Gabriele de Oliveira Mouta', 1400, 20, 'PS.ABA-2024-0487'),
+  ('Liliane de Oliveira Lima', 2600, 9, 'PS.ABA-2024-0510'),
+  ('Lorena Corrêa Guimarães', 0, 0, 'PS.ABA-01-00000007'),
+  ('Luana Beatriz de Brito Joaquim', 0, 0, 'PS.ABA-03.00000047'),
+  ('Luana Da Conceição Pedro', 2200, 9, 'PS.ABA-2024-0335'),
+  ('Luciana Lima Dos Santos', 2400, 9, 'PS.ABA-2024-0441'),
+  ('Luiz Gustavo Mello de Araújo', 6000, 27, 'PS.ABA-2024-0409'),
+  ('Marcela Beatriz Ferreira Martins', 2200, 20, 'PS.ABA-2024-0405'),
+  ('Marcelle Cabral Volpasso', 8000, 45, 'PS.ABA-2024-0343'),
+  ('Marcia Regina Araujo de Paula', 2300, 9, 'PS.ABA-2024-0392'),
+  ('Marcy Helem Corrêa Fernandes de Freitas Piovesan', 2300, 9, 'PS.ABA-2024-0496'),
+  ('Maria Alice Sarmento Jarcem', 3841.18, 12.33, 'PS.ABA-2024-0292'),
+  ('Maria Aparecida Costa Freitas', 1120, 16, 'PS.ABA-2024-0486'),
+  ('Maria Eduarda Marrocos', 2300, 9, 'PS.ABA-2024-0484'),
+  ('Maria Helena Rodrigues da Silva', 1886, 25.33, 'PS.ABA-2024-0509'),
+  ('Mariana Defante', 4200, 27, 'PS.ABA-2024-0355'),
+  ('Mayara Jorge Da Silva Pereira', 2100, 35, 'PS.ABA-01-000000016'),
+  ('Michele Sousa Freire de Faria', 0, 0, 'PS.ABA-03.00000020'),
+  ('Mirlley de Jesus Medeiros', 5200, 18, 'PS.ABA-2024-0427'),
+  ('Nathalia de Lyra Silva Rezende Freitas Inacio', 1980, 18, 'PS.ABA-2024-0482'),
+  ('Nathalia Medeiros D'' Aniello', 5625, 45, 'PS.ABA-2024-0307'),
+  ('Nayara Mendes Bello', 4500, 45, 'PS.ABA-2024-0308'),
+  ('Patricia da Silva Souza Santos', 4600, 18, 'PS.ABA-2024-0301'),
+  ('Patricia Victor da Silva de Lima', 1200, 9, 'PS.ABA-2024-0303'),
+  ('Paula Quintanilha De Sousa', 1866.67, 14, 'PS.ABA-2024-0317'),
+  ('Pauline Mazzei Ventura Silveira', 0, 0, 'PS.ABA-03.00000022'),
+  ('Pedro Igor Castro Teixeira', 0, 0, 'PS.ABA-03.000000019'),
+  ('Rachel Silva De Castro De Brito', 6000, 27, 'PS.ABA-2024-0353'),
+  ('Rafael Pontes Pinheiro De Souza', 6000, 45, 'PS.ABA-2024-0363'),
+  ('Rafaela De Souza Santos', 3600, 27, 'PS.ABA-2024-0368'),
+  ('Rayanne Pimentel De Mendonça', 0, 0, 'PS.ABA-01-00000008'),
+  ('Rodrigo Magalhães do Nascimento', 2300, 9, 'PS.ABA-2024-0443'),
+  ('Rosenilza Abreu Da Silva Leiras', 2300, 9, 'PS.ABA-2024-0497'),
+  ('Sabrina Santos Theobaldo', 3066.67, 23, 'PS.ABA-2024-0505'),
+  ('Samara Honorato da Silva', 3150, 45, 'PS.ABA-2024-0488'),
+  ('Sandra Cristina Moura Morais', 12000, 45, 'PS.ABA-2024-0419'),
+  ('Sara Jennifer Justina de Sousa', 1800, 22.5, 'PS.ABA-2024-0466'),
+  ('Stephanie Amado Diogo Nogueira', 4800, 18, 'PS.ABA-2024-0428'),
+  ('Tailisse Cristina Silva Giusti', 0, 0, 'PS.ABA-01-00000009'),
+  ('Tatiana Batista Gomes da Silva', 1400, 20, 'PS.ABA-2024-0332'),
+  ('Thainá Alves Cabral', 2310, 33, 'PS.ABA-2024-0412'),
+  ('Thais Liberato Silva', 5866.67, 22, 'PS.ABA-2024-0336'),
+  ('Thaísa Raquel Souza Da Gama Sarmento Dos Santos', 2566.67, 19, 'PS.ABA-2024-0302'),
+  ('Thalia Fernandes Pires de Andrade', 0, 0, 'PS.ABA-01-000000010'),
+  ('Thayná Nascimento De Souza', 9244.45, 32, 'PS.ABA-2024-0519'),
+  ('Thiago Henrique Brito Do Nascimento', 7500, 18, 'PS.ABA-2024-0354'),
+  ('Vanessa Kely Souza do Amaral', 1312, 16.33, 'PS.ABA-2024-0520'),
+  ('Vitoria Gabriela Vieira De Mesquita', 1600, 20, 'PS.ABA-2024-0467'),
+  ('Vivian Menendes dos Santos', 7800, 27, 'PS.ABA-2024-0502'),
+  ('Willian da Silva Santos', 0, 0, 'PS.ABA-01-000000013'),
+  ('Yasmim Jeniffer Tavares Silva', 0, 0, 'PS.ABA-03.00000038'),
+  ('Yasmin Souza Meirelles Oliveira', 3966.67, 26, 'PS.ABA-2024-0371')
+ON CONFLICT (profissional_nome) DO UPDATE SET
+  salario    = EXCLUDED.salario,
+  ch_semanal = EXCLUDED.ch_semanal,
+  contrato   = EXCLUDED.contrato,
+  updated_at = now();
+
+-- Pedro Igor Castro Teixeira: único caso com contrato ATUAL parcialmente cadastrado na
+-- ferramenta antiga (cadastro de teste para a regra de contrato duplo AC+PS). Números dos
+-- contratos novos e documento (CPF/CNPJ) ainda pendentes na planilha de origem — só o par
+-- função/PA foi preenchido.
+INSERT INTO remuneracao_contratos_atuais (profissional_nome, documento_tipo, cpf, cnpj, contratos_atuais, observacoes)
+VALUES (
+  'Pedro Igor Castro Teixeira',
+  NULL, NULL, NULL,
+  '[{"numero":"","funcao":"AC","valorPA":35,"vigente":true},{"numero":"","funcao":"PS","valorPA":30,"vigente":true}]'::jsonb,
+  'Cadastro inicial para regra de contrato duplo AC + PS. Documento e numeros dos contratos novos pendentes.'
+)
+ON CONFLICT (profissional_nome) DO UPDATE SET
+  contratos_atuais = EXCLUDED.contratos_atuais,
+  observacoes      = EXCLUDED.observacoes,
+  updated_at       = now();
