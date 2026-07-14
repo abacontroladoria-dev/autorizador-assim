@@ -59,6 +59,9 @@ interface AceitePacBundle {
   status: "pendente" | "confirmado" | "recusado" | "inviavel" | "removido_tita"
   inviavelSlots: string[]
   motivo?: string
+  // Auditoria da implantação (imutável) — ver types/acompanhamento.ts.
+  implantadoPor?: string
+  implantadoPorEmail?: string
 }
 
 // ─── Metadata ─────────────────────────────────────────────────────────────────
@@ -1821,6 +1824,8 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
         ok: boolean
         error?: string
         mensagem?: string
+        implantadoPor?: string
+        implantadoPorEmail?: string | null
         resultados?: Array<{ csvGradeId: string; ok: boolean; codigoErro?: string }>
       } | null
 
@@ -1848,6 +1853,9 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
         sessoes,
         status: "confirmado",
         inviavelSlots: [],
+        // Autoria imutável da implantação (do usuário autenticado no servidor).
+        implantadoPor: body?.implantadoPor,
+        implantadoPorEmail: body?.implantadoPorEmail ?? undefined,
       }
       persistAceites([...aceites, bundle])
 
