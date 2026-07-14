@@ -77,21 +77,24 @@ export function useDraftRow<T extends Record<string, unknown>>(
   const initialRef = useRef(initial)
   const valueRef = useRef(value)
   const saveRef = useRef(save)
+  const statusRef = useRef(status)
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => { valueRef.current = value }, [value])
   useEffect(() => { saveRef.current = save }, [save])
+  useEffect(() => { statusRef.current = status }, [status])
 
   // Ressincroniza com dado externo (ex.: lista recarregada) só quando a
   // linha não tem edição pendente, pra não descartar digitação em andamento.
+  // Lê o status por ref (não via updater de setStatus) para manter o updater
+  // puro — setValue não pode ser efeito colateral dentro de um reducer.
   useEffect(() => {
     if (initial !== initialRef.current) {
       initialRef.current = initial
-      // eslint-disable-next-line react-hooks/set-state-in-effect -- ressincroniza com dado externo assíncrono, só quando a linha não tem edição pendente
-      setStatus(curr => {
-        if (curr === "idle") setValue(initial)
-        return curr
-      })
+      if (statusRef.current === "idle") {
+        // eslint-disable-next-line react-hooks/set-state-in-effect -- ressincroniza com dado externo assíncrono, só quando a linha não tem edição pendente
+        setValue(initial)
+      }
     }
   }, [initial])
 

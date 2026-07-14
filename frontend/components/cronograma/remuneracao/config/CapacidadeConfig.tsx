@@ -128,35 +128,40 @@ export function CapacidadeConfig({ onDirtyChange, registerSave }: CapacidadeConf
 
   useEffect(() => { onDirtyChange?.(dirtyCount > 0) }, [dirtyCount, onDirtyChange])
 
-  const handleSalvarTudo = useCallback(async () => {
-    const { total, ok } = await saveAll()
-    if (!total) return true
-    const sucesso = ok === total
-    if (sucesso) toast.success(`${ok} ${ok === 1 ? "alteração salva" : "alterações salvas"}.`)
-    else toast.error(`${ok} de ${total} salvas — revise as linhas marcadas com erro.`)
-    return sucesso
-  }, [saveAll])
-
-  useEffect(() => {
-    registerSave?.(handleSalvarTudo)
-    return () => registerSave?.(null)
-  }, [handleSalvarTudo, registerSave])
-
-  const carregar = async () => {
-    setLoading(true)
+  const carregar = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true)
     const [{ data: capacidadesData }, { data: rosterData }] = await Promise.all([
       getCapacidades(),
       getProfissionaisRosterComTerapia(),
     ])
     if (capacidadesData) setCapacidades(capacidadesData as CapacidadeProfissional[])
     if (rosterData) setRoster(rosterData)
-    setLoading(false)
-  }
+    if (showLoading) setLoading(false)
+  }, [])
+
+  const handleSalvarTudo = useCallback(async () => {
+    const { total, ok } = await saveAll()
+    if (!total) return true
+    const sucesso = ok === total
+    if (sucesso) {
+      toast.success(`${ok} ${ok === 1 ? "alteração salva" : "alterações salvas"}.`)
+      // Recarrega a lista-fonte (sem flash de loading) para refletir o que foi salvo.
+      await carregar(false)
+    } else {
+      toast.error(`${ok} de ${total} salvas — revise as linhas marcadas com erro.`)
+    }
+    return sucesso
+  }, [saveAll, carregar])
+
+  useEffect(() => {
+    registerSave?.(handleSalvarTudo)
+    return () => registerSave?.(null)
+  }, [handleSalvarTudo, registerSave])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- carga inicial via API, sem valor derivável no primeiro render
     carregar()
-  }, [])
+  }, [carregar])
 
   const linhas = useMemo<LinhaBase[]>(() => {
     const porNome = new Map(capacidades.map(c => [c.profissional_nome, c]))

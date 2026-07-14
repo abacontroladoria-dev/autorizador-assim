@@ -43,8 +43,11 @@ function fetchConfig(): Promise<void> {
 // do navegador, sem precisar de reload) — chamar depois de qualquer salvamento em
 // Config que afete presença/taxas/contratos/capacidade/feriados.
 export function refetchRemuneracaoConfig(): Promise<void> {
-  cachedState = null
   inflightFetch = null
+  // Sinaliza "carregando" às instâncias montadas (mantém a config atual visível
+  // durante um refetch normal; num retry após erro, config já é null) para que
+  // um botão de "Tentar novamente" reflita o progresso.
+  notify({ config: cachedState?.config ?? null, loading: true, error: null })
   return fetchConfig()
 }
 
@@ -55,7 +58,10 @@ export function useRemuneracaoConfig() {
 
   useEffect(() => {
     subscribers.add(setState)
-    if (!cachedState) {
+    // Refaz o fetch quando ainda não há cache OU quando a tentativa anterior
+    // falhou — sem isso, um erro no primeiro carregamento ficava cacheado para
+    // sempre e toda tela de remuneração ficava presa até um reload completo.
+    if (!cachedState || cachedState.error) {
       fetchConfig()
     }
     return () => {

@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useMemo, useState } from "react"
 import toast from "react-hot-toast"
 import { Loader2, Search, ListFilter, Plus, X } from "lucide-react"
 import { getContratos, getProfissionaisRoster, upsertContrato } from "@/services/remuneracao.service"
-import { parseNumeroBR, numeroParaTextoBR, validarCpfCnpj } from "@/lib/remuneracao/formatacao"
+import { parseNumeroBR, formatMoedaBRTexto, maskMoedaBR, validarCpfCnpj } from "@/lib/remuneracao/formatacao"
 import { useDraftRow, useDraftTable, type DraftTable } from "@/hooks/useDraftRow"
 import { SaveStatusBadge } from "./SaveStatusBadge"
 import { SalvarTudoBar } from "./SalvarTudoBar"
@@ -42,12 +42,21 @@ const inputCls = "rounded-md border border-border bg-transparent px-2 py-1 text-
 // único "Salvar tudo" do pai é clicado (D.4) ──────────────────────────────
 
 const LinhaContratoAtual = memo(function LinhaContratoAtual({ linha, table }: { linha: LinhaBase; table: DraftTable }) {
+  const [saveError, setSaveError] = useState<string | null>(null)
+
   const save = useCallback(async (v: LinhaValor) => {
     const cpfValido = validarCpfCnpj(v.cpf)
     const cnpjValido = validarCpfCnpj(v.cnpj)
-    if ((v.cpf.trim() && !cpfValido) || (v.cnpj.trim() && !cnpjValido)) return false
+    if (v.cpf.trim() && !cpfValido) {
+      setSaveError("CPF inválido — corrija ou deixe em branco.")
+      return false
+    }
+    if (v.cnpj.trim() && !cnpjValido) {
+      setSaveError("CNPJ inválido — corrija ou deixe em branco.")
+      return false
+    }
 
-    return upsertContrato({
+    const { ok, error } = await upsertContrato({
       profissional_nome: linha.profissionalNome,
       documento_tipo: v.documentoTipo.trim() || null,
       cpf: v.cpf.trim() || null,
@@ -64,6 +73,8 @@ const LinhaContratoAtual = memo(function LinhaContratoAtual({ linha, table }: { 
           valorTotal: parseNumeroBR(it.valorTotalTexto) ?? 0,
         })),
     })
+    setSaveError(error)
+    return ok
   }, [linha.profissionalNome])
 
   const initial = useMemo<LinhaValor>(() => ({
@@ -74,10 +85,10 @@ const LinhaContratoAtual = memo(function LinhaContratoAtual({ linha, table }: { 
     contratos: linha.contratosAtuais.map(it => ({
       numero: it.numero ?? "",
       funcao: it.funcao ?? "",
-      valorPATexto: numeroParaTextoBR(it.valorPA),
+      valorPATexto: formatMoedaBRTexto(it.valorPA),
       vigente: it.vigente ?? true,
       modeloFaturamento: it.modeloFaturamento === "banco_horas" ? "banco_horas" : "atendimento",
-      valorTotalTexto: numeroParaTextoBR(it.valorTotal),
+      valorTotalTexto: formatMoedaBRTexto(it.valorTotal),
     })),
   }), [linha.cpf, linha.cnpj, linha.documentoTipo, linha.observacoes, linha.contratosAtuais])
 
@@ -161,8 +172,8 @@ const LinhaContratoAtual = memo(function LinhaContratoAtual({ linha, table }: { 
                 <input
                   value={c.funcao}
                   onChange={e => updateContrato(idx, { funcao: e.target.value })}
-                  placeholder="Função"
-                  aria-label={`Função do contrato ${idx + 1} de ${linha.profissionalNome}`}
+                  placeholder="Especialidade/Objeto Contratual"
+                  aria-label={`Especialidade/Objeto Contratual do contrato ${idx + 1} de ${linha.profissionalNome}`}
                   className={`${inputCls} w-full`}
                 />
               )}
@@ -175,8 +186,8 @@ const LinhaContratoAtual = memo(function LinhaContratoAtual({ linha, table }: { 
                   aria-label={`Modelo de faturamento do contrato ${idx + 1} de ${linha.profissionalNome}`}
                   className={`${inputCls} w-full`}
                 >
-                  <option value="atendimento">Por Atendimento</option>
-                  <option value="banco_horas">Por Banco de Horas</option>
+                  <option value="atendimento" className="text-foreground bg-white dark:bg-slate-900">Por Atendimento</option>
+                  <option value="banco_horas" className="text-foreground bg-white dark:bg-slate-900">Por Banco de Horas</option>
                 </select>
               )}
             </td>
@@ -187,18 +198,18 @@ const LinhaContratoAtual = memo(function LinhaContratoAtual({ linha, table }: { 
                   {c.modeloFaturamento === "banco_horas" ? (
                     <input
                       value={c.valorTotalTexto}
-                      onChange={e => updateContrato(idx, { valorTotalTexto: e.target.value })}
+                      onChange={e => updateContrato(idx, { valorTotalTexto: maskMoedaBR(e.target.value) })}
                       placeholder="Valor total pago"
-                      inputMode="decimal"
+                      inputMode="numeric"
                       aria-label={`Valor total pago do contrato ${idx + 1} de ${linha.profissionalNome}`}
                       className={`${inputCls} w-full pl-6 pr-1 text-right`}
                     />
                   ) : (
                     <input
                       value={c.valorPATexto}
-                      onChange={e => updateContrato(idx, { valorPATexto: e.target.value })}
+                      onChange={e => updateContrato(idx, { valorPATexto: maskMoedaBR(e.target.value) })}
                       placeholder="PA"
-                      inputMode="decimal"
+                      inputMode="numeric"
                       aria-label={`Valor PA do contrato ${idx + 1} de ${linha.profissionalNome}`}
                       className={`${inputCls} w-full pl-6 pr-1 text-right`}
                     />
@@ -219,7 +230,7 @@ const LinhaContratoAtual = memo(function LinhaContratoAtual({ linha, table }: { 
             </td>
             <td className="p-2 text-right">
               <div className="flex items-center justify-end gap-1.5 flex-wrap">
-                {isFirst && <SaveStatusBadge status={status} />}
+                {isFirst && <SaveStatusBadge status={status} errorMessage={saveError} />}
                 {c && (
                   <button
                     type="button"
@@ -266,35 +277,41 @@ export function ContratosAtuaisConfig({ onDirtyChange, registerSave }: Contratos
 
   useEffect(() => { onDirtyChange?.(dirtyCount > 0) }, [dirtyCount, onDirtyChange])
 
-  const handleSalvarTudo = useCallback(async () => {
-    const { total, ok } = await saveAll()
-    if (!total) return true
-    const sucesso = ok === total
-    if (sucesso) toast.success(`${ok} ${ok === 1 ? "alteração salva" : "alterações salvas"}.`)
-    else toast.error(`${ok} de ${total} salvas — revise as linhas marcadas com erro (CPF/CNPJ inválido?).`)
-    return sucesso
-  }, [saveAll])
-
-  useEffect(() => {
-    registerSave?.(handleSalvarTudo)
-    return () => registerSave?.(null)
-  }, [handleSalvarTudo, registerSave])
-
-  const carregar = async () => {
-    setLoading(true)
+  const carregar = useCallback(async (showLoading = true) => {
+    if (showLoading) setLoading(true)
     const [{ data: contratosData }, { data: rosterData }] = await Promise.all([
       getContratos(),
       getProfissionaisRoster(),
     ])
     if (contratosData) setContratos(contratosData as ContratoAtual[])
     if (rosterData) setRoster(rosterData)
-    setLoading(false)
-  }
+    if (showLoading) setLoading(false)
+  }, [])
+
+  const handleSalvarTudo = useCallback(async () => {
+    const { total, ok } = await saveAll()
+    if (!total) return true
+    const sucesso = ok === total
+    if (sucesso) {
+      toast.success(`${ok} ${ok === 1 ? "alteração salva" : "alterações salvas"}.`)
+      // Recarrega a lista-fonte (sem flash de loading) para que contador/filtro
+      // "Sem documento" e os badges reflitam os documentos recém-salvos.
+      await carregar(false)
+    } else {
+      toast.error(`${ok} de ${total} salvas — passe o mouse no "erro" das linhas marcadas para ver o motivo.`)
+    }
+    return sucesso
+  }, [saveAll, carregar])
+
+  useEffect(() => {
+    registerSave?.(handleSalvarTudo)
+    return () => registerSave?.(null)
+  }, [handleSalvarTudo, registerSave])
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- carga inicial via API, sem valor derivável no primeiro render
     carregar()
-  }, [])
+  }, [carregar])
 
   const linhas = useMemo<LinhaBase[]>(() => {
     const porNome = new Map(contratos.map(c => [c.profissional_nome, c]))
@@ -387,11 +404,11 @@ export function ContratosAtuaisConfig({ onDirtyChange, registerSave }: Contratos
                   <col className="w-[10%]" />
                   <col className="w-[11%]" />
                   <col className="w-[9%]" />
-                  <col className="w-[9%]" />
                   <col className="w-[13%]" />
                   <col className="w-[10%]" />
-                  <col className="w-[6%]" />
                   <col className="w-[10%]" />
+                  <col className="w-[6%]" />
+                  <col className="w-[6%]" />
                 </colgroup>
                 <thead className="bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-700 text-slate-500 font-bold uppercase tracking-wider text-[11px] sticky top-0 z-10">
                   <tr>
@@ -400,7 +417,7 @@ export function ContratosAtuaisConfig({ onDirtyChange, registerSave }: Contratos
                     <th className="p-2">CNPJ</th>
                     <th className="p-2">Observações</th>
                     <th className="p-2">Contrato Nº</th>
-                    <th className="p-2">Função</th>
+                    <th className="p-2 break-words">Especialidade/Objeto Contratual</th>
                     <th className="p-2">Modelo</th>
                     <th className="p-2 text-right">Valor (R$)</th>
                     <th className="p-2 text-center">Vigente</th>

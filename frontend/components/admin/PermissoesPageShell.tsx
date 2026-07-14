@@ -269,7 +269,16 @@ export default function PermissoesPageShell() {
       if (!data.user) { setIsAdmin(false); return }
       const { data: perfil } = await supabase
         .from('usuarios').select('role').eq('id', data.user.id).single()
-      setIsAdmin(perfil?.role === 'admin')
+      const role = perfil?.role ?? ''
+      // Mesma fonte de verdade do Sidebar/proxy (routes.ts): defaults do role +
+      // override individual — não um `role === 'admin'` fixo. Isso é o que
+      // permite liberar esta tela para outro role (ex.: diretoria) via
+      // routes.ts sem precisar editar este componente de novo.
+      if (role === 'admin') { setIsAdmin(true); return }
+      const defaults = getRoleDefaultPermissions(role)
+      const overrides = await getUsuarioPermissoes(data.user.id)
+      const override = overrides.find(o => o.permissao_codigo === 'permissoes')
+      setIsAdmin(override ? override.permitido : defaults.includes('permissoes'))
     })
   }, [])
 
@@ -407,7 +416,7 @@ export default function PermissoesPageShell() {
           </div>
           <h2 className="text-lg font-bold text-slate-800 mb-2">Acesso não autorizado</h2>
           <p className="text-sm text-slate-500">
-            Apenas administradores podem gerenciar permissões.
+            Seu perfil não tem permissão para gerenciar permissões.
           </p>
         </div>
       </div>

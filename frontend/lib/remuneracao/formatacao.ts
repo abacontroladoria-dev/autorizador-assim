@@ -80,6 +80,24 @@ export function numeroParaTextoBR(v: number | null | undefined): string {
   return String(v).replace(".", ",")
 }
 
+// Máscara de moeda "estilo caixa eletrônico": os últimos 2 dígitos digitados
+// são sempre os centavos — cada tecla reformata o texto todo a partir dos
+// dígitos brutos (ignora o que já estava formatado). Usado em <input> de
+// valor (PA, valor total) pra digitar sem precisar saber onde fica a vírgula.
+export function maskMoedaBR(raw: string): string {
+  const digitos = onlyDigits(raw)
+  if (!digitos) return ""
+  const centavos = parseInt(digitos, 10)
+  return (centavos / 100).toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
+// Número → texto já mascarado (com separador de milhar), pra popular o
+// mesmo <input> de maskMoedaBR com o valor vindo do servidor.
+export function formatMoedaBRTexto(v: number | null | undefined): string {
+  if (v === null || v === undefined || Number.isNaN(v)) return ""
+  return v.toLocaleString("pt-BR", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+}
+
 export function validarCpfCnpj(v: unknown): boolean {
   const digitos = onlyDigits(v)
   if (!digitos) return true

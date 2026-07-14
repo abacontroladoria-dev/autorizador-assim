@@ -18,10 +18,10 @@ function InfoTooltip({ text }: { text: string }) {
         ?
       </div>
       <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 opacity-0 transition-opacity group-hover:opacity-100 group-focus:opacity-100 z-50">
-        <div className="rounded-lg bg-slate-800 dark:bg-slate-200 p-2 text-xs text-white dark:text-slate-900 shadow-xl text-center">
+        <div className="rounded-lg bg-slate-900 border border-slate-700 p-2 text-xs text-white shadow-xl text-center">
           {text}
         </div>
-        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-slate-800 dark:border-t-slate-200" />
+        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-slate-900" />
       </div>
     </div>
   )
@@ -182,9 +182,16 @@ export function ConfigTab() {
       <div className="p-8">
         <div className="rounded-xl border border-red-200 bg-red-50 p-4 flex gap-3 text-red-800 dark:text-red-300">
           <AlertCircle className="w-5 h-5 shrink-0" />
-          <div>
+          <div className="flex-1">
             <div className="font-bold">Erro ao carregar configurações</div>
             <div className="text-sm mt-1">{configError || "Configuração não encontrada"}</div>
+            <button
+              type="button"
+              onClick={() => { void refetchRemuneracaoConfig() }}
+              className="mt-3 inline-flex items-center gap-2 rounded-lg border border-red-300 bg-white/60 dark:bg-transparent px-3 py-1.5 text-sm font-semibold text-red-700 dark:text-red-300 hover:bg-white transition-colors"
+            >
+              Tentar novamente
+            </button>
           </div>
         </div>
       </div>

@@ -530,9 +530,11 @@ export default function Sidebar() {
           )}
 
           {/* Administração */}
-          {canAccess("/admin") && (
+          {(canAccess("/admin") || canAccess("/admin/permissoes")) && (
             <SidebarGroup title="Administração" icon={ShieldCheck}>
-              <MenuItem label="Usuários" icon={Users} path="/admin" />
+              {canAccess("/admin") && (
+                <MenuItem label="Usuários" icon={Users} path="/admin" />
+              )}
               {canAccess("/admin/permissoes") && (
                 <MenuItem label="Permissões" icon={KeyRound} path="/admin/permissoes" />
               )}

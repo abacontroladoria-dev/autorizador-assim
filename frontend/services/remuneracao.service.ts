@@ -120,11 +120,11 @@ export async function getContratos() {
   return { data, error }
 }
 
-export async function upsertContrato(record: any) {
+export async function upsertContrato(record: any): Promise<{ ok: boolean; error: string | null }> {
   const supabase = getSupabaseClient()
   const { error } = await supabase.from('remuneracao_contratos').upsert(record, { onConflict: 'profissional_nome' })
   if (error) console.error('Erro ao salvar contrato:', error)
-  return !error
+  return { ok: !error, error: error?.message ?? null }
 }
 
 export async function getHistoricoSnapshots() {

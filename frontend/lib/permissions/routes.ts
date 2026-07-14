@@ -27,6 +27,10 @@ export const roleDefaults: Record<string, string[]> = {
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
     'relacionamento_prestador_individual', 'relacionamento_prestador_config',
     'relacionamento_prestador_historico', 'relacionamento_prestador_legenda',
+    // Gestão de acessos: só a tela de Permissões (/admin/permissoes), não a de
+    // Usuários (/admin). Requer o RLS de is_diretoria() — migration
+    // 20260713140000_diretoria_gerencia_permissoes.sql.
+    'permissoes',
   ],
   recepcao: [
     'dashboard', 'atendimentos', 'gestao', 'cronograma', 'auditoria_assim',
