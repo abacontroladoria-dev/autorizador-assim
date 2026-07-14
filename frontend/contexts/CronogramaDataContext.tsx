@@ -537,10 +537,17 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
         const { data: { user } } = await sb.auth.getUser()
         const nowIso = new Date().toISOString()
 
-        // Busca ids existentes para calcular diff
-        const { data: existing } = await sb.from("acomp_pac_bundles").select("id")
-        const existingIds = new Set((existing ?? []).map((r: { id: string }) => r.id))
+        // Busca ids + status existentes para calcular diff. O status é usado para
+        // detectar decisões genuínas (bundle novo ou que MUDOU de status) e alimentar
+        // a auditoria append-only — sem isso, o re-upsert de tudo re-registraria o
+        // mesmo aceite a cada sincronização.
+        const { data: existing } = await sb.from("acomp_pac_bundles").select("id, status")
+        const statusAnterior = new Map((existing ?? []).map((r: { id: string; status: string }) => [r.id, r.status]))
+        const existingIds = new Set(statusAnterior.keys())
         const nextIds = new Set(next.map(b => b.id))
+
+        // Bundles cuja DECISÃO é nova: id inédito ou status diferente do persistido.
+        const decisoesNovas = next.filter(b => !existingIds.has(b.id) || statusAnterior.get(b.id) !== b.status)
 
         const toUpsert = next.filter(b => {
           if (!existingIds.has(b.id)) return true
@@ -556,6 +563,37 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
         }
         if (toDelete.length) {
           await sb.from("acomp_pac_bundles").delete().in("id", toDelete)
+        }
+
+        // Auditoria append-only do ACEITE na tela (uma linha por sessão), só para
+        // decisões genuinamente novas. Best-effort: nunca derruba a sincronização.
+        if (user && decisoesNovas.length) {
+          try {
+            const linhasAudit = decisoesNovas.flatMap(b =>
+              b.sessoes.map(s => ({
+                evento: "aceite",
+                lote_id: b.id,
+                bundle_id: b.id,
+                status_bundle: b.status,
+                paciente: b.pac,
+                profissional: s.prof,
+                terapia: s.tP,
+                dia: s.dia,
+                hora: s.hora,
+                unidade: s.unidade,
+                csv_grade_id: s.csvGradeId,
+                dados: { origem: b.origem, motivo: b.motivo ?? null },
+                usuario_id: user.id,
+                usuario_email: user.email ?? null,
+              })),
+            )
+            if (linhasAudit.length) {
+              const { error: auditErro } = await sb.from("acomp_auditoria").insert(linhasAudit)
+              if (auditErro) console.error("[acomp] falha ao gravar auditoria de aceite (ignorada)", auditErro.message)
+            }
+          } catch (auditEx) {
+            console.error("[acomp] exceção ao gravar auditoria de aceite (ignorada)", (auditEx as Error).message)
+          }
         }
       } catch (e) {
         const msg = (e as Error).message || ""

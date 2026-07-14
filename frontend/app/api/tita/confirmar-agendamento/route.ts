@@ -37,8 +37,8 @@ interface ResultadoSessao {
   idAgendaFav?: number
 }
 
-async function getCurrentUser(request: NextRequest) {
-  const supabase = createServerClient(
+function criarSupabase(request: NextRequest) {
+  return createServerClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
     {
@@ -48,8 +48,6 @@ async function getCurrentUser(request: NextRequest) {
       },
     }
   )
-  const { data: { user } } = await supabase.auth.getUser()
-  return user
 }
 
 // Implanta na TiTa as sessões aceitas no fluxo de Ocupação de Paciente.
@@ -63,7 +61,8 @@ async function getCurrentUser(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const inicioTotal = Date.now()
 
-  const user = await getCurrentUser(request)
+  const supabase = criarSupabase(request)
+  const { data: { user } } = await supabase.auth.getUser()
   if (!user) return NextResponse.json({ ok: false, error: "not_authenticated" }, { status: 401 })
 
   const body = await request.json().catch(() => null) as RequestBody | null
@@ -197,6 +196,37 @@ export async function POST(request: NextRequest) {
       `criadas=${agregado.criadas} conflitos=${agregado.conflitos} rejeitadas=${agregado.rejeitadas} duracaoMs=${Date.now() - inicioCriacao}`,
   )
   if (!ok) console.error(`${LOG_TAG} falha na chamada de criação — auditar`, JSON.stringify(resultados.map(r => ({ csvGradeId: r.csvGradeId, codigoErro: r.codigoErro }))))
+
+  // Auditoria append-only da escrita EFETIVA na TiTa (uma linha por sessão).
+  // Só chega aqui quem passou pelas fases de preparação e disponibilidade, então
+  // isto reflete a chamada real de agendamento/create. É best-effort: uma falha
+  // ao gravar a auditoria nunca pode derrubar a resposta ao usuário. usuario_id
+  // é carimbado pela policy (with check = auth.uid()); usuario_email é o snapshot.
+  try {
+    const loteId = `${inicioTotal}_${body.pac}`
+    const linhas = criacoes.map(c => ({
+      evento: "escrita_tita",
+      lote_id: loteId,
+      paciente: body.pac,
+      profissional: c.sessao.prof,
+      terapia: c.sessao.tP,
+      dia: c.sessao.dia,
+      hora: c.sessao.hora,
+      unidade: c.sessao.unidade,
+      csv_grade_id: c.sessao.csvGradeId,
+      resultado: c.resumo.status,
+      criadas: c.resumo.criadas,
+      conflitos: c.resumo.conflitos,
+      rejeitadas: c.resumo.rejeitadas,
+      id_agenda_fav: c.resumo.idAgendaFav ?? null,
+      usuario_id: user.id,
+      usuario_email: user.email ?? null,
+    }))
+    const { error: auditErro } = await supabase.from("acomp_auditoria").insert(linhas)
+    if (auditErro) console.error(`${LOG_TAG} falha ao gravar auditoria (ignorada)`, auditErro.message)
+  } catch (e) {
+    console.error(`${LOG_TAG} exceção ao gravar auditoria (ignorada)`, (e as Error).message)
+  }
 
   console.log(`${LOG_TAG} fim pac=${body.pac} ok=${ok} duracaoTotalMs=${Date.now() - inicioTotal}`)
   return NextResponse.json({
