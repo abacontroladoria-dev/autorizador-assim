@@ -140,7 +140,7 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
   }, [setDispRows])
 
   useEffect(() => {
-    if (isOcupacaoPage) return // página gerencia o próprio rightContent — não interferir
+    if (isOcupacaoPage || isReposicaoPage) return // página gerencia o próprio rightContent — não interferir
     setRightContent(
       <CronogramaUploadBadges
         cRows={cRows}

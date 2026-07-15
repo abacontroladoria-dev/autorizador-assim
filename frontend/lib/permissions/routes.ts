@@ -12,7 +12,7 @@ export const roleDefaults: Record<string, string[]> = {
     'guias_digitais', 'auditoria_assim', 'usuarios', 'permissoes', 'cco',
     'autorizacoes', 'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
-    'ocupacao_clinica', 'ocupacao_profissionais',
+    'ocupacao_clinica', 'ocupacao_profissionais', 'reposicao_faltas',
     'analise_tratativas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
     'relacionamento_prestador_individual', 'relacionamento_prestador_config',
@@ -23,7 +23,7 @@ export const roleDefaults: Record<string, string[]> = {
     'escala_terapeutica', 'auditoria_assim',
     'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
-    'ocupacao_clinica', 'ocupacao_profissionais',
+    'ocupacao_clinica', 'ocupacao_profissionais', 'reposicao_faltas',
     'analise_tratativas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
     'relacionamento_prestador_individual', 'relacionamento_prestador_config',
@@ -48,7 +48,7 @@ export const roleDefaults: Record<string, string[]> = {
   cronograma: [
     'dashboard', 'cronograma_solicitacoes',
     'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
-    'ocupacao_clinica',
+    'ocupacao_clinica', 'reposicao_faltas',
   ],
 }
 
@@ -78,6 +78,7 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   cronograma_ocupacao_paciente: ['/cronograma/ocupacao-paciente'],
   ocupacao_clinica: ['/cronograma/ocupacao'],
   ocupacao_profissionais: ['/cronograma/indicadores'],
+  reposicao_faltas: ['/cronograma/reposicao'],
   analise_tratativas: ['/analise-tratativas'],
   relacionamento_prestador_analise: ['/relacionamento-prestador/analise'],
   relacionamento_prestador_rp: ['/relacionamento-prestador/rp'],
