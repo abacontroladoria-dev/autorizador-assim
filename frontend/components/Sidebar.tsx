@@ -489,8 +489,13 @@ export default function Sidebar() {
               {canAccess("/cronograma/saida-profissional") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/saida-profissional" />}
               {canAccess("/cronograma/ocupacao-paciente") && <MenuItem label="Ocupação Paciente" icon={UserCheck} path="/cronograma/ocupacao-paciente" />}
               {canAccess("/cronograma/solicitacoes") && <MenuItem label="Novo Cronograma" icon={CalendarPlus} path="/cronograma/solicitacoes?tab=novo-cron" />}
+              {canAccess("/cronograma/solicitacoes") && <MenuItem label="Simulação de Novo Prestador" icon={UserPlus} path="/cronograma/solicitacoes?tab=simulacao" />}
+              {canAccess("/cronograma/solicitacoes") && <MenuItem label="Aumentar Ocupação (Profissional)" icon={Zap} path="/cronograma/solicitacoes?tab=ocup-prof" />}
               {canAccess("/cronograma/reposicao") && <MenuItem label="Reposição de Faltas" icon={RotateCcw} path="/cronograma/reposicao" />}
               {canAccess("/cronograma/ocupacao") && <MenuItem label="Aceites e Recusas" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
+              {canAccess("/cronograma/ocupacao") && <MenuItem label="Aumentar Ocupação (Clínica)" icon={Stethoscope} path="/cronograma/ocupacao?tab=vagas" />}
+              {canAccess("/cronograma/ocupacao") && <MenuItem label="Diferença: Laudo e Oferta" icon={BarChart3} path="/cronograma/ocupacao?tab=gaps" />}
+              {canAccess("/cronograma/ocupacao") && <MenuItem label="Inconsistências e Exceções" icon={AlertTriangle} path="/cronograma/ocupacao?tab=inconsistencias" />}
             </SidebarGroup>
           )}
 
