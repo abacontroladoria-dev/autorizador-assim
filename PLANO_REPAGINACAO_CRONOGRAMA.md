@@ -2,6 +2,23 @@
 
 **Objetivo:** alinhar 5 abas do módulo Cronograma ao design system atual do sistema-pulsar, sem tocar em algoritmo/lógica. Repaginada visual completa: tipografia, cor, espaçamento, componentes, dark mode e motion.
 
+---
+
+## 0. Contexto para iniciar uma sessão nova
+
+> Cole isto (ou aponte para este arquivo) ao abrir um chat novo para executar.
+
+- **Branch de trabalho:** `pulsar-cronograma` (já criada, = main + Reposição de Faltas + links do Sidebar). Confirme com `git branch --show-current` antes de editar.
+- **Regra de ouro:** NÃO alterar lógica. O cálculo vive em `useMemo`/`useCallback` no topo de cada componente; mexa só no `return (…)` (JSX) e nos mapas de estilo. Resultados numéricos devem ser idênticos antes/depois.
+- **Antes de escrever qualquer estilo, leia estes arquivos-âncora (o "bom" a replicar):**
+  - `frontend/components/cronograma/remuneracao/CardRemun.tsx` (padrão premium de referência)
+  - `frontend/components/cronograma/remuneracao/AnaliseFuturaTab.tsx` (tons semânticos + filtros + estados)
+  - `frontend/app/globals.css` (tokens: escala tipográfica, `--radius-*`, brand hue 217, overrides de dark mode)
+  - `frontend/components/cronograma/ui/DataTable.tsx` e `ui/ConfirmDialog.tsx` e `ui/button.tsx` (primitivas já existentes)
+- **Stack:** Next.js (versão com breaking changes — ver `frontend/AGENTS.md`), Tailwind v4 + tokens shadcn, dark mode por override em `globals.css` (não `dark:` em tudo).
+- **Verificação por fase:** `cd frontend && npx tsc --noEmit -p .`; dev server em localhost:3000 (já roda com hot reload); screenshot light **e** dark; breakpoint mobile; conferir números idênticos aos da versão anterior.
+- **Ordem:** Fase 0 (primitivas) → piloto **GapsTab** → aprovação → demais abas (§5).
+
 **Abas no escopo:**
 
 | # | Aba (Sidebar) | Arquivo | Linhas |
