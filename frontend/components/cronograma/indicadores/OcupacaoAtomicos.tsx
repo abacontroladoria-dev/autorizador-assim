@@ -42,18 +42,17 @@ export function FiltroCheckbox({
   }
 
   return (
-    <div className="rounded-xl bg-white border p-3" style={{ borderColor: '#e5e7eb' }}>
+    <div className="rounded-xl bg-card border p-3" style={{ borderColor: 'var(--border)' }}>
       <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="text-xs font-bold" style={{ color: B.navy }}>{titulo}</div>
+        <div className="text-xs font-bold text-foreground">{titulo}</div>
         <div className="flex gap-1">
           <button type="button" onClick={() => setSelecionados([])}
-            className="text-[11px] font-bold px-2 py-1 rounded-full"
-            style={{ background: todas ? cor : B.navyLt, color: todas ? '#fff' : B.navy }}>
+            className={`rounded-full px-2 py-1 text-[11px] font-bold ${todas ? "" : "bg-muted text-foreground"}`}
+            style={todas ? { background: cor, color: '#fff' } : undefined}>
             Selecionar todos
           </button>
           <button type="button" onClick={() => setSelecionados(['__none__'])}
-            className="text-[11px] font-bold px-2 py-1 rounded-full"
-            style={{ background: B.orangeLt, color: B.orange }}>
+            className="rounded-full bg-orange-50 px-2 py-1 text-[11px] font-bold text-orange-700 dark:bg-orange-950/30 dark:text-orange-400">
             Desmarcar todos
           </button>
         </div>
@@ -85,8 +84,8 @@ interface FiltroRadioProps {
 
 export function FiltroRadio({ titulo, opcoes, selecionado, setSelecionado }: FiltroRadioProps) {
   return (
-    <div className="rounded-xl bg-white border p-3" style={{ borderColor: '#e5e7eb' }}>
-      <div className="text-xs font-bold mb-2" style={{ color: B.navy }}>{titulo}</div>
+    <div className="rounded-xl bg-card border p-3" style={{ borderColor: 'var(--border)' }}>
+      <div className="mb-2 text-xs font-bold text-foreground">{titulo}</div>
       <div className="space-y-1">
         {opcoes.map(op => (
           <label key={op.k} className="flex items-center gap-2 text-xs py-1 cursor-pointer">
@@ -115,7 +114,7 @@ interface DashboardCardProps {
 
 export function DashboardCard({ titulo, valor, detalhe, cor = B.blue }: DashboardCardProps) {
   return (
-    <div className="rounded-xl bg-white border overflow-hidden flex flex-col" style={{ borderColor: '#e7edf5' }}>
+    <div className="rounded-xl bg-card border overflow-hidden flex flex-col" style={{ borderColor: 'var(--border)' }}>
       <div style={{ height: 3, background: cor, flexShrink: 0 }} />
       <div className="px-3 pt-2.5 pb-3 flex flex-col gap-1 flex-1">
         <div className="text-[10px] font-bold uppercase tracking-widest leading-none"
@@ -126,7 +125,7 @@ export function DashboardCard({ titulo, valor, detalhe, cor = B.blue }: Dashboar
           {valor}
         </div>
         {detalhe && (
-          <div className="text-[11px] leading-snug mt-0.5" style={{ color: '#6b7280' }}>
+          <div className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
             {detalhe}
           </div>
         )}

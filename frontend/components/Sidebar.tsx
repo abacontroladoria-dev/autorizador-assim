@@ -22,7 +22,6 @@ import {
   TrendingUp,
   UserCheck,
   UserPlus,
-  Zap,
   Clock,
   XCircle,
   AlertTriangle,
@@ -35,6 +34,7 @@ import {
   Wallet,
   LineChart,
   RotateCcw,
+  DoorOpen,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -69,12 +69,11 @@ const pathIconMap: Record<string, any> = {
   "/admin": ShieldCheck,
   "/admin/permissoes": KeyRound,
   "/cronograma/solicitacoes?tab=simulacao": UserPlus,
-  "/cronograma/solicitacoes?tab=ocup-prof": TrendingUp,
   "/cronograma/solicitacoes?tab=novo-cron": CalendarPlus,
   "/cronograma/solicitacoes?tab=banco": Database,
+  "/cronograma/ocupacao-salas": DoorOpen,
   "/cronograma/saida-profissional": LogOut,
   "/cronograma/ocupacao-paciente": TrendingUp,
-  "/cronograma/ocupacao?tab=vagas": TrendingUp,
   "/cronograma/ocupacao?tab=fila": Clock,
   "/cronograma/ocupacao?tab=recusados": XCircle,
   "/cronograma/ocupacao?tab=inviavel": AlertTriangle,
@@ -89,7 +88,9 @@ const pathIconMap: Record<string, any> = {
   "/relacionamento-prestador/config": Settings,
   "/relacionamento-prestador/historico": LineChart,
   "/relacionamento-prestador/legenda": BookOpen,
-  "/cronograma/indicadores": BarChart3,
+  "/cronograma/indicadores?tab=profissionais": BarChart3,
+  "/cronograma/indicadores?tab=unidades": Building2,
+  "/cronograma/indicadores?tab=pacientes": UserCheck,
 }
 
 export default function Sidebar() {
@@ -484,16 +485,15 @@ export default function Sidebar() {
           )}
 
           {/* Cronograma */}
-          {(canAccess("/cronograma/saida-profissional") || canAccess("/cronograma/ocupacao-paciente") || canAccess("/cronograma/ocupacao") || canAccess("/cronograma/reposicao")) && (
+          {(canAccess("/cronograma/saida-profissional") || canAccess("/cronograma/ocupacao-paciente") || canAccess("/cronograma/ocupacao") || canAccess("/cronograma/reposicao") || canAccess("/cronograma/ocupacao-salas")) && (
             <SidebarGroup title="Cronograma" icon={CalendarRange}>
+              {canAccess("/cronograma/ocupacao-salas") && <MenuItem label="Ocupação de Salas" icon={DoorOpen} path="/cronograma/ocupacao-salas" />}
               {canAccess("/cronograma/saida-profissional") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/saida-profissional" />}
               {canAccess("/cronograma/ocupacao-paciente") && <MenuItem label="Ocupação Paciente" icon={UserCheck} path="/cronograma/ocupacao-paciente" />}
               {canAccess("/cronograma/solicitacoes") && <MenuItem label="Novo Cronograma" icon={CalendarPlus} path="/cronograma/solicitacoes?tab=novo-cron" />}
               {canAccess("/cronograma/solicitacoes") && <MenuItem label="Simulação de Novo Prestador" icon={UserPlus} path="/cronograma/solicitacoes?tab=simulacao" />}
-              {canAccess("/cronograma/solicitacoes") && <MenuItem label="Aumentar Ocupação (Profissional)" icon={Zap} path="/cronograma/solicitacoes?tab=ocup-prof" />}
               {canAccess("/cronograma/reposicao") && <MenuItem label="Reposição de Faltas" icon={RotateCcw} path="/cronograma/reposicao" />}
               {canAccess("/cronograma/ocupacao") && <MenuItem label="Aceites e Recusas" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
-              {canAccess("/cronograma/ocupacao") && <MenuItem label="Aumentar Ocupação (Clínica)" icon={Stethoscope} path="/cronograma/ocupacao?tab=vagas" />}
               {canAccess("/cronograma/ocupacao") && <MenuItem label="Diferença: Laudo e Oferta" icon={BarChart3} path="/cronograma/ocupacao?tab=gaps" />}
               {canAccess("/cronograma/ocupacao") && <MenuItem label="Inconsistências e Exceções" icon={AlertTriangle} path="/cronograma/ocupacao?tab=inconsistencias" />}
             </SidebarGroup>
@@ -502,7 +502,9 @@ export default function Sidebar() {
           {/* Indicadores */}
           {canAccess("/cronograma/indicadores") && (
             <SidebarGroup title="Indicadores" icon={TrendingUp}>
-              <MenuItem label="Ocupação de Profissionais" icon={BarChart3} path="/cronograma/indicadores" />
+              <MenuItem label="Ocupação de Profissionais" icon={BarChart3} path="/cronograma/indicadores?tab=profissionais" />
+              <MenuItem label="Dashboard por Unidade" icon={Building2} path="/cronograma/indicadores?tab=unidades" />
+              <MenuItem label="Dashboard de Pacientes" icon={UserCheck} path="/cronograma/indicadores?tab=pacientes" />
             </SidebarGroup>
           )}
 

@@ -3,7 +3,6 @@
 import { useSearchParams, useRouter } from "next/navigation"
 import { useEffect } from "react"
 import { useHeader } from "@/contexts/HeaderContext"
-import { OcupProfMode } from "./OcupProfMode"
 import { PreencherProfTab } from "@/components/cronograma/shared/PreencherProfTab"
 import { NovoCronogramaTab } from "@/components/cronograma/shared/NovoCronogramaTab"
 import { BancoDadosTab } from "./BancoDadosTab"
@@ -14,7 +13,6 @@ import type { CsvRow, LaudoRow, DispRow, CfgState } from "@/types/cronograma"
 // para poderem ter permissões independentes — ver frontend/lib/permissions/routes.ts
 const TABS = [
   { key: "simulacao",  label: "Simulação de Novo Prestador" },
-  { key: "ocup-prof",  label: "Aumentar Ocupação (Profissional)" },
   { key: "novo-cron",  label: "Novo Cronograma" },
 ] as const
 
@@ -38,7 +36,6 @@ export function SolicitacoesShell({ cRows, lRows, dispRows, cfg }: ShellProps) {
   useEffect(() => {
     const tab = TABS.find(t => t.key === activeTab)
     const subtitles: Record<string, string> = {
-      "ocup-prof":  "Aumente a ocupação de sessões por profissional",
       "simulacao":  "Simulação de novo prestador",
       "novo-cron":  "Criação de novo cronograma",
     }
@@ -71,10 +68,6 @@ function TabContent({
 
   if (tab === "simulacao") {
     return <PreencherProfTab cRows={cRows} lRows={lRows} initialMode="sim" fixedMode />
-  }
-
-  if (tab === "ocup-prof") {
-    return <OcupProfMode cRows={cRows} lRows={lRows} cfg={cfg} />
   }
 
   if (tab === "novo-cron") {

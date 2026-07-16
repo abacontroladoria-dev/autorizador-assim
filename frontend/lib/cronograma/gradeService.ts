@@ -12,7 +12,7 @@ const MOJIBAKE_RE = /[Â-Ã][-¿]/
 // A sincronização da grade (Edge Function sync-grade-csv) grava texto com dupla
 // codificação UTF-8. Isto repara na leitura. Só atua quando o padrão está presente,
 // para não corromper texto já correto.
-function fixMojibake(s: string | null | undefined): string {
+export function fixMojibake(s: string | null | undefined): string {
   const str = s ?? ""
   if (!str || !MOJIBAKE_RE.test(str)) return str
   try {

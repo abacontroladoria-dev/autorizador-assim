@@ -5,7 +5,7 @@ import { B } from "@/lib/cronograma/constants"
 
 interface Props {
   title: string
-  description?: string
+  description?: React.ReactNode
   obsLabel?: string
   obsRequired?: boolean
   obsPlaceholder?: string
@@ -46,7 +46,7 @@ export function ConfirmDialog({
         <div style={{ fontWeight: 800, fontSize: "16px", color: B.navy }}>{title}</div>
 
         {description && (
-          <div style={{ fontSize: "13px", color: "var(--muted-foreground)", marginTop: "-8px" }}>
+          <div style={{ fontSize: "13px", color: "var(--muted-foreground)", marginTop: "-8px", whiteSpace: "pre-line" }}>
             {description}
           </div>
         )}

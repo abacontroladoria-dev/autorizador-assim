@@ -1,0 +1,121 @@
+"use client"
+
+import { useEffect, useMemo, useState } from "react"
+import { DoorOpen, Loader2, Plus } from "lucide-react"
+import { useHeader } from "@/contexts/HeaderContext"
+import { SegmentedTabs } from "@/components/cronograma/ui/SegmentedTabs"
+import { StatCard } from "@/components/cronograma/ui/StatCard"
+import { useOcupacaoSalas } from "@/hooks/useOcupacaoSalas"
+import { SalasFiltros, SALAS_FILTROS_VAZIO, aplicarFiltrosSala, salaTemProfissional, type SalasFiltrosState } from "@/components/cronograma/salas/SalasFiltros"
+import { SalasGridView } from "@/components/cronograma/salas/SalasGridView"
+import { SalasHeatmapView } from "@/components/cronograma/salas/SalasHeatmapView"
+import { SalaEditModal } from "@/components/cronograma/salas/SalaEditModal"
+import type { Sala, SlotOcupacaoSala } from "@/lib/cronograma/salasTypes"
+
+type ViewTab = "grade" | "mapa"
+
+export default function OcupacaoSalasPage() {
+  const { setHeader } = useHeader()
+  useEffect(() => {
+    setHeader("Ocupação de Salas", "Cadastro estrutural de salas cruzado com a agenda real")
+    return () => setHeader("", "")
+  }, [setHeader])
+
+  const { salasComOcupacao, resumoUnidades, loading, error, recarregar, encontrarAlocacaoDoProfissional } = useOcupacaoSalas()
+
+  const [tab, setTab] = useState<ViewTab>("grade")
+  const [filtros, setFiltros] = useState<SalasFiltrosState>(SALAS_FILTROS_VAZIO)
+  const [editando, setEditando] = useState<Sala | null | "novo">(null)
+
+  const unidades = useMemo(() => [...new Set(salasComOcupacao.map(s => s.sala.unidade_nome))].sort(), [salasComOcupacao])
+  const nucleos = useMemo(() => [...new Set(salasComOcupacao.map(s => s.sala.nucleo).filter((n): n is string => !!n))].sort(), [salasComOcupacao])
+  const andares = useMemo(() => [...new Set(salasComOcupacao.map(s => s.sala.andar).filter((n): n is string => !!n))].sort(), [salasComOcupacao])
+
+  const filtradas = useMemo(() => {
+    return salasComOcupacao
+      .filter(item => aplicarFiltrosSala(filtros, item.sala) && salaTemProfissional(item, filtros.profissional))
+      .map(item => {
+        if (!filtros.turno) return item
+        const slots = item.slots.filter((s: SlotOcupacaoSala) => s.turno === filtros.turno)
+        return { ...item, slots }
+      })
+  }, [salasComOcupacao, filtros])
+
+  const totalInconsistencias = resumoUnidades.reduce((sum, r) => sum + r.inconsistencias, 0)
+  const totalSalas = salasComOcupacao.length
+  const totalBloqueadas = salasComOcupacao.filter(s => s.sala.status === "bloqueada").length
+  const pctGeral = (() => {
+    const total = resumoUnidades.reduce((s, r) => s + r.slotsTotal, 0)
+    const ocup = resumoUnidades.reduce((s, r) => s + r.slotsOcupados, 0)
+    return total > 0 ? ocup / total : null
+  })()
+
+  return (
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard tone="slate" icon={<DoorOpen size={15} />} label="Salas cadastradas">
+          <div className="text-2xl font-black text-foreground">{totalSalas}</div>
+        </StatCard>
+        <StatCard tone="blue" icon={<DoorOpen size={15} />} label="Ocupação da semana">
+          <div className="text-2xl font-black text-foreground">{pctGeral !== null ? `${Math.round(pctGeral * 100)}%` : "—"}</div>
+        </StatCard>
+        <StatCard tone="red" icon={<DoorOpen size={15} />} label="Salas bloqueadas">
+          <div className="text-2xl font-black text-foreground">{totalBloqueadas}</div>
+        </StatCard>
+        <StatCard tone="amber" icon={<DoorOpen size={15} />} label="Inconsistências">
+          <div className="text-2xl font-black text-foreground">{totalInconsistencias}</div>
+        </StatCard>
+      </div>
+
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <SegmentedTabs
+          value={tab}
+          onChange={setTab}
+          ariaLabel="Visão de ocupação de salas"
+          tabs={[
+            { value: "grade", label: "Grade" },
+            { value: "mapa", label: "Mapa de calor" },
+          ]}
+        />
+        <button
+          type="button"
+          onClick={() => setEditando("novo")}
+          className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900"
+        >
+          <Plus size={14} /> Nova sala
+        </button>
+      </div>
+
+      <SalasFiltros value={filtros} onChange={setFiltros} unidades={unidades} nucleos={nucleos} andares={andares} />
+
+      {loading && (
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          <Loader2 size={14} className="animate-spin" /> Carregando salas e agenda...
+        </div>
+      )}
+      {error && <div className="text-sm font-semibold text-rose-600 dark:text-rose-400">{error}</div>}
+
+      {!loading && !error && (
+        tab === "grade"
+          ? (
+            <SalasGridView
+              salas={filtradas}
+              onEditarSala={id => setEditando(salasComOcupacao.find(s => s.sala.id === id)?.sala ?? null)}
+              encontrarAlocacaoDoProfissional={encontrarAlocacaoDoProfissional}
+              onRecarregar={recarregar}
+              buscaProfissional={filtros.profissional}
+            />
+          )
+          : <SalasHeatmapView salas={filtradas} />
+      )}
+
+      {editando && (
+        <SalaEditModal
+          sala={editando === "novo" ? null : editando}
+          onClose={() => setEditando(null)}
+          onSaved={recarregar}
+        />
+      )}
+    </div>
+  )
+}

@@ -12,7 +12,7 @@ export const roleDefaults: Record<string, string[]> = {
     'guias_digitais', 'auditoria_assim', 'usuarios', 'permissoes', 'cco',
     'autorizacoes', 'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
-    'ocupacao_clinica', 'ocupacao_profissionais', 'reposicao_faltas',
+    'ocupacao_clinica', 'ocupacao_profissionais', 'reposicao_faltas', 'cronograma_ocupacao_salas',
     'analise_tratativas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
     'relacionamento_prestador_individual', 'relacionamento_prestador_config',
@@ -23,7 +23,7 @@ export const roleDefaults: Record<string, string[]> = {
     'escala_terapeutica', 'auditoria_assim',
     'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
-    'ocupacao_clinica', 'ocupacao_profissionais', 'reposicao_faltas',
+    'ocupacao_clinica', 'ocupacao_profissionais', 'reposicao_faltas', 'cronograma_ocupacao_salas',
     'analise_tratativas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
     'relacionamento_prestador_individual', 'relacionamento_prestador_config',
@@ -48,7 +48,7 @@ export const roleDefaults: Record<string, string[]> = {
   cronograma: [
     'dashboard', 'cronograma_solicitacoes',
     'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
-    'ocupacao_clinica', 'reposicao_faltas',
+    'ocupacao_clinica', 'reposicao_faltas', 'cronograma_ocupacao_salas',
   ],
 }
 
@@ -79,6 +79,7 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   ocupacao_clinica: ['/cronograma/ocupacao'],
   ocupacao_profissionais: ['/cronograma/indicadores'],
   reposicao_faltas: ['/cronograma/reposicao'],
+  cronograma_ocupacao_salas: ['/cronograma/ocupacao-salas'],
   analise_tratativas: ['/analise-tratativas'],
   relacionamento_prestador_analise: ['/relacionamento-prestador/analise'],
   relacionamento_prestador_rp: ['/relacionamento-prestador/rp'],

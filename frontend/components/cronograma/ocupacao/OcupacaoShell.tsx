@@ -10,7 +10,6 @@ import { runAlgorithm } from "@/lib/cronograma/runAlgorithm"
 import { exportBase } from "@/lib/cronograma/xlsx"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 import { useHeader } from "@/contexts/HeaderContext"
-import { VagasAgoraTab } from "./tabs/VagasAgoraTab"
 import { GapsTab } from "./tabs/GapsTab"
 import { GuiaTab } from "./tabs/GuiaTab"
 import { AcompanhamentoTab } from "./tabs/AcompanhamentoTab"
@@ -20,7 +19,6 @@ import { detectarInconsistencias } from "@/lib/cronograma/inconsistencias"
 import type { AlgorithmResult, Sugestao, WaStatus } from "@/types/cronograma"
 
 const TABS = [
-  { key: "vagas",            label: "📋 Aumentar Ocupação (Clínica)" },
   { key: "acompanhamento",   label: "📬 Acompanhamento" },
   { key: "gaps",             label: "📊 Diferença: Laudo e Oferta" },
   { key: "inconsistencias",  label: "⚠️ Inconsistências e Exceções" },
@@ -30,7 +28,6 @@ const TABS = [
 type TabKey = (typeof TABS)[number]["key"]
 
 const TAB_HEADERS: Record<TabKey, { title: string; subtitle: string }> = {
-  vagas:           { title: "Aumentar Ocupação (Clínica)",   subtitle: "Sugestões de novos agendamentos para vagas ociosas" },
   acompanhamento:  { title: "Aceites e Recusas",             subtitle: "Acompanhamento de sugestões e redistribuições" },
   gaps:            { title: "Diferença: Laudo e Oferta",     subtitle: "Comparativo entre laudos autorizados e sessões ofertadas" },
   inconsistencias: { title: "Inconsistências e Exceções",    subtitle: "Registros com divergências ou exceções no cronograma" },
@@ -43,7 +40,7 @@ export function OcupacaoShell() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const rawTab = searchParams.get("tab")
-  const activeTab: TabKey = rawTab && TABS.some(t => t.key === rawTab) ? (rawTab as TabKey) : "vagas"
+  const activeTab: TabKey = rawTab && TABS.some(t => t.key === rawTab) ? (rawTab as TabKey) : "acompanhamento"
 
   const { setHeader } = useHeader()
 
@@ -66,7 +63,7 @@ export function OcupacaoShell() {
   const [apiErr, setApiErr] = useState("")
 
   useEffect(() => {
-    if (!rawTab) router.replace("/cronograma/ocupacao?tab=vagas")
+    if (!rawTab) router.replace("/cronograma/ocupacao?tab=acompanhamento")
   }, [rawTab])
 
   useEffect(() => {
@@ -189,10 +186,6 @@ export function OcupacaoShell() {
       )}
 
       {/* Tab content */}
-      {activeTab === "vagas" && (
-        <VagasAgoraTab res={res} waMap={waMap}
-          onWA={handleWA} onInv={setCInv} onCron={s => setCronPac(s.pac)} />
-      )}
       {activeTab === "acompanhamento" && (
         <AcompanhamentoTab res={res}
           onWA={handleWA} onWAUndo={handleWAUndo} onWAStatus={handleWAStatus}
