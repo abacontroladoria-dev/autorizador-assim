@@ -4,6 +4,7 @@
 // para a grade e o mapa de calor de Ocupação de Salas.
 
 import { normTxt } from "@/lib/cronograma/constants"
+import { CAPACIDADE_LABEL_CURTO } from "@/lib/cronograma/salasTypes"
 import type { SalaCapacidade, SalaStatus, SalaComOcupacao } from "@/lib/cronograma/salasTypes"
 
 export interface SalasFiltrosState {
@@ -26,9 +27,11 @@ interface SelectFiltroProps {
   value: string
   options: string[]
   onChange: (v: string) => void
+  /** Rótulo legível por opção (ex.: "unico" -> "Único") — opcional, usa o valor cru quando ausente. */
+  labelFor?: (opcao: string) => string
 }
 
-function SelectFiltro({ label, value, options, onChange }: SelectFiltroProps) {
+function SelectFiltro({ label, value, options, onChange, labelFor }: SelectFiltroProps) {
   return (
     <label className="flex flex-col gap-1 text-xs">
       <span className="font-semibold text-muted-foreground uppercase tracking-wide">{label}</span>
@@ -38,7 +41,7 @@ function SelectFiltro({ label, value, options, onChange }: SelectFiltroProps) {
         className="rounded-lg border border-border bg-card px-2.5 py-1.5 text-sm text-foreground"
       >
         <option value="">Todos</option>
-        {options.map(o => <option key={o} value={o}>{o}</option>)}
+        {options.map(o => <option key={o} value={o}>{labelFor ? labelFor(o) : o}</option>)}
       </select>
     </label>
   )
@@ -83,6 +86,7 @@ export function SalasFiltros({ value, onChange, unidades, nucleos, andares }: Sa
         value={value.capacidade}
         options={CAPACIDADE_OPCOES}
         onChange={v => set("capacidade", v as SalaCapacidade | "")}
+        labelFor={o => CAPACIDADE_LABEL_CURTO[o as SalaCapacidade]}
       />
       <SelectFiltro
         label="Turno"

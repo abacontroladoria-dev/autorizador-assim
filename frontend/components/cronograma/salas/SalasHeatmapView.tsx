@@ -4,7 +4,9 @@
 // Tarde (2 linhas por sala) em vez de lado a lado. Faixas de cor 0-39/40-59/
 // 60-79/80-100 (mesma paleta de corFaixaOcupacao/ocupacaoProf.ts).
 
+import { Eye, EyeOff } from "lucide-react"
 import { corFaixaOcupacao, textoFaixaOcupacaoSala } from "@/lib/cronograma/salas"
+import { CAPACIDADE_LABEL_CURTO } from "@/lib/cronograma/salasTypes"
 import type { SalaComOcupacao, SlotOcupacaoSala } from "@/lib/cronograma/salasTypes"
 
 const DIAS = [
@@ -20,14 +22,18 @@ const TURNOS = ["Manhã", "Tarde"] as const
 /** Tinta neutra por turno (usa a própria paleta de cinza do sistema, funciona em light e dark) — só pra ficar claro onde a manhã termina e a tarde começa. */
 const TURNO_ROW_BG: Record<(typeof TURNOS)[number], string> = {
   "Manhã": "",
-  "Tarde": "bg-muted/40",
+  "Tarde": "bg-slate-200/70 dark:bg-white/[0.06]",
 }
 
 interface SalasHeatmapViewProps {
   salas: SalaComOcupacao[]
+  /** Alterna o modo solo: mostra só esta sala na visão atual. Clicar de novo (ou no botão "voltar para todas" acima da tabela) restaura as demais. */
+  onIsolarSala: (id: string, nome: string) => void
+  /** Id da sala em modo solo, se houver — usado só para trocar o ícone do botão para indicar o estado ativo. */
+  salaIsoladaId: string | null
 }
 
-export function SalasHeatmapView({ salas }: SalasHeatmapViewProps) {
+export function SalasHeatmapView({ salas, onIsolarSala, salaIsoladaId }: SalasHeatmapViewProps) {
   if (!salas.length) {
     return (
       <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
@@ -56,9 +62,37 @@ export function SalasHeatmapView({ salas }: SalasHeatmapViewProps) {
               TURNOS.map((turno, turnoIdx) => (
                 <tr key={`${sala.id}-${turno}`} className={TURNO_ROW_BG[turno]}>
                   {turnoIdx === 0 && (
-                    <td rowSpan={2} className="sticky left-0 z-10 border-t border-border bg-card px-3 py-2 align-top">
-                      <div className="font-semibold text-foreground">{sala.nome_exibicao}</div>
-                      <div className="text-[11px] text-muted-foreground">{sala.unidade_nome}</div>
+                    <td rowSpan={2} className="sticky left-0 z-10 w-[200px] max-w-[200px] border-t border-border bg-card px-3 py-2 align-top">
+                      <div className="flex items-start gap-1.5">
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate font-semibold text-foreground" title={sala.nome_exibicao}>{sala.nome_exibicao}</div>
+                          <div className="truncate text-[11px] text-muted-foreground" title={sala.unidade_nome}>{sala.unidade_nome}</div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => onIsolarSala(sala.id, sala.nome_exibicao)}
+                          aria-label={salaIsoladaId === sala.id ? `Voltar a mostrar todas as salas` : `Mostrar só ${sala.nome_exibicao}`}
+                          title={salaIsoladaId === sala.id ? "Voltar a mostrar todas as salas" : "Mostrar só esta sala"}
+                          className={`mt-0.5 shrink-0 rounded-md p-1 hover:bg-muted hover:text-foreground ${salaIsoladaId === sala.id ? "text-blue-600 dark:text-blue-400" : "text-muted-foreground"}`}
+                        >
+                          {salaIsoladaId === sala.id ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </div>
+                      <div className="mt-1 flex flex-wrap items-center gap-1">
+                        <span className="shrink-0 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-400">
+                          {CAPACIDADE_LABEL_CURTO[sala.capacidade]}
+                        </span>
+                        {sala.nucleo && (
+                          <span className="truncate rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground" title={sala.nucleo}>
+                            {sala.nucleo}
+                          </span>
+                        )}
+                        {sala.andar && (
+                          <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                            {sala.andar}º andar
+                          </span>
+                        )}
+                      </div>
                     </td>
                   )}
                   <td className={`w-10 border-l border-border px-1 py-2 text-center text-[10px] font-semibold text-muted-foreground ${turnoIdx === 0 ? "border-t" : ""}`}>

@@ -12,10 +12,13 @@ export async function listarSalas(): Promise<Sala[]> {
     .from(TABLE)
     .select("*")
     .order("unidade_nome")
-    .order("numero_sala")
 
   if (error) throw new Error(error.message)
-  return (data ?? []) as Sala[]
+  const salas = (data ?? []) as Sala[]
+  return salas.sort((a, b) =>
+    a.unidade_nome.localeCompare(b.unidade_nome)
+    || a.numero_sala.localeCompare(b.numero_sala, undefined, { numeric: true, sensitivity: "base" }),
+  )
 }
 
 export async function criarSala(input: SalaInput): Promise<Sala> {

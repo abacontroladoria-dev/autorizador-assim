@@ -6,6 +6,13 @@
 export type SalaCapacidade = "unico" | "duplo" | "multiplo"
 export type SalaStatus = "ativa" | "bloqueada" | "adm"
 
+/** Rótulo curto de capacidade — usado em badges/filtros (formulário de cadastro usa uma versão mais descritiva). */
+export const CAPACIDADE_LABEL_CURTO: Record<SalaCapacidade, string> = {
+  unico: "Único",
+  duplo: "Duplo",
+  multiplo: "Múltiplo",
+}
+
 /** Linha de `cronograma_salas` */
 export interface Sala {
   id: string

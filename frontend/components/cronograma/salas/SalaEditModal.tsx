@@ -2,15 +2,18 @@
 
 // SalaEditModal — CRUD de sala (criar/editar) sobre o shell ScheduleModal.
 
-import { useEffect, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Loader2, Save, Trash2 } from "lucide-react"
 import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
 import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
 import { criarSala, atualizarSala, arquivarSala, listarNucleosDistintos } from "@/services/salas.service"
+import { normNumeroSala, sugerirNumerosSalaDisponiveis } from "@/lib/cronograma/salas"
 import type { Sala, SalaInput, SalaCapacidade, SalaStatus } from "@/lib/cronograma/salasTypes"
 
 interface SalaEditModalProps {
   sala: Sala | null
+  /** Salas já cadastradas (todas as unidades) — usadas para sugerir números livres e avisar de duplicidade antes de tentar salvar. */
+  todasSalas: Sala[]
   onClose: () => void
   onSaved: () => void
 }
@@ -32,7 +35,7 @@ const UNIDADES = ["Realengo", "Fazendinha", "Padre Miguel", "Ambiente Natural"]
 
 const INPUT_CLS = "w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-sm text-foreground"
 
-export function SalaEditModal({ sala, onClose, onSaved }: SalaEditModalProps) {
+export function SalaEditModal({ sala, todasSalas, onClose, onSaved }: SalaEditModalProps) {
   const [nucleos, setNucleos] = useState<string[]>([])
 
   useEffect(() => {
@@ -58,7 +61,25 @@ export function SalaEditModal({ sala, onClose, onSaved }: SalaEditModalProps) {
     setForm(prev => ({ ...prev, [key]: v }))
   }
 
-  const valido = form.unidade_nome.trim() && form.numero_sala.trim() && form.nome_exibicao.trim()
+  const andarPreenchido = (form.andar ?? "").trim() !== ""
+
+  /** Números já em uso na mesma unidade + andar (exceto a própria sala, quando editando) — a numeração é por andar, então "Sala 1" do 1º e do 2º andar podem coexistir. */
+  const numerosUsadosNoAndar = useMemo(
+    () => todasSalas
+      .filter(s => s.unidade_nome === form.unidade_nome && (s.andar ?? "") === (form.andar ?? "") && s.id !== sala?.id)
+      .map(s => s.numero_sala),
+    [todasSalas, form.unidade_nome, form.andar, sala?.id],
+  )
+
+  const numerosSugeridos = useMemo(
+    () => (form.unidade_nome && andarPreenchido) ? sugerirNumerosSalaDisponiveis(numerosUsadosNoAndar) : [],
+    [form.unidade_nome, andarPreenchido, numerosUsadosNoAndar],
+  )
+
+  const numeroJaUsado = andarPreenchido && form.numero_sala.trim() !== ""
+    && numerosUsadosNoAndar.some(n => normNumeroSala(n) === normNumeroSala(form.numero_sala))
+
+  const valido = form.unidade_nome.trim() && andarPreenchido && form.numero_sala.trim() && form.nome_exibicao.trim() && !numeroJaUsado
 
   async function handleSalvar() {
     if (!valido) return
@@ -137,22 +158,55 @@ export function SalaEditModal({ sala, onClose, onSaved }: SalaEditModalProps) {
           </select>
         </Campo>
         <Campo label="Núcleo">
+          <select className={INPUT_CLS} value={form.nucleo ?? ""} onChange={e => set("nucleo", e.target.value)}>
+            <option value="">Nenhum</option>
+            {nucleos.map(n => <option key={n} value={n}>{n}</option>)}
+          </select>
+        </Campo>
+        <Campo label="Andar *">
           <input
             className={INPUT_CLS}
-            list="nucleos-sugeridos"
-            value={form.nucleo ?? ""}
-            onChange={e => set("nucleo", e.target.value)}
-            placeholder="Ex.: Especialidades Terapêuticas"
+            value={form.andar ?? ""}
+            onChange={e => set("andar", e.target.value)}
+            placeholder="1"
           />
-          <datalist id="nucleos-sugeridos">
-            {nucleos.map(n => <option key={n} value={n} />)}
-          </datalist>
         </Campo>
-        <Campo label="Andar">
-          <input className={INPUT_CLS} value={form.andar ?? ""} onChange={e => set("andar", e.target.value)} />
-        </Campo>
-        <Campo label="Número da sala *">
-          <input className={INPUT_CLS} value={form.numero_sala} onChange={e => set("numero_sala", e.target.value)} placeholder="3" />
+        <Campo label="Número da sala *" className="col-span-2">
+          <input
+            className={`${INPUT_CLS} ${numeroJaUsado ? "border-rose-400 dark:border-rose-700" : ""}`}
+            value={form.numero_sala}
+            onChange={e => set("numero_sala", e.target.value)}
+            placeholder="3"
+          />
+          {!andarPreenchido && (
+            <span className="text-[11px] text-muted-foreground">
+              Preencha o Andar para ver os números livres — a numeração é por andar, não pela unidade inteira.
+            </span>
+          )}
+          {numeroJaUsado && (
+            <span className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">
+              Já existe uma sala &quot;{form.numero_sala}&quot; em {form.unidade_nome} · {form.andar}º andar. Escolha outro número.
+            </span>
+          )}
+          {!numeroJaUsado && numerosSugeridos.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">Livres em {form.unidade_nome} · {form.andar}º andar:</span>
+              {numerosSugeridos.map(n => (
+                <button
+                  key={n}
+                  type="button"
+                  onClick={() => set("numero_sala", String(n))}
+                  className={`rounded-full border px-2 py-0.5 text-[11px] font-semibold transition-colors ${
+                    normNumeroSala(form.numero_sala) === String(n)
+                      ? "border-slate-900 bg-slate-900 text-white dark:border-white dark:bg-white dark:text-slate-900"
+                      : "border-border text-muted-foreground hover:bg-muted/50"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+          )}
         </Campo>
         <Campo label="Nome de exibição *" className="col-span-2">
           <input className={INPUT_CLS} value={form.nome_exibicao} onChange={e => set("nome_exibicao", e.target.value)} placeholder="Sala 3" />

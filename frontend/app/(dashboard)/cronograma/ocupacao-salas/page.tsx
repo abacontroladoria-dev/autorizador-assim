@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { DoorOpen, Loader2, Plus } from "lucide-react"
+import { DoorOpen, Eye, Loader2, Plus } from "lucide-react"
 import { useHeader } from "@/contexts/HeaderContext"
 import { SegmentedTabs } from "@/components/cronograma/ui/SegmentedTabs"
 import { StatCard } from "@/components/cronograma/ui/StatCard"
@@ -21,25 +21,31 @@ export default function OcupacaoSalasPage() {
     return () => setHeader("", "")
   }, [setHeader])
 
-  const { salasComOcupacao, resumoUnidades, loading, error, recarregar, encontrarAlocacaoDoProfissional } = useOcupacaoSalas()
+  const { salas, salasComOcupacao, resumoUnidades, loading, error, recarregar, encontrarAlocacaoDoProfissional } = useOcupacaoSalas()
 
   const [tab, setTab] = useState<ViewTab>("grade")
   const [filtros, setFiltros] = useState<SalasFiltrosState>(SALAS_FILTROS_VAZIO)
   const [editando, setEditando] = useState<Sala | null | "novo">(null)
+  const [isolada, setIsolada] = useState<{ id: string; nome: string } | null>(null)
 
   const unidades = useMemo(() => [...new Set(salasComOcupacao.map(s => s.sala.unidade_nome))].sort(), [salasComOcupacao])
   const nucleos = useMemo(() => [...new Set(salasComOcupacao.map(s => s.sala.nucleo).filter((n): n is string => !!n))].sort(), [salasComOcupacao])
   const andares = useMemo(() => [...new Set(salasComOcupacao.map(s => s.sala.andar).filter((n): n is string => !!n))].sort(), [salasComOcupacao])
 
+  function alternarIsolarSala(salaId: string, nome: string) {
+    setIsolada(prev => (prev?.id === salaId ? null : { id: salaId, nome }))
+  }
+
   const filtradas = useMemo(() => {
     return salasComOcupacao
+      .filter(item => (isolada ? item.sala.id === isolada.id : true))
       .filter(item => aplicarFiltrosSala(filtros, item.sala) && salaTemProfissional(item, filtros.profissional))
       .map(item => {
         if (!filtros.turno) return item
         const slots = item.slots.filter((s: SlotOcupacaoSala) => s.turno === filtros.turno)
         return { ...item, slots }
       })
-  }, [salasComOcupacao, filtros])
+  }, [salasComOcupacao, filtros, isolada])
 
   const totalInconsistencias = resumoUnidades.reduce((sum, r) => sum + r.inconsistencias, 0)
   const totalSalas = salasComOcupacao.length
@@ -77,13 +83,24 @@ export default function OcupacaoSalasPage() {
             { value: "mapa", label: "Mapa de calor" },
           ]}
         />
-        <button
-          type="button"
-          onClick={() => setEditando("novo")}
-          className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900"
-        >
-          <Plus size={14} /> Nova sala
-        </button>
+        <div className="flex items-center gap-3">
+          {isolada && (
+            <button
+              type="button"
+              onClick={() => setIsolada(null)}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted/50"
+            >
+              <Eye size={13} /> Mostrando só <strong className="font-semibold text-foreground">{isolada.nome}</strong> · voltar para todas
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={() => setEditando("novo")}
+            className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900"
+          >
+            <Plus size={14} /> Nova sala
+          </button>
+        </div>
       </div>
 
       <SalasFiltros value={filtros} onChange={setFiltros} unidades={unidades} nucleos={nucleos} andares={andares} />
@@ -101,17 +118,20 @@ export default function OcupacaoSalasPage() {
             <SalasGridView
               salas={filtradas}
               onEditarSala={id => setEditando(salasComOcupacao.find(s => s.sala.id === id)?.sala ?? null)}
+              onIsolarSala={alternarIsolarSala}
+              salaIsoladaId={isolada?.id ?? null}
               encontrarAlocacaoDoProfissional={encontrarAlocacaoDoProfissional}
               onRecarregar={recarregar}
               buscaProfissional={filtros.profissional}
             />
           )
-          : <SalasHeatmapView salas={filtradas} />
+          : <SalasHeatmapView salas={filtradas} onIsolarSala={alternarIsolarSala} salaIsoladaId={isolada?.id ?? null} />
       )}
 
       {editando && (
         <SalaEditModal
           sala={editando === "novo" ? null : editando}
+          todasSalas={salas}
           onClose={() => setEditando(null)}
           onSaved={recarregar}
         />

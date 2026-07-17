@@ -262,6 +262,37 @@ export function calcularResumoUnidades(salas: Sala[], alocacoes: AlocacaoSala[],
   return resumos.sort((a, b) => a.unidade.localeCompare(b.unidade))
 }
 
+/**
+ * Sugere números de sala livres para uma unidade, a partir dos números já em
+ * uso (`uq_cronograma_salas_unidade_numero` é único por unidade+número, então
+ * digitar um número ocupado sempre falha no salvar). Prioriza os "buracos" na
+ * sequência (ex.: já tem 1,2,3,5 → sugere o 4 primeiro) e complementa com os
+ * próximos números seguidos após o maior já cadastrado, até `maxSugestoes`.
+ * Números de sala não numéricos (texto livre) são ignorados na sequência —
+ * não têm como participar de um "próximo número".
+ */
+export function sugerirNumerosSalaDisponiveis(numerosUsados: string[], maxSugestoes = 10): number[] {
+  const usados = new Set(
+    numerosUsados
+      .map(n => parseInt(normNumeroSala(n), 10))
+      .filter((n): n is number => Number.isFinite(n) && n > 0),
+  )
+  if (!usados.size) return Array.from({ length: maxSugestoes }, (_, i) => i + 1)
+
+  const maior = Math.max(...usados)
+  const buracos: number[] = []
+  for (let i = 1; i < maior; i++) {
+    if (!usados.has(i)) buracos.push(i)
+  }
+
+  const seguintes: number[] = []
+  for (let i = maior + 1; seguintes.length < maxSugestoes; i++) {
+    seguintes.push(i)
+  }
+
+  return [...buracos, ...seguintes]
+}
+
 export function textoFaixaOcupacaoSala(pct: number | null | undefined): string {
   if (pct === null || pct === undefined) return "Sem base"
   const p = Number(pct) > 1 ? Number(pct) / 100 : Number(pct)

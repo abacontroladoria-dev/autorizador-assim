@@ -8,11 +8,12 @@
 // alocação. Reproduz o fluxo de edição do calculadora-remuneracao.
 
 import { useState } from "react"
-import { Pencil, Plus } from "lucide-react"
+import { Eye, EyeOff, Pencil, Plus } from "lucide-react"
 import { StatusPill } from "@/components/cronograma/ui/StatusPill"
 import { AlocarSessaoModal } from "@/components/cronograma/salas/AlocarSessaoModal"
 import { profissionalBateComBusca } from "@/components/cronograma/salas/SalasFiltros"
 import { tCor } from "@/lib/cronograma/constants"
+import { CAPACIDADE_LABEL_CURTO } from "@/lib/cronograma/salasTypes"
 import type { SalaComOcupacao, SlotOcupacaoSala, Sala } from "@/lib/cronograma/salasTypes"
 import type { AlocacaoAtual } from "@/hooks/useOcupacaoSalas"
 import type { Tone } from "@/components/cronograma/ui/tones"
@@ -30,7 +31,7 @@ const TURNOS = ["Manhã", "Tarde"] as const
 /** Tinta neutra por turno (usa a própria paleta de cinza do sistema, funciona em light e dark) — só pra ficar claro onde a manhã termina e a tarde começa. */
 const TURNO_ROW_BG: Record<(typeof TURNOS)[number], string> = {
   "Manhã": "",
-  "Tarde": "bg-muted/40",
+  "Tarde": "bg-slate-200/70 dark:bg-white/[0.06]",
 }
 
 const STATUS_TONE: Record<SlotOcupacaoSala["status"], Tone> = {
@@ -62,6 +63,10 @@ interface ModalState {
 interface SalasGridViewProps {
   salas: SalaComOcupacao[]
   onEditarSala: (id: string) => void
+  /** Alterna o modo solo: mostra só esta sala na visão atual. Clicar de novo (ou no botão "voltar para todas" acima da tabela) restaura as demais. */
+  onIsolarSala: (id: string, nome: string) => void
+  /** Id da sala em modo solo, se houver — usado só para trocar o ícone do botão para indicar o estado ativo. */
+  salaIsoladaId: string | null
   encontrarAlocacaoDoProfissional: (
     profissionalNome: string,
     dow: number,
@@ -73,7 +78,7 @@ interface SalasGridViewProps {
   buscaProfissional?: string
 }
 
-export function SalasGridView({ salas, onEditarSala, encontrarAlocacaoDoProfissional, onRecarregar, buscaProfissional = "" }: SalasGridViewProps) {
+export function SalasGridView({ salas, onEditarSala, onIsolarSala, salaIsoladaId, encontrarAlocacaoDoProfissional, onRecarregar, buscaProfissional = "" }: SalasGridViewProps) {
   const [modal, setModal] = useState<ModalState | null>(null)
 
   if (!salas.length) {
@@ -105,23 +110,45 @@ export function SalasGridView({ salas, onEditarSala, encontrarAlocacaoDoProfissi
                 {turnoIdx === 0 && (
                   <td
                     rowSpan={2}
-                    className="sticky left-0 z-10 w-[150px] max-w-[150px] border-t border-border bg-card px-2.5 py-2 align-top"
+                    className="sticky left-0 z-10 w-[200px] max-w-[200px] border-t border-border bg-card px-2.5 py-2 align-top"
                   >
                     <div className="flex items-start gap-1.5">
-                      <button
-                        type="button"
-                        onClick={() => onEditarSala(sala.id)}
-                        aria-label={`Editar ${sala.nome_exibicao}`}
-                        className="mt-0.5 shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
-                      >
-                        <Pencil size={14} />
-                      </button>
-                      <div className="min-w-0">
-                        <div className="truncate font-semibold text-foreground">{sala.nome_exibicao}</div>
-                        <div className="truncate text-[11px] text-muted-foreground" title={[sala.unidade_nome, sala.nucleo, sala.andar ? `${sala.andar}º andar` : null].filter(Boolean).join(" · ")}>
-                          {sala.unidade_nome}
-                          {sala.nucleo ? ` · ${sala.nucleo}` : ""}
-                          {sala.andar ? ` · ${sala.andar}º andar` : ""}
+                      <div className="mt-0.5 flex shrink-0 flex-col gap-0.5">
+                        <button
+                          type="button"
+                          onClick={() => onEditarSala(sala.id)}
+                          aria-label={`Editar ${sala.nome_exibicao}`}
+                          className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                        >
+                          <Pencil size={14} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => onIsolarSala(sala.id, sala.nome_exibicao)}
+                          aria-label={salaIsoladaId === sala.id ? `Voltar a mostrar todas as salas` : `Mostrar só ${sala.nome_exibicao}`}
+                          title={salaIsoladaId === sala.id ? "Voltar a mostrar todas as salas" : "Mostrar só esta sala"}
+                          className={`rounded-md p-1 hover:bg-muted hover:text-foreground ${salaIsoladaId === sala.id ? "text-blue-600 dark:text-blue-400" : "text-muted-foreground"}`}
+                        >
+                          {salaIsoladaId === sala.id ? <EyeOff size={14} /> : <Eye size={14} />}
+                        </button>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="truncate font-semibold text-foreground" title={sala.nome_exibicao}>{sala.nome_exibicao}</div>
+                        <div className="truncate text-[11px] text-muted-foreground" title={sala.unidade_nome}>{sala.unidade_nome}</div>
+                        <div className="mt-1 flex flex-wrap items-center gap-1">
+                          <span className="shrink-0 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-400">
+                            {CAPACIDADE_LABEL_CURTO[sala.capacidade]}
+                          </span>
+                          {sala.nucleo && (
+                            <span className="truncate rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground" title={sala.nucleo}>
+                              {sala.nucleo}
+                            </span>
+                          )}
+                          {sala.andar && (
+                            <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground">
+                              {sala.andar}º andar
+                            </span>
+                          )}
                         </div>
                       </div>
                     </div>
