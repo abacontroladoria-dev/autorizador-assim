@@ -45,10 +45,6 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
   const isOcupacaoPage =
     pathname === '/cronograma/ocupacao' || !!pathname?.startsWith('/cronograma/ocupacao/') ||
     pathname === '/cronograma/indicadores' || !!pathname?.startsWith('/cronograma/indicadores/')
-  // Ocupação de Salas cruza dados estruturais (cronograma_salas) com a agenda — não depende
-  // dos laudos do TI, então o badge "Laudos" não é relevante aqui, mas "Grade" continua sendo.
-  const isOcupacaoSalasPage =
-    pathname === '/cronograma/ocupacao-salas' || !!pathname?.startsWith('/cronograma/ocupacao-salas/')
   const isReposicaoPage = !!pathname?.includes('/reposicao')
   // Disponibilidade só é relevante na aba Novo Cronograma (solicitações ?tab=novo-cron).
   const isNovoCron = !!pathname?.includes('/solicitacoes') && searchParams.get('tab') === 'novo-cron'
@@ -154,7 +150,7 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
   }, [setDispRows])
 
   useEffect(() => {
-    if (isOcupacaoPage || isReposicaoPage) return // página gerencia o próprio rightContent — não interferir
+    if (isOcupacaoPage) return // página gerencia o próprio rightContent — não interferir
     setRightContent(
       <CronogramaUploadBadges
         cRows={cRows}
@@ -164,7 +160,6 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
         error={uploadError}
         onSelectFile={handleLaudosFile}
         onClear={handleClear}
-        showLaudos={!isOcupacaoSalasPage}
         showDisponibilidade={isNovoCron}
         dispRows={dispRows}
         dispLoading={dispUploading}
@@ -174,7 +169,7 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
       />
     )
     return () => setRightContent(null)
-  }, [cRows, lRows, dispRows, uploading, gradeLoading, uploadError, dispUploading, dispError, handleLaudosFile, handleClear, handleDispFile, handleClearDisp, setRightContent, isOcupacaoPage, isOcupacaoSalasPage, isReposicaoPage, isNovoCron])
+  }, [cRows, lRows, dispRows, uploading, gradeLoading, uploadError, dispUploading, dispError, handleLaudosFile, handleClear, handleDispFile, handleClearDisp, setRightContent, isOcupacaoPage, isReposicaoPage, isNovoCron])
 
   return <div>{children}</div>
 }
