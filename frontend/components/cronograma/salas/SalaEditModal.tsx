@@ -25,7 +25,7 @@ const CAPACIDADE_LABEL: Record<SalaCapacidade, string> = {
 }
 
 const STATUS_LABEL: Record<SalaStatus, string> = {
-  ativa: "Ativa",
+  operacional: "Operacional",
   bloqueada: "Bloqueada",
   adm: "Administrativa (ADM)",
 }
@@ -49,7 +49,7 @@ export function SalaEditModal({ sala, todasSalas, onClose, onSaved }: SalaEditMo
     numero_sala: sala?.numero_sala ?? "",
     nome_exibicao: sala?.nome_exibicao ?? "",
     capacidade: sala?.capacidade ?? "unico",
-    status: sala?.status ?? "ativa",
+    status: sala?.status ?? "operacional",
     sala_nome_referencia: sala?.sala_nome_referencia ?? "",
     observacoes: sala?.observacoes ?? "",
   })

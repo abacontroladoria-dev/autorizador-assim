@@ -4,11 +4,12 @@
 // acima de Tarde (2 linhas por sala) em vez de lado a lado — colunas de dia
 // ficam mais largas e a semana cabe melhor na tela. Cada slot mostra as
 // alocações (planejamento — quem é o responsável recorrente daquele bloco),
-// clicáveis para editar/mover; "Livre"/"+ Alocar" abre o modal de nova
-// alocação. Reproduz o fluxo de edição do calculadora-remuneracao.
+// clicáveis para editar/mover; uma linha "Livre+" por vaga ainda disponível
+// (repete conforme a capacidade — duplo/múltiplo mostram mais de uma) abre o
+// modal de nova alocação. Reproduz o fluxo de edição do calculadora-remuneracao.
 
-import { useState } from "react"
-import { Eye, EyeOff, Pencil, Plus } from "lucide-react"
+import { useEffect, useRef, useState } from "react"
+import { Eye, EyeOff, Pencil } from "lucide-react"
 import { StatusPill } from "@/components/cronograma/ui/StatusPill"
 import { AlocarSessaoModal } from "@/components/cronograma/salas/AlocarSessaoModal"
 import { profissionalBateComBusca } from "@/components/cronograma/salas/SalasFiltros"
@@ -81,6 +82,27 @@ interface SalasGridViewProps {
 export function SalasGridView({ salas, onEditarSala, onIsolarSala, salaIsoladaId, encontrarAlocacaoDoProfissional, onRecarregar, buscaProfissional = "" }: SalasGridViewProps) {
   const [modal, setModal] = useState<ModalState | null>(null)
 
+  const salaRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map())
+  /** Sala isolada mais recente — guardado à parte porque `salaIsoladaId` já
+      vira null no MESMO clique que dispara o efeito abaixo (precisamos saber
+      pra qual sala rolar de volta). */
+  const lastIsoladaIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (salaIsoladaId) {
+      lastIsoladaIdRef.current = salaIsoladaId
+      return
+    }
+    // `salaIsoladaId` acabou de virar null (voltou a mostrar todas) — rola de
+    // volta pra onde a sala isolada estava, em vez de deixar o scroll "preso"
+    // no topo da lista completa (onde a página ficava enquanto só 1 sala
+    // estava visível).
+    const alvo = lastIsoladaIdRef.current
+    if (!alvo) return
+    salaRowRefs.current.get(alvo)?.scrollIntoView({ block: "center" })
+    lastIsoladaIdRef.current = null
+  }, [salaIsoladaId])
+
   if (!salas.length) {
     return (
       <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
@@ -106,7 +128,14 @@ export function SalasGridView({ salas, onEditarSala, onIsolarSala, salaIsoladaId
         <tbody>
           {salas.map(({ sala, slots }) => (
             TURNOS.map((turno, turnoIdx) => (
-              <tr key={`${sala.id}-${turno}`} className={`${TURNO_ROW_BG[turno]} hover:brightness-95 dark:hover:brightness-125`}>
+              <tr
+                key={`${sala.id}-${turno}`}
+                ref={turnoIdx === 0 ? (el => {
+                  if (el) salaRowRefs.current.set(sala.id, el)
+                  else salaRowRefs.current.delete(sala.id)
+                }) : undefined}
+                className={`${TURNO_ROW_BG[turno]} hover:brightness-95 dark:hover:brightness-125`}
+              >
                 {turnoIdx === 0 && (
                   <td
                     rowSpan={2}
@@ -214,7 +243,6 @@ function SlotCell({
     )
   }
 
-  const podeAdicionar = slot.alocacoes.length < slot.capacidadeProjetada
   const buscaAtiva = buscaProfissional.trim().length > 0
 
   return (
@@ -241,7 +269,7 @@ function SlotCell({
                 terapiaInicial: card.terapiaNome,
               })}
               title={`${card.profissionalNome}${card.terapiaNome ? " · " + card.terapiaNome : ""} · ${card.semCruzamentoCsv ? "sem cruzamento no CSV" : `${card.sessoesReais}/${card.sessoesCapacidadeTurno} com paciente`}${slot.inconsistente ? " · capacidade excedida" : ""}`}
-              className={`flex w-full flex-col gap-0.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-muted/60 ${bate ? "bg-amber-100 ring-1 ring-amber-400 dark:bg-amber-950/40 dark:ring-amber-500" : ""} ${buscaAtiva && !bate ? "opacity-35" : ""}`}
+              className={`flex min-h-[38px] w-full flex-col justify-center gap-0.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-muted/60 ${bate ? "bg-amber-100 ring-1 ring-amber-400 dark:bg-amber-950/40 dark:ring-amber-500" : ""} ${buscaAtiva && !bate ? "opacity-35" : ""}`}
             >
               <span className="flex items-center gap-1.5">
                 <span
@@ -260,27 +288,24 @@ function SlotCell({
           )
         })}
 
-        {slot.alocacoes.length === 0 && (
+        {/* Uma linha "Livre+" por vaga realmente disponível (capacidade - já
+            alocados) — repete quando a capacidade é dupla/múltipla, em vez de
+            um "Livre" isolado quando vazio e um "+Alocar" separado quando já
+            tem alguém. Mesma min-h dos cards de alocação (acima) — sem isso,
+            um card (2 linhas de texto) é mais alto que o pill "Livre+", e a
+            posição de cada "vaga" (1ª, 2ª, 3ª...) desalinha entre colunas
+            vizinhas que têm quantidades diferentes de alocação × livre. */}
+        {Array.from({ length: Math.max(0, slot.capacidadeProjetada - slot.alocacoes.length) }).map((_, i) => (
           <button
+            key={`livre-${i}`}
             type="button"
             onClick={() => onAbrirModal({ sala, dow: slot.dow, turno: slot.turno, diaLabel })}
-            className="inline-flex w-full justify-center py-0.5 opacity-70 transition-opacity hover:opacity-100"
+            title="Alocar profissional neste bloco"
+            className="flex min-h-[38px] w-full items-center justify-center opacity-70 transition-opacity hover:opacity-100"
           >
-            <StatusPill tone="slate" dense>Livre</StatusPill>
+            <StatusPill tone="slate" dense>Livre+</StatusPill>
           </button>
-        )}
-
-        {slot.alocacoes.length > 0 && podeAdicionar && (
-          <button
-            type="button"
-            onClick={() => onAbrirModal({ sala, dow: slot.dow, turno: slot.turno, diaLabel })}
-            title="Alocar mais um profissional neste bloco"
-            aria-label="Alocar mais um profissional neste bloco"
-            className="inline-flex items-center gap-1 self-start rounded-md px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground opacity-0 transition-opacity hover:bg-muted/50 focus-visible:opacity-100 group-hover:opacity-100"
-          >
-            <Plus size={10} /> Alocar
-          </button>
-        )}
+        ))}
       </div>
     </td>
   )

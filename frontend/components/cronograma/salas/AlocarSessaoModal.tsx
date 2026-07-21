@@ -9,11 +9,11 @@
 // Profissional/terapia são validados contra nomes reais (mesmas fontes de
 // sugestão já usadas na Agenda) — não aceita texto livre/digitado errado.
 
-import { useEffect, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import { Loader2, Save, Trash2 } from "lucide-react"
 import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
 import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
-import { criarAlocacao, atualizarAlocacao, excluirAlocacao, buscarSugestoesProfissionaisSalas, buscarTerapiasDoProfissional } from "@/services/salas.service"
+import { criarAlocacao, atualizarAlocacao, excluirAlocacao, listarTodosProfissionaisSalas, buscarTerapiasDoProfissional } from "@/services/salas.service"
 import { buscarOpcoesFiltro } from "@/services/agenda.service"
 import { normTxt } from "@/lib/cronograma/constants"
 import type { Sala } from "@/lib/cronograma/salasTypes"
@@ -54,12 +54,10 @@ export function AlocarSessaoModal({
   encontrarAlocacaoDoProfissional, onClose, onSaved,
 }: AlocarSessaoModalProps) {
   const [profissional, setProfissional] = useState(profissionalInicial)
-  const [profissionalSugestoes, setProfissionalSugestoes] = useState<string[]>([])
+  const [profissionaisTodos, setProfissionaisTodos] = useState<string[]>([])
   const [profissionalValido, setProfissionalValido] = useState(!!profissionalInicial)
   const [mostrarSugestoesProf, setMostrarSugestoesProf] = useState(false)
-  /** Só true depois que o usuário efetivamente digitou algo — evita mostrar "Nenhum profissional encontrado" ao simplesmente focar um campo já preenchido (editar/mover). */
-  const [profissionalEditado, setProfissionalEditado] = useState(false)
-  const [buscandoProf, setBuscandoProf] = useState(false)
+  const [carregandoProf, setCarregandoProf] = useState(true)
 
   const [terapia, setTerapia] = useState(terapiaInicial ?? "")
   const [terapiasTodas, setTerapiasTodas] = useState<string[]>([])
@@ -70,23 +68,32 @@ export function AlocarSessaoModal({
   const [error, setError] = useState<string | null>(null)
   const [confirmacao, setConfirmacao] = useState<ConfirmacaoPendente | null>(null)
 
-  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  /** Sequência da última busca disparada — descarta respostas de buscas antigas que cheguem fora de ordem. */
-  const buscaSeqRef = useRef(0)
-
   useEffect(() => {
     buscarOpcoesFiltro().then(op => setTerapiasTodas(op.terapias.filter(Boolean).sort()))
   }, [])
 
+  // Lista completa carregada uma única vez ao abrir o modal — a lista fica
+  // sempre disponível (mesmo campo vazio) e o filtro conforme digita é feito
+  // aqui no cliente, sem round-trip ao banco a cada tecla.
+  useEffect(() => {
+    listarTodosProfissionaisSalas()
+      .then(setProfissionaisTodos)
+      .finally(() => setCarregandoProf(false))
+  }, [])
+
+  const profissionalSugestoes = profissional.trim().length
+    ? profissionaisTodos.filter(n => normTxt(n).includes(normTxt(profissional)))
+    : profissionaisTodos
+
   // Valida automaticamente se o texto digitado bate exatamente (case-insensitive)
-  // com alguma sugestão já retornada pela busca — cobre o caso de o usuário
-  // digitar/colar o nome completo certinho sem clicar na lista.
+  // com algum nome da lista completa — cobre o caso de o usuário digitar/colar
+  // o nome completo certinho sem clicar na sugestão.
   useEffect(() => {
     if (!profissional.trim()) { setProfissionalValido(false); return }
-    if (profissionalSugestoes.some(s => normTxt(s) === normTxt(profissional))) {
+    if (profissionaisTodos.some(s => normTxt(s) === normTxt(profissional))) {
       setProfissionalValido(true)
     }
-  }, [profissional, profissionalSugestoes])
+  }, [profissional, profissionaisTodos])
 
   // Quando um profissional válido está selecionado, busca só as terapias que
   // ele de fato realiza (histórico real) — restringe a lista em vez de
@@ -102,32 +109,14 @@ export function AlocarSessaoModal({
 
   function handleProfissionalChange(valor: string) {
     setProfissional(valor)
-    setProfissionalEditado(true)
     setProfissionalValido(!!profissionalInicial && normTxt(valor) === normTxt(profissionalInicial))
     setMostrarSugestoesProf(true)
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    const minhaSeq = ++buscaSeqRef.current
-    if (valor.trim().length < 2) {
-      setProfissionalSugestoes([])
-      setBuscandoProf(false)
-      return
-    }
-    setBuscandoProf(true)
-    debounceRef.current = setTimeout(() => {
-      buscarSugestoesProfissionaisSalas(valor.trim()).then(resultado => {
-        // Só aplica se nenhuma busca mais nova foi disparada enquanto esta rodava.
-        if (minhaSeq !== buscaSeqRef.current) return
-        setProfissionalSugestoes(resultado)
-        setBuscandoProf(false)
-      })
-    }, 200)
   }
 
   function selecionarProfissional(nome: string) {
     setProfissional(nome)
     setProfissionalValido(true)
     setMostrarSugestoesProf(false)
-    setProfissionalSugestoes([])
   }
 
   // Restringe às terapias reais do profissional selecionado quando disponíveis;
@@ -265,17 +254,17 @@ export function AlocarSessaoModal({
             placeholder="Digite o nome do profissional..."
             autoFocus
           />
-          {mostrarSugestoesProf && profissionalEditado && profissional.trim().length >= 2 && (
+          {mostrarSugestoesProf && (
             <div className="absolute top-full z-10 mt-1 max-h-48 w-full overflow-auto rounded-lg border border-border bg-card shadow-lg">
-              {buscandoProf && (
+              {carregandoProf && (
                 <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground">
-                  <Loader2 size={12} className="animate-spin" /> Buscando...
+                  <Loader2 size={12} className="animate-spin" /> Carregando profissionais...
                 </div>
               )}
-              {!buscandoProf && profissionalSugestoes.length === 0 && (
+              {!carregandoProf && profissionalSugestoes.length === 0 && (
                 <div className="px-2.5 py-1.5 text-xs text-muted-foreground">Nenhum profissional encontrado.</div>
               )}
-              {!buscandoProf && profissionalSugestoes.map(nome => (
+              {!carregandoProf && profissionalSugestoes.slice(0, 30).map(nome => (
                 <button
                   key={nome}
                   type="button"
@@ -288,7 +277,10 @@ export function AlocarSessaoModal({
               ))}
             </div>
           )}
-          {profissional.trim() && !profissionalValido && (
+          {/* Só aparece com o campo FECHADO (depois que o usuário saiu dele) —
+              mostrar a cada tecla digitada (ex.: só "a") é alarme falso, já
+              que nenhum nome real bate logo na primeira letra. */}
+          {!mostrarSugestoesProf && profissional.trim() && !profissionalValido && (
             <span className="text-[11px] font-semibold text-rose-600 dark:text-rose-400">
               Selecione um profissional da lista (nome deve bater com um profissional real).
             </span>
@@ -305,14 +297,15 @@ export function AlocarSessaoModal({
             )}
           </span>
           <input
-            className={INPUT_CLS}
+            className={`${INPUT_CLS} disabled:cursor-not-allowed disabled:opacity-50`}
             value={terapia}
             onChange={e => setTerapia(e.target.value)}
-            onFocus={() => setMostrarSugestoesTerapia(true)}
+            onFocus={() => profissionalValido && setMostrarSugestoesTerapia(true)}
             onBlur={() => setTimeout(() => setMostrarSugestoesTerapia(false), 150)}
-            placeholder="Digite a terapia..."
+            placeholder={profissionalValido ? "Digite a terapia..." : "Selecione o profissional primeiro"}
+            disabled={!profissionalValido}
           />
-          {mostrarSugestoesTerapia && terapiasSugeridas.length > 0 && (
+          {mostrarSugestoesTerapia && profissionalValido && terapiasSugeridas.length > 0 && (
             <div className="absolute top-full z-10 mt-1 max-h-48 w-full overflow-auto rounded-lg border border-border bg-card shadow-lg">
               {terapiasSugeridas.slice(0, 20).map(nome => (
                 <button

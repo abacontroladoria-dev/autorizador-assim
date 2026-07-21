@@ -155,6 +155,7 @@ export function FaltasSemanaPanel({
     <VisaoComparativa
       key={`${pacienteId}::${semanaInicio}`}
       pacienteNome={pacienteNome}
+      pacienteId={pacienteId}
       resultados={resultados}
       sessoesAgendadas={sessoesAgendadas}
       sessoesConcluidas={sessoesConcluidas}

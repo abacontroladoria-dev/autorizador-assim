@@ -72,6 +72,7 @@ const pathIconMap: Record<string, any> = {
   "/cronograma/solicitacoes?tab=novo-cron": CalendarPlus,
   "/cronograma/solicitacoes?tab=banco": Database,
   "/cronograma/ocupacao-salas": DoorOpen,
+  "/cronograma/valores-convenio": Wallet,
   "/cronograma/saida-profissional": LogOut,
   "/cronograma/ocupacao-paciente": TrendingUp,
   "/cronograma/ocupacao?tab=fila": Clock,
@@ -91,6 +92,7 @@ const pathIconMap: Record<string, any> = {
   "/cronograma/indicadores?tab=profissionais": BarChart3,
   "/cronograma/indicadores?tab=unidades": Building2,
   "/cronograma/indicadores?tab=pacientes": UserCheck,
+  "/cronograma/indicadores?tab=previsao-receitas": Wallet,
 }
 
 export default function Sidebar() {
@@ -500,11 +502,13 @@ export default function Sidebar() {
           )}
 
           {/* Indicadores */}
-          {canAccess("/cronograma/indicadores") && (
+          {(canAccess("/cronograma/indicadores") || canAccess("/cronograma/valores-convenio")) && (
             <SidebarGroup title="Indicadores" icon={TrendingUp}>
               <MenuItem label="Ocupação de Profissionais" icon={BarChart3} path="/cronograma/indicadores?tab=profissionais" />
               <MenuItem label="Dashboard por Unidade" icon={Building2} path="/cronograma/indicadores?tab=unidades" />
               <MenuItem label="Dashboard de Pacientes" icon={UserCheck} path="/cronograma/indicadores?tab=pacientes" />
+              <MenuItem label="Previsão de Receitas" icon={Wallet} path="/cronograma/indicadores?tab=previsao-receitas" />
+              {canAccess("/cronograma/valores-convenio") && <MenuItem label="Valores de Convênio" icon={Wallet} path="/cronograma/valores-convenio" />}
             </SidebarGroup>
           )}
 

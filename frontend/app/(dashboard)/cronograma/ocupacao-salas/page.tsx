@@ -6,6 +6,7 @@ import { useHeader } from "@/contexts/HeaderContext"
 import { SegmentedTabs } from "@/components/cronograma/ui/SegmentedTabs"
 import { StatCard } from "@/components/cronograma/ui/StatCard"
 import { useOcupacaoSalas } from "@/hooks/useOcupacaoSalas"
+import { resumoOcupacaoDeItens } from "@/lib/cronograma/salas"
 import { SalasFiltros, SALAS_FILTROS_VAZIO, aplicarFiltrosSala, salaTemProfissional, type SalasFiltrosState } from "@/components/cronograma/salas/SalasFiltros"
 import { SalasGridView } from "@/components/cronograma/salas/SalasGridView"
 import { SalasHeatmapView } from "@/components/cronograma/salas/SalasHeatmapView"
@@ -21,7 +22,7 @@ export default function OcupacaoSalasPage() {
     return () => setHeader("", "")
   }, [setHeader])
 
-  const { salas, salasComOcupacao, resumoUnidades, loading, error, recarregar, encontrarAlocacaoDoProfissional } = useOcupacaoSalas()
+  const { salas, salasComOcupacao, loading, error, recarregar, encontrarAlocacaoDoProfissional } = useOcupacaoSalas()
 
   const [tab, setTab] = useState<ViewTab>("grade")
   const [filtros, setFiltros] = useState<SalasFiltrosState>(SALAS_FILTROS_VAZIO)
@@ -41,20 +42,22 @@ export default function OcupacaoSalasPage() {
       .filter(item => (isolada ? item.sala.id === isolada.id : true))
       .filter(item => aplicarFiltrosSala(filtros, item.sala) && salaTemProfissional(item, filtros.profissional))
       .map(item => {
-        if (!filtros.turno) return item
-        const slots = item.slots.filter((s: SlotOcupacaoSala) => s.turno === filtros.turno)
+        if (!filtros.turno.length) return item
+        const slots = item.slots.filter((s: SlotOcupacaoSala) => filtros.turno.includes(s.turno))
         return { ...item, slots }
       })
   }, [salasComOcupacao, filtros, isolada])
 
-  const totalInconsistencias = resumoUnidades.reduce((sum, r) => sum + r.inconsistencias, 0)
-  const totalSalas = salasComOcupacao.length
-  const totalBloqueadas = salasComOcupacao.filter(s => s.sala.status === "bloqueada").length
-  const pctGeral = (() => {
-    const total = resumoUnidades.reduce((s, r) => s + r.slotsTotal, 0)
-    const ocup = resumoUnidades.reduce((s, r) => s + r.slotsOcupados, 0)
-    return total > 0 ? ocup / total : null
-  })()
+  // Os 4 cards respondem aos filtros atuais (unidade/núcleo/andar/capacidade/
+  // turno/status/profissional/isolada) — calculados sobre `filtradas`, a mesma
+  // lista que já alimenta a Grade e o Mapa de calor. Antes usavam
+  // salasComOcupacao/resumoUnidades (agregado de TODAS as unidades, sem
+  // nenhuma relação com o filtro selecionado na tela).
+  const totalSalas = filtradas.length
+  const totalBloqueadas = filtradas.filter(s => s.sala.status === "bloqueada").length
+  const resumoFiltrado = useMemo(() => resumoOcupacaoDeItens(filtradas), [filtradas])
+  const totalInconsistencias = resumoFiltrado.inconsistencias
+  const pctGeral = resumoFiltrado.pct
 
   return (
     <div className="flex flex-col gap-4">

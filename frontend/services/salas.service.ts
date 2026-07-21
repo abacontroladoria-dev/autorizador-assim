@@ -25,7 +25,7 @@ export async function criarSala(input: SalaInput): Promise<Sala> {
   const sb = getSupabaseClient()
   const { data, error } = await sb
     .from(TABLE)
-    .insert({ ...input, status: input.status ?? "ativa" })
+    .insert({ ...input, status: input.status ?? "operacional" })
     .select("*")
     .single()
 
@@ -53,7 +53,7 @@ export async function arquivarSala(id: string): Promise<void> {
 }
 
 export async function bloquearSala(id: string, bloquear: boolean): Promise<Sala> {
-  return atualizarSala(id, { status: bloquear ? "bloqueada" : "ativa" })
+  return atualizarSala(id, { status: bloquear ? "bloqueada" : "operacional" })
 }
 
 /**
@@ -118,38 +118,27 @@ export async function excluirAlocacao(id: string): Promise<void> {
 }
 
 /**
- * Sugestões de profissional para o autocomplete de alocação — busca em
- * `csv_grades_profissionais` (mesma tabela usada no cruzamento de ocupação),
- * não em `agenda_tita_autorizacao_v2` (universo de profissionais diferente/
- * mais restrito, que já deixou nomes reais de fora).
+ * Lista TODOS os profissionais distintos de csv_grades_profissionais — carregada
+ * uma vez ao abrir o modal de alocação, pra a lista já vir disponível antes de
+ * digitar (filtro é feito no cliente conforme o usuário digita, sem round-trip
+ * ao banco por tecla — ver AlocarSessaoModal).
  */
-export async function buscarSugestoesProfissionaisSalas(query: string): Promise<string[]> {
-  const q = query.trim()
-  if (q.length < 2) return []
+export async function listarTodosProfissionaisSalas(): Promise<string[]> {
   const sb = getSupabaseClient()
   const { data, error } = await sb
     .from("csv_grades_profissionais")
     .select("profissional_nome")
-    .ilike("profissional_nome", `%${q}%`)
     .not("profissional_nome", "is", null)
-    .limit(500)
+    .limit(5000)
 
   if (error) throw new Error(error.message)
-  const qNorm = q.toLocaleLowerCase()
   const unique = [...new Set((data ?? []).map(r => fixMojibake(r.profissional_nome as string).trim()).filter(Boolean))]
-  // Prioriza nomes que COMEÇAM com o texto digitado antes dos que só contêm.
-  unique.sort((a, b) => {
-    const aStarts = a.toLocaleLowerCase().startsWith(qNorm)
-    const bStarts = b.toLocaleLowerCase().startsWith(qNorm)
-    if (aStarts !== bStarts) return aStarts ? -1 : 1
-    return a.localeCompare(b)
-  })
-  return unique.slice(0, 15)
+  return unique.sort((a, b) => a.localeCompare(b))
 }
 
 const AGENDA_FIELDS = [
-  "paciente_nome", "convenio_nome", "unidade_nome", "sala_nome",
-  "profissional_nome", "terapia_nome", "terapia_exibicao_nome",
+  "paciente_id", "paciente_nome", "convenio_nome", "unidade_nome", "sala_nome",
+  "profissional_nome", "terapia_id", "terapia_nome", "terapia_exibicao_id", "terapia_exibicao_nome",
   "dia_semana", "hora_inicial", "hora_final", "status_agendamento", "data",
 ].join(", ")
 

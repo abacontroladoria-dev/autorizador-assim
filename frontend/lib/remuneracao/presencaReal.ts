@@ -46,9 +46,8 @@ export async function buscarPresencaFilaAutorizacoes(dataInicio: string, dataFim
   while (true) {
     const { data, error } = await sb
       .from("fila_autorizacoes")
-      .select("tita_agendamento_id, paciente_nome, data_atendimento, horario, status, falta_revertida_em, cancelado_em")
+      .select("tita_agendamento_id, paciente_nome, data_atendimento, horario, status, falta_revertida_em")
       .in("status", ["falta", "concluido", "glosa"])
-      .is("cancelado_em", null)
       .gte("data_atendimento", dataInicio)
       .lte("data_atendimento", dataFim)
       .range(from, from + PAGE - 1)

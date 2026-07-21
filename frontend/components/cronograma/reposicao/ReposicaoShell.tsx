@@ -161,6 +161,7 @@ function PacienteSearch({
                 }}
               >
                 {p.nome}
+                <span style={{ color: "var(--muted-foreground)", fontWeight: 700 }}> (id {p.id})</span>
               </button>
             ))
           )}

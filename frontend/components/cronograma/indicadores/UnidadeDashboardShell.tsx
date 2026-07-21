@@ -3,12 +3,76 @@
 // UnidadeDashboardShell — dashboard de ocupação agregada por unidade, consumindo
 // useOcupacaoSalas() (cruzamento cronograma_salas × csv_grades_profissionais).
 
-import { Building2, DoorOpen, Loader2, Percent } from "lucide-react"
+import { useRef, useState } from "react"
+import { createPortal } from "react-dom"
+import { Building2, DoorOpen, Info, Loader2, Percent, X } from "lucide-react"
 import { StatCard } from "@/components/cronograma/ui/StatCard"
 import { StatusPill } from "@/components/cronograma/ui/StatusPill"
 import { useOcupacaoSalas } from "@/hooks/useOcupacaoSalas"
-import { textoFaixaOcupacaoSala } from "@/lib/cronograma/salas"
+import { CAPACIDADE_LABEL_CURTO } from "@/lib/cronograma/salasTypes"
 import type { Tone } from "@/components/cronograma/ui/tones"
+
+const POPOVER_W = 256 // w-64
+
+// Ícone de informação clicável — abre um balão de explicação (com botão "X"
+// pra fechar) em vez de depender do title nativo do navegador, que era
+// minúsculo e inconsistente entre navegadores. Renderizado via portal em
+// document.body: o StatCard usa overflow-hidden (pra arredondar a barra de
+// gradiente do topo) — um balão posicionado normalmente (absolute) dentro
+// dele ficaria cortado pela borda do card, que é exatamente o que acontecia.
+function InfoTooltip({ text }: { text: string }) {
+  const [aberto, setAberto] = useState(false)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+
+  function alternar() {
+    if (!aberto && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect()
+      setPos({
+        top: r.bottom + 8,
+        left: Math.min(r.left, window.innerWidth - POPOVER_W - 16),
+      })
+    }
+    setAberto(v => !v)
+  }
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={alternar}
+        aria-label="Mais informações"
+        aria-expanded={aberto}
+        className="ml-1.5 inline-flex h-5 w-5 items-center justify-center rounded-full bg-muted text-muted-foreground transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        <Info size={13} />
+      </button>
+      {aberto && pos && createPortal(
+        <>
+          {/* Camada invisível atrás do balão — clicar em qualquer lugar fora dele fecha. */}
+          <div className="fixed inset-0 z-40" onClick={() => setAberto(false)} />
+          <div
+            role="tooltip"
+            style={{ position: "fixed", top: pos.top, left: pos.left, width: POPOVER_W }}
+            className="z-50 rounded-lg border border-border bg-card p-3 pr-7 text-[11px] font-normal normal-case leading-relaxed text-foreground shadow-lg"
+          >
+            <button
+              type="button"
+              onClick={() => setAberto(false)}
+              aria-label="Fechar"
+              className="absolute right-1.5 top-1.5 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <X size={13} />
+            </button>
+            {text}
+          </div>
+        </>,
+        document.body,
+      )}
+    </>
+  )
+}
 
 function pctTone(pct: number | null): Tone {
   if (pct === null) return "slate"
@@ -45,10 +109,28 @@ export function UnidadeDashboardShell() {
         <StatCard tone="blue" icon={<DoorOpen size={15} />} label="Salas cadastradas">
           <div className="text-2xl font-black text-foreground">{salasTotal}</div>
         </StatCard>
-        <StatCard tone="purple" icon={<DoorOpen size={15} />} label="Capacidade simultânea">
+        <StatCard
+          tone="purple"
+          icon={<DoorOpen size={15} />}
+          label={
+            <span className="inline-flex items-center">
+              Capacidade simultânea
+              <InfoTooltip text="Quantos atendimentos podem acontecer ao mesmo tempo, no mesmo horário, somando todas as salas operacionais: salas Único contam 1, Duplo contam 2, Múltiplo contam 3. Salas bloqueadas ou administrativas não entram na conta." />
+            </span>
+          }
+        >
           <div className="text-2xl font-black text-foreground">{capacidadeTotal}</div>
         </StatCard>
-        <StatCard tone={pctTone(pctGeral)} icon={<Percent size={15} />} label="Ocupação geral">
+        <StatCard
+          tone={pctTone(pctGeral)}
+          icon={<Percent size={15} />}
+          label={
+            <span className="inline-flex items-center">
+              Ocupação geral
+              <InfoTooltip text={`${slotsOcupados} slots ocupados ÷ ${slotsTotal} slots totais = ${pctGeral !== null ? Math.round(pctGeral * 100) : 0}%.`} />
+            </span>
+          }
+        >
           <div className="text-2xl font-black text-foreground">{pctGeral !== null ? `${Math.round(pctGeral * 100)}%` : "—"}</div>
         </StatCard>
       </div>
@@ -57,18 +139,36 @@ export function UnidadeDashboardShell() {
         {resumoUnidades.map(r => (
           <div key={r.unidade} className="rounded-xl border border-border bg-card p-4">
             <div className="mb-2 flex items-center justify-between">
-              <div className="font-bold text-foreground">{r.unidade}</div>
-              <StatusPill tone={pctTone(r.pct)}>{textoFaixaOcupacaoSala(r.pct)}</StatusPill>
+              <div className="inline-flex items-center font-bold text-foreground">
+                {r.unidade}
+                <InfoTooltip text={`${r.slotsOcupados} slots ocupados ÷ ${r.slotsTotal} slots totais = ${r.pct !== null ? Math.round(r.pct * 100) : 0}%.`} />
+              </div>
+              <StatusPill tone={pctTone(r.pct)}>{r.pct !== null ? `${Math.round(r.pct * 100)}%` : "Sem base"}</StatusPill>
             </div>
-            <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground">
+            <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground sm:grid-cols-5">
               <div><span className="block text-sm font-bold text-foreground">{r.salasTotal}</span>Salas</div>
-              <div><span className="block text-sm font-bold text-foreground">{r.salasAtivas}</span>Ativas</div>
-              <div><span className="block text-sm font-bold text-foreground">{r.inconsistencias}</span>Inconsistências</div>
+              <div><span className="block text-sm font-bold text-foreground">{r.salasAtivas}</span>Operacionais</div>
+              <div><span className="block text-sm font-bold text-foreground">{r.salasAdm}</span>Administrativas</div>
+              <div><span className="block text-sm font-bold text-foreground">{r.salasBloqueadas}</span>Bloqueadas</div>
+              <div className="inline-flex items-start gap-0.5">
+                <div><span className="block text-sm font-bold text-foreground">{r.inconsistencias}</span>Inconsistências</div>
+                <InfoTooltip text={`${r.inconsistencias} slot(s) com mais profissionais alocados do que a capacidade da sala (1, 2 ou 3, conforme Único/Duplo/Múltiplo).`} />
+              </div>
+            </div>
+            <div className="mt-2 flex gap-3 text-xs text-muted-foreground">
+              {(["unico", "duplo", "multiplo"] as const).map(cap => (
+                <div key={cap}>
+                  <span className="font-bold text-foreground">{r.salasPorCapacidade[cap]}</span> {CAPACIDADE_LABEL_CURTO[cap]}
+                </div>
+              ))}
             </div>
             <div className="mt-3 flex gap-3 text-xs">
               {r.porTurno.map(t => (
                 <div key={t.turno} className="flex-1 rounded-lg bg-muted/40 p-2">
-                  <div className="font-semibold text-foreground">{t.turno}</div>
+                  <div className="inline-flex items-center font-semibold text-foreground">
+                    {t.turno}
+                    <InfoTooltip text={`${t.slotsOcupados} slots ocupados ÷ ${t.slotsTotal} slots totais = ${t.pct !== null ? Math.round(t.pct * 100) : 0}%.`} />
+                  </div>
                   <div className="text-muted-foreground">{t.slotsOcupados}/{t.slotsTotal} ocupados</div>
                 </div>
               ))}

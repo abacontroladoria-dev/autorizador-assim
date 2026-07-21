@@ -6,20 +6,23 @@ import { useHeader } from "@/contexts/HeaderContext"
 import { OcupacaoProfShell } from "@/components/cronograma/indicadores/OcupacaoProfShell"
 import { UnidadeDashboardShell } from "@/components/cronograma/indicadores/UnidadeDashboardShell"
 import { PacientesDashboardShell } from "@/components/cronograma/indicadores/PacientesDashboardShell"
+import { PrevisaoReceitasShell } from "@/components/cronograma/indicadores/PrevisaoReceitasShell"
 
-const TABS = ["profissionais", "unidades", "pacientes"] as const
+const TABS = ["profissionais", "unidades", "pacientes", "previsao-receitas"] as const
 type TabKey = (typeof TABS)[number]
 
 const TAB_LABELS: Record<TabKey, string> = {
   profissionais: "Ocupação de Profissionais",
   unidades: "Dashboard por Unidade",
   pacientes: "Dashboard de Pacientes",
+  "previsao-receitas": "Previsão de Receitas",
 }
 
 const TAB_SUBTITLES: Record<TabKey, string> = {
   profissionais: "",
   unidades: "Ocupação agregada de salas por unidade",
   pacientes: "Métricas de pacientes ativos: CH, convênio, unidade",
+  "previsao-receitas": "Receita mensal projetada, cruzando sessões com valores cadastrados por convênio",
 }
 
 function IndicadoresContent() {
@@ -46,6 +49,7 @@ function IndicadoresContent() {
       {activeTab === "profissionais" && <OcupacaoProfShell />}
       {activeTab === "unidades" && <UnidadeDashboardShell />}
       {activeTab === "pacientes" && <PacientesDashboardShell />}
+      {activeTab === "previsao-receitas" && <PrevisaoReceitasShell />}
     </div>
   )
 }

@@ -198,9 +198,14 @@ function ordenarSugestoes(a: AvaliacaoSlot, b: AvaliacaoSlot): number {
 // ─── Função principal ─────────────────────────────────────────────────────────
 
 export function calcularSugestoes(
-  faltas:         SessaoFaltada[],
-  slotsLivres:    SlotLivre[],
-  agendaPaciente: AgendaPacienteSlot[],
+  faltas:          SessaoFaltada[],
+  slotsLivres:     SlotLivre[],
+  agendaPaciente:  AgendaPacienteSlot[],
+  // Datas (ISO) em que o paciente teve ao menos uma sessão concluída — nelas o
+  // paciente já está fisicamente na unidade, então uma reposição NO MESMO DIA
+  // (inclusive sexta, que nunca teria dia posterior na semana) é viável. Sem
+  // presença naquele dia, só valem dias estritamente posteriores à falta.
+  diasComPresenca: Set<string> = new Set(),
 ): ResultadoReposicao[] {
   const slotsAlocados = new Set<string>()
 
@@ -222,13 +227,15 @@ export function calcularSugestoes(
     // Usa comparação de data ISO em vez de diasPosteriores() para suportar
     // reposições em semanas futuras (tabela pode não ter dados da semana corrente).
     const dataOriginal = falta.dataOriginal
+    const podeMesmoDia = diasComPresenca.has(dataOriginal)
 
     // Filtra slots candidatos: mesma terapia (P1 = mesmo prof, P2 = prof diferente) —
     // exceto Coordenador de Caso, que tem regra própria (ver terapiaElegivel) — data
-    // posterior à falta, não já alocado por outra falta.
+    // posterior à falta (ou o MESMO dia, se houve presença nele — paciente já está
+    // na unidade), não já alocado por outra falta.
     const candidatos: AvaliacaoSlot[] = slotsLivres
       .filter(s => terapiaElegivel(s, falta))
-      .filter(s => s.data > dataOriginal)
+      .filter(s => s.data > dataOriginal || (s.data === dataOriginal && podeMesmoDia))
       .filter(s => !slotsAlocados.has(chaveSlot(s)))
       .map(s => avaliarSlot(s, falta, agendaVirtual))
       .filter(a => a.viavel)

@@ -5,9 +5,10 @@
 
 import { pm, cleanTxt } from "./helpers"
 import { normalizarUnidadeOcupacao } from "./ocupacaoProf"
-import type { AgendaSalaRow, ResumoPacientesSalas, ResumoPacientesGrupo } from "./salasTypes"
+import { PROCESSO_DIAGNOSTICO_IDS, PROCESSO_DIAGNOSTICO_NAMES } from "./constants"
+import type { AgendaSalaRow, ResumoPacientesSalas, ResumoPacientesGrupo, DashboardPacientesGeral } from "./salasTypes"
 
-function chDaLinha(r: AgendaSalaRow): number {
+export function chDaLinha(r: AgendaSalaRow): number {
   const ini = pm(r.hora_inicial)
   const fim = pm(r.hora_final)
   if (ini === null || fim === null || fim <= ini) return 0
@@ -27,13 +28,26 @@ interface AgendamentoNormalizado {
   data: string
 }
 
-function isAgendadoAtivo(r: AgendaSalaRow): boolean {
+export function isAgendadoAtivo(r: AgendaSalaRow): boolean {
   const status = cleanTxt(r.status_agendamento).toLowerCase()
   const paciente = cleanTxt(r.paciente_nome)
   return status.includes("agendado") && !!paciente
 }
 
-function semanasNoPeriodo(datas: string[]): number {
+// Terapia de "Processo Diagnóstico" (Avaliação Neuropsicológica / Psiquiatra-
+// Neurologista) — casa por terapia_id (ação), caindo pra terapia_exibicao_id
+// quando a ação não tem id, e só recorre a nome (terapia_nome/terapia_exibicao_nome)
+// como último fallback pra linhas antigas sem nenhum id. IDs são estáveis mesmo
+// quando o nome de exibição da terapia é renomeado no TITA.
+export function isTerapiaDiagnostico(r: AgendaSalaRow): boolean {
+  if (r.terapia_id !== null && r.terapia_id !== undefined) return PROCESSO_DIAGNOSTICO_IDS.has(r.terapia_id)
+  if (r.terapia_exibicao_id !== null && r.terapia_exibicao_id !== undefined) return PROCESSO_DIAGNOSTICO_IDS.has(r.terapia_exibicao_id)
+  const acao = cleanTxt(r.terapia_nome)
+  if (acao) return PROCESSO_DIAGNOSTICO_NAMES.has(acao)
+  return PROCESSO_DIAGNOSTICO_NAMES.has(cleanTxt(r.terapia_exibicao_nome))
+}
+
+export function semanasNoPeriodo(datas: string[]): number {
   const ordenadas = [...datas].sort()
   if (!ordenadas.length) return 1
   const inicio = new Date(`${ordenadas[0]}T12:00:00`)
@@ -68,24 +82,23 @@ function resumoGrupo(
     .sort((a, b) => b.chSemanalTotal - a.chSemanalTotal)
 }
 
-/** Calcula o dashboard de pacientes ativos (CH, convênio, unidade) a partir das linhas já buscadas de csv_grades_profissionais. */
-export function calcularDashboardPacientes(rows: AgendaSalaRow[]): ResumoPacientesSalas {
-  const agendamentos: AgendamentoNormalizado[] = (rows || [])
-    .filter(isAgendadoAtivo)
-    .map(r => ({
-      pacienteKey: pacienteKey(r),
-      paciente: cleanTxt(r.paciente_nome),
-      convenio: cleanTxt(r.convenio_nome) || "Não informado",
-      // `unidade_nome` em csv_grades_profissionais é sempre o nome da clínica
-      // ("CLÍNICA UNIVERSO ABA"), não a unidade física — a unidade real só
-      // existe dentro do texto livre de `sala_nome` (ex.: "Unid. Realengo -
-      // Sala 5", "AT Externo Escola"). normalizarUnidadeOcupacao já sabe
-      // extrair isso por palavra-chave.
-      unidade: normalizarUnidadeOcupacao(r.sala_nome || ""),
-      ch: chDaLinha(r),
-      data: cleanTxt(r.data),
-    }))
+function normalizarLinha(r: AgendaSalaRow): AgendamentoNormalizado {
+  return {
+    pacienteKey: pacienteKey(r),
+    paciente: cleanTxt(r.paciente_nome),
+    convenio: cleanTxt(r.convenio_nome) || "Não informado",
+    // `unidade_nome` em csv_grades_profissionais é sempre o nome da clínica
+    // ("CLÍNICA UNIVERSO ABA"), não a unidade física — a unidade real só
+    // existe dentro do texto livre de `sala_nome` (ex.: "Unid. Realengo -
+    // Sala 5", "AT Externo Escola"). normalizarUnidadeOcupacao já sabe
+    // extrair isso por palavra-chave.
+    unidade: normalizarUnidadeOcupacao(r.sala_nome || ""),
+    ch: chDaLinha(r),
+    data: cleanTxt(r.data),
+  }
+}
 
+function montarResumo(agendamentos: AgendamentoNormalizado[]): ResumoPacientesSalas {
   const pacientesUnicos = new Set(agendamentos.map(a => a.pacienteKey)).size
   const semanas = semanasNoPeriodo(agendamentos.map(a => a.data).filter(Boolean))
   const chTotal = agendamentos.reduce((sum, a) => sum + a.ch, 0)
@@ -99,5 +112,35 @@ export function calcularDashboardPacientes(rows: AgendaSalaRow[]): ResumoPacient
     mediaSessoesPorPaciente: pacientesUnicos ? agendamentos.length / pacientesUnicos : 0,
     porConvenio: resumoGrupo(agendamentos, "convenio", semanas),
     porUnidade: resumoGrupo(agendamentos, "unidade", semanas),
+  }
+}
+
+/**
+ * Calcula os dois dashboards de pacientes ativos (CH, convênio, unidade) a
+ * partir das linhas já buscadas de csv_grades_profissionais. A separação é por
+ * SESSÃO (agendamento), não por paciente — uma sessão de Avaliação
+ * Neuropsicológica ou Psiquiatra/Neurologista SEMPRE vai só pro "Processo
+ * Diagnóstico", nunca soma nos totais/contadores do "Tratamento
+ * Multidisciplinar", mesmo quando o paciente também faz outras terapias:
+ *   - "Tratamento Multidisciplinar" (dashboard geral): todas as sessões QUE NÃO
+ *     SÃO do grupo "Processo Diagnóstico". Um paciente cuja agenda inteira é
+ *     feita só dessas duas terapias não sobra nenhuma sessão aqui, então some
+ *     do dashboard geral por completo — exatamente o caso do exemplo (paciente
+ *     do convênio X com só Avaliação Neuropsicológica/Psiquiatra não conta nos
+ *     números do convênio X aqui, só no Processo Diagnóstico).
+ *   - "Processo Diagnóstico": só as sessões de Avaliação Neuropsicológica /
+ *     Psiquiatra-Neurologista, de QUALQUER paciente que as tenha — inclusive
+ *     quem também aparece no dashboard multidisciplinar por causa de outras
+ *     terapias (a sessão diagnóstica dele conta aqui, nunca lá).
+ */
+export function calcularDashboardPacientes(rows: AgendaSalaRow[]): DashboardPacientesGeral {
+  const ativos = (rows || []).filter(isAgendadoAtivo)
+
+  const rowsMultidisciplinar = ativos.filter(r => !isTerapiaDiagnostico(r))
+  const rowsDiagnostico = ativos.filter(isTerapiaDiagnostico)
+
+  return {
+    multidisciplinar: montarResumo(rowsMultidisciplinar.map(normalizarLinha)),
+    processoDiagnostico: montarResumo(rowsDiagnostico.map(normalizarLinha)),
   }
 }

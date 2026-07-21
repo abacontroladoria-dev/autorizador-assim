@@ -1,10 +1,10 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { Fragment, useMemo, useRef, useState } from "react"
 import { ORDEM_DIAS } from "@/types/reposicao"
 import { DIA_ABR, fmtData } from "@/lib/cronograma/formatters"
 import { extrairUnidade } from "@/lib/cronograma/reposicao"
-import { pm } from "@/lib/cronograma/helpers"
+import { pm, isTerapiaAdministrativa } from "@/lib/cronograma/helpers"
 import type { ReposicaoStorage, ResultadoReposicao, SessaoAgendada, SessaoConcluida, SugestaoReposicao } from "@/types/reposicao"
 
 // ─── Constantes ───────────────────────────────────────────────────────────────
@@ -13,6 +13,14 @@ const HORAS = [
   "08:00","08:40","09:20","10:00","10:40","11:20",
   "13:00","13:40","14:20","15:00","15:40","16:20","17:00",
 ]
+
+// Escala de z-index da grade — um card/marcador destacado (hover) precisa ficar
+// acima dos vizinhos não destacados, e o overlay de "extras" precisa ficar acima
+// de tudo (inclusive um card destacado por baixo dele). Nomeada num só lugar pra
+// evitar a próxima camada sobreposta escolher um número por tentativa e erro.
+const Z_MARCADOR_DESTACADO = 1
+const Z_CARD_DESTACADO = 2
+const Z_EXTRAS_OVERLAY = 3
 
 // ─── Tipos internos ───────────────────────────────────────────────────────────
 
@@ -226,6 +234,7 @@ function SessionCard({
   selected,
   compact,
   highlighted,
+  reserveBottom,
   onToggle,
   onRecusarAceito,
   onHoverEnter,
@@ -240,6 +249,12 @@ function SessionCard({
   // true quando outro card/marcador da MESMA falta está sob o mouse — destaca este
   // também, para localizar rapidamente todas as opções espalhadas pela grade.
   highlighted?: boolean
+  // true quando a célula tem "extras" (outras opções de reposição sobrepostas no
+  // canto do card, ver célula da tabela) — reserva uma faixa em branco embaixo do
+  // conteúdo pra garantir que os marcadores nunca cubram o badge/botão Recusar,
+  // mesmo quando ESTE card é o que define a altura da linha (nesse caso não sobra
+  // espaço "de graça" pelo stretch, então precisa reservar de propósito).
+  reserveBottom?: boolean
   onToggle: () => void
   onRecusarAceito: () => void
   onHoverEnter?: () => void
@@ -253,40 +268,48 @@ function SessionCard({
 
   const style = (() => {
     if (isFalta) return {
-      bg:     "#fffbeb",
-      border: "#fcd34d",
-      nameC:  "#92400e",
-      profC:  "#b45309",
+      bg:     "var(--repo-red-bg)",
+      border: "var(--repo-red-border)",
+      nameC:  "var(--repo-red-ink)",
+      profC:  "var(--repo-red-ink-soft)",
     }
     if (isReposicaoAceita) return {
-      bg:     "#f0fdf4",
-      border: "#86efac",
-      nameC:  "#166534",
-      profC:  "#16a34a",
+      bg:     "var(--repo-green-bg)",
+      border: "var(--repo-green-border)",
+      nameC:  "var(--repo-green-ink)",
+      profC:  "var(--repo-green-solid)",
     }
-    if (isProposta && selected) return {
-      bg:     "#f0fdf4",
-      border: "#86efac",
-      nameC:  "#166534",
-      profC:  "#16a34a",
+    if (isProposta && selected) {
+      if (card.prioridade === "P2") return {
+        bg:     "var(--repo-yellow-bg)",
+        border: "var(--repo-yellow-border)",
+        nameC:  "var(--repo-yellow-ink)",
+        profC:  "var(--repo-yellow-ink-soft)",
+      }
+      return {
+        bg:     "var(--repo-green-bg)",
+        border: "var(--repo-green-border)",
+        nameC:  "var(--repo-green-ink)",
+        profC:  "var(--repo-green-solid)",
+      }
     }
     if (isConcluido) return {
-      bg:     "#f8fafc",
-      border: "#e2e8f0",
-      nameC:  "#334155",
-      profC:  "#94a3b8",
+      bg:     "var(--repo-panel-bg)",
+      border: "var(--border)",
+      nameC:  "var(--foreground)",
+      profC:  "var(--muted-foreground)",
     }
     if (isFuturo) return {
-      bg:     "#eff6ff",
-      border: "#bfdbfe",
-      nameC:  "#1e3a8a",
-      profC:  "#3b82f6",
+      bg:     "var(--repo-blue-bg)",
+      border: "var(--repo-blue-border)",
+      nameC:  "var(--repo-blue-ink)",
+      profC:  "var(--repo-blue-ink-soft)",
     }
     return {
-      bg:     "#ffffff",
-      border: "#e2e8f0",
-      nameC:  "#0f172a",
-      profC:  "#94a3b8",
+      bg:     "var(--card)",
+      border: "var(--border)",
+      nameC:  "var(--foreground)",
+      profC:  "var(--muted-foreground)",
     }
   })()
 
@@ -298,9 +321,9 @@ function SessionCard({
   // prioridade — que ainda é clicável para virar a opção escolhida. Detalhe
   // completo via tooltip.
   if (isProposta && (compact || !selected)) {
-    const corPrioridade = card.prioridade === "P1" ? "#1d4ed8" : "#c2410c"
-    const bgPrioridade  = card.prioridade === "P1" ? "#eff6ff" : "#fff7ed"
-    const borderPrioridade = card.prioridade === "P1" ? "#bfdbfe" : "#fed7aa"
+    const corPrioridade = card.prioridade === "P1" ? "var(--repo-green-solid)" : "var(--repo-yellow-solid)"
+    const bgPrioridade  = card.prioridade === "P1" ? "var(--repo-green-bg)" : "var(--repo-yellow-bg)"
+    const borderPrioridade = card.prioridade === "P1" ? "var(--repo-green-border)" : "var(--repo-yellow-border)"
     const tooltip = [
       card.terapia,
       card.profissional,
@@ -328,9 +351,16 @@ function SessionCard({
           justifyContent: "center",
           cursor: "pointer",
           flexShrink: 0,
+          position: "relative",
+          zIndex: highlighted ? Z_MARCADOR_DESTACADO : 0,
         }}
       >
         <div
+          // Estado "highlighted" usa uma classe com cor em hex fixo + !important —
+          // nada de var()/color-mix aqui. Isso elimina de vez qualquer dúvida sobre
+          // a custom property não resolver neste ponto (a causa mais provável do
+          // marcador ficar "em branco" nas tentativas anteriores).
+          className={highlighted ? (card.prioridade === "P1" ? "marcador-hl-p1" : "marcador-hl-p2") : undefined}
           style={{
             width: 26,
             height: 26,
@@ -343,9 +373,6 @@ function SessionCard({
             background: bgPrioridade,
             color: corPrioridade,
             border: `1.5px solid ${borderPrioridade}`,
-            boxShadow: highlighted ? `0 0 0 3px ${corPrioridade}55` : "none",
-            transform: highlighted ? "scale(1.15)" : "scale(1)",
-            transition: "transform 0.12s, box-shadow 0.12s",
           }}
         >
           {card.label ?? "?"}
@@ -363,13 +390,23 @@ function SessionCard({
         borderRadius: 8,
         border: `1px solid ${style.border}`,
         background: style.bg,
-        padding: "8px 10px",
-        minHeight: 76,
+        padding: "5px 10px",
+        paddingBottom: reserveBottom ? 30 : 5,
+        minHeight: 48,
+        height: "100%",
+        boxSizing: "border-box",
         display: "flex",
         flexDirection: "column",
         position: "relative",
-        boxShadow: highlighted ? "0 0 0 3px rgba(37,99,235,0.25)" : "none",
-        transition: "background 0.15s, border-color 0.15s, box-shadow 0.12s",
+        zIndex: highlighted ? Z_CARD_DESTACADO : 0,
+        // Anel usa a cor de TEXTO do card (nameC — a tinta forte e saturada, não a
+        // borda pastel, que é claríssima demais no modo claro e some no escuro).
+        // Sombra é neutra (preta translúcida, não colorida) — dá profundidade sem
+        // virar um "glow" de palco; quem identifica o destaque é só o anel.
+        boxShadow: highlighted
+          ? `0 0 0 2px ${style.nameC}, 0 3px 10px -3px rgba(0,0,0,0.35)`
+          : "none",
+        transition: "background 0.15s, border-color 0.15s, box-shadow 0.16s ease-out",
         cursor: isProposta ? "pointer" : "default",
         userSelect: "none",
       }}
@@ -384,7 +421,7 @@ function SessionCard({
             fontSize: 9,
             fontWeight: 700,
             letterSpacing: "0.04em",
-            color: "#b45309",
+            color: "var(--repo-red-ink-soft)",
             textTransform: "uppercase",
             lineHeight: 1,
           }}
@@ -401,7 +438,7 @@ function SessionCard({
             fontSize: 9,
             fontWeight: 700,
             letterSpacing: "0.04em",
-            color: "#16a34a",
+            color: "var(--repo-green-solid)",
             textTransform: "uppercase",
             lineHeight: 1,
           }}
@@ -418,7 +455,7 @@ function SessionCard({
             fontSize: 9,
             fontWeight: 700,
             letterSpacing: "0.04em",
-            color: selected ? "#16a34a" : "#64748b",
+            color: selected ? (card.prioridade === "P2" ? "var(--repo-yellow-solid)" : "var(--repo-green-solid)") : "var(--muted-foreground)",
             textTransform: "uppercase",
             lineHeight: 1,
           }}
@@ -435,7 +472,7 @@ function SessionCard({
             fontSize: 9,
             fontWeight: 700,
             letterSpacing: "0.04em",
-            color: "#64748b",
+            color: "var(--muted-foreground)",
             textTransform: "uppercase",
             lineHeight: 1,
           }}
@@ -452,7 +489,7 @@ function SessionCard({
             fontSize: 9,
             fontWeight: 700,
             letterSpacing: "0.04em",
-            color: "#3b82f6",
+            color: "var(--repo-blue-ink-soft)",
             textTransform: "uppercase",
             lineHeight: 1,
           }}
@@ -510,40 +547,48 @@ function SessionCard({
         {card.profissional || "—"}
       </div>
 
-      {/* Mesmo prof. / prof. diferente — sempre visível, independente de seleção */}
-      {isProposta && card.prioridade && (
-        <span style={{
-          display: "inline-block", marginTop: 4, alignSelf: "flex-start",
-          fontSize: 9, fontWeight: 700, borderRadius: 4, padding: "1px 5px",
-          background: card.prioridade === "P1" ? "#eff6ff" : "#fff7ed",
-          color: card.prioridade === "P1" ? "#1d4ed8" : "#c2410c",
-          border: `1px solid ${card.prioridade === "P1" ? "#bfdbfe" : "#fed7aa"}`,
+      {/* Mesmo prof./prof. diferente + Recusar (só quando JÁ ACEITA — nesse estado o
+          card não é mais clicável pra desfazer, então o botão é o único jeito).
+          Uma proposta apenas SELECIONADA (ainda não aceita) já desmarca com um
+          clique no próprio card — um botão "Recusar" ali seria redundante e
+          confuso (dois jeitos de fazer a mesma coisa). */}
+      {(isProposta && card.prioridade) || isReposicaoAceita ? (
+        <div style={{
+          display: "flex", alignItems: "center", marginTop: 4, gap: 6,
+          justifyContent: isProposta && card.prioridade ? "space-between" : "flex-end",
         }}>
-          {card.prioridade === "P1" ? "MESMO PROF." : "PROF. DIFERENTE"}
-        </span>
-      )}
-
-      {/* Botão Recusar — proposta selecionada (transiente) ou reposição já aceita (persistida) */}
-      {(isReposicaoAceita || (isProposta && selected)) && (
-        <div style={{ marginTop: "auto", paddingTop: 6, display: "flex", justifyContent: "flex-end" }}>
-          <button
-            onClick={e => { e.stopPropagation(); isReposicaoAceita ? onRecusarAceito() : onToggle() }}
-            style={{
-              padding: "2px 10px",
-              borderRadius: 999,
-              fontSize: 10,
-              fontWeight: 700,
-              cursor: "pointer",
-              border: "1px solid #fca5a5",
-              background: "#fef2f2",
-              color: "#dc2626",
-              lineHeight: 1.6,
-            }}
-          >
-            Recusar
-          </button>
+          {isProposta && card.prioridade && (
+            <span style={{
+              display: "inline-block",
+              fontSize: 9, fontWeight: 700, borderRadius: 4, padding: "1px 5px",
+              background: card.prioridade === "P1" ? "var(--repo-green-bg)" : "var(--repo-yellow-bg)",
+              color: card.prioridade === "P1" ? "var(--repo-green-ink-soft)" : "var(--repo-yellow-ink)",
+              border: `1px solid ${card.prioridade === "P1" ? "var(--repo-green-border)" : "var(--repo-yellow-border)"}`,
+            }}>
+              {card.prioridade === "P1" ? "MESMO PROF." : "PROF. DIFERENTE"}
+            </span>
+          )}
+          {isReposicaoAceita && (
+            <button
+              onClick={e => { e.stopPropagation(); onRecusarAceito() }}
+              style={{
+                flexShrink: 0,
+                padding: "2px 10px",
+                borderRadius: 999,
+                fontSize: 10,
+                fontWeight: 700,
+                cursor: "pointer",
+                border: "1px solid var(--repo-red-border)",
+                background: "var(--repo-red-bg)",
+                color: "var(--repo-red-ink-soft)",
+                lineHeight: 1.6,
+              }}
+            >
+              Recusar
+            </button>
+          )}
         </div>
-      )}
+      ) : null}
     </div>
   )
 }
@@ -563,16 +608,16 @@ function PropostaChip({ dia, hora, terapia }: { dia: string; hora: string; terap
     <div
       style={{
         flexShrink: 0,
-        background: "#f0fdf4",
-        border: "1px solid #86efac",
+        background: "var(--repo-green-bg)",
+        border: "1px solid var(--repo-green-border)",
         borderRadius: 8,
         padding: "5px 12px",
         fontSize: 11,
         lineHeight: 1.4,
       }}
     >
-      <div style={{ fontWeight: 700, color: "#166534" }}>{DIA_ABR[dia] ?? dia} · {hora}</div>
-      <div style={{ color: "#15803d", marginTop: 1 }}>{terapia}</div>
+      <div style={{ fontWeight: 700, color: "var(--repo-green-ink)" }}>{DIA_ABR[dia] ?? dia} · {hora}</div>
+      <div style={{ color: "var(--repo-green-ink-soft)", marginTop: 1 }}>{terapia}</div>
     </div>
   )
 }
@@ -667,22 +712,22 @@ function PainelResumo({
       style={{
         width: 320,
         flexShrink: 0,
-        background: "#f8fafc",
+        background: "var(--repo-panel-bg)",
         borderRadius: 12,
-        border: "1px solid #e2e8f0",
+        border: "1px solid var(--border)",
         padding: "18px 16px",
         alignSelf: "flex-start",
         position: "sticky",
         top: 16,
         fontSize: 12,
-        color: "#334155",
+        color: "var(--foreground)",
         lineHeight: 1.5,
       }}
     >
       {/* Cabeçalho */}
       <div style={{
         fontSize: 10, fontWeight: 700, letterSpacing: "0.07em",
-        textTransform: "uppercase", color: "#94a3b8", marginBottom: 8,
+        textTransform: "uppercase", color: "var(--muted-foreground)", marginBottom: 8,
       }}>
         Faltou · {faltas.length} &nbsp;/&nbsp; Pode repor · {comSugestao.length}
       </div>
@@ -700,9 +745,9 @@ function PainelResumo({
             fontWeight: 700,
             cursor: totalPendentes === 0 ? "default" : "pointer",
             fontFamily: "inherit",
-            border: "1px solid #bbf7d0",
-            background: "#f0fdf4",
-            color: "#16a34a",
+            border: "1px solid var(--repo-green-border-strong)",
+            background: "var(--repo-green-bg)",
+            color: "var(--repo-green-solid)",
             opacity: totalPendentes === 0 ? 0.5 : 1,
           }}
         >
@@ -719,9 +764,9 @@ function PainelResumo({
             fontWeight: 700,
             cursor: selecionados.size === 0 ? "default" : "pointer",
             fontFamily: "inherit",
-            border: "1px solid #fecaca",
-            background: "#fff1f2",
-            color: "#dc2626",
+            border: "1px solid var(--repo-red-border-soft)",
+            background: "var(--repo-red-bg-soft)",
+            color: "var(--repo-red-ink-soft)",
             opacity: selecionados.size === 0 ? 0.5 : 1,
           }}
         >
@@ -745,24 +790,24 @@ function PainelResumo({
               {/* Falta */}
               <div style={{
                 flex: 1, minWidth: 0,
-                background: "#fffbeb",
-                border: `1px solid ${isOutlier ? "#f97316" : "#fcd34d"}`,
+                background: "var(--repo-red-bg)",
+                border: `1px solid ${isOutlier ? "var(--repo-orange-solid)" : "var(--repo-red-border)"}`,
                 borderRadius: 8,
                 padding: "6px 10px",
               }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 4 }}>
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 700, color: "#92400e", fontSize: 11 }}>
+                    <div style={{ fontWeight: 700, color: "var(--repo-red-ink)", fontSize: 11 }}>
                       {(DIA_ABR[f.dia] ?? f.dia).toUpperCase()} · {f.hora}
                       {faltaLabel[f.faltaId] && (
-                        <span style={{ color: "#b45309", fontWeight: 800 }}> · {faltaLabel[f.faltaId]}</span>
+                        <span style={{ color: "var(--repo-red-ink-soft)", fontWeight: 800 }}> · {faltaLabel[f.faltaId]}</span>
                       )}
                     </div>
-                    <div style={{ color: "#b45309", fontSize: 11, marginTop: 1 }}>
+                    <div style={{ color: "var(--repo-red-ink-soft)", fontSize: 11, marginTop: 1 }}>
                       {abrevTerapia(f.terapiaExibicao || f.terapia)}
                     </div>
                     {f.profissional && (
-                      <div style={{ color: "#d97706", fontSize: 10, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      <div style={{ color: "var(--repo-red-ink-softer)", fontSize: 10, marginTop: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                         {doisNomes(f.profissional)}
                       </div>
                     )}
@@ -770,8 +815,8 @@ function PainelResumo({
                   {isOutlier && (
                     <span style={{
                       fontSize: 9, fontWeight: 700, flexShrink: 0,
-                      background: "#fff7ed", color: "#ea580c",
-                      border: "1px solid #fdba74", borderRadius: 4, padding: "1px 5px",
+                      background: "var(--repo-orange-bg)", color: "var(--repo-orange-ink-soft)",
+                      border: "1px solid var(--repo-orange-border-soft)", borderRadius: 4, padding: "1px 5px",
                     }}>
                       ⚠ {faltaUnid}
                     </span>
@@ -780,19 +825,25 @@ function PainelResumo({
               </div>
 
               {/* Reposição ou status */}
-              {bestSug ? (
+              {bestSug ? (() => {
+                const selCores = selected
+                  ? (bestSug.prioridade === "P1"
+                      ? { bg: "var(--repo-green-bg)", border: "var(--repo-green-border)", strong: "var(--repo-green-ink)", soft: "var(--repo-green-ink-soft)" }
+                      : { bg: "var(--repo-yellow-bg)", border: "var(--repo-yellow-border)", strong: "var(--repo-yellow-ink)", soft: "var(--repo-yellow-ink-soft)" })
+                  : { bg: "var(--repo-panel-bg)", border: "var(--border)", strong: "var(--foreground)", soft: "var(--muted-foreground)" }
+                return (
                 <div style={{
                   flex: 1, minWidth: 0,
-                  background: selected ? "#f0fdf4" : "#f8fafc",
-                  border: `1px solid ${selected ? "#86efac" : "#e2e8f0"}`,
+                  background: selCores.bg,
+                  border: `1px solid ${selCores.border}`,
                   borderRadius: 8,
                   padding: "6px 10px 7px 10px",
                 }}>
-                  <div style={{ fontWeight: 700, color: selected ? "#166534" : "#334155", fontSize: 11 }}>
+                  <div style={{ fontWeight: 700, color: selCores.strong, fontSize: 11 }}>
                     {(DIA_ABR[bestSug.dia] ?? bestSug.dia).toUpperCase()} · {bestSug.hora}
                   </div>
                   <div style={{
-                    color: selected ? "#15803d" : "#64748b", fontSize: 10, marginTop: 1,
+                    color: selCores.soft, fontSize: 10, marginTop: 1,
                     overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
                   }}>
                     {doisNomes(bestSug.profissional)}
@@ -801,30 +852,31 @@ function PainelResumo({
                     <span style={{
                       display: "inline-block",
                       fontSize: 9, fontWeight: 700, borderRadius: 4, padding: "1px 5px",
-                      background: bestSug.prioridade === "P1" ? "#eff6ff" : "#fff7ed",
-                      color: bestSug.prioridade === "P1" ? "#1d4ed8" : "#c2410c",
-                      border: `1px solid ${bestSug.prioridade === "P1" ? "#bfdbfe" : "#fed7aa"}`,
+                      background: bestSug.prioridade === "P1" ? "var(--repo-green-bg)" : "var(--repo-yellow-bg)",
+                      color: bestSug.prioridade === "P1" ? "var(--repo-green-ink-soft)" : "var(--repo-yellow-ink)",
+                      border: `1px solid ${bestSug.prioridade === "P1" ? "var(--repo-green-border)" : "var(--repo-yellow-border)"}`,
                     }}>
                       {selected ? "✓ " : ""}{bestSug.prioridade === "P1" ? "MESMO PROF." : "PROF. DIFERENTE"}
                     </span>
                     {outrasOpcoes > 0 && (
-                      <span style={{ fontSize: 9, color: "#94a3b8", fontStyle: "italic" }}>
+                      <span style={{ fontSize: 9, color: "var(--muted-foreground)", fontStyle: "italic" }}>
                         +{outrasOpcoes} opç{outrasOpcoes !== 1 ? "ões" : "ão"} na grade
                       </span>
                     )}
                   </div>
                 </div>
-              ) : (
+                )
+              })() : (
                 <div style={{
                   flex: 1, minWidth: 0,
-                  background: r.status === "sem_disponibilidade" ? "#fef2f2" : "#f8fafc",
-                  border: `1px solid ${r.status === "sem_disponibilidade" ? "#fca5a5" : "#e2e8f0"}`,
+                  background: r.status === "sem_disponibilidade" ? "var(--repo-red-bg)" : "var(--repo-panel-bg)",
+                  border: `1px solid ${r.status === "sem_disponibilidade" ? "var(--repo-red-border)" : "var(--border)"}`,
                   borderRadius: 8,
                   padding: "5px 10px 5px 10px",
                   display: "flex", alignItems: "center", justifyContent: "center",
                 }}>
                   <span style={{
-                    color: r.status === "sem_disponibilidade" ? "#dc2626" : "#94a3b8",
+                    color: r.status === "sem_disponibilidade" ? "var(--repo-red-ink-soft)" : "var(--muted-foreground)",
                     fontSize: 10, fontStyle: "italic", textAlign: "center",
                   }}>
                     {r.status === "sem_disponibilidade" ? "sem disponibilidade"
@@ -840,18 +892,18 @@ function PainelResumo({
 
       {/* Unidade */}
       {unidades.length > 0 && (
-        <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid #e2e8f0" }}>
+        <div style={{ marginTop: 16, paddingTop: 14, borderTop: "1px solid var(--border)" }}>
           <div style={{
             fontSize: 10, fontWeight: 700, letterSpacing: "0.07em",
-            textTransform: "uppercase", color: "#94a3b8", marginBottom: 8,
+            textTransform: "uppercase", color: "var(--muted-foreground)", marginBottom: 8,
           }}>
             Unidade
           </div>
           {unidades.length === 1 ? (
             /* Caso simples: todas as sessões na mesma unidade */
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "#22c55e", flexShrink: 0 }} />
-              <span style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>{unidades[0]}</span>
+              <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "var(--repo-green-solid)", flexShrink: 0 }} />
+              <span style={{ fontSize: 12, fontWeight: 700, color: "var(--repo-green-ink)" }}>{unidades[0]}</span>
             </div>
           ) : (
             /* Caso multi-unidade: mostra a habitual + destaca quais faltas fogem dela */
@@ -859,9 +911,9 @@ function PainelResumo({
               {/* Unidade habitual */}
               {unidMajoritaria && (
                 <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8 }}>
-                  <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "#22c55e", flexShrink: 0 }} />
-                  <span style={{ fontSize: 12, fontWeight: 700, color: "#166534" }}>{unidMajoritaria}</span>
-                  <span style={{ fontSize: 10, color: "#94a3b8" }}>habitual</span>
+                  <span style={{ display: "inline-block", width: 7, height: 7, borderRadius: "50%", background: "var(--repo-green-solid)", flexShrink: 0 }} />
+                  <span style={{ fontSize: 12, fontWeight: 700, color: "var(--repo-green-ink)" }}>{unidMajoritaria}</span>
+                  <span style={{ fontSize: 10, color: "var(--muted-foreground)" }}>habitual</span>
                 </div>
               )}
               {/* Faltas em unidade diferente da habitual */}
@@ -877,35 +929,35 @@ function PainelResumo({
                 if (outliers.length === 0 && outliersAgend.length === 0) return null
                 return (
                   <div style={{
-                    background: "#fff7ed",
-                    border: "1px solid #fed7aa",
+                    background: "var(--repo-orange-bg)",
+                    border: "1px solid var(--repo-orange-border)",
                     borderRadius: 7,
                     padding: "7px 10px",
                   }}>
-                    <div style={{ fontSize: 10, fontWeight: 700, color: "#c2410c", marginBottom: 5 }}>
+                    <div style={{ fontSize: 10, fontWeight: 700, color: "var(--repo-orange-ink)", marginBottom: 5 }}>
                       ⚠ Destoa da unidade habitual:
                     </div>
                     <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                       {outliers.map(f => (
-                        <div key={f.faltaId} style={{ fontSize: 10, color: "#92400e" }}>
+                        <div key={f.faltaId} style={{ fontSize: 10, color: "var(--repo-orange-ink-softer)" }}>
                           <span style={{ fontWeight: 700 }}>
                             {DIA_ABR[f.dia] ?? f.dia} {f.hora}
                           </span>
                           {" · "}
                           <span>{f.terapiaExibicao || f.terapia}</span>
-                          <span style={{ color: "#c2410c", marginLeft: 4, fontWeight: 700 }}>
+                          <span style={{ color: "var(--repo-orange-ink)", marginLeft: 4, fontWeight: 700 }}>
                             → {extrairUnidade(f.unidade)}
                           </span>
                         </div>
                       ))}
                       {outliersAgend.map((s, i) => (
-                        <div key={i} style={{ fontSize: 10, color: "#64748b" }}>
+                        <div key={i} style={{ fontSize: 10, color: "var(--muted-foreground)" }}>
                           <span style={{ fontWeight: 700 }}>
                             {DIA_ABR[s.dia] ?? s.dia} {s.hora}
                           </span>
                           {" · "}
                           <span>{s.terapiaExibicao || s.terapia}</span>
-                          <span style={{ color: "#c2410c", marginLeft: 4, fontWeight: 700 }}>
+                          <span style={{ color: "var(--repo-orange-ink)", marginLeft: 4, fontWeight: 700 }}>
                             → {extrairUnidade(s.unidade)}
                           </span>
                         </div>
@@ -927,6 +979,7 @@ function PainelResumo({
 
 interface VisaoComparativaProps {
   pacienteNome:      string
+  pacienteId:        string
   resultados:        ResultadoReposicao[]
   sessoesAgendadas:  SessaoAgendada[]
   sessoesConcluidas: SessaoConcluida[]
@@ -938,6 +991,7 @@ interface VisaoComparativaProps {
 
 export function VisaoComparativa({
   pacienteNome,
+  pacienteId,
   resultados,
   sessoesAgendadas,
   sessoesConcluidas,
@@ -977,13 +1031,21 @@ export function VisaoComparativa({
   // em vez de só marcar as faltas com MESMO PROF. — assim que a semana carrega, a
   // grade já mostra o melhor lote calculado (balanceando prioridade e blocos sem
   // intervalo), e o coordenador ajusta manualmente a partir daí se quiser.
+  // Calculado uma única vez (ref) e compartilhado pelos dois useState abaixo —
+  // calcularSugestaoAutomatica é um otimizador caro (múltiplos pontos de partida ×
+  // várias passadas), então chamá-lo duas vezes com os mesmos argumentos (um por
+  // useState) dobraria à toa o custo do primeiro carregamento.
+  const automaticaInicialRef = useRef<ReturnType<typeof calcularSugestaoAutomatica> | null>(null)
+  if (automaticaInicialRef.current === null) {
+    automaticaInicialRef.current = calcularSugestaoAutomatica(comSugestao, aceites)
+  }
   const [selecionados, setSelecionados] = useState<Set<string>>(
-    () => calcularSugestaoAutomatica(comSugestao, aceites).selecionados,
+    () => automaticaInicialRef.current!.selecionados,
   )
   // Qual sugestão (índice em ResultadoReposicao.sugestoes) está escolhida para cada
   // falta — mesmo padrão inicial da sugestão automática.
   const [escolhas, setEscolhas] = useState<Record<string, number>>(
-    () => calcularSugestaoAutomatica(comSugestao, aceites).escolhas,
+    () => automaticaInicialRef.current!.escolhas,
   )
 
   // Data de cada dia da semana
@@ -1096,27 +1158,36 @@ export function VisaoComparativa({
 
     // 4º: propostas de reposição pendentes (já exclui faltaIds resolvidos) — mostra
     // TODAS as opções calculadas para cada falta, não só a melhor. Em duas passadas:
-    // primeiro a opção ESCOLHIDA de cada falta (para ela ter prioridade de virar o
-    // card cheio da célula), depois as demais. O usuário escolhe clicando; só uma
-    // fica marcada como "escolhida" por vez (ver `escolhas`).
-    comSugestao.forEach(r => {
-      const escolhaIndex = escolhas[r.falta.faltaId] ?? 0
-      const s = r.sugestoes[escolhaIndex]
-      if (!s) return
-      addProposta(s.hora, s.dia as string, {
-        tipo: "proposta",
-        ...resolverTerapia(s.terapiaExibicao, s.terapia),
-        profissional: s.profissional,
-        faltaId: r.falta.faltaId,
-        candidatoIndex: escolhaIndex,
-        label: faltaLabel[r.falta.faltaId],
-        prioridade: s.prioridade,
+    //   a) a opção ESCOLHIDA de cada falta, faltas JÁ SELECIONADAS primeiro (ganham
+    //      o card cheio da célula sempre, mesmo se outra falta ainda não decidida
+    //      "previsualizar" um candidato dela mesma data+hora — sem essa ordem, duas
+    //      faltas diferentes podem ter escolhas apontando pro mesmo dia+hora
+    //      simultaneamente, e a que processa primeiro no array "rouba" a célula
+    //      mesmo estando desmarcada, escondendo a que o usuário efetivamente
+    //      selecionou). `sort` é estável (ES2019+), então dentro de cada grupo
+    //      (selecionada/não selecionada) a ordem original de `comSugestao` é
+    //      preservada — só a prioridade entre os dois grupos muda.
+    //   b) todas as demais opções não escolhidas, como extras.
+    ;[...comSugestao]
+      .sort((a, b) => Number(selecionados.has(b.falta.faltaId)) - Number(selecionados.has(a.falta.faltaId)))
+      .forEach(r => {
+        const escolhaIndex = escolhas[r.falta.faltaId] ?? 0
+        const s = r.sugestoes[escolhaIndex]
+        if (!s) return
+        addProposta(s.hora, s.dia as string, {
+          tipo: "proposta",
+          ...resolverTerapia(s.terapiaExibicao, s.terapia),
+          profissional: s.profissional,
+          faltaId: r.falta.faltaId,
+          candidatoIndex: escolhaIndex,
+          label: faltaLabel[r.falta.faltaId],
+          prioridade: s.prioridade,
+        })
       })
-    })
     comSugestao.forEach(r => {
       const escolhaIndex = escolhas[r.falta.faltaId] ?? 0
       r.sugestoes.forEach((s, i) => {
-        if (i === escolhaIndex) return  // já inserida na passada acima
+        if (i === escolhaIndex) return  // já inserida na passada (a) acima
         addProposta(s.hora, s.dia as string, {
           tipo: "proposta",
           ...resolverTerapia(s.terapiaExibicao, s.terapia),
@@ -1130,13 +1201,29 @@ export function VisaoComparativa({
     })
 
     // 5º: sessões futuras agendadas (ainda não ocorreram)
-    sessoesAgendadas.forEach(s =>
+    // Terapias administrativas (ADMIN_ONLY em constants.ts — "Supervisão ABA",
+    // "Coordenador de Caso", "Visita Guiada", "Triagem" etc.: profissional
+    // planeja/administra, paciente não comparece) nunca têm linha própria em
+    // fila_autorizacoes, então cairiam sempre como "futuro" mesmo em dias já
+    // passados. Regra do coordenador: elas herdam o status do dia — PRESENÇA se
+    // houve ao menos uma sessão clínica com presença naquele dia (mesmo com
+    // outras faltas), FALTA só se o dia inteiro foi faltado. (Coordenador de Caso
+    // normalmente já tem falta/concluído reais via seu próprio fluxo — essa
+    // passada só entra em ação nos casos raros em que ele também não tiver.)
+    const diasComPresenca = new Set(sessoesConcluidas.map(s => s.dia))
+    const diasComFalta    = new Set(resultados.map(r => r.falta.dia))
+    sessoesAgendadas.forEach(s => {
+      let tipo: CellCard["tipo"] = "futuro"
+      if (isTerapiaAdministrativa(s.terapia)) {
+        if (diasComPresenca.has(s.dia)) tipo = "concluido"
+        else if (diasComFalta.has(s.dia)) tipo = "falta"
+      }
       setPrincipal(s.hora, s.dia, {
-        tipo: "futuro",
+        tipo,
         ...resolverTerapia(s.terapiaExibicao, s.terapia),
         profissional: s.profissional,
-      }),
-    )
+      })
+    })
 
     const horasAtivas = HORAS.filter(h => h in g)
     // Sempre mostra Seg-Sex, mesmo sem conteúdo — colunas com largura reservada em
@@ -1144,7 +1231,7 @@ export function VisaoComparativa({
     const diasAtivos = ORDEM_DIAS
 
     return { grid: g, horasAtivas, diasAtivos }
-  }, [resultados, sessoesAgendadas, sessoesConcluidas, aceites, comSugestao, faltaLabel, escolhas])
+  }, [resultados, sessoesAgendadas, sessoesConcluidas, aceites, comSugestao, faltaLabel, escolhas, selecionados])
 
   const propostasSel = comSugestao
     .filter(r => selecionados.has(r.falta.faltaId))
@@ -1220,6 +1307,7 @@ export function VisaoComparativa({
           textTransform: "uppercase", color: "var(--muted-foreground)",
         }}>
           {pacienteNome}
+          <span style={{ fontWeight: 700, textTransform: "none", letterSpacing: "normal" }}> (id {pacienteId})</span>
         </div>
         <button
           type="button"
@@ -1238,7 +1326,7 @@ export function VisaoComparativa({
             fontFamily: "inherit",
             cursor: temSugestoes ? "pointer" : "default",
             border: "none",
-            background: temSugestoes ? "linear-gradient(135deg, #4f46e5, #7c3aed)" : "#cbd5e1",
+            background: temSugestoes ? "linear-gradient(135deg, var(--repo-gradient-start), var(--repo-gradient-end))" : "var(--repo-disabled-bg)",
             color: "#ffffff",
             boxShadow: temSugestoes ? "0 4px 14px rgba(79,70,229,0.35)" : "none",
             opacity: temSugestoes ? 1 : 0.6,
@@ -1258,6 +1346,25 @@ export function VisaoComparativa({
           @media (prefers-reduced-motion: reduce) {
             .sugestao-automatica-btn { animation: none !important; }
           }
+          /* Marcador em destaque (hover na falta correspondente) — cor em hex fixo,
+             sem var()/color-mix, pra nunca depender de resolução de custom property.
+             ATENÇÃO: #16a34a/#ca8a04 são cópias literais de --repo-green-solid e
+             --repo-yellow-solid (globals.css). Esses tokens ainda não têm variante
+             .dark (mesmo valor nos dois temas hoje) — se um dia ganharem uma, essas
+             duas classes têm que ser atualizadas manualmente junto, senão o hover
+             fica com a cor do tema claro mesmo no escuro. */
+          .marcador-hl-p1 {
+            background: #16a34a !important;
+            color: #ffffff !important;
+            border-color: #16a34a !important;
+            box-shadow: 0 2px 8px -1px rgba(0,0,0,0.5) !important;
+          }
+          .marcador-hl-p2 {
+            background: #ca8a04 !important;
+            color: #ffffff !important;
+            border-color: #ca8a04 !important;
+            box-shadow: 0 2px 8px -1px rgba(0,0,0,0.5) !important;
+          }
         `}</style>
       </div>
 
@@ -1265,144 +1372,162 @@ export function VisaoComparativa({
 
         {/* ── Grade semanal ── */}
         <div style={{ flex: 1, minWidth: 0, overflowX: "auto" }}>
-          <table
+          {/* CSS Grid em vez de <table> — cada linha (hora) é uma faixa de grid, e por
+              padrão TODO item de uma faixa de grid estica (align-items: stretch) pra
+              altura da faixa (a do item mais alto), sem precisar de percentual de
+              altura em célula de tabela — que é inconsistente entre navegadores e
+              foi a causa dos cards ficando menores que a linha, com vão vazio embaixo. */}
+          <div
             style={{
-              width: "100%",
-              borderCollapse: "separate",
-              borderSpacing: 0,
-              tableLayout: "fixed",
+              display: "grid",
+              gridTemplateColumns: `56px repeat(${diasAtivos.length}, minmax(140px, 1fr))`,
             }}
           >
-            <colgroup>
-              <col style={{ width: 56 }} />
-              {diasAtivos.map(d => <col key={d} />)}
-            </colgroup>
+            {/* Cabeçalho */}
+            <div style={{ padding: "0 0 14px" }} />
+            {diasAtivos.map(dia => (
+              <div
+                key={dia}
+                style={{
+                  padding: "0 6px 14px",
+                  textAlign: "center",
+                  alignSelf: "end",
+                  borderBottom: "2px solid var(--border)",
+                }}
+              >
+                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)" }}>
+                  {DIA_ABR[dia] ?? dia}
+                </div>
+                <div style={{ fontSize: 11, color: "var(--muted-foreground)", fontWeight: 400, marginTop: 1 }}>
+                  {fmtData(diaToDate[dia])}
+                </div>
+              </div>
+            ))}
 
-            <thead>
-              <tr>
-                <th style={{ padding: "0 0 14px" }} />
-                {diasAtivos.map(dia => (
-                  <th
-                    key={dia}
-                    style={{
-                      padding: "0 6px 14px",
-                      textAlign: "center",
-                      verticalAlign: "bottom",
-                      borderBottom: "2px solid #e2e8f0",
-                    }}
-                  >
-                    <div style={{ fontSize: 13, fontWeight: 700, color: "#1e293b" }}>
-                      {DIA_ABR[dia] ?? dia}
-                    </div>
-                    <div style={{ fontSize: 11, color: "#94a3b8", fontWeight: 400, marginTop: 1 }}>
-                      {fmtData(diaToDate[dia])}
-                    </div>
-                  </th>
-                ))}
-              </tr>
-            </thead>
+            {/* Linhas de hora */}
+            {horasAtivas.map(hora => (
+              <Fragment key={hora}>
+                <div
+                  style={{
+                    // A caixa continua esticando (stretch padrão do grid — mantém a
+                    // borderBottom alinhada com o fim real da linha, igual às colunas
+                    // vizinhas). Só o TEXTO por dentro é ancorado no topo (display:flex
+                    // + alignItems:flex-start) — a linha estica pra caber a sessão mais
+                    // alta entre as colunas (badge+Recusar, extras...), então centralizar
+                    // o texto o afastava do topo do card correspondente.
+                    display: "flex",
+                    alignItems: "flex-start",
+                    padding: "4px 10px 8px 0",
+                    fontSize: 12,
+                    color: "var(--muted-foreground)",
+                    fontWeight: 500,
+                    whiteSpace: "nowrap",
+                    borderBottom: "1px solid var(--border)",
+                  }}
+                >
+                  {hora}
+                </div>
 
-            <tbody>
-              {horasAtivas.map(hora => (
-                <tr key={hora}>
-                  <td
-                    style={{
-                      padding: "8px 10px 8px 0",
-                      fontSize: 12,
-                      color: "#94a3b8",
-                      fontWeight: 500,
-                      verticalAlign: "middle",
-                      whiteSpace: "nowrap",
-                      borderBottom: "1px solid #f1f5f9",
-                    }}
-                  >
-                    {hora}
-                  </td>
+                {diasAtivos.map(dia => {
+                  const bucket = grid[hora]?.[dia]
+                  const principal = bucket?.principal
+                  const extras = bucket?.extras ?? []
 
-                  {diasAtivos.map(dia => {
-                    const bucket = grid[hora]?.[dia]
-                    const principal = bucket?.principal
-                    const extras = bucket?.extras ?? []
+                  // Para "proposta", só é "selecionada" a que representa a opção escolhida
+                  // atualmente (candidatoIndex bate com escolhas[faltaId]) — as demais
+                  // opções (da mesma falta ou de outra) ficam com visual neutro (clicáveis).
+                  function isSelecionada(c: CellCard): boolean {
+                    if (!c.faltaId) return false
+                    if (c.tipo !== "proposta") return selecionados.has(c.faltaId)
+                    return selecionados.has(c.faltaId) && (c.candidatoIndex ?? 0) === (escolhas[c.faltaId] ?? 0)
+                  }
 
-                    // Para "proposta", só é "selecionada" a que representa a opção escolhida
-                    // atualmente (candidatoIndex bate com escolhas[faltaId]) — as demais
-                    // opções (da mesma falta ou de outra) ficam com visual neutro (clicáveis).
-                    function isSelecionada(c: CellCard): boolean {
-                      if (!c.faltaId) return false
-                      if (c.tipo !== "proposta") return selecionados.has(c.faltaId)
-                      return selecionados.has(c.faltaId) && (c.candidatoIndex ?? 0) === (escolhas[c.faltaId] ?? 0)
-                    }
+                  // Marcadores em ordem alfabética pela letra da falta — mais fácil de
+                  // escanear um grupo empilhado do que a ordem em que foram calculados.
+                  function porLetra(a: CellCard, b: CellCard): number {
+                    return (a.label ?? "").localeCompare(b.label ?? "")
+                  }
 
-                    // Marcadores em ordem alfabética pela letra da falta — mais fácil de
-                    // escanear um grupo empilhado do que a ordem em que foram calculados.
-                    function porLetra(a: CellCard, b: CellCard): number {
-                      return (a.label ?? "").localeCompare(b.label ?? "")
-                    }
-
-                    function marcador(c: CellCard) {
-                      return (
-                        <SessionCard
-                          key={c.faltaId ? `${c.faltaId}-${c.candidatoIndex}` : undefined}
-                          card={c}
-                          selected={isSelecionada(c)}
-                          compact
-                          highlighted={!!c.faltaId && c.faltaId === hoverFaltaId}
-                          onToggle={() => c.faltaId && selecionarCandidato(c.faltaId, c.candidatoIndex ?? 0)}
-                          onRecusarAceito={() => c.faltaId && onRecusarAceito(c.faltaId)}
-                          onHoverEnter={() => c.faltaId && setHoverFaltaId(c.faltaId)}
-                          onHoverLeave={() => setHoverFaltaId(null)}
-                        />
-                      )
-                    }
-
-                    // Se o "principal" da célula também é só um marcador (nenhuma opção
-                    // escolhida caiu aqui — pass 1 já teria reservado a célula pra ela),
-                    // TODOS os candidatos dessa célula (principal + extras) são marcadores
-                    // e entram juntos numa única grade compacta, em vez de um "principal"
-                    // grande e vazio seguido de extras pequenos desalinhados.
-                    const principalEhMarcador = principal?.tipo === "proposta" && !isSelecionada(principal)
-
+                  function marcador(c: CellCard) {
                     return (
-                      <td
-                        key={dia}
-                        style={{
-                          padding: "5px 4px",
-                          verticalAlign: "top",
-                          borderBottom: "1px solid #f1f5f9",
-                          minWidth: 140,
-                        }}
-                      >
-                        {!principal ? (
-                          <EmptyCell />
-                        ) : principalEhMarcador ? (
-                          <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-                            {[principal, ...extras].sort(porLetra).map(marcador)}
-                          </div>
-                        ) : (
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                            <SessionCard
-                              card={principal}
-                              selected={isSelecionada(principal)}
-                              highlighted={!!principal.faltaId && principal.faltaId === hoverFaltaId}
-                              onToggle={() => principal.faltaId && selecionarCandidato(principal.faltaId, principal.candidatoIndex ?? 0)}
-                              onRecusarAceito={() => principal.faltaId && onRecusarAceito(principal.faltaId)}
-                              onHoverEnter={() => principal.faltaId && setHoverFaltaId(principal.faltaId)}
-                              onHoverLeave={() => setHoverFaltaId(null)}
-                            />
-                            {extras.length > 0 && (
-                              <div style={{ display: "flex", flexWrap: "wrap", gap: 3 }}>
-                                {[...extras].sort(porLetra).map(marcador)}
-                              </div>
-                            )}
-                          </div>
-                        )}
-                      </td>
+                      <SessionCard
+                        key={c.faltaId ? `${c.faltaId}-${c.candidatoIndex}` : undefined}
+                        card={c}
+                        selected={isSelecionada(c)}
+                        compact
+                        highlighted={!!c.faltaId && c.faltaId === hoverFaltaId}
+                        onToggle={() => c.faltaId && selecionarCandidato(c.faltaId, c.candidatoIndex ?? 0)}
+                        onRecusarAceito={() => c.faltaId && onRecusarAceito(c.faltaId)}
+                        onHoverEnter={() => c.faltaId && setHoverFaltaId(c.faltaId)}
+                        onHoverLeave={() => setHoverFaltaId(null)}
+                      />
                     )
-                  })}
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                  }
+
+                  // Se o "principal" da célula também é só um marcador (nenhuma opção
+                  // escolhida caiu aqui — pass 1 já teria reservado a célula pra ela),
+                  // TODOS os candidatos dessa célula (principal + extras) são marcadores
+                  // e entram juntos numa única grade compacta, em vez de um "principal"
+                  // grande e vazio seguido de extras pequenos desalinhados.
+                  const principalEhMarcador = principal?.tipo === "proposta" && !isSelecionada(principal)
+
+                  return (
+                    <div
+                      key={dia}
+                      style={{
+                        padding: "4px 4px",
+                        borderBottom: "1px solid var(--border)",
+                        minWidth: 0,
+                        // display:flex + flex:1 no filho real (abaixo) garante que o card
+                        // preencha a célula esticada pelo grid — mais confiável que
+                        // percentual de altura.
+                        display: "flex",
+                        flexDirection: "column",
+                      }}
+                    >
+                      {!principal ? (
+                        <EmptyCell />
+                      ) : principalEhMarcador ? (
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 3, alignContent: "center", flex: 1 }}>
+                          {[principal, ...extras].sort(porLetra).map(marcador)}
+                        </div>
+                      ) : (
+                        // O card cheio estica (flex:1) pra ocupar toda a altura da célula,
+                        // que por sua vez já foi esticada pelo grid pra bater com a linha
+                        // (a célula vizinha mais alta). Os "extras" NÃO entram no fluxo
+                        // abaixo do card (isso forçava a linha a ficar mais alta ainda) —
+                        // ficam sobrepostos no canto do próprio card, absolute.
+                        <div style={{ position: "relative", flex: 1 }}>
+                          <SessionCard
+                            card={principal}
+                            selected={isSelecionada(principal)}
+                            highlighted={!!principal.faltaId && principal.faltaId === hoverFaltaId}
+                            reserveBottom={extras.length > 0}
+                            onToggle={() => principal.faltaId && selecionarCandidato(principal.faltaId, principal.candidatoIndex ?? 0)}
+                            onRecusarAceito={() => principal.faltaId && onRecusarAceito(principal.faltaId)}
+                            onHoverEnter={() => principal.faltaId && setHoverFaltaId(principal.faltaId)}
+                            onHoverLeave={() => setHoverFaltaId(null)}
+                          />
+                          {extras.length > 0 && (
+                            // zIndex 3: precisa ficar ACIMA do card mesmo quando o
+                            // PRÓPRIO card está "highlighted" (zIndex 2 no hover — ver
+                            // SessionCard) — senão passar o mouse no card cobre os
+                            // marcadores extras sobrepostos nele.
+                            <div style={{
+                              position: "absolute", right: 6, bottom: 6, zIndex: Z_EXTRAS_OVERLAY,
+                              display: "flex", flexWrap: "wrap", gap: 3, justifyContent: "flex-end",
+                            }}>
+                              {[...extras].sort(porLetra).map(marcador)}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+              </Fragment>
+            ))}
+          </div>
         </div>
 
         {/* ── Painel de resumo (direita) ── */}
@@ -1426,8 +1551,8 @@ export function VisaoComparativa({
             bottom: 0,
             left: 0,
             right: 0,
-            background: "#ffffff",
-            borderTop: "1px solid #e2e8f0",
+            background: "var(--card)",
+            borderTop: "1px solid var(--border)",
             boxShadow: "0 -4px 24px rgba(15,23,42,0.07)",
             padding: "10px 28px",
             display: "flex",
@@ -1443,13 +1568,13 @@ export function VisaoComparativa({
                 width: 30,
                 height: 30,
                 borderRadius: "50%",
-                background: "#f0fdf4",
-                border: "2px solid #16a34a",
+                background: "var(--repo-green-bg)",
+                border: "2px solid var(--repo-green-solid)",
                 display: "flex",
                 alignItems: "center",
                 justifyContent: "center",
                 fontSize: 13,
-                color: "#16a34a",
+                color: "var(--repo-green-solid)",
                 fontWeight: 800,
                 flexShrink: 0,
               }}
@@ -1457,10 +1582,10 @@ export function VisaoComparativa({
               ✓
             </div>
             <div>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#0f172a", lineHeight: 1.3 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "var(--foreground)", lineHeight: 1.3 }}>
                 {propostasSel.length} alteração(ões) pronta(s) para implantação
               </div>
-              <div style={{ fontSize: 11, color: "#94a3b8", marginTop: 1 }}>
+              <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 1 }}>
                 Revise as propostas selecionadas na grade.
               </div>
             </div>
@@ -1497,9 +1622,9 @@ export function VisaoComparativa({
                   fontSize: 12,
                   fontWeight: 600,
                   cursor: "pointer",
-                  border: "1px solid #e2e8f0",
-                  background: "#ffffff",
-                  color: "#475569",
+                  border: "1px solid var(--border)",
+                  background: "var(--card)",
+                  color: "var(--muted-foreground)",
                 }}
               >
                 Cancelar seleção
@@ -1513,14 +1638,14 @@ export function VisaoComparativa({
                   fontWeight: 700,
                   cursor: "pointer",
                   border: "none",
-                  background: "#16a34a",
+                  background: "var(--repo-green-solid)",
                   color: "#ffffff",
                 }}
               >
                 Aceitar alterações ({propostasSel.length})
               </button>
             </div>
-            <div style={{ fontSize: 10, color: "#94a3b8" }}>
+            <div style={{ fontSize: 10, color: "var(--muted-foreground)" }}>
               As alterações só serão aplicadas após a confirmação.
             </div>
           </div>

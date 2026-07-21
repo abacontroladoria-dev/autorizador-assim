@@ -108,6 +108,7 @@ function PacienteRow({
         }}
       >
         {p.pacienteNome}
+        <span style={{ color: "var(--muted-foreground)", fontWeight: 700 }}> (id {p.pacienteId})</span>
       </span>
 
       {/* Contagem — evita contradizer o selo (ex.: "Resolvido" ao lado de "0 repostas"

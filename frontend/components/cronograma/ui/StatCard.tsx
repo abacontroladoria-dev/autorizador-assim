@@ -12,7 +12,7 @@ import { ICON_BG, TONE_ACCENT, TONE_SOFT, type Tone } from "./tones"
 interface StatCardProps {
   tone: Tone
   icon: ReactNode
-  label: string
+  label: ReactNode
   /** Tinta o card com o par suave da tonalidade (senão usa bg-card neutro). */
   tinted?: boolean
   className?: string

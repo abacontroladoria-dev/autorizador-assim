@@ -35,7 +35,6 @@ export function useVisaoGeralFaltas(semanaInicio: string) {
         .from('fila_autorizacoes')
         .select('id, paciente_id, paciente_nome, tita_agendamento_id, data_atendimento')
         .eq('status', 'falta')
-        .is('cancelado_em', null)
         .is('falta_revertida_em', null)
         .gte('data_atendimento', semanaInicio)
         .lte('data_atendimento', semanaFim)

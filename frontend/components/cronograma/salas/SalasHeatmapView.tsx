@@ -2,12 +2,25 @@
 
 // SalasHeatmapView — mapa de calor sala × dia, com Manhã empilhada acima de
 // Tarde (2 linhas por sala) em vez de lado a lado. Faixas de cor 0-39/40-59/
-// 60-79/80-100 (mesma paleta de corFaixaOcupacao/ocupacaoProf.ts).
+// 60-79/80-100 — paleta própria em tons pastel (mais suave que a paleta
+// saturada de corFaixaOcupacao/ocupacaoProf.ts, usada em outras telas como
+// Ocupação de Profissionais).
 
+import { useEffect, useRef } from "react"
 import { Eye, EyeOff } from "lucide-react"
-import { corFaixaOcupacao, textoFaixaOcupacaoSala } from "@/lib/cronograma/salas"
+import { textoFaixaOcupacaoSala } from "@/lib/cronograma/salas"
 import { CAPACIDADE_LABEL_CURTO } from "@/lib/cronograma/salasTypes"
 import type { SalaComOcupacao, SlotOcupacaoSala } from "@/lib/cronograma/salasTypes"
+
+/** Paleta pastel só do mapa de calor — mesmas 4 faixas de corFaixaOcupacao, tons mais suaves. */
+function corFaixaOcupacaoPastel(pct: number | null | undefined): string {
+  if (pct === null || pct === undefined || !Number.isFinite(Number(pct))) return "#3a3f55"
+  const p = Number(pct) > 1 ? Number(pct) / 100 : Number(pct)
+  if (p >= 0.8) return "#A8DDBB"
+  if (p >= 0.6) return "#A6D2E8"
+  if (p >= 0.4) return "#F2DD9B"
+  return "#F0AFAF"
+}
 
 const DIAS = [
   { dow: 1, label: "Seg" },
@@ -34,6 +47,26 @@ interface SalasHeatmapViewProps {
 }
 
 export function SalasHeatmapView({ salas, onIsolarSala, salaIsoladaId }: SalasHeatmapViewProps) {
+  const salaRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map())
+  /** Sala isolada mais recente — guardado à parte porque `salaIsoladaId` já
+      vira null no MESMO clique que dispara o efeito abaixo (precisamos saber
+      pra qual sala rolar de volta). */
+  const lastIsoladaIdRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (salaIsoladaId) {
+      lastIsoladaIdRef.current = salaIsoladaId
+      return
+    }
+    // `salaIsoladaId` acabou de virar null (voltou a mostrar todas) — rola de
+    // volta pra onde a sala isolada estava, em vez de deixar o scroll "preso"
+    // no topo da lista completa.
+    const alvo = lastIsoladaIdRef.current
+    if (!alvo) return
+    salaRowRefs.current.get(alvo)?.scrollIntoView({ block: "center" })
+    lastIsoladaIdRef.current = null
+  }, [salaIsoladaId])
+
   if (!salas.length) {
     return (
       <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
@@ -60,7 +93,14 @@ export function SalasHeatmapView({ salas, onIsolarSala, salaIsoladaId }: SalasHe
           <tbody>
             {salas.map(({ sala, slots }) => (
               TURNOS.map((turno, turnoIdx) => (
-                <tr key={`${sala.id}-${turno}`} className={TURNO_ROW_BG[turno]}>
+                <tr
+                  key={`${sala.id}-${turno}`}
+                  ref={turnoIdx === 0 ? (el => {
+                    if (el) salaRowRefs.current.set(sala.id, el)
+                    else salaRowRefs.current.delete(sala.id)
+                  }) : undefined}
+                  className={TURNO_ROW_BG[turno]}
+                >
                   {turnoIdx === 0 && (
                     <td rowSpan={2} className="sticky left-0 z-10 w-[200px] max-w-[200px] border-t border-border bg-card px-3 py-2 align-top">
                       <div className="flex items-start gap-1.5">
@@ -78,12 +118,12 @@ export function SalasHeatmapView({ salas, onIsolarSala, salaIsoladaId }: SalasHe
                           {salaIsoladaId === sala.id ? <EyeOff size={14} /> : <Eye size={14} />}
                         </button>
                       </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-1">
+                      <div className="mt-1 flex flex-nowrap items-center gap-1 overflow-hidden">
                         <span className="shrink-0 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-400">
                           {CAPACIDADE_LABEL_CURTO[sala.capacidade]}
                         </span>
                         {sala.nucleo && (
-                          <span className="truncate rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground" title={sala.nucleo}>
+                          <span className="min-w-0 flex-1 truncate rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground" title={sala.nucleo}>
                             {sala.nucleo}
                           </span>
                         )}
@@ -116,7 +156,7 @@ export function SalasHeatmapView({ salas, onIsolarSala, salaIsoladaId }: SalasHe
         <span className="font-semibold">Legenda:</span>
         {[0.2, 0.5, 0.7, 0.9].map(p => (
           <span key={p} className="inline-flex items-center gap-1.5">
-            <span className="h-3 w-3 rounded-sm" style={{ background: corFaixaOcupacao(p) }} />
+            <span className="h-3 w-3 rounded-sm" style={{ background: corFaixaOcupacaoPastel(p) }} />
             {textoFaixaOcupacaoSala(p)}
           </span>
         ))}
@@ -140,11 +180,11 @@ function HeatCell({ slot, bordaTopo }: { slot: SlotOcupacaoSala | undefined; bor
   const sessoesTotal = slot.alocacoes.reduce((s, a) => s + a.sessoesReais, 0)
   const capacidadeTotal = slot.alocacoes.reduce((s, a) => s + a.sessoesCapacidadeTurno, 0)
   const pct = capacidadeTotal > 0 ? sessoesTotal / capacidadeTotal : null
-  const cor = corFaixaOcupacao(pct)
+  const cor = corFaixaOcupacaoPastel(pct)
   return (
     <td
       className={`border-l border-border px-1 py-2 text-center text-[10px] font-semibold ${bordaCls}`}
-      style={{ background: cor, color: pct !== null && pct >= 0.4 && pct < 0.6 ? "#222847" : "#fff" }}
+      style={{ background: cor, color: "#222847" }}
       title={`${slot.alocacoes.length} alocação(ões) · ${sessoesTotal} sessão(ões) de ${capacidadeTotal} no turno${slot.inconsistente ? " · capacidade excedida" : ""}`}
     >
       {pct !== null ? `${Math.round(pct * 100)}%` : "—"}

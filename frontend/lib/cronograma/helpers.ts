@@ -1,4 +1,4 @@
-import { B, HORAS_GRID, normTxt } from "./constants"
+import { ADMIN_ONLY, B, HORAS_GRID, normTxt } from "./constants"
 import type { Sugestao } from "@/types/cronograma"
 
 // ─── TEMPO ────────────────────────────────────────────────────────────────────
@@ -105,6 +105,16 @@ export const turnoNome: Record<"manha" | "tarde", string> = {
 
 export function isSupervisaoAba(terapia: string | null | undefined): boolean {
   return normTxt(terapia) === "supervisao aba"
+}
+
+const ADMIN_ONLY_NORM = new Set([...ADMIN_ONLY].map(t => normTxt(t)))
+
+// Qualquer terapia administrativa (ver ADMIN_ONLY em constants.ts) — sessão sem
+// presença do paciente, nunca tem linha própria em fila_autorizacoes. Usado pra
+// saber quando uma dessas deve herdar o status geral do dia em vez de aparecer
+// sempre como "futuro" mesmo em dias já passados.
+export function isTerapiaAdministrativa(terapia: string | null | undefined): boolean {
+  return ADMIN_ONLY_NORM.has(normTxt(terapia))
 }
 
 export function isAltaAtivaValor(v: unknown): boolean {

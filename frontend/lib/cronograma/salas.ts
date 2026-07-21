@@ -11,6 +11,7 @@ import { normTxt } from "./constants"
 import { capacidadeProjetadaSala } from "./salasTypes"
 import type {
   Sala,
+  SalaCapacidade,
   AgendaSalaRow,
   AlocacaoSala,
   AlocacaoCardSlot,
@@ -152,7 +153,7 @@ export function calcularSlotsDaSala(
       })
 
       const status = statusDoSlot(sala.status, capacidadeProjetada, cards.length)
-      const inconsistente = sala.status === "ativa" && cards.length > capacidadeProjetada
+      const inconsistente = sala.status === "operacional" && cards.length > capacidadeProjetada
 
       slots.push({
         salaId: sala.id,
@@ -196,6 +197,7 @@ export function calcularResumoUnidades(salas: Sala[], alocacoes: AlocacaoSala[],
     let capacidadeSimultanea = 0
     let salasAtivas = 0, salasBloqueadas = 0, salasAdm = 0
     let inconsistencias = 0
+    const salasPorCapacidade: Record<SalaCapacidade, number> = { unico: 0, duplo: 0, multiplo: 0 }
     const porTurnoAcc: Record<"Manhã" | "Tarde", ResumoTurnoUnidadeSalas> = {
       Manhã: { turno: "Manhã", slotsTotal: 0, slotsOcupados: 0, slotsLivres: 0, slotsBloqueados: 0, pct: null },
       Tarde: { turno: "Tarde", slotsTotal: 0, slotsOcupados: 0, slotsLivres: 0, slotsBloqueados: 0, pct: null },
@@ -203,10 +205,11 @@ export function calcularResumoUnidades(salas: Sala[], alocacoes: AlocacaoSala[],
     const terapiaAcc = new Map<string, number>()
 
     salasUnidade.forEach(sala => {
-      if (sala.status === "ativa") salasAtivas++
+      if (sala.status === "operacional") salasAtivas++
       else if (sala.status === "bloqueada") salasBloqueadas++
       else if (sala.status === "adm") salasAdm++
       capacidadeSimultanea += capacidadeProjetadaSala(sala.capacidade, sala.status)
+      salasPorCapacidade[sala.capacidade]++
 
       const { slots } = calcularOcupacaoDaSala(sala, alocacoes, linhas)
       slots.forEach(slot => {
@@ -245,6 +248,7 @@ export function calcularResumoUnidades(salas: Sala[], alocacoes: AlocacaoSala[],
       salasAtivas,
       salasBloqueadas,
       salasAdm,
+      salasPorCapacidade,
       capacidadeSimultanea,
       slotsTotal,
       slotsOcupados,
@@ -260,6 +264,46 @@ export function calcularResumoUnidades(salas: Sala[], alocacoes: AlocacaoSala[],
   })
 
   return resumos.sort((a, b) => a.unidade.localeCompare(b.unidade))
+}
+
+export interface ResumoOcupacaoItens {
+  slotsTotal: number
+  slotsOcupados: number
+  slotsBloqueados: number
+  inconsistencias: number
+  pct: number | null
+}
+
+/**
+ * Agrega slotsTotal/slotsOcupados/inconsistências a partir de QUALQUER lista de
+ * SalaComOcupacao (ex.: já filtrada por unidade/núcleo/turno/status na UI) —
+ * mesma regra usada por calcularResumoUnidades (ignora slots "adm", conta
+ * "bloqueado" à parte do total), só que sobre um subconjunto arbitrário em vez
+ * de agrupar por unidade.
+ */
+export function resumoOcupacaoDeItens(itens: SalaComOcupacao[]): ResumoOcupacaoItens {
+  let slotsTotal = 0, slotsOcupados = 0, slotsBloqueados = 0, inconsistencias = 0
+
+  itens.forEach(item => {
+    item.slots.forEach(slot => {
+      if (slot.status === "adm") return
+      if (slot.status === "bloqueado") {
+        slotsBloqueados++
+        return
+      }
+      slotsTotal++
+      if (slot.status === "ocupado" || slot.status === "parcial") slotsOcupados++
+      if (slot.inconsistente) inconsistencias++
+    })
+  })
+
+  return {
+    slotsTotal,
+    slotsOcupados,
+    slotsBloqueados,
+    inconsistencias,
+    pct: slotsTotal > 0 ? slotsOcupados / slotsTotal : null,
+  }
 }
 
 /**

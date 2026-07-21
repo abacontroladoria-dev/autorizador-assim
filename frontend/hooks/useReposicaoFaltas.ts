@@ -82,13 +82,12 @@ export function useReposicaoFaltas(
       const [r1, r2, r3] = await Promise.all([
         sb
           .from('fila_autorizacoes')
-          .select('id, paciente_id, paciente_nome, data_atendimento, horario, status, tipo_falta, tita_agendamento_id, terapia_nome, terapia_exibicao_id, justificativa_falta, cancelado_em, falta_revertida_em')
+          .select('id, paciente_id, paciente_nome, data_atendimento, horario, status, tipo_falta, tita_agendamento_id, terapia_nome, terapia_exibicao_id, justificativa_falta, falta_revertida_em')
           // 'glosa' conta como comparecimento (convênio negou/questionou o pagamento
           // depois, não afeta se a sessão ocorreu) — sem isso, essas linhas ficavam de
           // fora tanto de FALTA quanto de CONCLUÍDO, e a sessão (já no passado) caía no
           // reforço de "futuro" por não ter nenhum card mais específico cobrindo-a.
           .in('status', ['falta', 'concluido', 'glosa'])
-          .is('cancelado_em', null)
           .eq('paciente_id', pacienteId)
           .gte('data_atendimento', semanaInicio)
           .lte('data_atendimento', semanaFim),
@@ -453,7 +452,10 @@ export function useReposicaoFaltas(
 
 
       // ── Executa algoritmo ─────────────────────────────────────────────────
-      const resultado = calcularSugestoes(faltasEnriquecidas, slotsLivres, agendaPaciente)
+      // Dias em que o paciente teve ao menos uma sessão concluída — habilita
+      // reposição no MESMO dia da falta nesses casos (ver calcularSugestoes).
+      const diasComPresenca = new Set(sessoesConcluidas.map(s => s.data))
+      const resultado = calcularSugestoes(faltasEnriquecidas, slotsLivres, agendaPaciente, diasComPresenca)
 
       if (!cancelled) {
         setResultados(resultado)

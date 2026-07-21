@@ -280,7 +280,12 @@ function parseXlsx<T>(file: File): Promise<T[]> {
     const reader = new FileReader()
     reader.onload = e => {
       try {
-        const wb = XLSX.read(e.target?.result, { type: "array" })
+        // raw:true evita que o SheetJS "adivinhe" datas ao ler o .xls (que na prática é uma
+        // tabela HTML exportada pelo TI): sem isso, datas em formato DD/MM/AAAA com dia <= 12
+        // (ex.: "01/07/2026") são reinterpretadas como MM/DD/AAAA e viram outra data (7 de
+        // janeiro em vez de 1 de julho) de forma silenciosa. Com raw:true o texto original da
+        // célula é preservado como string, igual em todas as linhas.
+        const wb = XLSX.read(e.target?.result, { type: "array", raw: true })
         const ws = wb.Sheets[wb.SheetNames[0]]
         const data = XLSX.utils.sheet_to_json<T>(ws, { defval: "" })
         resolve(data)

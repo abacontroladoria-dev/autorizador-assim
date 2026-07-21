@@ -4,13 +4,20 @@
 // docs internos: "Portar Ocupação de Salas + Dashboards".
 
 export type SalaCapacidade = "unico" | "duplo" | "multiplo"
-export type SalaStatus = "ativa" | "bloqueada" | "adm"
+export type SalaStatus = "operacional" | "bloqueada" | "adm"
 
 /** Rótulo curto de capacidade — usado em badges/filtros (formulário de cadastro usa uma versão mais descritiva). */
 export const CAPACIDADE_LABEL_CURTO: Record<SalaCapacidade, string> = {
   unico: "Único",
   duplo: "Duplo",
   multiplo: "Múltiplo",
+}
+
+/** Rótulo curto de status — usado em filtros (formulário de cadastro usa uma versão mais descritiva). */
+export const STATUS_LABEL_CURTO: Record<SalaStatus, string> = {
+  operacional: "Operacional",
+  bloqueada: "Bloqueada",
+  adm: "Adm",
 }
 
 /** Linha de `cronograma_salas` */
@@ -44,7 +51,7 @@ export interface SalaInput {
 
 /** Capacidade projetada (nº de profissionais/pacientes simultâneos esperados) */
 export function capacidadeProjetadaSala(capacidade: SalaCapacidade, status: SalaStatus): number {
-  if (status === "adm" || status === "bloqueada") return 0
+  if (status !== "operacional") return 0
   if (capacidade === "multiplo") return 3
   if (capacidade === "duplo") return 2
   return 1
@@ -124,6 +131,7 @@ export interface ResumoUnidadeSalas {
   salasAtivas: number
   salasBloqueadas: number
   salasAdm: number
+  salasPorCapacidade: Record<SalaCapacidade, number>
   capacidadeSimultanea: number
   slotsTotal: number
   slotsOcupados: number
@@ -137,12 +145,15 @@ export interface ResumoUnidadeSalas {
 
 /** Linha bruta de agendamento usada para cruzar com salas (subconjunto de CsvRow) */
 export interface AgendaSalaRow {
+  paciente_id: number | null
   paciente_nome: string | null
   convenio_nome: string | null
   unidade_nome: string | null
   sala_nome: string | null
   profissional_nome: string | null
+  terapia_id: number | null
   terapia_nome: string | null
+  terapia_exibicao_id: number | null
   terapia_exibicao_nome: string | null
   dia_semana: string | null
   hora_inicial: string | null
@@ -170,4 +181,18 @@ export interface ResumoPacientesGrupo {
   chSemanalTotal: number
   chMediaMensalTotal: number
   mediaSessoesPorPaciente: number
+}
+
+/**
+ * Os dois dashboards de indicadores/pacientes, separados POR SESSÃO (não por
+ * paciente): "Tratamento Multidisciplinar" (dashboard geral — toda sessão que
+ * não é do grupo "Processo Diagnóstico", ver PROCESSO_DIAGNOSTICO_NAMES em
+ * constants.ts) e "Processo Diagnóstico" (só as sessões de Avaliação
+ * Neuropsicológica / Psiquiatra-Neurologista). Uma sessão dessas duas terapias
+ * nunca soma nos números do multidisciplinar, mesmo que o paciente também
+ * tenha outras sessões contadas lá.
+ */
+export interface DashboardPacientesGeral {
+  multidisciplinar: ResumoPacientesSalas
+  processoDiagnostico: ResumoPacientesSalas
 }

@@ -13,6 +13,7 @@ export const roleDefaults: Record<string, string[]> = {
     'autorizacoes', 'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
     'ocupacao_clinica', 'ocupacao_profissionais', 'reposicao_faltas', 'cronograma_ocupacao_salas',
+    'cronograma_valores_convenio',
     'analise_tratativas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
     'relacionamento_prestador_individual', 'relacionamento_prestador_config',
@@ -24,6 +25,7 @@ export const roleDefaults: Record<string, string[]> = {
     'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
     'ocupacao_clinica', 'ocupacao_profissionais', 'reposicao_faltas', 'cronograma_ocupacao_salas',
+    'cronograma_valores_convenio',
     'analise_tratativas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
     'relacionamento_prestador_individual', 'relacionamento_prestador_config',
@@ -49,6 +51,7 @@ export const roleDefaults: Record<string, string[]> = {
     'dashboard', 'cronograma_solicitacoes',
     'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
     'ocupacao_clinica', 'reposicao_faltas', 'cronograma_ocupacao_salas',
+    'cronograma_valores_convenio',
   ],
 }
 
@@ -80,6 +83,7 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   ocupacao_profissionais: ['/cronograma/indicadores'],
   reposicao_faltas: ['/cronograma/reposicao'],
   cronograma_ocupacao_salas: ['/cronograma/ocupacao-salas'],
+  cronograma_valores_convenio: ['/cronograma/valores-convenio'],
   analise_tratativas: ['/analise-tratativas'],
   relacionamento_prestador_analise: ['/relacionamento-prestador/analise'],
   relacionamento_prestador_rp: ['/relacionamento-prestador/rp'],

@@ -16,7 +16,12 @@ function parseXlsx<T>(file: File): Promise<T[]> {
     const reader = new FileReader()
     reader.onload = e => {
       try {
-        const wb = XLSX.read(e.target?.result, { type: "array" })
+        // raw:true evita que o SheetJS "adivinhe" datas ao ler o .xls (que na prática é uma
+        // tabela HTML exportada pelo TI): sem isso, datas em formato DD/MM/AAAA com dia <= 12
+        // (ex.: "01/07/2026") são reinterpretadas como MM/DD/AAAA e viram outra data (7 de
+        // janeiro em vez de 1 de julho) de forma silenciosa. Com raw:true o texto original da
+        // célula é preservado como string, igual em todas as linhas.
+        const wb = XLSX.read(e.target?.result, { type: "array", raw: true })
         const ws = wb.Sheets[wb.SheetNames[0]]
         resolve(XLSX.utils.sheet_to_json<T>(ws, { defval: "" }))
       } catch (err) { reject(err) }
@@ -71,27 +76,32 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
       .finally(() => setGradeLoading(false))
   }, [cRows.length, setCRows])
 
-  // Carrega os laudos automaticamente via API do TI (substitui o upload manual do Excel).
-  // Se a API falhar, o badge cai no estado de erro e o botão de upload manual reaparece
-  // como fallback (ver CronogramaUploadBadges).
+  // DESATIVADO TEMPORARIAMENTE (2026-07-17): a API de laudos do TI
+  // (cronogramauniversoaba.com.br/api_laudos) está com problema. Enquanto isso,
+  // pulamos direto para o estado de erro para que o botão de upload manual do
+  // Excel de laudos apareça (ver CronogramaUploadBadges). Nenhuma chamada de rede
+  // é feita — o fetch para /api/laudos foi só comentado abaixo, não removido.
+  // Para reativar a busca automática via API, ver prompt salvo em:
+  // frontend/app/(dashboard)/cronograma/REATIVAR_API_LAUDOS.md
   useEffect(() => {
     if (laudosFetchedRef.current || lRows.length > 0) return
     laudosFetchedRef.current = true
-    const rw = getRefWeek()
-    setUploading(true)
-    setUploadError(null)
-    fetch(`/api/laudos?inicio=${rw.inicio}&fim=${rw.fim}`)
-      .then(async res => {
-        const body = await res.json().catch(() => null)
-        if (!res.ok || !body?.ok) throw new Error("Não foi possível carregar os laudos automaticamente.")
-        if (body.rows.length === 0) throw new Error("Nenhum laudo encontrado para o período.")
-        setLRows(body.rows as LaudoRow[])
-      })
-      .catch(e => {
-        laudosFetchedRef.current = false // permite nova tentativa (ex.: via upload manual)
-        setUploadError(e instanceof Error ? e.message : "Erro ao carregar os laudos.")
-      })
-      .finally(() => setUploading(false))
+    setUploadError("Carregamento automático de laudos desativado. Selecione o arquivo manualmente.")
+    // const rw = getRefWeek()
+    // setUploading(true)
+    // setUploadError(null)
+    // fetch(`/api/laudos?inicio=${rw.inicio}&fim=${rw.fim}`)
+    //   .then(async res => {
+    //     const body = await res.json().catch(() => null)
+    //     if (!res.ok || !body?.ok) throw new Error("Não foi possível carregar os laudos automaticamente.")
+    //     if (body.rows.length === 0) throw new Error("Nenhum laudo encontrado para o período.")
+    //     setLRows(body.rows as LaudoRow[])
+    //   })
+    //   .catch(e => {
+    //     laudosFetchedRef.current = false // permite nova tentativa (ex.: via upload manual)
+    //     setUploadError(e instanceof Error ? e.message : "Erro ao carregar os laudos.")
+    //   })
+    //   .finally(() => setUploading(false))
   }, [lRows.length, setLRows])
 
   const handleLaudosFile = useCallback(async (file: File) => {

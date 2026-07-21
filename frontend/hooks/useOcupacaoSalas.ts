@@ -6,7 +6,7 @@ import { calcularOcupacaoDaSala, calcularResumoUnidades } from "@/lib/cronograma
 import { calcularDashboardPacientes } from "@/lib/cronograma/pacientesDashboard"
 import { getRefWeek } from "@/lib/cronograma/helpers"
 import { normTxt } from "@/lib/cronograma/constants"
-import type { Sala, SalaComOcupacao, ResumoUnidadeSalas, AgendaSalaRow, AlocacaoSala, ResumoPacientesSalas } from "@/lib/cronograma/salasTypes"
+import type { Sala, SalaComOcupacao, ResumoUnidadeSalas, AgendaSalaRow, AlocacaoSala, DashboardPacientesGeral } from "@/lib/cronograma/salasTypes"
 
 /**
  * Período padrão de análise. `csv_grades_profissionais` é sincronizado pelo TITA
@@ -30,9 +30,10 @@ export interface AlocacaoAtual {
 export interface UseOcupacaoSalasResult {
   salas: Sala[]
   alocacoes: AlocacaoSala[]
+  linhas: AgendaSalaRow[]
   salasComOcupacao: SalaComOcupacao[]
   resumoUnidades: ResumoUnidadeSalas[]
-  dashboardPacientes: ResumoPacientesSalas
+  dashboardPacientes: DashboardPacientesGeral
   loading: boolean
   error: string | null
   recarregar: () => void
@@ -113,6 +114,7 @@ export function useOcupacaoSalas(inicio?: string, fim?: string): UseOcupacaoSala
   return {
     salas,
     alocacoes,
+    linhas,
     salasComOcupacao,
     resumoUnidades,
     dashboardPacientes,
