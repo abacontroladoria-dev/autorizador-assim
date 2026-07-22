@@ -10,7 +10,7 @@ export const NOMES_FALSOS = [
 
 export const IDS_FAVORECIDOS_FALSOS = [
   "17795", "18565", "19196", "20471", "20472", "20473",
-  "20475", "20476", "20477", "20478", "20479",
+  "20475", "20476", "20477", "20478", "20479", "20725",
   "Ainda não selecionado",
 ]
 
@@ -26,9 +26,12 @@ export const PACIENTES_FICTICIOS_POR_ID: Record<string, string> = {
   "20477": "Supervisora Susane Vitória",
   "20478": "Supervisora Beatriz Paiva",
   "20479": "Supervisora Fernanda Lima",
+  "20725": "Paciente Teste Sanderson",
 }
 
-export const NOMES_FALSOS_PREFIXOS = ["Supervisor", "Supervisora", "Alinhamento"]
+// "Paciente Teste" cobre variações tipo "Paciente Teste Sanderson" mesmo se o
+// id mudar ou aparecer um novo nome de teste no mesmo padrão.
+export const NOMES_FALSOS_PREFIXOS = ["Supervisor", "Supervisora", "Alinhamento", "Paciente Teste"]
 
 export const ETA_ADMIN_NOMES = ["Horário Administrativo"]
 

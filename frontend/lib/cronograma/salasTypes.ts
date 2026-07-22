@@ -145,6 +145,7 @@ export interface ResumoUnidadeSalas {
 
 /** Linha bruta de agendamento usada para cruzar com salas (subconjunto de CsvRow) */
 export interface AgendaSalaRow {
+  tita_agendamento_id: number | null
   paciente_id: number | null
   paciente_nome: string | null
   convenio_nome: string | null

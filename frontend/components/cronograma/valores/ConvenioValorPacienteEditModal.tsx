@@ -31,7 +31,6 @@ export function ConvenioValorPacienteEditModal({ regra, conveniosAgenda, pacient
     convenio_nome: regra?.convenio_nome ?? "",
     paciente_id: regra?.paciente_id ?? null,
     paciente_nome: regra?.paciente_nome ?? "",
-    valor_hora: regra?.valor_hora ?? null,
     valor_sessao: regra?.valor_sessao ?? null,
     observacoes: regra?.observacoes ?? "",
   })
@@ -64,8 +63,7 @@ export function ConvenioValorPacienteEditModal({ regra, conveniosAgenda, pacient
     setForm(prev => ({ ...prev, paciente_nome: nome, paciente_id: opcao?.id ?? null }))
   }
 
-  const valido = form.convenio_nome.trim() !== "" && form.paciente_nome.trim() !== ""
-    && (form.valor_hora !== null || form.valor_sessao !== null)
+  const valido = form.convenio_nome.trim() !== "" && form.paciente_nome.trim() !== "" && form.valor_sessao !== null
 
   async function handleSalvar() {
     if (!valido) return
@@ -157,24 +155,14 @@ export function ConvenioValorPacienteEditModal({ regra, conveniosAgenda, pacient
             </span>
           )}
         </Campo>
-        <Campo label="Valor Hora (R$)">
-          <input
-            type="number"
-            step="0.01"
-            className={INPUT_CLS}
-            value={form.valor_hora ?? ""}
-            onChange={e => set("valor_hora", e.target.value === "" ? null : Number(e.target.value))}
-            placeholder="215.00"
-          />
-        </Campo>
-        <Campo label="Valor Sessão de 40min (R$)">
+        <Campo label="Valor Sessão de 40min (R$) *" className="col-span-2">
           <input
             type="number"
             step="0.01"
             className={INPUT_CLS}
             value={form.valor_sessao ?? ""}
             onChange={e => set("valor_sessao", e.target.value === "" ? null : Number(e.target.value))}
-            placeholder="-"
+            placeholder="215.00"
           />
         </Campo>
         <Campo label="Observações" className="col-span-2">
@@ -186,7 +174,7 @@ export function ConvenioValorPacienteEditModal({ regra, conveniosAgenda, pacient
         </Campo>
       </div>
       {!valido && (form.convenio_nome.trim() !== "" || form.paciente_nome.trim() !== "") && (
-        <div className="mt-2 text-[11px] text-muted-foreground">Preencha Convênio, Paciente e Valor Hora e/ou Valor Sessão.</div>
+        <div className="mt-2 text-[11px] text-muted-foreground">Preencha Convênio, Paciente e Valor Sessão.</div>
       )}
       {error && <div className="mt-3 text-xs font-semibold text-rose-600 dark:text-rose-400">{error}</div>}
 

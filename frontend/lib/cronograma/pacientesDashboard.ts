@@ -6,6 +6,7 @@
 import { pm, cleanTxt } from "./helpers"
 import { normalizarUnidadeOcupacao } from "./ocupacaoProf"
 import { PROCESSO_DIAGNOSTICO_IDS, PROCESSO_DIAGNOSTICO_NAMES } from "./constants"
+import { isFakePatient } from "../remuneracao/pacientes"
 import type { AgendaSalaRow, ResumoPacientesSalas, ResumoPacientesGrupo, DashboardPacientesGeral } from "./salasTypes"
 
 export function chDaLinha(r: AgendaSalaRow): number {
@@ -31,7 +32,12 @@ interface AgendamentoNormalizado {
 export function isAgendadoAtivo(r: AgendaSalaRow): boolean {
   const status = cleanTxt(r.status_agendamento).toLowerCase()
   const paciente = cleanTxt(r.paciente_nome)
-  return status.includes("agendado") && !!paciente
+  if (!status.includes("agendado") || !paciente) return false
+  // Pacientes fictícios (placeholders administrativos como "Horário Bloqueado",
+  // "Supervisora X", "Paciente Teste X" etc.) não são pacientes reais — nunca
+  // devem contar em sessões/pacientes ativos nem gerar receita projetada.
+  if (isFakePatient(paciente, r.paciente_id !== null && r.paciente_id !== undefined ? String(r.paciente_id) : null)) return false
+  return true
 }
 
 // Terapia de "Processo Diagnóstico" (Avaliação Neuropsicológica / Psiquiatra-

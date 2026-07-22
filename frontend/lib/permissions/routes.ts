@@ -83,7 +83,7 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   ocupacao_profissionais: ['/cronograma/indicadores'],
   reposicao_faltas: ['/cronograma/reposicao'],
   cronograma_ocupacao_salas: ['/cronograma/ocupacao-salas'],
-  cronograma_valores_convenio: ['/cronograma/valores-convenio'],
+  cronograma_valores_convenio: ['/cronograma/cadastro-valores'],
   analise_tratativas: ['/analise-tratativas'],
   relacionamento_prestador_analise: ['/relacionamento-prestador/analise'],
   relacionamento_prestador_rp: ['/relacionamento-prestador/rp'],

@@ -1,8 +1,15 @@
 "use client"
 
-// ConvenioValorEditModal — CRUD de regra de valor por convênio (geral, quando
-// Terapia fica em branco, ou específica por terapia dentro do convênio —
-// mesma tabela cronograma_convenio_valores, ver ConvenioValor.terapia_nome).
+// ConvenioValorEditModal — CRUD de regra de valor por convênio. Uma linha de
+// cronograma_convenio_valores é sempre um dos 3 tipos abaixo (mutuamente
+// exclusivos):
+// - Geral: vale pra qualquer sessão do convênio.
+// - Por terapia: vale só pra uma terapia específica (terapia_id) dentro do
+//   convênio (ex.: ASSIM Saúde tem valor diferente por terapia).
+// - Por critério ABA: vale pra TODAS as sessões do paciente nesse convênio,
+//   dependendo só de o cronograma dele conter Psicologia ABA ou não (ex.:
+//   SEGUROS UNIMED: com ABA = R$170, sem ABA = R$135, não importa a terapia
+//   específica de cada sessão).
 // Convênio e Terapia SÓ podem ser escolhidos entre valores que já existem de
 // fato na agenda real (csv_grades_profissionais, via useConvenioValores) —
 // nunca texto livre, pra nunca cadastrar uma regra que não casa com nenhuma
@@ -13,7 +20,7 @@ import { Loader2, Save, Trash2 } from "lucide-react"
 import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
 import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
 import { criarConvenioValor, atualizarConvenioValor, excluirConvenioValor, type OpcaoTerapia } from "@/services/convenioValores.service"
-import type { ConvenioValor, ConvenioValorInput } from "@/lib/cronograma/convenioValoresTypes"
+import type { ConvenioValor, ConvenioValorInput, CriterioAba } from "@/lib/cronograma/convenioValoresTypes"
 
 interface ConvenioValorEditModalProps {
   regra: ConvenioValor | null
@@ -25,14 +32,24 @@ interface ConvenioValorEditModalProps {
   onSaved: () => void
 }
 
+type TipoRegra = "geral" | "terapia" | "aba"
+
+function tipoInicial(regra: ConvenioValor | null): TipoRegra {
+  if (regra?.criterio_aba) return "aba"
+  if (regra?.terapia_id !== null && regra?.terapia_id !== undefined) return "terapia"
+  if (regra?.terapia_nome) return "terapia"
+  return "geral"
+}
+
 const INPUT_CLS = "w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-sm text-foreground"
 
 export function ConvenioValorEditModal({ regra, conveniosAgenda, terapiasAgenda, onClose, onSaved }: ConvenioValorEditModalProps) {
+  const [tipo, setTipo] = useState<TipoRegra>(() => tipoInicial(regra))
   const [form, setForm] = useState<ConvenioValorInput>({
     convenio_nome: regra?.convenio_nome ?? "",
     terapia_id: regra?.terapia_id ?? null,
     terapia_nome: regra?.terapia_nome ?? "",
-    valor_hora: regra?.valor_hora ?? null,
+    criterio_aba: regra?.criterio_aba ?? null,
     valor_sessao: regra?.valor_sessao ?? null,
     observacoes: regra?.observacoes ?? "",
   })
@@ -42,6 +59,18 @@ export function ConvenioValorEditModal({ regra, conveniosAgenda, terapiasAgenda,
 
   function set<K extends keyof ConvenioValorInput>(key: K, v: ConvenioValorInput[K]) {
     setForm(prev => ({ ...prev, [key]: v }))
+  }
+
+  // Trocar o tipo de regra limpa os campos dos outros tipos — uma linha nunca
+  // tem terapia_id E criterio_aba preenchidos ao mesmo tempo.
+  function handleTipoChange(novoTipo: TipoRegra) {
+    setTipo(novoTipo)
+    setForm(prev => ({
+      ...prev,
+      terapia_id: novoTipo === "terapia" ? prev.terapia_id : null,
+      terapia_nome: novoTipo === "terapia" ? prev.terapia_nome : null,
+      criterio_aba: novoTipo === "aba" ? (prev.criterio_aba ?? "com_aba") : null,
+    }))
   }
 
   // Ao editar uma regra cujo convênio/terapia não aparece mais entre as opções
@@ -66,7 +95,7 @@ export function ConvenioValorEditModal({ regra, conveniosAgenda, terapiasAgenda,
     setForm(prev => ({ ...prev, terapia_nome: nome, terapia_id: opcao?.id ?? null }))
   }
 
-  const valido = form.convenio_nome.trim() !== "" && (form.valor_hora !== null || form.valor_sessao !== null)
+  const valido = form.convenio_nome.trim() !== "" && form.valor_sessao !== null
 
   async function handleSalvar() {
     if (!valido) return
@@ -104,7 +133,7 @@ export function ConvenioValorEditModal({ regra, conveniosAgenda, terapiasAgenda,
   return (
     <ScheduleModal
       title={regra ? `Editar valor — ${regra.convenio_nome}` : "Nova regra de valor"}
-      subtitle="Regra geral do convênio (deixe Terapia em branco) ou específica de uma terapia dentro dele. Convênio e Terapia só podem ser escolhidos entre o que já existe na agenda real."
+      subtitle="Geral (todo o convênio), por terapia específica, ou por critério ABA (vale pra todas as sessões do paciente, conforme o cronograma dele conter Psicologia ABA ou não)."
       maxWidth={480}
       onClose={onClose}
       footer={
@@ -145,31 +174,45 @@ export function ConvenioValorEditModal({ regra, conveniosAgenda, terapiasAgenda,
             {opcoesConvenio.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
         </Campo>
-        <Campo label="Terapia (vazio = regra geral do convênio)" className="col-span-2">
-          <select className={INPUT_CLS} value={form.terapia_nome ?? ""} onChange={e => handleTerapiaChange(e.target.value)}>
-            <option value="">— Regra geral (todas as terapias) —</option>
-            {opcoesTerapia.map(t => (
-              <option key={t.nome} value={t.nome}>{t.id !== null ? `${t.nome} (ID ${t.id})` : t.nome}</option>
-            ))}
+        <Campo label="Tipo de regra" className="col-span-2">
+          <select className={INPUT_CLS} value={tipo} onChange={e => handleTipoChange(e.target.value as TipoRegra)}>
+            <option value="geral">Geral (todas as sessões do convênio)</option>
+            <option value="terapia">Por terapia específica</option>
+            <option value="aba">Por critério ABA (cronograma do paciente contém Psicologia ABA?)</option>
           </select>
-          {form.terapia_nome && (
+        </Campo>
+        {tipo === "terapia" && (
+          <Campo label="Terapia *" className="col-span-2">
+            <select className={INPUT_CLS} value={form.terapia_nome ?? ""} onChange={e => handleTerapiaChange(e.target.value)}>
+              <option value="" disabled>Selecione uma terapia da agenda...</option>
+              {opcoesTerapia.map(t => (
+                <option key={t.nome} value={t.nome}>{t.id !== null ? `${t.nome} (ID ${t.id})` : t.nome}</option>
+              ))}
+            </select>
+            {form.terapia_nome && (
+              <span className="text-[11px] text-muted-foreground">
+                Terapia selecionada: {form.terapia_nome} · ID {form.terapia_id ?? "—"}
+                {form.terapia_id === null && " (sem id — o cruzamento vai usar o nome até você reselecionar essa terapia na lista)"}
+              </span>
+            )}
+          </Campo>
+        )}
+        {tipo === "aba" && (
+          <Campo label="Critério *" className="col-span-2">
+            <select
+              className={INPUT_CLS}
+              value={form.criterio_aba ?? "com_aba"}
+              onChange={e => set("criterio_aba", e.target.value as CriterioAba)}
+            >
+              <option value="com_aba">Paciente TEM Psicologia ABA no cronograma</option>
+              <option value="sem_aba">Paciente NÃO TEM Psicologia ABA no cronograma</option>
+            </select>
             <span className="text-[11px] text-muted-foreground">
-              Terapia selecionada: {form.terapia_nome} · ID {form.terapia_id ?? "—"}
-              {form.terapia_id === null && " (sem id — o cruzamento vai usar o nome até você reselecionar essa terapia na lista)"}
+              Vale pra todas as sessões do paciente nesse convênio (qualquer terapia), com base no cronograma inteiro dele na semana de referência.
             </span>
-          )}
-        </Campo>
-        <Campo label="Valor Hora (R$)">
-          <input
-            type="number"
-            step="0.01"
-            className={INPUT_CLS}
-            value={form.valor_hora ?? ""}
-            onChange={e => set("valor_hora", e.target.value === "" ? null : Number(e.target.value))}
-            placeholder="225.00"
-          />
-        </Campo>
-        <Campo label="Valor Sessão de 40min (R$)">
+          </Campo>
+        )}
+        <Campo label="Valor Sessão de 40min (R$) *" className="col-span-2">
           <input
             type="number"
             step="0.01"
@@ -188,7 +231,7 @@ export function ConvenioValorEditModal({ regra, conveniosAgenda, terapiasAgenda,
         </Campo>
       </div>
       {!valido && form.convenio_nome.trim() !== "" && (
-        <div className="mt-2 text-[11px] text-muted-foreground">Preencha Valor Hora e/ou Valor Sessão.</div>
+        <div className="mt-2 text-[11px] text-muted-foreground">Preencha o Valor Sessão.</div>
       )}
       {error && <div className="mt-3 text-xs font-semibold text-rose-600 dark:text-rose-400">{error}</div>}
 

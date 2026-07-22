@@ -2,15 +2,17 @@
 
 import { useEffect, useState } from "react"
 import {
-  listarConvenioValores, listarConvenioValoresPaciente,
+  listarConvenioValores, listarConvenioValoresPaciente, listarConvenioPacoteAvaliacao,
   listarConveniosAgenda, listarTerapiasAgenda, listarPacientesAgenda,
   type OpcaoTerapia, type OpcaoPaciente,
 } from "@/services/convenioValores.service"
-import type { ConvenioValor, ConvenioValorPaciente } from "@/lib/cronograma/convenioValoresTypes"
+import type { ConvenioValor, ConvenioValorPaciente, ConvenioPacoteAvaliacao } from "@/lib/cronograma/convenioValoresTypes"
 
 export interface UseConvenioValoresResult {
   regrasGerais: ConvenioValor[]
   excecoesPaciente: ConvenioValorPaciente[]
+  /** Valor fixo do pacote de Avaliação Neuropsicológica por convênio (cobrado uma vez por paciente, não por sessão). */
+  pacotesAvaliacao: ConvenioPacoteAvaliacao[]
   /** Convênios, terapias e pacientes distintos vistos na agenda real (csv_grades_profissionais) — únicas opções válidas pros formulários. */
   conveniosAgenda: string[]
   terapiasAgenda: OpcaoTerapia[]
@@ -20,10 +22,11 @@ export interface UseConvenioValoresResult {
   recarregar: () => void
 }
 
-/** Carrega as regras de valor por convênio/terapia + exceções por paciente, e as opções reais da agenda pros formulários — usado tanto pela tela de cadastro quanto pela Previsão de Receitas. */
+/** Carrega as regras de valor por convênio/terapia + exceções por paciente + pacote de avaliação, e as opções reais da agenda pros formulários — usado tanto pela tela de cadastro quanto pela Previsão de Receitas. */
 export function useConvenioValores(): UseConvenioValoresResult {
   const [regrasGerais, setRegrasGerais] = useState<ConvenioValor[]>([])
   const [excecoesPaciente, setExcecoesPaciente] = useState<ConvenioValorPaciente[]>([])
+  const [pacotesAvaliacao, setPacotesAvaliacao] = useState<ConvenioPacoteAvaliacao[]>([])
   const [conveniosAgenda, setConveniosAgenda] = useState<string[]>([])
   const [terapiasAgenda, setTerapiasAgenda] = useState<OpcaoTerapia[]>([])
   const [pacientesAgenda, setPacientesAgenda] = useState<OpcaoPaciente[]>([])
@@ -39,14 +42,16 @@ export function useConvenioValores(): UseConvenioValoresResult {
     Promise.all([
       listarConvenioValores(),
       listarConvenioValoresPaciente(),
+      listarConvenioPacoteAvaliacao(),
       listarConveniosAgenda(),
       listarTerapiasAgenda(),
       listarPacientesAgenda(),
     ])
-      .then(([gerais, excecoes, convenios, terapias, pacientes]) => {
+      .then(([gerais, excecoes, pacotes, convenios, terapias, pacientes]) => {
         if (cancelled) return
         setRegrasGerais(gerais)
         setExcecoesPaciente(excecoes)
+        setPacotesAvaliacao(pacotes)
         setConveniosAgenda(convenios)
         setTerapiasAgenda(terapias)
         setPacientesAgenda(pacientes)
@@ -62,7 +67,7 @@ export function useConvenioValores(): UseConvenioValoresResult {
   }, [refreshKey])
 
   return {
-    regrasGerais, excecoesPaciente, conveniosAgenda, terapiasAgenda, pacientesAgenda,
+    regrasGerais, excecoesPaciente, pacotesAvaliacao, conveniosAgenda, terapiasAgenda, pacientesAgenda,
     loading, error, recarregar: () => setRefreshKey(k => k + 1),
   }
 }

@@ -35,6 +35,8 @@ import {
   LineChart,
   RotateCcw,
   DoorOpen,
+  ArrowRightLeft,
+  Tag,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -72,7 +74,7 @@ const pathIconMap: Record<string, any> = {
   "/cronograma/solicitacoes?tab=novo-cron": CalendarPlus,
   "/cronograma/solicitacoes?tab=banco": Database,
   "/cronograma/ocupacao-salas": DoorOpen,
-  "/cronograma/valores-convenio": Wallet,
+  "/cronograma/cadastro-valores": Tag,
   "/cronograma/saida-profissional": LogOut,
   "/cronograma/ocupacao-paciente": TrendingUp,
   "/cronograma/ocupacao?tab=fila": Clock,
@@ -93,6 +95,7 @@ const pathIconMap: Record<string, any> = {
   "/cronograma/indicadores?tab=unidades": Building2,
   "/cronograma/indicadores?tab=pacientes": UserCheck,
   "/cronograma/indicadores?tab=previsao-receitas": Wallet,
+  "/cronograma/indicadores?tab=comparativo-sessoes": ArrowRightLeft,
 }
 
 export default function Sidebar() {
@@ -502,13 +505,14 @@ export default function Sidebar() {
           )}
 
           {/* Indicadores */}
-          {(canAccess("/cronograma/indicadores") || canAccess("/cronograma/valores-convenio")) && (
+          {(canAccess("/cronograma/indicadores") || canAccess("/cronograma/cadastro-valores")) && (
             <SidebarGroup title="Indicadores" icon={TrendingUp}>
               <MenuItem label="Ocupação de Profissionais" icon={BarChart3} path="/cronograma/indicadores?tab=profissionais" />
-              <MenuItem label="Dashboard por Unidade" icon={Building2} path="/cronograma/indicadores?tab=unidades" />
+              <MenuItem label="Ocupação Clínica" icon={Building2} path="/cronograma/indicadores?tab=unidades" />
               <MenuItem label="Dashboard de Pacientes" icon={UserCheck} path="/cronograma/indicadores?tab=pacientes" />
               <MenuItem label="Previsão de Receitas" icon={Wallet} path="/cronograma/indicadores?tab=previsao-receitas" />
-              {canAccess("/cronograma/valores-convenio") && <MenuItem label="Valores de Convênio" icon={Wallet} path="/cronograma/valores-convenio" />}
+              <MenuItem label="Comparativo de Sessões" icon={ArrowRightLeft} path="/cronograma/indicadores?tab=comparativo-sessoes" />
+              {canAccess("/cronograma/cadastro-valores") && <MenuItem label="Cadastro de Valores" icon={Tag} path="/cronograma/cadastro-valores" />}
             </SidebarGroup>
           )}
 

@@ -137,7 +137,7 @@ export async function listarTodosProfissionaisSalas(): Promise<string[]> {
 }
 
 const AGENDA_FIELDS = [
-  "paciente_id", "paciente_nome", "convenio_nome", "unidade_nome", "sala_nome",
+  "tita_agendamento_id", "paciente_id", "paciente_nome", "convenio_nome", "unidade_nome", "sala_nome",
   "profissional_nome", "terapia_id", "terapia_nome", "terapia_exibicao_id", "terapia_exibicao_nome",
   "dia_semana", "hora_inicial", "hora_final", "status_agendamento", "data",
 ].join(", ")

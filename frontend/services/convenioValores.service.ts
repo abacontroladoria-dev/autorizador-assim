@@ -1,9 +1,14 @@
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { fixMojibake } from "@/lib/cronograma/gradeService"
-import type { ConvenioValor, ConvenioValorInput, ConvenioValorPaciente, ConvenioValorPacienteInput } from "@/lib/cronograma/convenioValoresTypes"
+import { isFakePatient } from "@/lib/remuneracao/pacientes"
+import type {
+  ConvenioValor, ConvenioValorInput, ConvenioValorPaciente, ConvenioValorPacienteInput,
+  ConvenioPacoteAvaliacao, ConvenioPacoteAvaliacaoInput,
+} from "@/lib/cronograma/convenioValoresTypes"
 
 const TABLE = "cronograma_convenio_valores"
 const TABLE_PACIENTE = "cronograma_convenio_valores_paciente"
+const TABLE_PACOTE_AVALIACAO = "cronograma_convenio_pacote_avaliacao"
 const AGENDA_TABLE = "csv_grades_profissionais"
 const PAGE = 1000
 
@@ -42,7 +47,12 @@ async function buscarColunaCompleta<T extends string>(coluna: T): Promise<Record
 /** Convênios distintos já vistos na agenda real. Não existe convenio_id na fonte — só nome. */
 export async function listarConveniosAgenda(): Promise<string[]> {
   const rows = await buscarColunaCompleta("convenio_nome")
-  const nomes = rows.map(r => fixMojibake(r.convenio_nome as string).trim()).filter(Boolean)
+  const nomes = rows
+    .map(r => fixMojibake(r.convenio_nome as string).trim())
+    // "Ainda não selecionado" e afins são placeholders de agendamento
+    // administrativo/fictício (ver isFakePatient) — vazam no campo convênio
+    // desses registros, mas não são convênio nenhum de verdade.
+    .filter(nome => nome && !isFakePatient(nome))
   return [...new Set(nomes)].sort()
 }
 
@@ -85,8 +95,9 @@ export async function listarPacientesAgenda(): Promise<OpcaoPaciente[]> {
     rows.forEach(r => {
       const nome = fixMojibake(r.paciente_nome as string).trim()
       const id = (r.paciente_id as number | null) ?? null
+      if (!nome || isFakePatient(nome, id !== null ? String(id) : null)) return
       const chave = id !== null ? String(id) : nome
-      if (nome && !porChave.has(chave)) porChave.set(chave, { id, nome })
+      if (!porChave.has(chave)) porChave.set(chave, { id, nome })
     })
     if (rows.length < PAGE) break
     from += PAGE
@@ -171,5 +182,47 @@ export async function atualizarConvenioValorPaciente(id: string, input: Partial<
 export async function excluirConvenioValorPaciente(id: string): Promise<void> {
   const sb = getSupabaseClient()
   const { error } = await sb.from(TABLE_PACIENTE).delete().eq("id", id)
+  if (error) throw new Error(error.message)
+}
+
+// ─── PACOTE DE AVALIAÇÃO NEUROPSICOLÓGICA ─────────────────────────────────────
+// Valor fixo por convênio, cobrado uma vez por paciente (não por sessão) — ver
+// cronograma_convenio_pacote_avaliacao e ConvenioPacoteAvaliacao.
+
+export async function listarConvenioPacoteAvaliacao(): Promise<ConvenioPacoteAvaliacao[]> {
+  const sb = getSupabaseClient()
+  const { data, error } = await sb.from(TABLE_PACOTE_AVALIACAO).select("*").order("convenio_nome")
+  if (error) throw new Error(error.message)
+  return (data ?? []) as ConvenioPacoteAvaliacao[]
+}
+
+export async function criarConvenioPacoteAvaliacao(input: ConvenioPacoteAvaliacaoInput): Promise<ConvenioPacoteAvaliacao> {
+  const sb = getSupabaseClient()
+  const { data, error } = await sb
+    .from(TABLE_PACOTE_AVALIACAO)
+    .insert(input)
+    .select("*")
+    .single()
+
+  if (error) throw new Error(error.message)
+  return data as ConvenioPacoteAvaliacao
+}
+
+export async function atualizarConvenioPacoteAvaliacao(id: string, input: Partial<ConvenioPacoteAvaliacaoInput>): Promise<ConvenioPacoteAvaliacao> {
+  const sb = getSupabaseClient()
+  const { data, error } = await sb
+    .from(TABLE_PACOTE_AVALIACAO)
+    .update(input)
+    .eq("id", id)
+    .select("*")
+    .single()
+
+  if (error) throw new Error(error.message)
+  return data as ConvenioPacoteAvaliacao
+}
+
+export async function excluirConvenioPacoteAvaliacao(id: string): Promise<void> {
+  const sb = getSupabaseClient()
+  const { error } = await sb.from(TABLE_PACOTE_AVALIACAO).delete().eq("id", id)
   if (error) throw new Error(error.message)
 }
