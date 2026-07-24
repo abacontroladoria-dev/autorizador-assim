@@ -22,6 +22,7 @@ import {
   Search,
   ShieldCheck,
   Stethoscope,
+  TrendingUp,
   UserCheck,
   UserRound,
   Users,
@@ -95,11 +96,12 @@ const GROUP_ICONS: Record<string, React.ElementType> = {
   Terapêutico: Stethoscope,
   Operações: BriefcaseBusiness,
   Cronograma: CalendarRange,
+  Indicadores: TrendingUp,
   Cadastros: Database,
   Administração: ShieldCheck,
 }
 
-const GROUP_ORDER = ['Pacientes', 'Terapêutico', 'Operações', 'Cronograma', 'Cadastros', 'Administração', 'Sistema', 'Geral']
+const GROUP_ORDER = ['Pacientes', 'Terapêutico', 'Operações', 'Cronograma', 'Indicadores', 'Cadastros', 'Administração', 'Sistema', 'Geral']
 
 const INITIAL_OPEN = new Set(GROUP_ORDER)
 
