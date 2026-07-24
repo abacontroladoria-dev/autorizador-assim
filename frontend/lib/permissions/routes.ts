@@ -12,7 +12,8 @@ export const roleDefaults: Record<string, string[]> = {
     'guias_digitais', 'auditoria_assim', 'usuarios', 'permissoes', 'cco',
     'autorizacoes', 'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
-    'ocupacao_clinica', 'ocupacao_profissionais', 'indicadores_ocupacao_unidades',
+    'ocupacao_clinica', 'ocupacao_clinica_gaps', 'ocupacao_clinica_inconsistencias',
+    'ocupacao_profissionais', 'indicadores_ocupacao_unidades',
     'indicadores_pacientes', 'indicadores_previsao_receitas', 'indicadores_comparativo_sessoes',
     'reposicao_faltas', 'cronograma_ocupacao_salas',
     'cronograma_valores_convenio', 'cadastros_feriados', 'cadastros_contratos', 'cadastros_taxas',
@@ -26,7 +27,8 @@ export const roleDefaults: Record<string, string[]> = {
     'escala_terapeutica', 'auditoria_assim',
     'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
-    'ocupacao_clinica', 'ocupacao_profissionais', 'indicadores_ocupacao_unidades',
+    'ocupacao_clinica', 'ocupacao_clinica_gaps', 'ocupacao_clinica_inconsistencias',
+    'ocupacao_profissionais', 'indicadores_ocupacao_unidades',
     'indicadores_pacientes', 'indicadores_previsao_receitas', 'indicadores_comparativo_sessoes',
     'reposicao_faltas', 'cronograma_ocupacao_salas',
     'cronograma_valores_convenio', 'cadastros_feriados', 'cadastros_contratos', 'cadastros_taxas',
@@ -59,7 +61,7 @@ export const roleDefaults: Record<string, string[]> = {
   cronograma: [
     'dashboard', 'cronograma_solicitacoes',
     'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
-    'ocupacao_clinica',
+    'ocupacao_clinica', 'ocupacao_clinica_gaps', 'ocupacao_clinica_inconsistencias',
   ],
 }
 
@@ -87,7 +89,12 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   cronograma_solicitacoes: ['/cronograma/solicitacoes'],
   cronograma_saida_profissional: ['/cronograma/saida-profissional'],
   cronograma_ocupacao_paciente: ['/cronograma/ocupacao-paciente'],
-  ocupacao_clinica: ['/cronograma/ocupacao'],
+  // Mesmo padrão de Indicadores: /cronograma/ocupacao tem 3 abas
+  // (Aceites e Recusas, Diferença: Laudo e Oferta, Inconsistências e
+  // Exceções), cada uma com seu próprio código de permissão.
+  ocupacao_clinica: ['/cronograma/ocupacao?tab=acompanhamento'],
+  ocupacao_clinica_gaps: ['/cronograma/ocupacao?tab=gaps'],
+  ocupacao_clinica_inconsistencias: ['/cronograma/ocupacao?tab=inconsistencias'],
   // Indicadores: uma rota só (/cronograma/indicadores), abas diferenciadas por
   // ?tab=. Cada aba tem seu próprio código de permissão — ver routeMatches()
   // abaixo, que sabe comparar rota+querystring (não só pathname) pra isso

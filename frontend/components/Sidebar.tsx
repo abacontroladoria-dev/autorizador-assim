@@ -495,7 +495,10 @@ export default function Sidebar() {
           )}
 
           {/* Cronograma */}
-          {(canAccess("/cronograma/saida-profissional") || canAccess("/cronograma/ocupacao-paciente") || canAccess("/cronograma/ocupacao") || canAccess("/cronograma/reposicao") || canAccess("/cronograma/ocupacao-salas")) && (
+          {(canAccess("/cronograma/saida-profissional") || canAccess("/cronograma/ocupacao-paciente") ||
+            canAccess("/cronograma/ocupacao?tab=acompanhamento") || canAccess("/cronograma/ocupacao?tab=gaps") ||
+            canAccess("/cronograma/ocupacao?tab=inconsistencias") ||
+            canAccess("/cronograma/reposicao") || canAccess("/cronograma/ocupacao-salas")) && (
             <SidebarGroup title="Cronograma" icon={CalendarRange}>
               {canAccess("/cronograma/ocupacao-salas") && <MenuItem label="Ocupação de Salas" icon={DoorOpen} path="/cronograma/ocupacao-salas" />}
               {canAccess("/cronograma/saida-profissional") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/saida-profissional" />}
@@ -503,9 +506,9 @@ export default function Sidebar() {
               {/* "Novo Cronograma" removido do menu — feature ainda não está pronta (ver SolicitacoesShell) */}
               {canAccess("/cronograma/solicitacoes") && <MenuItem label="Simulação de Novo Prestador" icon={UserPlus} path="/cronograma/solicitacoes?tab=simulacao" />}
               {canAccess("/cronograma/reposicao") && <MenuItem label="Reposição de Faltas" icon={RotateCcw} path="/cronograma/reposicao" />}
-              {canAccess("/cronograma/ocupacao") && <MenuItem label="Aceites e Recusas" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
-              {canAccess("/cronograma/ocupacao") && <MenuItem label="Diferença: Laudo e Oferta" icon={BarChart3} path="/cronograma/ocupacao?tab=gaps" />}
-              {canAccess("/cronograma/ocupacao") && <MenuItem label="Inconsistências e Exceções" icon={AlertTriangle} path="/cronograma/ocupacao?tab=inconsistencias" />}
+              {canAccess("/cronograma/ocupacao?tab=acompanhamento") && <MenuItem label="Aceites e Recusas" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
+              {canAccess("/cronograma/ocupacao?tab=gaps") && <MenuItem label="Diferença: Laudo e Oferta" icon={BarChart3} path="/cronograma/ocupacao?tab=gaps" />}
+              {canAccess("/cronograma/ocupacao?tab=inconsistencias") && <MenuItem label="Inconsistências e Exceções" icon={AlertTriangle} path="/cronograma/ocupacao?tab=inconsistencias" />}
             </SidebarGroup>
           )}
 

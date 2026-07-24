@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
+  AlertTriangle,
   ArrowRightLeft,
   BarChart3,
   BriefcaseBusiness,
@@ -82,6 +83,8 @@ const MODULE_ICONS: Record<string, React.ElementType> = {
   cronograma_saida_profissional: LogOut,
   cronograma_ocupacao_paciente: UserCheck,
   ocupacao_clinica: ClipboardList,
+  ocupacao_clinica_gaps: BarChart3,
+  ocupacao_clinica_inconsistencias: AlertTriangle,
   ocupacao_profissionais: BarChart3,
   indicadores_ocupacao_unidades: Building2,
   indicadores_pacientes: UserCheck,
