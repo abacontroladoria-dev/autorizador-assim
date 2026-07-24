@@ -3,6 +3,16 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { useHeader } from '@/contexts/HeaderContext'
+import {
+  ChevronDown, ChevronRight, Search, SlidersHorizontal, Download, X, Users, Building2,
+  Apple, Waves, Activity, Mic2, Hand, Music, Palette, PawPrint, HeartHandshake, Move,
+  BookOpen, ClipboardList, Stethoscope, Puzzle, Brain, MapPin, Dumbbell, type LucideIcon,
+  LayoutDashboard, Table2,
+} from 'lucide-react'
+import { StatCard } from '@/components/cronograma/ui/StatCard'
+import { SegmentedTabs } from '@/components/cronograma/ui/SegmentedTabs'
+import { TONE_ACCENT, type Tone } from '@/components/cronograma/ui/tones'
+import { SortableTh, ordenarPor, type SortDir } from '@/components/cronograma/ui/SortableTh'
 import { B, normTxt } from '@/lib/cronograma/constants'
 import { fmtH, fmtHDec, fmtPctOcup } from '@/lib/cronograma/helpers'
 import {
@@ -24,15 +34,13 @@ import { useOcupacaoProf } from '@/hooks/useOcupacaoProf'
 import { getRefWeek } from '@/lib/cronograma/helpers'
 import { AgendaMinimalista, resumoUnidadesAgenda, unidadeDiaAgenda } from './AgendaMinimalista'
 import { OcupacaoDonut } from './OcupacaoDonut'
-import { DashboardCard, FiltroCheckbox, FiltroRadio, PercentualOcupacao } from './OcupacaoAtomicos'
-import { InteractivePieChart } from './InteractivePieChart'
+import { FiltroCheckbox, FiltroRadio, PercentualOcupacao } from './OcupacaoAtomicos'
 import type { BaseOcup, OcupacaoAgregada, OcupacaoFinalizada, SlotNormalizado } from '@/types/ocupacaoProf'
 
 // ─── CONSTANTES LOCAIS ────────────────────────────────────────────────────────
 
 const UNIDADES_DASHBOARD = ['Realengo', 'Fazendinha', 'Padre Miguel', 'Ambiente Natural']
 const UNIDADE_CORRIGIR   = 'Consertar Unidade no sistema'
-const LIVRE_BG           = '#fee2e2'
 
 // Cores de terapia (paleta da clínica, conforme tabela oficial)
 // Entradas #FFFFFF = sem cor definida → usa corFaixaOcupacao como fallback
@@ -85,12 +93,57 @@ const TERAPIA_CORES: Record<string, string> = {
   'Trilha Socioemocional':             '#FFFFFF',
   'Visita Guiada':                     '#EC62E5',
 }
-const COR_LIVRE_ESP = '#CBD5E1' // cinza-azulado neutro (slate-300)
-
 function corTerapiaEsp(esp: string, fallback: string): string {
   const c = TERAPIA_CORES[esp]
   if (!c || c.toUpperCase() === '#FFFFFF') return fallback
   return c
+}
+
+// Ícone por especialidade — associação por palavra-chave no nome (ordem importa:
+// regras mais específicas primeiro, ex.: "arteterapia" antes de "aba" pra não
+// perder o ícone de arte em "Arteterapia (Psicologia ABA)").
+const ICONE_TERAPIA_REGRAS: [RegExp, LucideIcon][] = [
+  [/nutri|alimentar|cozinha/,                 Apple],
+  [/fisioterapia aquatica|hidro/,             Waves],
+  [/fisioterapia/,                            Activity],
+  [/fonoaudiologia/,                          Mic2],
+  [/terapia ocupacional/,                     Hand],
+  [/musicoterapia|musicalizacao/,             Music],
+  [/arteterapia/,                             Palette],
+  [/equoterapia/,                             PawPrint],
+  [/habilidades sociais|trilha socioemocional/, HeartHandshake],
+  [/psicomotricidade/,                        Move],
+  [/psicopedagogia|oficina de aprendizagem|estagio/, BookOpen],
+  [/avaliacao neuropsicologica|triagem/,       ClipboardList],
+  [/psiquiatr|neurolog/,                       Stethoscope],
+  [/aba/,                                      Puzzle],
+  [/psicologia|psicoeducacao/,                 Brain],
+  [/visita guiada/,                            MapPin],
+  [/esporte adaptado|circuito funcional/,      Dumbbell],
+  [/coordenador|supervis|especialista tecnico|facilitador|operacoes clinicas|apoio operacional|assistente de desenvolvimento|tecnico terapeutico/, Users],
+]
+
+function iconeTerapia(esp: string): LucideIcon {
+  const norm = normTxt(esp)
+  const regra = ICONE_TERAPIA_REGRAS.find(([re]) => re.test(norm))
+  return regra ? regra[1] : Stethoscope
+}
+
+// Badge que identifica o tipo de seção (dashboard de cards vs. tabela) — substitui
+// repetir "Ocupação de Profissionais - Dashboard/Tabela por..." em cada título.
+function TipoSecaoBadge({ tipo }: { tipo: 'dashboard' | 'tabela' }) {
+  const isDash = tipo === 'dashboard'
+  const Icon = isDash ? LayoutDashboard : Table2
+  return (
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
+      isDash
+        ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300'
+        : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
+    }`}>
+      <Icon size={11} />
+      {isDash ? 'Dashboard' : 'Tabela'}
+    </span>
+  )
 }
 
 // ─── HELPERS DE VIEW ─────────────────────────────────────────────────────────
@@ -149,34 +202,112 @@ function dashboardPorEspecialidade(
 
 // ─── TABELA RESUMO (fora do componente para evitar remount) ──────────────────
 
-type LinhaResumo = { label: string; pct: number | null; baseCompacta: string; baseTexto: string; horasLivres: number }
+type LinhaResumo = {
+  label: string; pct: number | null; baseCompacta: string; baseTexto: string
+  horasOcupadas: number; horasLivres: number
+  capacidadeMultipla: boolean
+  horariosOcupados: number; horariosTotal: number
+  slotsOcupados: number; slotsTotal: number
+  /** Ordem natural do recorte (ex.: dia/turno em sequência cronológica) — usada só como sort padrão inicial. */
+  ordem?: number
+}
 
-function TabelaResumo({ linhas }: { linhas: LinhaResumo[] }) {
+type SortKeyResumo = keyof LinhaResumo | 'pctDasOcupadas' | 'pctDoTotal'
+
+/** Deriva a tonalidade padrão do sistema (StatCard) a partir do % de ocupação — mesmos limiares de corFaixaOcupacao. */
+function toneOcupacao(pct: number | null | undefined): Tone {
+  if (pct === null || pct === undefined) return 'slate'
+  const p = Number(pct) > 1 ? Number(pct) / 100 : Number(pct)
+  if (!Number.isFinite(p)) return 'slate'
+  if (p >= 0.8) return 'green'
+  if (p >= 0.6) return 'blue'
+  if (p >= 0.4) return 'amber'
+  return 'red'
+}
+
+function TabelaResumo({ linhas, sortPadrao = { key: 'label', dir: 'asc' }, recorteSortKey = 'label' }: {
+  linhas: LinhaResumo[]
+  sortPadrao?: { key: SortKeyResumo; dir: SortDir }
+  /** Chave usada ao clicar no cabeçalho "Recorte" — 'label' ordena alfabeticamente, 'ordem' respeita a sequência natural (ex.: dia/turno cronológico). */
+  recorteSortKey?: SortKeyResumo
+}) {
+  const temCapacidadeMultipla = linhas.some(x => x.capacidadeMultipla)
+  const totalOcupadas = linhas.reduce((s, x) => s + (x.horariosOcupados || 0), 0)
+  const totalSessoes  = linhas.reduce((s, x) => s + (x.horariosTotal || 0), 0)
+
+  const linhasCalc = useMemo(() => linhas.map(x => ({
+    ...x,
+    pctDasOcupadas: totalOcupadas > 0 ? x.horariosOcupados / totalOcupadas : null,
+    pctDoTotal:     totalSessoes  > 0 ? x.horariosTotal  / totalSessoes  : null,
+  })), [linhas, totalOcupadas, totalSessoes])
+
+  const [sort, setSort] = useState<{ key: SortKeyResumo; dir: SortDir }>(sortPadrao)
+  const linhasOrdenadas = useMemo(
+    () => ordenarPor(linhasCalc, sort.key as keyof (typeof linhasCalc)[number], sort.dir),
+    [linhasCalc, sort.key, sort.dir],
+  )
+
+  function onSortClick(key: string) {
+    setSort(prev => ({ key: key as SortKeyResumo, dir: prev.key === key && prev.dir === 'asc' ? 'desc' : 'asc' }))
+  }
+
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-xs">
         <thead>
-          <tr className="text-gray-500">
-            <th className="text-left py-1">Recorte</th>
-            <th className="text-right py-1 w-32">Base</th>
-            <th className="text-right py-1 w-20">CH livre</th>
-            <th className="text-right py-1 w-20">% ocup.</th>
+          <tr className="border-b border-border text-left text-muted-foreground">
+            <SortableTh label="Recorte" sortKey={recorteSortKey} activeKey={sort.key} dir={sort.dir} onClick={onSortClick} />
+            {temCapacidadeMultipla ? (
+              <>
+                <SortableTh label="Sessões" sortKey="horariosOcupados" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick} />
+                <SortableTh label="Vagas simult." sortKey="slotsOcupados" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick} />
+              </>
+            ) : (
+              <SortableTh label="Sessões" sortKey="horariosOcupados" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick} />
+            )}
+            <SortableTh label="% das ocupadas" sortKey="pctDasOcupadas" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick}
+              title="Percentual que as sessões ocupadas deste recorte representam sobre o total de sessões ocupadas de todos os recortes" />
+            <SortableTh label="% do total" sortKey="pctDoTotal" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick}
+              title="Percentual que o total de sessões (ocupadas + livres) deste recorte representa sobre o total geral de sessões" />
+            <SortableTh label="CH ocupada" sortKey="horasOcupadas" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick} />
+            <SortableTh label="CH livre" sortKey="horasLivres" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick} />
+            <SortableTh label="% ocup." sortKey="pct" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick} />
           </tr>
         </thead>
         <tbody>
-          {linhas.map(x => (
-            <tr key={x.label} className="border-t">
-              <td className="py-1.5 font-medium whitespace-nowrap">{x.label}</td>
-              <td className="text-right whitespace-nowrap text-gray-400" title={x.baseTexto}>{x.baseCompacta || '—'}</td>
-              <td className="text-right whitespace-nowrap" style={{ color: B.red }}>{fmtH(x.horasLivres)}</td>
-              <td className="text-right font-bold whitespace-nowrap">
+          {linhasOrdenadas.map(x => (
+            <tr key={x.label} className="border-t border-border/40">
+              <td className="py-1.5 pr-2 font-medium whitespace-nowrap">{x.label}</td>
+              {temCapacidadeMultipla ? (
+                <>
+                  <td className="py-1.5 px-2 text-right whitespace-nowrap text-muted-foreground" title={x.baseTexto}>
+                    {x.slotsTotal > 0 ? `${Math.round(x.horariosOcupados)}/${Math.round(x.horariosTotal)}` : '—'}
+                  </td>
+                  <td className="py-1.5 px-2 text-right whitespace-nowrap text-muted-foreground">
+                    {x.capacidadeMultipla ? `${Math.round(x.slotsOcupados)}/${Math.round(x.slotsTotal)}` : '—'}
+                  </td>
+                </>
+              ) : (
+                <td className="py-1.5 px-2 text-right whitespace-nowrap text-muted-foreground" title={x.baseTexto}>
+                  {x.slotsTotal > 0 ? `${Math.round(x.horariosOcupados)}/${Math.round(x.horariosTotal)}` : '—'}
+                </td>
+              )}
+              <td className="py-1.5 px-2 text-right whitespace-nowrap text-muted-foreground">
+                {x.pctDasOcupadas !== null ? fmtPctOcup(x.pctDasOcupadas) : '—'}
+              </td>
+              <td className="py-1.5 px-2 text-right whitespace-nowrap text-muted-foreground">
+                {x.pctDoTotal !== null ? fmtPctOcup(x.pctDoTotal) : '—'}
+              </td>
+              <td className="py-1.5 px-2 text-right whitespace-nowrap text-muted-foreground">{fmtH(x.horasOcupadas)}</td>
+              <td className="py-1.5 px-2 text-right whitespace-nowrap text-muted-foreground">{fmtH(x.horasLivres)}</td>
+              <td className="py-1.5 pl-2 text-right whitespace-nowrap">
                 <PercentualOcupacao pct={x.pct} />
               </td>
             </tr>
           ))}
-          {!linhas.length && (
+          {!linhasOrdenadas.length && (
             <tr>
-              <td colSpan={4} className="py-4 text-center text-gray-400">Sem dados nos filtros atuais.</td>
+              <td colSpan={temCapacidadeMultipla ? 8 : 7} className="py-4 text-center text-muted-foreground">Sem dados nos filtros atuais.</td>
             </tr>
           )}
         </tbody>
@@ -333,7 +464,13 @@ export function OcupacaoProfShell() {
     })
     return Object.values(mapa).map(e => {
       const f = finalizarBaseOcup(e)
-      return { label: e.label, pct: f.pct, baseCompacta: f.baseCompacta, baseTexto: f.baseTexto, horasLivres: f.horasLivres }
+      return {
+        label: e.label, pct: f.pct, baseCompacta: f.baseCompacta, baseTexto: f.baseTexto,
+        horasOcupadas: f.horasOcupadas, horasLivres: f.horasLivres,
+        capacidadeMultipla: f.capacidadeMultipla,
+        horariosOcupados: f.horariosOcupados, horariosTotal: f.horariosTotal,
+        slotsOcupados: f.slotsOcupados, slotsTotal: f.slotsTotal,
+      }
     }).sort((a, b) => a.label.localeCompare(b.label))
   }, [dadosFiltrados])
 
@@ -347,9 +484,36 @@ export function OcupacaoProfShell() {
     })
     return Object.values(mapa).map(e => {
       const f = finalizarBaseOcup(e)
-      return { label: e.label, pct: f.pct, baseCompacta: f.baseCompacta, baseTexto: f.baseTexto, horasLivres: f.horasLivres }
+      return {
+        label: e.label, pct: f.pct, baseCompacta: f.baseCompacta, baseTexto: f.baseTexto,
+        horasOcupadas: f.horasOcupadas, horasLivres: f.horasLivres,
+        capacidadeMultipla: f.capacidadeMultipla,
+        horariosOcupados: f.horariosOcupados, horariosTotal: f.horariosTotal,
+        slotsOcupados: f.slotsOcupados, slotsTotal: f.slotsTotal,
+      }
     }).sort((a, b) => a.label.localeCompare(b.label))
   }, [dadosFiltrados])
+
+  const porDiaTurno = useMemo((): (LinhaResumo & { dow: number; turno: 'Manhã' | 'Tarde' })[] =>
+    [1, 2, 3, 4, 5].flatMap(dow =>
+      (['Manhã', 'Tarde'] as const).map(turno => {
+        const b = novaBaseOcup()
+        dadosFiltrados.forEach(d => {
+          const x = d.ocupacao?.porTurno?.find(t => t.dow === dow && t.turno === turno)
+          if (x) somaBaseOcup(b, x)
+        })
+        const f = finalizarBaseOcup(b)
+        return {
+          label: `${DOW_PT[dow]} · ${turno}`, dow, turno, ordem: dow * 2 + (turno === 'Tarde' ? 1 : 0),
+          pct: f.pct, baseCompacta: f.baseCompacta, baseTexto: f.baseTexto,
+          horasOcupadas: f.horasOcupadas, horasLivres: f.horasLivres,
+          capacidadeMultipla: f.capacidadeMultipla,
+          horariosOcupados: f.horariosOcupados, horariosTotal: f.horariosTotal,
+          slotsOcupados: f.slotsOcupados, slotsTotal: f.slotsTotal,
+        }
+      })
+    ),
+  [dadosFiltrados])
 
   const toggleCompareSlot = useCallback((key: string) => {
     setOcupCompareSlots(prev => prev.includes(key) ? prev.filter(x => x !== key) : [...prev, key])
@@ -443,36 +607,37 @@ export function OcupacaoProfShell() {
   useEffect(() => {
     setRightContent(
       <div className="flex flex-wrap items-center gap-2">
-        <input
-          key={buscaResetKey}
-          type="search"
-          defaultValue={ocupBusca}
-          onChange={e => setOcupBusca(e.target.value)}
-          placeholder="Busca"
-          className="rounded-xl border px-3 py-1.5 text-sm"
-          style={{ borderColor: '#d1d5db', width: 160 }}
-        />
+        <div className="relative">
+          <Search size={13} className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+          <input
+            key={buscaResetKey}
+            type="search"
+            defaultValue={ocupBusca}
+            onChange={e => setOcupBusca(e.target.value)}
+            placeholder="Busca"
+            className="w-40 rounded-lg border border-border bg-card pl-7 pr-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+          />
+        </div>
         <span className="text-xs font-medium text-muted-foreground">
           {dadosFiltrados.length}/{dadosPorProf.length} prof.
         </span>
         <button type="button" onClick={() => setPainelAberto(v => !v)}
-          className="px-3 py-1.5 rounded-full text-xs font-bold border"
-          style={{ background: painelAberto ? B.navy : '#fff', color: painelAberto ? '#fff' : B.navy, borderColor: B.navy }}>
-          {painelAberto ? '▲ Recolher' : '▼ Filtros'}
+          className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-colors ${
+            painelAberto
+              ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900"
+              : "border border-border bg-card text-foreground hover:bg-muted/50"
+          }`}>
+          <SlidersHorizontal size={13} /> Filtros
         </button>
         {filtrosAtivos && (
           <button type="button" onClick={limparFiltros}
-            className="px-3 py-1.5 rounded-full text-xs font-bold border"
-            style={{ background: '#fff', color: B.red, borderColor: B.red }}>
-            ✕ Limpar
+            className="inline-flex items-center gap-1.5 rounded-lg border border-rose-300 bg-card px-3 py-1.5 text-xs font-bold text-rose-600 hover:bg-rose-50 dark:border-rose-800 dark:text-rose-400 dark:hover:bg-rose-950/30">
+            <X size={13} /> Limpar
           </button>
         )}
         <button type="button" onClick={exportarXLSX}
-          className="px-3 py-1.5 rounded-full text-xs font-bold border flex items-center gap-1"
-          style={{ background: '#fff', color: '#16a34a', borderColor: '#16a34a' }}>
-          <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-          </svg>
+          className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white shadow-sm bg-emerald-700 hover:bg-emerald-800 dark:bg-emerald-600 dark:hover:bg-emerald-700 active:scale-95 transition-colors">
+          <Download size={13} />
           Exportar XLSX
         </button>
       </div>
@@ -496,9 +661,9 @@ export function OcupacaoProfShell() {
 
   if (!dadosPorProf.length) return (
     <div className="text-center py-16">
-      <div className="font-bold text-lg mb-1" style={{ color: B.navy }}>Nenhum dado para o período</div>
-      <div className="text-sm text-gray-400">{analMes}</div>
-      <div className="text-sm text-gray-400 mt-1">Verifique se há grade importada para este período.</div>
+      <div className="font-bold text-lg mb-1 text-foreground">Nenhum dado para o período</div>
+      <div className="text-sm text-muted-foreground">{analMes}</div>
+      <div className="text-sm text-muted-foreground mt-1">Verifique se há grade importada para este período.</div>
     </div>
   )
 
@@ -510,41 +675,44 @@ export function OcupacaoProfShell() {
         <div className="-mx-6 -mt-6 mb-6 border-b border-border bg-card px-6 py-4 space-y-3 sticky -top-6 z-20">
             <div className="rounded-xl bg-muted/40 p-3">
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-[minmax(200px,1fr)_minmax(240px,1.2fr)_minmax(240px,1.2fr)_minmax(180px,0.8fr)] gap-2 items-start">
-                <FiltroCheckbox titulo="Profissionais" opcoes={profissionaisFiltro} selecionados={ocupProfissionais} setSelecionados={setOcupProfissionais} cor={B.navy} />
-                <FiltroCheckbox titulo="Terapias" opcoes={allTerps} selecionados={ocupEsp} setSelecionados={setOcupEsp} cor={B.purple} selecaoPadrao={terapiasPadrao} />
-                <FiltroCheckbox titulo="Unidades" opcoes={unidadesFiltro} selecionados={ocupUnidades} setSelecionados={setOcupUnidades} cor={B.blue} />
+                <FiltroCheckbox titulo="Profissionais" opcoes={profissionaisFiltro} selecionados={ocupProfissionais} setSelecionados={setOcupProfissionais} />
+                <FiltroCheckbox titulo="Terapias" opcoes={allTerps} selecionados={ocupEsp} setSelecionados={setOcupEsp} selecaoPadrao={terapiasPadrao} />
+                <FiltroCheckbox titulo="Unidades" opcoes={unidadesFiltro} selecionados={ocupUnidades} setSelecionados={setOcupUnidades} />
                 <FiltroRadio titulo="Ordenação" opcoes={OCUP_SORTS} selecionado={ocupSort} setSelecionado={setOcupSort} />
               </div>
             </div>
 
             <div className="flex flex-wrap gap-1.5 items-center">
               <span className="text-[11px] font-bold text-muted-foreground">Nível de ocupação:</span>
-              {OCUP_FAIXAS.map(f => (
-                <button key={f.k} type="button" onClick={() => setOcupFaixa(f.k)}
-                  className="px-2.5 py-1 rounded-full text-[11px] font-bold border"
-                  style={{ background: ocupFaixa === f.k ? B.navy : '#fff', color: ocupFaixa === f.k ? '#fff' : B.navy, borderColor: ocupFaixa === f.k ? B.navy : '#d1d5db' }}>
-                  {f.l}
-                </button>
-              ))}
+              <SegmentedTabs
+                value={ocupFaixa}
+                onChange={setOcupFaixa}
+                tabs={OCUP_FAIXAS.map(f => ({ value: f.k, label: f.l }))}
+                ariaLabel="Nível de ocupação"
+              />
             </div>
 
-            <div className="rounded-xl p-2 px-3" style={{ background: B.navyLt }}>
+            <div className="rounded-xl border border-border bg-card p-3">
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-[11px] font-bold" style={{ color: B.navy }}>Agenda</span>
+                <span className="text-[11px] font-bold text-foreground">Agenda</span>
                 {[
-                  { k: 'comparece',     l: 'Comparece',     c: B.green  },
-                  { k: 'nao_comparece', l: 'Não comparece', c: B.orange },
-                ].map(opt => (
-                  <button key={opt.k} type="button"
-                    onClick={() => setOcupCompareModo(prev => prev === opt.k ? '' : opt.k)}
-                    className="px-3 py-1.5 rounded-full text-xs font-bold border"
-                    style={{ background: ocupCompareModo === opt.k ? opt.c : '#fff', color: ocupCompareModo === opt.k ? '#fff' : opt.c, borderColor: opt.c }}>
-                    {opt.l}
-                  </button>
-                ))}
+                  { k: 'comparece',     l: 'Comparece',     ativoCls: 'bg-emerald-600 text-white dark:bg-emerald-500' },
+                  { k: 'nao_comparece', l: 'Não comparece', ativoCls: 'bg-rose-600 text-white dark:bg-rose-500' },
+                ].map(opt => {
+                  const ativo = ocupCompareModo === opt.k
+                  return (
+                    <button key={opt.k} type="button"
+                      onClick={() => setOcupCompareModo(prev => prev === opt.k ? '' : opt.k)}
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold border transition-colors ${
+                        ativo ? `border-transparent ${opt.ativoCls}` : "border-border bg-transparent text-foreground hover:bg-muted/50"
+                      }`}>
+                      {opt.l}
+                    </button>
+                  )
+                })}
                 {ocupCompareModo && (
                   <button type="button" onClick={() => { setOcupCompareModo(''); setOcupCompareSlots([]) }}
-                    className="text-[11px] text-gray-400 hover:text-red-500 underline">
+                    className="text-[11px] text-muted-foreground hover:text-rose-600 dark:hover:text-rose-400 underline">
                     limpar agenda
                   </button>
                 )}
@@ -553,15 +721,17 @@ export function OcupacaoProfShell() {
                 <div className="mt-2 grid grid-cols-1 lg:grid-cols-[70px_1fr] gap-1 text-xs">
                   {(['Manhã', 'Tarde'] as const).map(row => (
                     <div key={row} className="contents">
-                      <div className="font-bold py-1" style={{ color: row === 'Manhã' ? B.blue : B.purple }}>{row}</div>
+                      <div className={`font-bold py-1 ${row === 'Manhã' ? 'text-sky-700 dark:text-sky-400' : 'text-violet-700 dark:text-violet-400'}`}>{row}</div>
                       <div className="flex flex-wrap gap-1.5">
                         {OCUP_COMPARE_SLOTS.filter(s => s.row === row).map(s => {
                           const ativo = ocupCompareSlots.includes(s.key)
-                          const cor   = row === 'Manhã' ? B.blue : B.purple
+                          const ativoCls = row === 'Manhã' ? 'bg-sky-600 text-white dark:bg-sky-500' : 'bg-violet-600 text-white dark:bg-violet-500'
+                          const inativoCls = row === 'Manhã' ? 'border-sky-300 text-sky-700 dark:border-sky-800 dark:text-sky-400' : 'border-violet-300 text-violet-700 dark:border-violet-800 dark:text-violet-400'
                           return (
                             <button key={s.key} type="button" onClick={() => toggleCompareSlot(s.key)}
-                              className="px-2.5 py-1 rounded-full border text-[11px] font-bold"
-                              style={{ background: ativo ? cor : '#fff', color: ativo ? '#fff' : cor, borderColor: cor }}>
+                              className={`px-2.5 py-1 rounded-full border text-[11px] font-bold transition-colors ${
+                                ativo ? `border-transparent ${ativoCls}` : `bg-transparent hover:bg-muted/50 ${inativoCls}`
+                              }`}>
                               {s.label}
                             </button>
                           )
@@ -578,60 +748,44 @@ export function OcupacaoProfShell() {
       <div className="max-w-[1800px] mx-auto">
 
       {/* ── dashboard especialidade ── */}
-      <div className="rounded-xl bg-white shadow-sm overflow-hidden mb-3">
+      <div className="rounded-xl border border-border bg-card overflow-hidden mb-3">
         <button type="button" onClick={() => setDashboardAberto(v => !v)}
-          className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50">
-          <span className="font-bold text-sm" style={{ color: B.navy }}>
-            {dashboardAberto ? '▼' : '▶'} Dashboard por especialidade
+          className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-muted/50">
+          <span className="font-bold text-sm text-foreground flex items-center gap-1.5">
+            {dashboardAberto ? <ChevronDown size={14} className="text-muted-foreground" /> : <ChevronRight size={14} className="text-muted-foreground" />}
+            <TipoSecaoBadge tipo="dashboard" />
+            Especialidade
           </span>
-          <span className="text-xs text-gray-400">{dashboardEsp.length} especialidade(s)</span>
+          <span className="text-xs text-muted-foreground">{dashboardEsp.length} especialidade(s)</span>
         </button>
         {dashboardAberto && (
           <div className="px-4 pb-4">
             {!dashboardEsp.length ? (
-              <div className="text-center py-6 text-sm text-gray-400">
+              <div className="text-center py-6 text-sm text-muted-foreground">
                 Nenhuma especialidade nos filtros atuais.
               </div>
             ) : (
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
                 {dashboardEsp.map(e => {
-                  const corOcup = corTerapiaEsp(e.especialidade, corFaixaOcupacao(e.pct) ?? B.green)
-                  const pctNum  = Math.max(0, Math.min(100, (Number(e.pct) || 0) * 100))
+                  const tone = toneOcupacao(e.pct)
+                  const Icon = iconeTerapia(e.especialidade)
                   return (
-                    <div key={e.especialidade}
-                      className="rounded-xl border bg-white flex flex-col items-center px-4 pt-3 pb-3 gap-2"
-                      style={{ borderColor: '#e8eef5', borderTop: `3px solid ${corOcup}` }}>
-                      <div className="font-bold text-sm text-center leading-tight"
-                        title={e.especialidade} style={{ color: B.navy }}>
-                        {e.especialidade}
+                    <StatCard key={e.especialidade} tone={tone} tinted={false}
+                      icon={<Icon size={15} />}
+                      label={<span className="truncate" title={e.especialidade}>{e.especialidade}</span>}>
+                      <div className="text-2xl font-black leading-none" style={{ color: TONE_ACCENT[tone] }}>
+                        {fmtPctOcup(e.pct)}
                       </div>
-                      <InteractivePieChart
-                        size={110}
-                        centerLabel={fmtPctOcup(e.pct)}
-                        valueFormatter={(v) => fmtH(v)}
-                        segments={[
-                          { value: e.horasOcupadas, color: corOcup,       label: 'Ocupada' },
-                          { value: e.horasLivres,   color: COR_LIVRE_ESP, label: 'Livre'   },
-                        ].filter(s => s.value > 0)}
-                      />
-                      <div className="w-full">
-                        <div className="h-1.5 rounded-full overflow-hidden bg-gray-100 mb-2">
-                          <div className="h-full rounded-full" style={{ width: `${pctNum}%`, background: corOcup }} />
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setEspModal(e)}
-                          className="w-full rounded-lg py-1.5 text-sm font-bold text-center"
-                          style={{ background: B.navyLt, color: B.navy }}>
-                          Ver {e.profissionaisQtd} {e.profissionaisQtd !== 1 ? 'profissionais' : 'profissional'} →
-                        </button>
-                        {e.horasLivres > 0 && (
-                          <div className="text-xs text-center mt-1.5" style={{ color: B.red }}>
-                            {fmtH(e.horasLivres)} livres
-                          </div>
-                        )}
+                      <div className="mt-1 text-[11px] text-muted-foreground">
+                        {fmtH(e.horasLivres)} livres · {e.profissionaisQtd} {e.profissionaisQtd !== 1 ? 'profissionais' : 'profissional'}
                       </div>
-                    </div>
+                      <button
+                        type="button"
+                        onClick={() => setEspModal(e)}
+                        className="mt-2 w-full rounded-lg py-1 text-[11px] font-semibold text-center bg-muted hover:bg-muted/70 text-foreground transition-colors">
+                        Ver {e.profissionaisQtd !== 1 ? 'profissionais' : 'profissional'} →
+                      </button>
+                    </StatCard>
                   )
                 })}
               </div>
@@ -642,26 +796,34 @@ export function OcupacaoProfShell() {
 
       {/* ── dashboard unidades ── */}
       {dashboardUnidades.length > 0 && (
-        <div className="rounded-xl bg-white shadow-sm overflow-hidden mb-3">
+        <div className="rounded-xl border border-border bg-card overflow-hidden mb-3">
           <button type="button" onClick={() => setDashUnidAberto(v => !v)}
-            className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50">
-            <span className="font-bold text-sm" style={{ color: B.navy }}>
-              {dashUnidAberto ? '▼' : '▶'} Dashboard por unidade
+            className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-muted/50">
+            <span className="font-bold text-sm text-foreground flex items-center gap-1.5">
+              {dashUnidAberto ? <ChevronDown size={14} className="text-muted-foreground" /> : <ChevronRight size={14} className="text-muted-foreground" />}
+              <TipoSecaoBadge tipo="dashboard" />
+              Unidades
             </span>
-            <span className="text-xs text-gray-400">{dashboardUnidades.length} unidade(s)</span>
+            <span className="text-xs text-muted-foreground">{dashboardUnidades.length} unidade(s)</span>
           </button>
           {dashUnidAberto && (
             <div className="px-4 pb-3">
-              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-2">
-                {dashboardUnidades.map(({ unidade, f }) => (
-                  <DashboardCard
-                    key={unidade}
-                    titulo={unidade}
-                    valor={fmtPctOcup(f.pct)}
-                    detalhe={`${fmtH(f.horasLivres)} livres · ${f.baseCompacta || '—'}`}
-                    cor={corFaixaOcupacao(f.pct)}
-                  />
-                ))}
+              <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-5 gap-3">
+                {dashboardUnidades.map(({ unidade, f }) => {
+                  const tone = toneOcupacao(f.pct)
+                  return (
+                    <StatCard key={unidade} tone={tone} tinted={false}
+                      icon={<Building2 size={15} />}
+                      label={<span className="truncate" title={unidade}>{unidade}</span>}>
+                      <div className="text-2xl font-black leading-none" style={{ color: TONE_ACCENT[tone] }}>
+                        {fmtPctOcup(f.pct)}
+                      </div>
+                      <div className="mt-1 text-[11px] text-muted-foreground">
+                        {fmtH(f.horasLivres)} livres · {f.baseCompacta || '—'}
+                      </div>
+                    </StatCard>
+                  )
+                })}
               </div>
             </div>
           )}
@@ -670,70 +832,45 @@ export function OcupacaoProfShell() {
 
       {/* ── resumos colapsáveis ── */}
       <div className="space-y-2 mb-3">
-        <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
           <button type="button" onClick={() => setUnidadeAberto(v => !v)}
-            className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50">
-            <span className="font-bold text-sm" style={{ color: B.navy }}>
-              {unidadeAberto ? '▼' : '▶'} Ocupação por unidade
+            className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-muted/50">
+            <span className="font-bold text-sm text-foreground flex items-center gap-1.5">
+              {unidadeAberto ? <ChevronDown size={14} className="text-muted-foreground" /> : <ChevronRight size={14} className="text-muted-foreground" />}
+              <TipoSecaoBadge tipo="tabela" />
+              Unidades
             </span>
-            <span className="text-xs text-gray-400">{porUnidade.length} unidade(s)</span>
+            <span className="text-xs text-muted-foreground">{porUnidade.length} unidade(s)</span>
           </button>
           {unidadeAberto && <div className="px-4 pb-4"><TabelaResumo linhas={porUnidade} /></div>}
         </div>
 
-        <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
           <button type="button" onClick={() => setEspAberto(v => !v)}
-            className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50">
-            <span className="font-bold text-sm" style={{ color: B.navy }}>
-              {espAberto ? '▼' : '▶'} Ocupação por especialidade
+            className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-muted/50">
+            <span className="font-bold text-sm text-foreground flex items-center gap-1.5">
+              {espAberto ? <ChevronDown size={14} className="text-muted-foreground" /> : <ChevronRight size={14} className="text-muted-foreground" />}
+              <TipoSecaoBadge tipo="tabela" />
+              Especialidades
             </span>
-            <span className="text-xs text-gray-400">{porEsp.length} especialidade(s)</span>
+            <span className="text-xs text-muted-foreground">{porEsp.length} especialidade(s)</span>
           </button>
           {espAberto && <div className="px-4 pb-4"><TabelaResumo linhas={porEsp} /></div>}
         </div>
 
-        <div className="rounded-xl bg-white shadow-sm overflow-hidden">
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
           <button type="button" onClick={() => setDiaTurnoAberto(v => !v)}
-            className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-gray-50">
-            <span className="font-bold text-sm" style={{ color: B.navy }}>
-              {diaTurnoAberto ? '▼' : '▶'} Dia × turno — geral
+            className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-muted/50">
+            <span className="font-bold text-sm text-foreground flex items-center gap-1.5">
+              {diaTurnoAberto ? <ChevronDown size={14} className="text-muted-foreground" /> : <ChevronRight size={14} className="text-muted-foreground" />}
+              <TipoSecaoBadge tipo="tabela" />
+              Dia × turno
             </span>
-            <span className="text-xs text-gray-400">segunda a sexta</span>
+            <span className="text-xs text-muted-foreground">segunda a sexta</span>
           </button>
           {diaTurnoAberto && (
-            <div className="px-4 pb-4 overflow-x-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-gray-500">
-                    <th className="text-left py-1">Dia / turno</th>
-                    <th className="text-right py-1 w-20">% ocup.</th>
-                    <th className="text-right py-1 w-32">Base</th>
-                    <th className="text-right py-1 w-20">CH livre</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {[1, 2, 3, 4, 5].flatMap(dow =>
-                    (['Manhã', 'Tarde'] as const).map(turno => {
-                      const b = novaBaseOcup()
-                      dadosFiltrados.forEach(d => {
-                        const x = d.ocupacao?.porTurno?.find(t => t.dow === dow && t.turno === turno)
-                        if (x) somaBaseOcup(b, x)
-                      })
-                      const f = finalizarBaseOcup(b)
-                      return (
-                        <tr key={`${dow}-${turno}`} className="border-t">
-                          <td className="py-1.5 whitespace-nowrap">{DOW_PT[dow]} · {turno}</td>
-                          <td className="py-1.5 text-right font-bold whitespace-nowrap">
-                            <PercentualOcupacao pct={f.pct} />
-                          </td>
-                          <td className="py-1.5 text-right whitespace-nowrap text-gray-400">{f.baseCompacta || '—'}</td>
-                          <td className="py-1.5 text-right whitespace-nowrap" style={{ color: B.red }}>{fmtH(f.horasLivres)}</td>
-                        </tr>
-                      )
-                    })
-                  )}
-                </tbody>
-              </table>
+            <div className="px-4 pb-4">
+              <TabelaResumo linhas={porDiaTurno} sortPadrao={{ key: 'ordem', dir: 'asc' }} recorteSortKey="ordem" />
             </div>
           )}
         </div>
@@ -753,20 +890,22 @@ export function OcupacaoProfShell() {
 
           return (
             <div key={d.prof}
-              className="rounded-2xl bg-white shadow-sm border overflow-hidden"
-              style={{ borderColor: '#e7edf5', borderLeft: `4px solid ${corPct}` }}>
+              className="rounded-xl border border-border bg-card overflow-hidden"
+              style={{ borderLeft: `4px solid ${corPct}` }}>
 
               {/* cabeçalho do card */}
               <button type="button"
                 onClick={() => setProfsAbertos(prev => ({ ...prev, [d.prof]: !prev[d.prof] }))}
-                className="w-full text-left px-4 py-2 hover:bg-gray-50 transition-colors">
+                className="w-full text-left px-4 py-2 hover:bg-muted/50 transition-colors">
                 <div className="grid grid-cols-1 lg:grid-cols-[minmax(260px,480px)_minmax(180px,1fr)_80px] gap-2 lg:gap-3 items-center">
                   <div className="min-w-0">
                     <div className="flex items-center gap-2">
-                      <span className="text-xs font-black shrink-0" style={{ color: B.navy }}>{aberto ? '▼' : '▶'}</span>
-                      <span className="font-bold truncate" style={{ color: B.navy }} title={d.prof}>{d.prof}</span>
+                      <span className="shrink-0 text-muted-foreground">
+                        {aberto ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                      </span>
+                      <span className="font-bold truncate text-foreground" title={d.prof}>{d.prof}</span>
                     </div>
-                    <div className="flex flex-wrap items-center gap-x-2 pl-5 text-[10px] text-gray-500 leading-tight">
+                    <div className="flex flex-wrap items-center gap-x-2 pl-5 text-[10px] text-muted-foreground leading-tight">
                       <span className="truncate" title={d.terapiaDetails.map(t => t.terp).join(' · ')}>
                         {d.terapiaDetails.map(t => t.terp).join(' · ')}
                       </span>
@@ -776,16 +915,16 @@ export function OcupacaoProfShell() {
                     </div>
                   </div>
                   <div className="min-w-0">
-                    <div className="h-1.5 rounded-full overflow-hidden bg-gray-100 border border-gray-200">
+                    <div className="h-1.5 rounded-full overflow-hidden bg-muted border border-border">
                       <div className="h-full rounded-full" style={{ width: `${pctVal}%`, background: corPct }} />
                     </div>
-                    <div className="mt-0.5 text-[9px] text-gray-400 truncate">{baseTxt}</div>
+                    <div className="mt-0.5 text-[9px] text-muted-foreground truncate">{baseTxt}</div>
                   </div>
                   <div className="text-right shrink-0">
                     <div className="text-base font-black leading-none" style={{ color: corPct }}>
                       {fmtPctOcup(d.taxaOcupacao)}
                     </div>
-                    <div className="text-[9px] text-gray-400 mt-0.5">
+                    <div className="text-[9px] text-muted-foreground mt-0.5">
                       {baseTxt}
                     </div>
                   </div>
@@ -794,25 +933,25 @@ export function OcupacaoProfShell() {
 
               {/* detalhe expandido */}
               {aberto && (
-                <div className="px-5 pb-5 pt-2 border-t" style={{ borderColor: '#f0f4f8' }}>
+                <div className="px-5 pb-5 pt-2 border-t" style={{ borderColor: 'var(--border)' }}>
                   <div className="overflow-x-auto">
                     <div className="inline-grid gap-4 items-start"
                       style={{ gridTemplateColumns: '300px 320px minmax(300px, 760px)', minWidth: 'min-content' }}>
 
                       {/* donut */}
-                      <div className="rounded-2xl p-4" style={{ background: '#fbfcfe', border: '1px solid #eef2f7' }}>
-                        <OcupacaoDonut item={d} size={148} />
+                      <div className="rounded-2xl p-4" style={{ background: 'var(--muted)', border: '1px solid var(--border)' }}>
+                        <OcupacaoDonut item={d} size={148} centerFillClassName="fill-muted" ringStrokeClassName="stroke-muted" />
                         <div className="grid grid-cols-2 gap-2 mt-3 text-[11px]">
-                          <div className="rounded-lg px-2 py-2" style={{ background: LIVRE_BG, color: B.red }}>
+                          <div className="rounded-lg bg-rose-50 px-2 py-2 text-rose-700 dark:bg-rose-950/30 dark:text-rose-400">
                             <strong className="text-sm">{fmtH(d.ocupacao?.horasOcupadas ?? 0)}</strong>
                             <div>ocupadas</div>
                           </div>
-                          <div className="rounded-lg px-2 py-2" style={{ background: B.limeLt, color: B.green }}>
+                          <div className="rounded-lg bg-emerald-50 px-2 py-2 text-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-400">
                             <strong className="text-sm">{fmtH(d.ocupacao?.horasLivres ?? 0)}</strong>
                             <div>livres</div>
                           </div>
                           {temAdmin && (
-                            <div className="rounded-lg px-2 py-2 col-span-2" style={{ background: B.purpleLt, color: B.purple }}>
+                            <div className="col-span-2 rounded-lg bg-violet-50 px-2 py-2 text-violet-700 dark:bg-violet-950/30 dark:text-violet-400">
                               <strong>{fmtHDec(d.ocupacao?.horasTecnicas ?? 0)}</strong> em Horário Administrativo
                             </div>
                           )}
@@ -826,8 +965,8 @@ export function OcupacaoProfShell() {
                       <div className="flex flex-col gap-3">
 
                         {/* por dia */}
-                        <div className="rounded-xl p-3" style={{ background: '#fff', border: '1px solid #eef2f7' }}>
-                          <div className="font-bold text-xs mb-1 flex items-center gap-1.5" style={{ color: B.navy }}>
+                        <div className="rounded-xl p-3" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+                          <div className="font-bold text-xs mb-1 flex items-center gap-1.5 text-foreground">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: B.purple, flexShrink: 0 }}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
                             Ocupação por dia{unidadeSoUma ? ` · ${resumoUnidade}` : ''}
                           </div>
@@ -836,10 +975,10 @@ export function OcupacaoProfShell() {
                               {regrasCapacidadeTexto(d)}
                             </div>
                           )}
-                          <table className="w-full text-xs">
+                          <table className="w-full table-fixed text-xs">
                             <thead>
-                              <tr className="text-gray-400 text-[11px] border-b">
-                                <th className="text-left px-1 pb-2 pt-1 font-medium">Dia</th>
+                              <tr className="text-muted-foreground text-[11px] border-b">
+                                <th className="w-32 text-left px-1 pb-2 pt-1 font-medium">Dia</th>
                                 <th className="text-left px-1 pb-2 pt-1 font-medium">% ocup.</th>
                                 {temRegraEspecial ? (
                                   <>
@@ -861,17 +1000,17 @@ export function OcupacaoProfShell() {
                                 const pctNum = Math.max(0, Math.min(100, (Number(x.pct) || 0) * 100))
                                 return (
                                   <tr key={x.dow} className="border-t">
-                                    <td className="px-1 py-2 whitespace-nowrap">
-                                      <div className="font-medium">{x.dia}</div>
-                                      {uDia && <div className="text-[10px] mt-0.5" style={{ color: B.blue }}>· {uDia}</div>}
+                                    <td className="px-1 py-2">
+                                      <div className="truncate font-medium">{x.dia}</div>
+                                      {uDia && <div className="truncate text-[10px] mt-0.5" style={{ color: B.blue }} title={uDia}>· {uDia}</div>}
                                     </td>
                                     <td className="px-1 py-2" style={{ minWidth: 160 }}>
                                       <div className="flex items-center gap-2">
-                                        <span className="inline-block rounded-full px-2.5 py-0.5 font-bold whitespace-nowrap text-xs"
+                                        <span className="inline-block min-w-[4.4rem] rounded-full px-2.5 py-0.5 text-center font-bold whitespace-nowrap text-xs"
                                           style={{ background: `${cor}22`, color: cor, border: `1.5px solid ${cor}55` }}>
                                           {fmtPctOcup(x.pct)}
                                         </span>
-                                        <div className="flex-1 h-1.5 rounded-full bg-gray-100 min-w-[48px]">
+                                        <div className="flex-1 h-1.5 rounded-full bg-muted min-w-[48px]">
                                           <div className="h-full rounded-full" style={{ width: `${pctNum}%`, background: cor }} />
                                         </div>
                                       </div>
@@ -887,20 +1026,20 @@ export function OcupacaoProfShell() {
                                         <td className="px-1 py-2 text-right">
                                           {x.capacidadeMultipla ? (
                                             <>
-                                              <div className="font-semibold text-gray-700 whitespace-nowrap">
+                                              <div className="font-semibold text-foreground whitespace-nowrap">
                                                 {Math.round(x.horariosOcupados)} / {Math.round(x.horariosTotal)}
                                               </div>
                                               {pctSess !== null && (
-                                                <div className="text-[10px] text-gray-400">{fmtPctOcup(pctSess)}</div>
+                                                <div className="text-[10px] text-muted-foreground">{fmtPctOcup(pctSess)}</div>
                                               )}
                                             </>
                                           ) : (
-                                            <span className="text-gray-300 text-sm">—</span>
+                                            <span className="text-muted-foreground/50 text-sm">—</span>
                                           )}
                                         </td>
                                       </>
                                     ) : (
-                                      <td className="px-1 py-2 text-right whitespace-nowrap text-gray-400">
+                                      <td className="px-1 py-2 text-right whitespace-nowrap text-muted-foreground">
                                         {x.baseCompacta || '—'}
                                       </td>
                                     )}
@@ -916,12 +1055,12 @@ export function OcupacaoProfShell() {
 
                         {/* por especialidade */}
                         {(d.ocupacao?.porEspecialidade?.length ?? 0) > 0 && (
-                          <div className="rounded-xl p-3" style={{ background: '#fff', border: '1px solid #eef2f7' }}>
-                            <div className="font-bold text-xs mb-2" style={{ color: B.navy }}>Ocupação por especialidade</div>
-                            <table className="w-full text-xs">
+                          <div className="rounded-xl p-3" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
+                            <div className="font-bold text-xs mb-2 text-foreground">Ocupação por especialidade</div>
+                            <table className="w-full table-fixed text-xs">
                               <thead>
-                                <tr className="text-gray-400 text-[11px] border-b">
-                                  <th className="text-left px-1 pb-2 pt-1 font-medium">Especialidade</th>
+                                <tr className="text-muted-foreground text-[11px] border-b">
+                                  <th className="w-32 text-left px-1 pb-2 pt-1 font-medium">Especialidade</th>
                                   <th className="text-left px-1 pb-2 pt-1 font-medium">% ocup.</th>
                                   {temRegraEspecial ? (
                                     <>
@@ -945,15 +1084,13 @@ export function OcupacaoProfShell() {
                                       <td className="px-1 py-2 truncate max-w-[120px]" title={x.terp}>{x.terp}</td>
                                       <td className="px-1 py-2" style={{ minWidth: 140 }}>
                                         <div className="flex items-center gap-2">
-                                          <span className="inline-block rounded-full px-2.5 py-0.5 font-bold whitespace-nowrap text-xs"
+                                          <span className="inline-block min-w-[4.4rem] rounded-full px-2.5 py-0.5 text-center font-bold whitespace-nowrap text-xs"
                                             style={{ background: `${corEsp}22`, color: corEsp, border: `1.5px solid ${corEsp}55` }}>
                                             {fmtPctOcup(x.pct)}
                                           </span>
-                                          {temRegraEspecial && (
-                                            <div className="flex-1 h-1.5 rounded-full bg-gray-100 min-w-[40px]">
-                                              <div className="h-full rounded-full" style={{ width: `${pctNumEsp}%`, background: corEsp }} />
-                                            </div>
-                                          )}
+                                          <div className="flex-1 h-1.5 rounded-full bg-muted min-w-[48px]">
+                                            <div className="h-full rounded-full" style={{ width: `${pctNumEsp}%`, background: corEsp }} />
+                                          </div>
                                         </div>
                                       </td>
                                       {temRegraEspecial ? (
@@ -967,20 +1104,20 @@ export function OcupacaoProfShell() {
                                           <td className="px-1 py-2 text-right">
                                             {x.capacidadeMultipla ? (
                                               <>
-                                                <div className="font-semibold text-gray-700 whitespace-nowrap">
+                                                <div className="font-semibold text-foreground whitespace-nowrap">
                                                   {Math.round(x.horariosOcupados)} / {Math.round(x.horariosTotal)}
                                                 </div>
                                                 {pctSessEsp !== null && (
-                                                  <div className="text-[10px] text-gray-400">{fmtPctOcup(pctSessEsp)}</div>
+                                                  <div className="text-[10px] text-muted-foreground">{fmtPctOcup(pctSessEsp)}</div>
                                                 )}
                                               </>
                                             ) : (
-                                              <span className="text-gray-300 text-sm">—</span>
+                                              <span className="text-muted-foreground/50 text-sm">—</span>
                                             )}
                                           </td>
                                         </>
                                       ) : (
-                                        <td className="px-1 py-2 text-right whitespace-nowrap text-gray-400">{x.baseCompacta || '—'}</td>
+                                        <td className="px-1 py-2 text-right whitespace-nowrap text-muted-foreground">{x.baseCompacta || '—'}</td>
                                       )}
                                       <td className="px-1 py-2 text-right whitespace-nowrap font-semibold" style={{ color: B.red }}>
                                         {fmtH(x.horasLivres)}
@@ -1002,16 +1139,16 @@ export function OcupacaoProfShell() {
         })}
 
         {!dadosFiltrados.length && (
-          <div className="text-center text-sm text-gray-400 py-10 bg-white rounded-xl">
+          <div className="text-center text-sm text-muted-foreground py-10 bg-card rounded-xl">
             Nenhum profissional dentro dos filtros de ocupação.
           </div>
         )}
       </div>
 
       {/* ── nota de cálculo ── */}
-      <div className="mt-5 text-xs text-gray-500 rounded-xl p-3 border"
-        style={{ background: B.blueLt, borderColor: '#d8ecf6' }}>
-        <strong style={{ color: B.navy }}>Notas sobre o cálculo:</strong> sessões comuns usam sessões ocupadas ÷ sessões disponíveis. Musicoterapia usa vagas preenchidas ÷ capacidade total (múltiplos pacientes por sessão). Aplicador ABA EF usa capacidade de 2 pacientes por sessão. Horário Administrativo conta como ocupação técnica e aparece separado no detalhe do profissional.
+      <div className="mt-5 text-xs text-muted-foreground rounded-xl p-3 border"
+        style={{ background: 'var(--muted)', borderColor: 'var(--border)' }}>
+        <strong className="text-foreground">Notas sobre o cálculo:</strong> sessões comuns usam sessões ocupadas ÷ sessões disponíveis. Musicoterapia usa vagas preenchidas ÷ capacidade total (múltiplos pacientes por sessão). Aplicador ABA EF usa capacidade de 2 pacientes por sessão. Horário Administrativo conta como ocupação técnica e aparece separado no detalhe do profissional.
       </div>
       </div>
 
@@ -1048,7 +1185,7 @@ export function OcupacaoProfShell() {
                 }}>
                   <div style={{
                     width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-                    background: B.navyLt, color: B.navy,
+                    background: 'var(--muted)', color: 'var(--foreground)',
                     display: 'flex', alignItems: 'center', justifyContent: 'center',
                     fontSize: 11, fontWeight: 700,
                   }}>

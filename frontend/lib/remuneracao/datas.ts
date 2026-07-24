@@ -1,7 +1,7 @@
 // Migrado de calculadora-remuneracao/src/utils/datas.ts
 // Adaptação: no original, getCalendario importava FERIADOS_BR de um arquivo
-// estático. No Pulsar os feriados vêm do Supabase (remuneracao_config.feriados),
-// então passam a ser parâmetro em vez de import.
+// estático. No Pulsar os feriados vêm do Supabase (tabela public.feriados,
+// ver hooks/useFeriados.ts), então passam a ser parâmetro em vez de import.
 
 import { cleanTxt } from "./formatacao"
 import type { FeriadoInfo } from "@/types/remuneracao"

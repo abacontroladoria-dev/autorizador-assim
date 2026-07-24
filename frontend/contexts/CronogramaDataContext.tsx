@@ -121,7 +121,7 @@ export interface CronogramaDataContextValue {
   cfg: CfgState
   /** Aceites da Saída de Profissional — compartilhado entre a equipe via tabela saida_aceites */
   statusMap: StatusMap
-  /** statusMap do OcupProfMode — compartilhado via acomp_prof_map */
+  /** statusMap de acompanhamento por profissional — compartilhado via acomp_prof_map */
   profMap: Record<string, string>
   /** Bundles de aceite do OcupPacMode — compartilhado via acomp_pac_bundles */
   pacBundles: AceitePacBundle[]
@@ -141,7 +141,7 @@ export interface CronogramaDataContextValue {
   sCfg: (cfg: CfgState) => void
   /** Grava os aceites da Saída (diff por linha contra saida_aceites). */
   persistStatus: (map: StatusMap) => void
-  /** Grava o statusMap do OcupProfMode (diff contra acomp_prof_map). */
+  /** Grava o statusMap de acompanhamento por profissional (diff contra acomp_prof_map). */
   persistProfMap: (map: Record<string, string>) => void
   /** Grava os bundles de aceite do OcupPacMode (upsert + delete contra acomp_pac_bundles). */
   persistPacBundles: (bundles: AceitePacBundle[]) => void
@@ -492,7 +492,7 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
     })()
   }, [])
 
-  // Grava statusMap do OcupProfMode por diff de linhas
+  // Grava statusMap de acompanhamento por profissional, por diff de linhas
   const persistProfMap = useCallback((next: Record<string, string>) => {
     const prev = profMapRef.current
     setProfMap(next)

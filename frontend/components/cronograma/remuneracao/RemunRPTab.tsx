@@ -9,7 +9,8 @@ import { RemuneracaoUploadBadges } from "./RemuneracaoUploadBadges"
 import { RemuneracaoRPDashboard } from "./RemuneracaoRPDashboard"
 import { PeCoordenadoresPanel, profTemPe, type PeFiltroKey } from "./PeCoordenadoresPanel"
 import { ContratosPendentesPanel } from "./ContratosPendentesPanel"
-import { useRemuneracaoConfig } from "@/hooks/useRemuneracaoConfig"
+import { useParametrosGerais } from "@/hooks/useParametrosGerais"
+import { useTaxasEspecialidade } from "@/hooks/useTaxasEspecialidade"
 import { validarModeloRelatorio, parseHtmlTable, type CsvGradeRow } from "@/lib/remuneracao/relatorio"
 import { calcularTotalPorEspecialidade } from "@/lib/remuneracao/dashboardRP"
 import { exportarRemuneracaoRPXlsx } from "@/lib/remuneracao/exportRemuneracaoRP"
@@ -28,7 +29,8 @@ export function RemunRPTab() {
     loading, error,
   } = useRemuneracaoRPContext()
 
-  const { config } = useRemuneracaoConfig()
+  const { parametros } = useParametrosGerais()
+  const { taxas_pa } = useTaxasEspecialidade()
 
   const [expandido, setExpandido] = useState<ExpandidoState>({})
   const [remBusca, setRemBusca] = useState("")
@@ -86,10 +88,10 @@ export function RemunRPTab() {
   }, [setHeader, setRightContent, evoRows, peRows, carregarGrade, carregarPE, limparGrade, limparPE, setCsvName])
 
   // Dados de configuração para o CardRemun — fallbacks seguros enquanto config carrega
-  const ccPA     = config?.cc_pa_default ?? 50
-  const ccPE     = config?.cc_pe_default ?? 100
-  const etaBonus = config?.eta_bonus_default ?? 100
-  const taxasPA  = config?.taxas_pa ?? {}
+  const ccPA     = parametros?.cc_pa_default ?? 50
+  const ccPE     = parametros?.cc_pe_default ?? 100
+  const etaBonus = parametros?.eta_bonus_default ?? 100
+  const taxasPA  = taxas_pa
 
   return (
     <div className="space-y-4">

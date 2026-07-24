@@ -3,7 +3,6 @@
 import { useSearchParams, useRouter } from "next/navigation"
 import { useEffect } from "react"
 import { useHeader } from "@/contexts/HeaderContext"
-import { OcupProfMode } from "./OcupProfMode"
 import { PreencherProfTab } from "@/components/cronograma/shared/PreencherProfTab"
 import { BancoDadosTab } from "./BancoDadosTab"
 import type { CsvRow, LaudoRow, DispRow, CfgState } from "@/types/cronograma"
@@ -12,11 +11,12 @@ import type { CsvRow, LaudoRow, DispRow, CfgState } from "@/types/cronograma"
 // (/cronograma/solicitacoes/saida e /cronograma/solicitacoes/ocupacao-paciente)
 // para poderem ter permissões independentes — ver frontend/lib/permissions/routes.ts
 //
-// "Novo Cronograma" (novo-cron) foi retirado do ar temporariamente por não estar
-// pronto — o componente NovoCronogramaTab segue no código, só não é mais roteável aqui.
+// "Novo Cronograma" (novo-cron) foi retirado do ar por não estar pronto, e
+// "Aumentar Ocupação (Profissional)" (ocup-prof) foi removida a pedido do
+// usuário — ambos os componentes (NovoCronogramaTab, OcupProfMode) seguem no
+// código, só não são mais roteáveis aqui.
 const TABS = [
   { key: "simulacao",  label: "Simulação de Novo Prestador" },
-  { key: "ocup-prof",  label: "Aumentar Ocupação (Profissional)" },
 ] as const
 
 type TabKey = (typeof TABS)[number]["key"]
@@ -39,7 +39,6 @@ export function SolicitacoesShell({ cRows, lRows, dispRows, cfg }: ShellProps) {
   useEffect(() => {
     const tab = TABS.find(t => t.key === activeTab)
     const subtitles: Record<string, string> = {
-      "ocup-prof":  "Aumente a ocupação de sessões por profissional",
       "simulacao":  "Simulação de novo prestador",
     }
     setHeader(tab?.label ?? "Cronograma", subtitles[activeTab] ?? "")
@@ -72,10 +71,6 @@ function TabContent({
 
   if (tab === "simulacao") {
     return <PreencherProfTab cRows={cRows} lRows={lRows} initialMode="sim" fixedMode />
-  }
-
-  if (tab === "ocup-prof") {
-    return <OcupProfMode cRows={cRows} lRows={lRows} cfg={cfg} />
   }
 
   return (

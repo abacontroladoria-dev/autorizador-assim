@@ -12,10 +12,11 @@ export const roleDefaults: Record<string, string[]> = {
     'guias_digitais', 'auditoria_assim', 'usuarios', 'permissoes', 'cco',
     'autorizacoes', 'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
-    'ocupacao_clinica', 'ocupacao_profissionais',
+    'ocupacao_clinica', 'ocupacao_profissionais', 'reposicao_faltas', 'cronograma_ocupacao_salas',
+    'cronograma_valores_convenio', 'cadastros_feriados', 'cadastros_contratos', 'cadastros_taxas',
     'analise_tratativas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
-    'relacionamento_prestador_individual', 'relacionamento_prestador_config',
+    'relacionamento_prestador_individual',
     'relacionamento_prestador_historico', 'relacionamento_prestador_legenda',
   ],
   diretoria: [
@@ -23,10 +24,11 @@ export const roleDefaults: Record<string, string[]> = {
     'escala_terapeutica', 'auditoria_assim',
     'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
-    'ocupacao_clinica', 'ocupacao_profissionais',
+    'ocupacao_clinica', 'ocupacao_profissionais', 'reposicao_faltas', 'cronograma_ocupacao_salas',
+    'cronograma_valores_convenio', 'cadastros_feriados', 'cadastros_contratos', 'cadastros_taxas',
     'analise_tratativas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
-    'relacionamento_prestador_individual', 'relacionamento_prestador_config',
+    'relacionamento_prestador_individual',
     'relacionamento_prestador_historico', 'relacionamento_prestador_legenda',
   ],
   recepcao: [
@@ -41,10 +43,15 @@ export const roleDefaults: Record<string, string[]> = {
   faturamento: ['dashboard'],
   rp: [
     'dashboard', 'escala_terapeutica',
+    'cadastros_feriados', 'cadastros_contratos', 'cadastros_taxas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
-    'relacionamento_prestador_individual', 'relacionamento_prestador_config',
+    'relacionamento_prestador_individual',
     'relacionamento_prestador_historico', 'relacionamento_prestador_legenda',
   ],
+  // Ocupação de Salas, Cadastro de Valores de Convênio e Reposição de Faltas
+  // foram retiradas deste papel em 2026-07-24 a pedido do usuário — ficam
+  // restritas a admin/diretoria (a RLS das tabelas por trás também foi
+  // restringida junto, ver 20260724200000_restringir_cronograma_role_admin_diretoria.sql).
   cronograma: [
     'dashboard', 'cronograma_solicitacoes',
     'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
@@ -78,11 +85,16 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   cronograma_ocupacao_paciente: ['/cronograma/ocupacao-paciente'],
   ocupacao_clinica: ['/cronograma/ocupacao'],
   ocupacao_profissionais: ['/cronograma/indicadores'],
+  reposicao_faltas: ['/cronograma/reposicao'],
+  cronograma_ocupacao_salas: ['/cronograma/ocupacao-salas'],
+  cronograma_valores_convenio: ['/cadastros/cadastro-valores'],
+  cadastros_feriados: ['/cadastros/feriados'],
+  cadastros_contratos: ['/cadastros/contratos'],
+  cadastros_taxas: ['/cadastros/taxas-e-parametros'],
   analise_tratativas: ['/analise-tratativas'],
   relacionamento_prestador_analise: ['/relacionamento-prestador/analise'],
   relacionamento_prestador_rp: ['/relacionamento-prestador/rp'],
   relacionamento_prestador_individual: ['/relacionamento-prestador/individual'],
-  relacionamento_prestador_config: ['/relacionamento-prestador/config'],
   relacionamento_prestador_historico: ['/relacionamento-prestador/historico'],
   relacionamento_prestador_legenda: ['/relacionamento-prestador/legenda'],
 }

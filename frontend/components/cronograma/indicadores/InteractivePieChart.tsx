@@ -21,9 +21,13 @@ interface Props {
   highlightGroup?: string | null
   // Cor do disco central — por padrão casa com bg-card (a maioria dos
   // chamadores fica sobre esse fundo). Sobrescreva quando o donut é embutido
-  // num container tintado diferente (ex.: StatCardShell tone="slate") para o
-  // disco não destoar do fundo ao redor.
+  // num container tintado diferente (ex.: StatCardShell tone="slate", ou um
+  // painel com background var(--muted)) para o disco não destoar do fundo ao
+  // redor.
   centerFillClassName?: string
+  // Cor do contorno entre os segmentos — deve casar com o MESMO fundo de
+  // `centerFillClassName` (default: stroke-white dark:stroke-card).
+  ringStrokeClassName?: string
 }
 
 export function InteractivePieChart({
@@ -37,6 +41,7 @@ export function InteractivePieChart({
   valueFormatter = (v) => `${v} sess.`,
   highlightGroup = null,
   centerFillClassName = 'fill-white dark:fill-card',
+  ringStrokeClassName = 'stroke-white dark:stroke-card',
 }: Props) {
   const uid = useId()
   const clipId = `pie-inner-${uid.replace(/:/g, '')}`
@@ -153,7 +158,7 @@ export function InteractivePieChart({
                 onMouseEnter={() => setHov(a.idx)} onMouseLeave={() => setHov(null)}
                 style={{ cursor: 'pointer' }}>
                 <path d={a.path}
-                  className="stroke-white dark:stroke-card"
+                  className={ringStrokeClassName}
                   fill={a.color}
                   opacity={(hov === null && !highlightGroup) || isHov ? 1 : 0.35}
                   strokeWidth={isHov ? 2 : 0.8}

@@ -1,9 +1,12 @@
 "use client"
 
 import { useState } from "react"
+import { Ban, CalendarDays, CheckCircle2, Clock, Repeat, Users, XCircle } from "lucide-react"
 import { B } from "@/lib/cronograma/constants"
 import { fmtName } from "@/lib/cronograma/helpers"
 import { PBadge } from "@/components/cronograma/ui/PBadge"
+import { StatusPill } from "@/components/cronograma/ui/StatusPill"
+import { type Tone } from "@/components/cronograma/ui/tones"
 import type { Sugestao, WaStatus } from "@/types/cronograma"
 
 const REGRA_LABEL: Record<string, string> = {
@@ -16,12 +19,13 @@ const REGRA_LABEL: Record<string, string> = {
   "Foco novo dia": "Foco — Novo Dia",
 }
 
-const WA_ST: Record<string, { lbl: string; bg: string; color: string }> = {
-  "":         { lbl: "",                  bg: "",        color: ""        },
-  aguardando: { lbl: "⏳ Aguardando WA",  bg: B.blueLt,  color: B.blue   },
-  aceito:     { lbl: "✅ Aceito",         bg: B.limeLt,  color: "#5a8a30" },
-  recusado:   { lbl: "❌ Recusado",       bg: "#fef2f2", color: "#dc2626" },
-  inviavel:   { lbl: "⛔ Inviável",       bg: "var(--muted)", color: "var(--muted-foreground)" },
+// Status WhatsApp → par tonal + ícone Lucide (substitui os hex + emoji).
+const WA_ST: Record<string, { lbl: string; tone: Tone; icon: React.ReactNode } | null> = {
+  "":         null,
+  aguardando: { lbl: "Aguardando WA", tone: "blue",  icon: <Clock size={11} /> },
+  aceito:     { lbl: "Aceito",        tone: "green", icon: <CheckCircle2 size={11} /> },
+  recusado:   { lbl: "Recusado",      tone: "red",   icon: <XCircle size={11} /> },
+  inviavel:   { lbl: "Inviável",      tone: "slate", icon: <Ban size={11} /> },
 }
 
 export interface SugCardProps {
@@ -39,175 +43,149 @@ export function SugCard({ s, waStatus, onWA, onInv, onCron, fila = false }: SugC
   const isGrupo = s.colegas !== "—"
   const isR4    = s.regra === "R4"
 
-  const tipoColor = isGrupo ? B.purple : B.blue
-  const tipoBg    = isGrupo ? B.purpleLt : B.blueLt
-  const cardBd    = confirming ? B.lime : isGrupo ? `${B.purple}33` : "var(--border)"
-  const cardBg    = isGrupo ? B.purpleLt : "var(--card)"
-
-  const wa = WA_ST[waStatus ?? ""] ?? WA_ST[""]
+  const railColor = isGrupo ? B.purple : B.blue
+  const wa = WA_ST[waStatus ?? ""] ?? null
 
   return (
     <>
-      <div style={{ border: `1px solid ${cardBd}`, background: cardBg, borderRadius: "14px", padding: "12px", marginBottom: "4px", opacity: waStatus === "aceito" ? 0.5 : 1, boxShadow: "0 1px 4px rgba(0,0,0,.06)" }}>
-        {/* ── Header: badges + ações ── */}
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "flex-start", justifyContent: "space-between", gap: "8px", marginBottom: "8px" }}>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: "4px", alignItems: "center" }}>
-            <span style={{ background: tipoBg, color: tipoColor, border: `1px solid ${tipoColor}33`, borderRadius: "999px", padding: "2px 8px", fontSize: "11px", fontWeight: 700 }}>
-              {isGrupo ? "👥 Montar Grupo" : "📅 Ocupar Vaga Livre"}
-            </span>
-            <span style={{ background: "var(--muted)", color: "var(--muted-foreground)", borderRadius: "999px", padding: "2px 7px", fontSize: "11px", fontWeight: 500 }}>
-              {REGRA_LABEL[s.regra] ?? s.regra}
-            </span>
-            <PBadge prio={s.prio} />
-            {fila && s.filaM && (
-              <span style={{ background: B.orangeLt, color: B.orange, borderRadius: "999px", padding: "2px 8px", fontSize: "11px", fontWeight: 600 }}>
-                Fila: {s.filaM}
-              </span>
-            )}
-            {s.obs && (
-              <span style={{ background: s.obs.includes("Juliana") ? "#fef2f2" : B.orangeLt, color: s.obs.includes("Juliana") ? "#dc2626" : B.orange, borderRadius: "999px", padding: "2px 8px", fontSize: "11px", fontWeight: 600 }}>
-                {s.obs}
-              </span>
-            )}
-            {wa.lbl && (
-              <span
-                title={waStatus === "aguardando" ? "Vaga reservada: só libera com Recusado, Inviável ou Desfazer envio." : "Status da proposta."}
-                style={{ background: wa.bg, color: wa.color, border: `1px solid ${wa.color}33`, borderRadius: "999px", padding: "2px 8px", fontSize: "11px", fontWeight: 700, cursor: "help" }}
-              >
-                {wa.lbl}
-              </span>
-            )}
-          </div>
-
-          {!confirming && (
-            <div style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
-              <button onClick={() => onCron(s)} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: B.blueLt, color: B.blue, border: `1px solid ${B.blue}33`, cursor: "pointer" }}>
-                🗓 Ver
-              </button>
-              {!waStatus && (
-                <button onClick={() => setConfirming(true)} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: B.limeLt, color: "#4a6e20", border: `1px solid ${B.lime}`, cursor: "pointer", fontWeight: 700 }}>
-                  Aceitar (→ Acompanhamento)
-                </button>
-              )}
-              {!waStatus && (
-                <button onClick={() => onInv(s)} style={{ fontSize: "11px", padding: "4px 8px", borderRadius: "8px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}>
-                  ⛔ Inviável
-                </button>
+      <div
+        className={`rounded-2xl border border-border shadow-sm hover:shadow-md transition-shadow overflow-hidden mb-1 ${
+          isGrupo ? "bg-violet-50/40 dark:bg-violet-950/20" : "bg-card"
+        } ${confirming ? "ring-2 ring-emerald-400/60" : ""} ${waStatus === "aceito" ? "opacity-50" : ""}`}
+        style={{ borderLeft: `4px solid ${railColor}` }}
+      >
+        <div className="p-3">
+          {/* ── Header: badges + ações ── */}
+          <div className="flex flex-wrap items-start justify-between gap-2 mb-2">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <StatusPill tone={isGrupo ? "purple" : "blue"} dense>
+                {isGrupo ? <><Users size={11} /> Montar Grupo</> : <><CalendarDays size={11} /> Ocupar Vaga Livre</>}
+              </StatusPill>
+              <StatusPill tone="slate" dense>{REGRA_LABEL[s.regra] ?? s.regra}</StatusPill>
+              <PBadge prio={s.prio} />
+              {fila && s.filaM && <StatusPill tone="amber" dense>Fila: {s.filaM}</StatusPill>}
+              {s.obs && <StatusPill tone={s.obs.includes("Juliana") ? "red" : "amber"} dense>{s.obs}</StatusPill>}
+              {wa && (
+                <StatusPill
+                  tone={wa.tone} variant="solid" dense
+                  title={waStatus === "aguardando" ? "Vaga reservada: só libera com Recusado, Inviável ou Desfazer envio." : "Status da proposta."}
+                >
+                  {wa.icon} {wa.lbl}
+                </StatusPill>
               )}
             </div>
-          )}
-        </div>
 
-        {/* ── Grid de detalhes ── */}
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px 24px", fontSize: "12px" }}>
-          <div>
-            <div style={{ color: "var(--muted-foreground)" }}>Paciente</div>
-            <div style={{ fontWeight: 800, color: B.navy, fontSize: "14px" }}>{s.pac}</div>
+            {!confirming && (
+              <div className="flex flex-wrap gap-1.5">
+                <button
+                  type="button" onClick={() => onCron(s)}
+                  className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-400 hover:bg-sky-100 dark:hover:bg-sky-900/40 transition-colors"
+                >
+                  <CalendarDays size={12} /> Ver
+                </button>
+                {!waStatus && (
+                  <button
+                    type="button" onClick={() => setConfirming(true)}
+                    className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-bold bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/40 transition-colors"
+                  >
+                    <CheckCircle2 size={12} /> Aceitar
+                  </button>
+                )}
+                {!waStatus && (
+                  <button
+                    type="button" onClick={() => onInv(s)}
+                    className="inline-flex items-center gap-1 rounded-lg px-2.5 py-1 text-[11px] font-semibold bg-muted text-muted-foreground hover:bg-muted/70 transition-colors"
+                  >
+                    <Ban size={12} /> Inviável
+                  </button>
+                )}
+              </div>
+            )}
           </div>
-          <div>
-            <div style={{ color: "var(--muted-foreground)" }}>Profissional</div>
-            <div style={{ color: "var(--card-foreground)" }}>{fmtName(s.prof)}</div>
-          </div>
-          <div>
-            <div style={{ color: "var(--muted-foreground)" }}>Terapia (Exibição)</div>
-            <div style={{ color: "var(--card-foreground)" }}>{s.tP}{s.esp && s.esp !== s.tP ? ` (${s.esp})` : ""}</div>
-          </div>
-          <div>
-            <div style={{ color: "var(--muted-foreground)" }}>Unidade</div>
-            <div style={{ color: "var(--card-foreground)" }}>{s.unidade}</div>
-          </div>
-          <div>
-            <div style={{ color: "var(--muted-foreground)" }}>Dia / Hora</div>
-            <div style={{ fontWeight: 700, color: B.navy }}>{s.dia} {s.hora}</div>
-          </div>
-          <div>
-            <div style={{ color: "var(--muted-foreground)" }}>Gap / Convênio</div>
-            <div style={{ color: "var(--card-foreground)" }}>{s.gap > 0 ? `+${s.gap}x` : "—"} · {s.conv || "—"}</div>
-          </div>
-          {s.colegas !== "—" && (() => {
-            const membros = s.colegas.split(", ").filter(Boolean)
-            const total = membros.length + 1
-            return (
-              <div style={{ gridColumn: "1/3" }}>
-                <div style={{ color: "var(--muted-foreground)", display: "flex", alignItems: "center", gap: "6px" }}>
-                  Grupo na sessão
-                  <span style={{ background: B.purpleLt, color: B.purple, border: `1px solid ${B.purple}33`, borderRadius: "999px", padding: "0 7px", fontSize: "11px", fontWeight: 700 }}>
-                    {total} pessoas
-                  </span>
-                </div>
-                <div style={{ marginTop: "4px", display: "flex", flexDirection: "column", gap: "2px" }}>
-                  {membros.map((m, i) => (
-                    <div key={i} style={{ fontSize: "12px", color: B.purple, fontWeight: 600, display: "flex", gap: "6px", alignItems: "baseline" }}>
-                      <span style={{ fontSize: "10px", fontWeight: 800, color: B.purple, minWidth: "14px" }}>{i + 1}.</span>
-                      {m}
+
+          {/* ── Grid de detalhes ── */}
+          <div className="grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+            <Detalhe label="Paciente" strong>{s.pac}</Detalhe>
+            <Detalhe label="Profissional">{fmtName(s.prof)}</Detalhe>
+            <Detalhe label="Terapia (Exibição)">{s.tP}{s.esp && s.esp !== s.tP ? ` (${s.esp})` : ""}</Detalhe>
+            <Detalhe label="Unidade">{s.unidade}</Detalhe>
+            <Detalhe label="Dia / Hora" strong>{s.dia} {s.hora}</Detalhe>
+            <Detalhe label="Gap / Convênio">{s.gap > 0 ? `+${s.gap}x` : "—"} · {s.conv || "—"}</Detalhe>
+
+            {s.colegas !== "—" && (() => {
+              const membros = s.colegas.split(", ").filter(Boolean)
+              const total = membros.length + 1
+              return (
+                <div className="col-span-2">
+                  <div className="flex items-center gap-1.5 text-muted-foreground">
+                    Grupo na sessão
+                    <StatusPill tone="purple" dense>{total} pessoas</StatusPill>
+                  </div>
+                  <div className="mt-1 flex flex-col gap-0.5">
+                    {membros.map((m, i) => (
+                      <div key={i} className="flex items-baseline gap-1.5 text-xs font-semibold text-violet-700 dark:text-violet-400">
+                        <span className="min-w-[14px] text-[10px] font-extrabold tabular-nums">{i + 1}.</span>
+                        {m}
+                      </div>
+                    ))}
+                    <div className="flex items-baseline gap-1.5 text-xs italic text-muted-foreground">
+                      <span className="min-w-[14px] text-[10px] font-extrabold tabular-nums">{total}.</span>
+                      {s.pac} <span className="text-[10px]">(este paciente)</span>
                     </div>
-                  ))}
-                  <div style={{ fontSize: "12px", color: "var(--muted-foreground)", fontStyle: "italic", display: "flex", gap: "6px", alignItems: "baseline" }}>
-                    <span style={{ fontSize: "10px", fontWeight: 800, color: "var(--muted-foreground)", minWidth: "14px" }}>{total}.</span>
-                    {s.pac} <span style={{ fontSize: "10px" }}>(este paciente)</span>
                   </div>
                 </div>
+              )
+            })()}
+
+            {s.vComp && s.vComp !== "—" && (
+              <div className="col-span-2">
+                <div className="flex items-center gap-1 text-muted-foreground">
+                  {isR4 ? <><Repeat size={11} /> Remanejamento</> : s.regra?.startsWith("Foco") ? "Atenção para oferta" : "Vaga complementar (R3 — oferecer junto)"}
+                </div>
+                <div className="font-semibold text-amber-700 dark:text-amber-400">{s.vComp}</div>
               </div>
-            )
-          })()}
-          {s.vComp && s.vComp !== "—" && (
-            <div style={{ gridColumn: "1/3" }}>
-              <div style={{ color: "var(--muted-foreground)" }}>
-                {isR4 ? "⟳ Remanejamento" : s.regra?.startsWith("Foco") ? "Atenção para oferta" : "Vaga complementar (R3 — oferecer junto)"}
-              </div>
-              <div style={{ color: B.orange, fontWeight: 600 }}>{s.vComp}</div>
-            </div>
-          )}
+            )}
+          </div>
         </div>
       </div>
 
       {/* ── Modal de confirmação ── */}
       {confirming && (
         <div
-          style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.4)", padding: "16px" }}
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
           onClick={e => { if (e.target === e.currentTarget) setConfirming(false) }}
         >
-          <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "400px", width: "100%", padding: "24px" }}>
-            <div style={{ fontWeight: 900, fontSize: "17px", color: B.navy, marginBottom: "4px" }}>
+          <div className="w-full max-w-[400px] rounded-2xl bg-card p-6 shadow-2xl">
+            <div className="text-lg font-black text-foreground mb-1">
               Aceitar e enviar para Acompanhamento
             </div>
-            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "16px" }}>
+            <div className="text-xs text-muted-foreground mb-4">
               A vaga ficará reservada e aparecerá em Acompanhamento → Aguardando Resposta.
             </div>
 
             {/* Resumo da proposta */}
-            <div style={{ background: B.limeLt, border: `1px solid ${B.lime}`, borderRadius: "12px", padding: "14px", marginBottom: "18px" }}>
-              <div style={{ fontWeight: 800, fontSize: "14px", color: B.navy, marginBottom: "6px" }}>{s.pac}</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "6px 16px", fontSize: "12px" }}>
-                <div>
-                  <div style={{ color: "var(--muted-foreground)", fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Terapia</div>
-                  <div style={{ fontWeight: 600, color: "var(--card-foreground)" }}>{s.tP}</div>
-                </div>
-                <div>
-                  <div style={{ color: "var(--muted-foreground)", fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Profissional</div>
-                  <div style={{ fontWeight: 600, color: "var(--card-foreground)" }}>{fmtName(s.prof)}</div>
-                </div>
-                <div>
-                  <div style={{ color: "var(--muted-foreground)", fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Dia / Hora</div>
-                  <div style={{ fontWeight: 700, color: B.navy }}>{s.dia} {s.hora}</div>
-                </div>
-                <div>
-                  <div style={{ color: "var(--muted-foreground)", fontSize: "10px", fontWeight: 600, textTransform: "uppercase", letterSpacing: "0.05em" }}>Unidade</div>
-                  <div style={{ fontWeight: 600, color: "var(--card-foreground)" }}>{s.unidade}</div>
-                </div>
+            <div className="rounded-xl border border-emerald-200 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 p-3.5 mb-4">
+              <div className="text-md font-extrabold text-foreground mb-1.5">{s.pac}</div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
+                <ResumoItem label="Terapia">{s.tP}</ResumoItem>
+                <ResumoItem label="Profissional">{fmtName(s.prof)}</ResumoItem>
+                <ResumoItem label="Dia / Hora" strong>{s.dia} {s.hora}</ResumoItem>
+                <ResumoItem label="Unidade">{s.unidade}</ResumoItem>
               </div>
             </div>
 
-            <div style={{ display: "flex", gap: "8px" }}>
+            <div className="flex gap-2">
               <button
+                type="button"
                 onClick={() => { onWA(s); setConfirming(false) }}
-                style={{ flex: 1, padding: "10px 16px", borderRadius: "10px", background: "#16a34a", color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: "13px" }}
+                className="flex-1 rounded-lg px-4 py-2.5 text-[13px] font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-colors"
               >
                 Confirmar
               </button>
               <button
+                type="button"
                 onClick={() => setConfirming(false)}
-                style={{ flex: 1, padding: "10px 16px", borderRadius: "10px", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: "13px" }}
+                className="flex-1 rounded-lg px-4 py-2.5 text-[13px] font-semibold bg-muted text-foreground hover:bg-muted/70 transition-colors"
               >
                 Cancelar
               </button>
@@ -216,5 +194,23 @@ export function SugCard({ s, waStatus, onWA, onInv, onCron, fila = false }: SugC
         </div>
       )}
     </>
+  )
+}
+
+function Detalhe({ label, children, strong = false }: { label: string; children: React.ReactNode; strong?: boolean }) {
+  return (
+    <div>
+      <div className="text-muted-foreground">{label}</div>
+      <div className={strong ? "font-bold text-foreground text-[13px]" : "text-foreground"}>{children}</div>
+    </div>
+  )
+}
+
+function ResumoItem({ label, children, strong = false }: { label: string; children: React.ReactNode; strong?: boolean }) {
+  return (
+    <div>
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className={strong ? "font-bold text-foreground" : "font-semibold text-foreground"}>{children}</div>
+    </div>
   )
 }

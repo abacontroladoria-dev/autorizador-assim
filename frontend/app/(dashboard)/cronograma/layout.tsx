@@ -11,6 +11,26 @@ import { getRefWeek } from "@/lib/cronograma/helpers"
 import { CronogramaUploadBadges } from "@/components/cronograma/CronogramaUploadBadges"
 import type { LaudoRow } from "@/types/cronograma"
 
+// Excel de laudos costuma vir com a coluna "Paciente" (ou "ID Favorecido")
+// mesclada verticalmente cobrindo todas as linhas de especialidade do mesmo
+// paciente — célula mesclada só existe de fato na âncora (canto superior-
+// esquerdo) da planilha; as demais ficam ausentes e sheet_to_json(defval:"")
+// as preenche com "". Sem desfazer isso ANTES do sheet_to_json, toda linha
+// não-âncora perde "Paciente" e é descartada em runAlgorithm (if (!pac)
+// continue) — o autorizado dela some do relatório sem erro nenhum.
+function desfazerMerges(ws: XLSX.WorkSheet) {
+  for (const m of ws['!merges'] ?? []) {
+    const anchor = ws[XLSX.utils.encode_cell(m.s)]
+    if (!anchor) continue
+    for (let r = m.s.r; r <= m.e.r; r++) {
+      for (let c = m.s.c; c <= m.e.c; c++) {
+        const addr = XLSX.utils.encode_cell({ r, c })
+        if (!ws[addr]) ws[addr] = { ...anchor }
+      }
+    }
+  }
+}
+
 function parseXlsx<T>(file: File): Promise<T[]> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader()
@@ -23,6 +43,7 @@ function parseXlsx<T>(file: File): Promise<T[]> {
         // célula é preservado como string, igual em todas as linhas.
         const wb = XLSX.read(e.target?.result, { type: "array", raw: true })
         const ws = wb.Sheets[wb.SheetNames[0]]
+        desfazerMerges(ws)
         resolve(XLSX.utils.sheet_to_json<T>(ws, { defval: "" }))
       } catch (err) { reject(err) }
     }
@@ -41,10 +62,16 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
   const [dispError, setDispError] = useState<string | null>(null)
   const pathname = usePathname()
   const searchParams = useSearchParams()
-  // Páginas que gerenciam rightContent por conta própria (não precisam do badge de Laudos no header)
-  const isOcupacaoPage =
-    pathname === '/cronograma/ocupacao' || !!pathname?.startsWith('/cronograma/ocupacao/') ||
+  // Indicadores gerencia rightContent por conta própria (não precisa do badge de Laudos no header).
+  // Ocupação (Diferença: Laudo e Oferta) PRECISA do badge — é a única forma de subir o Excel de
+  // laudos manualmente, já que a busca automática via API está desativada (ver
+  // REATIVAR_API_LAUDOS.md) e a aba de gaps não funciona sem laudos carregados.
+  const isIndicadoresPage =
     pathname === '/cronograma/indicadores' || !!pathname?.startsWith('/cronograma/indicadores/')
+  // Ocupação de Salas cruza dados estruturais (cronograma_salas) com a agenda — não depende
+  // dos laudos do TI, então o badge "Laudos" não é relevante aqui, mas "Grade" continua sendo.
+  const isOcupacaoSalasPage =
+    pathname === '/cronograma/ocupacao-salas' || !!pathname?.startsWith('/cronograma/ocupacao-salas/')
   const isReposicaoPage = !!pathname?.includes('/reposicao')
   // Disponibilidade só é relevante na aba Novo Cronograma (solicitações ?tab=novo-cron).
   const isNovoCron = !!pathname?.includes('/solicitacoes') && searchParams.get('tab') === 'novo-cron'
@@ -150,7 +177,7 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
   }, [setDispRows])
 
   useEffect(() => {
-    if (isOcupacaoPage) return // página gerencia o próprio rightContent — não interferir
+    if (isIndicadoresPage || isReposicaoPage) return // página gerencia o próprio rightContent — não interferir
     setRightContent(
       <CronogramaUploadBadges
         cRows={cRows}
@@ -160,6 +187,7 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
         error={uploadError}
         onSelectFile={handleLaudosFile}
         onClear={handleClear}
+        showLaudos={!isOcupacaoSalasPage}
         showDisponibilidade={isNovoCron}
         dispRows={dispRows}
         dispLoading={dispUploading}
@@ -169,7 +197,7 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
       />
     )
     return () => setRightContent(null)
-  }, [cRows, lRows, dispRows, uploading, gradeLoading, uploadError, dispUploading, dispError, handleLaudosFile, handleClear, handleDispFile, handleClearDisp, setRightContent, isOcupacaoPage, isReposicaoPage, isNovoCron])
+  }, [cRows, lRows, dispRows, uploading, gradeLoading, uploadError, dispUploading, dispError, handleLaudosFile, handleClear, handleDispFile, handleClearDisp, setRightContent, isIndicadoresPage, isOcupacaoSalasPage, isReposicaoPage, isNovoCron])
 
   return <div>{children}</div>
 }

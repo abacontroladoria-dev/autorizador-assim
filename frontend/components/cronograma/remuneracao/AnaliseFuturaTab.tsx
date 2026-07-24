@@ -8,7 +8,7 @@ import {
 } from "lucide-react"
 import { useHeader } from "@/contexts/HeaderContext"
 import { useAnaliseFutura } from "@/hooks/useRemuneracao"
-import { useRemuneracaoConfig } from "@/hooks/useRemuneracaoConfig"
+import { useParametrosGerais } from "@/hooks/useParametrosGerais"
 import { fmt, fmtH, fmtPct } from "@/lib/remuneracao/formatacao"
 import { B } from "@/lib/cronograma/constants"
 import { DOW_PT } from "@/lib/cronograma/ocupacaoConst"
@@ -572,12 +572,12 @@ const SORT_OPTIONS: { k: SortKey; l: string }[] = [
 
 export function AnaliseFuturaTab() {
   const { resultado, refWeek, analMes, presenca, loading, error, gradeVazia, totalGrade } = useAnaliseFutura()
-  const { config } = useRemuneracaoConfig()
+  const { parametros } = useParametrosGerais()
   const { setHeader, setRightContent } = useHeader()
 
-  const ccPA = config?.cc_pa_default ?? 50
-  const ccPE = config?.cc_pe_default ?? 100
-  const etaBonus = config?.eta_bonus_default ?? 100
+  const ccPA = parametros?.cc_pa_default ?? 50
+  const ccPE = parametros?.cc_pe_default ?? 100
+  const etaBonus = parametros?.eta_bonus_default ?? 100
   const presencaNum = presenca ?? 80
 
   const [busca, setBusca] = useState("")

@@ -17,3 +17,10 @@ backup_12MAI2026/
 .vscode
 references/
 nina-api-oficial/
+
+# Dados reais/sensíveis que nunca podem ir pro histórico do git
+# (pacientes, receita, laudos) — ver PLANO_REDEPLOY_SEGURO.md seção 2
+*.xlsx
+*.xls
+supabase/sync_public_from_cloud*.sql
+integração/

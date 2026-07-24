@@ -222,7 +222,6 @@ export type AnaliseFuturaConfig = {
   presenca: number // 0-100
   feriados: Record<string, FeriadoInfo>
   extraHols?: Feriado[]
-  limites?: Record<string, number> // profissional -> override do limite de pacientes CC
   antigos?: Record<string, ContratoAntigoInfo> // profissional -> contrato antigo (Passo 9; vazio até lá)
   cadastroPrestadores?: Record<string, CadastroContratual> // profissional -> contrato(s) atual(is)/novo(s) cadastrados em Config
 }
@@ -303,7 +302,7 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
 
   const {
     taxasPA, diarias, etaBonus, ccPA, ccPE, ccLimDefault, presenca, feriados,
-    extraHols = [], limites = {}, antigos = {}, cadastroPrestadores = {},
+    extraHols = [], antigos = {}, cadastroPrestadores = {},
   } = config
 
   const datas = rows.map(r => r["Data"]).filter(Boolean).sort() as string[]
@@ -440,7 +439,7 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
       .map(pd => ({ dow: pd.dow, horas: pd.horasTotal }))
       .sort((a, b) => a.dow - b.dow)
     const pacCC = d.pacCC.size, hasCC = "Coordenador de Caso" in d.terapias
-    const limCC = limites[d.prof] ?? ccLimDefault
+    const limCC = ccLimDefault
     const alertCC = hasCC && pacCC > limCC
     // Acumulado em float sem arredondar centavos a cada soma — diferença de
     // até R$ 0,01 entre este total e a soma dos valores já arredondados

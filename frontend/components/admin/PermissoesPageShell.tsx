@@ -24,6 +24,7 @@ import {
   UserCheck,
   UserRound,
   Users,
+  Database,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useHeader } from '@/contexts/HeaderContext'
@@ -37,7 +38,7 @@ import {
   salvarPermissoesUsuario,
 } from '@/services/permissoes.service'
 import type { Permissao } from '@/services/permissoes.service'
-import { getRoleDefaultPermissions } from '@/lib/permissions/hasPermission'
+import { getRoleDefaultPermissions, hasPermission } from '@/lib/permissions/hasPermission'
 import {
   Dialog,
   DialogContent,
@@ -88,10 +89,11 @@ const GROUP_ICONS: Record<string, React.ElementType> = {
   Terapêutico: Stethoscope,
   Operações: BriefcaseBusiness,
   Cronograma: CalendarRange,
+  Cadastros: Database,
   Administração: ShieldCheck,
 }
 
-const GROUP_ORDER = ['Pacientes', 'Terapêutico', 'Operações', 'Cronograma', 'Administração', 'Sistema', 'Geral']
+const GROUP_ORDER = ['Pacientes', 'Terapêutico', 'Operações', 'Cronograma', 'Cadastros', 'Administração', 'Sistema', 'Geral']
 
 const INITIAL_OPEN = new Set(GROUP_ORDER)
 
@@ -278,7 +280,15 @@ export default function PermissoesPageShell() {
       if (!data.user) { setIsAdmin(false); return }
       const { data: perfil } = await supabase
         .from('usuarios').select('role').eq('id', data.user.id).single()
-      setIsAdmin(perfil?.role === 'admin')
+      // 'diretoria' já tem RLS própria pra gerenciar usuarios/usuarios_permissoes
+      // (ver migration 20260713140000_diretoria_gerencia_permissoes.sql,
+      // função is_diretoria()) — só a tela nunca tinha sido atualizada pra
+      // deixar entrar, ficava restrita a 'admin' aqui mesmo com o banco já
+      // liberando escrita.
+      if (perfil?.role === 'admin' || perfil?.role === 'diretoria') { setIsAdmin(true); return }
+      // Qualquer outro papel só entra com o override individual do código
+      // "permissoes" (ver usuarios_permissoes / hasPermission.ts).
+      setIsAdmin(await hasPermission(data.user.id, 'permissoes'))
     })
   }, [])
 
