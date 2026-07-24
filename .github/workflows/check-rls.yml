@@ -1,0 +1,17 @@
+name: Check RLS on new tables
+
+on:
+  pull_request:
+    paths:
+      - "supabase/migrations/**"
+
+jobs:
+  check-rls:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: Verifica se toda tabela criada tem RLS habilitado
+        run: node scripts/check-rls.js
