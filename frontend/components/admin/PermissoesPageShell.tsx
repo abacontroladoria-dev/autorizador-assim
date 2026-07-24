@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
+  AlertTriangle,
+  ArrowRightLeft,
   BarChart3,
   BriefcaseBusiness,
   Building2,
@@ -21,10 +23,12 @@ import {
   Search,
   ShieldCheck,
   Stethoscope,
+  TrendingUp,
   UserCheck,
   UserRound,
   Users,
   Database,
+  Wallet,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useHeader } from '@/contexts/HeaderContext'
@@ -79,7 +83,13 @@ const MODULE_ICONS: Record<string, React.ElementType> = {
   cronograma_saida_profissional: LogOut,
   cronograma_ocupacao_paciente: UserCheck,
   ocupacao_clinica: ClipboardList,
+  ocupacao_clinica_gaps: BarChart3,
+  ocupacao_clinica_inconsistencias: AlertTriangle,
   ocupacao_profissionais: BarChart3,
+  indicadores_ocupacao_unidades: Building2,
+  indicadores_pacientes: UserCheck,
+  indicadores_previsao_receitas: Wallet,
+  indicadores_comparativo_sessoes: ArrowRightLeft,
 }
 
 const GROUP_ICONS: Record<string, React.ElementType> = {
@@ -89,11 +99,12 @@ const GROUP_ICONS: Record<string, React.ElementType> = {
   Terapêutico: Stethoscope,
   Operações: BriefcaseBusiness,
   Cronograma: CalendarRange,
+  Indicadores: TrendingUp,
   Cadastros: Database,
   Administração: ShieldCheck,
 }
 
-const GROUP_ORDER = ['Pacientes', 'Terapêutico', 'Operações', 'Cronograma', 'Cadastros', 'Administração', 'Sistema', 'Geral']
+const GROUP_ORDER = ['Pacientes', 'Terapêutico', 'Operações', 'Cronograma', 'Indicadores', 'Cadastros', 'Administração', 'Sistema', 'Geral']
 
 const INITIAL_OPEN = new Set(GROUP_ORDER)
 

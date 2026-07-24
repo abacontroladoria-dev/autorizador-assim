@@ -2,7 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit'
-import { getRoleDefaultPermissions, codigosToRotas } from '@/lib/permissions/routes'
+import { getRoleDefaultPermissions, codigosToRotas, hasRouteAccess } from '@/lib/permissions/routes'
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next()
@@ -128,9 +128,9 @@ export async function proxy(request: NextRequest) {
 
   const allowedRoutes = codigosToRotas(codigos)
 
-  const hasAccess = allowedRoutes.some(
-    (route) => pathname === route || pathname.startsWith(route + '/')
-  )
+  // hasRouteAccess sabe comparar rota+querystring (não só pathname) — necessário
+  // pra permissões por aba, ex: /cronograma/indicadores?tab=previsao-receitas.
+  const hasAccess = hasRouteAccess(pathname, request.nextUrl.search, allowedRoutes)
 
   if (!hasAccess) {
     return NextResponse.redirect(new URL('/sem-permissao', request.url))

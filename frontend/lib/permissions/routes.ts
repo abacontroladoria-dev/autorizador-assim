@@ -12,7 +12,10 @@ export const roleDefaults: Record<string, string[]> = {
     'guias_digitais', 'auditoria_assim', 'usuarios', 'permissoes', 'cco',
     'autorizacoes', 'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
-    'ocupacao_clinica', 'ocupacao_profissionais', 'reposicao_faltas', 'cronograma_ocupacao_salas',
+    'ocupacao_clinica', 'ocupacao_clinica_gaps', 'ocupacao_clinica_inconsistencias',
+    'ocupacao_profissionais', 'indicadores_ocupacao_unidades',
+    'indicadores_pacientes', 'indicadores_previsao_receitas', 'indicadores_comparativo_sessoes',
+    'reposicao_faltas', 'cronograma_ocupacao_salas',
     'cronograma_valores_convenio', 'cadastros_feriados', 'cadastros_contratos', 'cadastros_taxas',
     'analise_tratativas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
@@ -24,7 +27,10 @@ export const roleDefaults: Record<string, string[]> = {
     'escala_terapeutica', 'auditoria_assim',
     'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
-    'ocupacao_clinica', 'ocupacao_profissionais', 'reposicao_faltas', 'cronograma_ocupacao_salas',
+    'ocupacao_clinica', 'ocupacao_clinica_gaps', 'ocupacao_clinica_inconsistencias',
+    'ocupacao_profissionais', 'indicadores_ocupacao_unidades',
+    'indicadores_pacientes', 'indicadores_previsao_receitas', 'indicadores_comparativo_sessoes',
+    'reposicao_faltas', 'cronograma_ocupacao_salas',
     'cronograma_valores_convenio', 'cadastros_feriados', 'cadastros_contratos', 'cadastros_taxas',
     'analise_tratativas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
@@ -55,7 +61,7 @@ export const roleDefaults: Record<string, string[]> = {
   cronograma: [
     'dashboard', 'cronograma_solicitacoes',
     'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
-    'ocupacao_clinica',
+    'ocupacao_clinica', 'ocupacao_clinica_gaps', 'ocupacao_clinica_inconsistencias',
   ],
 }
 
@@ -83,8 +89,21 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   cronograma_solicitacoes: ['/cronograma/solicitacoes'],
   cronograma_saida_profissional: ['/cronograma/saida-profissional'],
   cronograma_ocupacao_paciente: ['/cronograma/ocupacao-paciente'],
-  ocupacao_clinica: ['/cronograma/ocupacao'],
-  ocupacao_profissionais: ['/cronograma/indicadores'],
+  // Mesmo padrão de Indicadores: /cronograma/ocupacao tem 3 abas
+  // (Aceites e Recusas, Diferença: Laudo e Oferta, Inconsistências e
+  // Exceções), cada uma com seu próprio código de permissão.
+  ocupacao_clinica: ['/cronograma/ocupacao?tab=acompanhamento'],
+  ocupacao_clinica_gaps: ['/cronograma/ocupacao?tab=gaps'],
+  ocupacao_clinica_inconsistencias: ['/cronograma/ocupacao?tab=inconsistencias'],
+  // Indicadores: uma rota só (/cronograma/indicadores), abas diferenciadas por
+  // ?tab=. Cada aba tem seu próprio código de permissão — ver routeMatches()
+  // abaixo, que sabe comparar rota+querystring (não só pathname) pra isso
+  // funcionar tanto no Sidebar quanto no proxy.ts (gate real, server-side).
+  ocupacao_profissionais: ['/cronograma/indicadores?tab=profissionais'],
+  indicadores_ocupacao_unidades: ['/cronograma/indicadores?tab=unidades'],
+  indicadores_pacientes: ['/cronograma/indicadores?tab=pacientes'],
+  indicadores_previsao_receitas: ['/cronograma/indicadores?tab=previsao-receitas'],
+  indicadores_comparativo_sessoes: ['/cronograma/indicadores?tab=comparativo-sessoes'],
   reposicao_faltas: ['/cronograma/reposicao'],
   cronograma_ocupacao_salas: ['/cronograma/ocupacao-salas'],
   cronograma_valores_convenio: ['/cadastros/cadastro-valores'],
@@ -105,4 +124,28 @@ export function codigosToRotas(codigos: Iterable<string>): string[] {
   const rotas = [...codigos].flatMap((c) => CODIGO_PARA_ROTAS[c] ?? [])
   if (!rotas.includes('/')) rotas.unshift('/')
   return rotas
+}
+
+// Compara um pathname+querystring contra uma rota de CODIGO_PARA_ROTAS, que
+// pode vir só com pathname ("/x/y") ou com querystring embutida
+// ("/x/y?tab=z") — nesse segundo caso, todo par chave=valor da rota precisa
+// bater com o search recebido, não só o pathname. Rotas sem "?" continuam
+// se comportando exatamente como antes (só pathname importa).
+export function routeMatches(pathname: string, search: string, route: string): boolean {
+  const [routePath, routeQuery] = route.split('?')
+  const pathOk = pathname === routePath || pathname.startsWith(routePath + '/')
+  if (!pathOk) return false
+  if (!routeQuery) return true
+
+  const params = new URLSearchParams(search)
+  const routeParams = new URLSearchParams(routeQuery)
+  for (const [key, value] of routeParams) {
+    if (params.get(key) !== value) return false
+  }
+  return true
+}
+
+// Mesma checagem, mas contra uma lista de rotas permitidas (basta uma bater).
+export function hasRouteAccess(pathname: string, search: string, allowedRoutes: string[]): boolean {
+  return allowedRoutes.some((route) => routeMatches(pathname, search, route))
 }
