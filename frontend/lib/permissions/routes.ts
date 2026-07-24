@@ -48,11 +48,14 @@ export const roleDefaults: Record<string, string[]> = {
     'relacionamento_prestador_individual',
     'relacionamento_prestador_historico', 'relacionamento_prestador_legenda',
   ],
+  // Ocupação de Salas, Cadastro de Valores de Convênio e Reposição de Faltas
+  // foram retiradas deste papel em 2026-07-24 a pedido do usuário — ficam
+  // restritas a admin/diretoria (a RLS das tabelas por trás também foi
+  // restringida junto, ver 20260724200000_restringir_cronograma_role_admin_diretoria.sql).
   cronograma: [
     'dashboard', 'cronograma_solicitacoes',
     'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
-    'ocupacao_clinica', 'reposicao_faltas', 'cronograma_ocupacao_salas',
-    'cronograma_valores_convenio',
+    'ocupacao_clinica',
   ],
 }
 
