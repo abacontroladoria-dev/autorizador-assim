@@ -100,6 +100,32 @@ Quem protege de verdade é o RLS de cada tabela no Postgres.
   verificados. PITR (recuperação minuto a minuto) está desligado — upgrade
   opcional, não é um gap.
 
+## ⚠️ Pendente — `csv_grades_profissionais` aberta pra qualquer authenticated
+
+Achado em 2026-07-24 junto com a correção de `csv_reposicao_faltas` (que
+tinha o mesmo problema + acesso `anon`, já corrigido em
+`20260724190000_remove_acesso_anon_csv_reposicao_faltas.sql`).
+`csv_grades_profissionais` tem as mesmas colunas sensíveis
+(`paciente_nome`, `paciente_id`, `profissional_nome`, `profissional_cpf`)
+e uma policy `for select to authenticated using (true)` — ou seja,
+qualquer usuário logado, de qualquer setor (recepção, terapêutico,
+faturamento etc.), consegue ler nome de paciente e **CPF de profissional**
+de todo mundo.
+
+Diferente de `csv_reposicao_faltas` (usada só por uma feature), esta
+tabela é consumida por várias telas (agenda, ocupação, indicadores,
+faturamento). Antes de restringir por role é preciso:
+1. Mapear todas as telas/hooks que fazem `.from('csv_grades_profissionais')`
+   e o papel de quem usa cada uma.
+2. Decidir se dá pra restringir a tabela inteira por role, ou se o certo é
+   criar uma *view* sem a coluna `profissional_cpf` pra maioria dos papéis
+   (provavelmente ninguém no frontend precisa do CPF — ele existe pra
+   integração com a TiTa) e manter a tabela crua só pra quem realmente
+   precisa.
+3. Testar cada tela afetada antes de aplicar em produção — mudança mais
+   arriscada que as outras porque toca uma tabela central usada por muita
+   coisa.
+
 ## Achado extra fora do escopo de segurança (2026-07-24)
 
 - Cron `cco-conciliation-engine` (Conciliação ASSIM, agenda a cada 10 min)
