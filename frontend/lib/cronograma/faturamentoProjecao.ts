@@ -22,6 +22,7 @@ import { cleanTxt } from "./helpers"
 import { normTxt, EXIB_ID } from "./constants"
 import { isAgendadoAtivo, isTerapiaDiagnostico, semanasNoPeriodo } from "./pacientesDashboard"
 import { getCalendario, type CalendarioResult } from "../remuneracao/datas"
+import type { FeriadoInfo } from "@/types/feriados"
 import type { AgendaSalaRow } from "./salasTypes"
 import { TERAPIAS_PACOTE, type ConvenioValor, type ConvenioValorPaciente, type ConvenioPacoteAvaliacao } from "./convenioValoresTypes"
 
@@ -415,14 +416,14 @@ export function calcularPrevisaoReceita(
   regrasGerais: ConvenioValor[],
   excecoesPaciente: ConvenioValorPaciente[],
   pacotesAvaliacao: ConvenioPacoteAvaliacao[] = [],
+  feriados: Record<string, FeriadoInfo> = {},
 ): PrevisaoReceitaGeral {
   const ativos = (rows || []).filter(isAgendadoAtivo)
   const mesReferencia = mesReferenciaDeDatas(ativos.map(r => cleanTxt(r.data)).filter(Boolean))
-  // Sem feriados cadastrados aqui (diferente de calcularAnaliseFutura, que usa
-  // remuneracao_config.feriados) — a projeção conta TODOS os dias úteis do mês,
-  // sem descontar feriado. Simplificação consciente: dá pra evoluir depois
-  // passando os mesmos feriados usados em Relacionamento Prestador, se preciso.
-  const cal = mesReferencia ? getCalendario(mesReferencia.ano, mesReferencia.mes, {}) : null
+  // Mesmos feriados cadastrados em Cadastros → Feriados (usados também em
+  // Relacionamento Prestador) — dias de feriado não contam como "Ocorr. no
+  // mês" para nenhum convênio, já que não há recebimento nesses dias.
+  const cal = mesReferencia ? getCalendario(mesReferencia.ano, mesReferencia.mes, feriados) : null
 
   // Pré-passo: quais pacientes têm Psicologia ABA em algum lugar do cronograma
   // (semana de referência INTEIRA, dos dois segmentos juntos) — determina a

@@ -14,7 +14,7 @@ type TabKey = (typeof TABS)[number]
 
 const TAB_LABELS: Record<TabKey, string> = {
   profissionais: "Ocupação de Profissionais",
-  unidades: "Dashboard por Unidade",
+  unidades: "Ocupação Clínica",
   pacientes: "Dashboard de Pacientes",
   "previsao-receitas": "Previsão de Receitas",
   "comparativo-sessoes": "Comparativo de Sessões",

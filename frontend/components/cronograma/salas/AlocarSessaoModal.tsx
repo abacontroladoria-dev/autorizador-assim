@@ -13,7 +13,7 @@ import { useEffect, useState } from "react"
 import { Loader2, Save, Trash2 } from "lucide-react"
 import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
 import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
-import { criarAlocacao, atualizarAlocacao, excluirAlocacao, listarTodosProfissionaisSalas, buscarTerapiasDoProfissional } from "@/services/salas.service"
+import { criarAlocacao, atualizarAlocacao, excluirAlocacao, listarTodosProfissionaisSalas, buscarTerapiasDoProfissional, type ProfissionalOpcao } from "@/services/salas.service"
 import { buscarOpcoesFiltro } from "@/services/agenda.service"
 import { normTxt } from "@/lib/cronograma/constants"
 import type { Sala } from "@/lib/cronograma/salasTypes"
@@ -54,7 +54,8 @@ export function AlocarSessaoModal({
   encontrarAlocacaoDoProfissional, onClose, onSaved,
 }: AlocarSessaoModalProps) {
   const [profissional, setProfissional] = useState(profissionalInicial)
-  const [profissionaisTodos, setProfissionaisTodos] = useState<string[]>([])
+  const [profissionalId, setProfissionalId] = useState<number | null>(null)
+  const [profissionaisTodos, setProfissionaisTodos] = useState<ProfissionalOpcao[]>([])
   const [profissionalValido, setProfissionalValido] = useState(!!profissionalInicial)
   const [mostrarSugestoesProf, setMostrarSugestoesProf] = useState(false)
   const [carregandoProf, setCarregandoProf] = useState(true)
@@ -82,16 +83,20 @@ export function AlocarSessaoModal({
   }, [])
 
   const profissionalSugestoes = profissional.trim().length
-    ? profissionaisTodos.filter(n => normTxt(n).includes(normTxt(profissional)))
+    ? profissionaisTodos.filter(p => normTxt(p.nome).includes(normTxt(profissional)))
     : profissionaisTodos
 
   // Valida automaticamente se o texto digitado bate exatamente (case-insensitive)
   // com algum nome da lista completa — cobre o caso de o usuário digitar/colar
-  // o nome completo certinho sem clicar na sugestão.
+  // o nome completo certinho sem clicar na sugestão. Também resolve o
+  // profissional_id correspondente, já que digitar não passa pelo clique em
+  // selecionarProfissional().
   useEffect(() => {
-    if (!profissional.trim()) { setProfissionalValido(false); return }
-    if (profissionaisTodos.some(s => normTxt(s) === normTxt(profissional))) {
+    if (!profissional.trim()) { setProfissionalValido(false); setProfissionalId(null); return }
+    const bate = profissionaisTodos.find(p => normTxt(p.nome) === normTxt(profissional))
+    if (bate) {
       setProfissionalValido(true)
+      setProfissionalId(bate.id)
     }
   }, [profissional, profissionaisTodos])
 
@@ -110,11 +115,13 @@ export function AlocarSessaoModal({
   function handleProfissionalChange(valor: string) {
     setProfissional(valor)
     setProfissionalValido(!!profissionalInicial && normTxt(valor) === normTxt(profissionalInicial))
+    setProfissionalId(null)
     setMostrarSugestoesProf(true)
   }
 
-  function selecionarProfissional(nome: string) {
-    setProfissional(nome)
+  function selecionarProfissional(opcao: ProfissionalOpcao) {
+    setProfissional(opcao.nome)
+    setProfissionalId(opcao.id)
     setProfissionalValido(true)
     setMostrarSugestoesProf(false)
   }
@@ -135,15 +142,15 @@ export function AlocarSessaoModal({
     try {
       if (conflito) {
         await atualizarAlocacao(conflito.alocacao.id, {
-          sala_id: sala.id, dow, turno, profissional_nome: nome, terapia_nome: terapia.trim() || null,
+          sala_id: sala.id, dow, turno, profissional_nome: nome, profissional_id: profissionalId, terapia_nome: terapia.trim() || null,
         })
         if (alocacaoId && alocacaoId !== conflito.alocacao.id) await excluirAlocacao(alocacaoId)
       } else if (alocacaoId) {
         await atualizarAlocacao(alocacaoId, {
-          sala_id: sala.id, dow, turno, profissional_nome: nome, terapia_nome: terapia.trim() || null,
+          sala_id: sala.id, dow, turno, profissional_nome: nome, profissional_id: profissionalId, terapia_nome: terapia.trim() || null,
         })
       } else {
-        await criarAlocacao({ sala_id: sala.id, dow, turno, profissional_nome: nome, terapia_nome: terapia.trim() || null })
+        await criarAlocacao({ sala_id: sala.id, dow, turno, profissional_nome: nome, profissional_id: profissionalId, terapia_nome: terapia.trim() || null })
       }
       onSaved()
       onClose()
@@ -264,15 +271,15 @@ export function AlocarSessaoModal({
               {!carregandoProf && profissionalSugestoes.length === 0 && (
                 <div className="px-2.5 py-1.5 text-xs text-muted-foreground">Nenhum profissional encontrado.</div>
               )}
-              {!carregandoProf && profissionalSugestoes.slice(0, 30).map(nome => (
+              {!carregandoProf && profissionalSugestoes.slice(0, 30).map(opcao => (
                 <button
-                  key={nome}
+                  key={opcao.nome}
                   type="button"
                   onMouseDown={e => e.preventDefault()}
-                  onClick={() => selecionarProfissional(nome)}
+                  onClick={() => selecionarProfissional(opcao)}
                   className="block w-full px-2.5 py-1.5 text-left text-xs text-foreground hover:bg-muted"
                 >
-                  {nome}
+                  {opcao.nome}
                 </button>
               ))}
             </div>

@@ -3,13 +3,15 @@
 // UnidadeDashboardShell — dashboard de ocupação agregada por unidade, consumindo
 // useOcupacaoSalas() (cruzamento cronograma_salas × csv_grades_profissionais).
 
-import { useRef, useState } from "react"
+import { useMemo, useRef, useState, type MouseEvent } from "react"
 import { createPortal } from "react-dom"
 import { Building2, DoorOpen, Info, Loader2, Percent, X } from "lucide-react"
 import { StatCard } from "@/components/cronograma/ui/StatCard"
 import { StatusPill } from "@/components/cronograma/ui/StatusPill"
 import { useOcupacaoSalas } from "@/hooks/useOcupacaoSalas"
 import { CAPACIDADE_LABEL_CURTO } from "@/lib/cronograma/salasTypes"
+import { listarSlotsDetalhados, listarBlocosDetalhados } from "@/lib/cronograma/salas"
+import { OcupacaoDetalheModal, type DetalheOcupacao } from "./OcupacaoDetalheModal"
 import type { Tone } from "@/components/cronograma/ui/tones"
 
 const POPOVER_W = 256 // w-64
@@ -25,7 +27,11 @@ function InfoTooltip({ text }: { text: string }) {
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
 
-  function alternar() {
+  function alternar(e: MouseEvent) {
+    // Vários chamadores agora embrulham o InfoTooltip num card/linha clicável
+    // (ver os cards de turno abaixo) — sem isso, clicar no ícone também
+    // dispararia o onClick do card em volta.
+    e.stopPropagation()
     if (!aberto && btnRef.current) {
       const r = btnRef.current.getBoundingClientRect()
       setPos({
@@ -83,7 +89,20 @@ function pctTone(pct: number | null): Tone {
 }
 
 export function UnidadeDashboardShell() {
-  const { resumoUnidades, loading, error } = useOcupacaoSalas()
+  const { resumoUnidades, salasComOcupacao, loading, error } = useOcupacaoSalas()
+
+  // Pedido de drill-down (StatCard "Manhã/Tarde X/Y" clicado) — as linhas só
+  // são calculadas (listarSlotsDetalhados/listarBlocosDetalhados) quando o
+  // modal está de fato aberto, não a cada render.
+  const [pedido, setPedido] = useState<{ unidade: string; turno: "Manhã" | "Tarde"; tipo: "slot" | "bloco" } | null>(null)
+
+  const detalhe: DetalheOcupacao | null = useMemo(() => {
+    if (!pedido) return null
+    if (pedido.tipo === "slot") {
+      return { tipo: "slot", unidade: pedido.unidade, turno: pedido.turno, linhas: listarSlotsDetalhados(salasComOcupacao, pedido.unidade, pedido.turno) }
+    }
+    return { tipo: "bloco", unidade: pedido.unidade, turno: pedido.turno, linhas: listarBlocosDetalhados(salasComOcupacao, pedido.unidade, pedido.turno) }
+  }, [pedido, salasComOcupacao])
 
   if (loading) {
     return (
@@ -99,6 +118,10 @@ export function UnidadeDashboardShell() {
   const slotsTotal = resumoUnidades.reduce((s, r) => s + r.slotsTotal, 0)
   const slotsOcupados = resumoUnidades.reduce((s, r) => s + r.slotsOcupados, 0)
   const pctGeral = slotsTotal > 0 ? slotsOcupados / slotsTotal : null
+
+  const blocosTotalGeral = resumoUnidades.reduce((s, r) => s + r.blocosTotal, 0)
+  const blocosPreenchidosGeral = resumoUnidades.reduce((s, r) => s + r.blocosPreenchidos, 0)
+  const pctGeralGranular = blocosTotalGeral > 0 ? blocosPreenchidosGeral / blocosTotalGeral : null
 
   return (
     <div className="flex flex-col gap-4">
@@ -126,7 +149,7 @@ export function UnidadeDashboardShell() {
           icon={<Percent size={15} />}
           label={
             <span className="inline-flex items-center">
-              Ocupação geral
+              Salas que contém profissional
               <InfoTooltip text={`${slotsOcupados} slots ocupados ÷ ${slotsTotal} slots totais = ${pctGeral !== null ? Math.round(pctGeral * 100) : 0}%.`} />
             </span>
           }
@@ -164,12 +187,22 @@ export function UnidadeDashboardShell() {
             </div>
             <div className="mt-3 flex gap-3 text-xs">
               {r.porTurno.map(t => (
-                <div key={t.turno} className="flex-1 rounded-lg bg-muted/40 p-2">
+                <div
+                  key={t.turno}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setPedido({ unidade: r.unidade, turno: t.turno, tipo: "slot" })}
+                  onKeyDown={e => { if (e.key === "Enter" || e.key === " ") setPedido({ unidade: r.unidade, turno: t.turno, tipo: "slot" }) }}
+                  className="flex-1 cursor-pointer rounded-lg bg-muted/40 p-2 transition-colors hover:bg-muted/70"
+                >
                   <div className="inline-flex items-center font-semibold text-foreground">
                     {t.turno}
-                    <InfoTooltip text={`${t.slotsOcupados} slots ocupados ÷ ${t.slotsTotal} slots totais = ${t.pct !== null ? Math.round(t.pct * 100) : 0}%.`} />
+                    <InfoTooltip text={`${t.slotsOcupados} slots ocupados ÷ ${t.slotsTotal} slots totais = ${t.pct !== null ? Math.round(t.pct * 100) : 0}%. Clique pra ver o detalhe.`} />
                   </div>
-                  <div className="text-muted-foreground">{t.slotsOcupados}/{t.slotsTotal} ocupados</div>
+                  <div className="flex items-end justify-between gap-2">
+                    <div className="text-muted-foreground">{t.slotsOcupados}/{t.slotsTotal} ocupados</div>
+                    <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-sky-600 dark:text-sky-400">Ver detalhes ›</span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -188,6 +221,98 @@ export function UnidadeDashboardShell() {
           </div>
         ))}
       </div>
+
+      <div className="mt-2">
+        <div className="mb-1 inline-flex items-center text-sm font-bold text-foreground">
+          Ocupação Real (por sessão)
+          <InfoTooltip text="Mesmos dados, cálculo diferente: em vez de tratar cada slot sala/dia/turno como ocupado/livre (tudo ou nada), aqui cada vaga simultânea da sala (1/2/3 conforme Único/Duplo/Múltiplo) é uma cadeira própria com 6 blocos de 40min na Manhã e 7 na Tarde. Uma cadeira vazia entra como 0 preenchido, e um profissional alocado só conta suas sessões reais daquele bloco — não a cadeira inteira. Por isso este % tende a ser MENOR que o do Dashboard acima." />
+        </div>
+        <p className="mb-3 text-xs text-muted-foreground">
+          Ocupação agregada por unidade, ponderada pelas sessões reais em cada vaga — não só se a sala tem alguém alocado.
+        </p>
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <StatCard tone="slate" icon={<Building2 size={15} />} label="Unidades">
+          <div className="text-2xl font-black text-foreground">{resumoUnidades.length}</div>
+        </StatCard>
+        <StatCard tone="blue" icon={<DoorOpen size={15} />} label="Salas cadastradas">
+          <div className="text-2xl font-black text-foreground">{salasTotal}</div>
+        </StatCard>
+        <StatCard
+          tone="purple"
+          icon={<DoorOpen size={15} />}
+          label={
+            <span className="inline-flex items-center">
+              Capacidade simultânea
+              <InfoTooltip text="Quantos atendimentos podem acontecer ao mesmo tempo, no mesmo horário, somando todas as salas operacionais: salas Único contam 1, Duplo contam 2, Múltiplo contam 3. Salas bloqueadas ou administrativas não entram na conta." />
+            </span>
+          }
+        >
+          <div className="text-2xl font-black text-foreground">{capacidadeTotal}</div>
+        </StatCard>
+        <StatCard
+          tone={pctTone(pctGeralGranular)}
+          icon={<Percent size={15} />}
+          label={
+            <span className="inline-flex items-center">
+              Ocupação real
+              <InfoTooltip text={`${blocosPreenchidosGeral} blocos de 40min preenchidos ÷ ${blocosTotalGeral} blocos possíveis = ${pctGeralGranular !== null ? Math.round(pctGeralGranular * 100) : 0}%.`} />
+            </span>
+          }
+        >
+          <div className="text-2xl font-black text-foreground">{pctGeralGranular !== null ? `${Math.round(pctGeralGranular * 100)}%` : "—"}</div>
+        </StatCard>
+      </div>
+
+      <div className="grid gap-3 md:grid-cols-2">
+        {resumoUnidades.map(r => (
+          <div key={`${r.unidade}-granular`} className="rounded-xl border border-border bg-card p-4">
+            <div className="mb-2 flex items-center justify-between">
+              <div className="inline-flex items-center font-bold text-foreground">
+                {r.unidade}
+                <InfoTooltip text={`${r.blocosPreenchidos} blocos de 40min preenchidos ÷ ${r.blocosTotal} blocos possíveis = ${r.pctGranular !== null ? Math.round(r.pctGranular * 100) : 0}%.`} />
+              </div>
+              <StatusPill tone={pctTone(r.pctGranular)}>{r.pctGranular !== null ? `${Math.round(r.pctGranular * 100)}%` : "Sem base"}</StatusPill>
+            </div>
+            <div className="mt-3 flex gap-3 text-xs">
+              {r.porTurno.map(t => (
+                <div
+                  key={t.turno}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setPedido({ unidade: r.unidade, turno: t.turno, tipo: "bloco" })}
+                  onKeyDown={e => { if (e.key === "Enter" || e.key === " ") setPedido({ unidade: r.unidade, turno: t.turno, tipo: "bloco" }) }}
+                  className="flex-1 cursor-pointer rounded-lg bg-muted/40 p-2 transition-colors hover:bg-muted/70"
+                >
+                  <div className="inline-flex items-center font-semibold text-foreground">
+                    {t.turno}
+                    <InfoTooltip text={`${t.blocosPreenchidos} blocos de 40min preenchidos ÷ ${t.blocosTotal} blocos possíveis = ${t.pctGranular !== null ? Math.round(t.pctGranular * 100) : 0}%. Clique pra ver o detalhe.`} />
+                  </div>
+                  <div className="flex items-end justify-between gap-2">
+                    <div className="text-muted-foreground">{t.blocosPreenchidos}/{t.blocosTotal} preenchidos</div>
+                    <span className="shrink-0 text-[10px] font-bold uppercase tracking-wide text-sky-600 dark:text-sky-400">Ver detalhes ›</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+            {r.porTerapia.length > 0 && (
+              <div className="mt-3">
+                <div className="mb-1 text-[10px] font-bold uppercase text-muted-foreground">Terapias mais frequentes</div>
+                <div className="flex flex-wrap gap-1.5">
+                  {r.porTerapia.slice(0, 5).map(t => (
+                    <span key={t.terapia} className="rounded-full bg-muted px-2 py-0.5 text-[11px] text-foreground">
+                      {t.terapia} · {t.sessoes}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {detalhe && <OcupacaoDetalheModal detalhe={detalhe} onClose={() => setPedido(null)} />}
     </div>
   )
 }

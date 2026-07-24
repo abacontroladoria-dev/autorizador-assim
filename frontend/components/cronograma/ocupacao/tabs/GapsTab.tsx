@@ -1,9 +1,10 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { ArrowUp, BarChart3, Check, CheckCircle2, X } from "lucide-react"
+import { AlertTriangle, ArrowUp, BarChart3, Check, CheckCircle2, ListChecks, TrendingUp, X } from "lucide-react"
 import type { AlgorithmResult } from "@/types/cronograma"
 import { SearchInput, EmptyState } from "@/components/cronograma/ui/DataTable"
+import { StatCard } from "@/components/cronograma/ui/StatCard"
 import { StatusPill } from "@/components/cronograma/ui/StatusPill"
 import { TerapiaChip } from "@/components/cronograma/ui/TerapiaChip"
 import { SegmentedTabs, type SegmentedTab } from "@/components/cronograma/ui/SegmentedTabs"
@@ -36,6 +37,24 @@ export function GapsTab({ res }: Props) {
 
   const espOpts = useMemo(() => [...new Set((res?.allGaps || []).map(g => g.esp))].sort(), [res])
 
+  // Base pra contagem do dashboard: respeita busca/especialidade (contexto que o
+  // usuário já escolheu), mas não a aba de filtro nem "sem nada agendado" —
+  // é justamente a quebra por categoria que o dashboard mostra.
+  const gapsFiltrados = useMemo(() => {
+    let r = res?.allGaps || []
+    if (gapSearch) r = r.filter(g => g.pac.toLowerCase().includes(gapSearch.toLowerCase()))
+    if (gapEsp) r = r.filter(g => g.esp === gapEsp)
+    return r
+  }, [res, gapSearch, gapEsp])
+
+  const counts = useMemo(() => ({
+    all: gapsFiltrados.length,
+    pos: gapsFiltrados.filter(g => g.gap > 0 && !g.isAlta).length,
+    zero: gapsFiltrados.filter(g => g.gap === 0 && !g.isAlta).length,
+    neg: gapsFiltrados.filter(g => g.gap < 0 && !g.isAlta).length,
+    alta: gapsFiltrados.filter(g => g.isAlta).length,
+  }), [gapsFiltrados])
+
   const rows = useMemo(() => {
     let r = res?.allGaps || []
     if (gapSearch) r = r.filter(g => g.pac.toLowerCase().includes(gapSearch.toLowerCase()))
@@ -58,6 +77,35 @@ export function GapsTab({ res }: Props) {
 
   return (
     <div className="space-y-3">
+      {/* ── Dashboard: quantos em cada categoria (clicável — atalho de filtro) ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+        <button type="button" onClick={() => setGapFilt("all")} className="text-left">
+          <StatCard tone="slate" icon={<ListChecks size={15} />} label="Todos" tinted={gapFilt === "all"}>
+            <span className="text-2xl font-black tabular-nums text-foreground">{counts.all}</span>
+          </StatCard>
+        </button>
+        <button type="button" onClick={() => setGapFilt("pos")} className="text-left">
+          <StatCard tone="red" icon={<AlertTriangle size={15} />} label="Gap > 0" tinted={gapFilt === "pos"}>
+            <span className="text-2xl font-black tabular-nums text-foreground">{counts.pos}</span>
+          </StatCard>
+        </button>
+        <button type="button" onClick={() => setGapFilt("zero")} className="text-left">
+          <StatCard tone="green" icon={<Check size={15} />} label="Sem gap" tinted={gapFilt === "zero"}>
+            <span className="text-2xl font-black tabular-nums text-foreground">{counts.zero}</span>
+          </StatCard>
+        </button>
+        <button type="button" onClick={() => setGapFilt("neg")} className="text-left">
+          <StatCard tone="amber" icon={<TrendingUp size={15} />} label="Sobre-agendado" tinted={gapFilt === "neg"}>
+            <span className="text-2xl font-black tabular-nums text-foreground">{counts.neg}</span>
+          </StatCard>
+        </button>
+        <button type="button" onClick={() => setGapFilt("alta")} className="text-left">
+          <StatCard tone="purple" icon={<ArrowUp size={15} />} label="Com Alta" tinted={gapFilt === "alta"}>
+            <span className="text-2xl font-black tabular-nums text-foreground">{counts.alta}</span>
+          </StatCard>
+        </button>
+      </div>
+
       {/* ── Barra de filtros (§2.6) ──────────────────────────────────────── */}
       <div className="rounded-2xl border border-border bg-card p-3">
         <div className="flex flex-wrap items-center gap-2">

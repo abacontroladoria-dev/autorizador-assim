@@ -4,9 +4,10 @@ import { useCallback, useEffect, useState } from "react"
 import toast from "react-hot-toast"
 import { Loader2, Plus, Save, Trash2, Calendar } from "lucide-react"
 import { B } from "@/lib/cronograma/constants"
-import { useRemuneracaoConfig, refetchRemuneracaoConfig } from "@/hooks/useRemuneracaoConfig"
-import { updateRemuneracaoConfig } from "@/services/remuneracao.service"
-import type { FeriadoInfo } from "@/types/remuneracao"
+import { useFeriados, refetchFeriados } from "@/hooks/useFeriados"
+import { upsertFeriado, deleteFeriadoPorData } from "@/services/feriados.service"
+import { useUnsavedChangesGuard } from "@/contexts/UnsavedChangesContext"
+import type { FeriadoInfo } from "@/types/feriados"
 
 const HORARIO_DIA_COMPLETO = { inicio: "08:00", fim: "17:40" }
 
@@ -16,29 +17,16 @@ const TIPO_LABEL: Record<"integral" | "parcial", string> = {
 }
 
 function horarioLabel(f: FeriadoInfo): string | null {
-  if (f.tipo === "integral") return `${HORARIO_DIA_COMPLETO.inicio} - ${HORARIO_DIA_COMPLETO.fim}`
-  const inicio = f.horario_inicio ?? f.parcial_a_partir
-  const fim = f.horario_fim
-  if (!inicio && !fim) return null
-  return `${inicio ?? "—"} - ${fim ?? "—"}`
+  if (!f.horario_inicio && !f.horario_fim) return null
+  return `${f.horario_inicio ?? "—"} - ${f.horario_fim ?? "—"}`
 }
 
-interface FeriadosConfigProps {
-  onDirtyChange?: (dirty: boolean) => void
-  registerSave?: (save: (() => Promise<boolean>) | null) => void
-}
+export function FeriadosCadastro() {
+  const { feriados: feriadosSalvos, loading: feriadosLoading } = useFeriados()
 
-export function FeriadosConfig({ onDirtyChange, registerSave }: FeriadosConfigProps = {}) {
-  const { config, loading: configLoading } = useRemuneracaoConfig()
-
-  // Inicializa direto de "config" quando ele já está disponível/em cache no
-  // primeiro render (aba Feriados quase sempre monta depois da Config já ter
-  // buscado os dados) — se começasse vazio, o bloco de resync abaixo nunca
-  // dispararia (a referência de config não muda depois do mount) e a lista
-  // apareceria vazia mesmo com os feriados intactos no banco.
-  const [feriados, setFeriados] = useState<Record<string, FeriadoInfo>>(config?.feriados ?? {})
+  const [feriados, setFeriados] = useState<Record<string, FeriadoInfo>>(feriadosSalvos)
   const [saving, setSaving] = useState(false)
-  const [savedFeriados, setSavedFeriados] = useState<Record<string, FeriadoInfo>>(config?.feriados ?? {})
+  const [savedFeriados, setSavedFeriados] = useState<Record<string, FeriadoInfo>>(feriadosSalvos)
 
   // Para adicionar novo
   const [novaData, setNovaData] = useState("")
@@ -47,38 +35,48 @@ export function FeriadosConfig({ onDirtyChange, registerSave }: FeriadosConfigPr
   const [novoInicio, setNovoInicio] = useState(HORARIO_DIA_COMPLETO.inicio)
   const [novoFim, setNovoFim] = useState(HORARIO_DIA_COMPLETO.fim)
 
-  // Ressincroniza com "config" assíncrono quando ele chega/muda depois do mount
-  // (ex.: primeiro carregamento "frio", antes do fetch resolver) — padrão
-  // recomendado do React para ajustar estado a partir de props sem efeito.
-  const [prevConfig, setPrevConfig] = useState(config)
-  if (config?.feriados && config !== prevConfig) {
-    setPrevConfig(config)
-    setFeriados(config.feriados)
-    setSavedFeriados(config.feriados)
+  // Ressincroniza com os feriados assíncronos quando chegam/mudam depois do
+  // mount — padrão recomendado do React para ajustar estado a partir de props
+  // sem efeito.
+  const [prevFeriadosSalvos, setPrevFeriadosSalvos] = useState(feriadosSalvos)
+  if (feriadosSalvos !== prevFeriadosSalvos) {
+    setPrevFeriadosSalvos(feriadosSalvos)
+    setFeriados(feriadosSalvos)
+    setSavedFeriados(feriadosSalvos)
   }
 
   const isDirty = JSON.stringify(feriados) !== JSON.stringify(savedFeriados)
-  useEffect(() => { onDirtyChange?.(isDirty) }, [isDirty, onDirtyChange])
 
   const handleSaveAll = useCallback(async () => {
-    if (!config) return false
     setSaving(true)
-    const ok = await updateRemuneracaoConfig(config.id, { feriados })
+
+    const todasDatas = new Set([...Object.keys(feriados), ...Object.keys(savedFeriados)])
+    const operacoes = [...todasDatas].map(data => {
+      const atual = feriados[data]
+      const salvo = savedFeriados[data]
+      if (!atual) return deleteFeriadoPorData(data)
+      if (salvo && JSON.stringify(atual) === JSON.stringify(salvo)) return Promise.resolve(true)
+      return upsertFeriado({ data, ...atual })
+    })
+
+    const resultados = await Promise.all(operacoes)
+    const ok = resultados.every(Boolean)
     setSaving(false)
     if (ok) {
       setSavedFeriados(feriados)
-      await refetchRemuneracaoConfig()
+      await refetchFeriados()
       toast.success("Feriados atualizados com sucesso!")
     } else {
       toast.error("Erro ao salvar feriados.")
     }
     return ok
-  }, [config, feriados])
+  }, [feriados, savedFeriados])
 
+  const { registerGuard } = useUnsavedChangesGuard()
   useEffect(() => {
-    registerSave?.(handleSaveAll)
-    return () => registerSave?.(null)
-  }, [handleSaveAll, registerSave])
+    registerGuard({ isDirty, save: handleSaveAll })
+    return () => registerGuard(null)
+  })
 
   const handleTipoChange = (tipo: "integral" | "parcial") => {
     setNovoTipo(tipo)
@@ -98,10 +96,7 @@ export function FeriadosConfig({ onDirtyChange, registerSave }: FeriadosConfigPr
       ...prev,
       [novaData]: novoTipo === "integral"
         ? { nome: novoNome, tipo: novoTipo, horario_inicio: HORARIO_DIA_COMPLETO.inicio, horario_fim: HORARIO_DIA_COMPLETO.fim }
-        // parcial_a_partir é redundante com horario_inicio, mas o banco exige essa
-        // chave pra qualquer feriado "parcial" (CHECK remuneracao_config_feriados_check,
-        // migration 20260706000006) — sem ela o salvamento é rejeitado.
-        : { nome: novoNome, tipo: novoTipo, horario_inicio: novoInicio, horario_fim: novoFim, parcial_a_partir: novoInicio }
+        : { nome: novoNome, tipo: novoTipo, horario_inicio: novoInicio, horario_fim: novoFim }
     }))
     setNovaData("")
     setNovoNome("")
@@ -116,15 +111,15 @@ export function FeriadosConfig({ onDirtyChange, registerSave }: FeriadosConfigPr
     setFeriados(next)
   }
 
-  if (configLoading) {
+  if (feriadosLoading) {
     return <div className="p-8 flex justify-center"><Loader2 className="w-6 h-6 animate-spin text-slate-400" /></div>
   }
 
   const sortedDates = Object.keys(feriados).sort()
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-300">
-      
+    <div className="max-w-6xl mx-auto p-4 md:p-6 lg:p-8 space-y-4 animate-in fade-in duration-300">
+
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>
           <h3 className="font-bold text-lg text-foreground">Feriados Estaduais / Municipais</h3>
@@ -132,7 +127,7 @@ export function FeriadosConfig({ onDirtyChange, registerSave }: FeriadosConfigPr
             O sistema já desconta os feriados nacionais automaticamente. Adicione aqui apenas os feriados regionais que afetam a operação da clínica.
           </p>
         </div>
-        
+
         <div className="flex items-center gap-3 shrink-0">
           {isDirty && (
             <span className="text-xs font-semibold text-amber-600 dark:text-amber-400 whitespace-nowrap">
@@ -152,7 +147,7 @@ export function FeriadosConfig({ onDirtyChange, registerSave }: FeriadosConfigPr
       </div>
 
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm">
-        
+
         <div className="grid grid-cols-1 md:grid-cols-12 gap-3 mb-6 bg-slate-50 dark:bg-slate-800/50 p-4 rounded-xl border border-slate-100 dark:border-slate-800">
           <div className="col-span-12 md:col-span-3">
             <label htmlFor="feriado-data" className="text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider mb-1 block">Data (YYYY-MM-DD)</label>

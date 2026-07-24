@@ -2,7 +2,8 @@
 
 import { useEffect } from "react"
 import { useHeader } from "@/contexts/HeaderContext"
-import { useRemuneracaoConfig } from "@/hooks/useRemuneracaoConfig"
+import { useParametrosGerais } from "@/hooks/useParametrosGerais"
+import { useTaxasEspecialidade } from "@/hooks/useTaxasEspecialidade"
 import { fmt } from "@/lib/remuneracao/formatacao"
 import { B } from "@/lib/cronograma/constants"
 
@@ -13,7 +14,6 @@ const ABAS = [
   { k: "ocupacao", nome: "Ocupação de Profissionais" },
   { k: "remunRP", nome: "Remun. — RP" },
   { k: "remunInd", nome: "Remun. Individual" },
-  { k: "config", nome: "Config" },
   { k: "hist", nome: "Histórico" },
   { k: "leg", nome: "Legenda" },
 ]
@@ -43,17 +43,18 @@ function Secao({ titulo, children, accent }: { titulo: string; children: React.R
 
 export function LegendaTab() {
   const { setHeader } = useHeader()
-  const { config, loading, error } = useRemuneracaoConfig()
+  const { parametros, loading: parametrosLoading, error } = useParametrosGerais()
+  const { taxas_pa, diarias, loading: taxasLoading } = useTaxasEspecialidade()
+  const loading = parametrosLoading || taxasLoading
 
   useEffect(() => {
     setHeader("Legenda", "Relacionamento Prestador")
     return () => setHeader("", "")
   }, [setHeader])
 
-  const taxasPA = config?.taxas_pa ?? {}
-  const diarias = config?.diarias ?? {}
-  const ccPE = config?.cc_pe_default ?? 133.34
-  const etaBonus = config?.eta_bonus_default ?? 500
+  const taxasPA = taxas_pa
+  const ccPE = parametros?.cc_pe_default ?? 133.34
+  const etaBonus = parametros?.eta_bonus_default ?? 500
   const etaPA = taxasPA[ESP_ETA] ?? 50
   const etaDiaria = diarias[ESP_ETA] ?? 350
 
@@ -95,7 +96,7 @@ export function LegendaTab() {
             <div className="font-bold text-sm mb-1" style={{ color: B.green }}>PA – Valor por Atendimento Realizado</div>
             <div className="text-xs text-muted-foreground space-y-1">
               <p>Valor fixo por <strong>sessão de 40 min</strong> efetivamente realizada e com tratativa registrada no sistema.</p>
-              <p>Varia por especialidade — ver valores vigentes em Config → PA + PPD.</p>
+              <p>Varia por especialidade — ver valores vigentes em Cadastros → Variáveis & Taxas.</p>
               <p>Na projeção futura (Análise), é multiplicado pela taxa de presença configurada.</p>
               <p className="italic">Não é pago por sessão cancelada, não evoluída ou cedida a outro profissional.</p>
             </div>
@@ -112,7 +113,7 @@ export function LegendaTab() {
             <div className="font-bold text-sm mb-1" style={{ color: B.orange }}>PPD – Pagamento por Diária</div>
             <div className="text-xs text-muted-foreground space-y-1">
               <p>Valor por <strong>dia de referência/diária</strong>. Os critérios finais do PPD permanecem abertos para ajuste jurídico-operacional.</p>
-              <p>Aplica-se, por exemplo, a Fonoaudiologia, Terapia Ocupacional, ETA ({fmt(etaDiaria)}/dia) — ver valores completos em Config → PA + PPD.</p>
+              <p>Aplica-se, por exemplo, a Fonoaudiologia, Terapia Ocupacional, ETA ({fmt(etaDiaria)}/dia) — ver valores completos em Cadastros → Variáveis & Taxas.</p>
             </div>
           </div>
         </div>
@@ -157,7 +158,7 @@ export function LegendaTab() {
       <Secao titulo="📅 Projeção Mensal — Dias Úteis Reais">
         <div className="text-sm text-muted-foreground space-y-2">
           <p>A ferramenta usa a <strong>grade da semana carregada</strong> como padrão semanal e extrapola para o mês inteiro contando <strong>quantas vezes cada dia da semana ocorre no mês</strong> — nunca um multiplicador fixo de 4,33.</p>
-          <p><strong>Feriados nacionais</strong> são descontados automaticamente. Feriados municipais devem ser cadastrados manualmente em Config → Feriados.</p>
+          <p><strong>Feriados nacionais</strong> são descontados automaticamente. Feriados municipais devem ser cadastrados manualmente em Cadastros → Feriados.</p>
           <div className="rounded-lg p-2 text-xs bg-amber-50 dark:bg-amber-950/30 text-amber-800 dark:text-amber-400">
             ⚠️ A aba Análise Futura é uma <em>projeção</em>: assume que o profissional terá a mesma grade durante todo o mês. Afastamentos, inclusões ou remanejamentos no meio do mês não são capturados.
           </div>
@@ -165,7 +166,7 @@ export function LegendaTab() {
       </Secao>
 
       <div className="rounded-xl p-4 text-sm bg-muted text-foreground">
-        <strong>Para atualizar PA, PPD, PE ou o bônus ETA:</strong> acesse Config → PA + PPD (ou Config → Geral, para o Psicólogo Analista). Os valores ficam salvos no banco e valem para todos os usuários.
+        <strong>Para atualizar PA, PPD, PE ou o bônus ETA:</strong> acesse Cadastros → Variáveis & Taxas. Os valores ficam salvos no banco e valem para todos os usuários.
       </div>
     </div>
   )

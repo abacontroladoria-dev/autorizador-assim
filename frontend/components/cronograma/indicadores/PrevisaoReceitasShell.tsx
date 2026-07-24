@@ -28,6 +28,7 @@ import { SegmentedTabs } from "@/components/cronograma/ui/SegmentedTabs"
 import { SortableTh, ordenarPor, type SortDir } from "@/components/cronograma/ui/SortableTh"
 import { useOcupacaoSalas } from "@/hooks/useOcupacaoSalas"
 import { useConvenioValores } from "@/hooks/useConvenioValores"
+import { useFeriados } from "@/hooks/useFeriados"
 import {
   calcularPrevisaoReceita,
   type PrevisaoReceitaConvenio, type PrevisaoReceitaSessao, type PrevisaoReceitaSegmento,
@@ -421,13 +422,14 @@ function TabelaPorConvenio({ titulo, segmento, mesReferenciaLabel, avisoParticul
 export function PrevisaoReceitasShell() {
   const { linhas, loading: loadingSalas, error: errorSalas } = useOcupacaoSalas()
   const { regrasGerais, excecoesPaciente, pacotesAvaliacao, loading: loadingValores, error: errorValores } = useConvenioValores()
+  const { feriados, loading: loadingFeriados } = useFeriados()
 
-  const loading = loadingSalas || loadingValores
+  const loading = loadingSalas || loadingValores || loadingFeriados
   const error = errorSalas || errorValores
 
   const previsao = useMemo(
-    () => calcularPrevisaoReceita(linhas, regrasGerais, excecoesPaciente, pacotesAvaliacao),
-    [linhas, regrasGerais, excecoesPaciente, pacotesAvaliacao],
+    () => calcularPrevisaoReceita(linhas, regrasGerais, excecoesPaciente, pacotesAvaliacao, feriados),
+    [linhas, regrasGerais, excecoesPaciente, pacotesAvaliacao, feriados],
   )
 
   if (loading) {

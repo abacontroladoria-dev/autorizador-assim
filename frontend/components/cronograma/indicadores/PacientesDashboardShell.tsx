@@ -16,9 +16,10 @@
 
 import { Loader2, Users, Clock, CalendarDays } from "lucide-react"
 import { StatCard } from "@/components/cronograma/ui/StatCard"
+import { TONE_ACCENT } from "@/components/cronograma/ui/tones"
 import { fmtHDec } from "@/lib/cronograma/helpers"
 import { useOcupacaoSalas } from "@/hooks/useOcupacaoSalas"
-import type { ResumoPacientesGrupo, ResumoPacientesSalas } from "@/lib/cronograma/salasTypes"
+import type { ResumoPacientesGrupo, ResumoPacientesSalas, ResumoPacientesDia } from "@/lib/cronograma/salasTypes"
 
 function fmtPct(valor: number, total: number): string {
   if (total <= 0) return "—"
@@ -72,6 +73,58 @@ function TabelaGrupo({
   )
 }
 
+// Componente genérico de barras Seg–Sex — usado tanto para sessões quanto
+// para pacientes únicos por dia (mesma forma, medidas diferentes, então dois
+// gráficos separados em vez de dividir eixo/cor dentro de um só). A cor da
+// barra usa TONE_ACCENT — o mesmo tom pastel dos StatCard do dashboard.
+function BarrasPorDia({
+  titulo, linhas, valor, unidadeValor, cor, extra,
+}: {
+  titulo: string
+  linhas: ResumoPacientesDia[]
+  valor: (l: ResumoPacientesDia) => number
+  unidadeValor: string
+  cor: "blue" | "purple"
+  extra?: (l: ResumoPacientesDia) => { valor: string; unidade: string }
+}) {
+  const max = Math.max(1, ...linhas.map(valor))
+  const accent = TONE_ACCENT[cor]
+
+  return (
+    <div className="rounded-xl border border-border bg-card p-4">
+      <div className="mb-3 text-sm font-bold text-foreground">{titulo}</div>
+      <div className="flex flex-col gap-2.5">
+        {linhas.map(l => {
+          const v = valor(l)
+          const pct = Math.round((v / max) * 100)
+          return (
+            <div key={l.dow} className="flex items-center gap-3">
+              <div className="w-8 shrink-0 text-xs font-semibold text-muted-foreground">{l.dia}</div>
+              <div className="h-4 flex-1 overflow-hidden rounded-full bg-muted/60">
+                <div className="h-full rounded-full" style={{ width: `${pct}%`, background: accent }} />
+              </div>
+              <div className="w-36 shrink-0 whitespace-nowrap text-right text-xs tabular-nums">
+                <span className="font-bold text-foreground">{v}</span>{" "}
+                <span className="text-muted-foreground">{unidadeValor}</span>
+                {extra && (() => {
+                  const e = extra(l)
+                  return (
+                    <span className="ml-1.5">
+                      <span className="text-muted-foreground">· </span>
+                      <span className="font-bold text-foreground">{e.valor}</span>{" "}
+                      <span className="text-muted-foreground">{e.unidade}</span>
+                    </span>
+                  )
+                })()}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 // `tituloConvenio` é o nome do dashboard (ex.: "Tratamento Multidisciplinar",
 // "Processo Diagnóstico") — vai DIRETO no título da tabela por convênio, sem
 // header separado por cima. "Por unidade" continua com o mesmo nome nos dois.
@@ -102,6 +155,24 @@ function DashboardBloco({
       <div className="grid gap-4 md:grid-cols-2">
         <TabelaGrupo titulo={tituloConvenio} linhas={d.porConvenio} totalPacientes={d.pacientesUnicos} totalChSemanal={d.chSemanalTotal} />
         <TabelaGrupo titulo="Por unidade" linhas={d.porUnidade} totalPacientes={d.pacientesUnicos} totalChSemanal={d.chSemanalTotal} />
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        <BarrasPorDia
+          titulo="Sessões por dia da semana"
+          linhas={d.porDia}
+          valor={l => l.sessoesTotal}
+          unidadeValor="sess."
+          cor="blue"
+          extra={l => ({ valor: fmtHDec(l.chSemanalTotal), unidade: "CH" })}
+        />
+        <BarrasPorDia
+          titulo="Pacientes por dia da semana"
+          linhas={d.porDia}
+          valor={l => l.pacientesUnicos}
+          unidadeValor="pac."
+          cor="purple"
+        />
       </div>
     </div>
   )

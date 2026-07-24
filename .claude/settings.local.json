@@ -21,7 +21,11 @@
       "PowerShell(New-Item -ItemType Directory -Force \"C:\\\\Users\\\\UNIVERSO\\\\projeto_automacao\\\\calculadora-remuneracao\\\\src\\\\components\\\\layout\")",
       "Bash(git add *)",
       "Bash(git commit -m ' *)",
-      "Bash(git push *)"
+      "Bash(git push *)",
+      "Bash(node -e ' *)",
+      "Bash(node scratch_inspect_xlsx.js \"C:/Users/Maquina001/Downloads/comparativo_julho_agosto_2026.xlsx\")",
+      "Bash(npx eslint *)",
+      "Bash(grep -E \"^/|\\\\.tsx$|\\\\.ts$\")"
     ]
   }
 }

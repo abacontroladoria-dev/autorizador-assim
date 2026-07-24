@@ -7,7 +7,9 @@ import { pm, cleanTxt } from "./helpers"
 import { normalizarUnidadeOcupacao } from "./ocupacaoProf"
 import { PROCESSO_DIAGNOSTICO_IDS, PROCESSO_DIAGNOSTICO_NAMES } from "./constants"
 import { isFakePatient } from "../remuneracao/pacientes"
-import type { AgendaSalaRow, ResumoPacientesSalas, ResumoPacientesGrupo, DashboardPacientesGeral } from "./salasTypes"
+import { dowDeDiaSemana } from "./salas"
+import { DOW_PT } from "./ocupacaoConst"
+import type { AgendaSalaRow, ResumoPacientesSalas, ResumoPacientesGrupo, ResumoPacientesDia, DashboardPacientesGeral } from "./salasTypes"
 
 export function chDaLinha(r: AgendaSalaRow): number {
   const ini = pm(r.hora_inicial)
@@ -27,6 +29,7 @@ interface AgendamentoNormalizado {
   unidade: string
   ch: number
   data: string
+  dow: number | null
 }
 
 export function isAgendadoAtivo(r: AgendaSalaRow): boolean {
@@ -88,6 +91,29 @@ function resumoGrupo(
     .sort((a, b) => b.chSemanalTotal - a.chSemanalTotal)
 }
 
+/** Sessões/CH por dia útil (Seg–Sex), na mesma base recorrente semanal das demais colunas — agrupa pelo dia da grade (`dia_semana`), não pela data do registro. */
+function resumoPorDia(agendamentos: AgendamentoNormalizado[], semanas: number): ResumoPacientesDia[] {
+  const porDow = new Map<number, { pacientes: Set<string>; sessoes: number; ch: number }>()
+  agendamentos.forEach(a => {
+    if (a.dow === null) return
+    if (!porDow.has(a.dow)) porDow.set(a.dow, { pacientes: new Set(), sessoes: 0, ch: 0 })
+    const g = porDow.get(a.dow)!
+    g.pacientes.add(a.pacienteKey)
+    g.sessoes += 1
+    g.ch += a.ch
+  })
+  return [1, 2, 3, 4, 5].map(dow => {
+    const g = porDow.get(dow)
+    return {
+      dia: DOW_PT[dow],
+      dow,
+      pacientesUnicos: g?.pacientes.size ?? 0,
+      sessoesTotal: g?.sessoes ?? 0,
+      chSemanalTotal: (g?.ch ?? 0) / semanas,
+    }
+  })
+}
+
 function normalizarLinha(r: AgendaSalaRow): AgendamentoNormalizado {
   return {
     pacienteKey: pacienteKey(r),
@@ -101,6 +127,7 @@ function normalizarLinha(r: AgendaSalaRow): AgendamentoNormalizado {
     unidade: normalizarUnidadeOcupacao(r.sala_nome || ""),
     ch: chDaLinha(r),
     data: cleanTxt(r.data),
+    dow: dowDeDiaSemana(r.dia_semana),
   }
 }
 
@@ -118,6 +145,7 @@ function montarResumo(agendamentos: AgendamentoNormalizado[]): ResumoPacientesSa
     mediaSessoesPorPaciente: pacientesUnicos ? agendamentos.length / pacientesUnicos : 0,
     porConvenio: resumoGrupo(agendamentos, "convenio", semanas),
     porUnidade: resumoGrupo(agendamentos, "unidade", semanas),
+    porDia: resumoPorDia(agendamentos, semanas),
   }
 }
 

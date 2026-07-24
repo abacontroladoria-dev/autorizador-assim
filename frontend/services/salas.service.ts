@@ -1,5 +1,6 @@
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { fixMojibake } from "@/lib/cronograma/gradeService"
+import { isFakePatient } from "@/lib/remuneracao/pacientes"
 import type { Sala, SalaInput, AgendaSalaRow, AlocacaoSala, AlocacaoInput } from "@/lib/cronograma/salasTypes"
 
 const TABLE = "cronograma_salas"
@@ -68,11 +69,16 @@ export async function buscarTerapiasDoProfissional(profissionalNome: string): Pr
   const sb = getSupabaseClient()
   const { data, error } = await sb
     .from("csv_grades_profissionais")
-    .select("terapia_exibicao_nome, terapia_nome")
+    .select("terapia_exibicao_nome, terapia_nome, paciente_nome, paciente_id")
     .ilike("profissional_nome", nome)
     .limit(2000)
   if (error) throw new Error(error.message)
   const nomes = (data ?? [])
+    // Sessões de paciente fictício/administrativo (Ainda não selecionado,
+    // Horário Administrativo, etc. — mesmo isFakePatient já usado em
+    // buscarLinhasAgendaParaSalas) têm o mesmo texto placeholder no campo de
+    // terapia — não é uma terapia real que o profissional realiza.
+    .filter(r => !isFakePatient(r.paciente_nome as string | null, r.paciente_id !== null ? String(r.paciente_id) : null))
     .map(r => fixMojibake((r.terapia_exibicao_nome as string | null) || (r.terapia_nome as string | null)))
     .map(t => t.trim())
     .filter(Boolean)
@@ -117,28 +123,41 @@ export async function excluirAlocacao(id: string): Promise<void> {
   if (error) throw new Error(error.message)
 }
 
+export interface ProfissionalOpcao {
+  id: number | null
+  nome: string
+}
+
 /**
  * Lista TODOS os profissionais distintos de csv_grades_profissionais — carregada
  * uma vez ao abrir o modal de alocação, pra a lista já vir disponível antes de
  * digitar (filtro é feito no cliente conforme o usuário digita, sem round-trip
- * ao banco por tecla — ver AlocarSessaoModal).
+ * ao banco por tecla — ver AlocarSessaoModal). Inclui o `profissional_id` (chave
+ * estável, não muda se o nome for editado na TiTa) — usado para gravar a
+ * alocação com o ID, não só o nome, e viabilizar o cruzamento por ID na aba
+ * Regularizações.
  */
-export async function listarTodosProfissionaisSalas(): Promise<string[]> {
+export async function listarTodosProfissionaisSalas(): Promise<ProfissionalOpcao[]> {
   const sb = getSupabaseClient()
   const { data, error } = await sb
     .from("csv_grades_profissionais")
-    .select("profissional_nome")
+    .select("profissional_id, profissional_nome")
     .not("profissional_nome", "is", null)
     .limit(5000)
 
   if (error) throw new Error(error.message)
-  const unique = [...new Set((data ?? []).map(r => fixMojibake(r.profissional_nome as string).trim()).filter(Boolean))]
-  return unique.sort((a, b) => a.localeCompare(b))
+  const porNome = new Map<string, ProfissionalOpcao>()
+  ;(data ?? []).forEach(r => {
+    const nome = fixMojibake(r.profissional_nome as string).trim()
+    if (!nome) return
+    if (!porNome.has(nome)) porNome.set(nome, { id: (r.profissional_id as number | null) ?? null, nome })
+  })
+  return [...porNome.values()].sort((a, b) => a.nome.localeCompare(b.nome))
 }
 
 const AGENDA_FIELDS = [
   "tita_agendamento_id", "paciente_id", "paciente_nome", "convenio_nome", "unidade_nome", "sala_nome",
-  "profissional_nome", "terapia_id", "terapia_nome", "terapia_exibicao_id", "terapia_exibicao_nome",
+  "profissional_nome", "profissional_id", "terapia_id", "terapia_nome", "terapia_exibicao_id", "terapia_exibicao_nome",
   "dia_semana", "hora_inicial", "hora_final", "status_agendamento", "data",
 ].join(", ")
 
@@ -168,14 +187,20 @@ export async function buscarLinhasAgendaParaSalas(dataInicio: string, dataFim: s
   // A sincronização da grade (Edge Function sync-grade-csv) grava texto com
   // dupla codificação UTF-8 (mojibake) — reparado na leitura, mesmo tratamento
   // já usado em gradeService.ts.
-  return all.map(r => ({
-    ...r,
-    paciente_nome: fixMojibake(r.paciente_nome),
-    convenio_nome: fixMojibake(r.convenio_nome),
-    unidade_nome: fixMojibake(r.unidade_nome),
-    sala_nome: fixMojibake(r.sala_nome),
-    profissional_nome: fixMojibake(r.profissional_nome),
-    terapia_nome: fixMojibake(r.terapia_nome),
-    terapia_exibicao_nome: fixMojibake(r.terapia_exibicao_nome),
-  }))
+  return all
+    .map(r => ({
+      ...r,
+      paciente_nome: fixMojibake(r.paciente_nome),
+      convenio_nome: fixMojibake(r.convenio_nome),
+      unidade_nome: fixMojibake(r.unidade_nome),
+      sala_nome: fixMojibake(r.sala_nome),
+      profissional_nome: fixMojibake(r.profissional_nome),
+      terapia_nome: fixMojibake(r.terapia_nome),
+      terapia_exibicao_nome: fixMojibake(r.terapia_exibicao_nome),
+    }))
+    // Pacientes fictícios/administrativos (Horário Administrativo, Notificação
+    // Prévia, Ainda não selecionado, Supervisor(a), etc. — ver isFakePatient em
+    // lib/remuneracao/pacientes.ts) não são atendimento real e não devem contar
+    // como ocupação de sala nem aparecer em "Terapias mais frequentes".
+    .filter(r => !isFakePatient(r.paciente_nome, r.paciente_id !== null ? String(r.paciente_id) : null))
 }

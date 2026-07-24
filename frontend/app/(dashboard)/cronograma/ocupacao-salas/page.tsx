@@ -10,10 +10,11 @@ import { resumoOcupacaoDeItens } from "@/lib/cronograma/salas"
 import { SalasFiltros, SALAS_FILTROS_VAZIO, aplicarFiltrosSala, salaTemProfissional, type SalasFiltrosState } from "@/components/cronograma/salas/SalasFiltros"
 import { SalasGridView } from "@/components/cronograma/salas/SalasGridView"
 import { SalasHeatmapView } from "@/components/cronograma/salas/SalasHeatmapView"
+import { RegularizacoesView } from "@/components/cronograma/salas/RegularizacoesView"
 import { SalaEditModal } from "@/components/cronograma/salas/SalaEditModal"
 import type { Sala, SlotOcupacaoSala } from "@/lib/cronograma/salasTypes"
 
-type ViewTab = "grade" | "mapa"
+type ViewTab = "grade" | "mapa" | "regularizacoes"
 
 export default function OcupacaoSalasPage() {
   const { setHeader } = useHeader()
@@ -22,7 +23,7 @@ export default function OcupacaoSalasPage() {
     return () => setHeader("", "")
   }, [setHeader])
 
-  const { salas, salasComOcupacao, loading, error, recarregar, encontrarAlocacaoDoProfissional } = useOcupacaoSalas()
+  const { salas, alocacoes, linhas, salasComOcupacao, loading, error, recarregar, encontrarAlocacaoDoProfissional } = useOcupacaoSalas()
 
   const [tab, setTab] = useState<ViewTab>("grade")
   const [filtros, setFiltros] = useState<SalasFiltrosState>(SALAS_FILTROS_VAZIO)
@@ -84,6 +85,7 @@ export default function OcupacaoSalasPage() {
           tabs={[
             { value: "grade", label: "Grade" },
             { value: "mapa", label: "Mapa de calor" },
+            { value: "regularizacoes", label: "Regularizações" },
           ]}
         />
         <div className="flex items-center gap-3">
@@ -106,7 +108,9 @@ export default function OcupacaoSalasPage() {
         </div>
       </div>
 
-      <SalasFiltros value={filtros} onChange={setFiltros} unidades={unidades} nucleos={nucleos} andares={andares} />
+      {tab !== "regularizacoes" && (
+        <SalasFiltros value={filtros} onChange={setFiltros} unidades={unidades} nucleos={nucleos} andares={andares} />
+      )}
 
       {loading && (
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -115,20 +119,29 @@ export default function OcupacaoSalasPage() {
       )}
       {error && <div className="text-sm font-semibold text-rose-600 dark:text-rose-400">{error}</div>}
 
-      {!loading && !error && (
-        tab === "grade"
-          ? (
-            <SalasGridView
-              salas={filtradas}
-              onEditarSala={id => setEditando(salasComOcupacao.find(s => s.sala.id === id)?.sala ?? null)}
-              onIsolarSala={alternarIsolarSala}
-              salaIsoladaId={isolada?.id ?? null}
-              encontrarAlocacaoDoProfissional={encontrarAlocacaoDoProfissional}
-              onRecarregar={recarregar}
-              buscaProfissional={filtros.profissional}
-            />
-          )
-          : <SalasHeatmapView salas={filtradas} onIsolarSala={alternarIsolarSala} salaIsoladaId={isolada?.id ?? null} />
+      {!loading && !error && tab === "grade" && (
+        <SalasGridView
+          salas={filtradas}
+          onEditarSala={id => setEditando(salasComOcupacao.find(s => s.sala.id === id)?.sala ?? null)}
+          onIsolarSala={alternarIsolarSala}
+          salaIsoladaId={isolada?.id ?? null}
+          encontrarAlocacaoDoProfissional={encontrarAlocacaoDoProfissional}
+          onRecarregar={recarregar}
+          buscaProfissional={filtros.profissional}
+        />
+      )}
+      {!loading && !error && tab === "mapa" && (
+        <SalasHeatmapView salas={filtradas} onIsolarSala={alternarIsolarSala} salaIsoladaId={isolada?.id ?? null} />
+      )}
+      {!loading && !error && tab === "regularizacoes" && (
+        <RegularizacoesView
+          alocacoes={alocacoes}
+          linhas={linhas}
+          onVerNaGrade={nome => {
+            setFiltros(f => ({ ...f, profissional: nome }))
+            setTab("grade")
+          }}
+        />
       )}
 
       {editando && (

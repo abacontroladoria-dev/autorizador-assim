@@ -37,6 +37,9 @@ import {
   DoorOpen,
   ArrowRightLeft,
   Tag,
+  Calendar,
+  FileSignature,
+  Percent,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -74,7 +77,10 @@ const pathIconMap: Record<string, any> = {
   "/cronograma/solicitacoes?tab=novo-cron": CalendarPlus,
   "/cronograma/solicitacoes?tab=banco": Database,
   "/cronograma/ocupacao-salas": DoorOpen,
-  "/cronograma/cadastro-valores": Tag,
+  "/cadastros/cadastro-valores": Tag,
+  "/cadastros/feriados": Calendar,
+  "/cadastros/contratos": FileSignature,
+  "/cadastros/taxas-e-parametros": Percent,
   "/cronograma/saida-profissional": LogOut,
   "/cronograma/ocupacao-paciente": TrendingUp,
   "/cronograma/ocupacao?tab=fila": Clock,
@@ -88,7 +94,6 @@ const pathIconMap: Record<string, any> = {
   "/relacionamento-prestador/analise": TrendingUp,
   "/relacionamento-prestador/rp": Wallet,
   "/relacionamento-prestador/individual": UserRound,
-  "/relacionamento-prestador/config": Settings,
   "/relacionamento-prestador/historico": LineChart,
   "/relacionamento-prestador/legenda": BookOpen,
   "/cronograma/indicadores?tab=profissionais": BarChart3,
@@ -505,20 +510,30 @@ export default function Sidebar() {
           )}
 
           {/* Indicadores */}
-          {(canAccess("/cronograma/indicadores") || canAccess("/cronograma/cadastro-valores")) && (
+          {canAccess("/cronograma/indicadores") && (
             <SidebarGroup title="Indicadores" icon={TrendingUp}>
               <MenuItem label="Ocupação de Profissionais" icon={BarChart3} path="/cronograma/indicadores?tab=profissionais" />
               <MenuItem label="Ocupação Clínica" icon={Building2} path="/cronograma/indicadores?tab=unidades" />
               <MenuItem label="Dashboard de Pacientes" icon={UserCheck} path="/cronograma/indicadores?tab=pacientes" />
               <MenuItem label="Previsão de Receitas" icon={Wallet} path="/cronograma/indicadores?tab=previsao-receitas" />
               <MenuItem label="Comparativo de Sessões" icon={ArrowRightLeft} path="/cronograma/indicadores?tab=comparativo-sessoes" />
-              {canAccess("/cronograma/cadastro-valores") && <MenuItem label="Cadastro de Valores" icon={Tag} path="/cronograma/cadastro-valores" />}
+            </SidebarGroup>
+          )}
+
+          {/* Cadastros */}
+          {(canAccess("/cadastros/cadastro-valores") || canAccess("/cadastros/feriados") ||
+            canAccess("/cadastros/contratos") || canAccess("/cadastros/taxas-e-parametros")) && (
+            <SidebarGroup title="Cadastros" icon={Database}>
+              {canAccess("/cadastros/cadastro-valores") && <MenuItem label="Cadastro de Valores" icon={Tag} path="/cadastros/cadastro-valores" />}
+              {canAccess("/cadastros/feriados") && <MenuItem label="Feriados" icon={Calendar} path="/cadastros/feriados" />}
+              {canAccess("/cadastros/taxas-e-parametros") && <MenuItem label="Variáveis & Taxas" icon={Percent} path="/cadastros/taxas-e-parametros" />}
+              {canAccess("/cadastros/contratos") && <MenuItem label="Contratos" icon={FileSignature} path="/cadastros/contratos" />}
             </SidebarGroup>
           )}
 
           {/* Relacionamento Prestador */}
           {(canAccess("/relacionamento-prestador/analise") || canAccess("/relacionamento-prestador/rp") ||
-            canAccess("/relacionamento-prestador/individual") || canAccess("/relacionamento-prestador/config") ||
+            canAccess("/relacionamento-prestador/individual") ||
             canAccess("/relacionamento-prestador/historico") || canAccess("/relacionamento-prestador/legenda")) && (
             <SidebarGroup title="Relacionamento Prestador" icon={Handshake}>
               {canAccess("/relacionamento-prestador/analise") && (
@@ -529,9 +544,6 @@ export default function Sidebar() {
               )}
               {canAccess("/relacionamento-prestador/individual") && (
                 <MenuItem label="Rem. Mês - Individual" icon={UserRound} path="/relacionamento-prestador/individual" />
-              )}
-              {canAccess("/relacionamento-prestador/config") && (
-                <MenuItem label="Config" icon={Settings} path="/relacionamento-prestador/config" />
               )}
               {canAccess("/relacionamento-prestador/historico") && (
                 <MenuItem label="Histórico" icon={LineChart} path="/relacionamento-prestador/historico" />

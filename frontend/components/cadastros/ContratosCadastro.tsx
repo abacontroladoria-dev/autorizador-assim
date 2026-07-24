@@ -6,8 +6,9 @@ import { Loader2, Search, ListFilter, Plus, X } from "lucide-react"
 import { getContratos, getProfissionaisRoster, upsertContrato } from "@/services/remuneracao.service"
 import { parseNumeroBR, formatMoedaBRTexto, maskMoedaBR, validarCpfCnpj } from "@/lib/remuneracao/formatacao"
 import { useDraftRow, useDraftTable, type DraftTable } from "@/hooks/useDraftRow"
-import { SaveStatusBadge } from "./SaveStatusBadge"
-import { SalvarTudoBar } from "./SalvarTudoBar"
+import { useUnsavedChangesGuard } from "@/contexts/UnsavedChangesContext"
+import { SaveStatusBadge } from "./shared/SaveStatusBadge"
+import { SalvarTudoBar } from "./shared/SalvarTudoBar"
 import type { ContratoAtual, ContratoAtualItem } from "@/types/remuneracao"
 
 type ContratoItemEdit = {
@@ -39,7 +40,7 @@ type LinhaValor = {
 const inputCls = "rounded-md border border-border bg-transparent px-2 py-1 text-xs text-foreground focus:outline-none focus:ring-1 focus:ring-ring"
 
 // ─── Linha da tabela: estado local "rascunho" — só commita quando o botão
-// único "Salvar tudo" do pai é clicado (D.4) ──────────────────────────────
+// único "Salvar tudo" do pai é clicado ──────────────────────────────
 
 const LinhaContratoAtual = memo(function LinhaContratoAtual({ linha, table }: { linha: LinhaBase; table: DraftTable }) {
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -262,20 +263,13 @@ const LinhaContratoAtual = memo(function LinhaContratoAtual({ linha, table }: { 
 
 // ─── Tela ─────────────────────────────────────────────────────────────────
 
-interface ContratosAtuaisConfigProps {
-  onDirtyChange?: (dirty: boolean) => void
-  registerSave?: (save: (() => Promise<boolean>) | null) => void
-}
-
-export function ContratosAtuaisConfig({ onDirtyChange, registerSave }: ContratosAtuaisConfigProps = {}) {
+export function ContratosCadastro() {
   const [contratos, setContratos] = useState<ContratoAtual[]>([])
   const [roster, setRoster] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [busca, setBusca] = useState("")
   const [apenasPendentes, setApenasPendentes] = useState(false)
   const { table, dirtyCount, saving, saveAll } = useDraftTable()
-
-  useEffect(() => { onDirtyChange?.(dirtyCount > 0) }, [dirtyCount, onDirtyChange])
 
   const carregar = useCallback(async (showLoading = true) => {
     if (showLoading) setLoading(true)
@@ -303,10 +297,11 @@ export function ContratosAtuaisConfig({ onDirtyChange, registerSave }: Contratos
     return sucesso
   }, [saveAll, carregar])
 
+  const { registerGuard } = useUnsavedChangesGuard()
   useEffect(() => {
-    registerSave?.(handleSalvarTudo)
-    return () => registerSave?.(null)
-  }, [handleSalvarTudo, registerSave])
+    registerGuard({ isDirty: dirtyCount > 0, save: handleSalvarTudo })
+    return () => registerGuard(null)
+  })
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- carga inicial via API, sem valor derivável no primeiro render
@@ -340,7 +335,7 @@ export function ContratosAtuaisConfig({ onDirtyChange, registerSave }: Contratos
   const pendentesQtd = useMemo(() => linhas.filter(l => !l.cpf && !l.cnpj).length, [linhas])
 
   return (
-    <div className="space-y-4 animate-in fade-in duration-300">
+    <div className="max-w-6xl mx-auto p-4 md:p-6 lg:p-8 space-y-4 animate-in fade-in duration-300">
 
       <div className="flex items-start justify-between gap-4 flex-wrap">
         <div>

@@ -11,8 +11,10 @@ import {
 import { normalizarGradeParaSessao, classificarSessaoReal, type SessaoReal, type CsvGradeRow } from "@/lib/remuneracao/relatorio"
 import { buscarPresencaFilaAutorizacoes, presencaDaSessao, type PresencaIndice } from "@/lib/remuneracao/presencaReal"
 import { dataParaISO, mesAnoDeLinhas } from "@/lib/remuneracao/datas"
-import { getContratos, getCapacidades } from "@/services/remuneracao.service"
-import { useRemuneracaoConfig } from "./useRemuneracaoConfig"
+import { getContratos } from "@/services/remuneracao.service"
+import { useParametrosGerais } from "./useParametrosGerais"
+import { useTaxasEspecialidade } from "./useTaxasEspecialidade"
+import { useFeriados } from "./useFeriados"
 import type { CsvRow } from "@/types/cronograma"
 
 // Um "contrato antigo" agora é só um item não-vigente na mesma lista de
@@ -28,12 +30,13 @@ function deriveAntigoDeContratos(contratos: ContratoAtualItem[]): ContratoAntigo
 }
 
 export function useAnaliseFutura() {
-  const { config, loading: configLoading, error: configError } = useRemuneracaoConfig()
+  const { parametros, loading: parametrosLoading, error: parametrosError } = useParametrosGerais()
+  const { taxas_pa, diarias, loading: taxasLoading } = useTaxasEspecialidade()
+  const { feriados, loading: feriadosLoading } = useFeriados()
   const [rows, setRows] = useState<CsvRow[]>([])
   const [rowsLoading, setRowsLoading] = useState(true)
   const [rowsError, setRowsError] = useState<string | null>(null)
   const [antigos, setAntigos] = useState<Record<string, ContratoAntigoInfo>>({})
-  const [limites, setLimites] = useState<Record<string, number>>({})
   const [cadastroPrestadores, setCadastroPrestadores] = useState<Record<string, CadastroContratual>>({})
   const refWeek = useMemo(() => getRefWeek(), [])
 
@@ -54,15 +57,12 @@ export function useAnaliseFutura() {
     return () => { isMounted = false }
   }, [refWeek])
 
-  // Contratos (atuais + antigos, unificados) e capacidade/limite de CC por
-  // profissional — cadastrados em Config, não dependem da semana de referência.
+  // Contratos (atuais + antigos, unificados) — cadastrados em Cadastros, não
+  // dependem da semana de referência.
   useEffect(() => {
     let isMounted = true
     async function loadContratuais() {
-      const [{ data: contratosData }, { data: capacidadesData }] = await Promise.all([
-        getContratos(),
-        getCapacidades(),
-      ])
+      const { data: contratosData } = await getContratos()
       if (!isMounted) return
 
       const antigosMap: Record<string, ContratoAntigoInfo> = {}
@@ -74,13 +74,7 @@ export function useAnaliseFutura() {
         if (antigo) antigosMap[r.profissional_nome] = antigo
       })
 
-      const limitesMap: Record<string, number> = {}
-      ;(capacidadesData ?? []).forEach(r => {
-        if (r.limite_cc != null) limitesMap[r.profissional_nome] = r.limite_cc
-      })
-
       setAntigos(antigosMap)
-      setLimites(limitesMap)
       setCadastroPrestadores(cadastroMap)
     }
     loadContratuais()
@@ -88,21 +82,20 @@ export function useAnaliseFutura() {
   }, [])
 
   const resultado: AnaliseFuturaResult | null = useMemo(() => {
-    if (!config || !rows.length) return null
+    if (!parametros || !rows.length) return null
     return calcularAnaliseFutura(rows, {
-      taxasPA: config.taxas_pa,
-      diarias: config.diarias,
-      etaBonus: config.eta_bonus_default,
-      ccPA: config.cc_pa_default,
-      ccPE: config.cc_pe_default,
-      ccLimDefault: config.cc_lim_default,
-      presenca: config.presenca_padrao,
-      feriados: config.feriados,
-      limites,
+      taxasPA: taxas_pa,
+      diarias,
+      etaBonus: parametros.eta_bonus_default,
+      ccPA: parametros.cc_pa_default,
+      ccPE: parametros.cc_pe_default,
+      ccLimDefault: parametros.cc_lim_default,
+      presenca: parametros.presenca_padrao,
+      feriados,
       antigos,
       cadastroPrestadores,
     })
-  }, [config, rows, antigos, limites, cadastroPrestadores])
+  }, [parametros, taxas_pa, diarias, rows, antigos, cadastroPrestadores, feriados])
 
   const analMes = useMemo(() => (rows.length ? mesAnoDeLinhas(rows as unknown as Record<string, unknown>[]) : null), [rows])
 
@@ -110,16 +103,18 @@ export function useAnaliseFutura() {
     resultado,
     refWeek,
     analMes,
-    presenca: config?.presenca_padrao ?? null,
-    loading: configLoading || rowsLoading,
-    error: configError || rowsError,
+    presenca: parametros?.presenca_padrao ?? null,
+    loading: parametrosLoading || taxasLoading || rowsLoading || feriadosLoading,
+    error: parametrosError || rowsError,
     gradeVazia: !rowsLoading && rows.length === 0,
     totalGrade: rows.length,
   }
 }
 
 export function useRemunRP() {
-  const { config, loading: configLoading, error: configError } = useRemuneracaoConfig()
+  const { parametros, loading: parametrosLoading, error: parametrosError } = useParametrosGerais()
+  const { taxas_pa, diarias, loading: taxasLoading } = useTaxasEspecialidade()
+  const { feriados, loading: feriadosLoading } = useFeriados()
   const [evoRowsBase, setEvoRowsBase] = useState<SessaoReal[]>([])
   const [presencaIndice, setPresencaIndice] = useState<PresencaIndice>({ porId: new Map(), porChave: new Map() })
   const [csvName, setCsvName] = useState<string | null>(null)
@@ -153,8 +148,8 @@ export function useRemunRP() {
   }, [])
 
   const carregarGrade = useCallback((rows: Record<string, unknown>[]) => {
-    setEvoRowsBase(normalizarGradeParaSessao(rows, config?.feriados))
-  }, [config])
+    setEvoRowsBase(normalizarGradeParaSessao(rows, feriados))
+  }, [feriados])
 
   const limparGrade = useCallback(() => {
     setEvoRowsBase([])
@@ -193,10 +188,10 @@ export function useRemunRP() {
       const presencaOrbita = presente ? "Sim" : "Não"
       if (presencaOrbita === r.presencaOrbita) return r
       const atualizado = { ...r, presencaOrbita }
-      atualizado.classificacao = classificarSessaoReal(atualizado, config?.feriados)
+      atualizado.classificacao = classificarSessaoReal(atualizado, feriados)
       return atualizado
     })
-  }, [evoRowsBase, presencaIndice, config])
+  }, [evoRowsBase, presencaIndice, feriados])
 
   const carregarPE = useCallback((rows: CsvGradeRow[], fileName: string) => {
     setPeRows(normalizarRelatorioPE(rows, parsePeriodoArquivo(fileName)))
@@ -222,29 +217,29 @@ export function useRemunRP() {
     : "PE bloqueado: importe csv_grade_profissionais e agendamentos_profissionais para calcular com segurança."
 
   const peProporcional = useMemo(() => {
-    if (!config || !peAnaliseCompleta) return PE_INATIVO
-    return calcularPEProporcional(peRows, config.cc_pe_default, evoRows, coordsAtivos)
-  }, [config, peAnaliseCompleta, peRows, evoRows, coordsAtivos])
+    if (!parametros || !peAnaliseCompleta) return PE_INATIVO
+    return calcularPEProporcional(peRows, parametros.cc_pe_default, evoRows, coordsAtivos)
+  }, [parametros, peAnaliseCompleta, peRows, evoRows, coordsAtivos])
 
   const resultado: ProfRemunReal[] | null = useMemo(() => {
-    if (!config || !evoRows.length) return null
+    if (!parametros || !evoRows.length) return null
     return calcularRemuneracaoReal(evoRows, {
-      taxasPA: config.taxas_pa,
-      diarias: config.diarias,
-      etaBonus: config.eta_bonus_default,
-      ccPA: config.cc_pa_default,
-      ccPE: config.cc_pe_default,
+      taxasPA: taxas_pa,
+      diarias,
+      etaBonus: parametros.eta_bonus_default,
+      ccPA: parametros.cc_pa_default,
+      ccPE: parametros.cc_pe_default,
       antigos,
       cadastroPrestadores,
       peAnaliseCompleta,
       peProporcional,
       peStatusMensagem,
     })
-  }, [config, evoRows, antigos, cadastroPrestadores, peAnaliseCompleta, peProporcional, peStatusMensagem])
+  }, [parametros, taxas_pa, diarias, evoRows, antigos, cadastroPrestadores, peAnaliseCompleta, peProporcional, peStatusMensagem])
 
   return {
     resultado,
-    presenca: config?.presenca_padrao ?? 80,
+    presenca: parametros?.presenca_padrao ?? 80,
     evoRows,
     csvName,
     setCsvName,
@@ -257,7 +252,7 @@ export function useRemunRP() {
     peAnaliseCompleta,
     peStatusMensagem,
     cadastroPrestadores,
-    loading: configLoading,
-    error: configError,
+    loading: parametrosLoading || taxasLoading || feriadosLoading,
+    error: parametrosError,
   }
 }

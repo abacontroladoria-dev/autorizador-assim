@@ -2,7 +2,7 @@
 
 import { useSearchParams, useRouter } from "next/navigation"
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { AlertTriangle, Ban, CalendarClock, Loader2, Mail, XCircle } from "lucide-react"
+import { AlertTriangle, Ban, Loader2, XCircle } from "lucide-react"
 import { B } from "@/lib/cronograma/constants"
 import { buscarGradeComoCSVRows } from "@/lib/cronograma/gradeService"
 import { getRefWeek, waKey } from "@/lib/cronograma/helpers"
@@ -43,12 +43,6 @@ export function OcupacaoShell() {
   const activeTab: TabKey = rawTab && TABS.some(t => t.key === rawTab) ? (rawTab as TabKey) : "acompanhamento"
 
   const { setHeader } = useHeader()
-
-  useEffect(() => {
-    const h = TAB_HEADERS[activeTab]
-    setHeader(h.title, h.subtitle)
-    return () => setHeader("", "")
-  }, [activeTab, setHeader])
 
   const [res, setRes] = useState<AlgorithmResult | null>(null)
   const [load, setLoad] = useState(false)
@@ -91,6 +85,15 @@ export function OcupacaoShell() {
     return () => clearTimeout(t)
   }, [cRows, lRows, rec, inv, cfg, waMap, conf, pacBundles])
 
+  // Período (semana de referência) entra direto no subtítulo do cabeçalho — nada
+  // de repetir a mesma informação num pill separado abaixo, redundante em toda aba.
+  useEffect(() => {
+    const h = TAB_HEADERS[activeTab]
+    const subtitle = res ? `${h.subtitle} · ${res.semanaRef}` : h.subtitle
+    setHeader(h.title, subtitle)
+    return () => setHeader("", "")
+  }, [activeTab, res, setHeader])
+
   const handleWA = useCallback((s: Sugestao) => {
     sWa({ ...waMap, [waKey(s)]: "aguardando" })
   }, [waMap, sWa])
@@ -122,7 +125,6 @@ export function OcupacaoShell() {
     return m
   }, [res])
 
-  const aguardando = useMemo(() => Object.values(waMap).filter(v => v === "aguardando").length, [waMap])
   const incItems = useMemo(() => detectarInconsistencias(cRows, lRows), [cRows, lRows])
 
   // Carrega a grade da tabela csv_grades_profissionais (sincronizada diariamente às 06h).
@@ -144,21 +146,10 @@ export function OcupacaoShell() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column" }}>
-      {/* Status bar */}
-      {(res || load || err) && (
+      {/* Status bar — período já está no cabeçalho; "Salvo às" só faz sentido em
+          Acompanhamento (única aba que grava rec/inv/waMap). */}
+      {(load || err || (activeTab === "acompanhamento" && (savedAt || saveError))) && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "14px", alignItems: "center" }}>
-          {res && !load && (
-            <>
-              <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", background: B.limeLt, color: "#4a6e20", border: `1px solid ${B.lime}`, borderRadius: "999px", padding: "3px 10px", fontSize: "var(--text-xs)", fontWeight: "var(--weight-bold)" }}>
-                <CalendarClock size={12} /> {res.semanaRef}
-              </span>
-              {aguardando > 0 && (
-                <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", background: "var(--cron-active-bg)", color: B.blue, border: `1px solid ${B.blue}33`, borderRadius: "999px", padding: "3px 10px", fontSize: "var(--text-xs)", fontWeight: "var(--weight-bold)" }}>
-                  <Mail size={12} /> {aguardando} aguardando WhatsApp
-                </span>
-              )}
-            </>
-          )}
           {load && (
             <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "var(--text-xs)", color: B.blue, fontWeight: "var(--weight-semibold)" }}>
               <Loader2 size={12} className="animate-spin" /> Processando...
@@ -169,10 +160,10 @@ export function OcupacaoShell() {
               <AlertTriangle size={12} /> {err}
             </span>
           )}
-          {savedAt && !saveError && (
+          {activeTab === "acompanhamento" && savedAt && !saveError && (
             <span style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)" }}>Salvo às {savedAt}</span>
           )}
-          {saveError && (
+          {activeTab === "acompanhamento" && saveError && (
             <button
               type="button"
               style={{ display: "inline-flex", alignItems: "center", gap: "5px", background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: "999px", padding: "3px 10px", fontSize: "var(--text-xs)", fontWeight: "var(--weight-bold)", cursor: "pointer", fontFamily: "inherit" }}

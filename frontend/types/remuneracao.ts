@@ -1,22 +1,26 @@
 export type FeriadoInfo = {
   nome: string
   tipo: "integral" | "parcial"
-  horario_inicio?: string
-  horario_fim?: string
-  /** @deprecated usar horario_inicio — mantido só para não perder registros antigos já salvos. */
-  parcial_a_partir?: string
+  horario_inicio: string
+  horario_fim: string
 }
 
-export type RemuneracaoConfig = {
+export type TaxaEspecialidade = {
   id: string
-  taxas_pa: Record<string, number>
-  diarias: Record<string, number>
+  especialidade: string
+  taxa_pa: number
+  diaria: number
+  created_at: string
+  updated_at: string
+  updated_by: string | null
+}
+
+export type ParametrosGerais = {
+  id: string
   cc_pa_default: number
   cc_pe_default: number
   cc_lim_default: number
   eta_bonus_default: number
-  dow_pt: Record<string, string>
-  feriados: Record<string, FeriadoInfo>
   presenca_padrao: number
   updated_at: string
   updated_by: string | null
@@ -46,16 +50,6 @@ export type ContratoAtual = {
   cnpj: string | null
   contratos: ContratoAtualItem[]
   observacoes: string | null
-  created_at: string
-  updated_at: string
-}
-
-export type CapacidadeProfissional = {
-  id: string
-  profissional_nome: string
-  dias: Record<string, number>
-  padrao: number | null
-  limite_cc: number | null
   created_at: string
   updated_at: string
 }

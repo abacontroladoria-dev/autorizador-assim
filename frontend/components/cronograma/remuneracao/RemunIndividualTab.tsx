@@ -4,7 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { UserRound, FileText, FileSpreadsheet, XCircle, ChevronDown, Search } from "lucide-react"
 import { useHeader } from "@/contexts/HeaderContext"
 import { useRemuneracaoRPContext } from "@/contexts/RemuneracaoRPContext"
-import { useRemuneracaoConfig } from "@/hooks/useRemuneracaoConfig"
+import { useParametrosGerais } from "@/hooks/useParametrosGerais"
+import { useTaxasEspecialidade } from "@/hooks/useTaxasEspecialidade"
 import { exportResumoSessoesPdf } from "@/lib/remuneracao/exportResumoSessoesPdf"
 import { gerarPDF, gerarWord, montarInfoDocumentoPrestador, type PdfOpts } from "@/lib/remuneracao/documento"
 import { parseDateBR } from "@/lib/remuneracao/datas"
@@ -28,7 +29,8 @@ export function RemunIndividualTab() {
     peRows, carregarGrade, carregarPE, limparGrade, limparPE, setCsvName,
     cadastroPrestadores,
   } = useRemuneracaoRPContext()
-  const { config } = useRemuneracaoConfig()
+  const { parametros } = useParametrosGerais()
+  const { taxas_pa } = useTaxasEspecialidade()
   const { setHeader, setRightContent } = useHeader()
 
   const [profSelecionado, setProfSelecionado] = useState<string>("")
@@ -76,10 +78,10 @@ export function RemunIndividualTab() {
     }
   }, [selectOpen])
 
-  const ccPA     = config?.cc_pa_default ?? 50
-  const ccPE     = config?.cc_pe_default ?? 100
-  const etaBonus = config?.eta_bonus_default ?? 100
-  const taxasPA  = config?.taxas_pa ?? {}
+  const ccPA     = parametros?.cc_pa_default ?? 50
+  const ccPE     = parametros?.cc_pe_default ?? 100
+  const etaBonus = parametros?.eta_bonus_default ?? 100
+  const taxasPA  = taxas_pa
 
   const profissionais = useMemo(
     () => Array.from(new Set(resultado?.map(r => r.prof) || [])).sort((a, b) => a.localeCompare(b)),
