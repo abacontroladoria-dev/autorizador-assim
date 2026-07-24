@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
+  ArrowRightLeft,
   BarChart3,
   BriefcaseBusiness,
   Building2,
@@ -25,6 +26,7 @@ import {
   UserRound,
   Users,
   Database,
+  Wallet,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useHeader } from '@/contexts/HeaderContext'
@@ -80,6 +82,10 @@ const MODULE_ICONS: Record<string, React.ElementType> = {
   cronograma_ocupacao_paciente: UserCheck,
   ocupacao_clinica: ClipboardList,
   ocupacao_profissionais: BarChart3,
+  indicadores_ocupacao_unidades: Building2,
+  indicadores_pacientes: UserCheck,
+  indicadores_previsao_receitas: Wallet,
+  indicadores_comparativo_sessoes: ArrowRightLeft,
 }
 
 const GROUP_ICONS: Record<string, React.ElementType> = {

@@ -55,7 +55,7 @@ import { useTheme } from "@/contexts/ThemeContext"
 import { useImpersonation } from "@/contexts/ImpersonationContext"
 import { ImpersonationSelector } from "@/components/admin/ImpersonationSelector"
 import { ROLE_LABELS } from "@/constants/roleLabels"
-import { getRoleDefaultPermissions, codigosToRotas } from "@/lib/permissions/routes"
+import { getRoleDefaultPermissions, codigosToRotas, hasRouteAccess } from "@/lib/permissions/routes"
 import { getUsuarioPermissoes } from "@/services/permissoes.service"
 
 type Favorito = { label: string; path: string }
@@ -170,8 +170,8 @@ export default function Sidebar() {
 
   function canAccess(path: string) {
     if (!role) return false
-    const barePath = path.split("?")[0]
-    return allowedPaths.includes(barePath)
+    const [barePath, query] = path.split("?")
+    return hasRouteAccess(barePath, query ? `?${query}` : "", allowedPaths)
   }
 
   useEffect(() => {
@@ -509,14 +509,28 @@ export default function Sidebar() {
             </SidebarGroup>
           )}
 
-          {/* Indicadores */}
-          {canAccess("/cronograma/indicadores") && (
+          {/* Indicadores — uma permissão por aba, não uma pra rota inteira */}
+          {(canAccess("/cronograma/indicadores?tab=profissionais") ||
+            canAccess("/cronograma/indicadores?tab=unidades") ||
+            canAccess("/cronograma/indicadores?tab=pacientes") ||
+            canAccess("/cronograma/indicadores?tab=previsao-receitas") ||
+            canAccess("/cronograma/indicadores?tab=comparativo-sessoes")) && (
             <SidebarGroup title="Indicadores" icon={TrendingUp}>
-              <MenuItem label="Ocupação de Profissionais" icon={BarChart3} path="/cronograma/indicadores?tab=profissionais" />
-              <MenuItem label="Ocupação Clínica" icon={Building2} path="/cronograma/indicadores?tab=unidades" />
-              <MenuItem label="Dashboard de Pacientes" icon={UserCheck} path="/cronograma/indicadores?tab=pacientes" />
-              <MenuItem label="Previsão de Receitas" icon={Wallet} path="/cronograma/indicadores?tab=previsao-receitas" />
-              <MenuItem label="Comparativo de Sessões" icon={ArrowRightLeft} path="/cronograma/indicadores?tab=comparativo-sessoes" />
+              {canAccess("/cronograma/indicadores?tab=profissionais") && (
+                <MenuItem label="Ocupação de Profissionais" icon={BarChart3} path="/cronograma/indicadores?tab=profissionais" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=unidades") && (
+                <MenuItem label="Ocupação Clínica" icon={Building2} path="/cronograma/indicadores?tab=unidades" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=pacientes") && (
+                <MenuItem label="Dashboard de Pacientes" icon={UserCheck} path="/cronograma/indicadores?tab=pacientes" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=previsao-receitas") && (
+                <MenuItem label="Previsão de Receitas" icon={Wallet} path="/cronograma/indicadores?tab=previsao-receitas" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=comparativo-sessoes") && (
+                <MenuItem label="Comparativo de Sessões" icon={ArrowRightLeft} path="/cronograma/indicadores?tab=comparativo-sessoes" />
+              )}
             </SidebarGroup>
           )}
 
