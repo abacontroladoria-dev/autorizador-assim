@@ -71,16 +71,41 @@ Quem protege de verdade é o RLS de cada tabela no Postgres.
 
 ## Itens de sustentabilidade (não bloqueiam redeploy, revisar periodicamente)
 
-- MFA obrigatório para contas `admin`/`diretoria` — ainda não enforçado a
-  nível de RLS/Auth Hook, só disponível como opt-in (TOTP configurado em
-  `supabase/config.toml`, `[auth.mfa.totp]`).
-- Chave `SUPABASE_SERVICE_ROLE_KEY`: confirmar rotação periódica e que só
-  Edge Functions/servidor têm acesso — nunca browser. Nota: em 2026-07-24
-  encontramos essa chave hardcoded em texto puro em vários jobs de
-  `pg_cron` (`cron.job.command`) — ver migrations `202605*_sync_*_cron.sql`.
-  Ainda não migrado pra `supabase_vault` (extensão já habilitada no projeto).
-  Ao rotacionar a chave, também reescrever esses cron jobs.
-- Ambiente de staging separado (banco + app) antes de aplicar migration
-  direto em produção.
-- Backup automático do Supabase (plano pago) — confirmar se está ativo,
-  não depender só de backup manual antes de mudança pontual.
+- **MFA obrigatório para `admin`/`diretoria`** — ainda não enforçado. Checado
+  em 2026-07-24: **nenhuma** conta `admin`/`diretoria` tem MFA cadastrado
+  hoje, então NÃO dá pra exigir `aal2` nas policies agora (trancaria todo
+  mundo fora). Ordem correta: (1) pedir que cada conta `admin`/`diretoria`
+  cadastre um autenticador TOTP (já disponível, `[auth.mfa.totp]` no
+  `config.toml`), (2) só depois de confirmar 100% de adesão, adicionar
+  `auth.jwt()->>'aal' = 'aal2'` nas policies mais sensíveis
+  (`usuarios`, `usuarios_permissoes`).
+- **Chave `service_role` hardcoded em `pg_cron`** — ✅ Corrigido em
+  2026-07-24 (migration `20260724180000_migrar_cron_secrets_para_vault.sql`):
+  os 2 jobs afetados (`sync-reposicao-faltas`, `sync-grade-csv-daily`) agora
+  buscam a chave via `vault.decrypted_secrets` (secret `cron_service_role_key`)
+  em vez de literal no `cron.job.command`. O VALOR da chave não mudou (só
+  como ela é referenciada) — rotação de fato da chave continua pendente,
+  ver item abaixo.
+- **Rotação da `SUPABASE_SERVICE_ROLE_KEY`** — ainda não feita. Precisa ser
+  coordenada (gera nova chave no dashboard Supabase, atualiza Coolify e
+  qualquer outro consumidor, depois atualiza o secret no Vault com
+  `vault.update_secret`). Fora do escopo de uma sessão de código — decisão
+  e execução compartilhada com quem administra o Coolify.
+- **Ambiente de staging separado** (banco + app) antes de aplicar migration
+  direto em produção — ainda não existe. Envolve criar um novo projeto
+  Supabase (custo adicional possível) + novo app no Coolify apontando pra
+  esse projeto. Decisão de infraestrutura, não implementado.
+- **Backup automático do Supabase** — ✅ Confirmado ativo em 2026-07-24:
+  backups físicos diários (`walg_enabled: true`), 8 dias de histórico
+  verificados. PITR (recuperação minuto a minuto) está desligado — upgrade
+  opcional, não é um gap.
+
+## Achado extra fora do escopo de segurança (2026-07-24)
+
+- Cron `cco-conciliation-engine` (Conciliação ASSIM, agenda a cada 10 min)
+  está **falhando 100% das execuções** com
+  `ERROR: unrecognized configuration parameter "app.supabase_url"` — a GUC
+  que essa função espera nunca foi configurada no banco. Não é falha de
+  segurança (não expõe nada), é bug operacional: a conciliação automática
+  simplesmente não roda. Não corrigido nesta sessão (fora do escopo pedido);
+  investigar `cron.job_run_details where jobid = 18` pra confirmar histórico.
