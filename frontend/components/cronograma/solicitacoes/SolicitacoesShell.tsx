@@ -4,16 +4,19 @@ import { useSearchParams, useRouter } from "next/navigation"
 import { useEffect } from "react"
 import { useHeader } from "@/contexts/HeaderContext"
 import { PreencherProfTab } from "@/components/cronograma/shared/PreencherProfTab"
-import { NovoCronogramaTab } from "@/components/cronograma/shared/NovoCronogramaTab"
 import { BancoDadosTab } from "./BancoDadosTab"
 import type { CsvRow, LaudoRow, DispRow, CfgState } from "@/types/cronograma"
 
 // "Saída de Profissional" e "Ocupação · Paciente" viraram rotas dedicadas
 // (/cronograma/solicitacoes/saida e /cronograma/solicitacoes/ocupacao-paciente)
 // para poderem ter permissões independentes — ver frontend/lib/permissions/routes.ts
+//
+// "Novo Cronograma" (novo-cron) foi retirado do ar por não estar pronto, e
+// "Aumentar Ocupação (Profissional)" (ocup-prof) foi removida a pedido do
+// usuário — ambos os componentes (NovoCronogramaTab, OcupProfMode) seguem no
+// código, só não são mais roteáveis aqui.
 const TABS = [
   { key: "simulacao",  label: "Simulação de Novo Prestador" },
-  { key: "novo-cron",  label: "Novo Cronograma" },
 ] as const
 
 type TabKey = (typeof TABS)[number]["key"]
@@ -37,7 +40,6 @@ export function SolicitacoesShell({ cRows, lRows, dispRows, cfg }: ShellProps) {
     const tab = TABS.find(t => t.key === activeTab)
     const subtitles: Record<string, string> = {
       "simulacao":  "Simulação de novo prestador",
-      "novo-cron":  "Criação de novo cronograma",
     }
     setHeader(tab?.label ?? "Cronograma", subtitles[activeTab] ?? "")
   }, [activeTab, setHeader])
@@ -46,6 +48,7 @@ export function SolicitacoesShell({ cRows, lRows, dispRows, cfg }: ShellProps) {
   useEffect(() => {
     if (raw === "saida") { router.replace("/cronograma/saida-profissional"); return }
     if (raw === "ocup-pac") { router.replace("/cronograma/ocupacao-paciente"); return }
+    if (raw === "novo-cron") { router.replace("/cronograma/solicitacoes?tab=simulacao"); return }
     if (!raw) router.replace("/cronograma/solicitacoes?tab=simulacao")
   }, [raw, router])
 
@@ -68,10 +71,6 @@ function TabContent({
 
   if (tab === "simulacao") {
     return <PreencherProfTab cRows={cRows} lRows={lRows} initialMode="sim" fixedMode />
-  }
-
-  if (tab === "novo-cron") {
-    return <NovoCronogramaTab cRows={cRows} lRows={lRows} dispRows={dispRows} />
   }
 
   return (
