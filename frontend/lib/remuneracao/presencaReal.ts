@@ -77,6 +77,50 @@ export async function buscarPresencaFilaAutorizacoes(dataInicio: string, dataFim
 }
 
 /**
+ * IDs de agendamento (tita_agendamento_id) com falta registrada em
+ * fila_autorizacoes no intervalo de datas informado, usados na Previsão de
+ * Receitas para deduzir da receita mensal projetada. Mesmo critério de
+ * "falta real" de buscarPresencaFilaAutorizacoes: falta_revertida_em
+ * preenchido não conta (foi desfeita, virou presença normal de novo). Sessões
+ * sem tita_agendamento_id não entram aqui — não há como cruzar com segurança
+ * contra csv_grades_profissionais sem esse id.
+ */
+export async function buscarFaltasFilaAutorizacoes(dataInicio: string, dataFim: string): Promise<Set<number>> {
+  const faltas = new Set<number>()
+  if (!dataInicio || !dataFim) return faltas
+
+  const sb = getSupabaseClient()
+  let from = 0
+
+  while (true) {
+    const { data, error } = await sb
+      .from("fila_autorizacoes")
+      .select("tita_agendamento_id, falta_revertida_em")
+      .eq("status", "falta")
+      .is("falta_revertida_em", null)
+      .not("tita_agendamento_id", "is", null)
+      .gte("data_atendimento", dataInicio)
+      .lte("data_atendimento", dataFim)
+      .range(from, from + PAGE - 1)
+
+    if (error) {
+      console.error("Erro ao buscar faltas em fila_autorizacoes:", error)
+      return faltas
+    }
+
+    const rows = data ?? []
+    rows.forEach((r: any) => {
+      if (r.tita_agendamento_id != null) faltas.add(Number(r.tita_agendamento_id))
+    })
+
+    if (rows.length < PAGE) break
+    from += PAGE
+  }
+
+  return faltas
+}
+
+/**
  * Resolve a presença de uma sessão da grade: tenta pelo id do agendamento
  * (SessaoReal.id, o mesmo tita_agendamento_id) antes de cair para
  * paciente+data+hora. Retorna undefined quando não há registro em nenhum dos

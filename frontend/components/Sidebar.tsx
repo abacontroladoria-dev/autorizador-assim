@@ -40,6 +40,7 @@ import {
   Calendar,
   FileSignature,
   Percent,
+  History,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -100,6 +101,7 @@ const pathIconMap: Record<string, any> = {
   "/cronograma/indicadores?tab=unidades": Building2,
   "/cronograma/indicadores?tab=pacientes": UserCheck,
   "/cronograma/indicadores?tab=previsao-receitas": Wallet,
+  "/cronograma/indicadores?tab=historico-receitas": History,
   "/cronograma/indicadores?tab=comparativo-sessoes": ArrowRightLeft,
 }
 
@@ -517,6 +519,7 @@ export default function Sidebar() {
             canAccess("/cronograma/indicadores?tab=unidades") ||
             canAccess("/cronograma/indicadores?tab=pacientes") ||
             canAccess("/cronograma/indicadores?tab=previsao-receitas") ||
+            canAccess("/cronograma/indicadores?tab=historico-receitas") ||
             canAccess("/cronograma/indicadores?tab=comparativo-sessoes")) && (
             <SidebarGroup title="Indicadores" icon={TrendingUp}>
               {canAccess("/cronograma/indicadores?tab=profissionais") && (
@@ -530,6 +533,9 @@ export default function Sidebar() {
               )}
               {canAccess("/cronograma/indicadores?tab=previsao-receitas") && (
                 <MenuItem label="Previsão de Receitas" icon={Wallet} path="/cronograma/indicadores?tab=previsao-receitas" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=historico-receitas") && (
+                <MenuItem label="Histórico de Receitas" icon={History} path="/cronograma/indicadores?tab=historico-receitas" />
               )}
               {canAccess("/cronograma/indicadores?tab=comparativo-sessoes") && (
                 <MenuItem label="Comparativo de Sessões" icon={ArrowRightLeft} path="/cronograma/indicadores?tab=comparativo-sessoes" />
