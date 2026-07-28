@@ -261,8 +261,37 @@ function mesInteiroRange(ano: number, mes: number): { inicio: string; fim: strin
   return { inicio, fim }
 }
 
+/**
+ * Esta função só deve ser chamada pelo cron (net.http_post com o token do
+ * Vault) — nunca por um usuário comum do app, mesmo autenticado. Diferente
+ * das funções admin-* (que resolvem o usuário e checam usuarios.role), aqui
+ * quem chama não é uma pessoa, é o próprio job — então a checagem certa é o
+ * "role" do JWT em si (claim "role"), não a identidade de um usuário: só um
+ * JWT cujo claim role === "service_role" (ou seja, quem já possui a
+ * SUPABASE_SERVICE_ROLE_KEY) passa. Um usuário comum logado tem role
+ * "authenticated" no token, e a anon key tem role "anon" — ambos são
+ * rejeitados. Isso fecha o achado da revisão de segurança de 2026-07-28:
+ * antes, qualquer JWT válido (inclusive de um usuário sem privilégio
+ * nenhum) conseguia invocar esta function e sobrescrever/"fechar"
+ * indevidamente o histórico financeiro.
+ */
+function chamadorEhServiceRole(req: Request): boolean {
+  const auth = req.headers.get("authorization") || ""
+  const token = auth.match(/^Bearer\s+(.+)$/i)?.[1]
+  if (!token) return false
+  try {
+    const payloadB64 = token.split(".")[1]
+    const payloadJson = atob(payloadB64.replace(/-/g, "+").replace(/_/g, "/"))
+    const payload = JSON.parse(payloadJson) as { role?: string }
+    return payload.role === "service_role"
+  } catch {
+    return false
+  }
+}
+
 serve(async (req: Request) => {
   if (req.method !== "POST") return json({ error: "method_not_allowed" }, 405)
+  if (!chamadorEhServiceRole(req)) return json({ error: "forbidden" }, 403)
 
   const body = await req.json().catch(() => ({})) as { competencia?: string; fechamento?: boolean }
   const hoje = new Date(new Date().toLocaleString("en-US", { timeZone: "America/Sao_Paulo" }))
