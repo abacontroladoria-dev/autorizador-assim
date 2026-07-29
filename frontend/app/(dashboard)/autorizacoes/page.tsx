@@ -522,7 +522,7 @@ useEffect(() => {
 		  <div className="text-sm text-slate-500 flex items-center gap-2">
 			Solicitado por:{" "}
 			<span className="font-medium text-slate-700">
-			  {selecionado?.atendente_nome || '—'}
+			  {selecionado?.criado_por || '—'}
 			</span>
 		  </div>
 

@@ -37,6 +37,8 @@ type CriarAutorizacaoPayload = {
 
   usuario_id?: string
 
+  criado_por?: string
+
   machine_id?: string
 
   horario_autorizacao?: string
@@ -59,6 +61,27 @@ function semDadosPacienteComplementares(error: any) {
   )
 }
 
+// Nome da atendente logada — resolvido uma vez por sessão (mesmo lookup usado no
+// cancelamento). Gravado em fila_autorizacoes.criado_por para a Ficha Operacional
+// (SidePanel "Solicitado por") exibir o responsável sem depender de join/RPC.
+let _nomeUsuarioAtual: string | null = null
+async function resolverNomeUsuario(
+  supabase: ReturnType<typeof getSupabaseClient>
+): Promise<string | null> {
+  if (_nomeUsuarioAtual) return _nomeUsuarioAtual
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) return null
+  let nome: string | null = user.email ?? null
+  const { data: perfil } = await supabase
+    .from('usuarios')
+    .select('nome')
+    .eq('id', user.id)
+    .maybeSingle()
+  if (perfil?.nome) nome = perfil.nome
+  _nomeUsuarioAtual = nome
+  return nome
+}
+
 	
 export async function criarAutorizacao(
   payload: CriarAutorizacaoPayload
@@ -66,6 +89,9 @@ export async function criarAutorizacao(
 
   const supabase =
     getSupabaseClient()
+
+  const criadoPor =
+    payload.criado_por ?? (await resolverNomeUsuario(supabase))
 
   const insertPayload = {
 
@@ -149,6 +175,9 @@ export async function criarAutorizacao(
 
     usuario_id:
       payload.usuario_id || null,
+
+    criado_por:
+      criadoPor,
 
     machine_id:
       payload.machine_id || null,

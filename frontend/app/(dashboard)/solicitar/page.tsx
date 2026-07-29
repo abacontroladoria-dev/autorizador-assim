@@ -122,6 +122,11 @@ export default function SolicitarPage() {
 
   const [listaDia, setListaDia] = useState<any[]>([])
 
+  // Snapshot completo e ESTÁVEL do dia (setado só no carregarLista, nunca mutado
+  // pelos handlers de falta/manual). Usado para a contagem "N de Total" do badge,
+  // que antes encolhia conforme o operador processava sessões.
+  const [listaDiaCompleta, setListaDiaCompleta] = useState<any[]>([])
+
   const [loadingLista, setLoadingLista] = useState(true)
 
   const supabase = getSupabaseClient()
@@ -148,11 +153,16 @@ const unidades = [
   const sessoesHoje = useMemo(() => {
     const grupos: Record<number, { horario: string; terapia: string }[]> = {}
 
-    listaDia.forEach(p => {
-      const id = p.paciente_id
-      if (!grupos[id]) grupos[id] = []
-      grupos[id].push({ horario: p.horario ?? '', terapia: p.terapias?.[0] ?? '' })
-    })
+    // Conta sobre o dia COMPLETO e estável, excluindo terapias ocultas/blacklist.
+    // Assim "N de Total" reflete todas as sessões do dia do paciente e NÃO encolhe
+    // ao concluir/marcar falta (que só removem de listaDia, usado na exibição).
+    listaDiaCompleta
+      .filter(p => !terapiaOculta(p))
+      .forEach(p => {
+        const id = p.paciente_id
+        if (!grupos[id]) grupos[id] = []
+        grupos[id].push({ horario: p.horario ?? '', terapia: p.terapias?.[0] ?? '' })
+      })
 
     const lookup: Record<string, { index: number; total: number }> = {}
     Object.entries(grupos).forEach(([id, sessoes]) => {
@@ -163,7 +173,7 @@ const unidades = [
     })
 
     return lookup
-  }, [listaDia])
+  }, [listaDiaCompleta])
 
   const convenios = [
 
@@ -341,6 +351,7 @@ async function carregarLista() {
   }
 
   setListaDia(data || [])
+  setListaDiaCompleta(data || [])
 
   setLoadingLista(false)
 }
