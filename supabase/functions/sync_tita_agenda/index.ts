@@ -525,6 +525,10 @@ async function sincronizarData(
   }
 
   // Atualiza registros existentes que têm dados faltantes (numero_carteirinha = NULL)
+  // NÃO grava crm/nome_medico: essas colunas NÃO existem em agenda_tita — o
+  // crm/nome_medico são resolvidos na view agenda_tita_autorizacao via LATERAL
+  // em agenda_orbita. Escrevê-los aqui gerava PGRST204 ("column 'crm' not found")
+  // em todo sync, abortando o backfill de numero_carteirinha junto.
   for (const item of atualizarComDadosFaltantes) {
     const dadosPaciente = await buscarDadosPaciente(item.paciente_nome, item.paciente_id, supabase)
     if (dadosPaciente.numero_carteirinha) {
@@ -532,8 +536,6 @@ async function sincronizarData(
         .from("agenda_tita")
         .update({
           numero_carteirinha: dadosPaciente.numero_carteirinha,
-          crm: dadosPaciente.crm,
-          nome_medico: dadosPaciente.nome_medico,
           updated_at: agora,
         })
         .eq("id", item.id)
