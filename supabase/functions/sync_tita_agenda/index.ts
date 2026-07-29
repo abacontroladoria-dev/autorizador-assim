@@ -66,6 +66,29 @@ function normalizarDataNascimento(valor: unknown): string | null {
   return null
 }
 
+// CPF só com dígitos (a TiTa às vezes devolve formatado "127.251.677-60" e às
+// vezes cru "22444646797"). Normalizar evita duplicidade de formato e permite
+// comparar valor a valor no refresh de demografia.
+function normalizarCpf(valor: unknown): string | null {
+  if (!valor) return null
+  const digitos = String(valor).replace(/\D/g, "")
+  return digitos.length > 0 ? digitos : null
+}
+
+// Só os dígitos, para comparar CPF armazenado (possivelmente formatado) com o
+// valor cru vindo da TiTa sem disparar update por diferença de formato.
+function apenasDigitos(valor: unknown): string | null {
+  if (valor == null) return null
+  const d = String(valor).replace(/\D/g, "")
+  return d.length > 0 ? d : null
+}
+
+// Compara data (armazenada como date/string) com ISO YYYY-MM-DD.
+function isoData(valor: unknown): string | null {
+  if (valor == null) return null
+  return String(valor).slice(0, 10)
+}
+
 // Compara dois valores anuláveis convertendo para string.
 const eq = (a: unknown, b: unknown): boolean => {
   if (a == null && b == null) return true
@@ -335,7 +358,7 @@ async function sincronizarData(
       hora_final:            a.hora_final,
       paciente_id:           a.favorecido?.id           ?? null,
       paciente_nome:         a.favorecido?.nome         ?? null,
-      cpf:                   a.favorecido?.cpf          ?? null,
+      cpf:                   normalizarCpf(a.favorecido?.cpf),
       data_nascimento:       normalizarDataNascimento(a.favorecido?.data_nascimento),
       profissional_id:       a.profissional?.id         ?? null,
       profissional_nome:     a.profissional?.name       ?? null,
@@ -377,7 +400,7 @@ async function sincronizarData(
   // Busca registros ativos existentes para esta data
   const { data: existentes, error: fetchError } = await supabase
     .from("agenda_tita")
-    .select("id, tita_agendamento_id, paciente_id, profissional_id, terapia_id, sala_id, hora_inicial, hora_final")
+    .select("id, tita_agendamento_id, paciente_id, profissional_id, terapia_id, sala_id, hora_inicial, hora_final, cpf, data_nascimento, numero_carteirinha")
     .eq("data_atendimento", data)
     .eq("ativo", true)
 
@@ -391,6 +414,12 @@ async function sincronizarData(
   const inutilizarAlterado: number[] = []
   const inutilizarExcluido: number[] = []
   const atualizarComDadosFaltantes: Array<{ id: number; paciente_nome: string; paciente_id: number | null }> = []
+  const atualizarDemografia: Array<{
+    id: number
+    cpf?: string | null
+    data_nascimento?: string | null
+    raw_json: unknown
+  }> = []
 
   // Processa registros vindos do TiTa
   for (const [titaId, reg] of incoming) {
@@ -410,14 +439,35 @@ async function sincronizarData(
       if (mudou) {
         inutilizarAlterado.push(existente.id)
         novos.push(reg)
-      } else if (!existente.numero_carteirinha) {
-        // Registro sem mudança estrutural, mas com dados faltantes (numero_carteirinha = NULL)
-        // Tenta buscar dados complementares para preenchimento
-        atualizarComDadosFaltantes.push({
-          id: existente.id,
-          paciente_nome: reg.paciente_nome as string,
-          paciente_id: reg.paciente_id as number | null,
-        })
+      } else {
+        // Sem mudança estrutural: NÃO reinsere. Mas refresca a demografia se a
+        // TiTa trouxe valor não-nulo diferente do armazenado — o cadastro pode
+        // ter sido corrigido na origem depois da 1ª captura (CPF trocado,
+        // nascimento ajustado). Sem isso, linhas antigas ficam congeladas para
+        // sempre com o valor velho/nulo e o /solicitar mostra dado divergente.
+        const cpfNovo  = reg.cpf as string | null            // já normalizado (só dígitos)
+        const nascNovo = reg.data_nascimento as string | null // ISO YYYY-MM-DD
+        const precisaCpf  = cpfNovo  != null && cpfNovo  !== apenasDigitos(existente.cpf)
+        const precisaNasc = nascNovo != null && nascNovo !== isoData(existente.data_nascimento)
+
+        if (precisaCpf || precisaNasc) {
+          atualizarDemografia.push({
+            id: existente.id,
+            cpf: precisaCpf ? cpfNovo : undefined,
+            data_nascimento: precisaNasc ? nascNovo : undefined,
+            raw_json: reg.raw_json,
+          })
+        }
+
+        if (!existente.numero_carteirinha) {
+          // Registro sem mudança estrutural, mas com dados faltantes (numero_carteirinha = NULL)
+          // Tenta buscar dados complementares para preenchimento
+          atualizarComDadosFaltantes.push({
+            id: existente.id,
+            paciente_nome: reg.paciente_nome as string,
+            paciente_id: reg.paciente_id as number | null,
+          })
+        }
       }
       // Sem mudança e com dados completos: ignora (não regrava o registro)
     }
@@ -493,6 +543,25 @@ async function sincronizarData(
         console.log(`[sync_tita_agenda] ✅ Preenchidos dados faltantes: ${item.paciente_nome} (ID: ${item.id})`)
       }
     }
+  }
+
+  // Refresca CPF/nascimento de linhas existentes cujo valor na TiTa mudou.
+  // Só grava o que realmente diferiu (nunca sobrescreve valor bom com nulo) e
+  // reatualiza o raw_json para o próximo diff ser fiel.
+  for (const item of atualizarDemografia) {
+    const upd: Record<string, unknown> = { updated_at: agora, raw_json: item.raw_json }
+    if (item.cpf !== undefined)             upd.cpf = item.cpf
+    if (item.data_nascimento !== undefined) upd.data_nascimento = item.data_nascimento
+    const { error } = await supabase
+      .from("agenda_tita")
+      .update(upd)
+      .eq("id", item.id)
+    if (error) {
+      console.warn(`[sync_tita_agenda] Erro ao refrescar demografia ID ${item.id}:`, error)
+    }
+  }
+  if (atualizarDemografia.length > 0) {
+    console.log(`[sync_tita_agenda] 🔄 Demografia atualizada: ${atualizarDemografia.length} linha(s) para ${data}`)
   }
 
   return incoming.size
