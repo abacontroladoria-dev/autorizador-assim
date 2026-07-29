@@ -405,7 +405,11 @@ export function ComparativoSessoesShell() {
                     <SortableTh label="Unidade" sortKey="unidade" activeKey={sortUnidade.key} dir={sortUnidade.dir} onClick={onSortUnidade} />
                     <SortableTh label={labelP1} sortKey="p1" activeKey={sortUnidade.key} dir={sortUnidade.dir} align="right" onClick={onSortUnidade} />
                     <SortableTh label={labelP2} sortKey="p2" activeKey={sortUnidade.key} dir={sortUnidade.dir} align="right" onClick={onSortUnidade} />
-                    <SortableTh label="Diferença" sortKey="diferenca" activeKey={sortUnidade.key} dir={sortUnidade.dir} align="right" onClick={onSortUnidade} />
+                    <SortableTh label="Sessões Aumentadas" sortKey="sessoesAumentadas" activeKey={sortUnidade.key} dir={sortUnidade.dir} align="right" onClick={onSortUnidade} />
+                    <SortableTh label="Pacientes com Aumento" sortKey="pacientesComAumento" activeKey={sortUnidade.key} dir={sortUnidade.dir} align="right" onClick={onSortUnidade} />
+                    <SortableTh label="Sessões Reduzidas" sortKey="sessoesReduzidas" activeKey={sortUnidade.key} dir={sortUnidade.dir} align="right" onClick={onSortUnidade} />
+                    <SortableTh label="Pacientes com Redução" sortKey="pacientesComReducao" activeKey={sortUnidade.key} dir={sortUnidade.dir} align="right" onClick={onSortUnidade} />
+                    <SortableTh label="Diferença de Sessões" sortKey="diferenca" activeKey={sortUnidade.key} dir={sortUnidade.dir} align="right" onClick={onSortUnidade} />
                     <SortableTh label="Variação %" sortKey="variacaoPct" activeKey={sortUnidade.key} dir={sortUnidade.dir} align="right" onClick={onSortUnidade} />
                   </tr>
                 </thead>
@@ -427,12 +431,16 @@ export function ComparativoSessoesShell() {
                           </td>
                           <td className="py-1.5 px-2 text-right tabular-nums">{u.p1}</td>
                           <td className="py-1.5 px-2 text-right tabular-nums">{u.p2}</td>
+                          <td className="py-1.5 px-2 text-right tabular-nums text-emerald-600 dark:text-emerald-400">{u.sessoesAumentadas > 0 ? `+${u.sessoesAumentadas}` : "—"}</td>
+                          <td className="py-1.5 px-2 text-right tabular-nums">{u.pacientesComAumento > 0 ? u.pacientesComAumento : "—"}</td>
+                          <td className="py-1.5 px-2 text-right tabular-nums text-rose-600 dark:text-rose-400">{u.sessoesReduzidas > 0 ? `-${u.sessoesReduzidas}` : "—"}</td>
+                          <td className="py-1.5 px-2 text-right tabular-nums">{u.pacientesComReducao > 0 ? u.pacientesComReducao : "—"}</td>
                           <td className="py-1.5 px-2 text-right"><DiffBadge v={u.diferenca} /></td>
                           <td className="py-1.5 pl-2 text-right tabular-nums">{fmtPct(u.variacaoPct)}</td>
                         </tr>
                         {aberta && (
                           <tr className="border-b border-border/60 last:border-0 bg-muted/20">
-                            <td colSpan={5} className="p-0">
+                            <td colSpan={9} className="p-0">
                               <div className="px-4 py-3">
                                 <table className="w-full text-[11px]">
                                   <thead>
@@ -470,6 +478,10 @@ export function ComparativoSessoesShell() {
                     <td className="py-1.5 pr-2">TOTAL</td>
                     <td className="py-1.5 px-2 text-right tabular-nums">{resultado.totalP1}</td>
                     <td className="py-1.5 px-2 text-right tabular-nums">{resultado.totalP2}</td>
+                    <td className="py-1.5 px-2 text-right tabular-nums text-emerald-600 dark:text-emerald-400">+{resultado.resumo.sessoesAumentadas}</td>
+                    <td className="py-1.5 px-2 text-right tabular-nums">{resultado.resumo.pacientesAumentaram}</td>
+                    <td className="py-1.5 px-2 text-right tabular-nums text-rose-600 dark:text-rose-400">-{resultado.resumo.sessoesReduzidas}</td>
+                    <td className="py-1.5 px-2 text-right tabular-nums">{resultado.resumo.pacientesReduziram}</td>
                     <td className="py-1.5 px-2 text-right"><DiffBadge v={resultado.diferenca} /></td>
                     <td className="py-1.5 pl-2 text-right tabular-nums">{fmtPct(resultado.variacaoPct)}</td>
                   </tr>

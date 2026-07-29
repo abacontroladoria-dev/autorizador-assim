@@ -110,6 +110,14 @@ export interface UnidadeComparativo {
   variacaoPct: number | null
   /** Nº de pacientes distintos com ao menos uma sessão nessa unidade, em qualquer um dos dois períodos. */
   qtdPacientes: number
+  /** Soma das sessões ganhas pelos pacientes que aumentaram nessa unidade (só a parte positiva) — explica quando a diferença líquida (ex.: +10) esconde movimentos maiores em direções opostas (ex.: +30 de uns, -20 de outros). */
+  sessoesAumentadas: number
+  /** Nº de pacientes dessa unidade cujas sessões aumentaram de P1 pra P2. */
+  pacientesComAumento: number
+  /** Soma das sessões perdidas pelos pacientes que reduziram nessa unidade (só a parte negativa, em módulo). */
+  sessoesReduzidas: number
+  /** Nº de pacientes dessa unidade cujas sessões reduziram de P1 pra P2. */
+  pacientesComReducao: number
 }
 
 export interface PacienteComparativo {
@@ -214,11 +222,30 @@ export function calcularComparativo(sessoesP1: SessaoComparativo[], sessoesP2: S
   }
   for (const s of sessoesP1) { const acc = unidadeAcc(s.unidade); acc.p1 += 1; acc.pacientes.add(chaveDe(s)) }
   for (const s of sessoesP2) { const acc = unidadeAcc(s.unidade); acc.p2 += 1; acc.pacientes.add(chaveDe(s)) }
+
+  // Agrupa as sessões por unidade pra poder contar, por paciente, quantos
+  // aumentaram/reduziram dentro de cada unidade (a diferença líquida da
+  // unidade sozinha pode esconder isso, ex.: +30 de uns e -20 de outros = +10).
+  const sessoesP1PorUnidade = new Map<string, SessaoComparativo[]>()
+  const sessoesP2PorUnidade = new Map<string, SessaoComparativo[]>()
+  for (const s of sessoesP1) { const arr = sessoesP1PorUnidade.get(s.unidade) ?? []; arr.push(s); sessoesP1PorUnidade.set(s.unidade, arr) }
+  for (const s of sessoesP2) { const arr = sessoesP2PorUnidade.get(s.unidade) ?? []; arr.push(s); sessoesP2PorUnidade.set(s.unidade, arr) }
+
   const porUnidade: UnidadeComparativo[] = [...unidades.entries()]
-    .map(([unidade, v]) => ({
-      unidade, p1: v.p1, p2: v.p2, diferenca: v.p2 - v.p1, variacaoPct: variacao(v.p1, v.p2),
-      qtdPacientes: v.pacientes.size,
-    }))
+    .map(([unidade, v]) => {
+      const pacientesDaUnidade = agregarPorPaciente(sessoesP1PorUnidade.get(unidade) ?? [], sessoesP2PorUnidade.get(unidade) ?? [])
+      let sessoesAumentadas = 0, pacientesComAumento = 0
+      let sessoesReduzidas = 0, pacientesComReducao = 0
+      for (const p of pacientesDaUnidade) {
+        if (p.diferenca > 0) { sessoesAumentadas += p.diferenca; pacientesComAumento++ }
+        else if (p.diferenca < 0) { sessoesReduzidas += -p.diferenca; pacientesComReducao++ }
+      }
+      return {
+        unidade, p1: v.p1, p2: v.p2, diferenca: v.p2 - v.p1, variacaoPct: variacao(v.p1, v.p2),
+        qtdPacientes: v.pacientes.size,
+        sessoesAumentadas, pacientesComAumento, sessoesReduzidas, pacientesComReducao,
+      }
+    })
     .sort((a, b) => {
       const ia = ORDEM_UNIDADES.indexOf(a.unidade)
       const ib = ORDEM_UNIDADES.indexOf(b.unidade)

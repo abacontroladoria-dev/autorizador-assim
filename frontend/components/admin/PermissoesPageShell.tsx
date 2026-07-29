@@ -29,6 +29,7 @@ import {
   Users,
   Database,
   Wallet,
+  History,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useHeader } from '@/contexts/HeaderContext'
@@ -89,6 +90,7 @@ const MODULE_ICONS: Record<string, React.ElementType> = {
   indicadores_ocupacao_unidades: Building2,
   indicadores_pacientes: UserCheck,
   indicadores_previsao_receitas: Wallet,
+  indicadores_historico_receitas: History,
   indicadores_comparativo_sessoes: ArrowRightLeft,
 }
 

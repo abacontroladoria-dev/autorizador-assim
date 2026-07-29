@@ -29,13 +29,20 @@ import { SortableTh, ordenarPor, type SortDir } from "@/components/cronograma/ui
 import { useOcupacaoSalas } from "@/hooks/useOcupacaoSalas"
 import { useConvenioValores } from "@/hooks/useConvenioValores"
 import { useFeriados } from "@/hooks/useFeriados"
+import { useLinhasMesInteiro } from "@/hooks/useLinhasMesInteiro"
+import { usePrevisaoReceitasHistorico } from "@/hooks/usePrevisaoReceitasHistorico"
+import { getRefWeekDoMes, labelMesAno } from "@/lib/cronograma/helpers"
+import { SeletorMesPrevisao } from "./SeletorMesPrevisao"
 import {
   calcularPrevisaoReceita,
-  type PrevisaoReceitaConvenio, type PrevisaoReceitaSessao, type PrevisaoReceitaSegmento,
+  enriquecerComDeducaoFalta,
+  calcularSessoesMensaisPorConvenio,
+  agregarSegmentoHistorico,
+  type PrevisaoReceitaConvenio, type PrevisaoReceitaSessao, type PrevisaoReceitaSegmento, type PrevisaoReceitaGeral,
 } from "@/lib/cronograma/faturamentoProjecao"
 
-type VisaoDetalhe = "dia" | "terapia" | "sessao"
-const SORT_PADRAO_SESSAO = { key: "pacienteNome" as keyof PrevisaoReceitaSessao, dir: "asc" as SortDir }
+type VisaoDetalhe = "dia" | "terapia" | "paciente"
+const SORT_PADRAO_PACIENTE = { key: "pacienteNome" as keyof PrevisaoReceitaPacienteAgregado, dir: "asc" as SortDir }
 
 function fmtReal(v: number): string {
   return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
@@ -57,6 +64,57 @@ const ORIGEM_LABEL: Record<string, string> = {
   geral: "Regra geral",
   pacote_avaliacao: "Pacote de sessões",
   sem_valor: "Sem valor",
+}
+
+interface PrevisaoReceitaPacienteAgregado {
+  chave: string
+  pacienteId: number | null
+  pacienteNome: string
+  sessoesCount: number
+  /** Quantas dessas sessões do mês estão marcadas como falta em fila_autorizacoes (não revertida). */
+  faltasCount: number
+  /** Soma de todos os valores das sessões desse paciente no mês (sessões sem valor não entram na soma; inclui as sessões em falta, ver deducaoFalta). */
+  valorSemDeducao: number
+  /** Soma do valor só das sessões em falta desse paciente — o mesmo critério usado na dedução por convênio. */
+  deducaoFalta: number
+  /** valorSemDeducao − deducaoFalta. */
+  valorComDeducao: number
+  sessoes: PrevisaoReceitaSessao[]
+}
+
+/**
+ * Aglutina as sessões do mês por paciente — ID Paciente, Nome, sessões/faltas/valor do mês.
+ *
+ * `aplicaDeducaoFalta` deve ser true SÓ no segmento Multidisciplinar — no
+ * Processo Diagnóstico (cobrado em bloco/pacote, ver enriquecerComDeducaoFalta
+ * em faturamentoProjecao.ts) uma falta pontual não reduz nada, então
+ * deducaoFalta/valorComDeducao ficam neutros mesmo com sessões emFalta, pra
+ * não divergir do total do convênio (que nunca deduz nesse segmento).
+ * faltasCount continua contando normalmente — é só informativo.
+ */
+function agregarPorPaciente(sessoes: PrevisaoReceitaSessao[], aplicaDeducaoFalta: boolean): PrevisaoReceitaPacienteAgregado[] {
+  const map = new Map<string, PrevisaoReceitaPacienteAgregado>()
+  for (const s of sessoes) {
+    const chave = s.pacienteId !== null ? `id:${s.pacienteId}` : `nome:${s.pacienteNome}`
+    let entry = map.get(chave)
+    if (!entry) {
+      entry = {
+        chave, pacienteId: s.pacienteId, pacienteNome: s.pacienteNome,
+        sessoesCount: 0, faltasCount: 0, valorSemDeducao: 0, deducaoFalta: 0, valorComDeducao: 0,
+        sessoes: [],
+      }
+      map.set(chave, entry)
+    }
+    entry.sessoesCount += 1
+    entry.valorSemDeducao += s.valor ?? 0
+    if (s.emFalta) {
+      entry.faltasCount += 1
+      if (aplicaDeducaoFalta) entry.deducaoFalta += s.valor ?? 0
+    }
+    entry.sessoes.push(s)
+  }
+  for (const entry of map.values()) entry.valorComDeducao = entry.valorSemDeducao - entry.deducaoFalta
+  return Array.from(map.values())
 }
 
 function chaveSessao(convenio: string, s: PrevisaoReceitaSessao): string {
@@ -94,10 +152,12 @@ interface SessaoRowProps {
   /** Valor à vista cadastrado pra terapia dessa sessão, quando origem é "pacote_avaliacao" (Avaliação Neuropsicológica/Psiquiatra-Neurologista) — só exibição, não é somado por sessão (o pacote é cobrado uma vez por paciente, já contabilizado à parte na receita mensal). */
   valorPacote: number | null
   onSelect: (chave: string) => void
+  /** false dentro do destrinchamento "Por paciente", onde a coluna Paciente já é redundante (a linha-pai já identifica quem é). */
+  mostrarPaciente?: boolean
 }
 
 /** Memoizado — só re-renderiza quando a PRÓPRIA seleção/dado muda, não a cada clique em qualquer outra linha da tabela. */
-const SessaoRow = memo(function SessaoRow({ s, chave, selecionada, valorPacote, onSelect }: SessaoRowProps) {
+const SessaoRow = memo(function SessaoRow({ s, chave, selecionada, valorPacote, onSelect, mostrarPaciente = true }: SessaoRowProps) {
   const ehPacote = s.origem === "pacote_avaliacao"
   const valorExibido = s.valor !== null ? s.valor : (ehPacote ? valorPacote : null)
   const origemLabel = ehPacote
@@ -106,14 +166,21 @@ const SessaoRow = memo(function SessaoRow({ s, chave, selecionada, valorPacote, 
   return (
     <tr
       onClick={() => onSelect(chave)}
-      className={`cursor-pointer border-t border-border/40 ${selecionada ? "bg-emerald-100 dark:bg-emerald-950/50" : "hover:bg-muted/40"}`}
+      className={`cursor-pointer border-t border-border/40 ${selecionada ? "bg-emerald-100 dark:bg-emerald-950/50" : s.emFalta ? "bg-rose-50 dark:bg-rose-950/20" : "hover:bg-muted/40"}`}
     >
       <td className="py-1 pr-2 text-muted-foreground">{s.agendamentoId ?? "—"}</td>
-      <td className="py-1 pr-2 font-medium text-foreground">
-        {s.pacienteNome}{s.pacienteId !== null && <span className="text-muted-foreground"> (ID {s.pacienteId})</span>}
-      </td>
+      {mostrarPaciente && (
+        <td className="py-1 pr-2 font-medium text-foreground">
+          {s.pacienteNome}{s.pacienteId !== null && <span className="text-muted-foreground"> (ID {s.pacienteId})</span>}
+        </td>
+      )}
       <td className="py-1 px-2 text-muted-foreground">
         {s.terapiaNome}{s.terapiaId !== null && <span> (ID {s.terapiaId})</span>}
+        {s.emFalta && (
+          <span className="ml-2 rounded px-1.5 py-0.5 text-[10px] font-bold uppercase text-rose-700 bg-rose-100 dark:text-rose-300 dark:bg-rose-900/40">
+            Falta
+          </span>
+        )}
       </td>
       <td className="py-1 px-2 text-muted-foreground">{s.diaLabel} · {fmtData(s.data)}</td>
       <td className={`py-1 px-2 text-right tabular-nums font-semibold ${valorExibido === null ? "text-amber-600 dark:text-amber-400" : ""}`}>
@@ -124,6 +191,81 @@ const SessaoRow = memo(function SessaoRow({ s, chave, selecionada, valorPacote, 
   )
 })
 
+interface PacienteRowProps {
+  p: PrevisaoReceitaPacienteAgregado
+  convenio: string
+  aberto: boolean
+  onToggle: (chave: string) => void
+  sessaoSelecionada: string | null
+  onSelectSessao: (chave: string) => void
+  valorPacotePorTerapia: Map<number, number>
+}
+
+/** Linha "Por paciente" — aglutinado por padrão; clicar no nome destrincha sessão por sessão abaixo. */
+function PacienteRow({ p, convenio, aberto, onToggle, sessaoSelecionada, onSelectSessao, valorPacotePorTerapia }: PacienteRowProps) {
+  const sessoesDoPaciente = useMemo(() => ordenarPor(p.sessoes, "data", "asc"), [p.sessoes])
+  return (
+    <Fragment>
+      <tr
+        onClick={() => onToggle(p.chave)}
+        className="cursor-pointer border-t border-border/40 hover:bg-muted/40"
+      >
+        <td className="py-1 pr-2 text-muted-foreground">{p.pacienteId ?? "—"}</td>
+        <td className="py-1 px-2 font-medium text-foreground">
+          <span className="inline-flex items-center gap-1">
+            {aberto ? <ChevronDown size={12} className="text-muted-foreground" /> : <ChevronRight size={12} className="text-muted-foreground" />}
+            {p.pacienteNome}
+          </span>
+        </td>
+        <td className="py-1 px-2 text-right tabular-nums">{p.sessoesCount}</td>
+        <td className={`py-1 px-2 text-right tabular-nums ${p.faltasCount > 0 ? "font-semibold text-rose-600 dark:text-rose-400" : ""}`}>
+          {p.faltasCount > 0 ? p.faltasCount : "—"}
+        </td>
+        <td className="py-1 px-2 text-right tabular-nums font-semibold text-amber-600 dark:text-amber-400">{fmtReal(p.valorSemDeducao)}</td>
+        <td className={`py-1 px-2 text-right tabular-nums ${p.deducaoFalta > 0 ? "font-semibold text-rose-600 dark:text-rose-400" : ""}`}>
+          {p.deducaoFalta > 0 ? `-${fmtReal(p.deducaoFalta)}` : "—"}
+        </td>
+        <td className="py-1 pl-2 text-right tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">{fmtReal(p.valorComDeducao)}</td>
+      </tr>
+      {aberto && (
+        <tr className="bg-muted/10">
+          <td colSpan={7} className="p-0">
+            <div className="px-3 py-2">
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr className="text-left text-muted-foreground">
+                    <th className="py-1 pr-2 font-semibold">ID Agend.</th>
+                    <th className="py-1 px-2 font-semibold">Terapia</th>
+                    <th className="py-1 px-2 font-semibold">Dia</th>
+                    <th className="py-1 px-2 text-right font-semibold">Valor</th>
+                    <th className="py-1 pl-2 text-left font-semibold">Origem</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {sessoesDoPaciente.map((s, i) => {
+                    const chave = chaveSessao(convenio, s)
+                    return (
+                      <SessaoRow
+                        key={`${chave}::${i}`}
+                        s={s}
+                        chave={chave}
+                        selecionada={sessaoSelecionada === chave}
+                        valorPacote={s.terapiaId !== null ? valorPacotePorTerapia.get(s.terapiaId) ?? null : null}
+                        onSelect={onSelectSessao}
+                        mostrarPaciente={false}
+                      />
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </td>
+        </tr>
+      )}
+    </Fragment>
+  )
+}
+
 interface ConvenioRowProps {
   c: PrevisaoReceitaConvenio
   mesReferenciaLabel: string | null
@@ -131,17 +273,28 @@ interface ConvenioRowProps {
   onSelectSessao: (chave: string) => void
   /** Mostra o aviso de valor médio estimado quando este convênio é "Particular" (só faz sentido no segmento Multidisciplinar). */
   avisoParticular?: boolean
+  /** Sessões REAIS do mês inteiro deste convênio (não a amostra semanal) — fonte da aba "Por paciente", pra mostrar todas as faltas do mês. */
+  porSessaoMes: PrevisaoReceitaSessao[]
+  /** true só no segmento Multidisciplinar — ver agregarPorPaciente. */
+  aplicaDeducaoFalta: boolean
 }
 
-function ConvenioRow({ c, mesReferenciaLabel, sessaoSelecionada, onSelectSessao, avisoParticular }: ConvenioRowProps) {
+function ConvenioRow({ c, mesReferenciaLabel, sessaoSelecionada, onSelectSessao, avisoParticular, porSessaoMes, aplicaDeducaoFalta }: ConvenioRowProps) {
   const [aberto, setAberto] = useState(false)
-  const [visao, setVisao] = useState<VisaoDetalhe>("sessao")
-  const [sortSessao, setSortSessao] = useState(SORT_PADRAO_SESSAO)
+  const [visao, setVisao] = useState<VisaoDetalhe>("paciente")
+  const [sortPaciente, setSortPaciente] = useState(SORT_PADRAO_PACIENTE)
+  const [pacienteAberto, setPacienteAberto] = useState<string | null>(null)
 
-  const sessoesOrdenadas = useMemo(
-    () => ordenarPor(c.porSessao, sortSessao.key, sortSessao.dir),
-    [c.porSessao, sortSessao.key, sortSessao.dir],
+  // "Por paciente" usa o mês inteiro (porSessaoMes), diferente de "Por dia da
+  // semana"/"Por terapia" abaixo, que continuam usando a amostra semanal (c.porDia/c.porTerapia).
+  const pacientesAgregados = useMemo(
+    () => ordenarPor(agregarPorPaciente(porSessaoMes, aplicaDeducaoFalta), sortPaciente.key, sortPaciente.dir),
+    [porSessaoMes, aplicaDeducaoFalta, sortPaciente.key, sortPaciente.dir],
   )
+
+  const onTogglePaciente = useCallback((chave: string) => {
+    setPacienteAberto(prev => (prev === chave ? null : chave))
+  }, [])
 
   // Valor à vista cadastrado por terapia (Avaliação Neuropsicológica/Psiquiatra-
   // Neurologista) — pra exibir na coluna "Valor" das sessões de pacote, já que
@@ -154,8 +307,8 @@ function ConvenioRow({ c, mesReferenciaLabel, sessaoSelecionada, onSelectSessao,
   }, [c.pacotesTerapia])
 
   function onSortClick(key: string) {
-    setSortSessao(prev => ({
-      key: key as keyof PrevisaoReceitaSessao,
+    setSortPaciente(prev => ({
+      key: key as keyof PrevisaoReceitaPacienteAgregado,
       dir: prev.key === key && prev.dir === "asc" ? "desc" : "asc",
     }))
   }
@@ -175,16 +328,20 @@ function ConvenioRow({ c, mesReferenciaLabel, sessaoSelecionada, onSelectSessao,
           </span>
         </td>
         <td className="py-1.5 px-2 text-right tabular-nums">{c.pacientesUnicos}</td>
-        <td className="py-1.5 px-2 text-right tabular-nums">{c.sessoesTotal}</td>
+        <td className="py-1.5 px-2 text-right tabular-nums">{fmtNum(c.sessoesMesProjetadas)}</td>
         <td className={`py-1.5 px-2 text-right tabular-nums ${c.sessoesSemValor > 0 ? "font-semibold text-amber-600 dark:text-amber-400" : ""}`}>
           {c.sessoesSemValor > 0 ? c.sessoesSemValor : "—"}
         </td>
         <td className="py-1.5 px-2 text-right tabular-nums">{fmtReal(c.receitaSemanal)}</td>
-        <td className="py-1.5 pl-2 text-right tabular-nums font-semibold">{fmtReal(c.receitaMensalProjetada)}</td>
+        <td className="py-1.5 px-2 text-right tabular-nums font-semibold text-amber-600 dark:text-amber-400">{fmtReal(c.receitaMensalProjetada)}</td>
+        <td className={`py-1.5 px-2 text-right tabular-nums ${c.deducaoFalta > 0 ? "font-semibold text-rose-600 dark:text-rose-400" : ""}`}>
+          {c.deducaoFalta > 0 ? `-${fmtReal(c.deducaoFalta)}` : "—"}
+        </td>
+        <td className="py-1.5 pl-2 text-right tabular-nums font-semibold text-emerald-600 dark:text-emerald-400">{fmtReal(c.receitaMensalComDeducao)}</td>
       </tr>
       {mostrarAvisoParticular && (
         <tr className="border-b border-border/60 last:border-0">
-          <td colSpan={6} className="px-2 pb-2 pt-1">
+          <td colSpan={8} className="px-2 pb-2 pt-1">
             <AvisoAtencao>
               Para a modalidade "Particular" foi usada uma <strong>média de valor por sessão</strong> como estimativa — não é um valor negociado por sessão objetivamente. O novo modelo de captação de receita (por sessão, mensal, trimestral etc.) ainda está em estágio de definição interna; quando a transição acontecer, isso será configurado e sistematizado corretamente no cadastro.
             </AvisoAtencao>
@@ -193,13 +350,13 @@ function ConvenioRow({ c, mesReferenciaLabel, sessaoSelecionada, onSelectSessao,
       )}
       {aberto && (
         <tr className="border-b border-border/60 last:border-0 bg-muted/20">
-          <td colSpan={6} className="p-0">
+          <td colSpan={8} className="p-0">
             <div className="px-4 py-3">
               <SegmentedTabs
                 value={visao}
                 onChange={setVisao}
                 tabs={[
-                  { value: "sessao", label: "Por sessão", count: c.porSessao.length },
+                  { value: "paciente", label: "Por paciente", count: pacientesAgregados.length },
                   { value: "dia", label: "Por dia da semana" },
                   { value: "terapia", label: "Por terapia" },
                 ]}
@@ -295,46 +452,42 @@ function ConvenioRow({ c, mesReferenciaLabel, sessaoSelecionada, onSelectSessao,
                 </>
               )}
 
-              {visao === "sessao" && (
+              {visao === "paciente" && (
                 <>
                   <div className="max-h-96 overflow-y-auto">
                     <table className="w-full text-[11px]">
                       <thead className="sticky top-0 bg-card">
                         <tr className="text-left text-muted-foreground">
-                          <SortableTh label="ID Agend." sortKey="agendamentoId" activeKey={sortSessao.key} dir={sortSessao.dir} onClick={onSortClick} />
-                          <SortableTh label="Paciente" sortKey="pacienteNome" activeKey={sortSessao.key} dir={sortSessao.dir} onClick={onSortClick} />
-                          <SortableTh label="Terapia" sortKey="terapiaNome" activeKey={sortSessao.key} dir={sortSessao.dir} onClick={onSortClick} />
-                          <SortableTh label="Dia" sortKey="data" activeKey={sortSessao.key} dir={sortSessao.dir} onClick={onSortClick} />
-                          <SortableTh label="Valor" sortKey="valor" activeKey={sortSessao.key} dir={sortSessao.dir} align="right" onClick={onSortClick} />
-                          <SortableTh label="Origem" sortKey="origem" activeKey={sortSessao.key} dir={sortSessao.dir} onClick={onSortClick} />
+                          <SortableTh label="ID Paciente" sortKey="pacienteId" activeKey={sortPaciente.key} dir={sortPaciente.dir} onClick={onSortClick} />
+                          <SortableTh label="Paciente" sortKey="pacienteNome" activeKey={sortPaciente.key} dir={sortPaciente.dir} onClick={onSortClick} />
+                          <SortableTh label="Sessões no mês" sortKey="sessoesCount" activeKey={sortPaciente.key} dir={sortPaciente.dir} align="right" onClick={onSortClick} />
+                          <SortableTh label="Faltas no mês" sortKey="faltasCount" activeKey={sortPaciente.key} dir={sortPaciente.dir} align="right" onClick={onSortClick} />
+                          <SortableTh label="Receita Mês Projetada Sem Deduções" sortKey="valorSemDeducao" activeKey={sortPaciente.key} dir={sortPaciente.dir} align="right" onClick={onSortClick} />
+                          <SortableTh label="Deduções por Falta" sortKey="deducaoFalta" activeKey={sortPaciente.key} dir={sortPaciente.dir} align="right" onClick={onSortClick} />
+                          <SortableTh label="Receita Mês Projetada Com Deduções" sortKey="valorComDeducao" activeKey={sortPaciente.key} dir={sortPaciente.dir} align="right" onClick={onSortClick} />
                         </tr>
                       </thead>
                       <tbody>
-                        {sessoesOrdenadas.length === 0 && (
-                          <tr><td colSpan={6} className="py-2 text-center text-muted-foreground">Sem sessões pra detalhar.</td></tr>
+                        {pacientesAgregados.length === 0 && (
+                          <tr><td colSpan={7} className="py-2 text-center text-muted-foreground">Sem sessões pra detalhar.</td></tr>
                         )}
-                        {sessoesOrdenadas.map((s, i) => {
-                          const chave = chaveSessao(c.convenio, s)
-                          return (
-                            <SessaoRow
-                              // Chave de reconciliação usa o índice como desempate final —
-                              // se duas sessões forem idênticas em todos os campos (raro,
-                              // mas possível com dado duplicado na agenda), a `chave` de
-                              // conteúdo sozinha ainda colidiria.
-                              key={`${chave}::${i}`}
-                              s={s}
-                              chave={chave}
-                              selecionada={sessaoSelecionada === chave}
-                              valorPacote={s.terapiaId !== null ? valorPacotePorTerapia.get(s.terapiaId) ?? null : null}
-                              onSelect={onSelectSessao}
-                            />
-                          )
-                        })}
+                        {pacientesAgregados.map(p => (
+                          <PacienteRow
+                            key={p.chave}
+                            p={p}
+                            convenio={c.convenio}
+                            aberto={pacienteAberto === p.chave}
+                            onToggle={onTogglePaciente}
+                            sessaoSelecionada={sessaoSelecionada}
+                            onSelectSessao={onSelectSessao}
+                            valorPacotePorTerapia={valorPacotePorTerapia}
+                          />
+                        ))}
                       </tbody>
                     </table>
                   </div>
                   <p className="mt-2 text-[10px] text-muted-foreground">
-                    Uma linha por sessão da semana de referência (não é projeção mensal) — pra auditar exatamente qual paciente/terapia gerou qual valor. Clique numa linha pra marcar/desmarcar em verde (só um destaque visual pra apresentação, não é salvo). Clique num cabeçalho de coluna pra ordenar.
+                    Diferente de "Por dia da semana" e "Por terapia" (semana de referência), esta aba mostra o <strong>mês inteiro</strong> — uma linha por paciente, com todas as sessões e faltas do mês de {mesReferenciaLabel ?? "referência"}. Clique no nome do paciente pra destrinchar sessão por sessão. Clique num cabeçalho de coluna pra ordenar.
                   </p>
                 </>
               )}
@@ -354,9 +507,13 @@ interface TabelaPorConvenioProps {
   avisoParticular?: boolean
   /** Mostra o aviso de valor à vista padrão + falta de datas início/fim do processo — só faz sentido no segmento Processo Diagnóstico. */
   avisoPacote?: boolean
+  /** Sessões do mês inteiro por convênio (chave = nome do convênio) — fonte da aba "Por paciente" de cada ConvenioRow. */
+  sessoesMensaisPorConvenio: Map<string, PrevisaoReceitaSessao[]>
+  /** true só pra Multidisciplinar — ver agregarPorPaciente. */
+  aplicaDeducaoFalta?: boolean
 }
 
-function TabelaPorConvenio({ titulo, segmento, mesReferenciaLabel, avisoParticular, avisoPacote }: TabelaPorConvenioProps) {
+function TabelaPorConvenio({ titulo, segmento, mesReferenciaLabel, avisoParticular, avisoPacote, sessoesMensaisPorConvenio, aplicaDeducaoFalta = false }: TabelaPorConvenioProps) {
   // Seleção de linha em "Por sessão" — só destaque visual pra apresentação
   // (ex.: marcar em verde o que está sendo mostrado ao vivo), não é gravado em
   // lugar nenhum, some ao dar refresh. Só uma linha por vez em todo o
@@ -387,15 +544,17 @@ function TabelaPorConvenio({ titulo, segmento, mesReferenciaLabel, avisoParticul
             <tr className="border-b border-border text-left text-muted-foreground">
               <th className="py-1.5 pr-2 font-semibold">Convênio</th>
               <th className="py-1.5 px-2 text-right font-semibold">Pacientes</th>
-              <th className="py-1.5 px-2 text-right font-semibold">Sessões/semana</th>
+              <th className="py-1.5 px-2 text-right font-semibold">Sessões/mês</th>
               <th className="py-1.5 px-2 text-right font-semibold">Sem valor</th>
               <th className="py-1.5 px-2 text-right font-semibold">Receita semanal</th>
-              <th className="py-1.5 pl-2 text-right font-semibold">Receita mensal projetada</th>
+              <th className="py-1.5 px-2 text-right font-semibold">Receita Mês Projetada Sem Deduções</th>
+              <th className="py-1.5 px-2 text-right font-semibold">Deduções por falta</th>
+              <th className="py-1.5 pl-2 text-right font-semibold">Receita Mês Projetada Com Deduções</th>
             </tr>
           </thead>
           <tbody>
             {segmento.porConvenio.length === 0 && (
-              <tr><td colSpan={6} className="py-3 text-center text-muted-foreground">Sem sessões no período.</td></tr>
+              <tr><td colSpan={8} className="py-3 text-center text-muted-foreground">Sem sessões no período.</td></tr>
             )}
             {segmento.porConvenio.map(c => (
               <ConvenioRow
@@ -405,6 +564,8 @@ function TabelaPorConvenio({ titulo, segmento, mesReferenciaLabel, avisoParticul
                 sessaoSelecionada={sessaoSelecionada}
                 onSelectSessao={onSelectSessao}
                 avisoParticular={avisoParticular}
+                porSessaoMes={sessoesMensaisPorConvenio.get(c.convenio) ?? []}
+                aplicaDeducaoFalta={aplicaDeducaoFalta}
               />
             ))}
           </tbody>
@@ -419,18 +580,84 @@ function TabelaPorConvenio({ titulo, segmento, mesReferenciaLabel, avisoParticul
   )
 }
 
+/** Mês seguinte ao atual — abertura padrão da tela, mesmo mês que getRefWeek() já usava antes de existir o seletor. */
+function mesSeguinteAtual(): { ano: number; mes: number } {
+  const hoje = new Date()
+  const d = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1)
+  return { ano: d.getFullYear(), mes: d.getMonth() + 1 }
+}
+
 export function PrevisaoReceitasShell() {
-  const { linhas, loading: loadingSalas, error: errorSalas } = useOcupacaoSalas()
+  const [periodo, setPeriodo] = useState(mesSeguinteAtual)
+  const semanaRef = useMemo(() => getRefWeekDoMes(periodo.ano, periodo.mes), [periodo.ano, periodo.mes])
+
+  const { linhas, loading: loadingSalas, error: errorSalas } = useOcupacaoSalas(semanaRef.inicio, semanaRef.fim)
   const { regrasGerais, excecoesPaciente, pacotesAvaliacao, loading: loadingValores, error: errorValores } = useConvenioValores()
   const { feriados, loading: loadingFeriados } = useFeriados()
 
-  const loading = loadingSalas || loadingValores || loadingFeriados
-  const error = errorSalas || errorValores
-
-  const previsao = useMemo(
+  const previsaoBase = useMemo(
     () => calcularPrevisaoReceita(linhas, regrasGerais, excecoesPaciente, pacotesAvaliacao, feriados),
     [linhas, regrasGerais, excecoesPaciente, pacotesAvaliacao, feriados],
   )
+
+  // Deduções por falta precisam das sessões REAIS do mês inteiro (não a
+  // amostra semanal usada na projeção) — ver enriquecerComDeducaoFalta. Usa o
+  // mês SELECIONADO (não previsaoBase.mesReferencia, derivado dos dados) pra
+  // continuar funcionando mesmo se a semana de referência não tiver sessões.
+  const { linhasMes, faltas, loading: loadingMes, error: errorMes } = useLinhasMesInteiro(periodo.ano, periodo.mes)
+
+  const previsao = useMemo(
+    () => enriquecerComDeducaoFalta(previsaoBase, linhasMes, faltas, regrasGerais, excecoesPaciente),
+    [previsaoBase, linhasMes, faltas, regrasGerais, excecoesPaciente],
+  )
+
+  // Sessões do mês inteiro por convênio, pra aba "Por paciente" mostrar TODAS
+  // as sessões/faltas do mês (não só as da semana de referência) — "Por dia
+  // da semana"/"Por terapia" continuam usando a amostra semanal de `previsao`.
+  const sessoesMensais = useMemo(
+    () => calcularSessoesMensaisPorConvenio(linhasMes, regrasGerais, excecoesPaciente, pacotesAvaliacao, faltas),
+    [linhasMes, regrasGerais, excecoesPaciente, pacotesAvaliacao, faltas],
+  )
+
+  const mesSelecionadoLabel = labelMesAno(periodo.ano, periodo.mes)
+  const hoje = new Date()
+  const chaveMesSelecionado = periodo.ano * 12 + periodo.mes
+  const chaveMesAtual = hoje.getFullYear() * 12 + (hoje.getMonth() + 1)
+  const mesEhFuturo = chaveMesSelecionado > chaveMesAtual
+  const mesEhPassado = chaveMesSelecionado < chaveMesAtual
+
+  // Etapa 4: mês já passado usa o retrato histórico congelado (mais fiel —
+  // dados reais do mês inteiro, sem depender de regras de valor que podem ter
+  // mudado desde então) em vez de recalcular ao vivo. Só busca quando faz
+  // sentido (mês passado) — pra outros meses o hook simplesmente não é usado.
+  const competenciaSelecionada = `${periodo.ano}-${String(periodo.mes).padStart(2, "0")}`
+  const historico = usePrevisaoReceitasHistorico(mesEhPassado ? competenciaSelecionada : null)
+  const usarHistorico = mesEhPassado && historico.disponivel
+
+  const previsaoHistorico = useMemo<PrevisaoReceitaGeral | null>(() => {
+    if (!usarHistorico || !historico.sessoes) return null
+    return {
+      mesReferencia: { ano: periodo.ano, mes: periodo.mes, label: mesSelecionadoLabel },
+      multidisciplinar: agregarSegmentoHistorico(historico.sessoes.multidisciplinar, true),
+      processoDiagnostico: agregarSegmentoHistorico(historico.sessoes.processoDiagnostico, false),
+    }
+  }, [usarHistorico, historico.sessoes, periodo.ano, periodo.mes, mesSelecionadoLabel])
+
+  const previsaoExibida = previsaoHistorico ?? previsao
+
+  // No modo histórico, "Por paciente" usa a mesma sessão já agregada por
+  // convênio em previsaoExibida (não tem distinção semana/mês — é tudo real).
+  const sessoesMensaisExibidas = useMemo(() => {
+    if (!previsaoHistorico) return sessoesMensais
+    const paraMapa = (segmento: PrevisaoReceitaSegmento) => new Map(segmento.porConvenio.map(c => [c.convenio, c.porSessao]))
+    return {
+      multidisciplinar: paraMapa(previsaoHistorico.multidisciplinar),
+      processoDiagnostico: paraMapa(previsaoHistorico.processoDiagnostico),
+    }
+  }, [previsaoHistorico, sessoesMensais])
+
+  const loading = loadingSalas || loadingValores || loadingFeriados || loadingMes || (mesEhPassado && historico.loading)
+  const error = errorSalas || errorValores || errorMes || historico.error
 
   if (loading) {
     return (
@@ -441,39 +668,65 @@ export function PrevisaoReceitasShell() {
   }
   if (error) return <div className="text-sm font-semibold text-rose-600 dark:text-rose-400">{error}</div>
 
-  const receitaMensalTotal = previsao.multidisciplinar.receitaMensalProjetadaTotal + previsao.processoDiagnostico.receitaMensalProjetadaTotal
-  const receitaSemanalTotal = previsao.multidisciplinar.receitaSemanalTotal + previsao.processoDiagnostico.receitaSemanalTotal
-  const sessoesTotal = previsao.multidisciplinar.sessoesTotal + previsao.processoDiagnostico.sessoesTotal
-  const sessoesSemValor = previsao.multidisciplinar.sessoesSemValor + previsao.processoDiagnostico.sessoesSemValor
+  const receitaMensalSemDeducao = previsaoExibida.multidisciplinar.receitaMensalProjetadaTotal + previsaoExibida.processoDiagnostico.receitaMensalProjetadaTotal
+  const receitaMensalComDeducao = previsaoExibida.multidisciplinar.receitaMensalComDeducaoTotal + previsaoExibida.processoDiagnostico.receitaMensalComDeducaoTotal
+  const receitaSemanalTotal = previsaoExibida.multidisciplinar.receitaSemanalTotal + previsaoExibida.processoDiagnostico.receitaSemanalTotal
+  const sessoesTotal = previsaoExibida.multidisciplinar.sessoesTotal + previsaoExibida.processoDiagnostico.sessoesTotal
+  const sessoesSemValor = previsaoExibida.multidisciplinar.sessoesSemValor + previsaoExibida.processoDiagnostico.sessoesSemValor
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-        <StatCard tone="green" icon={<Wallet size={15} />} label="Receita mensal projetada">
-          <div className="text-2xl font-black text-foreground">{fmtReal(receitaMensalTotal)}</div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <SeletorMesPrevisao ano={periodo.ano} mes={periodo.mes} onChange={(ano, mes) => setPeriodo({ ano, mes })} />
+        {usarHistorico && historico.snapshotData && (
+          <span className="text-[11px] font-semibold text-blue-600 dark:text-blue-400">
+            📅 Histórico — retrato de {fmtData(historico.snapshotData)}
+          </span>
+        )}
+        {mesEhPassado && !usarHistorico && (
+          <span className="text-[11px] text-muted-foreground">
+            {mesSelecionadoLabel} já passou e ainda não tem retrato histórico congelado — valores recalculados agora com as regras vigentes hoje.
+          </span>
+        )}
+        {mesEhFuturo && (
+          <span className="text-[11px] text-muted-foreground">
+            {mesSelecionadoLabel} ainda não ocorreu — deduções por falta ficam em zero até o mês começar.
+          </span>
+        )}
+      </div>
+
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+        <StatCard tone="amber" icon={<Wallet size={15} />} label="Receita Mês Projetada Sem Deduções">
+          <div className="text-2xl font-black text-foreground">{fmtReal(receitaMensalSemDeducao)}</div>
+        </StatCard>
+        <StatCard tone="green" icon={<Wallet size={15} />} label="Receita Mês Projetada Com Deduções">
+          <div className="text-2xl font-black text-foreground">{fmtReal(receitaMensalComDeducao)}</div>
         </StatCard>
         <StatCard tone="blue" icon={<Wallet size={15} />} label="Receita semanal projetada">
           <div className="text-2xl font-black text-foreground">{fmtReal(receitaSemanalTotal)}</div>
         </StatCard>
-        <StatCard tone="slate" icon={<CalendarDays size={15} />} label="Sessões/semana">
+        <StatCard tone="slate" icon={<CalendarDays size={15} />} label={usarHistorico ? "Sessões no mês" : "Sessões/semana"}>
           <div className="text-2xl font-black text-foreground">{sessoesTotal}</div>
         </StatCard>
-        <StatCard tone="amber" icon={<AlertTriangle size={15} />} label="Sessões sem valor cadastrado">
+        <StatCard tone="red" icon={<AlertTriangle size={15} />} label="Sessões sem valor cadastrado">
           <div className="text-2xl font-black text-foreground">{sessoesSemValor}</div>
         </StatCard>
       </div>
 
       <TabelaPorConvenio
         titulo="Por Convênio (Multidisciplinar)"
-        segmento={previsao.multidisciplinar}
-        mesReferenciaLabel={previsao.mesReferencia?.label ?? null}
-        avisoParticular
+        segmento={previsaoExibida.multidisciplinar}
+        mesReferenciaLabel={mesSelecionadoLabel}
+        sessoesMensaisPorConvenio={sessoesMensaisExibidas.multidisciplinar}
+        aplicaDeducaoFalta
+        avisoParticular={!usarHistorico}
       />
       <TabelaPorConvenio
         titulo="Por Convênio (Processo Diagnóstico)"
-        segmento={previsao.processoDiagnostico}
-        mesReferenciaLabel={previsao.mesReferencia?.label ?? null}
-        avisoPacote
+        segmento={previsaoExibida.processoDiagnostico}
+        mesReferenciaLabel={mesSelecionadoLabel}
+        sessoesMensaisPorConvenio={sessoesMensaisExibidas.processoDiagnostico}
+        avisoPacote={!usarHistorico}
       />
     </div>
   )

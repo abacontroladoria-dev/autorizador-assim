@@ -148,15 +148,28 @@ export interface PrevisaoReceitaSessao {
   horaInicial: string | null
   valor: number | null
   origem: OrigemValor
+  /** true se esta sessão (pelo tita_agendamento_id) está marcada como falta em fila_autorizacoes (e não revertida) — preenchido por enriquecerComDeducaoFalta. */
+  emFalta: boolean
 }
 
 export interface PrevisaoReceitaConvenio {
   convenio: string
   pacientesUnicos: number
   sessoesTotal: number
+  /** Projeção de sessões no mês inteiro — soma de porDia[].sessoesMesProjetadas (sessões/semana de cada dia × ocorrências daquele dia no mês, já descontando feriados). Mesma lógica de receitaMensalProjetada, só que em contagem de sessões em vez de receita. */
+  sessoesMesProjetadas: number
   sessoesSemValor: number
   receitaSemanal: number
   receitaMensalProjetada: number
+  /**
+   * Quanto seria deduzido da receita mensal projetada por sessões REAIS do mês
+   * (não a amostra semanal) marcadas como falta em fila_autorizacoes — só
+   * calculado no segmento Multidisciplinar (ver enriquecerComDeducaoFalta).
+   * Sempre 0 até enriquecerComDeducaoFalta ser chamado.
+   */
+  deducaoFalta: number
+  /** receitaMensalProjetada − deducaoFalta. Igual a receitaMensalProjetada até enriquecerComDeducaoFalta ser chamado. */
+  receitaMensalComDeducao: number
   /** Detalhe dia a dia (Seg a Sex) — a base do cálculo de receitaMensalProjetada, pra exibir "o que está sendo calculado". */
   porDia: PrevisaoReceitaDia[]
   /** Detalhe por terapia — prova visual de que a mesma terapia pode ter valores diferentes por regra (ex.: ASSIM Saúde: Fono/TO a R$120, demais a R$100). */
@@ -187,6 +200,8 @@ export interface PrevisaoReceitaSegmento {
   sessoesSemValor: number
   receitaSemanalTotal: number
   receitaMensalProjetadaTotal: number
+  /** Soma de receitaMensalComDeducao de todos os convênios. Igual a receitaMensalProjetadaTotal até enriquecerComDeducaoFalta ser chamado. */
+  receitaMensalComDeducaoTotal: number
   porConvenio: PrevisaoReceitaConvenio[]
 }
 
@@ -292,6 +307,7 @@ function agregarSegmento(
       diaLabel: DOW_LABEL[dowKey], data,
       horaInicial: cleanTxt(r.hora_inicial) || null,
       valor, origem,
+      emFalta: false,
     })
   })
 
@@ -301,6 +317,7 @@ function agregarSegmento(
       let semValorTotal = 0
       let receitaSemanalTotal = 0
       let receitaMensalProjetada = 0
+      let sessoesMesProjetadasTotal = 0
 
       const porDia: PrevisaoReceitaDia[] = ([1, 2, 3, 4, 5] as const)
         .filter(dow => porDiaAcc[dow])
@@ -313,16 +330,18 @@ function agregarSegmento(
           const sessoesSemana = acc.sessoes / semanas
           const receitaSemana = acc.receita / semanas
           const receitaMes = receitaSemana * ocorrenciasMes
+          const sessoesMes = sessoesSemana * ocorrenciasMes
 
           receitaSemanalTotal += receitaSemana
           receitaMensalProjetada += receitaMes
+          sessoesMesProjetadasTotal += sessoesMes
 
           return {
             dow,
             diaLabel: DOW_LABEL[dow],
             sessoesSemana,
             ocorrenciasMes,
-            sessoesMesProjetadas: sessoesSemana * ocorrenciasMes,
+            sessoesMesProjetadas: sessoesMes,
             receitaSemana,
             receitaMesProjetada: receitaMes,
           }
@@ -347,9 +366,12 @@ function agregarSegmento(
         convenio,
         pacientesUnicos: porConvenioPacientes.get(convenio)?.size ?? 0,
         sessoesTotal,
+        sessoesMesProjetadas: sessoesMesProjetadasTotal,
         sessoesSemValor: semValorTotal,
         receitaSemanal: receitaSemanalTotal,
         receitaMensalProjetada,
+        deducaoFalta: 0,
+        receitaMensalComDeducao: receitaMensalProjetada,
         porDia,
         porTerapia,
         porSessao,
@@ -366,6 +388,7 @@ function agregarSegmento(
     sessoesSemValor: porConvenio.reduce((s, c) => s + c.sessoesSemValor, 0),
     receitaSemanalTotal: porConvenio.reduce((s, c) => s + c.receitaSemanal, 0),
     receitaMensalProjetadaTotal: porConvenio.reduce((s, c) => s + c.receitaMensalProjetada, 0),
+    receitaMensalComDeducaoTotal: porConvenio.reduce((s, c) => s + c.receitaMensalComDeducao, 0),
     porConvenio,
   }
 }
@@ -397,10 +420,14 @@ function enriquecerComPacotesTerapia(
 
     const receitaPacoteTotal = pacotesTerapia.reduce((s, p) => s + p.receita, 0)
 
+    const receitaMensalProjetada = c.receitaMensalProjetada + receitaPacoteTotal
     return {
       ...c,
       pacotesTerapia,
-      receitaMensalProjetada: c.receitaMensalProjetada + receitaPacoteTotal,
+      receitaMensalProjetada,
+      // deducaoFalta ainda é 0 aqui (Processo Diagnóstico não tem dedução por
+      // falta — ver enriquecerComDeducaoFalta), então com/sem dedução seguem iguais.
+      receitaMensalComDeducao: receitaMensalProjetada - c.deducaoFalta,
     }
   })
 
@@ -408,6 +435,270 @@ function enriquecerComPacotesTerapia(
     ...segmento,
     porConvenio,
     receitaMensalProjetadaTotal: porConvenio.reduce((s, c) => s + c.receitaMensalProjetada, 0),
+    receitaMensalComDeducaoTotal: porConvenio.reduce((s, c) => s + c.receitaMensalComDeducao, 0),
+  }
+}
+
+/** Marca emFalta em toda sessão (dos dois segmentos) cujo agendamentoId está no conjunto de faltas — só um flag de exibição, não afeta nenhum total. */
+function marcarSessoesEmFalta(segmento: PrevisaoReceitaSegmento, faltasSet: Set<number>): PrevisaoReceitaSegmento {
+  if (!faltasSet.size) return segmento
+  return {
+    ...segmento,
+    porConvenio: segmento.porConvenio.map(c => ({
+      ...c,
+      porSessao: c.porSessao.map(s => (
+        s.agendamentoId !== null && faltasSet.has(s.agendamentoId) ? { ...s, emFalta: true } : s
+      )),
+    })),
+  }
+}
+
+/**
+ * Calcula quanto cada convênio (segmento Multidisciplinar) perderia de receita
+ * mensal projetada por sessões REAIS do mês marcadas como falta em
+ * fila_autorizacoes, e devolve `previsao` com deducaoFalta/receitaMensalComDeducao
+ * preenchidos (e emFalta marcado nas sessões da semana de referência exibidas
+ * em "Por sessão").
+ *
+ * Só o segmento Multidisciplinar tem dedução: Processo Diagnóstico
+ * (Avaliação Neuropsicológica/Psiquiatra/Triagem) é cobrado em BLOCO por
+ * paciente (pacotesTerapia), não por sessão — uma falta pontual numa sessão
+ * do processo não reduz o valor do pacote já fechado com o convênio.
+ *
+ * `rowsMesInteiro` precisa ser o mês inteiro (não a semana de referência) —
+ * "falta" só existe pra dias já ocorridos, e a projeção por amostragem não
+ * enumera as datas reais do mês.
+ */
+export function enriquecerComDeducaoFalta(
+  previsao: PrevisaoReceitaGeral,
+  rowsMesInteiro: AgendaSalaRow[],
+  faltasSet: Set<number>,
+  regrasGerais: ConvenioValor[],
+  excecoesPaciente: ConvenioValorPaciente[],
+): PrevisaoReceitaGeral {
+  const multidisciplinarComEmFalta = marcarSessoesEmFalta(previsao.multidisciplinar, faltasSet)
+  const processoDiagnosticoComEmFalta = marcarSessoesEmFalta(previsao.processoDiagnostico, faltasSet)
+
+  if (!faltasSet.size) {
+    return { ...previsao, multidisciplinar: multidisciplinarComEmFalta, processoDiagnostico: processoDiagnosticoComEmFalta }
+  }
+
+  const ativosMes = (rowsMesInteiro || []).filter(isAgendadoAtivo)
+
+  const pacientesComAbaMes = new Set<string>()
+  ativosMes.forEach(r => {
+    if (r.terapia_exibicao_id !== EXIB_ID.PSICOLOGIA_ABA) return
+    pacientesComAbaMes.add(pacienteKey(r.paciente_id ?? null, cleanTxt(r.paciente_nome)))
+  })
+
+  const deducaoPorConvenio = new Map<string, number>()
+  ativosMes
+    .filter(r => !isTerapiaDiagnostico(r))
+    .forEach(r => {
+      const agendamentoId = r.tita_agendamento_id ?? null
+      if (agendamentoId === null || !faltasSet.has(agendamentoId)) return
+
+      const data = cleanTxt(r.data)
+      const dow = data ? new Date(`${data}T12:00:00`).getDay() : NaN
+      if (!Number.isFinite(dow) || dow < 1 || dow > 5) return
+
+      const convenio = cleanTxt(r.convenio_nome) || "Não informado"
+      const pacienteId = r.paciente_id ?? null
+      const paciente = cleanTxt(r.paciente_nome)
+      const terapiaId = r.terapia_id ?? r.terapia_exibicao_id ?? null
+      const terapiaNome = cleanTxt(r.terapia_nome) || cleanTxt(r.terapia_exibicao_nome) || "Não informado"
+      const temPsicologiaAba = pacientesComAbaMes.has(pacienteKey(pacienteId, paciente))
+
+      const { valor } = resolverValorSessao(regrasGerais, excecoesPaciente, {
+        convenio, pacienteId, paciente, terapiaId, terapiaNome, temPsicologiaAba,
+      })
+      if (valor === null) return
+
+      deducaoPorConvenio.set(convenio, (deducaoPorConvenio.get(convenio) ?? 0) + valor)
+    })
+
+  const porConvenio = multidisciplinarComEmFalta.porConvenio.map(c => {
+    const deducaoFalta = deducaoPorConvenio.get(c.convenio) ?? 0
+    return { ...c, deducaoFalta, receitaMensalComDeducao: c.receitaMensalProjetada - deducaoFalta }
+  })
+
+  const multidisciplinar: PrevisaoReceitaSegmento = {
+    ...multidisciplinarComEmFalta,
+    porConvenio,
+    receitaMensalComDeducaoTotal: porConvenio.reduce((s, c) => s + c.receitaMensalComDeducao, 0),
+  }
+
+  return { ...previsao, multidisciplinar, processoDiagnostico: processoDiagnosticoComEmFalta }
+}
+
+/**
+ * Sessões REAIS do mês inteiro (não a amostra semanal), agrupadas por
+ * convênio — usadas pela aba "Por paciente" da Previsão de Receitas pra
+ * mostrar TODAS as sessões/faltas do mês de cada paciente, não só as que
+ * caem na semana de referência. "Por dia da semana" e "Por terapia"
+ * continuam usando a amostra semanal (`PrevisaoReceitaConvenio.porSessao`) —
+ * só "Por paciente" troca de fonte.
+ *
+ * Não passa pelas mesmas etapas de `calcularPrevisaoReceita` que não fazem
+ * sentido aqui: sem `cal` (não projeta mês, só lista sessões reais) e sem
+ * `enriquecerComPacotesTerapia` (a soma de pacotes já é mostrada a partir da
+ * amostra semanal — aqui só precisamos da lista de sessões individuais,
+ * que `agregarSegmento` já classifica como "pacote_avaliacao" sozinha).
+ */
+export function calcularSessoesMensaisPorConvenio(
+  rowsMesInteiro: AgendaSalaRow[],
+  regrasGerais: ConvenioValor[],
+  excecoesPaciente: ConvenioValorPaciente[],
+  pacotesAvaliacao: ConvenioPacoteAvaliacao[] = [],
+  faltasSet: Set<number> = new Set(),
+): { multidisciplinar: Map<string, PrevisaoReceitaSessao[]>; processoDiagnostico: Map<string, PrevisaoReceitaSessao[]> } {
+  const ativos = (rowsMesInteiro || []).filter(isAgendadoAtivo)
+
+  const pacientesComAba = new Set<string>()
+  ativos.forEach(r => {
+    if (r.terapia_exibicao_id !== EXIB_ID.PSICOLOGIA_ABA) return
+    pacientesComAba.add(pacienteKey(r.paciente_id ?? null, cleanTxt(r.paciente_nome)))
+  })
+
+  const rowsMultidisciplinar = ativos.filter(r => !isTerapiaDiagnostico(r))
+  const rowsDiagnostico = ativos.filter(isTerapiaDiagnostico)
+
+  const multidisciplinar = agregarSegmento(rowsMultidisciplinar, regrasGerais, excecoesPaciente, pacientesComAba, null, pacotesAvaliacao)
+  const processoDiagnostico = agregarSegmento(rowsDiagnostico, [], [], pacientesComAba, null, pacotesAvaliacao)
+
+  const paraMapa = (segmento: PrevisaoReceitaSegmento): Map<string, PrevisaoReceitaSessao[]> =>
+    new Map(marcarSessoesEmFalta(segmento, faltasSet).porConvenio.map(c => [c.convenio, c.porSessao]))
+
+  return {
+    multidisciplinar: paraMapa(multidisciplinar),
+    processoDiagnostico: paraMapa(processoDiagnostico),
+  }
+}
+
+/** Uma linha de previsao_receitas_historico (Etapa 4) — sessão já resolvida (valor/origem calculados no snapshot), com o convênio junto (a tabela é "achatada", não agrupada). */
+export interface PrevisaoReceitaSessaoHistorico extends PrevisaoReceitaSessao {
+  convenio: string
+}
+
+/**
+ * Reconstrói um PrevisaoReceitaSegmento a partir de sessões JÁ RESOLVIDAS de
+ * um snapshot histórico (previsao_receitas_historico) — diferente de
+ * agregarSegmento, que resolve `valor`/`origem` a partir de regras/exceções
+ * sobre linhas brutas do mês. Aqui os números de "por dia"/"por terapia" são
+ * REAIS (soma das sessões que realmente ocorreram naquele mês, não uma
+ * projeção por amostragem) — não faz sentido projetar um mês que já
+ * aconteceu e já foi todo capturado.
+ */
+export function agregarSegmentoHistorico(
+  sessoesComConvenio: PrevisaoReceitaSessaoHistorico[],
+  aplicaDeducaoFalta: boolean,
+): PrevisaoReceitaSegmento {
+  const porConvenioSessoes = new Map<string, PrevisaoReceitaSessaoHistorico[]>()
+  sessoesComConvenio.forEach(s => {
+    if (!porConvenioSessoes.has(s.convenio)) porConvenioSessoes.set(s.convenio, [])
+    porConvenioSessoes.get(s.convenio)!.push(s)
+  })
+
+  const porConvenio: PrevisaoReceitaConvenio[] = [...porConvenioSessoes.entries()]
+    .map(([convenio, sessoes]) => {
+      const semanas = semanasNoPeriodo(sessoes.map(s => s.data))
+      const pacientes = new Set<string>()
+
+      type AccDia = { sessoes: number; semValor: number; receita: number; datas: Set<string> }
+      const porDiaAcc = new Map<1 | 2 | 3 | 4 | 5, AccDia>()
+
+      type AccTerapia = { terapiaId: number | null; terapiaNome: string; sessoes: number; semValor: number; receita: number; origens: Set<OrigemValor> }
+      const porTerapiaAcc = new Map<string, AccTerapia>()
+
+      let sessoesSemValorTotal = 0
+      let receitaTotal = 0
+      let deducaoFalta = 0
+
+      sessoes.forEach(s => {
+        pacientes.add(pacienteKey(s.pacienteId, s.pacienteNome))
+        const semValor = s.valor === null && s.origem !== "pacote_avaliacao"
+        if (semValor) sessoesSemValorTotal += 1
+        else if (s.valor !== null) receitaTotal += s.valor
+        if (aplicaDeducaoFalta && s.emFalta && s.valor !== null) deducaoFalta += s.valor
+
+        const dow = new Date(`${s.data}T12:00:00`).getDay()
+        if (dow >= 1 && dow <= 5) {
+          const dowKey = dow as 1 | 2 | 3 | 4 | 5
+          if (!porDiaAcc.has(dowKey)) porDiaAcc.set(dowKey, { sessoes: 0, semValor: 0, receita: 0, datas: new Set() })
+          const acc = porDiaAcc.get(dowKey)!
+          acc.sessoes += 1
+          acc.datas.add(s.data)
+          if (semValor) acc.semValor += 1
+          else if (s.valor !== null) acc.receita += s.valor
+        }
+
+        const terapiaKey = s.terapiaId !== null ? `id:${s.terapiaId}` : `nome:${normTxt(s.terapiaNome)}`
+        if (!porTerapiaAcc.has(terapiaKey)) porTerapiaAcc.set(terapiaKey, { terapiaId: s.terapiaId, terapiaNome: s.terapiaNome, sessoes: 0, semValor: 0, receita: 0, origens: new Set() })
+        const accT = porTerapiaAcc.get(terapiaKey)!
+        accT.sessoes += 1
+        accT.origens.add(s.origem)
+        if (semValor) accT.semValor += 1
+        else if (s.valor !== null) accT.receita += s.valor
+      })
+
+      const porDia: PrevisaoReceitaDia[] = ([1, 2, 3, 4, 5] as const)
+        .filter(dow => porDiaAcc.has(dow))
+        .map(dow => {
+          const acc = porDiaAcc.get(dow)!
+          // ocorrenciasMes real = quantos dias distintos daquele dia da semana
+          // realmente tiveram sessão nesse convênio no mês (não uma contagem
+          // de calendário/feriado — o mês já aconteceu, os dados já refletem isso).
+          const ocorrenciasMes = acc.datas.size
+          return {
+            dow,
+            diaLabel: DOW_LABEL[dow],
+            sessoesSemana: ocorrenciasMes > 0 ? acc.sessoes / ocorrenciasMes : 0,
+            ocorrenciasMes,
+            sessoesMesProjetadas: acc.sessoes,
+            receitaSemana: ocorrenciasMes > 0 ? acc.receita / ocorrenciasMes : 0,
+            receitaMesProjetada: acc.receita,
+          }
+        })
+
+      const porTerapia: PrevisaoReceitaTerapia[] = [...porTerapiaAcc.values()]
+        .map(t => ({
+          terapiaId: t.terapiaId,
+          terapiaNome: t.terapiaNome,
+          sessoesSemana: t.sessoes,
+          sessoesSemValor: t.semValor,
+          receitaSemana: t.receita,
+          valorMedioPorSessao: t.sessoes - t.semValor > 0 ? t.receita / (t.sessoes - t.semValor) : null,
+          origens: [...t.origens],
+        }))
+        .sort((a, b) => b.receitaSemana - a.receitaSemana)
+
+      const porSessao = [...sessoes].sort((a, b) => a.pacienteNome.localeCompare(b.pacienteNome) || a.data.localeCompare(b.data))
+
+      return {
+        convenio,
+        pacientesUnicos: pacientes.size,
+        sessoesTotal: sessoes.length,
+        sessoesMesProjetadas: sessoes.length,
+        sessoesSemValor: sessoesSemValorTotal,
+        receitaSemanal: receitaTotal / semanas,
+        receitaMensalProjetada: receitaTotal,
+        deducaoFalta,
+        receitaMensalComDeducao: receitaTotal - deducaoFalta,
+        porDia,
+        porTerapia,
+        porSessao,
+        pacotesTerapia: [],
+      }
+    })
+    .sort((a, b) => b.receitaMensalProjetada - a.receitaMensalProjetada)
+
+  return {
+    sessoesTotal: porConvenio.reduce((s, c) => s + c.sessoesTotal, 0),
+    sessoesSemValor: porConvenio.reduce((s, c) => s + c.sessoesSemValor, 0),
+    receitaSemanalTotal: porConvenio.reduce((s, c) => s + c.receitaSemanal, 0),
+    receitaMensalProjetadaTotal: porConvenio.reduce((s, c) => s + c.receitaMensalProjetada, 0),
+    receitaMensalComDeducaoTotal: porConvenio.reduce((s, c) => s + c.receitaMensalComDeducao, 0),
+    porConvenio,
   }
 }
 

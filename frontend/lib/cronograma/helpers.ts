@@ -248,9 +248,9 @@ export function cleanTxt(v: unknown): string {
 
 // ─── SEMANA DE REFERÊNCIA ─────────────────────────────────────────────────────
 
-export function getRefWeek(): { inicio: string; fim: string; label: string } {
-  const hoje = new Date()
-  const nm = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1)
+/** 1ª segunda-sexta de um mês (1-indexado) específico — base de getRefWeek() e do seletor de mês da Previsão de Receitas (getRefWeekDoMes). */
+export function getRefWeekDoMes(ano: number, mes: number): { inicio: string; fim: string; label: string } {
+  const nm = new Date(ano, mes - 1, 1)
   while (nm.getDay() !== 1) nm.setDate(nm.getDate() + 1)
   const fri = new Date(nm)
   fri.setDate(fri.getDate() + 4)
@@ -259,5 +259,24 @@ export function getRefWeek(): { inicio: string; fim: string; label: string } {
     fim: fri.toISOString().slice(0, 10),
     label: `${fmtDate(nm)} a ${fmtDate(fri)}`,
   }
+}
+
+export function getRefWeek(): { inicio: string; fim: string; label: string } {
+  const hoje = new Date()
+  const proximoMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1)
+  return getRefWeekDoMes(proximoMes.getFullYear(), proximoMes.getMonth() + 1)
+}
+
+/** "Julho de 2026" — mesmo formato usado por mesReferenciaDeDatas em faturamentoProjecao.ts, mas a partir de um ano/mês explícito (seletor de mês), não derivado das datas dos dados carregados. */
+export function labelMesAno(ano: number, mes: number): string {
+  const label = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(ano, mes - 1, 1))
+  return label.charAt(0).toUpperCase() + label.slice(1)
+}
+
+/** Dia 1 ao último dia de um mês (1-indexado), formato ISO — usado para buscar as sessões REAIS do mês inteiro (não a amostra de uma semana), ex.: Deduções por falta na Previsão de Receitas. */
+export function mesInteiroRange(ano: number, mes: number): { inicio: string; fim: string } {
+  const inicio = new Date(ano, mes - 1, 1)
+  const fim = new Date(ano, mes, 0)
+  return { inicio: inicio.toISOString().slice(0, 10), fim: fim.toISOString().slice(0, 10) }
 }
 
