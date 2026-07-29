@@ -246,6 +246,34 @@ async function executarRpa(tarefa, verificarCancelamento, browser) {
     if (!tarefa.nome_medico) throw new Error("Nome do médico não informado");
     await page.fill('input[name="findsolic"]', normalizarTexto(tarefa.nome_medico));
 
+    // UF do CRM solicitante. O portal fica em RJ por padrão; se o médico é de
+    // outro estado (ex.: SP) a guia é rejeitada. Localiza o <select> de UF pelas
+    // próprias opções (contém RJ e SP), sem depender do name exato do campo.
+    const ufMedico = (tarefa.crm_uf || 'RJ').toUpperCase();
+    const ufSelecionada = await page.evaluate((uf) => {
+      const setUf = (sel) => {
+        const opt = Array.from(sel.options).find(o =>
+          (o.value || '').trim().toUpperCase() === uf ||
+          (o.textContent || '').trim().toUpperCase() === uf);
+        if (!opt) return null;
+        sel.value = opt.value;
+        sel.dispatchEvent(new Event('input', { bubbles: true }));
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        return sel.name || '(sem name)';
+      };
+      // 1) campo conhecido do portal ASSIM
+      const ufcrm = document.querySelector('select[name="ufcrm"]');
+      if (ufcrm) { const r = setUf(ufcrm); if (r) return r; }
+      // 2) fallback: qualquer <select> cujas opções contenham RJ e SP
+      for (const sel of Array.from(document.querySelectorAll('select'))) {
+        const up = Array.from(sel.options).map(o => (o.value || o.textContent || '').trim().toUpperCase());
+        if (up.includes('RJ') && up.includes('SP')) { const r = setUf(sel); if (r) return r; }
+      }
+      return null;
+    }, ufMedico);
+    if (ufSelecionada) console.log(`✅ UF do CRM = ${ufMedico} (campo: ${ufSelecionada})`);
+    else console.warn(`⚠️ Campo de UF não localizado; mantido o default (UF alvo: ${ufMedico})`);
+
     if (!tarefa.tuss) throw new Error("TUSS não informado");
     await humanType(page, 'input[name="ttuss1"]', tarefa.tuss);
 
@@ -263,6 +291,18 @@ async function executarRpa(tarefa, verificarCancelamento, browser) {
 		await page.waitForLoadState('networkidle');
 		await delay(2000);
 
+		// Captura o nº da guia da tela de confirmação ("Documento: AD... / 000437530").
+		// Grava SEM zeros à esquerda para casar com autorizacoes_assim.guia (ex.: 437530).
+		// É a âncora da vinculação por guia (item 5): a autorização fica presa a ESTA fila,
+		// evitando que uma guia retroativa case com o atendimento de hoje.
+		const numeroGuia = await page.evaluate(() => {
+		  const txt = (document.body && document.body.innerText) || '';
+		  const m = txt.match(/Documento:\s*[A-Za-z0-9]+\s*\/\s*0*(\d+)/i);
+		  return m ? m[1] : null;
+		});
+		if (numeroGuia) console.log("🧾 Guia capturada:", numeroGuia);
+		else console.warn("⚠️ Não foi possível capturar o número da guia da tela");
+
 		const formaValidacao =
 		  await selecionarFormaValidacao(page);
 
@@ -270,14 +310,17 @@ async function executarRpa(tarefa, verificarCancelamento, browser) {
 		  "✅ Forma de validação:",
 		  formaValidacao
 		);
-		
+
+		const updatePayload = {
+		  status: 'concluido',
+		  forma_autorizacao: formaValidacao,
+		  validacao_finalizada_em: new Date().toISOString()
+		};
+		if (numeroGuia) updatePayload.numero_autorizacao = numeroGuia;
+
 		const { error } = await supabase
 		  .from('fila_autorizacoes')
-		  .update({
-			status: 'concluido',
-			forma_autorizacao: formaValidacao,
-			validacao_finalizada_em: new Date().toISOString()
-		  })
+		  .update(updatePayload)
 		  .eq('id', tarefa.id);
 
 		if (error) {
