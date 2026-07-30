@@ -1,58 +1,58 @@
 -- ============================================================================
--- Backfill: canoniza agenda_tita.data_nascimento por paciente
+-- Backfill: canoniza agenda_tita.data_nascimento por paciente (via raw_json)
 -- ----------------------------------------------------------------------------
 -- Causa-raiz (confirmada 2026-07-29): o sync_tita_agenda nunca reatualizava
 -- data_nascimento de uma linha já existente. Correções de cadastro na TiTa só
 -- chegavam nas linhas NOVAS; as antigas ficavam congeladas com nascimento
 -- nulo/errado. Como o badge do /solicitar mostra o valor da linha DAQUELA data,
 -- o mesmo paciente aparecia com nascimento divergente conforme o dia aberto.
+-- (O CPF/nascimento do /solicitar é a fonte de copiar-e-colar da atendente
+-- quando o auto-preenchimento da ASSIM falha — daí a correção importar.)
 --
 -- A correção de origem está no código (sync_tita_agenda passa a refrescar
--- cpf/data_nascimento/raw_json quando a TiTa traz valor não-nulo diferente),
--- mas o re-sync só toca datas que a TiTa ainda retorna (hoje → fim do mês
--- seguinte). Este backfill conserta as linhas PASSADAS (inclui as retroativas
--- do item 5), canonizando cada paciente para o nascimento não-nulo mais recente.
+-- cpf/data_nascimento/raw_json quando a TiTa traz valor não-nulo diferente).
+-- Este backfill conserta as linhas PASSADAS que o re-sync não toca.
 --
--- Segurança: validado com a recepção que "não-nulo mais recente = cadastro
--- correto" (nascimento vem confiável do endpoint agendamento). Idempotente:
--- só altera linha cujo valor difere do canônico; nunca grava nulo.
+-- MÉTODO (robusto): canoniza para o nascimento que a TiTa DE FATO mandou
+-- (raw_json->favorecido->data_nascimento), escolhendo a linha de
+-- data_atendimento MAIS RECENTE — que é a re-sincronizada = cadastro atual.
+-- NÃO usa updated_at (um backfill anterior que ordenava por updated_at foi
+-- corrompido quando outro backfill setou updated_at=now() em massa; ordenar por
+-- data_atendimento é imune a isso). Idempotente: só altera linha divergente.
 --
--- NÃO faz nada para CPF (o histórico não contém, de forma confiável, o CPF
--- correto — ex.: Arthur Vitorino). CPF é corrigido só via re-sync após a
--- recepção acertar o cadastro na TiTa.
+-- PRÉ-REQUISITO: deploy do sync_tita_agenda corrigido + re-sync da janela ativa,
+-- para que as linhas de data mais recente carreguem o raw_json vigente da TiTa.
 -- ============================================================================
 
--- ── PREVIEW (rode ANTES de aplicar; não escreve nada) ───────────────────────
--- Quantas linhas e pacientes seriam alterados, e amostra do de/para:
---
+-- ── PREVIEW (não escreve) ───────────────────────────────────────────────────
 -- with canon as (
---   select distinct on (paciente_id) paciente_id, data_nascimento
+--   select distinct on (paciente_id) paciente_id,
+--     to_date(raw_json->'favorecido'->>'data_nascimento','DD/MM/YYYY') as nasc
 --   from public.agenda_tita
---   where ativo = true and paciente_id is not null and data_nascimento is not null
---   order by paciente_id, updated_at desc
+--   where ativo and paciente_id is not null
+--     and raw_json->'favorecido'->>'data_nascimento' ~ '^\d{2}/\d{2}/\d{4}$'
+--   order by paciente_id, data_atendimento desc
 -- )
--- select count(*) as linhas_afetadas,
---        count(distinct a.paciente_id) as pacientes_afetados
--- from public.agenda_tita a
--- join canon c on c.paciente_id = a.paciente_id
--- where a.ativo = true
---   and a.data_nascimento is distinct from c.data_nascimento;
+-- select count(*) as linhas, count(distinct a.paciente_id) as pacientes
+-- from public.agenda_tita a join canon c on c.paciente_id = a.paciente_id
+-- where a.ativo and a.data_nascimento is distinct from c.nasc;
 
 -- ── APLICAÇÃO ───────────────────────────────────────────────────────────────
 with canon as (
   select distinct on (paciente_id)
     paciente_id,
-    data_nascimento
+    to_date(raw_json->'favorecido'->>'data_nascimento','DD/MM/YYYY') as nasc
   from public.agenda_tita
-  where ativo = true
+  where ativo
     and paciente_id is not null
-    and data_nascimento is not null
-  order by paciente_id, updated_at desc
+    and raw_json->'favorecido'->>'data_nascimento' ~ '^\d{2}/\d{2}/\d{4}$'
+  order by paciente_id, data_atendimento desc
 )
 update public.agenda_tita a
-set data_nascimento = c.data_nascimento,
+set data_nascimento = c.nasc,
     updated_at      = now()
 from canon c
 where a.paciente_id = c.paciente_id
-  and a.ativo = true
-  and a.data_nascimento is distinct from c.data_nascimento;
+  and a.ativo
+  and c.nasc is not null
+  and a.data_nascimento is distinct from c.nasc;

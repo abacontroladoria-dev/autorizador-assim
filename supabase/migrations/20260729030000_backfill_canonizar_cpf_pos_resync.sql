@@ -1,54 +1,55 @@
 -- ============================================================================
--- Backfill: canoniza agenda_tita.cpf por paciente  ⚠️ RODAR SÓ APÓS RE-SYNC ⚠️
+-- Backfill: canoniza agenda_tita.cpf por paciente (via raw_json) ⚠ PÓS RE-SYNC
 -- ----------------------------------------------------------------------------
 -- Mesma causa-raiz do nascimento (20260729020000): o sync nunca reatualizava
--- cpf de linha existente. A correção de código (sync_tita_agenda) faz o re-sync
--- refrescar as linhas das datas que a TiTa ainda retorna (hoje → fim do mês
--- seguinte). Este backfill estende a correção às linhas PASSADAS, canonizando
--- cada paciente para o CPF não-nulo mais recente.
+-- cpf de linha existente. A correção de código faz o re-sync refrescar as datas
+-- que a TiTa ainda retorna (hoje → fim do mês seguinte). Este backfill estende a
+-- correção às linhas PASSADAS.
 --
--- ⚠️ PRÉ-REQUISITO OBRIGATÓRIO: deploy do sync_tita_agenda corrigido + re-sync
--- da janela ATUAL concluído. Só assim a "linha mais recente" de cada paciente
--- carrega o CPF vigente da TiTa (validado no probe 2026-07-29: o endpoint devolve
--- o CPF correto de Alice/Arthur/José Valter). Rodar ANTES do re-sync espalharia
--- o CPF ANTIGO/ERRADO (ex.: Arthur tinha só 11348638702 no histórico).
+-- MÉTODO (robusto): canoniza para o CPF que a TiTa DE FATO mandou
+-- (raw_json->favorecido->cpf, só dígitos), escolhendo a linha de
+-- data_atendimento MAIS RECENTE = re-sincronizada = cadastro atual. NÃO usa
+-- updated_at (imune a backfills que setam updated_at em massa). O CPF do
+-- histórico NÃO é confiável (ex.: Arthur Vitorino tinha só o CPF antigo errado
+-- em todas as linhas); por isso a fonte é o raw_json da linha mais recente.
 --
--- Guarda extra: canoniza só quando o CPF mais recente do paciente foi
--- sincronizado DEPOIS do início do re-sync — evita canonizar para valor velho
--- em pacientes que não têm sessão futura (não foram tocados pelo re-sync).
--- Ajuste a data-limite abaixo para o instante em que você disparou o re-sync.
--- Idempotente: só altera linha cujo cpf difere do canônico; nunca grava nulo.
+-- ⚠ PRÉ-REQUISITO OBRIGATÓRIO: deploy do sync corrigido + re-sync da janela ativa
+-- CONCLUÍDO, para que a linha de data mais recente carregue o raw_json vigente.
+-- Rodar antes do re-sync propagaria o CPF antigo.
+--
+-- Escopo prático: só impacta o fluxo ASSIM (a atendente copia o CPF da tela do
+-- /solicitar quando o auto-preenchimento da ASSIM falha). Idempotente.
 -- ============================================================================
 
--- ── PREVIEW (rode ANTES; não escreve nada) ──────────────────────────────────
+-- ── PREVIEW (não escreve) ───────────────────────────────────────────────────
 -- with canon as (
---   select distinct on (paciente_id) paciente_id, cpf
+--   select distinct on (paciente_id) paciente_id,
+--     nullif(regexp_replace(coalesce(raw_json->'favorecido'->>'cpf',''), '\D','','g'), '') as cpf
 --   from public.agenda_tita
---   where ativo = true and paciente_id is not null and cpf is not null
---     and updated_at >= '2026-07-29 00:00:00+00'   -- << início do re-sync
---   order by paciente_id, updated_at desc
+--   where ativo and paciente_id is not null
+--     and nullif(regexp_replace(coalesce(raw_json->'favorecido'->>'cpf',''), '\D','','g'), '') is not null
+--   order by paciente_id, data_atendimento desc
 -- )
--- select count(*) as linhas_afetadas, count(distinct a.paciente_id) as pacientes
--- from public.agenda_tita a
--- join canon c on c.paciente_id = a.paciente_id
--- where a.ativo = true and a.cpf is distinct from c.cpf;
+-- select count(*) as linhas, count(distinct a.paciente_id) as pacientes
+-- from public.agenda_tita a join canon c on c.paciente_id = a.paciente_id
+-- where a.ativo and a.cpf is distinct from c.cpf;
 
 -- ── APLICAÇÃO ───────────────────────────────────────────────────────────────
 with canon as (
   select distinct on (paciente_id)
     paciente_id,
-    cpf
+    nullif(regexp_replace(coalesce(raw_json->'favorecido'->>'cpf',''), '\D', '', 'g'), '') as cpf
   from public.agenda_tita
-  where ativo = true
+  where ativo
     and paciente_id is not null
-    and cpf is not null
-    and updated_at >= '2026-07-29 00:00:00+00'   -- << ajuste p/ o início do re-sync
-  order by paciente_id, updated_at desc
+    and nullif(regexp_replace(coalesce(raw_json->'favorecido'->>'cpf',''), '\D', '', 'g'), '') is not null
+  order by paciente_id, data_atendimento desc
 )
 update public.agenda_tita a
 set cpf        = c.cpf,
     updated_at = now()
 from canon c
 where a.paciente_id = c.paciente_id
-  and a.ativo = true
+  and a.ativo
+  and c.cpf is not null
   and a.cpf is distinct from c.cpf;
