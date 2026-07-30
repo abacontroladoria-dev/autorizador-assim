@@ -18,13 +18,18 @@ const ESP_ORD_T = [
   "Fisioterapia Aquática", "Equoterapia", "Arteterapia", "Psicologia", "Habilidades Sociais",
 ]
 
-function scColor(esp: string): { bg: string; bd: string; tx: string } {
-  if (esp === "Psicologia ABA") return { bg: B.blueLt, bd: `${B.blue}66`, tx: B.blue }
-  if (esp === "Fonoaudiologia") return { bg: B.pinkLt, bd: `${B.pink}88`, tx: "#b85a8e" }
-  if (esp === "Terapia Ocupacional") return { bg: B.orangeLt, bd: `${B.orange}66`, tx: B.orange }
-  if (esp === "Musicoterapia") return { bg: B.purpleLt, bd: `${B.purple}66`, tx: B.purple }
-  return { bg: B.limeLt, bd: `${B.lime}88`, tx: "#4a6e20" }
+// Acento por especialidade — um único hex, do qual derivamos fundo e borda com alpha.
+// Tinta translúcida sobre var(--card) funciona nos dois temas (claro e escuro); o nome da
+// terapia usa var(--card-foreground) (legível sempre) e o acento fica só em detalhes.
+function espAccent(esp: string): string {
+  if (esp === "Psicologia ABA") return B.blue
+  if (esp === "Fonoaudiologia") return B.pink
+  if (esp === "Terapia Ocupacional") return B.orange
+  if (esp === "Musicoterapia") return B.purple
+  return B.green
 }
+
+const ALERTA_SEV = { error: 0, warn: 1, info: 2 } as const
 
 export function NovoCronogramaTab({ cRows, lRows, dispRows }: Props) {
   const [paciente, setPaciente] = useState("")
@@ -63,109 +68,135 @@ export function NovoCronogramaTab({ cRows, lRows, dispRows }: Props) {
     ? [...ESP_ORD_T.filter(e => result.espTable[e]), ...Object.keys(result.espTable).filter(e => !ESP_ORD_T.includes(e))]
     : []
 
+  const alertasOrdenadas = result
+    ? [...result.alertas].sort((a, b) => ALERTA_SEV[a.tipo] - ALERTA_SEV[b.tipo])
+    : []
+
   const canGerar = !!paciente && lRows.length > 0 && cRows.length > 0
+
+  // Pendências de dados (carregados pelos badges no topo da página).
+  const faltando: string[] = []
+  if (lRows.length === 0) faltando.push("Laudos")
+  if (dispRows.length === 0) faltando.push("Disponibilidade")
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Formulário */}
-      <div className="rounded-[14px] border border-border bg-card shadow-sm p-4">
-        <div className="font-extrabold mb-3 text-[15px]" style={{ color: B.navy }}>
-          Novo Cronograma do Zero
-        </div>
+      {/* Geração */}
+      <section className="rounded-[14px] border border-border bg-card shadow-sm p-4">
+        <h2 className="font-extrabold mb-3 text-[14px]" style={{ color: B.navy }}>Novo cronograma do zero</h2>
 
         <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_auto] gap-3 items-end">
-          {/* Paciente */}
           <div>
-            <label className="block text-[12px] font-bold text-muted-foreground mb-1">Paciente</label>
+            <label htmlFor="nc-paciente" className="block text-[12px] font-semibold text-muted-foreground mb-1.5">Paciente</label>
             <select
+              id="nc-paciente"
               value={paciente}
               onChange={e => { setPaciente(e.target.value); setResult(null) }}
-              className="w-full border border-input rounded-lg px-3 py-2 text-[13px] bg-background font-sans"
+              disabled={pacsAtivos.length === 0}
+              className="w-full border border-input rounded-[10px] px-3 text-[13px] bg-background font-sans disabled:opacity-60"
+              style={{ height: "44px" }}
             >
               <option value="">Selecionar paciente...</option>
               {pacsAtivos.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
-            {lRows.length === 0 && (
-              <p className="text-[11px] text-muted-foreground mt-1">Carregue o relatório de laudos primeiro</p>
-            )}
           </div>
 
-          {/* Unidade */}
           <div>
-            <label className="block text-[12px] font-bold text-muted-foreground mb-1">Unidade</label>
-            <div className="flex gap-1.5">
-              {(["Realengo", "Fazendinha", "Padre Miguel"] as const).map(u => (
-                <button
-                  key={u}
-                  onClick={() => setUnidade(u)}
-                  className="flex-1 py-2 px-1 rounded-lg border text-[12px] font-sans transition-colors"
-                  style={{
-                    border: `1px solid ${unidade === u ? B.blue : "var(--border)"}`,
-                    background: unidade === u ? B.blueLt : "transparent",
-                    color: unidade === u ? B.blue : "var(--card-foreground)",
-                    fontWeight: unidade === u ? 700 : 400,
-                    cursor: "pointer",
-                  }}
-                >
-                  {u}
-                </button>
-              ))}
+            <span className="block text-[12px] font-semibold text-muted-foreground mb-1.5">Unidade</span>
+            <div className="flex gap-1.5" role="group" aria-label="Unidade">
+              {(["Realengo", "Fazendinha", "Padre Miguel"] as const).map(u => {
+                const active = unidade === u
+                return (
+                  <button
+                    key={u}
+                    type="button"
+                    aria-pressed={active}
+                    onClick={() => setUnidade(u)}
+                    className="flex-1 px-1 rounded-[10px] border text-[12px] font-sans transition-colors"
+                    style={{
+                      height: "44px",
+                      border: `1px solid ${active ? B.blue : "var(--border)"}`,
+                      background: active ? B.blueLt : "transparent",
+                      color: active ? B.blue : "var(--card-foreground)",
+                      fontWeight: active ? 700 : 500,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {u}
+                  </button>
+                )
+              })}
             </div>
           </div>
 
-          {/* Gerar */}
           <button
+            type="button"
             onClick={handleGerar}
             disabled={!canGerar}
-            className="px-5 py-2.5 rounded-[10px] text-white text-[13px] font-extrabold font-sans border-none transition-opacity"
-            style={{ background: canGerar ? B.navy : `${B.navy}55`, cursor: canGerar ? "pointer" : "not-allowed" }}
+            className="rounded-[10px] text-white text-[13px] font-extrabold font-sans border-none transition-opacity"
+            style={{ height: "44px", padding: "0 22px", background: canGerar ? B.navy : `${B.navy}55`, cursor: canGerar ? "pointer" : "not-allowed" }}
           >
-            ▶ Gerar
+            Gerar cronograma
           </button>
         </div>
 
-        {dispRows.length === 0 && (
-          <div
-            className="mt-3 rounded-lg px-3 py-2 text-[12px]"
-            style={{ background: B.orangeLt, border: `1px solid ${B.orange}44`, color: B.orange }}
-          >
-            Disponibilidade não carregada — faça o upload do CSV do Órbita (disponibilidades_…csv) na seção de dados acima.
-          </div>
+        {faltando.length > 0 && (
+          <p className="text-[12px] text-muted-foreground mt-3 mb-0">
+            Carregue <strong style={{ color: "var(--card-foreground)" }}>{faltando.join(" e ")}</strong> nos badges no topo da página para gerar o cronograma.
+          </p>
         )}
-      </div>
+      </section>
 
       {result && (
         <>
-          {/* Alertas */}
-          {result.alertas.length > 0 && (
-            <div className="flex flex-col gap-1">
-              {result.alertas.map((a, i) => (
-                <div
-                  key={i}
-                  className="px-3.5 py-2 rounded-[10px] text-[12px] font-semibold"
-                  style={{
-                    background: a.tipo === "error" ? "#fef2f2" : a.tipo === "warn" ? B.orangeLt : B.blueLt,
-                    color: a.tipo === "error" ? "#dc2626" : a.tipo === "warn" ? B.orange : B.blue,
-                    border: `1px solid ${a.tipo === "error" ? "#fca5a5" : a.tipo === "warn" ? `${B.orange}44` : `${B.blue}33`}`,
-                  }}
-                >
-                  {a.tipo === "error" ? "❌" : a.tipo === "warn" ? "⚠️" : "ℹ️"} {a.msg}
+          {/* Observações — alertas organizados por severidade, uma por linha */}
+          {alertasOrdenadas.length > 0 && (
+            <section className="rounded-[14px] border border-border bg-card p-4">
+              <h3 className="font-extrabold text-[13px] mb-2" style={{ color: B.navy }}>Observações</h3>
+              <ul className="flex flex-col divide-y divide-border">
+                {alertasOrdenadas.map((a, i) => {
+                  const cor = a.tipo === "error" ? B.red : a.tipo === "warn" ? B.amber : B.blue
+                  return (
+                    <li key={i} className="flex items-start gap-2 py-2 first:pt-0 last:pb-0 text-[12px]">
+                      <span aria-hidden="true" className="shrink-0" style={{ color: cor }}>
+                        {a.tipo === "error" ? "❌" : a.tipo === "warn" ? "⚠️" : "ℹ️"}
+                      </span>
+                      <span style={{ color: "var(--card-foreground)", lineHeight: 1.45 }}>{a.msg}</span>
+                    </li>
+                  )
+                })}
+              </ul>
+            </section>
+          )}
+
+          {/* Workspace: grade (esquerda) + resumo fixo (direita) num só contêiner */}
+          <div className="rounded-[14px] border border-border bg-card overflow-hidden grid grid-cols-1 lg:grid-cols-[minmax(0,1fr)_248px]">
+            <div className="min-w-0 overflow-x-auto p-4 lg:border-r border-border">
+              <GradeView diasResult={diasResult} result={result} />
+            </div>
+            <SummaryPanel paciente={paciente} unidade={unidade} result={result} totalSess={totalSess} espRows={espRows} />
+          </div>
+
+          {/* Detalhamento do laudo */}
+          <LaudoTable espRows={espRows} result={result} />
+
+          {/* Regras — referência secundária, recolhível */}
+          <details className="rounded-[14px] border border-border bg-card">
+            <summary className="cursor-pointer select-none px-4 py-3 font-extrabold text-[14px] list-none" style={{ color: B.navy }}>
+              📐 Regras aplicadas neste cronograma
+            </summary>
+            <div className="px-4 pb-4 flex flex-col gap-1.5">
+              {REGRAS_NOVO_CRON.map((r, i) => (
+                <div key={i} className="flex gap-3 p-2.5 rounded-[10px] text-[12px]" style={{ background: "var(--muted)" }}>
+                  <span className="text-base shrink-0" aria-hidden="true">{r.icon}</span>
+                  <div>
+                    <div className="font-bold mb-0.5" style={{ color: B.navy }}>{r.title}</div>
+                    <div className="text-muted-foreground leading-relaxed">{r.desc}</div>
+                  </div>
                 </div>
               ))}
             </div>
-          )}
-
-          {/* Resumo */}
-          <ResumoBar paciente={paciente} unidade={unidade} result={result} totalSess={totalSess} espRows={espRows} />
-
-          {/* Grade */}
-          <GradePanel diasResult={diasResult} result={result} />
-
-          {/* Tabela Laudo */}
-          <LaudoTable espRows={espRows} result={result} />
-
-          {/* Regras */}
-          <RegrasPanel />
+          </details>
         </>
       )}
     </div>
@@ -174,86 +205,94 @@ export function NovoCronogramaTab({ cRows, lRows, dispRows }: Props) {
 
 // ─── SUB-COMPONENTES ──────────────────────────────────────────────────────────
 
-function ResumoBar({
-  paciente,
-  unidade,
-  result,
-  totalSess,
-  espRows,
+function SummaryPanel({
+  paciente, unidade, result, totalSess, espRows,
 }: {
-  paciente: string
-  unidade: string
-  result: NovoCronogramaResult
-  totalSess: number
-  espRows: string[]
+  paciente: string; unidade: string; result: NovoCronogramaResult; totalSess: number; espRows: string[]
 }) {
   const totalEsps = Object.values(result.espTable).filter((e: EspEntry) => e.vigente && e.aut > 0).length
   const alocEsps = Object.values(result.espTable).filter((e: EspEntry) => e.of > 0).length
+  const barras = espRows.filter(e => (result.espTable[e]?.aut ?? 0) > 0)
 
   return (
-    <div
-      className="rounded-xl border border-border bg-card px-4 py-3 flex gap-3.5 flex-wrap items-center"
-    >
-      <div>
-        <span className="font-extrabold text-[16px]" style={{ color: B.navy }}>{paciente}</span>
-        <span className="ml-1.5 text-[12px] text-muted-foreground">— {unidade}</span>
+    <aside className="p-4 border-t lg:border-t-0 border-border self-start lg:sticky lg:top-4">
+      <div className="text-[15px] font-extrabold leading-tight" style={{ color: B.navy }}>{paciente}</div>
+      <div className="text-[12px] text-muted-foreground mb-3">{unidade}</div>
+
+      <div className="flex items-baseline gap-1.5 mb-1">
+        <span className="text-[28px] font-extrabold leading-none" style={{ color: B.navy }}>{totalSess}</span>
+        <span className="text-[12px] text-muted-foreground">sessões alocadas</span>
       </div>
-      <span className="rounded-full px-2.5 py-0.5 text-[12px] font-bold" style={{ background: B.limeLt, color: "#4a6e20" }}>
-        {totalSess} sessões
-      </span>
-      <span className="rounded-full px-2.5 py-0.5 text-[12px] font-bold" style={{ background: B.purpleLt, color: B.purple }}>
-        {alocEsps}/{totalEsps} especialidades
-      </span>
-      {result.turnoClinico && (
-        <span className="rounded-full px-2.5 py-0.5 text-[12px] font-bold" style={{ background: B.orangeLt, color: B.orange }}>
-          🕐 Clínica: {result.turnoClinico === "manha" ? "Manhã" : "Tarde"}
+      <div className="flex flex-wrap gap-1.5 mb-3.5">
+        <span className="rounded-full px-2 py-0.5 text-[11px] font-bold" style={{ background: B.purpleLt, color: B.purple }}>
+          {alocEsps}/{totalEsps} especialidades
         </span>
-      )}
-    </div>
+        {result.turnoClinico && (
+          <span className="rounded-full px-2 py-0.5 text-[11px] font-bold" style={{ background: B.orangeLt, color: B.amber }}>
+            🕐 {result.turnoClinico === "manha" ? "Clínica de manhã" : "Clínica à tarde"}
+          </span>
+        )}
+      </div>
+
+      <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground mb-2">Ofertado / Autorizado</div>
+      <div className="flex flex-col gap-2">
+        {barras.length === 0 && <div className="text-[11px] text-muted-foreground">Sem especialidades autorizadas.</div>}
+        {barras.map(esp => {
+          const e = result.espTable[esp]
+          const aut = e.aut, of = e.of
+          const ok = of >= aut, none = of === 0
+          const cor = ok ? B.green : none ? B.red : B.amber
+          const pct = aut > 0 ? Math.min(100, Math.round((of / aut) * 100)) : (of > 0 ? 100 : 0)
+          return (
+            <div key={esp}>
+              <div className="flex items-center justify-between gap-2 mb-0.5">
+                <span className="text-[11px] font-semibold truncate" style={{ color: "var(--card-foreground)" }} title={esp}>{esp}</span>
+                <span className="text-[11px] font-bold shrink-0" style={{ color: cor }}>{of}/{aut}</span>
+              </div>
+              <div className="h-1.5 rounded-full overflow-hidden" style={{ background: "var(--muted)" }}>
+                <div className="h-full rounded-full" style={{ width: `${pct}%`, background: cor, transition: "width 220ms cubic-bezier(0.22,1,0.36,1)" }} />
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </aside>
   )
 }
 
-function GradePanel({
-  diasResult,
-  result,
-}: {
-  diasResult: string[]
-  result: NovoCronogramaResult
-}) {
+function GradeView({ diasResult, result }: { diasResult: string[]; result: NovoCronogramaResult }) {
   return (
-    <div className="rounded-[14px] border border-border bg-card p-4 overflow-x-auto">
-      <div className="font-extrabold mb-2.5 text-[14px]" style={{ color: B.navy }}>📅 Grade Sugerida</div>
-      <div className="flex gap-3 mb-3 text-[11px] text-muted-foreground flex-wrap">
-        <span>
-          <span
-            className="inline-block w-3 h-3 rounded-[3px] mr-1 align-middle"
-            style={{ background: "#fffbeb", border: "1px solid #fde68a" }}
-          />
-          Disponível — não preenchido
-        </span>
-        <span>
-          <span
-            className="inline-block w-3 h-3 rounded-[3px] mr-1 align-middle"
-            style={{ background: B.limeLt, border: `1px solid ${B.lime}` }}
-          />
-          Sessão alocada
-        </span>
+    <>
+      <div className="flex items-center justify-between mb-2.5 flex-wrap gap-2">
+        <h3 className="font-extrabold text-[14px]" style={{ color: B.navy }}>📅 Grade sugerida</h3>
+        <div className="flex gap-3 text-[11px] text-muted-foreground flex-wrap">
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block w-3 h-3 rounded-[3px]" style={{ background: "var(--muted)", border: "1px dashed var(--border)" }} />
+            Disponível, não preenchido
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <span className="inline-block w-3 h-3 rounded-[3px]" style={{ background: `${B.green}22`, border: `1px solid ${B.green}66` }} />
+            Sessão alocada
+          </span>
+        </div>
       </div>
 
       {diasResult.length === 0 ? (
-        <div className="text-center text-muted-foreground py-6">Nenhuma disponibilidade encontrada.</div>
+        <div className="text-center text-muted-foreground py-8 text-[13px]">Nenhuma disponibilidade encontrada para este paciente.</div>
       ) : (
-        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "500px" }}>
+        <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "520px", tableLayout: "fixed" }}>
+          <colgroup>
+            <col style={{ width: "52px" }} />
+            {diasResult.map(d => <col key={d} style={{ width: `${Math.floor(100 / diasResult.length)}%` }} />)}
+          </colgroup>
           <thead>
             <tr>
-              <th style={{ width: "60px", textAlign: "right", paddingRight: "14px", paddingBottom: "10px", fontSize: "13px", color: "var(--muted-foreground)", fontWeight: 500 }}>
-                Hora
-              </th>
+              <th style={{ textAlign: "right", paddingRight: "12px", paddingBottom: "10px", fontSize: "11px", color: "var(--muted-foreground)", fontWeight: 500 }}>Hora</th>
               {diasResult.map(d => (
-                <th key={d} style={{ minWidth: "160px", paddingBottom: "10px", textAlign: "center", fontSize: "15px", color: B.navy, fontWeight: 800 }}>
-                  {d.replace("-feira", "")}
+                <th key={d} style={{ paddingBottom: "10px", textAlign: "center", fontSize: "13px", color: B.navy, fontWeight: 800 }}>
+                  <div>{d.replace("-feira", "")}</div>
                   {result.availWindows[d] && (
-                    <div style={{ fontSize: "11px", fontWeight: 400, color: "var(--muted-foreground)", marginTop: "2px" }}>
+                    <div style={{ fontSize: "10px", fontWeight: 500, color: "var(--muted-foreground)", marginTop: "2px" }}>
                       {fm(result.availWindows[d].inicio)}–{fm(result.availWindows[d].fim)}
                     </div>
                   )}
@@ -266,26 +305,26 @@ function GradePanel({
               const rowData = diasResult.map(d => {
                 const hi = pm(hora)
                 const w = result.availWindows[d]
-                const inWin = w && hi !== null && hi >= w.inicio && hi < w.fim
+                const inWin = !!w && hi !== null && hi >= w.inicio && hi < w.fim
                 return { inWin, sess: result.schedule[d]?.[hora] }
               })
               if (!rowData.some(c => c.inWin || c.sess)) return null
               return (
                 <tr key={hora} style={{ borderTop: "1px solid var(--border)" }}>
-                  <td style={{ textAlign: "right", paddingRight: "14px", verticalAlign: "middle", fontFamily: "monospace", fontSize: "16px", fontWeight: 800, color: B.navy, letterSpacing: "-0.5px", paddingTop: "4px", paddingBottom: "4px" }}>
+                  <td style={{ textAlign: "right", paddingRight: "12px", verticalAlign: "middle", fontFamily: "monospace", fontVariantNumeric: "tabular-nums", fontSize: "13px", fontWeight: 800, color: B.navy }}>
                     {hora}
                   </td>
                   {diasResult.map((d, di) => {
                     const { inWin, sess } = rowData[di]
-                    const sc = sess ? scColor(sess.esp) : null
+                    const a = sess ? espAccent(sess.esp) : null
                     return (
                       <td key={d} style={{ padding: "3px" }}>
                         <div
                           style={{
-                            minHeight: "72px",
+                            minHeight: "68px",
                             borderRadius: "10px",
-                            background: sess ? sc!.bg : inWin ? "#fffbeb" : "transparent",
-                            border: sess ? `1px solid ${sc!.bd}` : inWin ? "1px solid #fde68a" : "none",
+                            background: sess ? `${a}22` : inWin ? "var(--muted)" : "transparent",
+                            border: sess ? `1px solid ${a}66` : inWin ? "1px dashed var(--border)" : "none",
                             padding: sess || inWin ? "8px 10px" : "0",
                             display: "flex",
                             flexDirection: "column",
@@ -294,12 +333,12 @@ function GradePanel({
                         >
                           {sess && (
                             <>
-                              <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--card-foreground)", lineHeight: "1.3" }}>{sess.tP}</div>
+                              <div style={{ fontSize: "12px", fontWeight: 700, color: "var(--card-foreground)", lineHeight: 1.3 }}>{sess.tP}</div>
                               {sess.esp !== sess.tP && (
                                 <div style={{ fontSize: "10px", color: "var(--muted-foreground)" }}>({sess.esp})</div>
                               )}
                               <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "3px" }}>{fmtName(sess.prof)}</div>
-                              <div style={{ fontSize: "11px", fontWeight: 700, color: sc!.tx, marginTop: "auto", paddingTop: "4px" }}>✦ Novo</div>
+                              <div style={{ fontSize: "10px", fontWeight: 800, color: a!, marginTop: "auto", paddingTop: "4px" }}>✦ Novo</div>
                             </>
                           )}
                         </div>
@@ -312,26 +351,26 @@ function GradePanel({
           </tbody>
         </table>
       )}
-    </div>
+    </>
   )
 }
 
 function LaudoTable({ espRows, result }: { espRows: string[]; result: NovoCronogramaResult }) {
   return (
-    <div className="rounded-[14px] border border-border bg-card p-4">
-      <div className="font-extrabold mb-3 text-[14px]" style={{ color: B.navy }}>
-        📋 Laudo — Solicitado × Autorizado × Ofertado
-      </div>
-      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
-        <thead style={{ background: "var(--muted)" }}>
-          <tr>
-            {["Especialidade", "Solicitado (Laudo)", "Autorizado (Convênio)", "Ofertado (Novo Crono)"].map(h => (
+    <div className="rounded-[14px] border border-border bg-card p-4 overflow-x-auto">
+      <h3 className="font-extrabold mb-3 text-[14px]" style={{ color: B.navy }}>
+        📋 Laudo: solicitado × autorizado × ofertado
+      </h3>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px", minWidth: "480px" }}>
+        <thead>
+          <tr style={{ background: "var(--muted)" }}>
+            {["Especialidade", "Solicitado", "Autorizado", "Ofertado"].map(h => (
               <th
                 key={h}
                 style={{
                   textAlign: h === "Especialidade" ? "left" : "center",
                   padding: "8px 12px",
-                  fontSize: "11px",
+                  fontSize: "10px",
                   fontWeight: 700,
                   color: "var(--muted-foreground)",
                   textTransform: "uppercase",
@@ -351,8 +390,8 @@ function LaudoTable({ espRows, result }: { espRows: string[]; result: NovoCronog
             const ok = aut > 0 && of_ >= aut
             const partial = of_ > 0 && of_ < aut
             const none = aut > 0 && of_ === 0
-            const ofC = ok ? "#4a6e20" : partial ? B.orange : none ? "#dc2626" : "var(--muted-foreground)"
-            const ofBg = ok ? B.limeLt : partial ? B.orangeLt : none ? "#fef2f2" : "var(--muted)"
+            const ofC = ok ? "#4a6e20" : partial ? B.amber : none ? B.red : "var(--muted-foreground)"
+            const ofBg = ok ? B.limeLt : partial ? B.orangeLt : "var(--muted)"
             return (
               <tr key={esp} style={{ borderTop: "1px solid var(--border)" }}>
                 <td style={{ padding: "9px 12px" }}>
@@ -373,27 +412,6 @@ function LaudoTable({ espRows, result }: { espRows: string[]; result: NovoCronog
           })}
         </tbody>
       </table>
-    </div>
-  )
-}
-
-function RegrasPanel() {
-  return (
-    <div className="rounded-[14px] border border-border bg-card p-4">
-      <div className="font-extrabold mb-3 text-[14px]" style={{ color: B.navy }}>
-        📐 Regras Aplicadas neste Cronograma
-      </div>
-      <div className="flex flex-col gap-1.5">
-        {REGRAS_NOVO_CRON.map((r, i) => (
-          <div key={i} className="flex gap-3 p-2.5 rounded-lg text-[12px]" style={{ background: "var(--card)", border: "1px solid var(--border)" }}>
-            <span className="text-base shrink-0">{r.icon}</span>
-            <div>
-              <div className="font-bold mb-0.5" style={{ color: B.navy }}>{r.title}</div>
-              <div className="text-muted-foreground leading-relaxed">{r.desc}</div>
-            </div>
-          </div>
-        ))}
-      </div>
     </div>
   )
 }

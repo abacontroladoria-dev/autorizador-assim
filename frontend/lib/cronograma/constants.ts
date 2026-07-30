@@ -15,6 +15,9 @@ export const B = {
   limeLt: "#f3f8e6",
   pinkLt: "#fdf0f6",
   navyLt: "#e8e9f0",
+  gray: "#6b7280",
+  amber: "#b45309",
+  amberLt: "#fff8e1",
 } as const
 
 // ─── MAPEAMENTOS DE TERAPIA ───────────────────────────────────────────────────
@@ -74,6 +77,15 @@ export const ABA_CLI_EXCL = new Set([
 ])
 
 export const ABA_EXT = new Set(["Aplicador ABA Casa", "Aplicador ABA Escola", "Aplicador ABA Escola/Casa"])
+
+// Terapias que NÃO são sessões clínicas do paciente (sem presença do paciente —
+// profissional planeja/administra). Usado tanto pra excluir de checagens de
+// buraco/min_sessoes (inconsistencias.ts) quanto pra saber quando uma sessão
+// dessas deve herdar o status do dia em telas de acompanhamento (reposição).
+export const ADMIN_ONLY = new Set([
+  "Supervisão ABA", "Coordenador de Caso", "Visita Guiada", "Triagem",
+  "Avaliação Neuropsicológica", "Avaliação de Repertório",
+])
 
 export const PACS_ADMIN = new Set([
   "Ainda não selecionado", "Notificação Prévia", "Horário Administrativo",
@@ -298,6 +310,7 @@ export const TERAPIA_ID: Record<string, number> = {
   "Fisioterapia":                   2258,
   "Fisioterapia Aquática":          2249,
   "Fonoaudiologia":                 2250,
+  "Psiquiatra/Neurologista":        2695,
   "Musicoterapia":                  2251,
   "OFERECER CONSULTA NUTRIÇÃO":     2579,
   "Operações Clínicas":             2279,
@@ -332,6 +345,18 @@ export const ABA_EXIB_PSICO_IDS = new Set([2269, 2317, 2262, 2261, 2248, 2353, 2
 export const ABA_EXIB_PSICO_NAMES = new Set(
   (Object.entries(TERAPIA_ID) as [string, number][])
     .filter(([, id]) => ABA_EXIB_PSICO_IDS.has(id))
+    .map(([name]) => name)
+)
+
+// Terapias do "Processo Diagnóstico" (dashboard de indicadores/pacientes) — um
+// paciente cuja agenda contém APENAS terapias deste grupo (nenhuma outra) está
+// em processo de avaliação/diagnóstico, não em tratamento multidisciplinar.
+export const PROCESSO_DIAGNOSTICO_IDS = new Set([2268, 2695, 2270])
+
+// Versão por nome (derivada de TERAPIA_ID — não edite diretamente)
+export const PROCESSO_DIAGNOSTICO_NAMES = new Set(
+  (Object.entries(TERAPIA_ID) as [string, number][])
+    .filter(([, id]) => PROCESSO_DIAGNOSTICO_IDS.has(id))
     .map(([name]) => name)
 )
 

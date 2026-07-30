@@ -54,9 +54,14 @@ interface AceiteSessao {
 interface AceitePacBundle {
   id: string; pac: string; ts: number; origem: "ocp-paciente"
   sessoes: AceiteSessao[]
-  status: "pendente" | "confirmado" | "recusado" | "inviavel"
+  // "removido_tita": série excluída direto na TiTa e detectada pela reconciliação.
+  // Mantém em sincronia com o tipo canônico em types/acompanhamento.ts.
+  status: "pendente" | "confirmado" | "recusado" | "inviavel" | "removido_tita"
   inviavelSlots: string[]
   motivo?: string
+  // Auditoria da implantação (imutável) — ver types/acompanhamento.ts.
+  implantadoPor?: string
+  implantadoPorEmail?: string
 }
 
 // ─── Metadata ─────────────────────────────────────────────────────────────────
@@ -1395,6 +1400,7 @@ const BUNDLE_STATUS_META = {
   confirmado: { label: "Confirmou", bg: "#dcfce7", c: "#14532d", bd: "#86efac" },
   recusado:   { label: "Recusou",   bg: "#fee2e2", c: "#7f1d1d", bd: "#fca5a5" },
   inviavel:   { label: "⛔ Inviável", bg: "#f3f4f6", c: "#6b7280", bd: "#d1d5db" },
+  removido_tita: { label: "Removido na TiTa", bg: "#fffbeb", c: "#b45309", bd: "#fcd34d" },
 }
 
 function AceitesPanel({
@@ -1700,6 +1706,50 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     [aceites, pac],
   )
 
+  // Reconciliação com a TiTa. A API só grava, não exclui — então uma série pode ser
+  // removida diretamente na TiTa sem que o Pulsar saiba. Como o estado "Implantado"
+  // vive só nos bundles (pacBundles), sem sync de volta ele ficaria preso para
+  // sempre, mostrando "✅ Implantado" e bloqueando o slot para todos. Ao abrir um
+  // paciente, um bundle "confirmado" cujas sessões não aparecem mais na grade oficial
+  // é reclassificado para "removido_tita": some de reservasConfirmadas (grade),
+  // slotsReservadosOutros e do bloqueio de dayHours — tudo porque buildSugestoes
+  // filtra por status === "confirmado". Só libera localmente (não há exclusão via API).
+  //
+  // Guarda anti-corrida (limite fixo de 24h): a grade oficial sincroniza 1x/dia (06h);
+  // uma sessão recém-implantada ainda não aparece nela, e sem essa guarda seria
+  // liberada por engano logo depois de implantada.
+  const RECONCILE_MIN_AGE_MS = 24 * 60 * 60 * 1000
+  useEffect(() => {
+    if (!pac || cRows.length === 0) return
+    // Só reconcilia se a grade cobre este paciente — sem nenhuma linha dele não dá
+    // para distinguir "removido na TiTa" de "grade ainda não carregou este paciente".
+    if (!cRows.some(r => r["Nome Favorecido"] === pac)) return
+
+    const agora = Date.now()
+    const sessaoNaGrade = (s: AceiteSessao) => cRows.some(r =>
+      r["Nome Favorecido"] === pac &&
+      r["Dia da Semana"] === s.dia &&
+      r.Profissional === s.prof &&
+      r.Terapia === s.tP &&
+      fm(pm(hiStr(r)) ?? hiMin(r)) === s.hora,
+    )
+
+    let mudou = false
+    const proximos = aceites.map(b => {
+      if (b.pac !== pac || b.status !== "confirmado") return b
+      if (agora - b.ts < RECONCILE_MIN_AGE_MS) return b
+      // Exclusão é sempre da série inteira — só libera quando NENHUMA sessão do
+      // bundle aparece mais na grade (conservador: presença parcial mantém).
+      if (b.sessoes.some(sessaoNaGrade)) return b
+      mudou = true
+      return { ...b, status: "removido_tita" as const }
+    })
+    if (mudou) {
+      persistAceites(proximos)
+      toast("♻️ Sessões implantadas foram removidas na TiTa — os horários foram liberados.")
+    }
+  }, [pac, cRows, aceites, persistAceites])
+
   const recusadasSet = useMemo(() => {
     const s = new Set<string>()
     for (const r of recGlobal) {
@@ -1751,6 +1801,18 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     if (!pendingConfirm || confirmando) return
     const { sessoes } = pendingConfirm
 
+    // Guarda: uma sessão sem csvGradeId faria a rota rejeitar com 400
+    // (sessao_sem_csv_grade_id) — resposta sem `mensagem`, que caía no fallback
+    // genérico "Não foi possível concluir a integração com a TiTa". Barra aqui, antes
+    // de qualquer chamada, com uma mensagem que diz o que realmente aconteceu.
+    const semGradeId = sessoes.filter(s => !s.csvGradeId)
+    if (semGradeId.length) {
+      toast.error(
+        `❌ ${semGradeId.length}/${sessoes.length} ${semGradeId.length === 1 ? "horário ainda não está sincronizado" : "horários ainda não estão sincronizados"} para implantação. Gere uma nova sugestão e tente novamente.`,
+      )
+      return
+    }
+
     setConfirmando(true)
     try {
       const resp = await fetch("/api/tita/confirmar-agendamento", {
@@ -1762,6 +1824,8 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
         ok: boolean
         error?: string
         mensagem?: string
+        implantadoPor?: string
+        implantadoPorEmail?: string | null
         resultados?: Array<{ csvGradeId: string; ok: boolean; codigoErro?: string }>
       } | null
 
@@ -1769,8 +1833,14 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
         const falhas = body?.resultados?.filter(r => !r.ok) ?? []
         // Mensagem amigável já vem traduzida do backend (mensagemAmigavel/
         // mensagemResumoCriacao em services/tita/confirmar.ts) — nunca expõe
-        // código técnico/stack ao usuário.
-        const mensagem = body?.mensagem ?? "Não foi possível concluir a integração com a TiTa. Tente novamente."
+        // código técnico/stack ao usuário. Respostas de guarda da rota (401/400)
+        // trazem só `error` (sem `mensagem`); traduz esses casos aqui em vez de
+        // cair no fallback genérico, que não diz nada ao usuário.
+        const mensagem =
+          body?.mensagem ??
+          (body?.error === "not_authenticated" ? "Sua sessão expirou. Recarregue a página e entre novamente."
+            : body?.error === "sessao_sem_csv_grade_id" ? "Um dos horários ainda não está sincronizado para implantação. Gere uma nova sugestão e tente novamente."
+            : "Não foi possível concluir a integração com a TiTa. Tente novamente.")
         const contagem = falhas.length || sessoes.length
         toast.error(`❌ ${mensagem} (${contagem}/${sessoes.length} sessões afetadas)`)
         return
@@ -1783,6 +1853,9 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
         sessoes,
         status: "confirmado",
         inviavelSlots: [],
+        // Autoria imutável da implantação (do usuário autenticado no servidor).
+        implantadoPor: body?.implantadoPor,
+        implantadoPorEmail: body?.implantadoPorEmail ?? undefined,
       }
       persistAceites([...aceites, bundle])
 

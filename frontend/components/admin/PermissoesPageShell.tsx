@@ -3,6 +3,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   Activity,
+  AlertTriangle,
+  ArrowRightLeft,
   BarChart3,
   BriefcaseBusiness,
   Building2,
@@ -21,9 +23,13 @@ import {
   Search,
   ShieldCheck,
   Stethoscope,
+  TrendingUp,
   UserCheck,
   UserRound,
   Users,
+  Database,
+  Wallet,
+  History,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useHeader } from '@/contexts/HeaderContext'
@@ -37,7 +43,7 @@ import {
   salvarPermissoesUsuario,
 } from '@/services/permissoes.service'
 import type { Permissao } from '@/services/permissoes.service'
-import { getRoleDefaultPermissions } from '@/lib/permissions/hasPermission'
+import { getRoleDefaultPermissions, hasPermission } from '@/lib/permissions/hasPermission'
 import {
   Dialog,
   DialogContent,
@@ -78,7 +84,14 @@ const MODULE_ICONS: Record<string, React.ElementType> = {
   cronograma_saida_profissional: LogOut,
   cronograma_ocupacao_paciente: UserCheck,
   ocupacao_clinica: ClipboardList,
+  ocupacao_clinica_gaps: BarChart3,
+  ocupacao_clinica_inconsistencias: AlertTriangle,
   ocupacao_profissionais: BarChart3,
+  indicadores_ocupacao_unidades: Building2,
+  indicadores_pacientes: UserCheck,
+  indicadores_previsao_receitas: Wallet,
+  indicadores_historico_receitas: History,
+  indicadores_comparativo_sessoes: ArrowRightLeft,
 }
 
 const GROUP_ICONS: Record<string, React.ElementType> = {
@@ -88,10 +101,12 @@ const GROUP_ICONS: Record<string, React.ElementType> = {
   Terapêutico: Stethoscope,
   Operações: BriefcaseBusiness,
   Cronograma: CalendarRange,
+  Indicadores: TrendingUp,
+  Cadastros: Database,
   Administração: ShieldCheck,
 }
 
-const GROUP_ORDER = ['Pacientes', 'Terapêutico', 'Operações', 'Cronograma', 'Administração', 'Sistema', 'Geral']
+const GROUP_ORDER = ['Pacientes', 'Terapêutico', 'Operações', 'Cronograma', 'Indicadores', 'Cadastros', 'Administração', 'Sistema', 'Geral']
 
 const INITIAL_OPEN = new Set(GROUP_ORDER)
 
@@ -278,7 +293,15 @@ export default function PermissoesPageShell() {
       if (!data.user) { setIsAdmin(false); return }
       const { data: perfil } = await supabase
         .from('usuarios').select('role').eq('id', data.user.id).single()
-      setIsAdmin(perfil?.role === 'admin')
+      // 'diretoria' já tem RLS própria pra gerenciar usuarios/usuarios_permissoes
+      // (ver migration 20260713140000_diretoria_gerencia_permissoes.sql,
+      // função is_diretoria()) — só a tela nunca tinha sido atualizada pra
+      // deixar entrar, ficava restrita a 'admin' aqui mesmo com o banco já
+      // liberando escrita.
+      if (perfil?.role === 'admin' || perfil?.role === 'diretoria') { setIsAdmin(true); return }
+      // Qualquer outro papel só entra com o override individual do código
+      // "permissoes" (ver usuarios_permissoes / hasPermission.ts).
+      setIsAdmin(await hasPermission(data.user.id, 'permissoes'))
     })
   }, [])
 

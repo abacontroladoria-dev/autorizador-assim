@@ -121,7 +121,7 @@ export interface CronogramaDataContextValue {
   cfg: CfgState
   /** Aceites da Saída de Profissional — compartilhado entre a equipe via tabela saida_aceites */
   statusMap: StatusMap
-  /** statusMap do OcupProfMode — compartilhado via acomp_prof_map */
+  /** statusMap de acompanhamento por profissional — compartilhado via acomp_prof_map */
   profMap: Record<string, string>
   /** Bundles de aceite do OcupPacMode — compartilhado via acomp_pac_bundles */
   pacBundles: AceitePacBundle[]
@@ -141,7 +141,7 @@ export interface CronogramaDataContextValue {
   sCfg: (cfg: CfgState) => void
   /** Grava os aceites da Saída (diff por linha contra saida_aceites). */
   persistStatus: (map: StatusMap) => void
-  /** Grava o statusMap do OcupProfMode (diff contra acomp_prof_map). */
+  /** Grava o statusMap de acompanhamento por profissional (diff contra acomp_prof_map). */
   persistProfMap: (map: Record<string, string>) => void
   /** Grava os bundles de aceite do OcupPacMode (upsert + delete contra acomp_pac_bundles). */
   persistPacBundles: (bundles: AceitePacBundle[]) => void
@@ -170,6 +170,8 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
   profMapRef.current = profMap
   const confRef = useRef<ConfItem[]>([])
   confRef.current = conf
+  const pacBundlesRef = useRef<AceitePacBundle[]>([])
+  pacBundlesRef.current = pacBundles
 
   const hasRealtimeFiredRef = useRef(false)
   const pendingWriteKeys = useRef(new Set<string>())
@@ -490,7 +492,7 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
     })()
   }, [])
 
-  // Grava statusMap do OcupProfMode por diff de linhas
+  // Grava statusMap de acompanhamento por profissional, por diff de linhas
   const persistProfMap = useCallback((next: Record<string, string>) => {
     const prev = profMapRef.current
     setProfMap(next)
@@ -526,6 +528,8 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
 
   // Grava bundles de aceite do OcupPacMode (upsert dos alterados, delete dos removidos)
   const persistPacBundles = useCallback((next: AceitePacBundle[]) => {
+    // Capturado ANTES do setState — é o estado que estava persistido, base do diff.
+    const prev = pacBundlesRef.current
     setPacBundles(next)
     try { localStorage.setItem(SK_BUNDLES_LEGACY, JSON.stringify(next)) } catch {}
 
@@ -537,16 +541,19 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
         const { data: { user } } = await sb.auth.getUser()
         const nowIso = new Date().toISOString()
 
-        // Busca ids existentes para calcular diff
+        // Busca ids existentes para calcular o que deletar (limpeza de órfãos).
         const { data: existing } = await sb.from("acomp_pac_bundles").select("id")
         const existingIds = new Set((existing ?? []).map((r: { id: string }) => r.id))
         const nextIds = new Set(next.map(b => b.id))
 
-        const toUpsert = next.filter(b => {
-          if (!existingIds.has(b.id)) return true
-          // Always upsert — simpler than deep compare
-          return true
-        })
+        // Só faz upsert dos bundles NOVOS ou de fato ALTERADOS (identidade de
+        // referência: os fluxos atualizam de forma imutável, reusando objetos
+        // inalterados). Sem isso, cada persist reescrevia atualizado_por/atualizado_em
+        // de TODAS as linhas, transformando atualizado_por num carimbo coletivo do
+        // último a sincronizar — inútil para auditoria (a autoria real vive em
+        // dados->>'implantadoPor').
+        const prevById = new Map(prev.map(b => [b.id, b]))
+        const toUpsert = next.filter(b => prevById.get(b.id) !== b)
         const toDelete = [...existingIds].filter(id => !nextIds.has(id))
 
         if (toUpsert.length) {

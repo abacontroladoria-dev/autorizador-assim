@@ -18,10 +18,19 @@ export interface AceitePacBundle {
   ts: number
   origem: "ocp-paciente"
   sessoes: AceiteSessao[]
-  status: "pendente" | "confirmado" | "recusado" | "inviavel"
+  // "removido_tita": bundle antes implantado cuja série foi excluída diretamente na
+  // TiTa (a API só grava, não exclui) e detectada pela reconciliação — some da grade
+  // como "Implantado" e libera o slot. Ver reconciliação em OcupPacMode.tsx.
+  status: "pendente" | "confirmado" | "recusado" | "inviavel" | "removido_tita"
   inviavelSlots: string[]
   motivo?: string
   slotStatus?: Record<string, SlotStatus>
+  // Auditoria da implantação (imutável, gravado no momento da confirmação a partir
+  // do usuário autenticado no servidor). Distinto de atualizado_por, que é um carimbo
+  // coletivo do último a sincronizar a tabela. implantadoPorEmail é um snapshot do
+  // email na hora da ação — sobrevive a troca/exclusão do usuário.
+  implantadoPor?: string
+  implantadoPorEmail?: string
 }
 
 export interface ConfItem {

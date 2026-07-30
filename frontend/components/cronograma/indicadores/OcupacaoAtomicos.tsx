@@ -1,8 +1,7 @@
 'use client'
 
-import { B } from '@/lib/cronograma/constants'
 import { fmtPctOcup } from '@/lib/cronograma/helpers'
-import { corFaixaOcupacao, textoFaixaOcupacao } from '@/lib/cronograma/ocupacaoProf'
+import { corFaixaOcupacao } from '@/lib/cronograma/ocupacaoProf'
 import type { ReactNode } from 'react'
 import type { OcupSort } from '@/types/ocupacaoProf'
 
@@ -13,7 +12,6 @@ interface FiltroCheckboxProps {
   opcoes: string[]
   selecionados: string[]
   setSelecionados: (v: string[] | ((prev: string[]) => string[])) => void
-  cor?: string
   selecaoPadrao?: string[] | null
 }
 
@@ -22,7 +20,6 @@ export function FiltroCheckbox({
   opcoes,
   selecionados,
   setSelecionados,
-  cor = B.blue,
   selecaoPadrao = null,
 }: FiltroCheckboxProps) {
   const basePadrao = selecaoPadrao ?? opcoes
@@ -42,18 +39,20 @@ export function FiltroCheckbox({
   }
 
   return (
-    <div className="rounded-xl bg-white border p-3" style={{ borderColor: '#e5e7eb' }}>
+    <div className="rounded-xl border border-border bg-card p-3">
       <div className="flex items-center justify-between gap-2 mb-2">
-        <div className="text-xs font-bold" style={{ color: B.navy }}>{titulo}</div>
+        <div className="text-xs font-bold text-foreground">{titulo}</div>
         <div className="flex gap-1">
           <button type="button" onClick={() => setSelecionados([])}
-            className="text-[11px] font-bold px-2 py-1 rounded-full"
-            style={{ background: todas ? cor : B.navyLt, color: todas ? '#fff' : B.navy }}>
+            className={`rounded-full px-2 py-1 text-[11px] font-bold transition-colors ${
+              todas
+                ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900"
+                : "bg-muted text-foreground hover:bg-muted/70"
+            }`}>
             Selecionar todos
           </button>
           <button type="button" onClick={() => setSelecionados(['__none__'])}
-            className="text-[11px] font-bold px-2 py-1 rounded-full"
-            style={{ background: B.orangeLt, color: B.orange }}>
+            className="rounded-full bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-100 dark:bg-rose-950/30 dark:text-rose-400 dark:hover:bg-rose-950/50">
             Desmarcar todos
           </button>
         </div>
@@ -85,8 +84,8 @@ interface FiltroRadioProps {
 
 export function FiltroRadio({ titulo, opcoes, selecionado, setSelecionado }: FiltroRadioProps) {
   return (
-    <div className="rounded-xl bg-white border p-3" style={{ borderColor: '#e5e7eb' }}>
-      <div className="text-xs font-bold mb-2" style={{ color: B.navy }}>{titulo}</div>
+    <div className="rounded-xl border border-border bg-card p-3">
+      <div className="mb-2 text-xs font-bold text-foreground">{titulo}</div>
       <div className="space-y-1">
         {opcoes.map(op => (
           <label key={op.k} className="flex items-center gap-2 text-xs py-1 cursor-pointer">
@@ -104,37 +103,6 @@ export function FiltroRadio({ titulo, opcoes, selecionado, setSelecionado }: Fil
   )
 }
 
-// ─── DashboardCard ────────────────────────────────────────────────────────────
-
-interface DashboardCardProps {
-  titulo: string
-  valor: ReactNode
-  detalhe?: ReactNode
-  cor?: string
-}
-
-export function DashboardCard({ titulo, valor, detalhe, cor = B.blue }: DashboardCardProps) {
-  return (
-    <div className="rounded-xl bg-white border overflow-hidden flex flex-col" style={{ borderColor: '#e7edf5' }}>
-      <div style={{ height: 3, background: cor, flexShrink: 0 }} />
-      <div className="px-3 pt-2.5 pb-3 flex flex-col gap-1 flex-1">
-        <div className="text-[10px] font-bold uppercase tracking-widest leading-none"
-          style={{ color: cor, opacity: 0.65 }}>
-          {titulo}
-        </div>
-        <div className="text-[1.45rem] font-black leading-none" style={{ color: cor }}>
-          {valor}
-        </div>
-        {detalhe && (
-          <div className="text-[11px] leading-snug mt-0.5" style={{ color: '#6b7280' }}>
-            {detalhe}
-          </div>
-        )}
-      </div>
-    </div>
-  )
-}
-
 // ─── PercentualOcupacao ───────────────────────────────────────────────────────
 
 interface PercentualOcupacaoProps {
@@ -144,10 +112,11 @@ interface PercentualOcupacaoProps {
 
 export function PercentualOcupacao({ pct, children }: PercentualOcupacaoProps) {
   if (pct === null || pct === undefined) return <span>—</span>
+  const cor = corFaixaOcupacao(pct)
   return (
     <span
-      className="inline-flex min-w-[4.4rem] justify-center rounded-full px-2 py-0.5 text-[11px] font-black"
-      style={{ background: corFaixaOcupacao(pct), color: textoFaixaOcupacao(pct) }}>
+      className="inline-flex min-w-[4.4rem] justify-center rounded-full px-2 py-0.5 text-xs font-medium"
+      style={{ background: `${cor}22`, color: cor, border: `1px solid ${cor}55` }}>
       {children ?? fmtPctOcup(pct)}
     </span>
   )

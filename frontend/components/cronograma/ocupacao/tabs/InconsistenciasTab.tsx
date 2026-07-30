@@ -1,9 +1,11 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { createPortal } from "react-dom"
-import { B, HORAS_GRID } from "@/lib/cronograma/constants"
+import { AlertTriangle, CalendarDays, CheckCircle2, Trash2 } from "lucide-react"
+import { HORAS_GRID } from "@/lib/cronograma/constants"
 import { pm, fm, fmtName, getTurno } from "@/lib/cronograma/helpers"
+import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
+import { SegmentedTabs, type SegmentedTab } from "@/components/cronograma/ui/SegmentedTabs"
 import type { IncItem, IncTipo } from "@/lib/cronograma/inconsistencias"
 import type { CsvRow } from "@/types/cronograma"
 
@@ -21,14 +23,23 @@ const TIPO_LABEL: Record<IncTipo, string> = {
   prof_unidade_turno: "Unidade no Turno (Prof.)",
 }
 
-const TIPO_COLOR: Record<IncTipo, { bg: string; c: string; border: string }> = {
-  unidade_turno:      { bg: "#fff7ed", c: "#c2410c", border: "#fed7aa" },
-  buraco:             { bg: "#fef2f2", c: "#dc2626", border: "#fca5a5" },
-  min_sessoes:        { bg: "#fffbeb", c: "#b45309", border: "#fde68a" },
-  exibicao_aba:       { bg: "#f0f9ff", c: "#0369a1", border: "#bae6fd" },
-  exibicao_hs:        { bg: "#faf5ff", c: "#7e22ce", border: "#e9d5ff" },
-  exibicao_ae:        { bg: "#fdf4ff", c: "#86198f", border: "#f0abfc" },
-  prof_unidade_turno: { bg: "#f0fdfa", c: "#0f766e", border: "#99f6e4" },
+// Par tonal por tipo (dark-aware) — substitui os hex de TIPO_COLOR. Sete hues
+// distintos, todos com suporte de dark mode em globals.css.
+const TIPO_TONE: Record<IncTipo, { bg: string; text: string }> = {
+  unidade_turno:      { bg: "bg-orange-50 dark:bg-orange-950/30", text: "text-orange-700 dark:text-orange-400" },
+  buraco:             { bg: "bg-rose-50 dark:bg-rose-950/30",     text: "text-rose-700 dark:text-rose-400" },
+  min_sessoes:        { bg: "bg-amber-50 dark:bg-amber-950/30",   text: "text-amber-700 dark:text-amber-400" },
+  exibicao_aba:       { bg: "bg-sky-50 dark:bg-sky-950/30",       text: "text-sky-700 dark:text-sky-400" },
+  exibicao_hs:        { bg: "bg-violet-50 dark:bg-violet-950/30", text: "text-violet-700 dark:text-violet-400" },
+  exibicao_ae:        { bg: "bg-pink-50 dark:bg-pink-950/30",     text: "text-pink-700 dark:text-pink-400" },
+  prof_unidade_turno: { bg: "bg-teal-50 dark:bg-teal-950/30",     text: "text-teal-700 dark:text-teal-400" },
+}
+
+// Par tonal por unidade (usado nas células da grade do profissional).
+const UNID_TONE: Record<string, { bg: string; text: string }> = {
+  Realengo:       { bg: "bg-sky-50 dark:bg-sky-950/30",       text: "text-sky-700 dark:text-sky-400" },
+  Fazendinha:     { bg: "bg-violet-50 dark:bg-violet-950/30", text: "text-violet-700 dark:text-violet-400" },
+  "Padre Miguel": { bg: "bg-amber-50 dark:bg-amber-950/30",   text: "text-amber-700 dark:text-amber-400" },
 }
 
 const DIAS_ORDER = ["Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira"]
@@ -38,7 +49,16 @@ interface Props {
   cRows: CsvRow[]
 }
 
-// ─── Schedlule modal ──────────────────────────────────────────────────────────
+function TipoPill({ tipo, className = "" }: { tipo: IncTipo; className?: string }) {
+  const t = TIPO_TONE[tipo]
+  return (
+    <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-bold whitespace-nowrap ${t.bg} ${t.text} ${className}`}>
+      {TIPO_LABEL[tipo]}
+    </span>
+  )
+}
+
+// ─── Schedule ──────────────────────────────────────────────────────────────
 
 interface SessaoView {
   dia: string
@@ -83,7 +103,6 @@ function buildSchedule(pac: string, cRows: CsvRow[], incItems: IncItem[]): Recor
   }
 
   // ── Injetar placeholders para buracos e dias com 1 sessão ─────────────────
-  const placeholderKey = (dia: string, hora: string) => `${dia}|||${hora}`
   const existingHoras = (dia: string) => new Set((byDia[dia] ?? []).map(s => s.hora))
 
   function addPlaceholder(dia: string, hora: string, motivo: string) {
@@ -128,6 +147,7 @@ function buildSchedule(pac: string, cRows: CsvRow[], incItems: IncItem[]): Recor
   return byDia
 }
 
+// ─── Modal: cronograma do paciente ──────────────────────────────────────────
 
 interface CronViewModalProps {
   pac: string
@@ -160,108 +180,79 @@ function CronViewModal({ pac, conv, cRows, items, onClose }: CronViewModalProps)
     }))
   )
 
-  return createPortal(
-    <div
-      style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", background: "rgba(0,0,0,.45)", padding: "24px 16px", overflowY: "auto" }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
-    >
-      <div style={{ background: "var(--color-card, white)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", width: "100%", maxWidth: "820px" }}>
-        {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "18px 20px 14px", borderBottom: "1px solid var(--border)" }}>
-          <div>
-            <div style={{ fontWeight: 900, fontSize: "15px" }}>{pac}</div>
-            {conv && <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "2px" }}>{conv}</div>}
-          </div>
-          <button
-            onClick={onClose}
-            style={{ padding: "4px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--muted)", cursor: "pointer", fontSize: "13px", fontFamily: "inherit" }}
-          >
-            ✕ Fechar
-          </button>
+  return (
+    <ScheduleModal title={pac} subtitle={conv || undefined} maxWidth={820} onClose={onClose}>
+      {dias.length === 0 ? (
+        <div className="text-center text-muted-foreground text-[13px] py-6">
+          Nenhuma sessão agendada encontrada no CSV.
         </div>
+      ) : (
+        <>
+          <table className="w-full min-w-[320px] border-collapse">
+            <thead>
+              <tr>
+                <th className="w-12 pb-1.5 pr-2 text-right text-[11px] font-normal text-muted-foreground">Hora</th>
+                {dias.map(d => (
+                  <th key={d} className="min-w-[120px] pb-1.5 text-center text-[13px] font-extrabold text-foreground">
+                    {d.replace("-feira", "")}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {horasGrid.map(hora => (
+                <tr key={hora} className="border-t border-border">
+                  <td className="pr-2 pt-1.5 text-right align-top font-mono text-[13px] font-extrabold text-foreground tabular-nums">{hora}</td>
+                  {dias.map(d => {
+                    const cells = cMap[`${d}|||${hora}`] || []
+                    return (
+                      <td key={d} className="p-0.5 align-top">
+                        {cells.map((s, ci) => (
+                          s.missing ? (
+                            <div key={ci} className="mb-0.5 flex min-h-[48px] items-center justify-center rounded-lg border border-dashed border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/30 px-2 py-1.5">
+                              <span className="text-[10px] italic text-rose-600 dark:text-rose-400">slot vazio</span>
+                            </div>
+                          ) : (
+                            <div key={ci} className={`mb-0.5 flex min-h-[58px] flex-col gap-0.5 rounded-lg border px-2 py-1.5 ${s.flagged ? "border-amber-400 dark:border-amber-700 bg-amber-100/70 dark:bg-amber-950/40" : "border-border bg-muted"}`}>
+                              <div className="text-[11px] font-bold leading-tight text-foreground">{s.terapia}</div>
+                              {s.terapiaExib && s.terapiaExib !== "—" && s.terapiaExib !== s.terapia && (
+                                <div className={`text-[10px] leading-tight ${s.flagged ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>({s.terapiaExib})</div>
+                              )}
+                              <div className="text-[10px] text-muted-foreground">{fmtName(s.prof)}</div>
+                              {s.flagged && <AlertTriangle size={11} className="mt-auto text-amber-600 dark:text-amber-400" />}
+                            </div>
+                          )
+                        ))}
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
 
-        {/* Grade */}
-        <div style={{ padding: "16px 20px", overflowX: "auto" }}>
-          {dias.length === 0 ? (
-            <div style={{ textAlign: "center", color: "var(--muted-foreground)", fontSize: "13px", padding: "24px 0" }}>
-              Nenhuma sessão agendada encontrada no CSV.
-            </div>
-          ) : (
-            <>
-              <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "320px" }}>
-                <thead>
-                  <tr>
-                    <th style={{ width: "48px", paddingBottom: "6px", textAlign: "right", paddingRight: "8px", fontSize: "11px", color: "var(--muted-foreground)", fontWeight: 400 }}>Hora</th>
-                    {dias.map(d => (
-                      <th key={d} style={{ minWidth: "120px", paddingBottom: "6px", textAlign: "center", fontSize: "13px", color: B.navy, fontWeight: 800 }}>
-                        {d.replace("-feira", "")}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {horasGrid.map(hora => (
-                    <tr key={hora} style={{ borderTop: "1px solid var(--border)" }}>
-                      <td style={{ textAlign: "right", paddingRight: "8px", verticalAlign: "top", paddingTop: "6px", fontFamily: "monospace", fontSize: "13px", fontWeight: 800, color: B.navy }}>{hora}</td>
-                      {dias.map(d => {
-                        const cells = cMap[`${d}|||${hora}`] || []
-                        return (
-                          <td key={d} style={{ padding: "2px", verticalAlign: "top" }}>
-                            {cells.map((s, ci) => (
-                              s.missing ? (
-                                <div key={ci} style={{ background: "#fef2f2", border: "1px dashed #fca5a5", borderRadius: "8px", padding: "6px 8px", marginBottom: "2px", minHeight: "48px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                  <span style={{ fontSize: "10px", color: "#dc2626", fontStyle: "italic" }}>slot vazio</span>
-                                </div>
-                              ) : (
-                                <div key={ci} style={{ background: s.flagged ? "#fef9c3" : "var(--muted)", border: `1px solid ${s.flagged ? "#f59e0b" : "var(--border)"}`, borderRadius: "8px", padding: "6px 8px", marginBottom: "2px", minHeight: "58px", display: "flex", flexDirection: "column", gap: "2px" }}>
-                                  <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--card-foreground)", lineHeight: "1.3" }}>{s.terapia}</div>
-                                  {s.terapiaExib && s.terapiaExib !== "—" && s.terapiaExib !== s.terapia && (
-                                    <div style={{ fontSize: "10px", color: s.flagged ? "#dc2626" : "var(--muted-foreground)", lineHeight: "1.2" }}>({s.terapiaExib})</div>
-                                  )}
-                                  <div style={{ fontSize: "10px", color: "var(--muted-foreground)" }}>{fmtName(s.prof)}</div>
-                                  {s.flagged && <div style={{ fontSize: "9px", fontWeight: 700, color: "#92400e", marginTop: "auto" }}>⚠</div>}
-                                </div>
-                              )
-                            ))}
-                          </td>
-                        )
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-
-              {/* Notas de inconsistência */}
-              {flagNotes.length > 0 && (
-                <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "4px" }}>
-                  {flagNotes.map((n, i) => (
-                    <div key={i} style={{ fontSize: "11px", color: "#92400e", background: "#fef3c7", borderRadius: "6px", padding: "4px 8px" }}>
-                      ⚠ {n.label} — {n.detail}
-                    </div>
-                  ))}
+          {/* Notas de inconsistência */}
+          {flagNotes.length > 0 && (
+            <div className="mt-3 flex flex-col gap-1">
+              {flagNotes.map((n, i) => (
+                <div key={i} className="flex items-start gap-1.5 rounded-md bg-amber-50 dark:bg-amber-950/30 px-2 py-1 text-[11px] text-amber-700 dark:text-amber-400">
+                  <AlertTriangle size={12} className="mt-px shrink-0" /> <span>{n.label} — {n.detail}</span>
                 </div>
-              )}
-            </>
+              ))}
+            </div>
           )}
-        </div>
-      </div>
-    </div>,
-    document.body
+        </>
+      )}
+    </ScheduleModal>
   )
 }
 
-// ─── Modal de Cronograma do Profissional ──────────────────────────────────────
+// ─── Modal: cronograma do profissional ──────────────────────────────────────
 
 interface ProfViewModalProps {
   prof: string
   cRows: CsvRow[]
   onClose: () => void
-}
-
-const UNID_BADGE: Record<string, { bg: string; c: string; border: string }> = {
-  Realengo:      { bg: "#dbeafe", c: "#1e40af", border: "#93c5fd" },
-  Fazendinha:    { bg: "#f3e8ff", c: "#6b21a8", border: "#d8b4fe" },
-  "Padre Miguel":{ bg: "#fef3c7", c: "#92400e", border: "#fcd34d" },
 }
 
 function ProfViewModal({ prof, cRows, onClose }: ProfViewModalProps) {
@@ -325,163 +316,96 @@ function ProfViewModal({ prof, cRows, onClose }: ProfViewModalProps) {
     return out
   }, [sessoes, mainUnidade])
 
-  return createPortal(
-    <div
-      style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "flex-start", justifyContent: "center", background: "rgba(0,0,0,.45)", padding: "24px 16px", overflowY: "auto" }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}
+  return (
+    <ScheduleModal
+      title={fmtName(prof)}
+      subtitle="Agenda semanal completa"
+      warning={erros.length > 0
+        ? <span className="inline-flex items-center gap-1"><AlertTriangle size={12} /> {erros.length} {erros.length === 1 ? "slot fora" : "slots fora"} da unidade do turno (agendados e livres) — marcados em vermelho</span>
+        : undefined}
+      maxWidth={900}
+      onClose={onClose}
     >
-      <div style={{ background: "var(--color-card, white)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", width: "100%", maxWidth: "900px" }}>
-
-        {/* Header */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", padding: "18px 20px 14px", borderBottom: "1px solid var(--border)" }}>
-          <div>
-            <div style={{ fontWeight: 900, fontSize: "15px" }}>{fmtName(prof)}</div>
-            <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "2px" }}>Agenda semanal completa</div>
-            {erros.length > 0 && (
-              <div style={{ fontSize: "11px", color: "#dc2626", marginTop: "4px", fontWeight: 700 }}>
-                ⚠ {erros.length} {erros.length === 1 ? "slot fora" : "slots fora"} da unidade do turno (agendados e livres) — marcados em vermelho
-              </div>
-            )}
-          </div>
-          <button
-            onClick={onClose}
-            style={{ padding: "4px 10px", borderRadius: "8px", border: "1px solid var(--border)", background: "var(--muted)", cursor: "pointer", fontSize: "13px", fontFamily: "inherit" }}
-          >
-            ✕ Fechar
-          </button>
+      {sessoes.length === 0 ? (
+        <div className="text-center text-muted-foreground text-[13px] py-6">
+          Nenhum slot encontrado no CSV para este profissional.
         </div>
-
-        {/* Grade semanal */}
-        <div style={{ padding: "16px 20px", overflowX: "auto" }}>
-          {sessoes.length === 0 ? (
-            <div style={{ textAlign: "center", color: "var(--muted-foreground)", fontSize: "13px", padding: "24px 0" }}>
-              Nenhum slot encontrado no CSV para este profissional.
-            </div>
-          ) : (
-            <>
-              <table style={{ borderCollapse: "collapse", width: "100%", minWidth: "420px" }}>
-                <thead>
-                  <tr>
-                    <th style={{ width: "52px", paddingBottom: "6px", textAlign: "right", paddingRight: "10px", fontSize: "11px", color: "var(--muted-foreground)", fontWeight: 400 }}>Hora</th>
-                    {dias.map(d => (
-                      <th key={d} style={{ minWidth: "140px", paddingBottom: "6px", textAlign: "center", fontSize: "13px", color: B.navy, fontWeight: 800 }}>
-                        {d.replace("-feira", "")}
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {horas.map(hora => (
-                    <tr key={hora} style={{ borderTop: "1px solid var(--border)" }}>
-                      <td style={{ textAlign: "right", paddingRight: "10px", verticalAlign: "top", paddingTop: "6px", fontFamily: "monospace", fontSize: "13px", fontWeight: 800, color: B.navy }}>
-                        {hora}
-                      </td>
-                      {dias.map(d => {
-                        const cells = cMap[`${d}|||${hora}`] || []
-                        return (
-                          <td key={d} style={{ padding: "2px", verticalAlign: "top" }}>
-                            {cells.map((s, ci) => {
-                              const mainU = mainUnidade[`${s.dia}|||${getTurno(s.hora)}`] ?? ""
-                              const flagged = !!mainU && !!s.unidade && s.unidade !== mainU
-                              const badge = UNID_BADGE[s.unidade]
-                              if (s.livre) {
-                                return (
-                                  <div
-                                    key={ci}
-                                    style={{
-                                      background: flagged ? "#fef2f2" : "var(--muted)",
-                                      border: `1px dashed ${flagged ? "#fca5a5" : "var(--border)"}`,
-                                      borderRadius: "8px",
-                                      padding: "6px 8px",
-                                      marginBottom: "2px",
-                                      minHeight: "52px",
-                                      display: "flex",
-                                      flexDirection: "column",
-                                      gap: "2px",
-                                    }}
-                                  >
-                                    <div style={{ fontSize: "10px", fontWeight: 600, color: flagged ? "#dc2626" : "var(--muted-foreground)", fontStyle: "italic" }}>
-                                      Livre
-                                    </div>
-                                    <div style={{
-                                      fontSize: "10px",
-                                      fontWeight: 700,
-                                      color: flagged ? "#dc2626" : (badge?.c ?? "var(--muted-foreground)"),
-                                      marginTop: "auto",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      gap: "3px",
-                                    }}>
-                                      {flagged && <span>⚠</span>}
-                                      {s.unidade || "—"}
-                                    </div>
-                                  </div>
-                                )
-                              }
-                              return (
-                                <div
-                                  key={ci}
-                                  style={{
-                                    background: flagged ? "#fef2f2" : (badge?.bg ?? "var(--muted)"),
-                                    border: `1px solid ${flagged ? "#fca5a5" : (badge?.border ?? "var(--border)")}`,
-                                    borderRadius: "8px",
-                                    padding: "6px 8px",
-                                    marginBottom: "2px",
-                                    minHeight: "60px",
-                                    display: "flex",
-                                    flexDirection: "column",
-                                    gap: "2px",
-                                  }}
-                                >
-                                  <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--card-foreground)", lineHeight: "1.3" }}>
-                                    {fmtName(s.pac)}
-                                  </div>
-                                  <div style={{ fontSize: "10px", color: "var(--muted-foreground)", lineHeight: "1.2" }}>
-                                    {s.terapia}
-                                  </div>
-                                  <div style={{
-                                    fontSize: "10px",
-                                    fontWeight: 700,
-                                    color: flagged ? "#dc2626" : (badge?.c ?? "var(--muted-foreground)"),
-                                    marginTop: "auto",
-                                    display: "flex",
-                                    alignItems: "center",
-                                    gap: "3px",
-                                  }}>
-                                    {flagged && <span>⚠</span>}
-                                    {s.unidade}
-                                  </div>
+      ) : (
+        <>
+          <table className="w-full min-w-[420px] border-collapse">
+            <thead>
+              <tr>
+                <th className="w-[52px] pb-1.5 pr-2.5 text-right text-[11px] font-normal text-muted-foreground">Hora</th>
+                {dias.map(d => (
+                  <th key={d} className="min-w-[140px] pb-1.5 text-center text-[13px] font-extrabold text-foreground">
+                    {d.replace("-feira", "")}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {horas.map(hora => (
+                <tr key={hora} className="border-t border-border">
+                  <td className="pr-2.5 pt-1.5 text-right align-top font-mono text-[13px] font-extrabold text-foreground tabular-nums">{hora}</td>
+                  {dias.map(d => {
+                    const cells = cMap[`${d}|||${hora}`] || []
+                    return (
+                      <td key={d} className="p-0.5 align-top">
+                        {cells.map((s, ci) => {
+                          const mainU = mainUnidade[`${s.dia}|||${getTurno(s.hora)}`] ?? ""
+                          const flagged = !!mainU && !!s.unidade && s.unidade !== mainU
+                          const badge = UNID_TONE[s.unidade]
+                          if (s.livre) {
+                            return (
+                              <div key={ci} className={`mb-0.5 flex min-h-[52px] flex-col gap-0.5 rounded-lg border border-dashed px-2 py-1.5 ${flagged ? "border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/30" : "border-border bg-muted"}`}>
+                                <div className={`text-[10px] font-semibold italic ${flagged ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>Livre</div>
+                                <div className={`mt-auto flex items-center gap-1 text-[10px] font-bold ${flagged ? "text-rose-600 dark:text-rose-400" : (badge?.text ?? "text-muted-foreground")}`}>
+                                  {flagged && <AlertTriangle size={10} />}
+                                  {s.unidade || "—"}
                                 </div>
-                              )
-                            })}
-                          </td>
-                        )
-                      })}
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                              </div>
+                            )
+                          }
+                          return (
+                            <div key={ci} className={`mb-0.5 flex min-h-[60px] flex-col gap-0.5 rounded-lg border px-2 py-1.5 ${flagged ? "border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/30" : `border-border ${badge?.bg ?? "bg-muted"}`}`}>
+                              <div className="text-[11px] font-bold leading-tight text-foreground">{fmtName(s.pac)}</div>
+                              <div className="text-[10px] leading-tight text-muted-foreground">{s.terapia}</div>
+                              <div className={`mt-auto flex items-center gap-1 text-[10px] font-bold ${flagged ? "text-rose-600 dark:text-rose-400" : (badge?.text ?? "text-muted-foreground")}`}>
+                                {flagged && <AlertTriangle size={10} />}
+                                {s.unidade}
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </td>
+                    )
+                  })}
+                </tr>
+              ))}
+            </tbody>
+          </table>
 
-              {/* Resumo das violações */}
-              {erros.length > 0 && (
-                <div style={{ marginTop: "14px", display: "flex", flexDirection: "column", gap: "4px" }}>
-                  {erros.map((e, i) => (
-                    <div key={i} style={{ fontSize: "11px", color: "#dc2626", background: "#fef2f2", borderRadius: "6px", padding: "5px 10px", border: "1px solid #fca5a5" }}>
-                      ⚠ {e.dia.replace("-feira", "")} {e.hora} ({e.livre ? "livre" : "agendado"}) — unidade <strong>{e.unidade}</strong>, mas maioria do turno está em <strong>{e.mainU}</strong>
-                    </div>
-                  ))}
+          {/* Resumo das violações */}
+          {erros.length > 0 && (
+            <div className="mt-3.5 flex flex-col gap-1">
+              {erros.map((e, i) => (
+                <div key={i} className="flex items-start gap-1.5 rounded-md border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/30 px-2.5 py-1.5 text-[11px] text-rose-600 dark:text-rose-400">
+                  <AlertTriangle size={12} className="mt-px shrink-0" />
+                  <span>{e.dia.replace("-feira", "")} {e.hora} ({e.livre ? "livre" : "agendado"}) — unidade <strong>{e.unidade}</strong>, mas maioria do turno está em <strong>{e.mainU}</strong></span>
                 </div>
-              )}
-            </>
+              ))}
+            </div>
           )}
-        </div>
-      </div>
-    </div>,
-    document.body
+        </>
+      )}
+    </ScheduleModal>
   )
 }
 
 // ─── Main Tab ─────────────────────────────────────────────────────────────────
+
+const INPUT_CLS = "flex-1 min-w-[220px] rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+const SELECT_CLS = "rounded-lg border border-border bg-popover px-2.5 py-1.5 text-xs font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
 
 export function InconsistenciasTab({ items, cRows }: Props) {
   const [subTab, setSubTab] = useState<"inc" | "exc">("inc")
@@ -544,55 +468,33 @@ export function InconsistenciasTab({ items, cRows }: Props) {
     return `${parts[0]} ${parts.slice(1).filter(p => p.length > 2).map(p => p[0] + ".").join(" ")} ${parts[parts.length - 1]}`
   }
 
+  const subTabs: SegmentedTab<"inc" | "exc">[] = [
+    { value: "inc", label: <><AlertTriangle size={12} /> Regras feridas</>, count: inconsistencias.length },
+    { value: "exc", label: <><CheckCircle2 size={12} /> Exceções</>, count: excList.length },
+  ]
+
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+    <div className="space-y-3">
       {/* Sub-abas */}
-      <div style={{ display: "flex", gap: "6px" }}>
-        {([
-          { key: "inc", label: "⚠️ Regras feridas", count: inconsistencias.length },
-          { key: "exc", label: "✅ Exceções",        count: excList.length },
-        ] as const).map(t => (
-          <button
-            key={t.key}
-            onClick={() => setSubTab(t.key)}
-            style={{
-              padding: "6px 14px", borderRadius: "999px", fontSize: "12px", fontWeight: 700,
-              cursor: "pointer",
-              border: subTab === t.key ? `2px solid ${B.navy}` : "2px solid var(--border)",
-              background: subTab === t.key ? B.navy : "var(--muted)",
-              color: subTab === t.key ? "white" : "var(--card-foreground)",
-              fontFamily: "inherit",
-            }}
-          >
-            {t.label} · {t.count}
-          </button>
-        ))}
-      </div>
+      <SegmentedTabs value={subTab} onChange={setSubTab} tabs={subTabs} ariaLabel="Regras ou exceções" />
 
       {/* ── Aba Regras feridas ─────────────────────────────────────── */}
       {subTab === "inc" && (
         <>
           {/* Filtros */}
-          <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+          <div className="flex flex-wrap gap-2">
             <input
               value={busca}
               onChange={e => setBusca(e.target.value)}
-              placeholder="Buscar paciente ou profissional..."
-              style={{
-                flex: "1 1 220px", padding: "7px 12px",
-                border: "1px solid var(--border)", borderRadius: "9px",
-                fontSize: "12px", fontFamily: "inherit",
-                background: "var(--color-card, white)", color: "inherit",
-              }}
+              placeholder="Buscar paciente ou profissional…"
+              aria-label="Buscar paciente ou profissional"
+              className={INPUT_CLS}
             />
             <select
               value={filtroTipo}
               onChange={e => setFiltroTipo(e.target.value as IncTipo | "")}
-              style={{
-                padding: "7px 12px", border: "1px solid var(--border)", borderRadius: "9px",
-                fontSize: "12px", fontFamily: "inherit",
-                background: "var(--color-card, white)", color: "inherit",
-              }}
+              aria-label="Filtrar por tipo"
+              className={SELECT_CLS}
             >
               <option value="">Todos os tipos</option>
               {(Object.keys(TIPO_LABEL) as IncTipo[]).map(t => (
@@ -603,24 +505,20 @@ export function InconsistenciasTab({ items, cRows }: Props) {
 
           {/* Resumo por tipo */}
           {inconsistencias.length > 0 && (
-            <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+            <div className="flex flex-wrap gap-1.5">
               {(Object.keys(TIPO_LABEL) as IncTipo[]).map(t => {
                 const cnt = inconsistencias.filter(i => i.tipo === t).length
                 if (!cnt) return null
-                const c = TIPO_COLOR[t]
+                const c = TIPO_TONE[t]
                 return (
-                  <span
+                  <button
                     key={t}
+                    type="button"
                     onClick={() => setFiltroTipo(filtroTipo === t ? "" : t)}
-                    style={{
-                      padding: "3px 10px", borderRadius: "999px",
-                      fontSize: "11px", fontWeight: 700, cursor: "pointer",
-                      background: c.bg, color: c.c, border: `1px solid ${c.border}`,
-                      opacity: filtroTipo && filtroTipo !== t ? 0.45 : 1,
-                    }}
+                    className={`rounded-full px-2.5 py-0.5 text-[11px] font-bold transition-opacity ${c.bg} ${c.text} ${filtroTipo && filtroTipo !== t ? "opacity-45" : ""}`}
                   >
                     {TIPO_LABEL[t]} · {cnt}
-                  </span>
+                  </button>
                 )
               })}
             </div>
@@ -628,83 +526,61 @@ export function InconsistenciasTab({ items, cRows }: Props) {
 
           {/* Lista */}
           {filtered.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "40px 16px", color: "var(--muted-foreground)", fontSize: "13px" }}>
+            <div className="rounded-2xl border border-border bg-card py-10 text-center text-[13px] text-muted-foreground">
               {inconsistencias.length === 0
                 ? "Nenhuma regra ferida detectada. Carregue CSV e laudos para analisar."
                 : "Nenhum resultado para o filtro selecionado."}
             </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+            <div className="flex flex-col gap-1.5">
               {filtered.map(item => {
-                const c = TIPO_COLOR[item.tipo]
                 const isExpanded = expandedId === item.id
                 return (
-                  <div
-                    key={item.id}
-                    style={{ border: `1px solid ${c.border}`, borderRadius: "12px", background: "var(--color-card, white)", overflow: "hidden" }}
-                  >
+                  <div key={item.id} className="overflow-hidden rounded-2xl border border-border bg-card">
                     {/* Linha principal */}
-                    <div style={{ display: "flex", gap: "10px", padding: "10px 14px", alignItems: "flex-start", flexWrap: "wrap" }}>
-                      {/* Tipo badge */}
-                      <span style={{
-                        padding: "2px 8px", borderRadius: "999px",
-                        fontSize: "10px", fontWeight: 700,
-                        background: c.bg, color: c.c, border: `1px solid ${c.border}`,
-                        whiteSpace: "nowrap", alignSelf: "center",
-                      }}>
-                        {TIPO_LABEL[item.tipo]}
-                      </span>
+                    <div className="flex flex-wrap items-start gap-2.5 px-3.5 py-2.5">
+                      <TipoPill tipo={item.tipo} className="self-center" />
 
                       {/* Info */}
-                      <div style={{ flex: "1 1 160px" }}>
-                        <div style={{ fontWeight: 700, fontSize: "13px" }}>{abrevNome(item.pac)}</div>
-                        <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "1px" }}>
+                      <div className="flex-[1_1_160px]">
+                        <div className="text-[13px] font-bold text-foreground">{abrevNome(item.pac)}</div>
+                        <div className="mt-px text-[11px] text-muted-foreground">
                           {item.dia} {item.hora} · {item.terapia}
                         </div>
-                        {item.conv && (
-                          <div style={{ fontSize: "10px", color: "var(--muted-foreground)" }}>{item.conv}</div>
-                        )}
+                        {item.conv && <div className="text-[10px] text-muted-foreground">{item.conv}</div>}
                       </div>
 
                       {/* Detalhe */}
-                      <div style={{ flex: "2 1 200px", fontSize: "12px", color: "var(--card-foreground)", alignSelf: "center" }}>
+                      <div className="flex-[2_1_200px] self-center text-xs text-foreground">
                         {item.detalhe}
                         {item.terapiaExibAtual && (
-                          <div style={{ marginTop: "3px", fontSize: "11px" }}>
-                            <span style={{ color: "#dc2626" }}>Atual: "{item.terapiaExibAtual}"</span>
+                          <div className="mt-0.5 text-[11px]">
+                            <span className="text-rose-600 dark:text-rose-400">Atual: &quot;{item.terapiaExibAtual}&quot;</span>
                             {" → "}
-                            <span style={{ color: "#16a34a" }}>Esperado: "{item.terapiaExibEsperada}"</span>
+                            <span className="text-emerald-600 dark:text-emerald-400">Esperado: &quot;{item.terapiaExibEsperada}&quot;</span>
                           </div>
                         )}
                       </div>
 
                       {/* Botões */}
-                      <div style={{ display: "flex", gap: "6px", alignSelf: "center", flexWrap: "wrap" }}>
+                      <div className="flex flex-wrap gap-1.5 self-center">
                         <button
+                          type="button"
                           onClick={() => {
                             if (item.tipo === "prof_unidade_turno") setViewProfItem(item)
                             else setViewItem(item)
                           }}
-                          style={{
-                            padding: "5px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 700,
-                            cursor: "pointer", border: "1px solid var(--border)",
-                            background: "var(--color-card, white)", color: "var(--card-foreground)",
-                            fontFamily: "inherit", whiteSpace: "nowrap",
-                          }}
+                          className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-foreground hover:bg-muted/50 transition-colors"
                         >
-                          🗓 Ver
+                          <CalendarDays size={12} /> Ver
                         </button>
                         <button
+                          type="button"
                           onClick={() => {
                             setExpandedId(isExpanded ? null : item.id)
                             if (!isExpanded) setDraftObs("")
                           }}
-                          style={{
-                            padding: "5px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 700,
-                            cursor: "pointer", border: "1px solid var(--border)",
-                            background: isExpanded ? "var(--muted)" : "var(--color-card, white)", color: "var(--card-foreground)",
-                            fontFamily: "inherit", whiteSpace: "nowrap",
-                          }}
+                          className={`inline-flex items-center gap-1 whitespace-nowrap rounded-lg border border-border px-2.5 py-1 text-[11px] font-semibold text-foreground transition-colors ${isExpanded ? "bg-muted" : "bg-card hover:bg-muted/50"}`}
                         >
                           {isExpanded ? "Cancelar" : "→ Exceção"}
                         </button>
@@ -713,30 +589,19 @@ export function InconsistenciasTab({ items, cRows }: Props) {
 
                     {/* Formulário de exceção inline */}
                     {isExpanded && (
-                      <div style={{ borderTop: `1px solid ${c.border}`, padding: "10px 14px", background: c.bg, display: "flex", gap: "8px", alignItems: "flex-end" }}>
+                      <div className="flex items-end gap-2 border-t border-border bg-muted/40 px-3.5 py-2.5">
                         <textarea
                           value={draftObs}
                           onChange={e => setDraftObs(e.target.value)}
-                          placeholder="Justificativa para a exceção..."
+                          placeholder="Justificativa para a exceção…"
                           rows={2}
-                          style={{
-                            flex: 1, padding: "7px 10px",
-                            border: "1px solid var(--border)", borderRadius: "8px",
-                            fontSize: "12px", fontFamily: "inherit",
-                            resize: "none", background: "var(--card)",
-                          }}
+                          className="flex-1 resize-none rounded-lg border border-border bg-card px-2.5 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
                         />
                         <button
+                          type="button"
                           onClick={() => promoverExcecao(item.id)}
                           disabled={!draftObs.trim()}
-                          style={{
-                            padding: "7px 14px", borderRadius: "8px",
-                            fontSize: "12px", fontWeight: 700,
-                            cursor: draftObs.trim() ? "pointer" : "not-allowed",
-                            border: "none",
-                            background: draftObs.trim() ? "#16a34a" : "#86efac",
-                            color: "white", fontFamily: "inherit", whiteSpace: "nowrap",
-                          }}
+                          className="whitespace-nowrap rounded-lg px-3.5 py-1.5 text-xs font-bold text-white bg-emerald-600 hover:bg-emerald-700 active:scale-95 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
                         >
                           Confirmar
                         </button>
@@ -754,73 +619,47 @@ export function InconsistenciasTab({ items, cRows }: Props) {
       {subTab === "exc" && (
         <>
           {excList.length === 0 ? (
-            <div style={{ textAlign: "center", padding: "40px 16px", color: "var(--muted-foreground)", fontSize: "13px" }}>
+            <div className="rounded-2xl border border-border bg-card py-10 text-center text-[13px] text-muted-foreground">
               Nenhuma exceção registrada ainda.
             </div>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              {excList.map(({ item, exc }) => {
-                const c = TIPO_COLOR[item.tipo]
-                return (
-                  <div
-                    key={item.id}
-                    style={{
-                      border: "1px solid var(--border)", borderRadius: "12px",
-                      background: "var(--color-card, white)",
-                      padding: "10px 14px", display: "flex", gap: "10px",
-                      alignItems: "flex-start", flexWrap: "wrap",
-                    }}
-                  >
-                    <span style={{
-                      padding: "2px 8px", borderRadius: "999px",
-                      fontSize: "10px", fontWeight: 700,
-                      background: c.bg, color: c.c, border: `1px solid ${c.border}`,
-                      whiteSpace: "nowrap", alignSelf: "center",
-                    }}>
-                      {TIPO_LABEL[item.tipo]}
-                    </span>
+            <div className="flex flex-col gap-1.5">
+              {excList.map(({ item, exc }) => (
+                <div key={item.id} className="flex flex-wrap items-start gap-2.5 rounded-2xl border border-border bg-card px-3.5 py-2.5">
+                  <TipoPill tipo={item.tipo} className="self-center" />
 
-                    <div style={{ flex: "1 1 160px" }}>
-                      <div style={{ fontWeight: 700, fontSize: "13px" }}>{abrevNome(item.pac)}</div>
-                      <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "1px" }}>
-                        {item.dia} {item.hora} · {item.terapia}
-                      </div>
-                    </div>
-
-                    <div style={{ flex: "2 1 200px" }}>
-                      <div style={{ fontSize: "12px", color: "var(--card-foreground)", fontStyle: "italic" }}>"{exc.obs}"</div>
-                      <div style={{ fontSize: "10px", color: "var(--muted-foreground)", marginTop: "3px" }}>
-                        {new Date(exc.confirmedAt).toLocaleDateString("pt-BR")}
-                      </div>
-                    </div>
-
-                    <div style={{ display: "flex", gap: "6px", alignSelf: "center" }}>
-                      <button
-                        onClick={() => setViewItem(item)}
-                        style={{
-                          padding: "5px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 700,
-                          cursor: "pointer", border: "1px solid var(--border)",
-                          background: "var(--color-card, white)", color: "var(--card-foreground)",
-                          fontFamily: "inherit", whiteSpace: "nowrap",
-                        }}
-                      >
-                        🔍 Ver
-                      </button>
-                      <button
-                        onClick={() => removerExcecao(item.id)}
-                        style={{
-                          padding: "5px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 700,
-                          cursor: "pointer", border: "1px solid #fca5a5",
-                          background: "#fef2f2", color: "#dc2626",
-                          fontFamily: "inherit", whiteSpace: "nowrap",
-                        }}
-                      >
-                        Remover Exceção
-                      </button>
+                  <div className="flex-[1_1_160px]">
+                    <div className="text-[13px] font-bold text-foreground">{abrevNome(item.pac)}</div>
+                    <div className="mt-px text-[11px] text-muted-foreground">
+                      {item.dia} {item.hora} · {item.terapia}
                     </div>
                   </div>
-                )
-              })}
+
+                  <div className="flex-[2_1_200px]">
+                    <div className="text-xs italic text-foreground">&quot;{exc.obs}&quot;</div>
+                    <div className="mt-0.5 text-[10px] text-muted-foreground">
+                      {new Date(exc.confirmedAt).toLocaleDateString("pt-BR")}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-1.5 self-center">
+                    <button
+                      type="button"
+                      onClick={() => setViewItem(item)}
+                      className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-foreground hover:bg-muted/50 transition-colors"
+                    >
+                      <CalendarDays size={12} /> Ver
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => removerExcecao(item.id)}
+                      className="inline-flex items-center gap-1 whitespace-nowrap rounded-lg px-2.5 py-1 text-[11px] font-semibold bg-rose-50 dark:bg-rose-950/30 text-rose-600 dark:text-rose-400 hover:bg-rose-100 dark:hover:bg-rose-900/40 transition-colors"
+                    >
+                      <Trash2 size={12} /> Remover Exceção
+                    </button>
+                  </div>
+                </div>
+              ))}
             </div>
           )}
         </>

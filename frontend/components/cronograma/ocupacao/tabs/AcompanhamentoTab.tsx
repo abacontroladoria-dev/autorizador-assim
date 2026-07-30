@@ -275,6 +275,25 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
       })))
   ), [pacBundles])
 
+  // Bundles cuja série foi excluída na TiTa e detectada pela reconciliação
+  // (ver OcupPacMode.tsx). Não são mais "Implantado" — surfaced à parte, só leitura,
+  // com opção de dispensar o aviso (remove o bundle da fonte de verdade).
+  const pacRemovidoDerived = useMemo((): ConfItem[] => (
+    pacBundles
+      .filter(b => b.status === "removido_tita")
+      .flatMap(b => b.sessoes.map(s => ({
+        id: `${RESERVA_PENDENTE_PREFIX}${b.id}|||${s.dia}|||${s.hora}`,
+        pac: b.pac,
+        prof: s.prof,
+        esp: s.tP,
+        unidade: s.unidade,
+        dia: s.dia,
+        hora: s.hora,
+        origem: "Ocp. Paciente",
+        registradoEm: new Date(b.ts).toLocaleDateString("pt-BR"),
+      })))
+  ), [pacBundles])
+
   const allConf = useMemo(() => [...conf, ...saidaConfDerived, ...pacConfDerived], [conf, saidaConfDerived, pacConfDerived])
   const allRec  = useMemo(() => [...rec,  ...saidaRecDerived],  [rec,  saidaRecDerived])
   const allInv  = useMemo(() => [...inv,  ...saidaInvDerived],  [inv,  saidaInvDerived])
@@ -639,7 +658,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
       )}
 
       {sub === "confirmados" && (
-        <ConfirmadosTab conf={allConf} onRemove={handleRemoverConfirmado} />
+        <ConfirmadosTab conf={allConf} removidos={pacRemovidoDerived} onRemove={handleRemoverConfirmado} />
       )}
       {sub === "recusados" && (
         <RecusadosTab rec={allRec} inv={allInv} waMap={waMap}
@@ -711,7 +730,7 @@ function InviavelModal({ pac, motivo, onMotivoChange, onConfirmar, onClose }: {
   )
 }
 
-function ConfirmadosTab({ conf, onRemove }: { conf: ConfItem[]; onRemove: (item: ConfItem) => void }) {
+function ConfirmadosTab({ conf, removidos, onRemove }: { conf: ConfItem[]; removidos: ConfItem[]; onRemove: (item: ConfItem) => void }) {
   const [removendo, setRemovendo] = useState<ConfItem | null>(null)
   const [filtro, setFiltro] = useState("")
   const [diasFechados, setDiasFechados] = useState<Set<string>>(new Set())
@@ -743,6 +762,36 @@ function ConfirmadosTab({ conf, onRemove }: { conf: ConfItem[]; onRemove: (item:
 
   return (
     <>
+    {removidos.length > 0 && (
+      <ListCard icon={Ban} title="Removidos na TiTa" count={removidos.length} titleColor="#b45309">
+        <div style={{ padding: "8px 12px 4px", fontSize: "var(--text-xs)", color: "var(--muted-foreground)" }}>
+          Estas sessões estavam implantadas, mas a série foi excluída diretamente na TiTa. Os horários já foram liberados — dispense o aviso quando quiser.
+        </div>
+        {removidos.map((c, i) => (
+          <div key={c.id || i} className={rowClass} style={rowStyle}>
+            <TimeBadge hora={c.hora} color="#b45309" />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontWeight: "var(--weight-heavy)", fontSize: "var(--text-base)", color: "var(--foreground)" }}>{c.pac}</span>
+              <div style={{ fontSize: "var(--text-sm)", color: "var(--muted-foreground)", marginTop: "2px" }}>
+                {c.esp || "—"} · {fmtName(c.prof)}
+              </div>
+            </div>
+            <div style={{ flexShrink: 0, width: "190px", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px" }}>
+              <span style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-semibold)", color: "#b45309", background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: "var(--radius-sm)", padding: "2px 8px", whiteSpace: "nowrap" }}>
+                Removido na TiTa
+              </span>
+              <button onClick={() => onRemove(c)} style={{
+                fontSize: "var(--text-xs)", fontWeight: "var(--weight-semibold)", whiteSpace: "nowrap",
+                color: "var(--muted-foreground)", background: "var(--muted)", border: "1px solid var(--border)",
+                borderRadius: "var(--radius-sm)", padding: "5px 10px", cursor: "pointer", fontFamily: "inherit",
+              }}>
+                Dispensar aviso
+              </button>
+            </div>
+          </div>
+        ))}
+      </ListCard>
+    )}
     <ListCard
       icon={CheckCircle2}
       title="Confirmados"

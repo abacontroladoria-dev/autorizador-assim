@@ -1,0 +1,486 @@
+// ─── LÓGICA DE CÁLCULO: OCUPAÇÃO DE SALAS ────────────────────────────────────
+// Adaptado de calculadora-remuneracao/src/utils/salas.js (calcularResumoSalas,
+// cruzarSalasComGradeProfissionais) + ocupacao.js (corFaixaOcupacao). Reescrito
+// em TypeScript para cruzar o cadastro estrutural de salas (cronograma_salas)
+// com dados de agendamento REAIS já existentes em csv_grades_profissionais, em
+// vez de CSV importado manualmente + localStorage.
+
+import { normalizarUnidadeOcupacao, turnoDoHorario, corFaixaOcupacao } from "./ocupacaoProf"
+import { DOW_PT } from "./ocupacaoConst"
+import { pm, fm, cleanTxt } from "./helpers"
+import { normTxt, HORAS_GRID } from "./constants"
+import { capacidadeProjetadaSala } from "./salasTypes"
+import type {
+  Sala,
+  SalaCapacidade,
+  AgendaSalaRow,
+  AlocacaoSala,
+  AlocacaoCardSlot,
+  BlocoOcupacaoSlot,
+  SlotOcupacaoSala,
+  SalaComOcupacao,
+  ResumoUnidadeSalas,
+  ResumoTurnoUnidadeSalas,
+  StatusOcupacaoSlot,
+  SlotDetalhado,
+  BlocoDetalhado,
+} from "./salasTypes"
+
+export { corFaixaOcupacao }
+
+// ─── DIA DA SEMANA ────────────────────────────────────────────────────────────
+
+const DOW_POR_NOME: Record<string, number> = {
+  "segunda-feira": 1, "segunda": 1,
+  "terca-feira": 2, "terça-feira": 2, "terca": 2, "terça": 2,
+  "quarta-feira": 3, "quarta": 3,
+  "quinta-feira": 4, "quinta": 4,
+  "sexta-feira": 5, "sexta": 5,
+}
+
+export function dowDeDiaSemana(diaSemana: string | null | undefined): number | null {
+  const n = normTxt(diaSemana)
+  return DOW_POR_NOME[n] ?? null
+}
+
+// ─── CRUZAMENTO: SALA × AGENDAMENTO ───────────────────────────────────────────
+//
+// O texto livre `sala_nome` da agenda real (ex.: "Unid. Realengo - Sala 18
+// (Coordenação de caso)") tem variações de observação/capitalização entre
+// registros do mesmo cômodo físico. Uma comparação por substring simples é
+// insegura (ex.: "Sala 1" é substring de "Sala 10", "Sala 11" ... "Sala 19"),
+// então o cruzamento é feito de forma estrutural: extrai-se {unidade, número}
+// do texto e compara-se com os campos já normalizados de `cronograma_salas`,
+// em vez de comparar as strings inteiras.
+
+/** Extrai {unidade, numeroSala} de um `sala_nome` livre vindo da agenda (ex.: "Unid. Realengo - Sala 18 (Coordenação de caso)"). */
+export function parseSalaAgenda(salaNomeRaw: string | null | undefined): { unidade: string; numeroSala: string } | null {
+  const raw = cleanTxt(salaNomeRaw)
+  if (!raw) return null
+  const m = raw.match(/^Unid\.?\s*([^-–—]+?)\s*[-–—]\s*Sala\s*0*(\d+)\b/i)
+  if (!m) return null
+  return { unidade: normalizarUnidadeOcupacao(m[1]), numeroSala: m[2] }
+}
+
+/** Normaliza número de sala para comparação (remove zeros à esquerda: "09" -> "9"). */
+export function normNumeroSala(numero: string | null | undefined): string {
+  const raw = cleanTxt(numero)
+  const n = parseInt(raw, 10)
+  return Number.isFinite(n) ? String(n) : raw
+}
+
+function salaCasaComAgenda(sala: Sala, salaNomeAgenda: string | null): boolean {
+  const parsed = parseSalaAgenda(salaNomeAgenda)
+  if (!parsed) return false
+  return normalizarUnidadeOcupacao(sala.unidade_nome) === parsed.unidade
+    && normNumeroSala(sala.numero_sala) === parsed.numeroSala
+}
+
+/** Filtra linhas de agenda cuja `sala_nome` corresponde estruturalmente (unidade + número) à sala. */
+export function linhasDaSala(sala: Sala, linhas: AgendaSalaRow[]): AgendaSalaRow[] {
+  return linhas.filter(r => salaCasaComAgenda(sala, r.sala_nome))
+}
+
+// Uma sala "única" atende, ao longo de um turno inteiro, VÁRIOS pacientes/
+// profissionais diferentes em sequência (blocos de 40min) — isso é normal,
+// não é ocupação simultânea. `capacidadeProjetadaSala` representa capacidade
+// POR BLOCO de horário (1/2/3 pacientes ao mesmo tempo), não por turno inteiro.
+// O nº de blocos de 40min por turno segue a mesma grade fixa já usada em todo
+// o módulo Cronograma (manhã 08:00–12:00 = 6 blocos; tarde = 7 blocos — ver
+// `agenda.service.ts`/legado `slotsTurno()`).
+const BLOCOS_POR_TURNO: Record<"Manhã" | "Tarde", number> = { "Manhã": 6, "Tarde": 7 }
+
+// HORAS_GRID tem os 13 horários oficiais em sequência (6 da manhã + 7 da
+// tarde) — mesma fonte usada em toda a Cronograma, nunca hardcodar de novo.
+const HORAS_POR_TURNO: Record<"Manhã" | "Tarde", string[]> = {
+  "Manhã": HORAS_GRID.slice(0, 6),
+  "Tarde": HORAS_GRID.slice(6),
+}
+
+function statusDoSlot(
+  status: Sala["status"],
+  capacidadeProjetada: number,
+  numAlocacoes: number,
+): StatusOcupacaoSlot {
+  if (status === "adm") return "adm"
+  if (status === "bloqueada") return "bloqueado"
+  if (numAlocacoes === 0) return "livre"
+  if (numAlocacoes >= capacidadeProjetada) return "ocupado"
+  return "parcial"
+}
+
+/**
+ * Calcula os 10 slots (5 dias × 2 turnos) de uma sala a partir das ALOCAÇÕES
+ * (planejamento — quem é o "dono" recorrente do bloco), cruzando cada
+ * alocação com as sessões reais dessa pessoa nesse sala/dia/turno apenas para
+ * exibir a proporção "X/Y com paciente" (informativo, não valida nada).
+ */
+export function calcularSlotsDaSala(
+  sala: Sala,
+  alocacoesSala: AlocacaoSala[],
+  linhasSala: AgendaSalaRow[],
+): SlotOcupacaoSala[] {
+  const capacidadeProjetada = capacidadeProjetadaSala(sala.capacidade, sala.status)
+
+  // sessões reais "Agendado" agrupadas por profissional (normalizado) + dow + turno
+  // — usado só pelos `cards` (proporção "X/Y com paciente" da alocação cadastrada).
+  const sessoesPorProfissional = new Map<string, number>()
+  // Mesmas linhas, mas agrupadas por HORÁRIO EXATO da SALA (dow|turno|minutos),
+  // SEM depender de profissional/cadastro — usado pra montar `blocos` ("Ocupação
+  // real" = TD_AGENDADO/TD_EXISTENTE). Uma sala com sessão real "Agendado" conta
+  // como preenchida mesmo que ninguém tenha sido cadastrado em
+  // cronograma_salas_alocacoes pra esse sala/dia/turno — cadastro é só
+  // planejamento (usado pelos `cards`/"Salas que contém profissional"), não
+  // condição pra contar ocupação real.
+  const sessoesPorHora = new Map<string, AgendaSalaRow[]>()
+  linhasSala.forEach(r => {
+    const dow = dowDeDiaSemana(r.dia_semana)
+    if (!dow) return
+    if (!normTxt(r.status_agendamento).includes("agendado")) return
+    const minutos = pm(r.hora_inicial)
+    if (minutos === null) return
+    const turno = turnoDoHorario(minutos)
+    const prof = cleanTxt(r.profissional_nome)
+    if (!prof) return
+    const key = `${dow}|${turno}|${normTxt(prof)}`
+    sessoesPorProfissional.set(key, (sessoesPorProfissional.get(key) ?? 0) + 1)
+    const chaveHora = `${dow}|${turno}|${minutos}`
+    if (!sessoesPorHora.has(chaveHora)) sessoesPorHora.set(chaveHora, [])
+    sessoesPorHora.get(chaveHora)!.push(r)
+  })
+
+  const alocacoesPorSlot = new Map<string, AlocacaoSala[]>()
+  alocacoesSala.forEach(a => {
+    const key = `${a.dow}-${a.turno}`
+    if (!alocacoesPorSlot.has(key)) alocacoesPorSlot.set(key, [])
+    alocacoesPorSlot.get(key)!.push(a)
+  })
+
+  const slots: SlotOcupacaoSala[] = []
+  for (let dow = 1; dow <= 5; dow++) {
+    for (const turno of ["Manhã", "Tarde"] as const) {
+      const key = `${dow}-${turno}`
+      const alocacoesDoSlot = alocacoesPorSlot.get(key) ?? []
+      const capacidadeBloco = BLOCOS_POR_TURNO[turno]
+
+      const cards: AlocacaoCardSlot[] = alocacoesDoSlot.map(a => {
+        const sessoesReais = sessoesPorProfissional.get(`${dow}|${turno}|${normTxt(a.profissional_nome)}`) ?? 0
+        const sessoesLimitadas = Math.min(sessoesReais, capacidadeBloco)
+        return {
+          alocacaoId: a.id,
+          profissionalNome: a.profissional_nome,
+          terapiaNome: a.terapia_nome,
+          sessoesReais: sessoesLimitadas,
+          sessoesCapacidadeTurno: capacidadeBloco,
+          pctOcupacao: capacidadeBloco > 0 ? sessoesLimitadas / capacidadeBloco : null,
+          semCruzamentoCsv: sessoesReais === 0,
+        }
+      })
+
+      const status = statusDoSlot(sala.status, capacidadeProjetada, cards.length)
+      const inconsistente = sala.status === "operacional" && cards.length > capacidadeProjetada
+
+      // Blocos de 40min, um por "cadeira" (vaga simultânea, até capacidadeProjetada)
+      // × horário oficial do turno. "Preenchido" = existe sessão real "Agendado"
+      // nessa sala/dia/horário EXATO — independente de cadastro em
+      // cronograma_salas_alocacoes (TD_AGENDADO/TD_EXISTENTE puro). Cada sessão
+      // real concorrente naquele horário ocupa uma cadeira, até o limite da
+      // capacidade da sala; sessão excedente (mais gente que capacidade) não é
+      // contada (mesmo critério de `inconsistente`, que sinaliza esse excesso
+      // no cadastro — aqui só limitamos a contagem ao nº de cadeiras existentes).
+      const horasTurno = HORAS_POR_TURNO[turno]
+      const blocos: BlocoOcupacaoSlot[] = []
+      for (const hora of horasTurno) {
+        const minutos = pm(hora) ?? 0
+        const horaFim = fm(minutos + 40)
+        const sessoesReaisNoHorario = sessoesPorHora.get(`${dow}|${turno}|${minutos}`) ?? []
+        for (let seat = 0; seat < capacidadeProjetada; seat++) {
+          const linhaReal = sessoesReaisNoHorario[seat]
+          blocos.push(linhaReal ? {
+            hora, horaFim,
+            profissional: cleanTxt(linhaReal.profissional_nome),
+            terapia: cleanTxt(linhaReal.terapia_nome) || cleanTxt(linhaReal.terapia_exibicao_nome) || null,
+            idAgendamento: linhaReal.tita_agendamento_id ?? null,
+            status: "preenchido",
+          } : {
+            hora, horaFim,
+            profissional: null,
+            terapia: null,
+            idAgendamento: null,
+            status: "livre",
+          })
+        }
+      }
+
+      slots.push({
+        salaId: sala.id,
+        dow,
+        turno,
+        capacidadeProjetada,
+        alocacoes: cards,
+        status,
+        inconsistente,
+        blocos,
+      })
+    }
+  }
+
+  return slots
+}
+
+export function calcularOcupacaoDaSala(sala: Sala, alocacoes: AlocacaoSala[], linhas: AgendaSalaRow[]): SalaComOcupacao {
+  const linhasSala = linhasDaSala(sala, linhas)
+  const alocacoesSala = alocacoes.filter(a => a.sala_id === sala.id)
+  const slots = calcularSlotsDaSala(sala, alocacoesSala, linhasSala)
+  const relevantes = slots.filter(s => s.status !== "adm" && s.status !== "bloqueado")
+  const ocupados = relevantes.filter(s => s.status === "ocupado" || s.status === "parcial").length
+  const pctOcupacaoSemanal = relevantes.length > 0 ? ocupados / relevantes.length : null
+  return { sala, slots, pctOcupacaoSemanal }
+}
+
+// ─── RESUMO POR UNIDADE (adaptado de calcularResumoSalas) ────────────────────
+
+export function calcularResumoUnidades(salas: Sala[], alocacoes: AlocacaoSala[], linhas: AgendaSalaRow[]): ResumoUnidadeSalas[] {
+  const porUnidade = new Map<string, Sala[]>()
+  salas.forEach(s => {
+    const unidade = normalizarUnidadeOcupacao(s.unidade_nome)
+    if (!porUnidade.has(unidade)) porUnidade.set(unidade, [])
+    porUnidade.get(unidade)!.push(s)
+  })
+
+  const resumos: ResumoUnidadeSalas[] = []
+
+  porUnidade.forEach((salasUnidade, unidade) => {
+    let slotsTotal = 0, slotsOcupados = 0, slotsLivres = 0, slotsBloqueados = 0
+    let blocosTotal = 0, blocosPreenchidos = 0
+    let capacidadeSimultanea = 0
+    let salasAtivas = 0, salasBloqueadas = 0, salasAdm = 0
+    let inconsistencias = 0
+    const salasPorCapacidade: Record<SalaCapacidade, number> = { unico: 0, duplo: 0, multiplo: 0 }
+    const porTurnoAcc: Record<"Manhã" | "Tarde", ResumoTurnoUnidadeSalas> = {
+      Manhã: { turno: "Manhã", slotsTotal: 0, slotsOcupados: 0, slotsLivres: 0, slotsBloqueados: 0, pct: null, blocosTotal: 0, blocosPreenchidos: 0, pctGranular: null },
+      Tarde: { turno: "Tarde", slotsTotal: 0, slotsOcupados: 0, slotsLivres: 0, slotsBloqueados: 0, pct: null, blocosTotal: 0, blocosPreenchidos: 0, pctGranular: null },
+    }
+    const terapiaAcc = new Map<string, number>()
+
+    salasUnidade.forEach(sala => {
+      if (sala.status === "operacional") salasAtivas++
+      else if (sala.status === "bloqueada") salasBloqueadas++
+      else if (sala.status === "adm") salasAdm++
+      capacidadeSimultanea += capacidadeProjetadaSala(sala.capacidade, sala.status)
+      salasPorCapacidade[sala.capacidade]++
+
+      const { slots } = calcularOcupacaoDaSala(sala, alocacoes, linhas)
+      slots.forEach(slot => {
+        if (slot.status === "adm") return
+        const turnoBucket = porTurnoAcc[slot.turno]
+        if (slot.status === "bloqueado") {
+          slotsBloqueados++
+          turnoBucket.slotsBloqueados++
+          return
+        }
+        slotsTotal++
+        turnoBucket.slotsTotal++
+        if (slot.status === "ocupado" || slot.status === "parcial") {
+          slotsOcupados++
+          turnoBucket.slotsOcupados++
+        } else {
+          slotsLivres++
+          turnoBucket.slotsLivres++
+        }
+        if (slot.inconsistente) inconsistencias++
+
+        // Ocupação granular: soma direto de slot.blocos (já calculado bloco a
+        // bloco, por horário EXATO, em calcularSlotsDaSala) — mesma fonte lida
+        // pelo drill-down (listarBlocosDetalhados), então o StatCard nunca
+        // diverge da lista de auditoria.
+        blocosTotal += slot.blocos.length
+        blocosPreenchidos += slot.blocos.filter(b => b.status === "preenchido").length
+        turnoBucket.blocosTotal += slot.blocos.length
+        turnoBucket.blocosPreenchidos += slot.blocos.filter(b => b.status === "preenchido").length
+
+        slot.alocacoes.forEach(card => {
+          const terapia = cleanTxt(card.terapiaNome) || "Sem especialidade"
+          terapiaAcc.set(terapia, (terapiaAcc.get(terapia) ?? 0) + Math.max(card.sessoesReais, 1))
+        })
+      })
+    })
+
+    ;(["Manhã", "Tarde"] as const).forEach(t => {
+      const b = porTurnoAcc[t]
+      b.pct = b.slotsTotal > 0 ? b.slotsOcupados / b.slotsTotal : null
+      b.pctGranular = b.blocosTotal > 0 ? b.blocosPreenchidos / b.blocosTotal : null
+    })
+
+    resumos.push({
+      unidade,
+      salasTotal: salasUnidade.length,
+      salasAtivas,
+      salasBloqueadas,
+      salasAdm,
+      salasPorCapacidade,
+      capacidadeSimultanea,
+      slotsTotal,
+      slotsOcupados,
+      slotsLivres,
+      slotsBloqueados,
+      pct: slotsTotal > 0 ? slotsOcupados / slotsTotal : null,
+      porTurno: [porTurnoAcc.Manhã, porTurnoAcc.Tarde],
+      porTerapia: [...terapiaAcc.entries()]
+        .map(([terapia, sessoes]) => ({ terapia, sessoes }))
+        .sort((a, b) => b.sessoes - a.sessoes),
+      inconsistencias,
+      blocosTotal,
+      blocosPreenchidos,
+      pctGranular: blocosTotal > 0 ? blocosPreenchidos / blocosTotal : null,
+    })
+  })
+
+  return resumos.sort((a, b) => a.unidade.localeCompare(b.unidade))
+}
+
+// ─── DRILL-DOWN DE AUDITORIA (StatCards "X/Y ocupados"/"X/Y preenchidos") ────
+// Ambas as funções abaixo recebem `salasComOcupacao` já calculado (pelo hook
+// useOcupacaoSalas, via calcularOcupacaoDaSala) — não refazem nenhum cálculo,
+// só filtram por unidade/turno e "achatam" os slots em linhas de tabela.
+// Mesmo critério de exclusão de calcularResumoUnidades: fora "adm"/"bloqueado".
+
+/** Linhas do drill-down binário — 1 linha por slot (sala×dia), pro StatCard "X/Y ocupados". */
+export function listarSlotsDetalhados(
+  salasComOcupacao: SalaComOcupacao[],
+  unidade: string,
+  turno: "Manhã" | "Tarde",
+): SlotDetalhado[] {
+  const unidadeAlvo = normalizarUnidadeOcupacao(unidade)
+  const linhas: SlotDetalhado[] = []
+
+  salasComOcupacao.forEach(({ sala, slots }) => {
+    if (normalizarUnidadeOcupacao(sala.unidade_nome) !== unidadeAlvo) return
+    slots.forEach(slot => {
+      if (slot.turno !== turno) return
+      if (slot.status === "adm" || slot.status === "bloqueado") return
+      linhas.push({
+        sala: sala.nome_exibicao,
+        dow: slot.dow,
+        diaLabel: DOW_PT[slot.dow] ?? String(slot.dow),
+        status: slot.status as "ocupado" | "parcial" | "livre",
+        alocacoes: slot.alocacoes.map(a => ({
+          profissional: a.profissionalNome,
+          terapia: a.terapiaNome,
+          sessoesReais: a.sessoesReais,
+          sessoesCapacidadeTurno: a.sessoesCapacidadeTurno,
+        })),
+      })
+    })
+  })
+
+  return linhas
+}
+
+/** Linhas do drill-down granular — 1 linha por bloco de 40min, pro StatCard "X/Y preenchidos". */
+export function listarBlocosDetalhados(
+  salasComOcupacao: SalaComOcupacao[],
+  unidade: string,
+  turno: "Manhã" | "Tarde",
+): BlocoDetalhado[] {
+  const unidadeAlvo = normalizarUnidadeOcupacao(unidade)
+  const linhas: BlocoDetalhado[] = []
+
+  salasComOcupacao.forEach(({ sala, slots }) => {
+    if (normalizarUnidadeOcupacao(sala.unidade_nome) !== unidadeAlvo) return
+    slots.forEach(slot => {
+      if (slot.turno !== turno) return
+      if (slot.status === "adm" || slot.status === "bloqueado") return
+      slot.blocos.forEach(bloco => {
+        linhas.push({
+          ...bloco,
+          sala: sala.nome_exibicao,
+          dow: slot.dow,
+          diaLabel: DOW_PT[slot.dow] ?? String(slot.dow),
+        })
+      })
+    })
+  })
+
+  return linhas
+}
+
+export interface ResumoOcupacaoItens {
+  slotsTotal: number
+  slotsOcupados: number
+  slotsBloqueados: number
+  inconsistencias: number
+  pct: number | null
+}
+
+/**
+ * Agrega slotsTotal/slotsOcupados/inconsistências a partir de QUALQUER lista de
+ * SalaComOcupacao (ex.: já filtrada por unidade/núcleo/turno/status na UI) —
+ * mesma regra usada por calcularResumoUnidades (ignora slots "adm", conta
+ * "bloqueado" à parte do total), só que sobre um subconjunto arbitrário em vez
+ * de agrupar por unidade.
+ */
+export function resumoOcupacaoDeItens(itens: SalaComOcupacao[]): ResumoOcupacaoItens {
+  let slotsTotal = 0, slotsOcupados = 0, slotsBloqueados = 0, inconsistencias = 0
+
+  itens.forEach(item => {
+    item.slots.forEach(slot => {
+      if (slot.status === "adm") return
+      if (slot.status === "bloqueado") {
+        slotsBloqueados++
+        return
+      }
+      slotsTotal++
+      if (slot.status === "ocupado" || slot.status === "parcial") slotsOcupados++
+      if (slot.inconsistente) inconsistencias++
+    })
+  })
+
+  return {
+    slotsTotal,
+    slotsOcupados,
+    slotsBloqueados,
+    inconsistencias,
+    pct: slotsTotal > 0 ? slotsOcupados / slotsTotal : null,
+  }
+}
+
+/**
+ * Sugere números de sala livres para uma unidade, a partir dos números já em
+ * uso (`uq_cronograma_salas_unidade_numero` é único por unidade+número, então
+ * digitar um número ocupado sempre falha no salvar). Prioriza os "buracos" na
+ * sequência (ex.: já tem 1,2,3,5 → sugere o 4 primeiro) e complementa com os
+ * próximos números seguidos após o maior já cadastrado, até `maxSugestoes`.
+ * Números de sala não numéricos (texto livre) são ignorados na sequência —
+ * não têm como participar de um "próximo número".
+ */
+export function sugerirNumerosSalaDisponiveis(numerosUsados: string[], maxSugestoes = 10): number[] {
+  const usados = new Set(
+    numerosUsados
+      .map(n => parseInt(normNumeroSala(n), 10))
+      .filter((n): n is number => Number.isFinite(n) && n > 0),
+  )
+  if (!usados.size) return Array.from({ length: maxSugestoes }, (_, i) => i + 1)
+
+  const maior = Math.max(...usados)
+  const buracos: number[] = []
+  for (let i = 1; i < maior; i++) {
+    if (!usados.has(i)) buracos.push(i)
+  }
+
+  const seguintes: number[] = []
+  for (let i = maior + 1; seguintes.length < maxSugestoes; i++) {
+    seguintes.push(i)
+  }
+
+  return [...buracos, ...seguintes]
+}
+
+export function textoFaixaOcupacaoSala(pct: number | null | undefined): string {
+  if (pct === null || pct === undefined) return "Sem base"
+  const p = Number(pct) > 1 ? Number(pct) / 100 : Number(pct)
+  if (p >= 0.8) return "80% a 100%"
+  if (p >= 0.6) return "60% a 79%"
+  if (p >= 0.4) return "40% a 59%"
+  return "0% a 39%"
+}

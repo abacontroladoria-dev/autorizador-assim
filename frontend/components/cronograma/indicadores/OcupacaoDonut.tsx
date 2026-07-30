@@ -6,9 +6,13 @@ import { InteractivePieChart } from './InteractivePieChart'
 interface Props {
   item: { ocupacao: OcupacaoAgregada } | null | undefined
   size?: number
+  /** Repassado ao disco central do donut (útil quando embutido em card tintado). */
+  centerFillClassName?: string
+  /** Repassado ao contorno entre os segmentos — deve casar com o mesmo fundo de `centerFillClassName`. */
+  ringStrokeClassName?: string
 }
 
-export function OcupacaoDonut({ item, size = 150 }: Props) {
+export function OcupacaoDonut({ item, size = 150, centerFillClassName, ringStrokeClassName }: Props) {
   const oc = item?.ocupacao
   if (!oc) return null
 
@@ -36,18 +40,19 @@ export function OcupacaoDonut({ item, size = 150 }: Props) {
       <InteractivePieChart
         size={size}
         title="Carga semanal"
+        centerFillClassName={centerFillClassName}
+        ringStrokeClassName={ringStrokeClassName}
         centerLabel={fmtPctOcup(pctTempo)}
         valueFormatter={(v, seg) =>
           seg?.label === 'Horário Administrativo' ? fmtHDec(v) : fmtH(v)
         }
         segments={segments.filter(s => (s.value || 0) > 0)}
       />
-      <div className="mt-1 text-center text-[11px] leading-snug text-gray-500">
-        <strong style={{ color: B.navy }}>CH total:</strong> {fmtH(totalHoras)}
+      <div className="mt-1 text-center text-[11px] leading-snug text-muted-foreground">
+        <strong className="text-foreground">CH total:</strong> {fmtH(totalHoras)}
       </div>
       {oc.capacidadeMultipla && (
-        <div className="mt-2 rounded-lg px-2 py-1 text-[11px] text-center"
-          style={{ background: B.purpleLt, color: B.purple }}>
+        <div className="mt-2 rounded-lg bg-violet-50 px-2 py-1 text-center text-[11px] text-violet-700 dark:bg-violet-950/30 dark:text-violet-400">
           Capacidade: {oc.baseTexto}
         </div>
       )}

@@ -1,8 +1,9 @@
 "use client"
 
 import { useCallback, useMemo, useState } from "react"
+import { Info, Star, Target } from "lucide-react"
 import {
-  B, ABA_EXT, DIAS_LIST, DIAS_ORD, ESP_CLINICO, EXCLUIR_OCUP, FOCO_CAMILA_PROF,
+  ABA_EXT, DIAS_LIST, DIAS_ORD, ESP_CLINICO, EXCLUIR_OCUP, FOCO_CAMILA_PROF,
   HORAS_GRID, PACS_ADMIN, TERAPIA_TO_ESP, isProfBloqueadoTemp,
   reservaSlotKey, reservasAtivasFromWa, DIAS_UTIL, SK_PREENCHER,
 } from "@/lib/cronograma/constants"
@@ -11,6 +12,11 @@ import {
   shouldShowSessionUnit, turnoFromHora, turnoNome, unidadeBadgeText,
 } from "@/lib/cronograma/helpers"
 import { UnitHeaderBadges, CronoGlobalUnitBadge } from "@/components/cronograma/ui/UnitBadges"
+import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
+import { SegmentedTabs, type SegmentedTab } from "@/components/cronograma/ui/SegmentedTabs"
+import { StatusPill } from "@/components/cronograma/ui/StatusPill"
+import { Button } from "@/components/ui/button"
+import { type Tone } from "@/components/cronograma/ui/tones"
 import type { CsvRow, LaudoRow, WaMap } from "@/types/cronograma"
 
 
@@ -42,11 +48,11 @@ interface PropostaItem {
 interface ModalItemData { pac: string; proposta: PropostaItem }
 
 type LocalWaStatus = "aguardando" | "aceito" | "recusado" | "inviavel"
-const WA_S: Record<LocalWaStatus, { bg: string; c: string; l: string }> = {
-  aguardando: { bg: B.blueLt, c: B.blue, l: "Aguardando WA" },
-  aceito: { bg: B.limeLt, c: "#4a6e20", l: "Aceito" },
-  recusado: { bg: "#fef2f2", c: "#dc2626", l: "Recusado" },
-  inviavel: { bg: "var(--muted)", c: "var(--muted-foreground)", l: "Inviável" },
+const WA_S: Record<LocalWaStatus, { tone: Tone; l: string }> = {
+  aguardando: { tone: "blue",  l: "Aguardando WA" },
+  aceito:     { tone: "green", l: "Aceito" },
+  recusado:   { tone: "red",   l: "Recusado" },
+  inviavel:   { tone: "slate", l: "Inviável" },
 }
 
 // ─── Pure helpers (defined outside to be stable across renders) ───────────────
@@ -63,11 +69,20 @@ function adjHs(hora: string): string[] {
 function InfoTip({ text }: { text: string }) {
   const [v, setV] = useState(false)
   return (
-    <span onMouseEnter={() => setV(true)} onMouseLeave={() => setV(false)}
+    <span
+      onMouseEnter={() => setV(true)}
+      onMouseLeave={() => setV(false)}
       onClick={e => { e.stopPropagation(); setV(x => !x) }}
-      style={{ position: "relative", cursor: "help", display: "inline-flex", flexShrink: 0, marginLeft: 5, verticalAlign: "middle" }}>
-      <span style={{ width: 15, height: 15, borderRadius: "50%", background: B.blueLt, color: B.blue, border: `1px solid ${B.blue}55`, display: "inline-flex", alignItems: "center", justifyContent: "center", fontSize: 10, fontWeight: 900 }}>i</span>
-      {v && <span style={{ position: "absolute", left: 18, top: -8, zIndex: 800, width: 240, background: B.navy, color: "white", borderRadius: 10, padding: "8px 10px", fontSize: 11, lineHeight: 1.35, boxShadow: "0 8px 24px rgba(0,0,0,.22)" }}>{text}</span>}
+      className="relative ml-1 inline-flex shrink-0 cursor-help align-middle"
+    >
+      <span className="inline-flex h-[15px] w-[15px] items-center justify-center rounded-full bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-400">
+        <Info size={10} strokeWidth={2.5} />
+      </span>
+      {v && (
+        <span className="absolute left-[18px] top-[-8px] z-[800] w-60 rounded-xl bg-slate-900 dark:bg-slate-800 px-2.5 py-2 text-[11px] leading-snug text-white shadow-2xl">
+          {text}
+        </span>
+      )}
     </span>
   )
 }
@@ -120,100 +135,89 @@ function PacPreencherModal({ pac, proposta, cRows, waStatus, onStatus, onClose }
   const convRowPac = cRows.find(r => r["Nome Favorecido"] === pac && (r["Convênio"] || r["Convenio"]))
   const convenioPac = String(convRowPac?.["Convênio"] || convRowPac?.["Convenio"] || "")
 
-  const cSt = (tipo: string) => {
-    if (tipo === "proposta") return { bg: B.limeLt, bd: B.lime, label: "Nova sessão", lc: B.purple }
-    if (tipo === "admin") return { bg: "var(--muted)", bd: "var(--border)", label: null, lc: null }
-    return { bg: "var(--muted)", bd: "var(--border)", label: null, lc: null }
-  }
-
   const ws = waStatus as LocalWaStatus | null
   const wsS = ws && WA_S[ws] ? WA_S[ws] : null
 
   return (
-    <div style={{ position: "fixed", inset: 0, zIndex: 70, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.55)", padding: 12 }}
-      onClick={e => { if (e.target === e.currentTarget) onClose() }}>
-      <div style={{ background: "var(--card)", borderRadius: 18, boxShadow: "0 24px 80px rgba(0,0,0,.22)", width: "96vw", maxWidth: 960, maxHeight: "92vh", display: "flex", flexDirection: "column" }}>
-        <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", background: "var(--card)", borderRadius: "18px 18px 0 0", display: "flex", justifyContent: "space-between", alignItems: "flex-start", flexWrap: "wrap", gap: 8 }}>
-          <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-            <span style={{ fontWeight: 900, fontSize: 15, color: B.navy }}>{pac}</span>
-            <div style={{ display: "flex", gap: 5, flexWrap: "wrap" }}>
-              <span style={{ background: B.blueLt, color: B.blue, border: `1px solid ${B.blue}33`, borderRadius: 999, padding: "2px 10px", fontSize: 11, fontWeight: 800 }}>Convênio: {convenioPac || "—"}</span>
-              <CronoGlobalUnitBadge unit={unitMeta.globalUnit} />
-              <span style={{ background: B.limeLt, color: "#4a6e20", border: `1px solid ${B.lime}88`, borderRadius: 999, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>
-                Nova: {proposta.terapia} · {proposta.dia.replace("-feira", "")} {proposta.hora} · {proposta.unidade}
-                {proposta.vCompSlots.length ? ` + ${proposta.vCompSlots.length} complementar(es)` : ""}
-              </span>
-              {wsS && <span style={{ background: wsS.bg, color: wsS.c, borderRadius: 999, padding: "2px 10px", fontSize: 11, fontWeight: 700 }}>{wsS.l}</span>}
-            </div>
-          </div>
-          <button onClick={onClose} aria-label="Fechar" style={{ width: 30, height: 30, borderRadius: "50%", border: "none", background: "var(--muted)", cursor: "pointer", fontSize: 16, color: "var(--muted-foreground)", display: "flex", alignItems: "center", justifyContent: "center" }}>×</button>
+    <ScheduleModal
+      title={pac}
+      maxWidth={960}
+      onClose={onClose}
+      subtitle={
+        <div className="flex flex-wrap gap-1.5">
+          <StatusPill tone="blue" variant="solid" dense>Convênio: {convenioPac || "—"}</StatusPill>
+          <CronoGlobalUnitBadge unit={unitMeta.globalUnit} />
+          <StatusPill tone="green" variant="solid" dense>
+            Nova: {proposta.terapia} · {proposta.dia.replace("-feira", "")} {proposta.hora} · {proposta.unidade}
+            {proposta.vCompSlots.length ? ` + ${proposta.vCompSlots.length} complementar(es)` : ""}
+          </StatusPill>
+          {wsS && <StatusPill tone={wsS.tone} variant="solid" dense>{wsS.l}</StatusPill>}
         </div>
-
-        <div style={{ flex: 1, overflow: "auto", padding: 14 }}>
-          <div style={{ display: "flex", gap: 8, marginBottom: 8, fontSize: 10, color: "var(--muted-foreground)", flexWrap: "wrap" }}>
-            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: B.limeLt, border: `1px solid ${B.lime}` }} /> Nova sessão proposta</span>
-            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "var(--muted)", border: "1px solid var(--border)" }} /> Existente</span>
-            <span style={{ display: "flex", alignItems: "center", gap: 3 }}><span style={{ display: "inline-block", width: 9, height: 9, borderRadius: 2, background: "var(--muted)", border: "1px solid var(--border)" }} /> Administrativo</span>
-          </div>
-          {!horasGrid.length ? (
-            <div style={{ textAlign: "center", color: "var(--muted-foreground)", padding: 32 }}>Nenhuma sessão encontrada.</div>
-          ) : (
-            <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 400 }}>
-              <thead><tr>
-                <th style={{ width: 52, paddingBottom: 8, textAlign: "right", paddingRight: 10, fontSize: 12, color: "var(--muted-foreground)", fontWeight: 400 }}>Hora</th>
-                {diasComSess.map(d => (
-                  <th key={d} style={{ minWidth: 130, paddingBottom: 8, textAlign: "center", fontSize: 13, color: d === proposta.dia ? B.purple : B.navy, fontWeight: 800 }}>
-                    <div>{d.replace("-feira", "")} {d === proposta.dia && <span style={{ fontSize: 10, background: B.limeLt, color: "#4a6e20", borderRadius: 4, padding: "1px 4px", marginLeft: 2 }}>nova</span>}</div>
-                    <UnitHeaderBadges dayMeta={unitMeta.byDay[d]} globalUnit={unitMeta.globalUnit} />
-                  </th>
-                ))}
-              </tr></thead>
-              <tbody>
-                {horasGrid.map(hora => (
-                  <tr key={hora} style={{ borderTop: "1px solid var(--border)" }}>
-                    <td style={{ textAlign: "right", paddingRight: 10, verticalAlign: "top", paddingTop: 8, fontFamily: "monospace", fontSize: 15, fontWeight: 800, color: hora === proposta.hora ? B.purple : B.navy }}>{hora}</td>
-                    {diasComSess.map(d => {
-                      const cells = cMap[`${d}|||${hora}`] || []
-                      return (
-                        <td key={d} style={{ padding: 3, verticalAlign: "top" }}>
-                          {cells.map((c, ci) => {
-                            const cs = cSt(c.tipo)
-                            return (
-                              <div key={ci} style={{ background: cs.bg, border: `1px solid ${cs.bd}`, borderRadius: 9, padding: "7px 9px", marginBottom: 3, minHeight: 58, display: "flex", flexDirection: "column", gap: 2 }}>
-                                <div style={{ fontSize: 12, fontWeight: 700, color: "var(--card-foreground)", lineHeight: 1.3 }}>{c.tP}</div>
-                                <div style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{fmtName(c.prof)}</div>
-                                {shouldShowSessionUnit(unitMeta, d, hora) && c.unidade && c.unidade !== "Desconhecida" && (
-                                  <div style={{ fontSize: 10, fontWeight: 800, color: B.blue, background: B.blueLt, border: `1px solid ${B.blue}33`, borderRadius: 999, padding: "1px 6px", width: "fit-content" }}>
-                                    {unidadeBadgeText(c.unidade)}
-                                  </div>
-                                )}
-                                {cs.label && <div style={{ fontSize: 11, fontWeight: 700, color: cs.lc ?? undefined, marginTop: "auto" }}>{cs.label}</div>}
-                              </div>
-                            )
-                          })}
-                        </td>
-                      )
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-
-        <div style={{ padding: "10px 20px", borderTop: "1px solid var(--border)", display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", background: "var(--card)", borderRadius: "0 0 18px 18px" }}>
-          <div style={{ flex: 1, fontSize: 11, color: "var(--muted-foreground)" }}>Cronograma atual + sessão proposta em verde.</div>
-          {!ws && <button onClick={() => onStatus("aguardando")} style={{ padding: "7px 13px", borderRadius: 9, border: "none", background: B.blue, color: "white", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Oferecer via WA</button>}
+      }
+      footer={
+        <>
+          <div className="mr-auto text-[11px] text-muted-foreground">Cronograma atual + sessão proposta em verde.</div>
+          {!ws && <Button variant="default" size="sm" onClick={() => onStatus("aguardando")}>Oferecer via WA</Button>}
           {ws === "aguardando" && <>
-            <button onClick={() => onStatus(null)} style={{ padding: "7px 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--card)", color: "var(--muted-foreground)", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Desfazer envio</button>
-            <button onClick={() => onStatus("aceito")} style={{ padding: "7px 12px", borderRadius: 9, border: "none", background: "#16a34a", color: "white", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Aceito</button>
-            <button onClick={() => onStatus("recusado")} style={{ padding: "7px 12px", borderRadius: 9, border: "1px solid #fca5a5", background: "#fef2f2", color: "#dc2626", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Recusado</button>
-            <button onClick={() => onStatus("inviavel")} style={{ padding: "7px 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--muted)", color: "var(--muted-foreground)", fontWeight: 700, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Inviável</button>
+            <Button variant="outline" size="sm" onClick={() => onStatus(null)}>Desfazer envio</Button>
+            <Button variant="default" size="sm" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => onStatus("aceito")}>Aceito</Button>
+            <Button variant="destructive" size="sm" onClick={() => onStatus("recusado")}>Recusado</Button>
+            <Button variant="outline" size="sm" onClick={() => onStatus("inviavel")}>Inviável</Button>
           </>}
-          <button onClick={onClose} style={{ padding: "7px 12px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--card)", color: "var(--muted-foreground)", fontWeight: 600, fontSize: 11, cursor: "pointer", fontFamily: "inherit" }}>Fechar</button>
-        </div>
+          <Button variant="outline" size="sm" onClick={onClose}>Fechar</Button>
+        </>
+      }
+    >
+      <div className="mb-2 flex flex-wrap gap-3 text-[10px] text-muted-foreground">
+        <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30" /> Nova sessão proposta</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-border bg-muted" /> Existente</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-border bg-muted" /> Administrativo</span>
       </div>
-    </div>
+      {!horasGrid.length ? (
+        <div className="py-8 text-center text-muted-foreground">Nenhuma sessão encontrada.</div>
+      ) : (
+        <table className="w-full min-w-[400px] border-collapse">
+          <thead><tr>
+            <th className="w-[52px] pb-2 pr-2.5 text-right text-xs font-normal text-muted-foreground">Hora</th>
+            {diasComSess.map(d => (
+              <th key={d} className={`min-w-[130px] pb-2 text-center text-[13px] font-extrabold ${d === proposta.dia ? "text-violet-700 dark:text-violet-400" : "text-foreground"}`}>
+                <div>{d.replace("-feira", "")} {d === proposta.dia && <span className="ml-0.5 rounded bg-emerald-50 dark:bg-emerald-950/30 px-1 py-px text-[10px] text-emerald-700 dark:text-emerald-400">nova</span>}</div>
+                <UnitHeaderBadges dayMeta={unitMeta.byDay[d]} globalUnit={unitMeta.globalUnit} />
+              </th>
+            ))}
+          </tr></thead>
+          <tbody>
+            {horasGrid.map(hora => (
+              <tr key={hora} className="border-t border-border">
+                <td className={`pr-2.5 pt-2 text-right align-top font-mono text-[15px] font-extrabold tabular-nums ${hora === proposta.hora ? "text-violet-700 dark:text-violet-400" : "text-foreground"}`}>{hora}</td>
+                {diasComSess.map(d => {
+                  const cells = cMap[`${d}|||${hora}`] || []
+                  return (
+                    <td key={d} className="p-0.5 align-top">
+                      {cells.map((c, ci) => {
+                        const prop = c.tipo === "proposta"
+                        return (
+                          <div key={ci} className={`mb-0.5 flex min-h-[58px] flex-col gap-0.5 rounded-lg border px-2 py-1.5 ${prop ? "border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30" : "border-border bg-muted"}`}>
+                            <div className="text-xs font-bold leading-tight text-foreground">{c.tP}</div>
+                            <div className="text-[11px] text-muted-foreground">{fmtName(c.prof)}</div>
+                            {shouldShowSessionUnit(unitMeta, d, hora) && c.unidade && c.unidade !== "Desconhecida" && (
+                              <div className="w-fit rounded-full bg-sky-50 dark:bg-sky-950/30 px-1.5 py-px text-[10px] font-extrabold text-sky-700 dark:text-sky-400">
+                                {unidadeBadgeText(c.unidade)}
+                              </div>
+                            )}
+                            {prop && <div className="mt-auto text-[11px] font-bold text-emerald-700 dark:text-emerald-400">Nova sessão</div>}
+                          </div>
+                        )
+                      })}
+                    </td>
+                  )
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+    </ScheduleModal>
   )
 }
 
@@ -259,6 +263,29 @@ function usePreencherGaps(lRows: LaudoRow[], cRows: CsvRow[]): GapItem[] {
   }, [lRows, cRows])
 }
 
+// ─── Shared presentation bits ─────────────────────────────────────────────────
+
+const SELECT_CLS = "rounded-lg border border-border bg-popover px-2.5 py-1.5 text-[13px] font-medium text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+
+function StatMini({ n, l, tone, tip }: { n: number; l: string; tone: Tone; tip: string }) {
+  const TONE_TEXT: Record<Tone, string> = {
+    green: "text-emerald-600 dark:text-emerald-400", amber: "text-amber-600 dark:text-amber-400",
+    blue: "text-sky-600 dark:text-sky-400", purple: "text-violet-600 dark:text-violet-400",
+    red: "text-rose-600 dark:text-rose-400", slate: "text-foreground",
+  }
+  const TONE_BORDER: Record<Tone, string> = {
+    green: "border-emerald-200 dark:border-emerald-900", amber: "border-amber-200 dark:border-amber-900",
+    blue: "border-sky-200 dark:border-sky-900", purple: "border-violet-200 dark:border-violet-900",
+    red: "border-rose-200 dark:border-rose-900", slate: "border-border",
+  }
+  return (
+    <div className={`flex-[1_1_110px] rounded-xl border bg-card p-3 text-center ${TONE_BORDER[tone]}`}>
+      <div className={`text-2xl font-black tabular-nums ${TONE_TEXT[tone]}`}>{n}</div>
+      <div className="mt-0.5 text-[11px] text-muted-foreground">{l}<InfoTip text={tip} /></div>
+    </div>
+  )
+}
+
 // ─── PreencherProfTab ─────────────────────────────────────────────────────────
 interface Props {
   cRows: CsvRow[]
@@ -268,6 +295,12 @@ interface Props {
   initialMode?: "prof" | "sim" | "paciente"
   fixedMode?: boolean
 }
+
+const MODE_TABS: SegmentedTab<"prof" | "sim" | "paciente">[] = [
+  { value: "prof", label: "Profissional" },
+  { value: "sim", label: "Simulação" },
+  { value: "paciente", label: "Paciente" },
+]
 
 export function PreencherProfTab({ cRows, lRows, waMap: waMapProp, onWaChange, initialMode = "prof", fixedMode = false }: Props) {
   const [modeState, setMode] = useState<"prof" | "sim" | "paciente">(initialMode)
@@ -388,25 +421,29 @@ export function PreencherProfTab({ cRows, lRows, waMap: waMapProp, onWaChange, i
     const wsS = ws ? WA_S[ws] : null
     const proposta: PropostaItem = { prof: profKey || "Novo profissional", dia, hora, unidade, terapia, esp: TERAPIA_TO_ESP[terapia] || terapia, vCompSlots: c.vCompSlots || [] }
     return (
-      <div style={{ background: ws ? "var(--muted)" : "var(--card)", border: `1px solid ${ws ? B.blue + "44" : "var(--border)"}`, borderRadius: 10, padding: "9px 11px", display: "flex", gap: 8, alignItems: "flex-start", flexWrap: "wrap" }}>
-        <div style={{ flex: "1 1 160px" }}>
-          <div style={{ fontWeight: 700, fontSize: 12, color: "var(--card-foreground)" }}>{c.pac}</div>
-          <div style={{ fontSize: 10, color: "var(--muted-foreground)", marginTop: 2 }}>Aut: <strong>{c.aut}</strong> · Of: <strong>{c.of}</strong> · <span style={{ color: "#dc2626", fontWeight: 700 }}>Gap −{c.gap}</span></div>
-          {c.tipo && <div style={{ fontSize: 10, color: c.rank === 0 ? "#4a6e20" : c.rank === 1 ? B.orange : "var(--muted-foreground)", fontWeight: 700, marginTop: 1 }}>🎯 {c.tipo}</div>}
-          {c.sessD?.length > 0 && <div style={{ fontSize: 10, color: "var(--muted-foreground)", marginTop: 1 }}>Já neste dia: {c.sessD.join(", ")}</div>}
-          {!c.sessD?.length && c.diasUn && <div style={{ fontSize: 10, color: "var(--muted-foreground)", marginTop: 1 }}>Frequenta a unidade em: {c.diasUn}</div>}
-          {c.vComp && <div style={{ fontSize: 10, color: "#4a6e20", marginTop: 1, fontWeight: 700 }}>Oferecer junto: {c.vComp}</div>}
-          {c.conflito && <div style={{ fontSize: 10, color: B.orange, marginTop: 1 }}>Conflito: {c.conflito}</div>}
+      <div className={`flex flex-wrap items-start gap-2 rounded-xl border p-2.5 ${ws ? "border-sky-300 dark:border-sky-800 bg-muted" : "border-border bg-card"}`}>
+        <div className="flex-[1_1_160px]">
+          <div className="text-xs font-bold text-foreground">{c.pac}</div>
+          <div className="mt-0.5 text-[10px] text-muted-foreground">Aut: <strong>{c.aut}</strong> · Of: <strong>{c.of}</strong> · <span className="font-bold text-rose-600 dark:text-rose-400">Gap −{c.gap}</span></div>
+          {c.tipo && (
+            <div className={`mt-px flex items-center gap-1 text-[10px] font-bold ${c.rank === 0 ? "text-emerald-600 dark:text-emerald-400" : c.rank === 1 ? "text-orange-600 dark:text-orange-400" : "text-muted-foreground"}`}>
+              <Target size={10} /> {c.tipo}
+            </div>
+          )}
+          {c.sessD?.length > 0 && <div className="mt-px text-[10px] text-muted-foreground">Já neste dia: {c.sessD.join(", ")}</div>}
+          {!c.sessD?.length && c.diasUn && <div className="mt-px text-[10px] text-muted-foreground">Frequenta a unidade em: {c.diasUn}</div>}
+          {c.vComp && <div className="mt-px text-[10px] font-bold text-emerald-600 dark:text-emerald-400">Oferecer junto: {c.vComp}</div>}
+          {c.conflito && <div className="mt-px text-[10px] text-orange-600 dark:text-orange-400">Conflito: {c.conflito}</div>}
         </div>
-        <div style={{ display: "flex", gap: 4, alignItems: "center", flexWrap: "wrap", flexShrink: 0 }}>
-          {wsS && <span style={{ background: wsS.bg, color: wsS.c, borderRadius: 999, padding: "2px 8px", fontSize: 10, fontWeight: 700 }}>{wsS.l}</span>}
-          <button onClick={() => setModalItem({ pac: c.pac, proposta })} style={{ padding: "4px 9px", borderRadius: 7, background: "var(--muted)", color: B.navy, border: "1px solid var(--border)", fontSize: 10, cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>Ver</button>
-          {!ws && <button onClick={() => setWst(c.pac, dia, hora, profKey, "aguardando")} style={{ padding: "4px 9px", borderRadius: 7, background: B.blue, color: "white", border: "none", fontSize: 10, cursor: "pointer", fontFamily: "inherit", fontWeight: 700 }}>Oferecer via WA</button>}
+        <div className="flex shrink-0 flex-wrap items-center gap-1">
+          {wsS && <StatusPill tone={wsS.tone} variant="solid" dense>{wsS.l}</StatusPill>}
+          <Button variant="outline" size="xs" onClick={() => setModalItem({ pac: c.pac, proposta })}>Ver</Button>
+          {!ws && <Button variant="default" size="xs" onClick={() => setWst(c.pac, dia, hora, profKey, "aguardando")}>Oferecer via WA</Button>}
           {ws === "aguardando" && <>
-            <button onClick={() => setWst(c.pac, dia, hora, profKey, null)} style={{ padding: "4px 7px", borderRadius: 7, background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>Desfazer envio</button>
-            <button onClick={() => setWst(c.pac, dia, hora, profKey, "aceito")} style={{ padding: "4px 7px", borderRadius: 7, background: "#16a34a", color: "white", border: "none", fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>Aceito</button>
-            <button onClick={() => setWst(c.pac, dia, hora, profKey, "recusado")} style={{ padding: "4px 7px", borderRadius: 7, background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>Recusado</button>
-            <button onClick={() => setWst(c.pac, dia, hora, profKey, "inviavel")} style={{ padding: "4px 7px", borderRadius: 7, background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", fontSize: 10, cursor: "pointer", fontFamily: "inherit" }}>Inviável</button>
+            <Button variant="outline" size="xs" onClick={() => setWst(c.pac, dia, hora, profKey, null)}>Desfazer envio</Button>
+            <Button variant="default" size="xs" className="bg-emerald-600 hover:bg-emerald-700" onClick={() => setWst(c.pac, dia, hora, profKey, "aceito")}>Aceito</Button>
+            <Button variant="destructive" size="xs" onClick={() => setWst(c.pac, dia, hora, profKey, "recusado")}>Recusado</Button>
+            <Button variant="outline" size="xs" onClick={() => setWst(c.pac, dia, hora, profKey, "inviavel")}>Inviável</Button>
           </>}
         </div>
       </div>
@@ -582,156 +619,169 @@ export function PreencherProfTab({ cRows, lRows, waMap: waMapProp, onWaChange, i
 
   // ─── Render ──────────────────────────────────────────────────────────────────
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+    <div className="flex flex-col gap-3">
 
       {/* Mode / filters card */}
-      <div style={{ background: "var(--card)", borderRadius: 14, border: "1px solid var(--border)", padding: "14px 16px" }}>
-        <div style={{ display: "flex", gap: 8, marginBottom: 12, flexWrap: "wrap", alignItems: "center" }}>
-          <span style={{ fontWeight: 800, color: B.navy, fontSize: 15 }}>
+      <div className="rounded-2xl border border-border bg-card p-4">
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-[15px] font-extrabold text-foreground">
             {mode === "sim" ? "Simulação de Novo Prestador" : mode === "paciente" ? "Aumentar Ocupação (Paciente)" : "Aumentar Ocupação (Profissional)"}
           </span>
           {!fixedMode && (
-            <div style={{ marginLeft: "auto", display: "flex", gap: 4, background: "var(--muted)", borderRadius: 10, padding: 3 }}>
-              {(["prof", "sim", "paciente"] as const).map(m => (
-                <button key={m} onClick={() => setMode(m)} style={{ padding: "5px 12px", borderRadius: 8, border: "none", background: mode === m ? B.navy : "transparent", color: mode === m ? "white" : "var(--muted-foreground)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>
-                  {m === "prof" ? "Profissional" : m === "sim" ? "Simulação" : "Paciente"}
-                </button>
-              ))}
-            </div>
+            <SegmentedTabs value={mode} onChange={setMode} tabs={MODE_TABS} ariaLabel="Modo" className="ml-auto" />
           )}
         </div>
 
-        <div style={{ fontSize: 11, color: "var(--muted-foreground)", background: "var(--muted)", border: "1px solid var(--border)", borderRadius: 9, padding: "7px 10px", marginBottom: 10 }}>
-          ⓘ Bloqueio temporário ativo: Djinane Ferreira Da Silva e Ana Carolina Mendes França não aparecem como vagas ofertáveis enquanto ainda constarem livres no CSV.
+        <div className="mb-2.5 flex items-start gap-1.5 rounded-lg border border-border bg-muted px-2.5 py-1.5 text-[11px] text-muted-foreground">
+          <Info size={13} className="mt-px shrink-0" />
+          Bloqueio temporário ativo: Djinane Ferreira Da Silva e Ana Carolina Mendes França não aparecem como vagas ofertáveis enquanto ainda constarem livres no CSV.
         </div>
 
         {/* Prof mode */}
         {mode === "prof" && <>
-          <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 10 }}>Selecione a profissional para ver seus slots Livres e os candidatos elegíveis.</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: "1 1 240px" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)" }}>Profissional</span>
-              <select value={fpProf} onChange={e => { setFpProf(e.target.value); setFpEsp(""); setFpDia("") }} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "7px 11px", fontSize: 13, fontFamily: "inherit" }}>
-                <option value="">Selecionar...</option>
+          <div className="mb-2.5 text-xs text-muted-foreground">Selecione a profissional para ver seus slots Livres e os candidatos elegíveis.</div>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="flex flex-[1_1_240px] flex-col gap-1">
+              <span className="text-[11px] font-bold text-muted-foreground">Profissional</span>
+              <select value={fpProf} onChange={e => { setFpProf(e.target.value); setFpEsp(""); setFpDia("") }} className={SELECT_CLS}>
+                <option value="">Selecionar…</option>
                 {todosProfs.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
-            {fpProf && espsDisp.length > 0 && <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)" }}>Especialidade</span>
-              <select value={fpEsp} onChange={e => setFpEsp(e.target.value)} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "7px 11px", fontSize: 13, fontFamily: "inherit" }}>
+            {fpProf && espsDisp.length > 0 && <div className="flex flex-col gap-1">
+              <span className="text-[11px] font-bold text-muted-foreground">Especialidade</span>
+              <select value={fpEsp} onChange={e => setFpEsp(e.target.value)} className={SELECT_CLS}>
                 <option value="">Todas</option>{espsDisp.map(e => <option key={e} value={e}>{e}</option>)}
               </select>
             </div>}
-            {fpProf && diasDisp.length > 0 && <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)" }}>Dia</span>
-              <select value={fpDia} onChange={e => setFpDia(e.target.value)} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "7px 11px", fontSize: 13, fontFamily: "inherit" }}>
+            {fpProf && diasDisp.length > 0 && <div className="flex flex-col gap-1">
+              <span className="text-[11px] font-bold text-muted-foreground">Dia</span>
+              <select value={fpDia} onChange={e => setFpDia(e.target.value)} className={SELECT_CLS}>
                 <option value="">Todos</option>{diasDisp.map(d => <option key={d} value={d}>{d.replace("-feira", "")}</option>)}
               </select>
             </div>}
           </div>
-          {fpProf === FOCO_CAMILA_PROF && <div style={{ marginTop: 10, background: B.limeLt, border: `1px solid ${B.lime}`, borderRadius: 10, padding: "9px 11px", fontSize: 12, color: "#4a6e20" }}>🎯 Foco Camila ativo: terça usa Padre Miguel; demais slots aparecem conforme a unidade do CSV.</div>}
+          {fpProf === FOCO_CAMILA_PROF && (
+            <div className="mt-2.5 flex items-start gap-1.5 rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50 dark:bg-emerald-950/30 px-2.5 py-1.5 text-xs text-emerald-700 dark:text-emerald-400">
+              <Target size={13} className="mt-px shrink-0" /> Foco Camila ativo: terça usa Padre Miguel; demais slots aparecem conforme a unidade do CSV.
+            </div>
+          )}
         </>}
 
         {/* Sim mode */}
         {mode === "sim" && <>
-          <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 10 }}>Simule um novo profissional por terapia, dia e turno. A recomendação pode combinar unidades por turno quando isso aumenta ocupação, respeitando a restrição geográfica de Padre Miguel.<InfoTip text="A simulação considera pacientes com Autorizado > Ofertado, adjacência no mesmo dia/unidade, turno clínico compatível e ausência de conflito no horário." /></div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: "1 1 280px" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)" }}>Especialidade <InfoTip text="Digite parte do nome da terapia e escolha uma opção da lista." /></span>
-              <input list="preencher-esp-options" value={simEsp} onChange={e => { setSimEsp(e.target.value); setSimUnid("") }}
+          <div className="mb-2.5 text-xs text-muted-foreground">
+            Simule um novo profissional por terapia, dia e turno. A recomendação pode combinar unidades por turno quando isso aumenta ocupação, respeitando a restrição geográfica de Padre Miguel.
+            <InfoTip text="A simulação considera pacientes com Autorizado > Ofertado, adjacência no mesmo dia/unidade, turno clínico compatível e ausência de conflito no horário." />
+          </div>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="flex flex-[1_1_280px] flex-col gap-1">
+              <span className="text-[11px] font-bold text-muted-foreground">Especialidade <InfoTip text="Digite parte do nome da terapia e escolha uma opção da lista." /></span>
+              <input
+                list="preencher-esp-options" value={simEsp}
+                onChange={e => { setSimEsp(e.target.value); setSimUnid("") }}
                 onBlur={() => { const match = espOptions.find(e => e.toLowerCase() === simEsp.trim().toLowerCase()); if (match) setSimEsp(match) }}
-                placeholder="Digite para pesquisar e selecione da lista..."
-                style={{ border: `1px solid ${simEspValida ? "var(--border)" : "#fca5a5"}`, borderRadius: 8, padding: "8px 11px", fontSize: 13, fontFamily: "inherit", background: simEspValida ? "var(--card)" : "#fff7f7" }} />
+                placeholder="Digite para pesquisar e selecione da lista…"
+                className={`rounded-lg border px-2.5 py-2 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring ${simEspValida ? "border-border bg-card" : "border-rose-300 dark:border-rose-800 bg-rose-50/50 dark:bg-rose-950/20"}`}
+              />
               <datalist id="preencher-esp-options">{espOptions.map(e => <option key={e} value={e} />)}</datalist>
-              {!simEspValida && <span style={{ fontSize: 11, fontWeight: 700, color: "#dc2626" }}>Selecione uma especialidade válida da lista.</span>}
+              {!simEspValida && <span className="text-[11px] font-bold text-rose-600 dark:text-rose-400">Selecione uma especialidade válida da lista.</span>}
             </div>
           </div>
-          <div style={{ marginTop: 12, background: "var(--muted)", border: "1px solid var(--border)", borderRadius: 12, padding: "10px 12px" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 8, flexWrap: "wrap" }}>
-              <span style={{ fontSize: 12, fontWeight: 800, color: B.navy }}>Dias e turnos afetados <InfoTip text="Marque manhã, tarde ou dia inteiro. A recomendação avalia cada período separadamente." /></span>
-              <button onClick={toggleSimTodos} style={{ padding: "4px 10px", borderRadius: 8, border: "1px solid #cbd5e1", background: "var(--card)", fontSize: 11, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>Todos</button>
+          <div className="mt-3 rounded-xl border border-border bg-muted p-3">
+            <div className="mb-2 flex flex-wrap items-center gap-2">
+              <span className="text-xs font-extrabold text-foreground">Dias e turnos afetados <InfoTip text="Marque manhã, tarde ou dia inteiro. A recomendação avalia cada período separadamente." /></span>
+              <Button variant="outline" size="xs" onClick={toggleSimTodos}>Todos</Button>
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))", gap: 10 }}>
+            <div className="grid gap-2.5" style={{ gridTemplateColumns: "repeat(auto-fit,minmax(150px,1fr))" }}>
               {(DIAS_UTIL as readonly string[]).map(d => (
-                <div key={d} style={{ display: "flex", flexDirection: "column", gap: 8, minHeight: 92 }}>
-                  <span style={{ fontSize: 12, fontWeight: 800, color: B.navy }}>{d.replace("-feira", "")}</span>
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 6 }}>
+                <div key={d} className="flex min-h-[92px] flex-col gap-2">
+                  <span className="text-xs font-extrabold text-foreground">{d.replace("-feira", "")}</span>
+                  <div className="grid grid-cols-2 gap-1.5">
                     {(["manha", "tarde"] as const).map(t => (
-                      <button key={t} onClick={() => toggleSimTurno(d, t)} style={{ height: 32, padding: "0 10px", borderRadius: 9, border: `1px solid ${simDT?.[d]?.[t] ? B.blue : "var(--border)"}`, background: simDT?.[d]?.[t] ? B.blueLt : "var(--card)", color: simDT?.[d]?.[t] ? B.blue : "var(--muted-foreground)", fontSize: 12, fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}>{turnoNome[t]}</button>
+                      <button
+                        key={t}
+                        type="button"
+                        onClick={() => toggleSimTurno(d, t)}
+                        className={`h-8 rounded-lg border px-2.5 text-xs font-bold transition-colors ${simDT?.[d]?.[t] ? "border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-400" : "border-border bg-card text-muted-foreground hover:bg-muted/50"}`}
+                      >
+                        {turnoNome[t]}
+                      </button>
                     ))}
                   </div>
-                  <button onClick={() => toggleSimDiaInteiro(d)} style={{ height: 30, padding: "0 10px", borderRadius: 9, border: "1px solid var(--border)", background: "var(--card)", color: "var(--muted-foreground)", fontSize: 11, cursor: "pointer", fontFamily: "inherit", width: "fit-content" }}>Dia inteiro</button>
+                  <button
+                    type="button"
+                    onClick={() => toggleSimDiaInteiro(d)}
+                    className="h-[30px] w-fit rounded-lg border border-border bg-card px-2.5 text-[11px] text-muted-foreground hover:bg-muted/50 transition-colors"
+                  >
+                    Dia inteiro
+                  </button>
                 </div>
               ))}
             </div>
-            {!simPeriodos.length && <div style={{ marginTop: 8, fontSize: 11, color: "#dc2626", fontWeight: 700 }}>Selecione pelo menos um dia/turno para simular.</div>}
+            {!simPeriodos.length && <div className="mt-2 text-[11px] font-bold text-rose-600 dark:text-rose-400">Selecione pelo menos um dia/turno para simular.</div>}
           </div>
         </>}
 
         {/* Paciente mode */}
         {mode === "paciente" && <>
-          <div style={{ fontSize: 12, color: "var(--muted-foreground)", marginBottom: 10 }}>Selecione um paciente para completar as terapias autorizadas em laudo. A busca prioriza acréscimos nas extremidades e mostra remanejamentos simples quando precisa abrir o horário.</div>
-          <div style={{ display: "flex", flexWrap: "wrap", gap: 8, alignItems: "flex-end" }}>
-            <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: "1 1 280px" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)" }}>Paciente com gap</span>
-              <select value={pacSel} onChange={e => { setPacSel(e.target.value); setPacEsp("") }} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "7px 11px", fontSize: 13, fontFamily: "inherit" }}>
-                <option value="">Selecionar paciente...</option>
+          <div className="mb-2.5 text-xs text-muted-foreground">Selecione um paciente para completar as terapias autorizadas em laudo. A busca prioriza acréscimos nas extremidades e mostra remanejamentos simples quando precisa abrir o horário.</div>
+          <div className="flex flex-wrap items-end gap-2">
+            <div className="flex flex-[1_1_280px] flex-col gap-1">
+              <span className="text-[11px] font-bold text-muted-foreground">Paciente com gap</span>
+              <select value={pacSel} onChange={e => { setPacSel(e.target.value); setPacEsp("") }} className={SELECT_CLS}>
+                <option value="">Selecionar paciente…</option>
                 {pacsComGap.map(p => <option key={p} value={p}>{p}</option>)}
               </select>
             </div>
-            {pacSel && gapsPaciente.length > 0 && <div style={{ display: "flex", flexDirection: "column", gap: 3, flex: "1 1 220px" }}>
-              <span style={{ fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)" }}>Especialidade autorizada pendente</span>
-              <select value={pacEspAtiva} onChange={e => setPacEsp(e.target.value)} style={{ border: "1px solid var(--border)", borderRadius: 8, padding: "7px 11px", fontSize: 13, fontFamily: "inherit" }}>
+            {pacSel && gapsPaciente.length > 0 && <div className="flex flex-[1_1_220px] flex-col gap-1">
+              <span className="text-[11px] font-bold text-muted-foreground">Especialidade autorizada pendente</span>
+              <select value={pacEspAtiva} onChange={e => setPacEsp(e.target.value)} className={SELECT_CLS}>
                 {gapsPaciente.map(g => <option key={g.esp} value={g.esp}>{g.esp} | gap {g.gap} (aut {g.aut}, of {g.of})</option>)}
               </select>
             </div>}
           </div>
-          {pacSel && <div style={{ marginTop: 10, display: "flex", gap: 6, flexWrap: "wrap" }}>
-            {gapsPaciente.map(g => (
-              <span key={g.esp} style={{ background: g.esp === pacEspAtiva ? B.blueLt : "var(--muted)", color: g.esp === pacEspAtiva ? B.blue : "var(--muted-foreground)", border: `1px solid ${g.esp === pacEspAtiva ? B.blue + "44" : "var(--border)"}`, borderRadius: 999, padding: "3px 9px", fontSize: 11, fontWeight: 700 }}>
-                {g.esp}: faltam {g.gap}
-              </span>
-            ))}
-          </div>}
+          {pacSel && (
+            <div className="mt-2.5 flex flex-wrap gap-1.5">
+              {gapsPaciente.map(g => (
+                <StatusPill key={g.esp} tone={g.esp === pacEspAtiva ? "blue" : "slate"} variant={g.esp === pacEspAtiva ? "solid" : "soft"} dense>
+                  {g.esp}: faltam {g.gap}
+                </StatusPill>
+              ))}
+            </div>
+          )}
         </>}
       </div>
 
       {/* PROF MODE results */}
       {mode === "prof" && fpProf && cRows.length > 0 && <>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {[
-            { n: slotFilt.length, l: "slots livres", c: B.navy, tip: "Quantidade de horários livres da profissional após filtros, já ignorando profissionais bloqueadas temporariamente." },
-            { n: slotFilt.filter(s => s.cands.some(c => c.rank === 0)).length, l: "adjacentes", c: B.lime, tip: "Slots em que existe paciente com gap e sessão clínica encostada no mesmo dia, unidade e turno." },
-            { n: slotFilt.filter(s => s.cands.some(c => c.rank === 2)).length, l: "novo dia válido", c: B.blue, tip: "Horários livres que podem compor novo comparecimento com pelo menos mais uma sessão útil." },
-            { n: slotFilt.filter(s => s.cands.length === 0).length, l: "sem candidato", c: "#f97316", tip: "Horários livres sem paciente elegível após regras de gap, turno, adjacência, conflito e reserva WA." },
-          ].map(({ n, l, c, tip }) => (
-            <div key={l} style={{ flex: "1 1 110px", background: "var(--card)", borderRadius: 12, border: `1px solid ${c}33`, padding: 12, textAlign: "center" }}>
-              <div style={{ fontSize: 26, fontWeight: 900, color: c }}>{n}</div>
-              <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 2 }}>{l}<InfoTip text={tip} /></div>
-            </div>
-          ))}
+        <div className="flex flex-wrap gap-2">
+          <StatMini n={slotFilt.length} l="slots livres" tone="slate" tip="Quantidade de horários livres da profissional após filtros, já ignorando profissionais bloqueadas temporariamente." />
+          <StatMini n={slotFilt.filter(s => s.cands.some(c => c.rank === 0)).length} l="adjacentes" tone="green" tip="Slots em que existe paciente com gap e sessão clínica encostada no mesmo dia, unidade e turno." />
+          <StatMini n={slotFilt.filter(s => s.cands.some(c => c.rank === 2)).length} l="novo dia válido" tone="blue" tip="Horários livres que podem compor novo comparecimento com pelo menos mais uma sessão útil." />
+          <StatMini n={slotFilt.filter(s => s.cands.length === 0).length} l="sem candidato" tone="amber" tip="Horários livres sem paciente elegível após regras de gap, turno, adjacência, conflito e reserva WA." />
         </div>
         {diasDisp.filter(d => !fpDia || fpDia === d).map(dia => {
           const sD = slotFilt.filter(s => s.dia === dia); if (!sD.length) return null
           return (
-            <div key={dia} style={{ background: "var(--card)", borderRadius: 14, border: "1px solid var(--border)", overflow: "hidden" }}>
-              <div style={{ padding: "11px 16px", background: "var(--muted)", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8 }}>
-                <span style={{ fontWeight: 800, color: B.navy, fontSize: 14 }}>{dia.replace("-feira", "")}</span>
-                <span style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{sD[0]?.unidade}</span>
-                <span style={{ marginLeft: "auto", fontSize: 11, color: "var(--muted-foreground)" }}>{sD.length} slot(s) · {sD.filter(s => s.cands.length > 0).length} com candidato</span>
+            <div key={dia} className="overflow-hidden rounded-2xl border border-border bg-card">
+              <div className="flex items-center gap-2 border-b border-border bg-muted px-4 py-2.5">
+                <span className="text-sm font-extrabold text-foreground">{dia.replace("-feira", "")}</span>
+                <span className="text-[11px] text-muted-foreground">{sD[0]?.unidade}</span>
+                <span className="ml-auto text-[11px] text-muted-foreground">{sD.length} slot(s) · {sD.filter(s => s.cands.length > 0).length} com candidato</span>
               </div>
               {sD.map((s, si) => (
-                <div key={si} style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", gap: 12, flexWrap: "wrap", background: s.cands.length > 0 ? "var(--card)" : "var(--muted)" }}>
-                  <div style={{ flexShrink: 0, width: 110 }}>
-                    <div style={{ fontFamily: "monospace", fontSize: 18, fontWeight: 900, color: B.navy }}>{s.hora}</div>
-                    <span style={{ background: "#e0f2fe", color: "#0369a1", borderRadius: 5, padding: "2px 6px", fontSize: 10, fontWeight: 600 }}>{s.esp}</span>
-                    {s.cands.length === 0 && <div style={{ fontSize: 10, color: "#f97316", marginTop: 4, fontWeight: 600 }}>Sem candidatos</div>}
+                <div key={si} className={`flex flex-wrap gap-3 border-b border-border px-4 py-3 ${s.cands.length > 0 ? "bg-card" : "bg-muted/40"}`}>
+                  <div className="w-[110px] shrink-0">
+                    <div className="font-mono text-lg font-black text-foreground">{s.hora}</div>
+                    <span className="rounded px-1.5 py-0.5 text-[10px] font-semibold bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-400">{s.esp}</span>
+                    {s.cands.length === 0 && <div className="mt-1 text-[10px] font-semibold text-orange-600 dark:text-orange-400">Sem candidatos</div>}
                   </div>
                   {s.cands.length > 0 ? (
-                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4, minWidth: 240 }}>
+                    <div className="flex min-w-[240px] flex-1 flex-col gap-1">
                       {s.cands.map((c, ci) => <CandCard key={ci} c={c} dia={s.dia} hora={s.hora} unidade={s.unidade} terapia={s.terapia} profKey={fpProf} />)}
                     </div>
-                  ) : <div style={{ flex: 1, display: "flex", alignItems: "center", color: "var(--muted-foreground)", fontSize: 12, fontStyle: "italic" }}>Nenhum paciente elegível neste dia/unidade/horário.</div>}
+                  ) : <div className="flex flex-1 items-center text-xs italic text-muted-foreground">Nenhum paciente elegível neste dia/unidade/horário.</div>}
                 </div>
               ))}
             </div>
@@ -741,44 +791,56 @@ export function PreencherProfTab({ cRows, lRows, waMap: waMapProp, onWaChange, i
 
       {/* SIM MODE results */}
       {mode === "sim" && cRows.length > 0 && simEspValida && simPeriodos.length > 0 && <>
-        <div style={{ background: "var(--card)", borderRadius: 14, border: "1px solid var(--border)", padding: 16 }}>
-          <div style={{ fontWeight: 800, color: B.navy, fontSize: 13, marginBottom: 10 }}>Qual combinação aproveita melhor {simEsp}? <InfoTip text="O card recomendado pode variar a unidade por turno. Se Padre Miguel for escolhido em um turno, o sistema não mistura com outra unidade no outro turno do mesmo dia." /></div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 12 }}>
-            <button onClick={() => setSimUnid("")} style={{ flex: "1 1 180px", padding: 12, borderRadius: 12, border: `2px solid ${!simUnid ? B.blue : "var(--border)"}`, background: !simUnid ? B.blueLt : "var(--card)", cursor: "pointer", textAlign: "center", fontFamily: "inherit" }}>
-              <div style={{ fontSize: 11, fontWeight: 800, color: "var(--muted-foreground)" }}>⭐ Recomendado inteligente</div>
-              <div style={{ fontSize: 22, fontWeight: 900, color: !simUnid ? B.blue : B.navy, marginTop: 2 }}>{planoStats.nPac}</div>
-              <div style={{ fontSize: 10, color: "var(--muted-foreground)" }}>pacientes · ~{planoStats.sessTotal} sessões</div>
-              <div style={{ fontSize: 11, fontWeight: 700, color: "var(--card-foreground)", marginTop: 4 }}>{planoRecomendado.map(p => `${p.dia.replace("-feira", "")} ${turnoNome[p.turno as "manha" | "tarde"] || p.turno}: ${p.unid}`).join(" · ")}</div>
+        <div className="rounded-2xl border border-border bg-card p-4">
+          <div className="mb-2.5 text-[13px] font-extrabold text-foreground">
+            Qual combinação aproveita melhor {simEsp}? <InfoTip text="O card recomendado pode variar a unidade por turno. Se Padre Miguel for escolhido em um turno, o sistema não mistura com outra unidade no outro turno do mesmo dia." />
+          </div>
+          <div className="mb-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => setSimUnid("")}
+              className={`flex-[1_1_180px] rounded-xl border-2 p-3 text-center transition-colors ${!simUnid ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30" : "border-border bg-card hover:bg-muted/40"}`}
+            >
+              <div className="flex items-center justify-center gap-1 text-[11px] font-extrabold text-muted-foreground"><Star size={11} /> Recomendado inteligente</div>
+              <div className={`mt-0.5 text-2xl font-black ${!simUnid ? "text-sky-700 dark:text-sky-400" : "text-foreground"}`}>{planoStats.nPac}</div>
+              <div className="text-[10px] text-muted-foreground">pacientes · ~{planoStats.sessTotal} sessões</div>
+              <div className="mt-1 text-[11px] font-bold text-foreground">{planoRecomendado.map(p => `${p.dia.replace("-feira", "")} ${turnoNome[p.turno as "manha" | "tarde"] || p.turno}: ${p.unid}`).join(" · ")}</div>
             </button>
             {unitRank.map((u, i) => (
-              <button key={u.unid} onClick={() => setSimUnid(simUnid === u.unid ? "" : u.unid)} style={{ flex: "1 1 130px", padding: 12, borderRadius: 12, border: `2px solid ${simUnid === u.unid ? B.blue : "var(--border)"}`, background: simUnid === u.unid ? B.blueLt : "var(--card)", cursor: "pointer", textAlign: "center", fontFamily: "inherit" }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color: "var(--muted-foreground)" }}>{i === 0 ? "Unidade fixa forte" : u.unid}</div>
-                <div style={{ fontSize: 22, fontWeight: 900, color: simUnid === u.unid ? B.blue : B.navy, marginTop: 2 }}>{u.nPac}</div>
-                <div style={{ fontSize: 10, color: "var(--muted-foreground)" }}>pacientes · ~{u.sessTotal} sessões</div>
-                <div style={{ fontSize: 13, fontWeight: 700, color: "var(--card-foreground)", marginTop: 2 }}>{u.unid}</div>
+              <button
+                key={u.unid}
+                type="button"
+                onClick={() => setSimUnid(simUnid === u.unid ? "" : u.unid)}
+                className={`flex-[1_1_130px] rounded-xl border-2 p-3 text-center transition-colors ${simUnid === u.unid ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30" : "border-border bg-card hover:bg-muted/40"}`}
+              >
+                <div className="text-[11px] font-bold text-muted-foreground">{i === 0 ? "Unidade fixa forte" : u.unid}</div>
+                <div className={`mt-0.5 text-2xl font-black ${simUnid === u.unid ? "text-sky-700 dark:text-sky-400" : "text-foreground"}`}>{u.nPac}</div>
+                <div className="text-[10px] text-muted-foreground">pacientes · ~{u.sessTotal} sessões</div>
+                <div className="mt-0.5 text-[13px] font-bold text-foreground">{u.unid}</div>
               </button>
             ))}
           </div>
-          <div style={{ fontSize: 11, color: "var(--muted-foreground)", background: "var(--muted)", borderRadius: 8, padding: "7px 10px" }}>
-            <strong>Pacientes</strong> = quem tem gap em {simEsp}, já frequenta a unidade no dia/turno avaliado e possui sessão adjacente sem conflito. <strong>Sessões</strong> = soma dos encaixes possíveis. <InfoTip text="A contagem de sessões pode ser maior que a de pacientes porque um mesmo paciente pode caber em mais de um horário." />
+          <div className="rounded-lg bg-muted px-2.5 py-1.5 text-[11px] text-muted-foreground">
+            <strong>Pacientes</strong> = quem tem gap em {simEsp}, já frequenta a unidade no dia/turno avaliado e possui sessão adjacente sem conflito. <strong>Sessões</strong> = soma dos encaixes possíveis.
+            <InfoTip text="A contagem de sessões pode ser maior que a de pacientes porque um mesmo paciente pode caber em mais de um horário." />
           </div>
         </div>
-        <div style={{ background: "var(--card)", borderRadius: 14, border: "1px solid var(--border)", overflow: "hidden" }}>
-          <div style={{ padding: "11px 16px", background: "var(--muted)", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <span style={{ fontWeight: 800, color: B.navy, fontSize: 14 }}>{simUnid ? `Unidade fixa: ${simUnid}` : "Plano recomendado inteligente"}</span>
-            <span style={{ fontSize: 11, color: "var(--muted-foreground)", marginLeft: "auto" }}>{simSlots.length} sessão(ões) com candidatos <InfoTip text="Cada bloco mostra dia, turno, unidade sugerida e horários com pacientes elegíveis." /></span>
+        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+          <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted px-4 py-2.5">
+            <span className="text-sm font-extrabold text-foreground">{simUnid ? `Unidade fixa: ${simUnid}` : "Plano recomendado inteligente"}</span>
+            <span className="ml-auto text-[11px] text-muted-foreground">{simSlots.length} sessão(ões) com candidatos <InfoTip text="Cada bloco mostra dia, turno, unidade sugerida e horários com pacientes elegíveis." /></span>
           </div>
-          {!simSlots.length ? <div style={{ padding: 24, textAlign: "center", color: "var(--muted-foreground)", fontSize: 13 }}>Nenhuma sessão com candidatos nesta combinação.</div>
+          {!simSlots.length ? <div className="p-6 text-center text-[13px] text-muted-foreground">Nenhuma sessão com candidatos nesta combinação.</div>
             : simSlots.map((s, si) => {
               const terapiaSim = (ESP_CLINICO[simEsp] || [simEsp]).filter(t => !EXCLUIR_OCUP.has(t))[0] || simEsp
               return (
-                <div key={`${s.dia}-${s.turno}-${s.unid}-${s.hora}-${si}`} style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", gap: 12, flexWrap: "wrap" }}>
-                  <div style={{ flexShrink: 0, width: 150 }}>
-                    <div style={{ fontSize: 11, fontWeight: 800, color: B.blue, marginBottom: 2 }}>{s.dia.replace("-feira", "")} · {turnoNome[s.turno as "manha" | "tarde"] || s.turno}</div>
-                    <div style={{ fontFamily: "monospace", fontSize: 18, fontWeight: 900, color: B.navy }}>{s.hora}</div>
-                    <div style={{ fontSize: 10, color: "var(--muted-foreground)", marginTop: 2 }}>{s.unid} · {s.cands.length} candidato(s)</div>
+                <div key={`${s.dia}-${s.turno}-${s.unid}-${s.hora}-${si}`} className="flex flex-wrap gap-3 border-b border-border px-4 py-3">
+                  <div className="w-[150px] shrink-0">
+                    <div className="mb-0.5 text-[11px] font-extrabold text-sky-700 dark:text-sky-400">{s.dia.replace("-feira", "")} · {turnoNome[s.turno as "manha" | "tarde"] || s.turno}</div>
+                    <div className="font-mono text-lg font-black text-foreground">{s.hora}</div>
+                    <div className="mt-0.5 text-[10px] text-muted-foreground">{s.unid} · {s.cands.length} candidato(s)</div>
                   </div>
-                  <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4, minWidth: 240 }}>
+                  <div className="flex min-w-[240px] flex-1 flex-col gap-1">
                     {s.cands.map((c, ci) => <CandCard key={ci} c={c} dia={s.dia} hora={s.hora} unidade={s.unid} terapia={terapiaSim} profKey={`sim:${s.dia}:${s.unid}`} />)}
                   </div>
                 </div>
@@ -789,35 +851,28 @@ export function PreencherProfTab({ cRows, lRows, waMap: waMapProp, onWaChange, i
 
       {/* PACIENTE MODE results */}
       {mode === "paciente" && pacSel && cRows.length > 0 && <>
-        <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-          {[
-            { n: pacienteSlots.length, l: "opções encontradas", c: B.navy, tip: "Total de slots livres elegíveis para a especialidade escolhida." },
-            { n: pacienteSlots.filter(s => s.rank === 0).length, l: "extremidades", c: B.lime, tip: "Acréscimos antes ou depois de sessões existentes do paciente no mesmo dia e unidade." },
-            { n: pacienteSlots.filter(s => s.rank === 1).length, l: "remanejamentos", c: B.orange, tip: "Casos em que o paciente já tem outra terapia naquele horário e existe alternativa simples para mover a sessão atual." },
-            { n: pacienteSlots.filter(s => s.rank === 2).length, l: "novo dia conjunto", c: B.blue, tip: "Novo dia aceito somente quando há outra sessão complementar autorizada para ofertar junto." },
-          ].map(({ n, l, c, tip }) => (
-            <div key={l} style={{ flex: "1 1 130px", background: "var(--card)", borderRadius: 12, border: `1px solid ${c}33`, padding: 12, textAlign: "center" }}>
-              <div style={{ fontSize: 26, fontWeight: 900, color: c }}>{n}</div>
-              <div style={{ fontSize: 11, color: "var(--muted-foreground)", marginTop: 2 }}>{l}<InfoTip text={tip} /></div>
-            </div>
-          ))}
+        <div className="flex flex-wrap gap-2">
+          <StatMini n={pacienteSlots.length} l="opções encontradas" tone="slate" tip="Total de slots livres elegíveis para a especialidade escolhida." />
+          <StatMini n={pacienteSlots.filter(s => s.rank === 0).length} l="extremidades" tone="green" tip="Acréscimos antes ou depois de sessões existentes do paciente no mesmo dia e unidade." />
+          <StatMini n={pacienteSlots.filter(s => s.rank === 1).length} l="remanejamentos" tone="amber" tip="Casos em que o paciente já tem outra terapia naquele horário e existe alternativa simples para mover a sessão atual." />
+          <StatMini n={pacienteSlots.filter(s => s.rank === 2).length} l="novo dia conjunto" tone="blue" tip="Novo dia aceito somente quando há outra sessão complementar autorizada para ofertar junto." />
         </div>
-        <div style={{ background: "var(--card)", borderRadius: 14, border: "1px solid var(--border)", overflow: "hidden" }}>
-          <div style={{ padding: "11px 16px", background: "var(--muted)", borderBottom: "1px solid var(--border)", display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-            <span style={{ fontWeight: 800, color: B.navy, fontSize: 14 }}>{pacEspAtiva || "Especialidade"}</span>
-            <span style={{ fontSize: 11, color: "var(--muted-foreground)" }}>{pacSel}</span>
-            <span style={{ fontSize: 11, color: "var(--muted-foreground)", marginLeft: "auto" }}>{pacienteSlots.length} sugestão(ões)</span>
+        <div className="overflow-hidden rounded-2xl border border-border bg-card">
+          <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted px-4 py-2.5">
+            <span className="text-sm font-extrabold text-foreground">{pacEspAtiva || "Especialidade"}</span>
+            <span className="text-[11px] text-muted-foreground">{pacSel}</span>
+            <span className="ml-auto text-[11px] text-muted-foreground">{pacienteSlots.length} sugestão(ões)</span>
           </div>
-          {!pacienteSlots.length ? <div style={{ padding: 24, textAlign: "center", color: "var(--muted-foreground)", fontSize: 13 }}>Nenhuma vaga elegível para este paciente/especialidade com as regras atuais.</div>
+          {!pacienteSlots.length ? <div className="p-6 text-center text-[13px] text-muted-foreground">Nenhuma vaga elegível para este paciente/especialidade com as regras atuais.</div>
             : pacienteSlots.map((s, si) => (
-              <div key={`${s.prof}-${s.dia}-${s.hora}-${si}`} style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", gap: 12, flexWrap: "wrap", background: s.rank === 1 ? B.orangeLt : "var(--card)" }}>
-                <div style={{ flexShrink: 0, width: 150 }}>
-                  <div style={{ fontSize: 11, fontWeight: 800, color: s.rank === 1 ? B.orange : s.rank === 2 ? B.blue : "#4a6e20", marginBottom: 2 }}>{s.tipo}</div>
-                  <div style={{ fontFamily: "monospace", fontSize: 18, fontWeight: 900, color: B.navy }}>{s.hora}</div>
-                  <div style={{ fontSize: 10, color: "var(--muted-foreground)", marginTop: 2 }}>{s.dia.replace("-feira", "")} · {s.unidade}</div>
-                  <div style={{ fontSize: 10, color: "var(--muted-foreground)", marginTop: 2 }}>{fmtName(s.prof)}</div>
+              <div key={`${s.prof}-${s.dia}-${s.hora}-${si}`} className={`flex flex-wrap gap-3 border-b border-border px-4 py-3 ${s.rank === 1 ? "bg-orange-50/50 dark:bg-orange-950/20" : "bg-card"}`}>
+                <div className="w-[150px] shrink-0">
+                  <div className={`mb-0.5 text-[11px] font-extrabold ${s.rank === 1 ? "text-orange-600 dark:text-orange-400" : s.rank === 2 ? "text-sky-600 dark:text-sky-400" : "text-emerald-600 dark:text-emerald-400"}`}>{s.tipo}</div>
+                  <div className="font-mono text-lg font-black text-foreground">{s.hora}</div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground">{s.dia.replace("-feira", "")} · {s.unidade}</div>
+                  <div className="mt-0.5 text-[10px] text-muted-foreground">{fmtName(s.prof)}</div>
                 </div>
-                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4, minWidth: 240 }}>
+                <div className="flex min-w-[240px] flex-1 flex-col gap-1">
                   {s.cands.map((c, ci) => <CandCard key={ci} c={c} dia={s.dia} hora={s.hora} unidade={s.unidade} terapia={s.terapia} profKey={s.prof} />)}
                 </div>
               </div>
@@ -826,7 +881,7 @@ export function PreencherProfTab({ cRows, lRows, waMap: waMapProp, onWaChange, i
       </>}
 
       {!cRows.length && (
-        <div style={{ background: "#fff7ed", border: "1px solid #fed7aa", borderRadius: 12, padding: "14px 16px", fontSize: 12, color: "#92400e" }}>
+        <div className="rounded-xl border border-orange-200 dark:border-orange-900 bg-orange-50 dark:bg-orange-950/30 px-4 py-3.5 text-xs text-orange-800 dark:text-orange-300">
           Carregue o CSV da grade e o relatório de laudos para usar esta ferramenta.
         </div>
       )}

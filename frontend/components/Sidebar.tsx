@@ -22,7 +22,6 @@ import {
   TrendingUp,
   UserCheck,
   UserPlus,
-  Zap,
   Clock,
   XCircle,
   AlertTriangle,
@@ -30,6 +29,18 @@ import {
   BookOpen,
   Settings,
   CalendarRange,
+  ClipboardCheck,
+  Handshake,
+  Wallet,
+  LineChart,
+  RotateCcw,
+  DoorOpen,
+  ArrowRightLeft,
+  Tag,
+  Calendar,
+  FileSignature,
+  Percent,
+  History,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -45,7 +56,7 @@ import { useTheme } from "@/contexts/ThemeContext"
 import { useImpersonation } from "@/contexts/ImpersonationContext"
 import { ImpersonationSelector } from "@/components/admin/ImpersonationSelector"
 import { ROLE_LABELS } from "@/constants/roleLabels"
-import { getRoleDefaultPermissions, codigosToRotas } from "@/lib/permissions/routes"
+import { getRoleDefaultPermissions, codigosToRotas, hasRouteAccess } from "@/lib/permissions/routes"
 import { getUsuarioPermissoes } from "@/services/permissoes.service"
 
 type Favorito = { label: string; path: string }
@@ -64,12 +75,15 @@ const pathIconMap: Record<string, any> = {
   "/admin": ShieldCheck,
   "/admin/permissoes": KeyRound,
   "/cronograma/solicitacoes?tab=simulacao": UserPlus,
-  "/cronograma/solicitacoes?tab=ocup-prof": TrendingUp,
   "/cronograma/solicitacoes?tab=novo-cron": CalendarPlus,
   "/cronograma/solicitacoes?tab=banco": Database,
+  "/cronograma/ocupacao-salas": DoorOpen,
+  "/cadastros/cadastro-valores": Tag,
+  "/cadastros/feriados": Calendar,
+  "/cadastros/contratos": FileSignature,
+  "/cadastros/taxas-e-parametros": Percent,
   "/cronograma/saida-profissional": LogOut,
   "/cronograma/ocupacao-paciente": TrendingUp,
-  "/cronograma/ocupacao?tab=vagas": TrendingUp,
   "/cronograma/ocupacao?tab=fila": Clock,
   "/cronograma/ocupacao?tab=recusados": XCircle,
   "/cronograma/ocupacao?tab=inviavel": AlertTriangle,
@@ -77,7 +91,18 @@ const pathIconMap: Record<string, any> = {
   "/cronograma/ocupacao?tab=inconsistencias": AlertTriangle,
   "/cronograma/ocupacao?tab=guia": BookOpen,
   "/cronograma/ocupacao?tab=config": Settings,
-  "/cronograma/indicadores": BarChart3,
+  "/analise-tratativas": ClipboardCheck,
+  "/relacionamento-prestador/analise": TrendingUp,
+  "/relacionamento-prestador/rp": Wallet,
+  "/relacionamento-prestador/individual": UserRound,
+  "/relacionamento-prestador/historico": LineChart,
+  "/relacionamento-prestador/legenda": BookOpen,
+  "/cronograma/indicadores?tab=profissionais": BarChart3,
+  "/cronograma/indicadores?tab=unidades": Building2,
+  "/cronograma/indicadores?tab=pacientes": UserCheck,
+  "/cronograma/indicadores?tab=previsao-receitas": Wallet,
+  "/cronograma/indicadores?tab=historico-receitas": History,
+  "/cronograma/indicadores?tab=comparativo-sessoes": ArrowRightLeft,
 }
 
 export default function Sidebar() {
@@ -147,8 +172,8 @@ export default function Sidebar() {
 
   function canAccess(path: string) {
     if (!role) return false
-    const barePath = path.split("?")[0]
-    return allowedPaths.includes(barePath)
+    const [barePath, query] = path.split("?")
+    return hasRouteAccess(barePath, query ? `?${query}` : "", allowedPaths)
   }
 
   useEffect(() => {
@@ -439,10 +464,13 @@ export default function Sidebar() {
           )}
 
           {/* Terapêutico */}
-          {(canAccess("/central-terapeutas") || canAccess("/agenda/terapeutas") || canAccess("/agenda/salas")) && (
+          {(canAccess("/central-terapeutas") || canAccess("/analise-tratativas") || canAccess("/agenda/terapeutas") || canAccess("/agenda/salas")) && (
             <SidebarGroup title="Terapêutico" icon={Stethoscope}>
               {canAccess("/central-terapeutas") && (
                 <MenuItem label="Gestão" icon={UserRound} path="/central-terapeutas" />
+              )}
+              {canAccess("/analise-tratativas") && (
+                <MenuItem label="Análise de Tratativas" icon={ClipboardCheck} path="/analise-tratativas" />
               )}
               {canAccess("/agenda/terapeutas") && (
                 <MenuItem label="Agenda Terapêutica" icon={CalendarDays} path="/agenda/terapeutas" />
@@ -469,18 +497,83 @@ export default function Sidebar() {
           )}
 
           {/* Cronograma */}
-          {(canAccess("/cronograma/saida-profissional") || canAccess("/cronograma/ocupacao-paciente") || canAccess("/cronograma/ocupacao")) && (
+          {(canAccess("/cronograma/saida-profissional") || canAccess("/cronograma/ocupacao-paciente") ||
+            canAccess("/cronograma/ocupacao?tab=acompanhamento") || canAccess("/cronograma/ocupacao?tab=gaps") ||
+            canAccess("/cronograma/ocupacao?tab=inconsistencias") ||
+            canAccess("/cronograma/reposicao") || canAccess("/cronograma/ocupacao-salas")) && (
             <SidebarGroup title="Cronograma" icon={CalendarRange}>
+              {canAccess("/cronograma/ocupacao-salas") && <MenuItem label="Ocupação de Salas" icon={DoorOpen} path="/cronograma/ocupacao-salas" />}
               {canAccess("/cronograma/saida-profissional") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/saida-profissional" />}
               {canAccess("/cronograma/ocupacao-paciente") && <MenuItem label="Ocupação Paciente" icon={UserCheck} path="/cronograma/ocupacao-paciente" />}
-              {canAccess("/cronograma/ocupacao") && <MenuItem label="Aceites e Recusas" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
+              {/* "Novo Cronograma" removido do menu — feature ainda não está pronta (ver SolicitacoesShell) */}
+              {canAccess("/cronograma/solicitacoes") && <MenuItem label="Simulação de Novo Prestador" icon={UserPlus} path="/cronograma/solicitacoes?tab=simulacao" />}
+              {canAccess("/cronograma/reposicao") && <MenuItem label="Reposição de Faltas" icon={RotateCcw} path="/cronograma/reposicao" />}
+              {canAccess("/cronograma/ocupacao?tab=acompanhamento") && <MenuItem label="Aceites e Recusas" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
+              {canAccess("/cronograma/ocupacao?tab=gaps") && <MenuItem label="Diferença: Laudo e Oferta" icon={BarChart3} path="/cronograma/ocupacao?tab=gaps" />}
+              {canAccess("/cronograma/ocupacao?tab=inconsistencias") && <MenuItem label="Inconsistências e Exceções" icon={AlertTriangle} path="/cronograma/ocupacao?tab=inconsistencias" />}
             </SidebarGroup>
           )}
 
-          {/* Indicadores */}
-          {canAccess("/cronograma/indicadores") && (
+          {/* Indicadores — uma permissão por aba, não uma pra rota inteira */}
+          {(canAccess("/cronograma/indicadores?tab=profissionais") ||
+            canAccess("/cronograma/indicadores?tab=unidades") ||
+            canAccess("/cronograma/indicadores?tab=pacientes") ||
+            canAccess("/cronograma/indicadores?tab=previsao-receitas") ||
+            canAccess("/cronograma/indicadores?tab=historico-receitas") ||
+            canAccess("/cronograma/indicadores?tab=comparativo-sessoes")) && (
             <SidebarGroup title="Indicadores" icon={TrendingUp}>
-              <MenuItem label="Ocupação de Profissionais" icon={BarChart3} path="/cronograma/indicadores" />
+              {canAccess("/cronograma/indicadores?tab=profissionais") && (
+                <MenuItem label="Ocupação de Profissionais" icon={BarChart3} path="/cronograma/indicadores?tab=profissionais" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=unidades") && (
+                <MenuItem label="Ocupação Clínica" icon={Building2} path="/cronograma/indicadores?tab=unidades" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=pacientes") && (
+                <MenuItem label="Dashboard de Pacientes" icon={UserCheck} path="/cronograma/indicadores?tab=pacientes" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=previsao-receitas") && (
+                <MenuItem label="Previsão de Receitas" icon={Wallet} path="/cronograma/indicadores?tab=previsao-receitas" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=historico-receitas") && (
+                <MenuItem label="Histórico de Receitas" icon={History} path="/cronograma/indicadores?tab=historico-receitas" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=comparativo-sessoes") && (
+                <MenuItem label="Comparativo de Sessões" icon={ArrowRightLeft} path="/cronograma/indicadores?tab=comparativo-sessoes" />
+              )}
+            </SidebarGroup>
+          )}
+
+          {/* Cadastros */}
+          {(canAccess("/cadastros/cadastro-valores") || canAccess("/cadastros/feriados") ||
+            canAccess("/cadastros/contratos") || canAccess("/cadastros/taxas-e-parametros")) && (
+            <SidebarGroup title="Cadastros" icon={Database}>
+              {canAccess("/cadastros/cadastro-valores") && <MenuItem label="Cadastro de Valores" icon={Tag} path="/cadastros/cadastro-valores" />}
+              {canAccess("/cadastros/feriados") && <MenuItem label="Feriados" icon={Calendar} path="/cadastros/feriados" />}
+              {canAccess("/cadastros/taxas-e-parametros") && <MenuItem label="Variáveis & Taxas" icon={Percent} path="/cadastros/taxas-e-parametros" />}
+              {canAccess("/cadastros/contratos") && <MenuItem label="Contratos" icon={FileSignature} path="/cadastros/contratos" />}
+            </SidebarGroup>
+          )}
+
+          {/* Relacionamento Prestador */}
+          {(canAccess("/relacionamento-prestador/analise") || canAccess("/relacionamento-prestador/rp") ||
+            canAccess("/relacionamento-prestador/individual") ||
+            canAccess("/relacionamento-prestador/historico") || canAccess("/relacionamento-prestador/legenda")) && (
+            <SidebarGroup title="Relacionamento Prestador" icon={Handshake}>
+              {canAccess("/relacionamento-prestador/analise") && (
+                <MenuItem label="Rem. Mês - Previsão" icon={TrendingUp} path="/relacionamento-prestador/analise" />
+              )}
+              {canAccess("/relacionamento-prestador/rp") && (
+                <MenuItem label="Rem. Mês - Total" icon={Wallet} path="/relacionamento-prestador/rp" />
+              )}
+              {canAccess("/relacionamento-prestador/individual") && (
+                <MenuItem label="Rem. Mês - Individual" icon={UserRound} path="/relacionamento-prestador/individual" />
+              )}
+              {canAccess("/relacionamento-prestador/historico") && (
+                <MenuItem label="Histórico" icon={LineChart} path="/relacionamento-prestador/historico" />
+              )}
+              {canAccess("/relacionamento-prestador/legenda") && (
+                <MenuItem label="Legenda" icon={BookOpen} path="/relacionamento-prestador/legenda" />
+              )}
             </SidebarGroup>
           )}
 

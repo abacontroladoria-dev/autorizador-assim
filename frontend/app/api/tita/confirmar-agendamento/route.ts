@@ -202,6 +202,12 @@ export async function POST(request: NextRequest) {
   return NextResponse.json({
     ok,
     etapa: "criacao",
+    // Auditoria: quem de fato gravou na TiTa, capturado do usuário autenticado no
+    // servidor (fonte confiável). O cliente carimba isso no bundle de forma imutável
+    // (ver confirmarImplantacao) — separado de atualizado_por, que é sobrescrito a
+    // cada sincronização e não serve para autoria.
+    implantadoPor: user.id,
+    implantadoPorEmail: user.email ?? null,
     mensagem: ok
       ? mensagemResumoCriacao({
           status: agregado.total === 0 ? "erro_api" : agregado.criadas === agregado.total ? "success" : agregado.criadas === 0 ? "failed" : "partial_success",
