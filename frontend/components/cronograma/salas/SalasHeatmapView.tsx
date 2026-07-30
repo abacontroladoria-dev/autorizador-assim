@@ -7,7 +7,7 @@
 // Ocupação de Profissionais).
 
 import { useEffect, useRef } from "react"
-import { Eye, EyeOff } from "lucide-react"
+import { AlertTriangle, Eye, EyeOff } from "lucide-react"
 import { textoFaixaOcupacaoSala } from "@/lib/cronograma/salas"
 import { CAPACIDADE_LABEL_CURTO } from "@/lib/cronograma/salasTypes"
 import type { SalaComOcupacao, SlotOcupacaoSala } from "@/lib/cronograma/salasTypes"
@@ -183,10 +183,17 @@ function HeatCell({ slot, bordaTopo }: { slot: SlotOcupacaoSala | undefined; bor
   const cor = corFaixaOcupacaoPastel(pct)
   return (
     <td
-      className={`border-l border-border px-1 py-2 text-center text-[10px] font-semibold ${bordaCls}`}
+      className={`relative border-l border-border px-1 py-2 text-center text-[10px] font-semibold ${bordaCls} ${slot.inconsistente ? "ring-2 ring-inset ring-red-500" : ""}`}
       style={{ background: cor, color: "#222847" }}
-      title={`${slot.alocacoes.length} alocação(ões) · ${sessoesTotal} sessão(ões) de ${capacidadeTotal} no turno${slot.inconsistente ? " · capacidade excedida" : ""}`}
+      title={`${slot.alocacoes.length} alocação(ões) · ${sessoesTotal} sessão(ões) de ${capacidadeTotal} no turno${slot.inconsistente ? " · ⚠️ EXCEDE CAPACIDADE" : ""}`}
     >
+      {slot.inconsistente && (
+        <AlertTriangle
+          className="absolute right-0.5 top-0.5 h-3 w-3 text-red-600 drop-shadow-sm"
+          strokeWidth={2.5}
+          fill="white"
+        />
+      )}
       {pct !== null ? `${Math.round(pct * 100)}%` : "—"}
     </td>
   )
