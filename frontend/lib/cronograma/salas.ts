@@ -122,8 +122,15 @@ export function calcularSlotsDaSala(
 ): SlotOcupacaoSala[] {
   const capacidadeProjetada = capacidadeProjetadaSala(sala.capacidade, sala.status)
 
-  // sessões reais "Agendado" agrupadas por profissional (normalizado) + dow + turno
-  // — usado só pelos `cards` (proporção "X/Y com paciente" da alocação cadastrada).
+  // sessões reais "Agendado" agrupadas por profissional + dow + turno — usado só
+  // pelos `cards` (proporção "X/Y com paciente" da alocação cadastrada). Duas
+  // chaves por linha: por profissional_id (estável — sobrevive a nome editado
+  // na TiTa depois do cadastro da alocação) e por nome normalizado (fallback
+  // pra quando a alocação não tem profissional_id resolvido). Cruzar só por
+  // nome quebra silenciosamente sempre que o texto cadastrado diverge do nome
+  // atual na TiTa (ex.: alocação renomeada pra bater com uma planilha, mas a
+  // agenda real ainda usa a grafia antiga) — ver profissional_id em salasTypes.ts.
+  const sessoesPorProfissionalId = new Map<string, number>()
   const sessoesPorProfissional = new Map<string, number>()
   // Mesmas linhas, mas agrupadas por HORÁRIO EXATO da SALA (dow|turno|minutos),
   // SEM depender de profissional/cadastro — usado pra montar `blocos` ("Ocupação
@@ -144,6 +151,10 @@ export function calcularSlotsDaSala(
     if (!prof) return
     const key = `${dow}|${turno}|${normTxt(prof)}`
     sessoesPorProfissional.set(key, (sessoesPorProfissional.get(key) ?? 0) + 1)
+    if (r.profissional_id !== null && r.profissional_id !== undefined) {
+      const keyId = `${dow}|${turno}|${r.profissional_id}`
+      sessoesPorProfissionalId.set(keyId, (sessoesPorProfissionalId.get(keyId) ?? 0) + 1)
+    }
     const chaveHora = `${dow}|${turno}|${minutos}`
     if (!sessoesPorHora.has(chaveHora)) sessoesPorHora.set(chaveHora, [])
     sessoesPorHora.get(chaveHora)!.push(r)
@@ -164,7 +175,9 @@ export function calcularSlotsDaSala(
       const capacidadeBloco = BLOCOS_POR_TURNO[turno]
 
       const cards: AlocacaoCardSlot[] = alocacoesDoSlot.map(a => {
-        const sessoesReais = sessoesPorProfissional.get(`${dow}|${turno}|${normTxt(a.profissional_nome)}`) ?? 0
+        const sessoesReais = (a.profissional_id !== null ? sessoesPorProfissionalId.get(`${dow}|${turno}|${a.profissional_id}`) : undefined)
+          ?? sessoesPorProfissional.get(`${dow}|${turno}|${normTxt(a.profissional_nome)}`)
+          ?? 0
         const sessoesLimitadas = Math.min(sessoesReais, capacidadeBloco)
         return {
           alocacaoId: a.id,
