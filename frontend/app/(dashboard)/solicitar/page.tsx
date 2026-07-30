@@ -6,7 +6,7 @@ import { useEffect, useState, useMemo } from 'react'
 
 import { getSupabaseClient } from '@/lib/supabase/client'
 
-import { criarAutorizacao } from '@/services/autorizacoes.service'
+import { criarAutorizacao, resolverNomeUsuario } from '@/services/autorizacoes.service'
 
 import toast from 'react-hot-toast'
 
@@ -602,13 +602,17 @@ async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta', justificativa
 
     // 🔁 SE JÁ EXISTE → ATUALIZA
     if (existente) {
+      // Registra a atendente responsável também no fluxo de falta: este UPDATE
+      // não passa por criarAutorizacao, então o criado_por ficava NULL.
+      const criadoPor = await resolverNomeUsuario(supabase)
       const { error } = await supabase
         .from('fila_autorizacoes')
         .update({
           status: 'falta',
           tipo_falta: tipo,
           terapia_falta: p.terapias?.join(' + ') || null,
-          justificativa_falta: justificativa || null
+          justificativa_falta: justificativa || null,
+          criado_por: criadoPor
         })
         .eq('id', existente.id)
 
@@ -728,13 +732,15 @@ const atendimentos = Object.values(
 
     if (existente) {
       // 🔄 ATUALIZA
+      const criadoPor = await resolverNomeUsuario(supabase)
       await supabase
         .from('fila_autorizacoes')
         .update({
           status: 'falta',
           tipo_falta: 'paciente',
           terapia_falta: p.terapias?.join(' + ') || null,
-          justificativa_falta: justificativa || null
+          justificativa_falta: justificativa || null,
+          criado_por: criadoPor
         })
         .eq('id', existente.id)
 
@@ -797,8 +803,10 @@ const atendimentos = Object.values(
   // =========================
   
 async function handleManualLista(p: any) {
-	
+
   try {
+    // Atendente responsável — gravada também no UPDATE (não passa por criarAutorizacao).
+    const criadoPor = await resolverNomeUsuario(supabase)
     // 🔍 VERIFICA SE JÁ EXISTE NA FILA
     const { data: existente } = await supabase
       .from('fila_autorizacoes')
@@ -824,6 +832,7 @@ async function handleManualLista(p: any) {
 		  numero_autorizacao: 'MANUAL',
 		  horario_autorizacao: new Date().toISOString(),
 		  completed_at: new Date().toISOString(),
+		  criado_por: criadoPor,
 		})
         .eq('id', existente.id)
 

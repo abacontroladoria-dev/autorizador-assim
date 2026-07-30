@@ -65,7 +65,7 @@ function semDadosPacienteComplementares(error: any) {
 // cancelamento). Gravado em fila_autorizacoes.criado_por para a Ficha Operacional
 // (SidePanel "Solicitado por") exibir o responsável sem depender de join/RPC.
 let _nomeUsuarioAtual: string | null = null
-async function resolverNomeUsuario(
+export async function resolverNomeUsuario(
   supabase: ReturnType<typeof getSupabaseClient>
 ): Promise<string | null> {
   if (_nomeUsuarioAtual) return _nomeUsuarioAtual
