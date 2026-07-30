@@ -81,6 +81,24 @@ export function linhasDaSala(sala: Sala, linhas: AgendaSalaRow[]): AgendaSalaRow
   return linhas.filter(r => salaCasaComAgenda(sala, r.sala_nome))
 }
 
+/**
+ * Filtra linhas de agenda cuja `sala_nome` bate só pela UNIDADE (ignora o
+ * número da sala) — usado exclusivamente pra proporção "X/Y com paciente"
+ * dos cards (`sessoesReais`/`semCruzamentoCsv`), nunca pros `blocos` (grade
+ * real de ocupação física, que precisa da sala exata).
+ *
+ * A TiTa não é confiável pra registrar EM QUAL sala física a sessão
+ * aconteceu (o profissional pode estar cadastrado numa sala pra fins de
+ * ocupação/planejamento e a sessão real cair registrada em outro número
+ * dentro da mesma unidade — comum pra Coordenador de Caso, cuja sessão é
+ * sempre lançada numa sala genérica de "Coordenação"). O que de fato
+ * importa validar é unidade + turno, não o número exato da sala.
+ */
+export function linhasDaUnidade(sala: Sala, linhas: AgendaSalaRow[]): AgendaSalaRow[] {
+  const unidade = normalizarUnidadeOcupacao(sala.unidade_nome)
+  return linhas.filter(r => parseSalaAgenda(r.sala_nome)?.unidade === unidade)
+}
+
 // Uma sala "única" atende, ao longo de um turno inteiro, VÁRIOS pacientes/
 // profissionais diferentes em sequência (blocos de 40min) — isso é normal,
 // não é ocupação simultânea. `capacidadeProjetadaSala` representa capacidade
@@ -112,13 +130,15 @@ function statusDoSlot(
 /**
  * Calcula os 10 slots (5 dias × 2 turnos) de uma sala a partir das ALOCAÇÕES
  * (planejamento — quem é o "dono" recorrente do bloco), cruzando cada
- * alocação com as sessões reais dessa pessoa nesse sala/dia/turno apenas para
- * exibir a proporção "X/Y com paciente" (informativo, não valida nada).
+ * alocação com as sessões reais dessa pessoa nesse dia/turno/UNIDADE (não
+ * exige a sala exata — ver `linhasDaUnidade`) apenas para exibir a proporção
+ * "X/Y com paciente" (informativo, não valida nada).
  */
 export function calcularSlotsDaSala(
   sala: Sala,
   alocacoesSala: AlocacaoSala[],
   linhasSala: AgendaSalaRow[],
+  linhasUnidade: AgendaSalaRow[] = linhasSala,
 ): SlotOcupacaoSala[] {
   const capacidadeProjetada = capacidadeProjetadaSala(sala.capacidade, sala.status)
 
@@ -130,17 +150,15 @@ export function calcularSlotsDaSala(
   // nome quebra silenciosamente sempre que o texto cadastrado diverge do nome
   // atual na TiTa (ex.: alocação renomeada pra bater com uma planilha, mas a
   // agenda real ainda usa a grafia antiga) — ver profissional_id em salasTypes.ts.
+  //
+  // Usa `linhasUnidade` (bate só pela unidade, não pela sala exata) — a TiTa
+  // não é confiável pra registrar em qual sala física a sessão aconteceu (ex.:
+  // Coordenador de Caso é sempre lançado numa sala genérica de "Coordenação",
+  // nunca na sala onde a pessoa está fisicamente alocada). O que precisa bater
+  // de verdade é profissional + dia + turno + unidade, não o número da sala.
   const sessoesPorProfissionalId = new Map<string, number>()
   const sessoesPorProfissional = new Map<string, number>()
-  // Mesmas linhas, mas agrupadas por HORÁRIO EXATO da SALA (dow|turno|minutos),
-  // SEM depender de profissional/cadastro — usado pra montar `blocos` ("Ocupação
-  // real" = TD_AGENDADO/TD_EXISTENTE). Uma sala com sessão real "Agendado" conta
-  // como preenchida mesmo que ninguém tenha sido cadastrado em
-  // cronograma_salas_alocacoes pra esse sala/dia/turno — cadastro é só
-  // planejamento (usado pelos `cards`/"Salas que contém profissional"), não
-  // condição pra contar ocupação real.
-  const sessoesPorHora = new Map<string, AgendaSalaRow[]>()
-  linhasSala.forEach(r => {
+  linhasUnidade.forEach(r => {
     const dow = dowDeDiaSemana(r.dia_semana)
     if (!dow) return
     if (!normTxt(r.status_agendamento).includes("agendado")) return
@@ -155,6 +173,25 @@ export function calcularSlotsDaSala(
       const keyId = `${dow}|${turno}|${r.profissional_id}`
       sessoesPorProfissionalId.set(keyId, (sessoesPorProfissionalId.get(keyId) ?? 0) + 1)
     }
+  })
+
+  // Mesmas linhas, mas agrupadas por HORÁRIO EXATO da SALA (dow|turno|minutos),
+  // SEM depender de profissional/cadastro — usado pra montar `blocos` ("Ocupação
+  // real" = TD_AGENDADO/TD_EXISTENTE). Uma sala com sessão real "Agendado" conta
+  // como preenchida mesmo que ninguém tenha sido cadastrado em
+  // cronograma_salas_alocacoes pra esse sala/dia/turno — cadastro é só
+  // planejamento (usado pelos `cards`/"Salas que contém profissional"), não
+  // condição pra contar ocupação real. Aqui SIM precisa da sala exata
+  // (`linhasSala`) — é a grade física de verdade, diferente do cruzamento por
+  // unidade usado só pra proporção "X/Y com paciente" dos cards acima.
+  const sessoesPorHora = new Map<string, AgendaSalaRow[]>()
+  linhasSala.forEach(r => {
+    const dow = dowDeDiaSemana(r.dia_semana)
+    if (!dow) return
+    if (!normTxt(r.status_agendamento).includes("agendado")) return
+    const minutos = pm(r.hora_inicial)
+    if (minutos === null) return
+    const turno = turnoDoHorario(minutos)
     const chaveHora = `${dow}|${turno}|${minutos}`
     if (!sessoesPorHora.has(chaveHora)) sessoesPorHora.set(chaveHora, [])
     sessoesPorHora.get(chaveHora)!.push(r)
@@ -243,8 +280,9 @@ export function calcularSlotsDaSala(
 
 export function calcularOcupacaoDaSala(sala: Sala, alocacoes: AlocacaoSala[], linhas: AgendaSalaRow[]): SalaComOcupacao {
   const linhasSala = linhasDaSala(sala, linhas)
+  const linhasUnidade = linhasDaUnidade(sala, linhas)
   const alocacoesSala = alocacoes.filter(a => a.sala_id === sala.id)
-  const slots = calcularSlotsDaSala(sala, alocacoesSala, linhasSala)
+  const slots = calcularSlotsDaSala(sala, alocacoesSala, linhasSala, linhasUnidade)
   const relevantes = slots.filter(s => s.status !== "adm" && s.status !== "bloqueado")
   const ocupados = relevantes.filter(s => s.status === "ocupado" || s.status === "parcial").length
   const pctOcupacaoSemanal = relevantes.length > 0 ? ocupados / relevantes.length : null
