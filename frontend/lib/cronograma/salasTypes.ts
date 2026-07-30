@@ -67,6 +67,8 @@ export interface AlocacaoSala {
   /** Chave estável do profissional (csv_grades_profissionais.profissional_id) — nome pode mudar na TiTa, o ID não. Null em alocações antigas sem correspondência encontrada no backfill. */
   profissional_id: number | null
   terapia_nome: string | null
+  /** Chave estável da terapia (constants.ts TERAPIA_ID) — nome pode mudar, ID não. Null em alocações antigas sem correspondência encontrada no backfill. */
+  terapia_id: number | null
   created_at: string
   updated_at: string
 }
@@ -79,6 +81,7 @@ export interface AlocacaoInput {
   profissional_nome: string
   profissional_id?: number | null
   terapia_nome?: string | null
+  terapia_id?: number | null
 }
 
 export type StatusOcupacaoSlot = "livre" | "ocupado" | "parcial" | "bloqueado" | "adm"

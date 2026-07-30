@@ -324,6 +324,13 @@ export const TERAPIA_ID: Record<string, number> = {
   "Visita Guiada":                  2604,
 }
 
+// Nome normalizado (normTxt) -> ID — usado pra resolver terapia_id a partir do
+// texto livre digitado/selecionado no modal de alocação de sala, sem precisar
+// cruzar com csv_grades_profissionais a cada salvamento.
+export const NOME_PARA_TERAPIA_ID: Record<string, number> = Object.fromEntries(
+  Object.entries(TERAPIA_ID).map(([nome, id]) => [normTxt(nome), id]),
+)
+
 // IDs permanentes das terapias de exibição (o ID nunca muda, o nome pode)
 export const EXIB_ID = {
   PSICOLOGIA_ABA:  2271,
