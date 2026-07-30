@@ -23,7 +23,7 @@ export default function OcupacaoSalasPage() {
     return () => setHeader("", "")
   }, [setHeader])
 
-  const { salas, alocacoes, linhas, salasComOcupacao, loading, error, recarregar, encontrarAlocacaoDoProfissional } = useOcupacaoSalas()
+  const { salas, alocacoes, linhas, salasComOcupacao, loading, error, recarregarSalas, recarregarAlocacoes, encontrarAlocacaoDoProfissional } = useOcupacaoSalas()
 
   const [tab, setTab] = useState<ViewTab>("grade")
   const [filtros, setFiltros] = useState<SalasFiltrosState>(SALAS_FILTROS_VAZIO)
@@ -72,7 +72,7 @@ export default function OcupacaoSalasPage() {
         <StatCard tone="red" icon={<DoorOpen size={15} />} label="Salas bloqueadas">
           <div className="text-2xl font-black text-foreground">{totalBloqueadas}</div>
         </StatCard>
-        <StatCard tone="amber" icon={<DoorOpen size={15} />} label="Inconsistências">
+        <StatCard tone="amber" icon={<DoorOpen size={15} />} label="Turnos sobreocupados">
           <div className="text-2xl font-black text-foreground">{totalInconsistencias}</div>
         </StatCard>
       </div>
@@ -126,7 +126,7 @@ export default function OcupacaoSalasPage() {
           onIsolarSala={alternarIsolarSala}
           salaIsoladaId={isolada?.id ?? null}
           encontrarAlocacaoDoProfissional={encontrarAlocacaoDoProfissional}
-          onRecarregar={recarregar}
+          onRecarregar={recarregarAlocacoes}
           buscaProfissional={filtros.profissional}
         />
       )}
@@ -149,7 +149,7 @@ export default function OcupacaoSalasPage() {
           sala={editando === "novo" ? null : editando}
           todasSalas={salas}
           onClose={() => setEditando(null)}
-          onSaved={recarregar}
+          onSaved={recarregarSalas}
         />
       )}
     </div>

@@ -9,7 +9,7 @@
 // modal de nova alocação. Reproduz o fluxo de edição do calculadora-remuneracao.
 
 import { useEffect, useRef, useState } from "react"
-import { Eye, EyeOff, Pencil } from "lucide-react"
+import { AlertTriangle, Eye, EyeOff, Pencil } from "lucide-react"
 import { StatusPill } from "@/components/cronograma/ui/StatusPill"
 import { AlocarSessaoModal } from "@/components/cronograma/salas/AlocarSessaoModal"
 import { profissionalBateComBusca } from "@/components/cronograma/salas/SalasFiltros"
@@ -246,8 +246,14 @@ function SlotCell({
   const buscaAtiva = buscaProfissional.trim().length > 0
 
   return (
-    <td className={`group w-[190px] max-w-[190px] border-l border-border px-1 py-1.5 align-top ${bordaCls}`}>
+    <td className={`group w-[190px] max-w-[190px] border-l border-border px-1 py-1.5 align-top ${bordaCls} ${slot.inconsistente ? "bg-red-100 ring-2 ring-inset ring-red-500 dark:bg-red-950/40 dark:ring-red-500" : ""}`}>
       <div className="flex flex-col gap-1">
+        {slot.inconsistente && (
+          <div className="flex items-center gap-1 rounded-md bg-red-600 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-tight text-white shadow-sm dark:bg-red-500">
+            <AlertTriangle className="h-3 w-3 shrink-0" strokeWidth={2.5} />
+            Excede capacidade
+          </div>
+        )}
         {slot.alocacoes.map(card => {
           const ratioTexto = card.semCruzamentoCsv ? "—" : `${card.sessoesReais}/${card.sessoesCapacidadeTurno}`
           const ratioCor = card.semCruzamentoCsv
@@ -276,8 +282,8 @@ function SlotCell({
                   className="h-2 w-2 shrink-0 rounded-full ring-1 ring-black/10 dark:ring-white/10"
                   style={{ background: tCor(card.terapiaNome ?? "", true) }}
                 />
-                <span className="min-w-0 flex-1 truncate text-[11px] font-medium leading-tight text-foreground">
-                  {slot.inconsistente ? "⚠ " : ""}{card.profissionalNome}
+                <span className={`min-w-0 flex-1 truncate text-[11px] font-medium leading-tight ${slot.inconsistente ? "text-red-700 dark:text-red-400" : "text-foreground"}`}>
+                  {card.profissionalNome}
                 </span>
               </span>
               <span className="flex items-center justify-between gap-1 pl-3.5">
