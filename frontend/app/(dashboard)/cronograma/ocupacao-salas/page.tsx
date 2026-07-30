@@ -43,10 +43,12 @@ export default function OcupacaoSalasPage() {
       .filter(item => (isolada ? item.sala.id === isolada.id : true))
       .filter(item => aplicarFiltrosSala(filtros, item.sala) && salaTemProfissional(item, filtros.profissional))
       .map(item => {
-        if (!filtros.turno.length) return item
-        const slots = item.slots.filter((s: SlotOcupacaoSala) => filtros.turno.includes(s.turno))
+        let slots = item.slots
+        if (filtros.turno.length) slots = slots.filter((s: SlotOcupacaoSala) => filtros.turno.includes(s.turno))
+        if (filtros.semSessao) slots = slots.filter((s: SlotOcupacaoSala) => s.alocacoes.some(a => a.semCruzamentoCsv))
         return { ...item, slots }
       })
+      .filter(item => !filtros.semSessao || item.slots.length > 0)
   }, [salasComOcupacao, filtros, isolada])
 
   // Os 4 cards respondem aos filtros atuais (unidade/núcleo/andar/capacidade/
