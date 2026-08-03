@@ -3,7 +3,7 @@
 import { useSearchParams, useRouter } from "next/navigation"
 import { useEffect } from "react"
 import { useHeader } from "@/contexts/HeaderContext"
-import { PreencherProfTab } from "@/components/cronograma/shared/PreencherProfTab"
+import { SimulacaoNovoPrestadorTab } from "./SimulacaoNovoPrestadorTab"
 import { BancoDadosTab } from "./BancoDadosTab"
 import type { CsvRow, LaudoRow, DispRow, CfgState } from "@/types/cronograma"
 
@@ -70,7 +70,7 @@ function TabContent({
   const label = TABS.find(t => t.key === tab)?.label ?? tab
 
   if (tab === "simulacao") {
-    return <PreencherProfTab cRows={cRows} lRows={lRows} initialMode="sim" fixedMode />
+    return <SimulacaoNovoPrestadorTab cRows={cRows} lRows={lRows} />
   }
 
   return (
