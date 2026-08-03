@@ -94,6 +94,8 @@ export async function getContratos() {
       contratos: (remuneracao_contratos_itens ?? [])
         .slice()
         .sort((a: any, b: any) => a.ordem - b.ordem)
+        // Whitelist: campo novo no item que não entrar aqui desaparece em
+        // silêncio na leitura, mesmo estando gravado.
         .map((it: any) => ({
           numero: it.numero ?? '',
           funcao: it.funcao ?? '',
@@ -101,6 +103,10 @@ export async function getContratos() {
           vigente: it.vigente,
           modeloFaturamento: it.modelo_faturamento === 'banco_horas' ? 'banco_horas' : 'atendimento',
           valorTotal: it.valor_total ?? 0,
+          // null -> '' como numero/funcao: mantém a assinatura do rascunho igual
+          // entre "veio do banco" e "digitado no modal", senão o bloco nasceria
+          // marcado como não salvo sem ninguém ter mexido nele.
+          observacoes: it.observacoes ?? '',
         })),
     }
   })
@@ -142,6 +148,10 @@ export async function upsertContrato(record: any): Promise<{ ok: boolean; error:
     vigente: it.vigente ?? true,
     modelo_faturamento: it.modeloFaturamento === 'banco_horas' ? 'banco_horas' : 'atendimento',
     valor_total: it.valorTotal ?? null,
+    // A observação é POR CONTRATO desde a migration 20260803120000. Requer que a
+    // coluna exista: sem ela o insert volta PGRST204 e, como o delete acima já
+    // rodou, o profissional fica sem contrato nenhum.
+    observacoes: it.observacoes || null,
   }))
   if (itens.length) {
     const { error: itensError } = await supabase.from('remuneracao_contratos_itens').insert(itens)

@@ -107,6 +107,47 @@
     --chart-4: oklch(0.76 0.15 73);
     --chart-5: oklch(0.64 0.20 28);
     --radius: 0.625rem;
+
+    /* ── Escada de superfície do bloco (cadastros) ───────────────────────
+       --background e --card são AMBOS oklch(1 0 0): numa pilha de blocos,
+       cartão e papel têm 1.00:1 de contraste — degrau nenhum. Pior, o
+       contorno do bloco usava a mesma --border dos campos internos
+       (1.26:1), então o cartão se lia como mais um campo em vez de como o
+       que contém os campos.
+       Estas três dão o enclausuramento que faltava, tingidas AGORA no azul do
+       sidebar (matiz ~255) e não mais no matiz de marca 217: o nome do
+       profissional passou a usar --sidebar-accent-foreground, e faixa ciano
+       sob texto azul deixava dois azuis diferentes brigando na mesma linha.
+       O par faixa+nome é literalmente o do item ativo do menu — fundo
+       --sidebar-accent, texto --sidebar-accent-foreground.
+       NOTA: com isso o bloco deixou de seguir --color-brand (217). Foi
+       deliberado, a pedido; se a marca voltar a mandar aqui, é rodar os três
+       matizes de volta para 217 e devolver o nome para --foreground.
+
+       Consumidas por valor arbitrário (bg-[var(--bloco-cap)]), como as
+       --repo-* logo abaixo, e deliberadamente FORA do @theme: registrar no
+       @theme inline faz o compilador tratar a variável como propriedade do
+       tema e DESCARTAR a redefinição em .dark — a faixa ficava clara no tema
+       escuro e engolia o nome do profissional. Verificado no CSS servido.
+
+       Valores (conferidos por conversão oklch→sRGB, todos em gamut):
+         cap        #DBEAFE  1.22:1 vs branco — faixa de identidade; é
+                             exatamente --sidebar-accent (blue-100). O nome
+                             #1D4ED8 sobre ela dá 5,49:1.
+         cap-borda  #CBE0FC  1.35:1 — divisória sob a faixa
+         borda      #BBD5F7  1.50:1 — contorno do bloco, acima do 1.26:1
+                                      dos campos, criando a hierarquia.
+
+       Por que a faixa ESCURECEU de 1.13:1 para 1.22:1: em sRGB o azul estoura
+       o gamut muito cedo no claro — em L=0.958 (o valor antigo) o croma máximo
+       no matiz 255 é só 0.020, e a faixa continuava lendo como cinza. Descer
+       para L=0.932 é o que compra croma suficiente para o azul aparecer. As
+       outras duas mantêm a lightness original, então a escada 1.35/1.50 e a
+       hierarquia contra o campo (1.26:1) estão preservadas. */
+    --bloco-cap: oklch(0.932 0.032 255.585);
+    --bloco-cap-borda: oklch(0.900 0.045 255);
+    --bloco-borda: oklch(0.865 0.055 255);
+
     --sidebar: #F8FAFC;
     --sidebar-foreground: #334155;
     --sidebar-primary: #2563EB;
@@ -165,6 +206,19 @@
 .dark {
     --color-central-topbar:  oklch(0.22 0.015 240);
     --color-central-sidebar: oklch(0.17 0.012 240);
+
+    /* No escuro a elevação vem de superfície MAIS CLARA, não de sombra:
+       a faixa sobe acima do --card (0.205) em vez de descer.
+       Mesma virada de matiz do tema claro (217 → 255), para o bloco não trocar
+       de família de cor ao alternar tema. Aqui não há o teto de gamut do azul
+       claro, então as três mantêm a lightness original e só ganham croma:
+       #192433 / #253447 / #2A3C53. O nome é quase-branco no escuro (lá
+       --sidebar-accent-foreground é oklch(0.985 0 0), sem azul — igual ao
+       próprio menu escuro), e continua com 14,96:1 sobre a faixa. */
+    --bloco-cap: oklch(0.258 0.032 255);
+    --bloco-cap-borda: oklch(0.320 0.040 255);
+    --bloco-borda: oklch(0.352 0.046 255);
+
     --background: oklch(0.145 0 0);
     --foreground: oklch(0.985 0 0);
     --card: oklch(0.205 0 0);

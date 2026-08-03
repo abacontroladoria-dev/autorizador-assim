@@ -8,9 +8,27 @@ interface UnsavedChangesModalProps {
   onCancel: () => void
   onSaveAndLeave: () => void
   onDiscardAndLeave: () => void
+  /**
+   * Texto e rótulos do modal. Os padrões falam de "sair", que é o caso do guard
+   * de navegação entre páginas do app. Quem descarta rascunho sem sair da rota
+   * (ex.: trocar de página na lista paginada de contratos) passa os próprios —
+   * uma ação precisa manter o mesmo nome do começo ao fim do fluxo.
+   */
+  descricao?: string
+  labelSalvar?: string
+  labelDescartar?: string
 }
 
-export function UnsavedChangesModal({ open, saving = false, onCancel, onSaveAndLeave, onDiscardAndLeave }: UnsavedChangesModalProps) {
+export function UnsavedChangesModal({
+  open,
+  saving = false,
+  onCancel,
+  onSaveAndLeave,
+  onDiscardAndLeave,
+  descricao = "Se sair agora sem salvar, o que você editou aqui vai se perder.",
+  labelSalvar = "Salvar e sair",
+  labelDescartar = "Sair sem salvar",
+}: UnsavedChangesModalProps) {
   if (!open) return null
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/50 p-4" role="alertdialog" aria-modal="true" aria-labelledby="unsaved-changes-title">
@@ -21,9 +39,7 @@ export function UnsavedChangesModal({ open, saving = false, onCancel, onSaveAndL
           </div>
           <div>
             <h2 id="unsaved-changes-title" className="font-bold text-foreground">Você tem alterações não salvas</h2>
-            <p className="text-sm text-muted-foreground mt-1">
-              Se sair agora sem salvar, o que você editou aqui vai se perder.
-            </p>
+            <p className="text-sm text-muted-foreground mt-1">{descricao}</p>
           </div>
         </div>
         <div className="flex flex-col gap-2">
@@ -34,7 +50,7 @@ export function UnsavedChangesModal({ open, saving = false, onCancel, onSaveAndL
             className="w-full px-3 py-2 rounded-lg text-xs font-bold text-white bg-emerald-700 hover:bg-emerald-800 dark:bg-emerald-600 dark:hover:bg-emerald-500 transition-colors disabled:opacity-60 inline-flex items-center justify-center gap-2"
           >
             {saving && <Loader2 size={13} className="animate-spin" />}
-            Salvar e sair
+            {labelSalvar}
           </button>
           <div className="flex justify-center gap-2">
             <button
@@ -51,7 +67,7 @@ export function UnsavedChangesModal({ open, saving = false, onCancel, onSaveAndL
               disabled={saving}
               className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-rose-600 hover:bg-rose-700 dark:bg-rose-700 dark:hover:bg-rose-600 transition-colors disabled:opacity-60"
             >
-              Sair sem salvar
+              {labelDescartar}
             </button>
           </div>
         </div>

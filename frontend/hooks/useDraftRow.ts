@@ -4,6 +4,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 export type SaveStatus = "idle" | "dirty" | "saving" | "saved" | "error"
 
+// Assinatura de valor da linha, para decidir "sujo" comparando conteúdo em vez
+// de só marcar sujo a cada tecla. Os valores de linha são rasos (strings,
+// booleanos e arrays de objetos rasos), montados sempre na mesma ordem de
+// chaves, então stringify é estável e barato aqui.
+const assinatura = (v: unknown): string => JSON.stringify(v)
+
 export interface DraftTable {
   register: (key: string, commit: () => Promise<boolean>) => void
   unregister: (key: string) => void
@@ -79,6 +85,9 @@ export function useDraftRow<T extends Record<string, unknown>>(
   const saveRef = useRef(save)
   const statusRef = useRef(status)
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // Conteúdo do último estado "limpo": o inicial, ou o que foi gravado com
+  // sucesso. É contra ele que `update` decide se a linha está suja.
+  const baseRef = useRef(assinatura(initial))
 
   useEffect(() => { valueRef.current = value }, [value])
   useEffect(() => { saveRef.current = save }, [save])
@@ -92,15 +101,26 @@ export function useDraftRow<T extends Record<string, unknown>>(
     if (initial !== initialRef.current) {
       initialRef.current = initial
       if (statusRef.current === "idle") {
+        baseRef.current = assinatura(initial)
         // eslint-disable-next-line react-hooks/set-state-in-effect -- ressincroniza com dado externo assíncrono, só quando a linha não tem edição pendente
         setValue(initial)
       }
     }
   }, [initial])
 
+  // "Sujo" é comparação de conteúdo, não "houve digitação": desfazer uma edição
+  // (apagar o que digitou, ou cancelar um item que acabou de adicionar) tem que
+  // devolver a linha para "idle". Marcar sujo a cada tecla deixava a borda de
+  // alteração, a barra de salvar e o guard de navegação presos sem nada a salvar.
+  //
+  // O próximo valor sai de valueRef, não do updater de setValue, para manter o
+  // updater puro — e valueRef é sincronizado aqui mesmo, para que dois updates
+  // no mesmo tick encadeiem em vez de um sobrescrever o outro.
   const update = useCallback((patch: Partial<T>) => {
-    setValue(prev => ({ ...prev, ...patch }))
-    setStatus("dirty")
+    const next = { ...valueRef.current, ...patch }
+    valueRef.current = next
+    setValue(next)
+    setStatus(assinatura(next) === baseRef.current ? "idle" : "dirty")
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
   }, [])
 
@@ -109,6 +129,7 @@ export function useDraftRow<T extends Record<string, unknown>>(
     const ok = await saveRef.current(valueRef.current)
     if (ok) {
       initialRef.current = valueRef.current
+      baseRef.current = assinatura(valueRef.current)
       setStatus("saved")
       savedTimerRef.current = setTimeout(() => setStatus(curr => (curr === "saved" ? "idle" : curr)), 2000)
     } else {

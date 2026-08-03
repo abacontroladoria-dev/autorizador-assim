@@ -40,6 +40,12 @@ export type ContratoAtualItem = {
    * Um contrato "antigo" é apenas um item com vigente=false.
    */
   valorTotal?: number
+  /**
+   * Nota deste contrato específico. Desceu do profissional para o item na
+   * migration 20260803120000 — antes era uma nota por profissional, então quem
+   * tinha dois contratos tinha uma nota falando de um deles sem dizer qual.
+   */
+  observacoes?: string | null
 }
 
 export type ContratoAtual = {
@@ -49,6 +55,12 @@ export type ContratoAtual = {
   cpf: string | null
   cnpj: string | null
   contratos: ContratoAtualItem[]
+  /**
+   * BACKUP CONGELADO — não é mais escrito. A observação virou por-contrato em
+   * `ContratoAtualItem.observacoes` (migration 20260803120000); a coluna
+   * continua existindo e `select('*')` continua trazendo, mas o app parou de
+   * gravar aqui de propósito. Não ler como fonte de verdade.
+   */
   observacoes: string | null
   created_at: string
   updated_at: string
