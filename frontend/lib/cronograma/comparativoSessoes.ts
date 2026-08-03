@@ -36,6 +36,37 @@ export interface SessaoComparativo {
   data: string
 }
 
+/**
+ * Filtra sessões por trecho do nome do paciente (case/acento-insensitive) e/ou
+ * por um conjunto de convênios selecionados (checkbox — "ou": basta bater com
+ * um deles). Usado pra recalcular Por Unidade e Por Paciente com o mesmo
+ * recorte de dados. `convenios` vazio = sem filtro de convênio.
+ */
+export function filtrarSessoesPorTexto(sessoes: SessaoComparativo[], paciente: string, convenios: string[]): SessaoComparativo[] {
+  const p = normTxt(paciente)
+  if (!p && convenios.length === 0) return sessoes
+  const setConvenios = new Set(convenios.map(normTxt))
+  return sessoes.filter(s => (!p || normTxt(s.paciente).includes(p)) && (setConvenios.size === 0 || setConvenios.has(normTxt(s.convenio))))
+}
+
+/**
+ * Filtro numérico aplicável a qualquer linha com p1/p2/diferenca (paciente ou
+ * unidade). P1/P2 são "≥ X" (null = sem filtro). Diferença é um intervalo
+ * [mín, máx] — como diferença é um valor com sinal, "≥ X" sozinho não deixa
+ * isolar quedas (ex.: "≥ -1" também inclui 0 e positivos); com mín/máx dá pra
+ * pedir só quedas (ex.: mín=-9, máx=-1) ou só ganhos (mín=1).
+ */
+export function passaFiltroNumerico(
+  row: { p1: number; p2: number; diferenca: number },
+  p1Min: number | null, p2Min: number | null, diferencaMin: number | null, diferencaMax: number | null,
+): boolean {
+  if (p1Min !== null && row.p1 < p1Min) return false
+  if (p2Min !== null && row.p2 < p2Min) return false
+  if (diferencaMin !== null && row.diferenca < diferencaMin) return false
+  if (diferencaMax !== null && row.diferenca > diferencaMax) return false
+  return true
+}
+
 function isAgendado(status: string | null | undefined): boolean {
   const n = normTxt(status)
   return !n || n === "agendado"
@@ -143,6 +174,52 @@ export interface ResumoAumentoReducao {
   /** Pacientes com ≥1 sessão em P1 e 0 em P2. */
   pacientesDesligados: number
   sessoesDesligados: number
+}
+
+/**
+ * Parseia a data de um agendamento em qualquer um dos formatos que a coluna
+ * "Data do Agendamento" pode assumir: ISO ("2026-09-07", vindo da API),
+ * brasileiro ("07/09/2026", texto no XLSX) ou serial do Excel (número de dias
+ * desde 1899-12-30, quando a célula não vem formatada como texto/data no XLSX).
+ */
+function parseDataAgendamento(raw: string): Date | null {
+  const s = raw.trim()
+  if (!s) return null
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
+    const d = new Date(s)
+    return isNaN(d.getTime()) ? null : d
+  }
+  const br = s.match(/^(\d{2})\/(\d{2})\/(\d{4})/)
+  if (br) {
+    const d = new Date(Number(br[3]), Number(br[2]) - 1, Number(br[1]))
+    return isNaN(d.getTime()) ? null : d
+  }
+  if (/^\d+(\.\d+)?$/.test(s)) {
+    const serial = Number(s)
+    const d = new Date(Date.UTC(1899, 11, 30) + serial * 86400000)
+    return isNaN(d.getTime()) ? null : d
+  }
+  return null
+}
+
+function fmtDataCurta(d: Date): string {
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}`
+}
+
+/** Intervalo (data mais antiga a mais recente) das sessões de um período, pra exibir junto ao total. Retorna null se nenhuma data for parseável. */
+export function rangeDatas(sessoes: SessaoComparativo[]): string | null {
+  let min: Date | null = null
+  let max: Date | null = null
+  for (const s of sessoes) {
+    const d = parseDataAgendamento(s.data)
+    if (!d) continue
+    if (!min || d < min) min = d
+    if (!max || d > max) max = d
+  }
+  if (!min || !max) return null
+  if (min.getTime() === max.getTime()) return fmtDataCurta(min)
+  const mesmoAno = min.getFullYear() === max.getFullYear()
+  return mesmoAno ? `${fmtDataCurta(min)} a ${fmtDataCurta(max)}/${max.getFullYear()}` : `${fmtDataCurta(min)}/${min.getFullYear()} a ${fmtDataCurta(max)}/${max.getFullYear()}`
 }
 
 /** Categoria de movimento de um paciente entre P1 e P2 — usada tanto no resumo quanto no filtro da tabela "Por Paciente". */
