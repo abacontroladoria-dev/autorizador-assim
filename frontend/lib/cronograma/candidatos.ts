@@ -2,6 +2,26 @@ import { pm } from "./helpers"
 import { ABA_EXT, EXCLUIR_OCUP } from "./constants"
 import type { CsvRow } from "@/types/cronograma"
 
+// Terapias ignoradas SÓ nesta checagem de sequenciamento — não é o mesmo
+// conjunto que EXCLUIR_OCUP (que serve outros propósitos em 8+ arquivos,
+// como decidir quais vagas livres são ofertáveis).
+//
+// "Coordenador de Caso" foi removido dessa lista: apesar de estar em
+// EXCLUIR_OCUP, ele NÃO é administrativo pra este cálculo — ocupa uma sala
+// física na unidade exatamente como qualquer outra especialidade. Ignorá-lo
+// aqui criava um "buraco fantasma" na agenda do paciente (ex.: 15:00 → 15:40
+// → [Coordenador de Caso às 16:20, invisível pro cálculo] → 17:00 parecia
+// ter 80min de buraco quando na real são 40 em 40 sem intervalo nenhum) —
+// e como esse buraco existe independente do horário candidato testado, o
+// paciente ficava permanentemente sem nenhuma sugestão possível naquele dia.
+//
+// "Supervisão ABA" continua ignorada de propósito: é maleável (pode ser
+// deslocada para qualquer ponta do dia do paciente), então não deve ancorar
+// nem travar o sequenciamento.
+const IGNORAR_NO_SEQUENCIAMENTO = new Set(
+  [...EXCLUIR_OCUP].filter(t => t !== "Coordenador de Caso"),
+)
+
 /**
  * Valida se um paciente pode receber uma nova sessão clínica no slot (slotDia, slotHora),
  * aplicando as duas regras de negócio de sequenciamento:
@@ -15,9 +35,10 @@ import type { CsvRow } from "@/types/cronograma"
  *     devem estar consecutivas com exatamente 40 min de diferença.
  *
  * Esta função é a única fonte de verdade para essa validação no sistema.
- * É usada em dois contextos:
- *   - "Vagas Agora"              → runAlgorithm.ts, módulo Ocupação R2
+ * É usada em três contextos:
+ *   - "Vagas Agora"                 → runAlgorithm.ts, módulo Ocupação R2
  *   - "Hipótese: novo profissional" → SaidaProfMode.tsx, sugestoesPorSlot
+ *   - "Simulação de Novo Prestador" → simulacaoNovoPrestador.ts, avaliarPeriodo
  *
  * Se as regras R2.1 ou R5.1 mudarem, altere apenas aqui.
  *
@@ -40,7 +61,7 @@ export function slotValidoParaPaciente(
   const sessoesDia = agendRows.filter(r => {
     if (String(r["Nome Favorecido"] || "") !== pac) return false
     if (String(r["Dia da Semana"] || "") !== slotDia) return false
-    if (EXCLUIR_OCUP.has(String(r.Terapia || ""))) return false
+    if (IGNORAR_NO_SEQUENCIAMENTO.has(String(r.Terapia || ""))) return false
     if (ABA_EXT.has(String(r.Terapia || ""))) return false
     if (unidadeFiltro && String(r.Unidade || "") !== unidadeFiltro) return false
     return true

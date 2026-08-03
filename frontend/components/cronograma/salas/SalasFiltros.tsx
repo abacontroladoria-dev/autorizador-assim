@@ -20,10 +20,12 @@ export interface SalasFiltrosState {
   status: SalaStatus[]
   /** Busca livre por nome de profissional alocado (ignora acentos/maiúsculas) */
   profissional: string
+  /** Só mostra slots com pelo menos uma alocação sem cruzamento real (card com "—" em vez de "X/Y") */
+  semSessao: boolean
 }
 
 export const SALAS_FILTROS_VAZIO: SalasFiltrosState = {
-  unidade: [], nucleo: [], andar: [], capacidade: [], turno: [], status: [], profissional: "",
+  unidade: [], nucleo: [], andar: [], capacidade: [], turno: [], status: [], profissional: "", semSessao: false,
 }
 
 interface MultiSelectFiltroProps {
@@ -109,6 +111,7 @@ export function SalasFiltros({ value, onChange, unidades, nucleos, andares }: Sa
 
   const temFiltroAtivo = value.unidade.length > 0 || value.nucleo.length > 0 || value.andar.length > 0
     || value.capacidade.length > 0 || value.turno.length > 0 || value.status.length > 0 || value.profissional
+    || value.semSessao
 
   return (
     <div className="flex flex-wrap gap-3 rounded-xl border border-border bg-card/60 p-3">
@@ -145,6 +148,21 @@ export function SalasFiltros({ value, onChange, unidades, nucleos, andares }: Sa
         onChange={v => set("status", v as SalaStatus[])}
         labelFor={o => STATUS_LABEL_CURTO[o as SalaStatus]}
       />
+      <label className="flex flex-col gap-1 text-xs">
+        <span className="font-semibold text-muted-foreground uppercase tracking-wide">&nbsp;</span>
+        <button
+          type="button"
+          onClick={() => set("semSessao", !value.semSessao)}
+          aria-pressed={value.semSessao}
+          className={`rounded-lg border px-2.5 py-1.5 text-sm font-semibold transition-colors ${
+            value.semSessao
+              ? "border-amber-400 bg-amber-100 text-amber-800 dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-300"
+              : "border-border bg-card text-muted-foreground hover:bg-muted/50"
+          }`}
+        >
+          Alocação sem sessão
+        </button>
+      </label>
       {temFiltroAtivo && (
         <button
           type="button"

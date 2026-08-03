@@ -37,6 +37,10 @@ export interface UseOcupacaoSalasResult {
   loading: boolean
   error: string | null
   recarregar: () => void
+  /** Recarrega só `cronograma_salas` (rápido) — usado após criar/editar/excluir sala, que não afeta alocações nem agenda. */
+  recarregarSalas: () => Promise<void>
+  /** Recarrega só `cronograma_salas_alocacoes` (rápido) — usado após alocar/mover/excluir alocação, que não afeta salas nem agenda. Evita re-paginar `csv_grades_profissionais` (a busca mais cara) numa ação que não muda esses dados. */
+  recarregarAlocacoes: () => Promise<void>
   /** Encontra onde um profissional já está alocado (dow+turno específicos), exceto a própria alocação (se informada). */
   encontrarAlocacaoDoProfissional: (profissionalNome: string, dow: number, turno: "Manhã" | "Tarde", excetoAlocacaoId?: string) => AlocacaoAtual | null
 }
@@ -80,6 +84,22 @@ export function useOcupacaoSalas(inicio?: string, fim?: string): UseOcupacaoSala
     return () => { cancelled = true }
   }, [periodo.inicio, periodo.fim, refreshKey])
 
+  async function recarregarSalas() {
+    try {
+      setSalas(await listarSalas())
+    } catch (err) {
+      setError(String((err as Error)?.message ?? err))
+    }
+  }
+
+  async function recarregarAlocacoes() {
+    try {
+      setAlocacoes(await listarAlocacoes())
+    } catch (err) {
+      setError(String((err as Error)?.message ?? err))
+    }
+  }
+
   const salasComOcupacao = useMemo(
     () => salas.map(sala => calcularOcupacaoDaSala(sala, alocacoes, linhas)),
     [salas, alocacoes, linhas],
@@ -121,6 +141,8 @@ export function useOcupacaoSalas(inicio?: string, fim?: string): UseOcupacaoSala
     loading,
     error,
     recarregar: () => setRefreshKey(k => k + 1),
+    recarregarSalas,
+    recarregarAlocacoes,
     encontrarAlocacaoDoProfissional,
   }
 }

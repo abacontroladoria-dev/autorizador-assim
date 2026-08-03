@@ -15,7 +15,7 @@ import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
 import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
 import { criarAlocacao, atualizarAlocacao, excluirAlocacao, listarTodosProfissionaisSalas, buscarTerapiasDoProfissional, type ProfissionalOpcao } from "@/services/salas.service"
 import { buscarOpcoesFiltro } from "@/services/agenda.service"
-import { normTxt } from "@/lib/cronograma/constants"
+import { normTxt, NOME_PARA_TERAPIA_ID } from "@/lib/cronograma/constants"
 import type { Sala } from "@/lib/cronograma/salasTypes"
 import type { AlocacaoAtual } from "@/hooks/useOcupacaoSalas"
 
@@ -140,17 +140,19 @@ export function AlocarSessaoModal({
     setSaving(true)
     setError(null)
     try {
+      const terapiaNome = terapia.trim() || null
+      const terapiaId = terapiaNome ? NOME_PARA_TERAPIA_ID[normTxt(terapiaNome)] ?? null : null
       if (conflito) {
         await atualizarAlocacao(conflito.alocacao.id, {
-          sala_id: sala.id, dow, turno, profissional_nome: nome, profissional_id: profissionalId, terapia_nome: terapia.trim() || null,
+          sala_id: sala.id, dow, turno, profissional_nome: nome, profissional_id: profissionalId, terapia_nome: terapiaNome, terapia_id: terapiaId,
         })
         if (alocacaoId && alocacaoId !== conflito.alocacao.id) await excluirAlocacao(alocacaoId)
       } else if (alocacaoId) {
         await atualizarAlocacao(alocacaoId, {
-          sala_id: sala.id, dow, turno, profissional_nome: nome, profissional_id: profissionalId, terapia_nome: terapia.trim() || null,
+          sala_id: sala.id, dow, turno, profissional_nome: nome, profissional_id: profissionalId, terapia_nome: terapiaNome, terapia_id: terapiaId,
         })
       } else {
-        await criarAlocacao({ sala_id: sala.id, dow, turno, profissional_nome: nome, profissional_id: profissionalId, terapia_nome: terapia.trim() || null })
+        await criarAlocacao({ sala_id: sala.id, dow, turno, profissional_nome: nome, profissional_id: profissionalId, terapia_nome: terapiaNome, terapia_id: terapiaId })
       }
       onSaved()
       onClose()
