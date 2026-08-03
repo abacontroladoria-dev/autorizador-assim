@@ -17,6 +17,59 @@ export async function getProfissionaisRoster(): Promise<{ data: string[] | null;
   return { data: (data ?? []).map((r: any) => r.profissional_nome as string), error: null }
 }
 
+// Quantos meses de agenda_tita olhar para trás ao datar um desligamento. Só
+// precisamos saber se o último atendimento ativo cabe na janela de exibição
+// (mês do desligamento + 1), então 4 meses dão folga de sobra — e o corte
+// importa: sem ele a consulta cresce sem limite numa tabela de ~72k linhas.
+const MESES_JANELA_DESLIGAMENTO = 4
+
+export type UltimoAtendimentoAtivo = { nome: string; ultimaData: string }
+
+// Último atendimento ATIVO de cada profissional, por profissional_id.
+//
+// Serve para datar um desligamento sem ter coluna de desligamento em lugar
+// nenhum: quando o TiTa inativa alguém, o nome dele em csv_grades_profissionais
+// vira "INATIVO-<nome>" (diz QUEM saiu) e os atendimentos dele passam a
+// ativo=false (o último ativo diz QUANDO). O agenda_tita ainda guarda o nome
+// limpo sob o mesmo profissional_id, então isto também resolve o nome de exibição
+// e o match do cadastro de contrato, que é feito por nome.
+//
+// Consultar só os ids já marcados como desligados (2 a 6 por mês), nunca o
+// roster inteiro.
+export async function getUltimoAtendimentoAtivo(
+  ids: number[],
+): Promise<{ data: Record<number, UltimoAtendimentoAtivo>; error: unknown }> {
+  if (!ids.length) return { data: {}, error: null }
+
+  const corte = new Date()
+  corte.setMonth(corte.getMonth() - MESES_JANELA_DESLIGAMENTO)
+
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase
+    .from('agenda_tita')
+    .select('profissional_id, profissional_nome, data_atendimento')
+    .in('profissional_id', ids)
+    .eq('ativo', true)
+    .gte('data_atendimento', corte.toISOString().slice(0, 10))
+    .order('data_atendimento', { ascending: false })
+
+  if (error) {
+    console.error('Erro getUltimoAtendimentoAtivo:', error)
+    return { data: {}, error }
+  }
+
+  // Já vem ordenado por data desc, então a primeira linha de cada id é a mais recente.
+  const porId: Record<number, UltimoAtendimentoAtivo> = {}
+  for (const r of (data ?? []) as Array<{ profissional_id: number; profissional_nome: string | null; data_atendimento: string }>) {
+    if (porId[r.profissional_id]) continue
+    porId[r.profissional_id] = {
+      nome: (r.profissional_nome ?? '').trim(),
+      ultimaData: r.data_atendimento,
+    }
+  }
+  return { data: porId, error: null }
+}
+
 // Tabela única de contratos (substitui remuneracao_contratos_atuais +
 // remuneracao_contratos_antigos — ver migration 20260710120000): 1 linha por
 // profissional. Os itens de contrato (numero, funcao, valorPA, vigente,

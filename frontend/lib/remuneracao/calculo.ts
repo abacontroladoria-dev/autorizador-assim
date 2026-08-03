@@ -8,7 +8,7 @@ import type { FeriadoInfo } from "@/types/remuneracao"
 import { cleanTxt, timeToMin, isSim, isCancelado } from "./formatacao"
 import { getCalendario, parseDateBR, type Feriado } from "./datas"
 import { isFakePatient, isEtaAdminPatient } from "./pacientes"
-import { normKey, PROFS_IGNORAR } from "./constants"
+import { normKey, PROFS_IGNORAR, isProfDesligado, limparPrefixoDesligado } from "./constants"
 import { getCol, type SessaoReal, type CsvGradeRow } from "./relatorio"
 import {
   parseUnidadeSala,
@@ -148,6 +148,82 @@ function buscarCadastroContratual(cadastros: Record<string, CadastroContratual>,
   return entry ? { nome: entry[0], ...entry[1] } : null
 }
 
+// Lookup por normKey (acento/caixa/espaço), igual ao buscarCadastroContratual —
+// antes era acesso direto por string crua, o que divergia do cadastro contratual
+// e falhava em qualquer diferença de acentuação vinda da grade.
+function buscarAntigo(antigos: Record<string, ContratoAntigoInfo>, prof: string): ContratoAntigoInfo | null {
+  const alvo = normKey(prof)
+  if (!alvo) return null
+  const entry = Object.entries(antigos || {}).find(([nome]) => normKey(nome) === alvo)
+  return entry ? entry[1] : null
+}
+
+// ─── Modalidade de faturamento do profissional ───────────────────────────────
+
+// "atendimento" = PA por sessão; "banco_horas" = valor total fixo pago no
+// período; "hibrido" = tem contrato vigente dos dois tipos (recebe pelos dois).
+export type ModalidadeAnalise = "atendimento" | "banco_horas" | "hibrido"
+
+export type ContratosVigentesInfo = {
+  modalidade: ModalidadeAnalise
+  /** Soma dos valorTotal dos contratos vigentes em banco de horas. */
+  valorFixoMensal: number
+  numerosBancoHoras: string[]
+  /** Números de todos os contratos vigentes, juntos — é o `contratoNovo` exibido. */
+  numeros: string | null
+}
+
+// Todo contrato vigente conta: quem tem dois contratos ativos recebe pelos dois,
+// não há um que "vença" o outro nem conflito a resolver. Um item com
+// vigente=false não é modelo atual — some daqui e passa a valer só como
+// histórico/comparação (ver deriveAntigoDeContratos no hook).
+export function resolverContratosVigentes(cadastro: CadastroContratual | null): ContratosVigentesInfo {
+  const vigentes = contratosAtuaisDoCadastro(cadastro)
+  const bancoHoras = vigentes.filter(c => c.modeloFaturamento === "banco_horas")
+  const atendimento = vigentes.filter(c => c.modeloFaturamento !== "banco_horas")
+  const modalidade: ModalidadeAnalise =
+    bancoHoras.length && atendimento.length ? "hibrido"
+      : bancoHoras.length ? "banco_horas"
+        : "atendimento"
+  return {
+    modalidade,
+    valorFixoMensal: bancoHoras.reduce((s, c) => s + Number(c.valorTotal || 0), 0),
+    numerosBancoHoras: bancoHoras.map(c => c.numero).filter((n): n is string => !!n),
+    numeros: vigentes.map(c => c.numero).filter(Boolean).join(" / ") || null,
+  }
+}
+
+// ─── Desligamento (profissional que saiu da clínica) ─────────────────────────
+
+// Quantos meses depois do mês do desligamento o profissional ainda aparece na
+// previsão. 1 = aparece no mês do desligamento e no seguinte (por questão de
+// pagamento), e sai a partir do terceiro.
+const MESES_EXIBIR_APOS_DESLIGAMENTO = 1
+
+export type DesligadoInfo = {
+  /** Nome sem o prefixo "INATIVO-" — é a chave do cadastro de contrato e o nome exibido. */
+  nomeLimpo: string
+  /** "YYYY-MM" do último atendimento ativo; null = nenhum encontrado na janela consultada. */
+  mesUltimoAtendimento: string | null
+}
+
+/** Chave: nome do profissional exatamente como vem na grade (com prefixo). */
+export type DesligadosMap = Record<string, DesligadoInfo>
+
+function diffMeses(mesA: string, mesB: string): number {
+  const [ya, ma] = mesA.split("-").map(Number)
+  const [yb, mb] = mesB.split("-").map(Number)
+  return (ya - yb) * 12 + (ma - mb)
+}
+
+// Um profissional desligado sai da previsão quando o mês analisado já passou da
+// janela de pagamento. Sem atendimento ativo na janela consultada ele também
+// sai: não há mais o que pagar.
+function desligadoDeveSerOcultado(info: DesligadoInfo, mesAnalisado: string): boolean {
+  if (!info.mesUltimoAtendimento) return true
+  return diffMeses(mesAnalisado, info.mesUltimoAtendimento) > MESES_EXIBIR_APOS_DESLIGAMENTO
+}
+
 function contratoLabel(c: ContratoAtualItem): string {
   const fn = labelFuncaoContrato(c.funcao) || c.funcao || "contrato"
   return c.numero ? `${fn} (${c.numero})` : fn
@@ -224,6 +300,7 @@ export type AnaliseFuturaConfig = {
   extraHols?: Feriado[]
   antigos?: Record<string, ContratoAntigoInfo> // profissional -> contrato antigo (Passo 9; vazio até lá)
   cadastroPrestadores?: Record<string, CadastroContratual> // profissional -> contrato(s) atual(is)/novo(s) cadastrados em Config
+  desligados?: DesligadosMap // nome na grade ("INATIVO-…") -> nome limpo + mês do último atendimento ativo
 }
 
 export type DowBreakItem = { dow: number; cnt: number; occ: number; mensal: number; feriados: Feriado[] }
@@ -279,6 +356,15 @@ export type ProfissionalAnalise = {
   taxaOcupacao: number | null
   ocupacao: OcupacaoAgregada
   diasTrabalhados: DiaTrabalhadoItem[]
+  /** Modalidade dos contratos VIGENTES. Sem contrato vigente = "atendimento". */
+  modalidade: ModalidadeAnalise
+  /** Valor fixo/mês do(s) contrato(s) vigente(s) em banco de horas. */
+  valorFixoBancoHoras: number | null
+  /** valorFixoBancoHoras ÷ horas agendadas no mês. */
+  valorHoraBancoHoras: number | null
+  numerosBancoHoras: string[]
+  /** Desligado no TiTa, ainda dentro da janela de exibição por pagamento. */
+  desligado: boolean
 }
 
 export type DiaTrabalhadoItem = { dow: number; horas: number }
@@ -302,20 +388,37 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
 
   const {
     taxasPA, diarias, etaBonus, ccPA, ccPE, ccLimDefault, presenca, feriados,
-    extraHols = [], antigos = {}, cadastroPrestadores = {},
+    extraHols = [], antigos = {}, cadastroPrestadores = {}, desligados = {},
   } = config
 
   const datas = rows.map(r => r["Data"]).filter(Boolean).sort() as string[]
   const [yr, mo] = (datas[0] || "2026-06-01").split("-").map(Number)
+  const mesAnalisado = `${yr}-${String(mo).padStart(2, "0")}`
   const cal = getCalendario(yr, mo, feriados, extraHols)
   const pct = presenca / 100
+
+  // Desligados: a grade traz o nome como "INATIVO-<nome>", mas o contrato está
+  // cadastrado no nome limpo. Renomear a linha aqui, uma vez, faz todo o resto do
+  // cálculo (ocupação, PA, cadastro, exibição) casar sem tratamento especial —
+  // e quem já passou da janela de pagamento é descartado antes de contar.
+  const nomesDesligadosVisiveis = new Set<string>()
+  const rowsVisiveis: CsvRow[] = []
+  for (const r of rows) {
+    const prof = String(r["Profissional"] ?? "")
+    if (!isProfDesligado(prof)) { rowsVisiveis.push(r); continue }
+    const info = desligados[prof.trim()] ?? { nomeLimpo: limparPrefixoDesligado(prof), mesUltimoAtendimento: null }
+    if (desligadoDeveSerOcultado(info, mesAnalisado)) continue
+    nomesDesligadosVisiveis.add(info.nomeLimpo)
+    rowsVisiveis.push({ ...r, "Profissional": info.nomeLimpo })
+  }
+  if (!rowsVisiveis.length) return { dadosPorProf: [], feriadosMes: cal.feriadosAtivos, allTerps: [], allUnits: [] }
 
   // Ocupação (donut / % de vagas) usa o mesmo motor de cronograma/indicadores/
   // (buildAllSlotsFromRows + calcularOcupacaoSemanal de ocupacaoProf.ts), para
   // que os dois lugares mostrem exatamente o mesmo número por profissional.
   // Só precisa de HI/HF numéricos (minutos), que essa query não seleciona por
   // padrão — derivados aqui a partir das colunas de horário já existentes.
-  const rowsParaOcupacao: CsvRow[] = rows.map(r => ({
+  const rowsParaOcupacao: CsvRow[] = rowsVisiveis.map(r => ({
     ...r,
     HI: timeToMin(r["Hora Inicial"] as string | undefined),
     HF: timeToMin(r["Hora Final"] as string | undefined),
@@ -323,7 +426,7 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
   const allSlotsOcupacao = buildAllSlotsFromRows(rowsParaOcupacao)
 
   const allSlots: Record<string, AllSlotsEntry> = {}
-  rows.forEach(r => {
+  rowsVisiveis.forEach(r => {
     const prof = r["Profissional"]?.trim()
     const terp = r["Terapia"]?.trim()
     const date = r["Data"]?.trim()
@@ -381,7 +484,7 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
   })
 
   const mapa: Record<string, MapaProf> = {}
-  rows.filter(r => r["Status do Agendamento"] === "Agendado" && !PROFS_IGNORAR.some(f => (r["Profissional"] || "").includes(f)))
+  rowsVisiveis.filter(r => r["Status do Agendamento"] === "Agendado" && !PROFS_IGNORAR.some(f => (r["Profissional"] || "").includes(f)))
     .forEach(r => {
       const prof = r["Profissional"]?.trim(), terp = r["Terapia"]?.trim()
       const date = r["Data"]?.trim(), pac = r["Nome Favorecido"]?.trim()
@@ -446,10 +549,31 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
     // exibidos na UI é possível e aceitável (não é bug, é ordem de arredondamento).
     let total100 = 0, totalX = 0
 
+    // O PA sai do contrato cadastrado, não da tabela de especialidade: mesma regra
+    // que a /rp já aplica (resolverPARow), reusada aqui em vez de reimplementada —
+    // contrato único manda, contrato duplo casa a função (AC/PS) com a terapia, e
+    // banco de horas zera o PA por sessão (o valor fixo entra à parte, abaixo).
+    // Sem contrato vigente cai na tabela de especialidade, como antes.
+    const cadastroContratual = buscarCadastroContratual(cadastroPrestadores, d.prof)
+    const contratoFuncoes = new Set(
+      Object.keys(d.terapias)
+        .map(terp => funcaoContratoPorEspecialidade(terp))
+        .filter((f): f is string => !!f),
+    )
+
     const terapiaDetails: TerapiaDetalhe[] = Object.values(d.terapias).map(td => {
       const isCC = td.terp === "Coordenador de Caso"
       const isETA = td.terp === "Especialista Técnico de Área"
-      const pa = isCC ? ccPA : (taxasPA[td.terp] || 0)
+      // ESPECIALIDADES_SEM_PA ("Tratado em outro contrato") é regra da remuneração
+      // REAL: na /rp essas terapias não geram PA porque são pagas fora desta
+      // calculadora. A previsão sempre as projetou pela tabela de especialidade, e
+      // três delas têm taxa cadastrada — manter, para o fix de modalidade não
+      // derrubar valor que ninguém pediu para mudar.
+      const paTabela = isCC ? ccPA : (taxasPA[td.terp] || 0)
+      const paInfo = isEspecialidadeSemPA(td.terp)
+        ? null
+        : resolverPARow({ especialidade: td.terp }, contratoFuncoes, { ccPA, taxasPA, cadastroContratual })
+      const pa = paInfo ? (paInfo.semPA ? 0 : paInfo.valor) : paTabela
       const diar = isCC ? 0 : (diarias[td.terp] || 0)
       const tDays = slotData.terpDays[td.terp] || {}
       const dowsPresent = new Set(Object.values(tDays))
@@ -484,8 +608,10 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
         mensalETA100 = etaWeeks * etaBonus
       }
 
-      const monthly100 = isCC ? td.sessoes * ccPA : mensalDiaria + mensalPA100 + mensalETA100
-      const monthlyX = isCC ? td.sessoes * pct * ccPA : mensalDiaria + mensalPAX + mensalETA100
+      // `pa` (não ccPA) também no ramo CC: com contrato de banco de horas o PA por
+      // sessão é zero, e com PA contratado é o do contrato que vale.
+      const monthly100 = isCC ? td.sessoes * pa : mensalDiaria + mensalPA100 + mensalETA100
+      const monthlyX = isCC ? td.sessoes * pct * pa : mensalDiaria + mensalPAX + mensalETA100
 
       if (!isCC) {
         total100 += monthly100; totalX += monthlyX
@@ -499,7 +625,7 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
       }
       const ccSess100 = Object.entries(td.sessByDow).reduce((s, [dow, cnt]) => s + cnt * (cal.counts[parseInt(dow) as 1 | 2 | 3 | 4 | 5] || 0), 0)
       const ccSessX = ccSess100 * pct
-      const m100cc = ccSess100 * ccPA, mXcc = ccSessX * ccPA
+      const m100cc = ccSess100 * pa, mXcc = ccSessX * pa
       total100 += m100cc; totalX += mXcc
       return {
         terp: td.terp, sessoes: td.sessoes, pacientes: td.pacsSet.size, pacientesList: [...td.pacsSet].sort(),
@@ -512,18 +638,29 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
     const pe = hasCC ? pacCC * ccPE : 0
     total100 += pe; totalX += pe
 
-    const cF = antigos[d.prof] || null
+    const cF = buscarAntigo(antigos, d.prof)
     const salA = cF?.salario ?? null, temA = salA !== null && salA > 0
     // Valor/hora derivado do contrato antigo: valor total pago ÷ horas
     // efetivamente agendadas no mês (mesma base de "Dias trabalhados" acima:
     // horas por dia da semana × quantas vezes esse dia ocorre no mês).
     const horasMensais = diasTrabalhados.reduce((s, dt) => s + dt.horas * (cal.counts[dt.dow as 1 | 2 | 3 | 4 | 5] || 0), 0)
     const valorHoraDerivado = temA && horasMensais > 0 ? salA! / horasMensais : null
-    const d100 = temA ? ((total100 - salA!) / salA!) * 100 : null
-    const dX = temA ? ((totalX - salA!) / salA!) * 100 : null
+
+    const vigentes = resolverContratosVigentes(cadastroContratual)
+    const temBancoHoras = vigentes.modalidade !== "atendimento" && vigentes.valorFixoMensal > 0
+    const valorFixoBancoHoras = temBancoHoras ? vigentes.valorFixoMensal : null
+    const valorHoraBancoHoras = temBancoHoras && horasMensais > 0 ? vigentes.valorFixoMensal / horasMensais : null
+
+    // Em banco de horas o total100/totalX carrega só PPD/ETA/PE (o PA por sessão é
+    // zero), então comparar isso com o contrato antigo daria um delta sem sentido —
+    // o comparável é fixo contra fixo.
+    const baseComparacao100 = temBancoHoras ? vigentes.valorFixoMensal + total100 : total100
+    const baseComparacaoX = temBancoHoras ? vigentes.valorFixoMensal + totalX : totalX
+    const d100 = temA ? ((baseComparacao100 - salA!) / salA!) * 100 : null
+    const dX = temA ? ((baseComparacaoX - salA!) / salA!) * 100 : null
+
     const terpN = terapiaDetails.map(t => t.terp)
-    const contratosVigentes = contratosAtuaisDoCadastro(buscarCadastroContratual(cadastroPrestadores, d.prof))
-    const contratoNovo = contratosVigentes.map(c => c.numero).filter(Boolean).join(" / ") || null
+    const contratoNovo = vigentes.numeros
 
     return {
       prof: d.prof, terapiaDetails, hasCC, pacCC, pe,
@@ -536,6 +673,10 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
       hasTA: terpN.includes("Terapia Alimentar"),
       allPacs: [...new Set(terapiaDetails.flatMap(t => t.pacientesList))].sort(),
       horasSemanaTotal, horasAbertas, horasComPac, taxaOcupacao, ocupacao, diasTrabalhados,
+      modalidade: temBancoHoras ? vigentes.modalidade : "atendimento",
+      valorFixoBancoHoras, valorHoraBancoHoras,
+      numerosBancoHoras: temBancoHoras ? vigentes.numerosBancoHoras : [],
+      desligado: nomesDesligadosVisiveis.has(d.prof),
     }
   }).sort((a, b) => a.prof.localeCompare(b.prof))
 

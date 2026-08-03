@@ -7,11 +7,13 @@ import {
   calcularAnaliseFutura, calcularRemuneracaoReal, calcularPEProporcional,
   normalizarRelatorioPE, parsePeriodoArquivo, PE_INATIVO,
   type AnaliseFuturaResult, type ProfRemunReal, type PERow, type ContratoAntigoInfo, type CadastroContratual, type ContratoAtualItem,
+  type DesligadosMap,
 } from "@/lib/remuneracao/calculo"
 import { normalizarGradeParaSessao, classificarSessaoReal, type SessaoReal, type CsvGradeRow } from "@/lib/remuneracao/relatorio"
 import { buscarPresencaFilaAutorizacoes, presencaDaSessao, type PresencaIndice } from "@/lib/remuneracao/presencaReal"
 import { dataParaISO, mesAnoDeLinhas } from "@/lib/remuneracao/datas"
-import { getContratos } from "@/services/remuneracao.service"
+import { isProfDesligado, limparPrefixoDesligado } from "@/lib/remuneracao/constants"
+import { getContratos, getUltimoAtendimentoAtivo } from "@/services/remuneracao.service"
 import { useParametrosGerais } from "./useParametrosGerais"
 import { useTaxasEspecialidade } from "./useTaxasEspecialidade"
 import { useFeriados } from "./useFeriados"
@@ -38,6 +40,8 @@ export function useAnaliseFutura() {
   const [rowsError, setRowsError] = useState<string | null>(null)
   const [antigos, setAntigos] = useState<Record<string, ContratoAntigoInfo>>({})
   const [cadastroPrestadores, setCadastroPrestadores] = useState<Record<string, CadastroContratual>>({})
+  const [contratosError, setContratosError] = useState<string | null>(null)
+  const [desligados, setDesligados] = useState<DesligadosMap>({})
   const refWeek = useMemo(() => getRefWeek(), [])
 
   useEffect(() => {
@@ -57,13 +61,64 @@ export function useAnaliseFutura() {
     return () => { isMounted = false }
   }, [refWeek])
 
+  // Quem aparece na grade como "INATIVO-<nome>", com o profissional_id que o TiTa
+  // mantém estável mesmo depois do rename. Vazio = nada a consultar.
+  const idsDesligados = useMemo(() => {
+    const porNome = new Map<string, number>()
+    for (const r of rows) {
+      const nome = String(r["Profissional"] ?? "").trim()
+      if (!nome || !isProfDesligado(nome) || porNome.has(nome)) continue
+      const id = Number(r["Id Profissional"])
+      if (Number.isFinite(id) && id > 0) porNome.set(nome, id)
+    }
+    return porNome
+  }, [rows])
+
+  // O agenda_tita resolve, pelo mesmo profissional_id, o nome limpo (chave do
+  // cadastro de contrato) e a data do último atendimento ativo — que é o que
+  // datamos como mês do desligamento.
+  //
+  // Sem ninguém marcado na grade o efeito não faz nada: entradas de uma grade
+  // anterior podem sobrar no mapa sem efeito colateral, porque o cálculo só
+  // consulta nomes que estão na grade atual E têm o prefixo.
+  useEffect(() => {
+    if (!idsDesligados.size) return
+    let isMounted = true
+    async function loadDesligados() {
+      const { data: porId } = await getUltimoAtendimentoAtivo([...idsDesligados.values()])
+      if (!isMounted) return
+
+      const mapa: DesligadosMap = {}
+      for (const [nome, id] of idsDesligados) {
+        const encontrado = porId[id]
+        mapa[nome] = {
+          // Sem linha no agenda_tita, o prefixo removido é o melhor palpite de nome.
+          nomeLimpo: encontrado?.nome || limparPrefixoDesligado(nome),
+          mesUltimoAtendimento: encontrado ? encontrado.ultimaData.slice(0, 7) : null,
+        }
+      }
+      setDesligados(mapa)
+    }
+    loadDesligados()
+    return () => { isMounted = false }
+  }, [idsDesligados])
+
   // Contratos (atuais + antigos, unificados) — cadastrados em Cadastros, não
   // dependem da semana de referência.
   useEffect(() => {
     let isMounted = true
     async function loadContratuais() {
-      const { data: contratosData } = await getContratos()
+      const { data: contratosData, error } = await getContratos()
       if (!isMounted) return
+
+      // Sem propagar o erro, uma falha de RLS (a tabela exige role rp/admin/
+      // diretoria) fazia a tela mostrar TODO mundo como "Sem contrato antigo
+      // cadastrado" / "PS.ABA-PENDENTE", sem nenhum aviso.
+      if (error) {
+        setContratosError("Não foi possível carregar os contratos cadastrados — a projeção abaixo ignora contrato antigo e modalidade. Verifique sua permissão de acesso a contratos.")
+        return
+      }
+      setContratosError(null)
 
       const antigosMap: Record<string, ContratoAntigoInfo> = {}
       const cadastroMap: Record<string, CadastroContratual> = {}
@@ -94,8 +149,9 @@ export function useAnaliseFutura() {
       feriados,
       antigos,
       cadastroPrestadores,
+      desligados,
     })
-  }, [parametros, taxas_pa, diarias, rows, antigos, cadastroPrestadores, feriados])
+  }, [parametros, taxas_pa, diarias, rows, antigos, cadastroPrestadores, desligados, feriados])
 
   const analMes = useMemo(() => (rows.length ? mesAnoDeLinhas(rows as unknown as Record<string, unknown>[]) : null), [rows])
 
@@ -106,6 +162,8 @@ export function useAnaliseFutura() {
     presenca: parametros?.presenca_padrao ?? null,
     loading: parametrosLoading || taxasLoading || rowsLoading || feriadosLoading,
     error: parametrosError || rowsError,
+    // Aviso, não erro bloqueante: sem os contratos a projeção de PA ainda serve.
+    avisoContratos: contratosError,
     gradeVazia: !rowsLoading && rows.length === 0,
     totalGrade: rows.length,
   }

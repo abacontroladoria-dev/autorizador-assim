@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import {
   CalendarDays, CheckCircle2, Search, X, ChevronDown, ChevronUp,
   AlertTriangle, Users, TrendingUp, TrendingDown, Building2, FileQuestion,
-  Download, Wallet, PieChart, Clock,
+  Download, Wallet, PieChart, Clock, UserMinus,
 } from "lucide-react"
 import { useHeader } from "@/contexts/HeaderContext"
 import { useAnaliseFutura } from "@/hooks/useRemuneracao"
@@ -241,6 +241,79 @@ function ContratoAntigoCard({ d }: { d: ProfissionalAnalise }) {
   )
 }
 
+// ─── Card: Banco de Horas (contrato vigente de valor fixo) ────────────────────
+
+// Contrato vigente com modelo_faturamento = "banco_horas": o profissional recebe
+// um valor total fixo no período, não PA por sessão — então este card substitui
+// os dois de projeção por presença (que não faz diferença num valor fixo). O
+// valor/hora é derivado, nunca cadastrado: valor fixo ÷ horas agendadas no mês.
+function BancoDeHorasCard({ d, presenca }: { d: ProfissionalAnalise; presenca: number | null }) {
+  const ppd = d.terapiaDetails.filter(t => !t.isCC).reduce((s, t) => s + (t.mensalDiaria || 0), 0)
+  const etaBonusTotal = d.terapiaDetails.reduce((s, t) => s + (t.mensalETA100 || 0), 0)
+  const c = TONE_CLS.amber
+
+  return (
+    <StatCardShell tone="amber" icon={<Wallet size={15} />} label="Banco de horas / mês">
+      {d.numerosBancoHoras.length > 0 && (
+        <div className="flex flex-wrap gap-1.5 self-start mb-2">
+          {d.numerosBancoHoras.map(n => (
+            <span key={n} className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-bold text-foreground">
+              {n}
+            </span>
+          ))}
+        </div>
+      )}
+
+      <div className={`font-black text-3xl leading-tight tabular-nums ${c.text}`}>{fmt(d.valorFixoBancoHoras ?? 0)}</div>
+
+      {d.valorHoraBancoHoras !== null && (
+        <div className="mt-3">
+          <LinhaValorDescricao
+            valor={fmt(d.valorHoraBancoHoras)}
+            descricao="valor/hora (calculado: valor fixo ÷ horas agendadas no mês)"
+            tone="muted"
+          />
+        </div>
+      )}
+
+      {/* PPD, bônus ETA e PE seguem valendo: o banco de horas zera só o PA por
+          sessão, igual à regra da remuneração real em relacionamento-prestador/rp. */}
+      {(ppd > 0 || etaBonusTotal > 0 || d.pe > 0) && (
+        <div className="mt-3 space-y-2.5">
+          {ppd > 0 && <LinhaValorDescricao valor={fmt(ppd)} descricao="PPD · pagamento por diária (fora do valor fixo)" />}
+          {etaBonusTotal > 0 && <LinhaValorDescricao valor={fmt(etaBonusTotal)} descricao="Bônus ETA (fora do valor fixo)" />}
+          {d.pe > 0 && <LinhaValorDescricao valor={fmt(d.pe)} descricao="PE · pagamento por entrega (fora do valor fixo)" />}
+        </div>
+      )}
+
+      <div className="mt-3 rounded-xl border border-border bg-card px-3.5 py-3.5 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+            <Clock size={12} />
+            Carga agendada
+          </span>
+          <strong className="text-sm font-bold tabular-nums text-foreground">{fmtH(d.horasSemanaTotal)}</strong>
+        </div>
+
+        {d.diasTrabalhados.length > 0 && (
+          <div className="flex flex-wrap gap-1.5">
+            {d.diasTrabalhados.map(dt => (
+              <span key={dt.dow} className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-xs">
+                <span className="font-semibold text-foreground">{DOW_PT[dt.dow]}</span>
+                <span className="text-muted-foreground tabular-nums">{fmtH(dt.horas)}</span>
+              </span>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <p className="mt-3 text-xs text-muted-foreground leading-snug">
+        Fora de “Total 100%” e “Total {presenca ?? "—"}%” — valor fixo não varia com presença. Somado em “Total banco de horas”.
+      </p>
+    </StatCardShell>
+  )
+}
+
 // ─── Card: projeção de presença (100% / X%) ───────────────────────────────────
 
 function PresencaCard({
@@ -460,6 +533,23 @@ function ProfissionalCard({
         </div>
 
         <div className="flex items-center gap-2 flex-wrap justify-end shrink-0">
+          {d.desligado && (
+            <Chip tone="red" title="Inativado no TiTa. Continua listado no mês do desligamento e no seguinte, por questão de pagamento.">
+              <UserMinus size={12} />
+              Desligado
+            </Chip>
+          )}
+          {d.modalidade !== "atendimento" && (
+            <Chip
+              tone="amber"
+              title={d.modalidade === "hibrido"
+                ? "Tem contrato vigente em banco de horas e em atendimento — recebe pelos dois."
+                : "Contrato vigente em banco de horas: valor fixo, sem PA por sessão."}
+            >
+              <Wallet size={12} />
+              {d.modalidade === "hibrido" ? "Banco de horas + PA" : "Banco de horas"}
+            </Chip>
+          )}
           {d.alertaCC && (
             <Chip tone="red">
               <AlertTriangle size={12} />
@@ -471,8 +561,20 @@ function ProfissionalCard({
 
       <div className="px-4 pb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 items-stretch">
         <ContratoAntigoCard d={d} />
-        <PresencaCard d={d} variante="100" presenca={presenca} />
-        <PresencaCard d={d} variante="x" presenca={presenca} />
+        {/* Banco de horas puro dispensa os cards de projeção por presença (o valor é
+            fixo), então o card ocupa as duas colunas que eles deixaram. No híbrido os
+            dois convivem: o profissional recebe pelos dois contratos. */}
+        {d.modalidade === "banco_horas" ? (
+          <div className="sm:col-span-2">
+            <BancoDeHorasCard d={d} presenca={presenca} />
+          </div>
+        ) : (
+          <>
+            {d.modalidade === "hibrido" && <BancoDeHorasCard d={d} presenca={presenca} />}
+            <PresencaCard d={d} variante="100" presenca={presenca} />
+            <PresencaCard d={d} variante="x" presenca={presenca} />
+          </>
+        )}
         <StatCardShell tone="slate" icon={<PieChart size={15} />} label="Resumo da ocupação">
           <div className="flex-1 flex flex-col items-center justify-center">
             <OcupacaoDonut item={d} size={128} centerFillClassName="fill-slate-100 dark:fill-slate-800" />
@@ -571,7 +673,7 @@ const SORT_OPTIONS: { k: SortKey; l: string }[] = [
 ]
 
 export function AnaliseFuturaTab() {
-  const { resultado, refWeek, analMes, presenca, loading, error, gradeVazia, totalGrade } = useAnaliseFutura()
+  const { resultado, refWeek, analMes, presenca, loading, error, avisoContratos, gradeVazia, totalGrade } = useAnaliseFutura()
   const { parametros } = useParametrosGerais()
   const { setHeader, setRightContent } = useHeader()
 
@@ -640,12 +742,15 @@ export function AnaliseFuturaTab() {
     })
   }, [dadosFiltrados, sortKey])
 
-  const { tot100, totX, alerts, totalAntigo, pendContr } = useMemo(() => ({
+  const { tot100, totX, alerts, totalAntigo, pendContr, totalBancoHoras } = useMemo(() => ({
     tot100: dadosFiltrados.reduce((s, d) => s + d.total100, 0),
     totX: dadosFiltrados.reduce((s, d) => s + d.totalX, 0),
     alerts: dadosPorProf.filter(d => d.alertaCC).length,
     totalAntigo: dadosFiltrados.filter(d => d.temAntigo).reduce((s, d) => s + (d.salAntigo || 0), 0),
     pendContr: dadosFiltrados.filter(d => !d.temAntigo).length,
+    // Valor fixo fica à parte de tot100/totX: não varia com presença, então somá-lo
+    // ali misturaria duas coisas diferentes no mesmo número.
+    totalBancoHoras: dadosFiltrados.reduce((s, d) => s + (d.valorFixoBancoHoras || 0), 0),
   }), [dadosFiltrados, dadosPorProf])
 
   const toggleFiltro = (key: string) => {
@@ -685,10 +790,26 @@ export function AnaliseFuturaTab() {
         Projeção mensal com base na semana de referência: <strong className="text-foreground">{refWeek.label}</strong>
       </p>
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+      {avisoContratos && (
+        <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300">
+          <span className="inline-flex items-start gap-2">
+            <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+            {avisoContratos}
+          </span>
+        </div>
+      )}
+
+      {/* 5 tiles fixos + os 2 condicionais (banco de horas, alertas CC) — a 7ª
+          coluna entra só quando os dois aparecem, pra não sobrar um tile órfão
+          numa segunda linha. Ambas as classes precisam existir literais aqui
+          para o Tailwind gerá-las. */}
+      <div className={`grid grid-cols-2 sm:grid-cols-3 gap-3 ${totalBancoHoras > 0 && alerts > 0 ? "lg:grid-cols-7" : "lg:grid-cols-6"}`}>
         <SummaryTile label="Exibindo" value={`${dadosFiltrados.length} de ${dadosPorProf.length}`} tone="blue" />
         <SummaryTile label="Total 100% / mês" value={fmt(tot100)} tone="green" />
         <SummaryTile label={`Total ${presenca ?? "—"}% / mês`} value={fmt(totX)} tone="blue" />
+        {totalBancoHoras > 0 && (
+          <SummaryTile label="Total banco de horas" value={fmt(totalBancoHoras)} tone="amber" />
+        )}
         <SummaryTile label="Total antigo proporcional" value={fmt(totalAntigo)} tone="slate" />
         <SummaryTile label="Dados contratuais pendentes" value={pendContr} tone={pendContr > 0 ? "red" : "slate"} />
         {alerts > 0 && (
