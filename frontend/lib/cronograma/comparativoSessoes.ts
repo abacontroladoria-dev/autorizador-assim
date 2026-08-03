@@ -130,11 +130,28 @@ export interface PacienteComparativo {
 }
 
 export interface ResumoAumentoReducao {
+  /** Pacientes que já tinham sessão em P1 e aumentaram (não inclui novos captados). */
   pacientesAumentaram: number
   sessoesAumentadas: number
+  /** Pacientes que já tinham sessão em P1 e reduziram sem zerar (não inclui desligados). */
   pacientesReduziram: number
   sessoesReduzidas: number
   pacientesSemAlteracao: number
+  /** Pacientes com 0 sessões em P1 e ≥1 em P2. */
+  pacientesNovosCaptados: number
+  sessoesNovosCaptados: number
+  /** Pacientes com ≥1 sessão em P1 e 0 em P2. */
+  pacientesDesligados: number
+  sessoesDesligados: number
+}
+
+/** Categoria de movimento de um paciente entre P1 e P2 — usada tanto no resumo quanto no filtro da tabela "Por Paciente". */
+export type CategoriaMovimento = "aumento" | "novos" | "reducao" | "desligados" | "semAlteracao"
+
+export function classificarMovimento(p: Pick<PacienteComparativo, "p1" | "p2" | "diferenca">): CategoriaMovimento {
+  if (p.diferenca > 0) return p.p1 === 0 ? "novos" : "aumento"
+  if (p.diferenca < 0) return p.p2 === 0 ? "desligados" : "reducao"
+  return "semAlteracao"
 }
 
 export interface ComparativoResultado {
@@ -259,13 +276,21 @@ export function calcularComparativo(sessoesP1: SessaoComparativo[], sessoesP2: S
   const porPaciente = agregarPorPaciente(sessoesP1, sessoesP2)
 
   // ─── Resumo aumento/redução ───
+  // "Aumento"/"Redução" só contam pacientes que já tinham sessão no outro
+  // período (senão duplicariam com Novos Captados/Desligados abaixo).
   let pacientesAumentaram = 0, sessoesAumentadas = 0
   let pacientesReduziram = 0, sessoesReduzidas = 0
   let pacientesSemAlteracao = 0
+  let pacientesNovosCaptados = 0, sessoesNovosCaptados = 0
+  let pacientesDesligados = 0, sessoesDesligados = 0
   for (const p of porPaciente) {
-    if (p.diferenca > 0) { pacientesAumentaram++; sessoesAumentadas += p.diferenca }
-    else if (p.diferenca < 0) { pacientesReduziram++; sessoesReduzidas += -p.diferenca }
-    else pacientesSemAlteracao++
+    switch (classificarMovimento(p)) {
+      case "novos": pacientesNovosCaptados++; sessoesNovosCaptados += p.diferenca; break
+      case "aumento": pacientesAumentaram++; sessoesAumentadas += p.diferenca; break
+      case "desligados": pacientesDesligados++; sessoesDesligados += -p.diferenca; break
+      case "reducao": pacientesReduziram++; sessoesReduzidas += -p.diferenca; break
+      case "semAlteracao": pacientesSemAlteracao++; break
+    }
   }
 
   return {
@@ -275,6 +300,9 @@ export function calcularComparativo(sessoesP1: SessaoComparativo[], sessoesP2: S
     variacaoPct: variacao(totalP1, totalP2),
     porUnidade,
     porPaciente,
-    resumo: { pacientesAumentaram, sessoesAumentadas, pacientesReduziram, sessoesReduzidas, pacientesSemAlteracao },
+    resumo: {
+      pacientesAumentaram, sessoesAumentadas, pacientesReduziram, sessoesReduzidas, pacientesSemAlteracao,
+      pacientesNovosCaptados, sessoesNovosCaptados, pacientesDesligados, sessoesDesligados,
+    },
   }
 }
