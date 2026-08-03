@@ -13,16 +13,98 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import * as XLSX from "xlsx"
 import {
   Upload, CheckCircle2, X, Loader2, TrendingUp, TrendingDown, Minus, Building2, Users, ArrowRightLeft,
-  DatabaseZap, AlertTriangle, ChevronUp, ChevronDown, ChevronsUpDown, ChevronRight,
+  DatabaseZap, AlertTriangle, ChevronUp, ChevronDown, ChevronsUpDown, ChevronRight, Filter,
 } from "lucide-react"
 import { StatCard } from "@/components/cronograma/ui/StatCard"
 import { StatusPill } from "@/components/cronograma/ui/StatusPill"
+import { TONE_SOFT, TONE_SOLID, TONE_ACCENT, type Tone } from "@/components/cronograma/ui/tones"
 import { getRefWeek } from "@/lib/cronograma/helpers"
 import {
-  normalizarLinhasUpload, normalizarLinhasApi, calcularComparativo, calcularPorPacienteDaUnidade,
-  type SessaoComparativo, type ComparativoResultado, type UnidadeComparativo, type PacienteComparativo,
+  normalizarLinhasUpload, normalizarLinhasApi, calcularComparativo, calcularPorPacienteDaUnidade, classificarMovimento,
+  type SessaoComparativo, type ComparativoResultado, type UnidadeComparativo, type PacienteComparativo, type CategoriaMovimento,
 } from "@/lib/cronograma/comparativoSessoes"
 import { buscarGradeComparativo } from "@/lib/cronograma/gradeService"
+
+const FILTRO_LABEL: Record<CategoriaMovimento, string> = {
+  aumento: "Pacientes com aumento",
+  novos: "Novos pacientes captados",
+  reducao: "Pacientes com redução",
+  desligados: "Pacientes desligados",
+  semAlteracao: "Sem alteração",
+}
+const FILTRO_TONE: Record<CategoriaMovimento, Tone> = {
+  aumento: "green", novos: "green", reducao: "red", desligados: "red", semAlteracao: "slate",
+}
+const RING_TONE: Record<Tone, string> = {
+  green: "ring-emerald-400", red: "ring-rose-400", slate: "ring-slate-400",
+  blue: "ring-sky-400", amber: "ring-amber-400", purple: "ring-violet-400",
+}
+
+interface MetricButtonProps {
+  label: string
+  qtd: number
+  sessoes: number
+  sign: "pos" | "neg"
+  tone: Tone
+  active: boolean
+  onClick: () => void
+}
+
+/** Metade clicável de um GroupCard — mostra pacientes + sessões e funciona como filtro toggle da tabela "Por Paciente". */
+function MetricButton({ label, qtd, sessoes, sign, tone, active, onClick }: MetricButtonProps) {
+  const soft = TONE_SOFT[tone]
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-pressed={active}
+      title={`Filtrar Por Paciente: ${label}`}
+      className={`relative flex-1 px-4 py-3 text-left transition-colors ${active ? soft.bg : "hover:bg-muted/40"}`}
+    >
+      {active && <span className={`pointer-events-none absolute inset-1.5 rounded-xl ring-2 ${RING_TONE[tone]}`} />}
+      <div className="mb-1.5 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+        {active && <Filter size={10} className={soft.text} />}
+        {label}
+      </div>
+      <div className="flex items-baseline gap-3">
+        <div>
+          <div className="text-xl font-black text-foreground">{qtd}</div>
+          <div className="text-[10px] text-muted-foreground">pacientes</div>
+        </div>
+        <div>
+          <div className={`text-xl font-black ${sign === "pos" ? "text-emerald-600 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+            {sign === "pos" ? "+" : "-"}{sessoes}
+          </div>
+          <div className="text-[10px] text-muted-foreground">sessões</div>
+        </div>
+      </div>
+    </button>
+  )
+}
+
+interface GroupCardProps {
+  tone: "green" | "red"
+  icon: React.ReactNode
+  title: string
+  children: React.ReactNode
+}
+
+/** Card que agrupa duas métricas relacionadas (ex.: Ganhos = Aumento + Novos captados) sob um mesmo título/tom. */
+function GroupCard({ tone, icon, title, children }: GroupCardProps) {
+  const soft = TONE_SOFT[tone]
+  const accent = TONE_ACCENT[tone]
+  const border = tone === "green" ? "border-emerald-200/70 dark:border-emerald-800/40" : "border-rose-200/70 dark:border-rose-800/40"
+  return (
+    <div className={`rounded-2xl border ${border} ${soft.bg} shadow-sm overflow-hidden`}>
+      <div className="h-1 w-full" style={{ background: `linear-gradient(90deg, ${accent}cc, ${accent}33)` }} />
+      <div className={`flex items-center gap-1.5 px-4 pt-3 pb-1 text-xs font-bold uppercase tracking-wide ${soft.text}`}>
+        {icon}
+        {title}
+      </div>
+      <div className="grid grid-cols-2 divide-x divide-border/60">{children}</div>
+    </div>
+  )
+}
 
 type SortDir = "asc" | "desc"
 
@@ -121,7 +203,7 @@ function UploadCard({ label, fileName, count, loading, error, onFile, onClear }:
 
   return (
     <div
-      className={`relative inline-flex w-auto max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] transition-colors select-none
+      className={`relative inline-flex w-auto max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] leading-none transition-colors select-none
         ${!loaded && !loading ? "cursor-pointer" : ""}
         ${dragging ? "border-primary bg-primary/5" : loaded ? "border-green-400 bg-green-50 dark:bg-green-950/20" : "border-border bg-card hover:border-[#2A92C0]/40 hover:bg-muted/40"}`}
       onClick={() => !loaded && !loading && inputRef.current?.click()}
@@ -132,27 +214,27 @@ function UploadCard({ label, fileName, count, loading, error, onFile, onClear }:
       <input ref={inputRef} type="file" accept=".xlsx,.xls" className="hidden" onChange={onInputChange} />
       {loaded ? (
         <>
-          <CheckCircle2 size={13} className="shrink-0 text-green-500" />
-          <span className="max-w-[160px] truncate font-semibold text-green-700 dark:text-green-400">{fileName ?? label}</span>
+          <CheckCircle2 size={11} className="shrink-0 text-green-500" />
+          <span className="max-w-[140px] truncate font-semibold text-green-700 dark:text-green-400">{fileName ?? label}</span>
           <span className="shrink-0 text-green-600 dark:text-green-500">({count})</span>
           <button
             onClick={e => { e.stopPropagation(); onClear() }}
             className="shrink-0 text-muted-foreground hover:text-destructive transition-colors"
             title="Remover"
           >
-            <X size={12} />
+            <X size={11} />
           </button>
         </>
       ) : loading ? (
         <span className="text-primary animate-pulse">Processando...</span>
       ) : error ? (
         <>
-          <Upload size={13} className="shrink-0 text-muted-foreground" />
+          <Upload size={11} className="shrink-0 text-muted-foreground" />
           <span className="text-destructive">{error}</span>
         </>
       ) : (
         <>
-          <Upload size={13} className="shrink-0 text-muted-foreground" />
+          <Upload size={11} className="shrink-0 text-muted-foreground" />
           <span className="font-medium text-foreground">{label}</span>
           <span className="text-muted-foreground">(.xlsx/.xls)</span>
         </>
@@ -255,6 +337,18 @@ export function ComparativoSessoesShell() {
     [resultado, sortPaciente],
   )
 
+  // Filtro por categoria de movimento: clicar num card de resumo (Aumento,
+  // Novos captados, Redução, Desligados, Sem alteração) filtra a tabela "Por
+  // Paciente" só pra essa categoria. Clicar de novo no mesmo card limpa o filtro.
+  const [filtroCategoria, setFiltroCategoria] = useState<CategoriaMovimento | null>(null)
+  function toggleFiltro(categoria: CategoriaMovimento) {
+    setFiltroCategoria(prev => (prev === categoria ? null : categoria))
+  }
+  const porPacienteFiltrado = useMemo(
+    () => filtroCategoria ? porPacienteOrdenado.filter(p => classificarMovimento(p) === filtroCategoria) : porPacienteOrdenado,
+    [porPacienteOrdenado, filtroCategoria],
+  )
+
   function onSortUnidade(key: string) {
     setSortUnidade(prev => ({
       key: key as keyof UnidadeComparativo,
@@ -285,11 +379,17 @@ export function ComparativoSessoesShell() {
     return ordenarPor(rows, sortPacienteUnidade.key, sortPacienteUnidade.dir)
   }, [sessoesP1, sessoesP2, unidadeExpandida, sortPacienteUnidade])
 
+  const [anoIni, mesIni, diaIni] = refWeek.inicio.split("-")
+  const [anoFim, mesFim, diaFim] = refWeek.fim.split("-")
+  const rangeCompacto = anoIni === anoFim
+    ? `${diaIni}/${mesIni} a ${diaFim}/${mesFim}/${anoFim}`
+    : refWeek.label
+
   return (
     <div className="flex flex-col gap-4">
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5">
-        <div className="flex items-center gap-1.5">
-          <span className="shrink-0 whitespace-nowrap text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Período 1</span>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-border bg-card px-2.5 py-1.5">
+        <div className="flex items-center gap-1">
+          <span className="shrink-0 whitespace-nowrap text-[9px] font-bold uppercase tracking-wide text-muted-foreground">Período 1</span>
           <UploadCard
             label="Agendamentos Profissionais"
             fileName={fileNameP1}
@@ -301,8 +401,10 @@ export function ComparativoSessoesShell() {
           />
         </div>
 
-        <div className="flex items-center gap-1.5">
-          <span className="shrink-0 whitespace-nowrap text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Período 2</span>
+        <div className="hidden h-4 w-px shrink-0 bg-border sm:block" />
+
+        <div className="flex flex-wrap items-center gap-1">
+          <span className="shrink-0 whitespace-nowrap text-[9px] font-bold uppercase tracking-wide text-muted-foreground">Período 2</span>
           <UploadCard
             label="Agendamentos Profissionais (opcional)"
             fileName={fileNameP2}
@@ -314,24 +416,24 @@ export function ComparativoSessoesShell() {
           />
           {!usandoUploadP2 && (
             <span
-              className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px]
+              className={`inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[10px] leading-none
                 ${loadingApiP2 ? "border-border bg-card" : errorApiP2 ? "border-rose-300 bg-rose-50 dark:bg-rose-950/20" : "border-green-400 bg-green-50 dark:bg-green-950/20"}`}
             >
               {loadingApiP2 ? (
                 <>
-                  <Loader2 size={12} className="shrink-0 animate-spin text-muted-foreground" />
+                  <Loader2 size={10} className="shrink-0 animate-spin text-muted-foreground" />
                   <span className="text-foreground">Carregando grade...</span>
                 </>
               ) : errorApiP2 ? (
                 <>
-                  <AlertTriangle size={12} className="shrink-0 text-rose-500" />
+                  <AlertTriangle size={10} className="shrink-0 text-rose-500" />
                   <span className="text-rose-700 dark:text-rose-400">{errorApiP2}</span>
                 </>
               ) : (
                 <>
-                  <DatabaseZap size={12} className="shrink-0 text-green-500" />
-                  <span className="font-semibold text-green-700 dark:text-green-400">Grade · {sessoesApiP2.length} horários</span>
-                  <span className="text-green-600 dark:text-green-500">· {refWeek.label}</span>
+                  <DatabaseZap size={10} className="shrink-0 text-green-500" />
+                  <span className="font-semibold text-green-700 dark:text-green-400">{sessoesApiP2.length} horários</span>
+                  <span className="text-green-600 dark:text-green-500">· {rangeCompacto}</span>
                 </>
               )}
             </span>
@@ -362,34 +464,47 @@ export function ComparativoSessoesShell() {
             </StatCard>
           </div>
 
-          <div className="grid gap-3 md:grid-cols-3">
-            <StatCard tone="green" icon={<TrendingUp size={15} />} label="Pacientes com aumento">
-              <div className="flex items-baseline gap-4">
-                <div>
-                  <div className="text-2xl font-black text-foreground">{resultado.resumo.pacientesAumentaram}</div>
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">pacientes</div>
-                </div>
-                <div>
-                  <div className="text-2xl font-black text-emerald-600 dark:text-emerald-400">+{resultado.resumo.sessoesAumentadas}</div>
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">sessões</div>
-                </div>
-              </div>
-            </StatCard>
-            <StatCard tone="red" icon={<TrendingDown size={15} />} label="Pacientes com redução">
-              <div className="flex items-baseline gap-4">
-                <div>
-                  <div className="text-2xl font-black text-foreground">{resultado.resumo.pacientesReduziram}</div>
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">pacientes</div>
-                </div>
-                <div>
-                  <div className="text-2xl font-black text-rose-600 dark:text-rose-400">-{resultado.resumo.sessoesReduzidas}</div>
-                  <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">sessões</div>
-                </div>
-              </div>
-            </StatCard>
-            <StatCard tone="slate" icon={<Minus size={15} />} label="Sem alteração">
+          {/* Ganhos e Perdas agrupados por sentido do movimento — cada metade é um
+              filtro clicável da tabela "Por Paciente" abaixo (toggle). */}
+          <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_180px]">
+            <GroupCard tone="green" icon={<TrendingUp size={14} />} title="Ganhos de sessões">
+              <MetricButton
+                label="Pacientes com aumento" sign="pos" tone="green"
+                qtd={resultado.resumo.pacientesAumentaram} sessoes={resultado.resumo.sessoesAumentadas}
+                active={filtroCategoria === "aumento"} onClick={() => toggleFiltro("aumento")}
+              />
+              <MetricButton
+                label="Novos pacientes captados" sign="pos" tone="green"
+                qtd={resultado.resumo.pacientesNovosCaptados} sessoes={resultado.resumo.sessoesNovosCaptados}
+                active={filtroCategoria === "novos"} onClick={() => toggleFiltro("novos")}
+              />
+            </GroupCard>
+            <GroupCard tone="red" icon={<TrendingDown size={14} />} title="Perdas de sessões">
+              <MetricButton
+                label="Pacientes com redução" sign="neg" tone="red"
+                qtd={resultado.resumo.pacientesReduziram} sessoes={resultado.resumo.sessoesReduzidas}
+                active={filtroCategoria === "reducao"} onClick={() => toggleFiltro("reducao")}
+              />
+              <MetricButton
+                label="Pacientes desligados" sign="neg" tone="red"
+                qtd={resultado.resumo.pacientesDesligados} sessoes={resultado.resumo.sessoesDesligados}
+                active={filtroCategoria === "desligados"} onClick={() => toggleFiltro("desligados")}
+              />
+            </GroupCard>
+            <button
+              type="button"
+              onClick={() => toggleFiltro("semAlteracao")}
+              aria-pressed={filtroCategoria === "semAlteracao"}
+              title="Filtrar Por Paciente: Sem alteração"
+              className={`relative flex flex-col items-center justify-center gap-1 rounded-2xl border p-4 text-center shadow-sm transition-colors
+                ${filtroCategoria === "semAlteracao" ? `${TONE_SOFT.slate.bg} border-slate-300 dark:border-slate-700` : "border-border bg-card hover:bg-muted/40"}`}
+            >
+              {filtroCategoria === "semAlteracao" && <span className="pointer-events-none absolute inset-1.5 rounded-xl ring-2 ring-slate-400" />}
+              {filtroCategoria === "semAlteracao" && <Filter size={11} className={TONE_SOFT.slate.text} />}
+              <Minus size={16} className="text-muted-foreground" />
               <div className="text-2xl font-black text-foreground">{resultado.resumo.pacientesSemAlteracao}</div>
-            </StatCard>
+              <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sem alteração</div>
+            </button>
           </div>
 
           <div className="rounded-xl border border-border bg-card p-4">
@@ -491,10 +606,23 @@ export function ComparativoSessoesShell() {
           </div>
 
           <div className="rounded-xl border border-border bg-card p-4">
-            <div className="mb-3 flex items-center gap-2">
+            <div className="mb-3 flex flex-wrap items-center gap-2">
               <Users size={15} className="text-muted-foreground" />
               <span className="text-sm font-bold text-foreground">Por Paciente</span>
-              <span className="text-xs text-muted-foreground">({resultado.porPaciente.length})</span>
+              <span className="text-xs text-muted-foreground">
+                {filtroCategoria ? `${porPacienteFiltrado.length} de ${porPacienteOrdenado.length}` : `(${porPacienteOrdenado.length})`}
+              </span>
+              {filtroCategoria && (
+                <button
+                  type="button"
+                  onClick={() => setFiltroCategoria(null)}
+                  className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-semibold transition-colors ${TONE_SOLID[FILTRO_TONE[filtroCategoria]].bg} ${TONE_SOLID[FILTRO_TONE[filtroCategoria]].text}`}
+                >
+                  <Filter size={11} />
+                  {FILTRO_LABEL[filtroCategoria]}
+                  <X size={11} />
+                </button>
+              )}
             </div>
             <div className="max-h-[480px] overflow-auto">
               <table className="w-full text-xs">
@@ -509,7 +637,10 @@ export function ComparativoSessoesShell() {
                   </tr>
                 </thead>
                 <tbody>
-                  {porPacienteOrdenado.map(p => (
+                  {porPacienteFiltrado.length === 0 && (
+                    <tr><td colSpan={6} className="py-4 text-center text-muted-foreground">Nenhum paciente nessa categoria.</td></tr>
+                  )}
+                  {porPacienteFiltrado.map(p => (
                     <tr key={`${p.idFavorecido ?? "s"}-${p.paciente}`} className="border-b border-border/40 last:border-0 hover:bg-muted/30">
                       <td className="py-1.5 pr-2 tabular-nums text-muted-foreground">{p.idFavorecido ?? "—"}</td>
                       <td className="py-1.5 px-2 text-foreground">{p.paciente}</td>
