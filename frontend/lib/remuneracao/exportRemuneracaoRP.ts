@@ -3,8 +3,14 @@
 
 import * as XLSX from "xlsx"
 import { formatDateBR } from "./datas"
-import type { ProfRemunReal } from "./calculo"
+import type { ModalidadeAnalise, ProfRemunReal } from "./calculo"
 import type { SessaoReal } from "./relatorio"
+
+const MODALIDADE_LABEL: Record<ModalidadeAnalise, string> = {
+  atendimento: "Por atendimento",
+  banco_horas: "Banco de horas",
+  hibrido: "Banco de horas + atendimento",
+}
 
 export type ExportarRemuneracaoRPOpts = {
   resultado: ProfRemunReal[]
@@ -42,6 +48,13 @@ export function exportarRemuneracaoRPXlsx(opts: ExportarRemuneracaoRPOpts): void
     Tem_Contrato_Antigo: p.temAntigo ? "Sim" : "Não",
     Remuneracao_Confirmada: p.valorConfirmado,
     Potencial_Apos_Regularizacao: p.valorPotencial,
+    // Modelo de faturamento do contrato vigente. Remuneracao_Confirmada continua
+    // sendo só a apuração variável (PA/PPD/PE/ETA) — quem soma a folha usa
+    // Total_A_Pagar, que é a coluna que inclui o valor fixo do banco de horas.
+    Modalidade: MODALIDADE_LABEL[p.modalidade],
+    Contratos_Banco_Horas: p.numerosBancoHoras.join(" / "),
+    Banco_Horas_Valor_Fixo: p.valorFixoBancoHoras,
+    Total_A_Pagar: p.valorTotalAPagar,
   }))), "Resumo por profissional")
 
   const peDetalhe = resultado.flatMap(p => (p.peDetalhe || []).map(x => ({

@@ -1,7 +1,7 @@
 import { cleanTxt, onlyDigits, htmlEsc } from "./formatacao"
 import { normKey, ETA_ADMIN_NOMES } from "./constants"
 import { abreviarNomePaciente } from "./pacientes"
-import { ProfRemunReal } from "./calculo"
+import { PA_TEXTO_BANCO_HORAS, ProfRemunReal } from "./calculo"
 
 export function formatCPF(v: string | null | undefined): string {
   const d = onlyDigits(v)
@@ -95,10 +95,14 @@ export function montarHtmlDocumentoFaturamento(p: ProfRemunReal, opts: PdfOpts):
   const peConfirmadoDetalhe = p.peConfirmadoDetalhe ?? p.peIntegralConfirmadoDetalhe ?? []
   const peConfirmadoQtd = p.peProporcionalAtivo ? (p.peConfirmadoQtd ?? peConfirmadoDetalhe.length) : (p.pacientesCCQtd || 0)
   const peConfirmadoValor = p.peProporcionalAtivo ? (p.peConfirmadoValor ?? peConfirmadoDetalhe.reduce((s, x) => s + Number(x.valor || 0), 0)) : (p.pe || 0)
-  const valorConfirmadoPrestador = p.valorConfirmado - (p.pe || 0) + peConfirmadoValor
+  // Valor fixo do contrato em banco de horas: não é apurado por sessão, então não
+  // está em p.valorConfirmado — entra como linha própria e soma no total, senão o
+  // demonstrativo do prestador sairia sem a parte principal do que ele recebe.
+  const fixoBancoHoras = p.valorFixoBancoHoras ?? 0
+  const valorConfirmadoPrestador = p.valorConfirmado - (p.pe || 0) + peConfirmadoValor + fixoBancoHoras
 
   const paBreakdown: Record<string, { count: number, rate: number, total: number, explicacao: string }> = {}
-  const outroContratoBreakdown: Record<string, { count: number, explicacao: string }> = {}
+  const outroContratoBreakdown: Record<string, { count: number, explicacao: string, bancoHoras: boolean }> = {}
   
   p.sessoes
     .filter(s => (s.papel === "Agenda" && s.classificacao === "Evolução normal") || (s.papel === "Substituição realizada"))
@@ -109,7 +113,13 @@ export function montarHtmlDocumentoFaturamento(p: ProfRemunReal, opts: PdfOpts):
       
       if (s.semPA || s.valorPATexto) {
         const key = s.especialidade
-        if (!outroContratoBreakdown[key]) outroContratoBreakdown[key] = { count: 0, explicacao: s.explicacaoPA || "" }
+        if (!outroContratoBreakdown[key]) outroContratoBreakdown[key] = {
+          count: 0,
+          explicacao: s.explicacaoPA || "",
+          // "Tratado em outro contrato" e "Banco de Horas" zeram o PA por motivos
+          // diferentes e não podem sair com o mesmo texto no demonstrativo.
+          bancoHoras: s.valorPATexto === PA_TEXTO_BANCO_HORAS,
+        }
         outroContratoBreakdown[key].count++
         return
       }
@@ -138,10 +148,17 @@ export function montarHtmlDocumentoFaturamento(p: ProfRemunReal, opts: PdfOpts):
     return `<tr><td><strong>PA – Valor por Atendimento Realizado</strong><br><span>${esc(detalhe)}</span></td><td>${d.count} sessão(ões) × ${money(d.rate)}</td><td class="val">${money(d.total)}</td></tr>`
   }).join("")
   
-  linhasFinanceiras += Object.entries(outroContratoBreakdown).map(([esp, d]) =>
-    `<tr><td><strong>Atendimento tratado em outro contrato</strong><br><span>${esc(esp)}</span></td><td>${d.count} sessão(ões)</td><td class="val">Tratado em outro contrato</td></tr>`
-  ).join("")
-  
+  linhasFinanceiras += Object.entries(outroContratoBreakdown).map(([esp, d]) => {
+    const titulo = d.bancoHoras ? "Atendimento coberto pelo banco de horas" : "Atendimento tratado em outro contrato"
+    const valor = d.bancoHoras ? "Incluído no valor fixo" : "Tratado em outro contrato"
+    return `<tr><td><strong>${titulo}</strong><br><span>${esc(esp)}</span></td><td>${d.count} sessão(ões)</td><td class="val">${valor}</td></tr>`
+  }).join("")
+
+  if (fixoBancoHoras > 0) {
+    const nums = (p.numerosBancoHoras ?? []).join(" / ")
+    linhasFinanceiras += `<tr><td><strong>Banco de Horas – valor fixo do contrato</strong>${nums ? `<br><span>${esc(nums)}</span>` : ""}</td><td>valor total do período (não por sessão)</td><td class="val">${money(fixoBancoHoras)}</td></tr>`
+  }
+
   if (isCC && peConfirmadoValor > 0) {
     const calcPE = p.peProporcionalAtivo
       ? `${peConfirmadoQtd} paciente(s) com PE confirmado`
@@ -170,7 +187,7 @@ export function montarHtmlDocumentoFaturamento(p: ProfRemunReal, opts: PdfOpts):
       <td class="card navy"><div class="card-ico">📅</div><div class="card-num">${p.agendadas}</div><div class="card-title">Total vinculadas</div></td>
       <td class="card green"><div class="card-ico">✅</div><div class="card-num">${p.evoluidasProprias}</div><div class="card-title">Evoluções próprias</div></td>
       <td class="card blue"><div class="card-ico">🔄</div><div class="card-num">${p.substituicoesRealizadas}</div><div class="card-title">Substituições</div></td>
-      <td class="card total"><div class="card-ico">💰</div><div class="card-num">${totalSessoes}</div><div class="card-title">Total elegíveis ao PA</div></td>
+      <td class="card total"><div class="card-ico">💰</div><div class="card-num">${totalSessoes}</div><div class="card-title">${p.modalidade === "banco_horas" ? "Cobertas pelo valor fixo" : "Total elegíveis ao PA"}</div></td>
     </tr></tbody></table>`
 
   const pacientesHTML = isCC && pacientesCCAbrev.length > 0 ? `

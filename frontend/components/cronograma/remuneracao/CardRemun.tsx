@@ -11,7 +11,7 @@
 // • tabular-nums em todos os valores monetários
 
 import { useMemo, useCallback, memo, useState } from "react"
-import { ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, XCircle, HelpCircle, Users, Lock } from "lucide-react"
+import { ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, XCircle, HelpCircle, Users, Lock, Wallet } from "lucide-react"
 import { B } from "@/lib/cronograma/constants"
 import { fmt, isSim } from "@/lib/remuneracao/formatacao"
 import { formatDateBR } from "@/lib/remuneracao/datas"
@@ -33,11 +33,11 @@ const TONE_CHIP: Record<Tone, { bg: string; text: string; border: string }> = {
   gray:   { bg: "bg-slate-100 dark:bg-slate-800/60",     text: "text-slate-600 dark:text-slate-400",     border: "border-slate-200 dark:border-slate-700" },
 }
 
-function StatusChip({ tone, children, className = "", dense = false }: { tone: Tone; children: React.ReactNode; className?: string; dense?: boolean }) {
+function StatusChip({ tone, children, className = "", dense = false, title }: { tone: Tone; children: React.ReactNode; className?: string; dense?: boolean; title?: string }) {
   const c = TONE_CHIP[tone]
   const sizing = dense ? "text-[10px] px-1.5 py-0.5" : "text-[11px] px-2 py-0.5"
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full font-semibold whitespace-nowrap ${sizing} ${c.bg} ${c.text} ${className}`}>
+    <span title={title} className={`inline-flex items-center gap-1 rounded-full font-semibold whitespace-nowrap ${sizing} ${c.bg} ${c.text} ${className}`}>
       {children}
     </span>
   )
@@ -463,7 +463,19 @@ export default function CardRemun({
 
   const peValorTela = p.pe ?? 0
 
-  const valorConfirmadoTela = p.valorConfirmado
+  // Banco de horas (modelo_faturamento do contrato em /cadastros/contratos): o PA
+  // por sessão já vem zerado do cálculo, e o valor fixo do contrato entra aqui —
+  // sem isso o card mostrava "Recebe agora" contando só PPD/ETA/PE.
+  const emBancoDeHoras = p.modalidade !== "atendimento"
+  // Banco de horas PURO: o valor fixo é a remuneração inteira. PPD/ETA/PE já vêm
+  // zerados do cálculo, então o card não os desenha — só explica por quê.
+  const soFixo = p.modalidade === "banco_horas"
+  const fixoBancoHoras = p.valorFixoBancoHoras ?? 0
+  // Contrato marcado como banco de horas mas sem valor total cadastrado: o PA foi
+  // zerado e não há fixo para pôr no lugar, então o profissional apareceria
+  // recebendo quase nada sem nenhum aviso. É pendência de cadastro, não R$ 0.
+  const fixoNaoCadastrado = emBancoDeHoras && fixoBancoHoras <= 0
+  const valorAPagarTela = p.valorTotalAPagar
 
   const peGrupos = useMemo(() => {
     const situacao = (x: PeLinhaItem) => String(x.situacao ?? "")
@@ -575,11 +587,31 @@ export default function CardRemun({
                 ({totalRecebeHoje} remun. / {baseCalc} válidas)
               </span>
             </div>
-            {p.inconsistencias > 0 && (
-              <StatusChip tone="red" className="mt-1 text-xs px-2">
-                ⚠ {p.inconsistencias} inconsistência(s)
-              </StatusChip>
-            )}
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              {p.inconsistencias > 0 && (
+                <StatusChip tone="red" className="text-xs px-2">
+                  ⚠ {p.inconsistencias} inconsistência(s)
+                </StatusChip>
+              )}
+              {/* Mesmo vocabulário da Análise Futura, para as duas telas dizerem a
+                  mesma coisa sobre o mesmo contrato. */}
+              {emBancoDeHoras && (
+                <StatusChip
+                  tone={fixoNaoCadastrado ? "red" : "amber"}
+                  className="text-xs px-2"
+                  title={fixoNaoCadastrado
+                    ? `Contrato ${p.numerosBancoHoras.join(" / ") || "vigente"} está marcado como banco de horas, mas sem valor total cadastrado em Cadastros › Contratos. O PA por sessão foi zerado e não há valor fixo para pagar no lugar.`
+                    : p.modalidade === "hibrido"
+                      ? "Tem contrato vigente em banco de horas e em atendimento — recebe pelos dois."
+                      : "Contrato vigente em banco de horas: o valor fixo do período é a remuneração inteira — sem PA por sessão, PPD, bônus ETA ou PE por cima."}
+                >
+                  <Wallet size={11} />
+                  {fixoNaoCadastrado
+                    ? "Banco de horas sem valor cadastrado"
+                    : p.modalidade === "hibrido" ? "Banco de horas + PA" : "Banco de horas"}
+                </StatusChip>
+              )}
+            </div>
           </div>
         </div>
 
@@ -599,7 +631,7 @@ export default function CardRemun({
             </div>
             <div className="text-right shrink-0">
               <div className="text-[10px] text-muted-foreground">Recebe</div>
-              <div className="text-sm font-black tabular-nums" style={{ color: B.green }}>{fmt(valorConfirmadoTela)}</div>
+              <div className="text-sm font-black tabular-nums" style={{ color: B.green }}>{fmt(valorAPagarTela)}</div>
             </div>
             <div className="text-right shrink-0">
               <div className="text-[10px] text-muted-foreground">Pendente</div>
@@ -666,10 +698,20 @@ export default function CardRemun({
               iconColor="#16a34a"
               icon={<CheckCircle2 size={16} />}
               titulo="Recebe agora"
-              tooltip="PA = Pagamento por Atendimento. Recebe agora soma evoluções próprias e substituições realizadas. Em contrato duplo AC+PS, a substituição usa a função do profissional substituído na agenda."
-              valor={fmt(valorConfirmadoTela)}
+              tooltip="PA = Pagamento por Atendimento. Recebe agora soma evoluções próprias e substituições realizadas. Em contrato duplo AC+PS, a substituição usa a função do profissional substituído na agenda. Em contrato de banco de horas o valor fixo do contrato é a remuneração inteira: não há PA por sessão, PPD, bônus ETA nem PE."
+              valor={fmt(valorAPagarTela)}
               onHover={setCardHover}
             >
+              {fixoBancoHoras > 0 && (
+                <div>• Banco de horas: {fmt(fixoBancoHoras)}
+                  {p.numerosBancoHoras.length > 0 && ` · ${p.numerosBancoHoras.join(" / ")}`}
+                </div>
+              )}
+              {fixoNaoCadastrado && (
+                <div className="font-semibold" style={{ color: B.red }}>
+                  • Banco de horas sem valor total cadastrado — nada a pagar pelo contrato.
+                </div>
+              )}
               {p.evoluidasProprias > 0 && <div>• {p.evoluidasProprias} evolução(ões) própria(s)</div>}
               {p.substituicoesRealizadas > 0 && <div>• {p.substituicoesRealizadas} substituição(ões)</div>}
               {isCC && pePacientesTela > 0 && (
@@ -686,8 +728,17 @@ export default function CardRemun({
                 )}
                 {(p.diariaPeriodo ?? 0) > 0 && <div>• PPD: {fmt(p.diariaPeriodo ?? 0)}</div>}
                 {(p.etaBonusPeriodo ?? 0) > 0 && <div>• Bônus ETA: {p.etaWeeksPeriodo}sem × {fmt(etaBonus)}</div>}
+                {soFixo && (
+                  <div className="text-muted-foreground">
+                    • PPD, bônus ETA e PE não se somam a contrato de valor fixo.
+                  </div>
+                )}
+                {/* "Elegível ao PA" com contrato em banco de horas era falso: as
+                    sessões estão lá, o PA delas é zero por contrato. */}
                 <div className="font-semibold border-t border-emerald-200 dark:border-emerald-800 pt-1 mt-1 text-emerald-700 dark:text-emerald-400">
-                  {totalRecebeHoje} sessão(ões) elegível(is) ao PA
+                  {soFixo
+                    ? `${totalRecebeHoje} sessão(ões) cobertas pelo valor fixo — sem PA por sessão`
+                    : `${totalRecebeHoje} sessão(ões) elegível(is) ao PA`}
                 </div>
             </KpiStatCard>
 
@@ -750,8 +801,10 @@ export default function CardRemun({
             </div>{/* fim flex horizontal */}
           </div>{/* fim wrapper px-4 */}
 
-          {/* ── Bloco CC / PE ────────────────────────────────────── */}
-          {isCC && (pePacientesTela > 0 || p.peBloqueado) && (
+          {/* ── Bloco CC / PE ──────────────────────────────────────
+              Banco de horas puro não paga PE: o bloco inteiro sairia com zeros e
+              uma análise de PE por paciente que não vira dinheiro nenhum. */}
+          {!soFixo && isCC && (pePacientesTela > 0 || p.peBloqueado) && (
             <div className="px-4 pb-4">
               <div className="rounded-2xl overflow-hidden shadow-sm border border-purple-200 dark:border-purple-800/60">
 
@@ -841,7 +894,7 @@ export default function CardRemun({
                         Total confirmado
                       </p>
                       <div className="text-xl font-black tabular-nums" style={{ color: B.green }}>
-                        {fmt(valorConfirmadoTela)}
+                        {fmt(valorAPagarTela)}
                       </div>
                     </div>
                     <div className="border-t border-purple-100 dark:border-purple-900/40 pt-3">

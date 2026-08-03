@@ -248,9 +248,12 @@ function ContratoAntigoCard({ d }: { d: ProfissionalAnalise }) {
 // os dois de projeção por presença (que não faz diferença num valor fixo). O
 // valor/hora é derivado, nunca cadastrado: valor fixo ÷ horas agendadas no mês.
 function BancoDeHorasCard({ d, presenca }: { d: ProfissionalAnalise; presenca: number | null }) {
-  const ppd = d.terapiaDetails.filter(t => !t.isCC).reduce((s, t) => s + (t.mensalDiaria || 0), 0)
-  const etaBonusTotal = d.terapiaDetails.reduce((s, t) => s + (t.mensalETA100 || 0), 0)
   const c = TONE_CLS.amber
+  // Só o valor fixo: em banco de horas puro o cálculo já zera PA, PPD, ETA e PE na
+  // origem. No híbrido eles continuam existindo, mas vêm do contrato de
+  // atendimento ao lado — quem os mostra são os cards de presença, não este.
+  const soFixo = d.modalidade === "banco_horas"
+  const semValorCadastrado = d.valorFixoBancoHoras === null
 
   return (
     <StatCardShell tone="amber" icon={<Wallet size={15} />} label="Banco de horas / mês">
@@ -276,14 +279,18 @@ function BancoDeHorasCard({ d, presenca }: { d: ProfissionalAnalise; presenca: n
         </div>
       )}
 
-      {/* PPD, bônus ETA e PE seguem valendo: o banco de horas zera só o PA por
-          sessão, igual à regra da remuneração real em relacionamento-prestador/rp. */}
-      {(ppd > 0 || etaBonusTotal > 0 || d.pe > 0) && (
-        <div className="mt-3 space-y-2.5">
-          {ppd > 0 && <LinhaValorDescricao valor={fmt(ppd)} descricao="PPD · pagamento por diária (fora do valor fixo)" />}
-          {etaBonusTotal > 0 && <LinhaValorDescricao valor={fmt(etaBonusTotal)} descricao="Bônus ETA (fora do valor fixo)" />}
-          {d.pe > 0 && <LinhaValorDescricao valor={fmt(d.pe)} descricao="PE · pagamento por entrega (fora do valor fixo)" />}
-        </div>
+      {semValorCadastrado && (
+        <p className={`mt-2 text-xs font-semibold leading-snug ${TONE_CLS.red.text}`}>
+          Contrato em banco de horas sem valor total cadastrado em Cadastros › Contratos.
+          Enquanto ficar assim, a previsão deste profissional é zero.
+        </p>
+      )}
+
+      {soFixo && (
+        <p className="mt-3 text-xs text-muted-foreground leading-snug">
+          É a remuneração inteira: PA por sessão, PPD, bônus ETA e PE não se somam a um contrato
+          de valor fixo.
+        </p>
       )}
 
       <div className="mt-3 rounded-xl border border-border bg-card px-3.5 py-3.5 space-y-3">
@@ -541,13 +548,17 @@ function ProfissionalCard({
           )}
           {d.modalidade !== "atendimento" && (
             <Chip
-              tone="amber"
-              title={d.modalidade === "hibrido"
-                ? "Tem contrato vigente em banco de horas e em atendimento — recebe pelos dois."
-                : "Contrato vigente em banco de horas: valor fixo, sem PA por sessão."}
+              tone={d.valorFixoBancoHoras === null ? "red" : "amber"}
+              title={d.valorFixoBancoHoras === null
+                ? `Contrato ${d.numerosBancoHoras.join(" / ") || "vigente"} está marcado como banco de horas, mas sem valor total cadastrado em Cadastros › Contratos.`
+                : d.modalidade === "hibrido"
+                  ? "Tem contrato vigente em banco de horas e em atendimento — recebe pelos dois."
+                  : "Contrato vigente em banco de horas: o valor fixo é a remuneração inteira, sem PA, PPD, ETA ou PE por cima."}
             >
               <Wallet size={12} />
-              {d.modalidade === "hibrido" ? "Banco de horas + PA" : "Banco de horas"}
+              {d.valorFixoBancoHoras === null
+                ? "Banco de horas sem valor cadastrado"
+                : d.modalidade === "hibrido" ? "Banco de horas + PA" : "Banco de horas"}
             </Chip>
           )}
           {d.alertaCC && (

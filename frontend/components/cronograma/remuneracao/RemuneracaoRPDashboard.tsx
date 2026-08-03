@@ -65,7 +65,8 @@ interface DashboardProps {
 }
 
 export function RemuneracaoRPDashboard({ resultado, especialidadeFiltro, onFiltroEspecialidade }: DashboardProps) {
-  const { totalMes, porEspecialidade } = useMemo(() => calcularTotalPorEspecialidade(resultado), [resultado])
+  const { totalMes, totalVariavel, totalBancoHoras, profsBancoHoras, porEspecialidade } =
+    useMemo(() => calcularTotalPorEspecialidade(resultado), [resultado])
   const animatedTotal = useCountUp(totalMes)
   const revealed = useReveal()
   const [hoverEsp, setHoverEsp] = useState<string | null>(null)
@@ -90,8 +91,20 @@ export function RemuneracaoRPDashboard({ resultado, especialidadeFiltro, onFiltr
           </div>
           <div className="mt-3 flex items-center gap-1.5 text-xs text-muted-foreground">
             <Users size={13} />
-            {resultado.length} profissional{resultado.length !== 1 ? "is" : ""} com remuneração neste mês
+            {resultado.length} profissiona{resultado.length !== 1 ? "is" : "l"} com remuneração neste mês
           </div>
+
+          {/* Banco de horas é valor fixo de contrato, não apuração por sessão —
+              some no hero mas fica decomposto aqui, senão o total viraria um
+              número sem origem para quem confere a folha. */}
+          {totalBancoHoras > 0 && (
+            <div className="mt-2 text-xs text-muted-foreground leading-relaxed">
+              <span className="tabular-nums font-semibold text-foreground">{fmt(totalVariavel)}</span> em PA/PPD/PE/ETA
+              {" + "}
+              <span className="tabular-nums font-semibold text-amber-700 dark:text-amber-400">{fmt(totalBancoHoras)}</span>
+              {" "}fixo de banco de horas ({profsBancoHoras} profissiona{profsBancoHoras !== 1 ? "is" : "l"})
+            </div>
+          )}
         </div>
 
         {/* ── Barras: total por especialidade ── */}
@@ -132,7 +145,7 @@ export function RemuneracaoRPDashboard({ resultado, especialidadeFiltro, onFiltr
                     onMouseLeave={() => setHoverEsp(null)}
                     onFocus={() => setHoverEsp(esp.especialidade)}
                     onBlur={() => setHoverEsp(null)}
-                    title={`${esp.especialidade}: ${fmt(esp.valor)} · ${(esp.pct * 100).toFixed(1)}% do total · ${esp.profissionais.length} profissional(is)`}
+                    title={`${esp.especialidade}: ${fmt(esp.valor)} · ${(esp.pct * 100).toFixed(1)}% do total apurado por sessão/entrega · ${esp.profissionais.length} profissional(is)`}
                     aria-pressed={selected}
                     className={`w-full text-left transition-opacity duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md ${dimmed ? "opacity-35" : "opacity-100"}`}
                   >
@@ -158,6 +171,13 @@ export function RemuneracaoRPDashboard({ resultado, especialidadeFiltro, onFiltr
                 )
               })}
             </div>
+          )}
+
+          {totalBancoHoras > 0 && (
+            <p className="mt-3 text-[11px] text-muted-foreground leading-snug">
+              As barras somam {fmt(totalVariavel)}. Os {fmt(totalBancoHoras)} de banco de horas não aparecem aqui:
+              são valor fixo de contrato, não pagamento por especialidade.
+            </p>
           )}
         </div>
       </div>
