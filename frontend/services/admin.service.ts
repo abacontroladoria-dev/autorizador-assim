@@ -6,6 +6,7 @@ export type AdminUser = {
   ativo?: boolean
   created_at?: string
   username?: string | null
+  unidades?: string[] | null
 }
 
 export type AdminMachine = {
@@ -22,7 +23,7 @@ export async function getAdminUsers(): Promise<AdminUser[]> {
   const supabase = getSupabaseClient()
   const { data, error } = await supabase
     .from('usuarios')
-    .select('id, nome, email, role, ativo, created_at, username')
+    .select('id, nome, email, role, ativo, created_at, username, unidades')
     .order('nome', { ascending: true })
 
   if (error) {
@@ -66,6 +67,22 @@ export async function changeUserRole(userId: string, role: string) {
   })
 
   return response.ok
+}
+
+export async function updateUserRoleUnidades(
+  userId: string,
+  role: string,
+  unidades: string[]
+): Promise<{ ok: boolean; error?: string }> {
+  const response = await fetch('/api/admin/user/update', {
+    method: 'POST',
+    headers: await getFunctionHeaders(),
+    body: JSON.stringify({ userId, role, unidades }),
+  })
+
+  const json = await response.json()
+  if (!response.ok) return { ok: false, error: json.error }
+  return { ok: true }
 }
 
 export async function updateMachineStatus(machineId: string, ativa: boolean) {

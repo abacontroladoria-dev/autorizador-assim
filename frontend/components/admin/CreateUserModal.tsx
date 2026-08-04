@@ -4,6 +4,7 @@ import { useState } from 'react'
 import toast from 'react-hot-toast'
 import { getFunctionHeaders, getFunctionUrl } from '@/lib/supabase/functions'
 import { normalizarParaUsername } from '@/lib/username'
+import { UNIDADES_DISPONIVEIS } from '@/lib/admin/unidades'
 
 import {
   Dialog,
@@ -23,6 +24,7 @@ export default function CreateUserModal() {
   const [comSenha, setComSenha] = useState(false)
   const [username, setUsername] = useState('')
   const [usernameEditado, setUsernameEditado] = useState(false)
+  const [unidades, setUnidades] = useState<string[]>([...UNIDADES_DISPONIVEIS])
   const [createdResult, setCreatedResult] = useState<{
     nome: string
     email: string
@@ -36,6 +38,7 @@ export default function CreateUserModal() {
     setRole('recepcao')
     setUsername('')
     setUsernameEditado(false)
+    setUnidades([...UNIDADES_DISPONIVEIS])
     setComSenha(false)
     setCreatedResult(null)
   }
@@ -52,6 +55,14 @@ export default function CreateUserModal() {
     setUsernameEditado(true)
   }
 
+  function toggleUnidade(unidade: string) {
+    setUnidades((current) =>
+      current.includes(unidade)
+        ? current.filter((u) => u !== unidade)
+        : [...current, unidade]
+    )
+  }
+
   async function handleCreateUser() {
     if (!nome.trim() || !email.trim()) {
       toast.error('Preencha nome e email.')
@@ -65,7 +76,7 @@ export default function CreateUserModal() {
         const res = await fetch('/api/admin/create-user-with-password', {
           method: 'POST',
           headers: await getFunctionHeaders(),
-          body: JSON.stringify({ nome, email, role, username: username || null }),
+          body: JSON.stringify({ nome, email, role, username: username || null, unidades }),
         })
 
         const json = await res.json()
@@ -77,7 +88,7 @@ export default function CreateUserModal() {
         const res = await fetch(getFunctionUrl('admin-create-user'), {
           method: 'POST',
           headers: await getFunctionHeaders(),
-          body: JSON.stringify({ nome, email, role }),
+          body: JSON.stringify({ nome, email, role, unidades }),
         })
 
         const json = await res.json()
@@ -190,6 +201,31 @@ export default function CreateUserModal() {
                 <option value="admin">Admin</option>
                 <option value="disponibilidade_terapeuta">Disponib. Terapeuta</option>
               </select>
+
+              <div>
+                <p className="mb-2 text-xs font-medium text-slate-500">
+                  Unidade(s) que este usuário pode ver
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {UNIDADES_DISPONIVEIS.map((unidade) => {
+                    const ativa = unidades.includes(unidade)
+                    return (
+                      <button
+                        key={unidade}
+                        type="button"
+                        onClick={() => toggleUnidade(unidade)}
+                        className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
+                          ativa
+                            ? 'bg-[#3A8FB7] text-white'
+                            : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
+                        }`}
+                      >
+                        {unidade}
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
 
               <button
                 onClick={handleCreateUser}

@@ -7,13 +7,13 @@ import AdminSummaryCards from './AdminSummaryCards'
 import AdminUsersTable from './AdminUsersTable'
 import AdminMachinesTable, { isMachineOnline } from './AdminMachinesTable'
 import {
-  changeUserRole,
   deleteUser,
   getAdminMachines,
   getAdminUsers,
   resetUserPassword,
   toggleUserActive,
   updateMachineStatus,
+  updateUserRoleUnidades,
 } from '@/services/admin.service'
 import ResetPasswordModal from './ResetPasswordModal'
 import { getFunctionHeaders, getFunctionUrl } from '@/lib/supabase/functions'
@@ -26,6 +26,7 @@ export type AdminUser = {
   ativo?: boolean
   created_at?: string
   username?: string | null
+  unidades?: string[] | null
 }
 
 export type AdminMachine = {
@@ -150,24 +151,27 @@ export default function AdminPageShell({
     setBusyId(null)
   }
 
-  async function handleRoleChange(userId: string, role: string) {
+  async function handleSaveUser(userId: string, role: string, unidades: string[]) {
     setBusyId(userId)
     setErrorMessage('')
 
-    const updated = await changeUserRole(userId, role)
+    const result = await updateUserRoleUnidades(userId, role, unidades)
 
-    if (!updated) {
-      setErrorMessage('Não foi possível alterar o setor do usuário.')
+    if (!result.ok) {
+      setErrorMessage(result.error ?? 'Não foi possível salvar as alterações do usuário.')
       setBusyId(null)
-      return
+      return false
     }
 
     setUsers((current) =>
       current.map((user) =>
-        user.id === userId ? { ...user, role } : user
+        user.id === userId
+          ? { ...user, role, unidades: unidades.length > 0 ? unidades : null }
+          : user
       )
     )
     setBusyId(null)
+    return true
   }
 
   async function handleResendInvite(userId: string, email: string, nome: string, role: string) {
@@ -260,7 +264,7 @@ export default function AdminPageShell({
             <AdminUsersTable
               users={filteredUsers}
               onToggleActive={handleToggleActive}
-              onChangeRole={handleRoleChange}
+              onSaveUser={handleSaveUser}
               onResendInvite={handleResendInvite}
               onDeleteUser={handleDeleteUser}
               onResetPassword={handleResetPassword}

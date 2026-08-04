@@ -12,6 +12,8 @@ const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
   auth: { persistSession: false },
 });
 
+const UNIDADES_DISPONIVEIS = ["Realengo", "Fazendinha", "Padre Miguel"];
+
 const ALLOWED_ORIGINS = [
   "http://127.0.0.1:3000",
   "https://127.0.0.1:3000",
@@ -92,10 +94,19 @@ serve(async (req: Request) => {
   if (!(await isAdmin(user))) return jsonResponse({ error: "forbidden" }, 403, corsHeaders);
 
   const body = await req.json();
-  const { nome, email, role } = body as { nome?: string; email?: string; role?: string };
+  const { nome, email, role, unidades } = body as {
+    nome?: string;
+    email?: string;
+    role?: string;
+    unidades?: string[];
+  };
   if (!nome || !email || !role) {
     return jsonResponse({ error: "invalid_payload" }, 400, corsHeaders);
   }
+
+  const unidadesValidas = Array.isArray(unidades)
+    ? unidades.filter((u) => UNIDADES_DISPONIVEIS.includes(u))
+    : [];
 
   const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
     data: { nome, role },
@@ -106,11 +117,11 @@ serve(async (req: Request) => {
   }
 
   // O trigger handle_new_user cria o registro em public.usuarios sem o role.
-  // Atualizamos aqui para garantir que o setor correto seja salvo.
+  // Atualizamos aqui para garantir que o setor e as unidades corretas sejam salvos.
   if (data.user) {
     await supabaseAdmin
       .from("usuarios")
-      .update({ role })
+      .update({ role, unidades: unidadesValidas.length > 0 ? unidadesValidas : null })
       .eq("id", data.user.id);
   }
 
