@@ -37,7 +37,7 @@ export default function AdminUsersTable({
   onChangeRole: (userId: string, role: string) => Promise<void>
   onResendInvite: (userId: string, email: string, nome: string, role: string) => Promise<void>
   onDeleteUser: (userId: string) => Promise<void>
-  onResetPassword: (userId: string, nome: string) => Promise<void>
+  onResetPassword: (userId: string, nome: string, email: string, username: string) => Promise<void>
   loadingId: string | null
   searchUser: string
   onSearchUserChange: (value: string) => void
@@ -234,7 +234,14 @@ export default function AdminUsersTable({
 							</button>
 
 							<button
-							  onClick={() => onResetPassword(user.id, user.nome ?? user.email ?? 'usuário')}
+							  onClick={() =>
+								onResetPassword(
+								  user.id,
+								  user.nome ?? user.email ?? 'usuário',
+								  user.email ?? '',
+								  user.username ?? ''
+								)
+							  }
 							  disabled={isLoading}
 							  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
 							>

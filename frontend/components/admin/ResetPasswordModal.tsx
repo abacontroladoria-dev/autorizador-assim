@@ -12,7 +12,7 @@ export default function ResetPasswordModal({
   result,
   onClose,
 }: {
-  result: { nome: string; password: string } | null
+  result: { nome: string; email: string; username: string; password: string } | null
   onClose: () => void
 }) {
   return (
@@ -33,6 +33,8 @@ export default function ResetPasswordModal({
           {result && (
             <GeneratedPasswordReveal
               nome={result.nome}
+              email={result.email}
+              username={result.username}
               password={result.password}
               onClose={onClose}
             />

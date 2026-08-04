@@ -3,6 +3,7 @@
 import { useState } from 'react'
 import toast from 'react-hot-toast'
 import { getFunctionHeaders, getFunctionUrl } from '@/lib/supabase/functions'
+import { normalizarParaUsername } from '@/lib/username'
 
 import {
   Dialog,
@@ -21,17 +22,34 @@ export default function CreateUserModal() {
   const [loading, setLoading] = useState(false)
   const [comSenha, setComSenha] = useState(false)
   const [username, setUsername] = useState('')
-  const [createdResult, setCreatedResult] = useState<{ nome: string; password: string } | null>(
-    null
-  )
+  const [usernameEditado, setUsernameEditado] = useState(false)
+  const [createdResult, setCreatedResult] = useState<{
+    nome: string
+    email: string
+    username: string
+    password: string
+  } | null>(null)
 
   function resetForm() {
     setNome('')
     setEmail('')
     setRole('recepcao')
     setUsername('')
+    setUsernameEditado(false)
     setComSenha(false)
     setCreatedResult(null)
+  }
+
+  function handleNomeChange(value: string) {
+    setNome(value)
+    if (!usernameEditado) {
+      setUsername(normalizarParaUsername(value))
+    }
+  }
+
+  function handleUsernameChange(value: string) {
+    setUsername(value.toLowerCase())
+    setUsernameEditado(true)
   }
 
   async function handleCreateUser() {
@@ -54,7 +72,7 @@ export default function CreateUserModal() {
 
         if (!res.ok) throw new Error(json.error ?? 'Erro ao criar usuário')
 
-        setCreatedResult({ nome, password: json.password })
+        setCreatedResult({ nome, email, username, password: json.password })
       } else {
         const res = await fetch(getFunctionUrl('admin-create-user'), {
           method: 'POST',
@@ -96,6 +114,8 @@ export default function CreateUserModal() {
           {createdResult ? (
             <GeneratedPasswordReveal
               nome={createdResult.nome}
+              email={createdResult.email}
+              username={createdResult.username}
               password={createdResult.password}
               description={
                 <>
@@ -135,7 +155,7 @@ export default function CreateUserModal() {
                 className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-[#3A8FB7] focus:ring-2 focus:ring-[#3A8FB7]/20"
                 placeholder="Nome completo"
                 value={nome}
-                onChange={(e) => setNome(e.target.value)}
+                onChange={(e) => handleNomeChange(e.target.value)}
               />
 
               <input
@@ -149,9 +169,9 @@ export default function CreateUserModal() {
               {comSenha && (
                 <input
                   className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-[#3A8FB7] focus:ring-2 focus:ring-[#3A8FB7]/20"
-                  placeholder="Usuário (opcional)"
+                  placeholder="Usuário (sugestão automática)"
                   value={username}
-                  onChange={(e) => setUsername(e.target.value.toLowerCase())}
+                  onChange={(e) => handleUsernameChange(e.target.value)}
                 />
               )}
 

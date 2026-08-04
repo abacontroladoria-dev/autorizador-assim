@@ -57,6 +57,8 @@ export default function AdminPageShell({
   const [errorMessage, setErrorMessage] = useState('')
   const [resetPasswordResult, setResetPasswordResult] = useState<{
     nome: string
+    email: string
+    username: string
     password: string
   } | null>(null)
 
@@ -206,7 +208,7 @@ export default function AdminPageShell({
     setBusyId(null)
   }
 
-  async function handleResetPassword(userId: string, nome: string) {
+  async function handleResetPassword(userId: string, nome: string, email: string, username: string) {
     setBusyId(userId)
     setErrorMessage('')
 
@@ -218,7 +220,7 @@ export default function AdminPageShell({
       return
     }
 
-    setResetPasswordResult({ nome, password: result.password })
+    setResetPasswordResult({ nome, email, username, password: result.password })
     setBusyId(null)
   }
 
