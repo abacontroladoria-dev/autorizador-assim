@@ -23,6 +23,7 @@ export default function AdminUsersTable({
   onChangeRole,
   onResendInvite,
   onDeleteUser,
+  onResetPassword,
   loadingId,
   searchUser,
   onSearchUserChange,
@@ -36,6 +37,7 @@ export default function AdminUsersTable({
   onChangeRole: (userId: string, role: string) => Promise<void>
   onResendInvite: (userId: string, email: string, nome: string, role: string) => Promise<void>
   onDeleteUser: (userId: string) => Promise<void>
+  onResetPassword: (userId: string, nome: string) => Promise<void>
   loadingId: string | null
   searchUser: string
   onSearchUserChange: (value: string) => void
@@ -218,17 +220,27 @@ export default function AdminUsersTable({
 							{isLoading ? 'Enviando...' : 'Reenviar convite'}
 						  </button>
 						) : (
-						  <button
-							onClick={() => onToggleActive(user.id, !!user.ativo)}
-							disabled={isLoading}
-							className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
-						  >
-							{isLoading
-							  ? 'Atualizando...'
-							  : user.ativo
-							  ? 'Desativar'
-							  : 'Ativar'}
-						  </button>
+						  <>
+							<button
+							  onClick={() => onToggleActive(user.id, !!user.ativo)}
+							  disabled={isLoading}
+							  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+							>
+							  {isLoading
+								? 'Atualizando...'
+								: user.ativo
+								? 'Desativar'
+								: 'Ativar'}
+							</button>
+
+							<button
+							  onClick={() => onResetPassword(user.id, user.nome ?? user.email ?? 'usuário')}
+							  disabled={isLoading}
+							  className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+							>
+							  Redefinir senha
+							</button>
+						  </>
 						)}
 
 						{confirmDeleteId === user.id ? (

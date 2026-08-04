@@ -89,3 +89,17 @@ export async function deleteUser(userId: string): Promise<{ ok: boolean; error?:
   if (!response.ok) return { ok: false, error: json.error }
   return { ok: true }
 }
+
+export async function resetUserPassword(
+  userId: string
+): Promise<{ ok: boolean; password?: string; error?: string }> {
+  const response = await fetch('/api/admin/user/reset-password', {
+    method: 'POST',
+    headers: await getFunctionHeaders(),
+    body: JSON.stringify({ userId }),
+  })
+
+  const json = await response.json()
+  if (!response.ok) return { ok: false, error: json.error }
+  return { ok: true, password: json.password }
+}

@@ -11,9 +11,11 @@ import {
   deleteUser,
   getAdminMachines,
   getAdminUsers,
+  resetUserPassword,
   toggleUserActive,
   updateMachineStatus,
 } from '@/services/admin.service'
+import ResetPasswordModal from './ResetPasswordModal'
 import { getFunctionHeaders, getFunctionUrl } from '@/lib/supabase/functions'
 
 export type AdminUser = {
@@ -53,6 +55,10 @@ export default function AdminPageShell({
   const [roleFilter, setRoleFilter] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState('')
+  const [resetPasswordResult, setResetPasswordResult] = useState<{
+    nome: string
+    password: string
+  } | null>(null)
 
   useEffect(() => {
     setHeader(
@@ -200,6 +206,22 @@ export default function AdminPageShell({
     setBusyId(null)
   }
 
+  async function handleResetPassword(userId: string, nome: string) {
+    setBusyId(userId)
+    setErrorMessage('')
+
+    const result = await resetUserPassword(userId)
+
+    if (!result.ok || !result.password) {
+      setErrorMessage(result.error ?? 'Não foi possível redefinir a senha do usuário.')
+      setBusyId(null)
+      return
+    }
+
+    setResetPasswordResult({ nome, password: result.password })
+    setBusyId(null)
+  }
+
   async function handleMachineToggle(machineId: string, currentAtiva: boolean) {
     setBusyId(machineId)
     setErrorMessage('')
@@ -239,6 +261,7 @@ export default function AdminPageShell({
               onChangeRole={handleRoleChange}
               onResendInvite={handleResendInvite}
               onDeleteUser={handleDeleteUser}
+              onResetPassword={handleResetPassword}
               loadingId={busyId}
               searchUser={searchUser}
               onSearchUserChange={setSearchUser}
@@ -256,6 +279,11 @@ export default function AdminPageShell({
           </div>
         </div>
       </div>
+
+      <ResetPasswordModal
+        result={resetPasswordResult}
+        onClose={() => setResetPasswordResult(null)}
+      />
     </div>
   )
 }

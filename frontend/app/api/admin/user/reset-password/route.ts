@@ -1,6 +1,7 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { supabaseService } from '@/lib/supabase/service'
+import { checkRateLimit } from '@/lib/rate-limit'
 import { gerarSenhaAleatoria } from '@/lib/admin/temp-password'
 
 async function getCurrentUser(request: NextRequest) {
@@ -12,13 +13,11 @@ async function getCurrentUser(request: NextRequest) {
 
 async function isAdmin(user: any) {
   if (!user) return false
-
   const { data: perfil } = await supabaseService
     .from('usuarios')
     .select('role, ativo')
     .eq('id', user.id)
     .single()
-
   if (!perfil && user.email) {
     const fallback = await supabaseService
       .from('usuarios')
@@ -27,53 +26,44 @@ async function isAdmin(user: any) {
       .single()
     return fallback.data?.role === 'admin' && fallback.data?.ativo
   }
-
   return perfil?.role === 'admin' && perfil?.ativo
 }
 
 export async function POST(request: NextRequest) {
   const user = await getCurrentUser(request)
+  if (!user) return NextResponse.json({ error: 'not_authenticated' }, { status: 401 })
+  if (!(await isAdmin(user))) return NextResponse.json({ error: 'forbidden' }, { status: 403 })
 
-  if (!user) {
-    return NextResponse.json({ error: 'not_authenticated' }, { status: 401 })
-  }
-
-  if (!(await isAdmin(user))) {
-    return NextResponse.json({ error: 'forbidden' }, { status: 403 })
+  const rateLimitKey = `admin:reset-password:${user.id}`
+  if (checkRateLimit(rateLimitKey, 10, 60 * 1000)) {
+    return NextResponse.json(
+      { error: 'Too many admin operations. Please try again in a moment.' },
+      { status: 429 }
+    )
   }
 
   try {
-    const { nome, email, role, username } = await request.json()
-
-    if (!nome || !email || !role) {
-      return NextResponse.json({ error: 'Preencha todos os campos obrigatórios' }, { status: 400 })
-    }
+    const { userId } = await request.json()
+    if (!userId) return NextResponse.json({ error: 'userId obrigatório' }, { status: 400 })
 
     const senhaTemporaria = gerarSenhaAleatoria()
 
-    const { data, error } = await supabaseService.auth.admin.createUser({
-      email,
+    const { error: authError } = await supabaseService.auth.admin.updateUserById(userId, {
       password: senhaTemporaria,
-      email_confirm: true,
-      user_metadata: { nome, role },
     })
 
-    if (error) return NextResponse.json({ error: error.message }, { status: 400 })
+    if (authError) {
+      return NextResponse.json({ error: authError.message }, { status: 400 })
+    }
 
-    await supabaseService
+    const { error: dbError } = await supabaseService
       .from('usuarios')
-      .upsert(
-        {
-          id: data.user.id,
-          nome,
-          email,
-          role,
-          ativo: true,
-          primeiro_acesso: true,
-          username: username?.trim() || null,
-        },
-        { onConflict: 'id' }
-      )
+      .update({ primeiro_acesso: true })
+      .eq('id', userId)
+
+    if (dbError) {
+      return NextResponse.json({ error: dbError.message }, { status: 500 })
+    }
 
     return NextResponse.json({ success: true, password: senhaTemporaria })
   } catch {
