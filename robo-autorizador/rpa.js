@@ -291,17 +291,30 @@ async function executarRpa(tarefa, verificarCancelamento, browser) {
 		await page.waitForLoadState('networkidle');
 		await delay(2000);
 
-		// Captura o nº da guia da tela de confirmação ("Documento: AD... / 000437530").
-		// Grava SEM zeros à esquerda para casar com autorizacoes_assim.guia (ex.: 437530).
-		// É a âncora da vinculação por guia (item 5): a autorização fica presa a ESTA fila,
-		// evitando que uma guia retroativa case com o atendimento de hoje.
-		const numeroGuia = await page.evaluate(() => {
+		// Captura o nº da guia e a data/hora da tela de confirmação
+		// ("Documento: AD... / 000437530", "Data: 28/07/26 - 08:44:47").
+		// Guia: grava SEM zeros à esquerda para casar com autorizacoes_assim.guia
+		// (ex.: 437530) — é a âncora da vinculação por guia (item 5): a autorização
+		// fica presa a ESTA fila, evitando que uma guia retroativa case com o
+		// atendimento de hoje.
+		// Data: monta a string direto dos dígitos capturados (sem passar por
+		// `new Date()`) para não sofrer conversão de fuso do processo Node — grava
+		// exatamente o horário que a própria ASSIM registrou para a autorização.
+		const { numeroGuia, dataConfirmacao } = await page.evaluate(() => {
 		  const txt = (document.body && document.body.innerText) || '';
-		  const m = txt.match(/Documento:\s*[A-Za-z0-9]+\s*\/\s*0*(\d+)/i);
-		  return m ? m[1] : null;
+		  const guiaMatch = txt.match(/Documento:\s*[A-Za-z0-9]+\s*\/\s*0*(\d+)/i);
+		  const dataMatch = txt.match(/Data:\s*(\d{2})\/(\d{2})\/(\d{2})\s*-\s*(\d{2}):(\d{2}):(\d{2})/);
+		  let dataConfirmacao = null;
+		  if (dataMatch) {
+			const [, dd, mm, yy, hh, mi, ss] = dataMatch;
+			dataConfirmacao = `20${yy}-${mm}-${dd}T${hh}:${mi}:${ss}`;
+		  }
+		  return { numeroGuia: guiaMatch ? guiaMatch[1] : null, dataConfirmacao };
 		});
 		if (numeroGuia) console.log("🧾 Guia capturada:", numeroGuia);
 		else console.warn("⚠️ Não foi possível capturar o número da guia da tela");
+		if (dataConfirmacao) console.log("🕒 Data/hora da confirmação capturada:", dataConfirmacao);
+		else console.warn("⚠️ Não foi possível capturar a data/hora da tela de confirmação");
 
 		const formaValidacao =
 		  await selecionarFormaValidacao(page);
@@ -316,7 +329,8 @@ async function executarRpa(tarefa, verificarCancelamento, browser) {
 		  forma_autorizacao: formaValidacao,
 		  validacao_finalizada_em: new Date().toISOString()
 		};
-		if (numeroGuia) updatePayload.numero_autorizacao = numeroGuia;
+		if (numeroGuia)      updatePayload.numero_autorizacao = numeroGuia;
+		if (dataConfirmacao) updatePayload.horario_autorizacao = dataConfirmacao;
 
 		const { error } = await supabase
 		  .from('fila_autorizacoes')
