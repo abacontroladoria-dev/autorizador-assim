@@ -109,7 +109,7 @@ export default function CreateUserModal() {
   return (
     <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) resetForm() }}>
       <DialogTrigger asChild>
-        <button className="rounded-xl bg-[#3A8FB7] px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:opacity-90">
+        <button className="rounded-xl bg-brand-fg px-4 py-2.5 text-sm font-medium text-white shadow-sm transition hover:opacity-90">
           + Novo usuário
         </button>
       </DialogTrigger>
@@ -149,58 +149,70 @@ export default function CreateUserModal() {
                 <button
                   type="button"
                   onClick={() => setComSenha(false)}
-                  className={`flex-1 py-2.5 transition ${!comSenha ? 'bg-[#3A8FB7] text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
+                  className={`flex-1 py-2.5 transition ${!comSenha ? 'bg-brand-fg text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
                 >
                   Enviar convite
                 </button>
                 <button
                   type="button"
                   onClick={() => setComSenha(true)}
-                  className={`flex-1 py-2.5 transition ${comSenha ? 'bg-[#3A8FB7] text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
+                  className={`flex-1 py-2.5 transition ${comSenha ? 'bg-brand-fg text-white' : 'bg-white text-slate-500 hover:bg-slate-50'}`}
                 >
                   Criar com senha temporária
                 </button>
               </div>
 
-              <input
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-[#3A8FB7] focus:ring-2 focus:ring-[#3A8FB7]/20"
-                placeholder="Nome completo"
-                value={nome}
-                onChange={(e) => handleNomeChange(e.target.value)}
-              />
+              <label className="block">
+                <span className="sr-only">Nome completo</span>
+                <input
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+                  placeholder="Nome completo"
+                  value={nome}
+                  onChange={(e) => handleNomeChange(e.target.value)}
+                />
+              </label>
 
-              <input
-                type="email"
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-[#3A8FB7] focus:ring-2 focus:ring-[#3A8FB7]/20"
-                placeholder="Email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
+              <label className="block">
+                <span className="sr-only">Email</span>
+                <input
+                  type="email"
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+                  placeholder="Email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                />
+              </label>
 
               {comSenha && (
-                <input
-                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-[#3A8FB7] focus:ring-2 focus:ring-[#3A8FB7]/20"
-                  placeholder="Usuário (sugestão automática)"
-                  value={username}
-                  onChange={(e) => handleUsernameChange(e.target.value)}
-                />
+                <label className="block">
+                  <span className="sr-only">Usuário</span>
+                  <input
+                    className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+                    placeholder="Usuário (sugestão automática)"
+                    value={username}
+                    onChange={(e) => handleUsernameChange(e.target.value)}
+                  />
+                </label>
               )}
 
-              <select
-                className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-[#3A8FB7] focus:ring-2 focus:ring-[#3A8FB7]/20"
-                value={role}
-                onChange={(e) => setRole(e.target.value)}
-              >
-                <option value="recepcao">Recepção</option>
-                <option value="terapeutico">Terapêutico</option>
-                <option value="faturamento">Faturamento</option>
-                <option value="autorizacao">Autorização</option>
-                <option value="rp">RP</option>
-                <option value="cronograma">Cronograma</option>
-                <option value="diretoria">Diretoria</option>
-                <option value="admin">Admin</option>
-                <option value="disponibilidade_terapeuta">Disponib. Terapeuta</option>
-              </select>
+              <label className="block">
+                <span className="sr-only">Setor</span>
+                <select
+                  className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm outline-none focus:border-brand focus:ring-2 focus:ring-brand/20"
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                >
+                  <option value="recepcao">Recepção</option>
+                  <option value="terapeutico">Terapêutico</option>
+                  <option value="faturamento">Faturamento</option>
+                  <option value="autorizacao">Autorização</option>
+                  <option value="rp">RP</option>
+                  <option value="cronograma">Cronograma</option>
+                  <option value="diretoria">Diretoria</option>
+                  <option value="admin">Admin</option>
+                  <option value="disponibilidade_terapeuta">Disponib. Terapeuta</option>
+                </select>
+              </label>
 
               <div>
                 <p className="mb-2 text-xs font-medium text-slate-500">
@@ -216,7 +228,7 @@ export default function CreateUserModal() {
                         onClick={() => toggleUnidade(unidade)}
                         className={`rounded-xl px-3 py-2 text-sm font-medium transition ${
                           ativa
-                            ? 'bg-[#3A8FB7] text-white'
+                            ? 'bg-brand-fg text-white'
                             : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                         }`}
                       >
@@ -230,7 +242,7 @@ export default function CreateUserModal() {
               <button
                 onClick={handleCreateUser}
                 disabled={loading}
-                className="w-full rounded-2xl bg-[#3A8FB7] py-3 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50"
+                className="w-full rounded-2xl bg-brand-fg py-3 text-sm font-medium text-white transition hover:opacity-90 disabled:opacity-50"
               >
                 {loading
                   ? 'Criando...'

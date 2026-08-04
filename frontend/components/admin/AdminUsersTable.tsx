@@ -1,14 +1,17 @@
 'use client'
 
 import { useState } from 'react'
+import { ChevronDown } from 'lucide-react'
 import { AdminUser } from './AdminPageShell'
 import CreateUserModal from './CreateUserModal'
 import { UNIDADES_DISPONIVEIS } from '@/lib/admin/unidades'
+import { getAvatarColor } from '@/lib/admin/avatar-color'
 
-const UNIDADE_ABREV: Record<string, string> = {
-  Realengo: 'REA',
-  Fazendinha: 'FAZ',
-  'Padre Miguel': 'PM',
+// Cor fixa por unidade — nunca a cor de marca (essa fica reservada a estado/foco).
+const UNIDADE_STYLES: Record<string, string> = {
+  Realengo: 'bg-blue-700 text-white',
+  Fazendinha: 'bg-emerald-700 text-white',
+  'Padre Miguel': 'bg-amber-700 text-white',
 }
 
 const roleOptions = [
@@ -22,6 +25,24 @@ const roleOptions = [
   { value: 'rp', label: 'RP' },
   { value: 'terapeutico', label: 'Terapêutico' },
 ]
+
+// Uma cor por setor — nunca as cores de status (emerald/rose/amber/sky/slate já
+// têm significado fixo em Status; setor usa uma paleta própria pra não colidir).
+const ROLE_STYLES: Record<string, { bg: string; text: string }> = {
+  admin: { bg: 'bg-slate-100', text: 'text-slate-700' },
+  diretoria: { bg: 'bg-orange-100', text: 'text-orange-700' },
+  recepcao: { bg: 'bg-blue-100', text: 'text-blue-700' },
+  autorizacao: { bg: 'bg-violet-100', text: 'text-violet-700' },
+  terapeutico: { bg: 'bg-teal-100', text: 'text-teal-700' },
+  faturamento: { bg: 'bg-cyan-100', text: 'text-cyan-700' },
+  rp: { bg: 'bg-fuchsia-100', text: 'text-fuchsia-700' },
+  cronograma: { bg: 'bg-indigo-100', text: 'text-indigo-700' },
+  disponibilidade_terapeuta: { bg: 'bg-pink-100', text: 'text-pink-700' },
+}
+
+function roleStyle(role: string) {
+  return ROLE_STYLES[role] ?? { bg: 'bg-slate-100', text: 'text-slate-700' }
+}
 
 function mesmasUnidades(a: string[], b: string[]) {
   if (a.length !== b.length) return false
@@ -81,32 +102,41 @@ export default function AdminUsersTable({
 
 {/*FILTROS*/}
 <div className="mt-4 grid gap-3 md:grid-cols-3">
-  <input
-    placeholder="Buscar usuário..."
-    value={searchUser}
-    onChange={(e) => onSearchUserChange(e.target.value)}
-    className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-sm outline-none transition focus:border-[#3A8FB7] focus:ring-4 focus:ring-[#3A8FB7]/10"
-  />
+  <label>
+    <span className="sr-only">Buscar usuário</span>
+    <input
+      placeholder="Buscar usuário..."
+      value={searchUser}
+      onChange={(e) => onSearchUserChange(e.target.value)}
+      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-sm outline-none transition focus:border-brand focus:ring-4 focus:ring-brand/10"
+    />
+  </label>
 
-  <select
-    value={roleFilter}
-    onChange={(e) => onRoleFilterChange(e.target.value)}
-    className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-sm outline-none transition focus:border-[#3A8FB7] focus:ring-4 focus:ring-[#3A8FB7]/10"
-  >
-    <option value="">Todos os setores</option>
-    {roleOptions.map((option) => (
-      <option key={option.value} value={option.value}>
-        {option.label}
-      </option>
-    ))}
-  </select>
+  <label>
+    <span className="sr-only">Filtrar por setor</span>
+    <select
+      value={roleFilter}
+      onChange={(e) => onRoleFilterChange(e.target.value)}
+      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-sm outline-none transition focus:border-brand focus:ring-4 focus:ring-brand/10"
+    >
+      <option value="">Todos os setores</option>
+      {roleOptions.map((option) => (
+        <option key={option.value} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  </label>
 
-  <input
-    placeholder="Buscar máquina..."
-    value={searchMachine}
-    onChange={(e) => onSearchMachineChange(e.target.value)}
-    className="rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-sm outline-none transition focus:border-[#3A8FB7] focus:ring-4 focus:ring-[#3A8FB7]/10"
-  />
+  <label>
+    <span className="sr-only">Buscar máquina</span>
+    <input
+      placeholder="Buscar máquina..."
+      value={searchMachine}
+      onChange={(e) => onSearchMachineChange(e.target.value)}
+      className="w-full rounded-2xl border border-slate-200 bg-slate-50 px-5 py-3 text-sm outline-none transition focus:border-brand focus:ring-4 focus:ring-brand/10"
+    />
+  </label>
 </div>
 
 
@@ -156,6 +186,7 @@ export default function AdminUsersTable({
                   onResetPassword={onResetPassword}
                   confirmDelete={confirmDeleteId === user.id}
                   onRequestDelete={() => setConfirmDeleteId(user.id)}
+                  onCancelDelete={() => setConfirmDeleteId(null)}
                   onConfirmDelete={async () => {
                     setConfirmDeleteId(null)
                     await onDeleteUser(user.id)
@@ -179,6 +210,7 @@ function UserRow({
   onResetPassword,
   confirmDelete,
   onRequestDelete,
+  onCancelDelete,
   onConfirmDelete,
 }: {
   user: AdminUser
@@ -189,6 +221,7 @@ function UserRow({
   onResetPassword: (userId: string, nome: string, email: string, username: string) => Promise<void>
   confirmDelete: boolean
   onRequestDelete: () => void
+  onCancelDelete: () => void
   onConfirmDelete: () => Promise<void>
 }) {
   // unidades NULL/vazio = sem restrição no banco, equivalente a "todas marcadas" —
@@ -227,7 +260,10 @@ function UserRow({
       {/* NOME */}
       <td className="px-5 py-4">
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-100 text-sm font-semibold text-slate-600">
+          <div
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white"
+            style={{ backgroundColor: getAvatarColor(user.id) }}
+          >
             {(user.nome || user.email || '?').charAt(0).toUpperCase()}
           </div>
 
@@ -252,18 +288,25 @@ function UserRow({
 
       {/* SETOR */}
       <td className="px-5 py-4 text-center">
-        <select
-          value={roleDraft}
-          onChange={(event) => setRoleDraft(event.target.value)}
-          disabled={disabled}
-          className="w-45 rounded-xl border border-slate-100 bg-white px-3 py-2 text-sm outline-none transition focus:border-[#3A8FB7] focus:ring-4 focus:ring-[#3A8FB7]/10"
-        >
-          {roleOptions.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
+        <div className={`relative inline-flex items-center ${roleStyle(roleDraft).text}`}>
+          <select
+            value={roleDraft}
+            onChange={(event) => setRoleDraft(event.target.value)}
+            disabled={disabled}
+            className={`appearance-none cursor-pointer rounded-full pl-3 pr-6 py-1.5 text-xs font-semibold outline-none transition disabled:cursor-not-allowed disabled:opacity-50 focus:outline-none focus:ring-2 focus:ring-brand/30 ${roleStyle(roleDraft).bg}`}
+          >
+            {roleOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+          <ChevronDown
+            size={12}
+            aria-hidden="true"
+            className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 opacity-60"
+          />
+        </div>
       </td>
 
       {/* UNIDADE(S) */}
@@ -275,16 +318,15 @@ function UserRow({
               <button
                 key={unidade}
                 type="button"
-                title={unidade}
                 disabled={disabled}
                 onClick={() => toggleUnidade(unidade)}
-                className={`rounded-lg px-2 py-1 text-xs font-semibold transition disabled:opacity-50 ${
+                className={`rounded-full px-2.5 py-1 text-xs font-semibold transition disabled:opacity-50 ${
                   ativa
-                    ? 'bg-[#3A8FB7] text-white'
+                    ? UNIDADE_STYLES[unidade]
                     : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
                 }`}
               >
-                {UNIDADE_ABREV[unidade] ?? unidade}
+                {unidade}
               </button>
             )
           })}
@@ -295,10 +337,14 @@ function UserRow({
       <td className="px-5 py-4">
         <div className="flex justify-center">
           <span
-            className={`inline-flex rounded-xl px-3 py-1 text-xs font-semibold ${
-              user.ativo ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700'
+            className={`inline-flex items-center gap-1.5 text-xs font-semibold ${
+              user.ativo ? 'text-emerald-700' : 'text-rose-700'
             }`}
           >
+            <span
+              className={`h-1.5 w-1.5 rounded-full ${user.ativo ? 'bg-emerald-500' : 'bg-rose-500'}`}
+              aria-hidden="true"
+            />
             {user.ativo ? 'Ativo' : 'Inativo'}
           </span>
         </div>
@@ -314,7 +360,7 @@ function UserRow({
             <button
               onClick={() => onSaveUser(user.id, roleDraft, unidadesDraft)}
               disabled={disabled}
-              className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
+              className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
             >
               {isLoading ? 'Salvando...' : 'Salvar'}
             </button>
@@ -326,7 +372,7 @@ function UserRow({
                 onResendInvite(user.id, user.email ?? '', user.nome ?? '', user.role ?? '')
               }
               disabled={disabled}
-              className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-2 text-sm font-medium text-amber-700 transition hover:bg-amber-100 disabled:opacity-50"
+              className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm font-medium text-amber-700 transition hover:bg-amber-100 disabled:opacity-50"
             >
               {isLoading ? 'Enviando...' : 'Reenviar convite'}
             </button>
@@ -335,7 +381,7 @@ function UserRow({
               <button
                 onClick={() => onToggleActive(user.id, !!user.ativo)}
                 disabled={disabled}
-                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
               >
                 {isLoading ? 'Atualizando...' : user.ativo ? 'Desativar' : 'Ativar'}
               </button>
@@ -350,7 +396,7 @@ function UserRow({
                   )
                 }
                 disabled={disabled}
-                className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+                className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
               >
                 Redefinir senha
               </button>
@@ -358,18 +404,27 @@ function UserRow({
           )}
 
           {confirmDelete ? (
-            <button
-              onClick={onConfirmDelete}
-              disabled={disabled}
-              className="rounded-xl border border-red-300 bg-red-50 px-4 py-2 text-sm font-medium text-red-700 transition hover:bg-red-100 disabled:opacity-50"
-            >
-              Confirmar?
-            </button>
+            <>
+              <button
+                onClick={onConfirmDelete}
+                disabled={disabled}
+                className="rounded-xl border border-red-300 bg-red-50 px-4 py-3 text-sm font-medium text-red-700 transition hover:bg-red-100 disabled:opacity-50"
+              >
+                Confirmar exclusão
+              </button>
+              <button
+                onClick={onCancelDelete}
+                disabled={disabled}
+                className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-slate-700 transition hover:bg-slate-50 disabled:opacity-50"
+              >
+                Cancelar
+              </button>
+            </>
           ) : (
             <button
               onClick={onRequestDelete}
               disabled={disabled}
-              className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-rose-600 transition hover:bg-rose-50 disabled:opacity-50"
+              className="rounded-xl border border-slate-200 bg-white px-4 py-3 text-sm font-medium text-rose-600 transition hover:bg-rose-50 disabled:opacity-50"
             >
               Excluir
             </button>

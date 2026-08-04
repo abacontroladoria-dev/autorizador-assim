@@ -92,8 +92,9 @@ export default function GeneratedPasswordReveal({
               onClick={handleCopy}
               className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-200"
               title="Copiar senha"
+              aria-label="Copiar senha"
             >
-              {copied ? <Check size={14} className="text-emerald-600" /> : <Copy size={14} />}
+              {copied ? <Check size={14} className="text-emerald-600" aria-hidden="true" /> : <Copy size={14} aria-hidden="true" />}
             </button>
           </div>
         </div>
@@ -122,7 +123,7 @@ export default function GeneratedPasswordReveal({
 
       <button
         onClick={onClose}
-        className="mt-2 w-full rounded-2xl bg-[#3A8FB7] py-3 text-sm font-medium text-white transition hover:opacity-90"
+        className="mt-2 w-full rounded-2xl bg-brand-fg py-3 text-sm font-medium text-white transition hover:opacity-90"
       >
         {closeLabel}
       </button>
