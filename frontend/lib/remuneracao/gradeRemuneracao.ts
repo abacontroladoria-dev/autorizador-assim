@@ -7,7 +7,10 @@
 import { getSupabaseClient } from "@/lib/supabase/client"
 import type { CsvRow } from "@/types/cronograma"
 
-const FIELDS = "paciente_id, paciente_nome, dia_semana, hora_inicial, hora_final, profissional_nome, terapia_nome, status_agendamento, sala_nome, data, unidade_nome"
+// profissional_id é a chave estável do profissional no TiTa: quando alguém é
+// desligado o nome vira "INATIVO-<nome>" aqui, mas o id continua o mesmo e o
+// agenda_tita ainda guarda o nome limpo sob ele (ver getUltimoAtendimentoAtivo).
+const FIELDS = "paciente_id, paciente_nome, dia_semana, hora_inicial, hora_final, profissional_id, profissional_nome, terapia_nome, status_agendamento, sala_nome, data, unidade_nome"
 const PAGE = 1000
 
 const DIAS_PT = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"]
@@ -67,6 +70,7 @@ export async function buscarGradeParaAnalise(dataInicio: string, dataFim: string
       "Hora Inicial": String(r.hora_inicial ?? "").slice(0, 5),
       "Hora Final": String(r.hora_final ?? "").slice(0, 5),
       "Terapia": fixMojibake(r.terapia_nome as string | null),
+      "Id Profissional": String(r.profissional_id ?? ""),
       "Profissional": fixMojibake(r.profissional_nome as string | null),
       "Status do Agendamento": (r.status_agendamento as string) ?? "",
       "Sala": salaNome,

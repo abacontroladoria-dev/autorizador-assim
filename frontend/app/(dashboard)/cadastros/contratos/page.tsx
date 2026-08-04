@@ -7,7 +7,7 @@ import { ContratosCadastro } from "@/components/cadastros/ContratosCadastro"
 export default function ContratosPage() {
   const { setHeader } = useHeader()
   useEffect(() => {
-    setHeader("Contratos", "Contratos vigentes/antigos por profissional (PA por atendimento ou banco de horas)")
+    setHeader("Contratos", "A calculadora paga pelos contratos marcados como vigentes")
     return () => setHeader("", "")
   }, [setHeader])
 

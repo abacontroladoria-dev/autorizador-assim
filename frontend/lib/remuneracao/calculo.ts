@@ -8,7 +8,7 @@ import type { FeriadoInfo } from "@/types/remuneracao"
 import { cleanTxt, timeToMin, isSim, isCancelado } from "./formatacao"
 import { getCalendario, parseDateBR, type Feriado } from "./datas"
 import { isFakePatient, isEtaAdminPatient } from "./pacientes"
-import { normKey, PROFS_IGNORAR } from "./constants"
+import { normKey, PROFS_IGNORAR, isProfDesligado, limparPrefixoDesligado } from "./constants"
 import { getCol, type SessaoReal, type CsvGradeRow } from "./relatorio"
 import {
   parseUnidadeSala,
@@ -23,6 +23,9 @@ import type { OcupacaoAgregada } from "@/types/ocupacaoProf"
 const FUNCAO_AC = "AC"
 const FUNCAO_PS = "PS"
 const PA_TRATADO_OUTRO_CONTRATO = "Tratado em outro contrato"
+/** `valorPATexto` das sessões zeradas por banco de horas — quem lê a sessão
+ *  (documento de faturamento, export) distingue por este valor, não por texto solto. */
+export const PA_TEXTO_BANCO_HORAS = "Banco de Horas"
 const ESPECIALIDADES_SEM_PA = [
   "Técnico Terapêutico Particular",
   "Aplicador ABA Casa",
@@ -67,9 +70,9 @@ function paTratadoOutroContratoInfo(esp: string): PAInfo {
 function bancoDeHorasInfo(esp: string, valorTotal: number | undefined, contratoAtual?: string): PAInfo {
   return {
     valor: 0,
-    valorTexto: "Banco de Horas",
+    valorTexto: PA_TEXTO_BANCO_HORAS,
     funcao: "",
-    label: esp || "Banco de Horas",
+    label: esp || PA_TEXTO_BANCO_HORAS,
     contratoAtual: contratoAtual || "",
     cadastroContratoPendente: false,
     semPA: true,
@@ -148,6 +151,117 @@ function buscarCadastroContratual(cadastros: Record<string, CadastroContratual>,
   return entry ? { nome: entry[0], ...entry[1] } : null
 }
 
+// Lookup por normKey (acento/caixa/espaço), igual ao buscarCadastroContratual —
+// antes era acesso direto por string crua, o que divergia do cadastro contratual
+// e falhava em qualquer diferença de acentuação vinda da grade.
+function buscarAntigo(antigos: Record<string, ContratoAntigoInfo>, prof: string): ContratoAntigoInfo | null {
+  const alvo = normKey(prof)
+  if (!alvo) return null
+  const entry = Object.entries(antigos || {}).find(([nome]) => normKey(nome) === alvo)
+  return entry ? entry[1] : null
+}
+
+// ─── Modalidade de faturamento do profissional ───────────────────────────────
+
+// "atendimento" = PA por sessão; "banco_horas" = valor total fixo pago no
+// período; "hibrido" = tem contrato vigente dos dois tipos (recebe pelos dois).
+export type ModalidadeAnalise = "atendimento" | "banco_horas" | "hibrido"
+
+export type ContratosVigentesInfo = {
+  modalidade: ModalidadeAnalise
+  /** Soma dos valorTotal dos contratos vigentes em banco de horas. */
+  valorFixoMensal: number
+  numerosBancoHoras: string[]
+  /** Números de todos os contratos vigentes, juntos — é o `contratoNovo` exibido. */
+  numeros: string | null
+}
+
+// Todo contrato vigente conta: quem tem dois contratos ativos recebe pelos dois,
+// não há um que "vença" o outro nem conflito a resolver. Um item com
+// vigente=false não é modelo atual — some daqui e passa a valer só como
+// histórico/comparação (ver deriveAntigoDeContratos no hook).
+export function resolverContratosVigentes(cadastro: CadastroContratual | null): ContratosVigentesInfo {
+  const vigentes = contratosAtuaisDoCadastro(cadastro)
+  const bancoHoras = vigentes.filter(c => c.modeloFaturamento === "banco_horas")
+  const atendimento = vigentes.filter(c => c.modeloFaturamento !== "banco_horas")
+  const modalidade: ModalidadeAnalise =
+    bancoHoras.length && atendimento.length ? "hibrido"
+      : bancoHoras.length ? "banco_horas"
+        : "atendimento"
+  return {
+    modalidade,
+    valorFixoMensal: bancoHoras.reduce((s, c) => s + Number(c.valorTotal || 0), 0),
+    numerosBancoHoras: bancoHoras.map(c => c.numero).filter((n): n is string => !!n),
+    numeros: vigentes.map(c => c.numero).filter(Boolean).join(" / ") || null,
+  }
+}
+
+// ─── Desligamento (profissional que saiu da clínica) ─────────────────────────
+
+// Quantos meses depois do mês do desligamento o profissional ainda aparece na
+// previsão. 1 = aparece no mês do desligamento e no seguinte (por questão de
+// pagamento), e sai a partir do terceiro.
+const MESES_EXIBIR_APOS_DESLIGAMENTO = 1
+
+export type DesligadoInfo = {
+  /** Nome sem o prefixo "INATIVO-" — é a chave do cadastro de contrato e o nome exibido. */
+  nomeLimpo: string
+  /** "YYYY-MM" do último atendimento ativo; null = nenhum encontrado na janela consultada. */
+  mesUltimoAtendimento: string | null
+}
+
+/** Chave: nome do profissional exatamente como vem na grade (com prefixo). */
+export type DesligadosMap = Record<string, DesligadoInfo>
+
+function diffMeses(mesA: string, mesB: string): number {
+  const [ya, ma] = mesA.split("-").map(Number)
+  const [yb, mb] = mesB.split("-").map(Number)
+  return (ya - yb) * 12 + (ma - mb)
+}
+
+// Um profissional desligado sai da previsão quando o mês analisado já passou da
+// janela de pagamento. Sem atendimento ativo na janela consultada ele também
+// sai: não há mais o que pagar.
+function desligadoDeveSerOcultado(info: DesligadoInfo, mesAnalisado: string): boolean {
+  if (!info.mesUltimoAtendimento) return true
+  return diffMeses(mesAnalisado, info.mesUltimoAtendimento) > MESES_EXIBIR_APOS_DESLIGAMENTO
+}
+
+// Qual dos contratos vigentes vale para ESTA linha da grade, em ordem de
+// precisão: função normalizada (AC/PS) → nome da especialidade da agenda →
+// contrato sem função (curinga).
+//
+// O passo do meio só passou a ser confiável quando `funcao` virou vocabulário
+// fechado das especialidades da agenda (lib/remuneracao/especialidades.ts). Sem
+// ele, quem tem contrato de banco de horas sem função + contrato de atendimento
+// na especialidade da sessão casava no curinga (o banco de horas) e recebia PA
+// zero em tudo, apesar de ter contrato de atendimento vigente para aquela
+// especialidade.
+function escolherContratoDaLinha(
+  contratos: ContratoAtualItem[],
+  funcaoLinha: string | null,
+  especialidade: string,
+): ContratoAtualItem | undefined {
+  return contratos.find(x => x.funcao === funcaoLinha)
+    || contratos.find(x => x.funcao && normKey(x.funcao) === normKey(especialidade))
+    || contratos.find(x => !x.funcao)
+}
+
+// PA de um contrato de atendimento já escolhido para a linha. Contrato AC/PS cai
+// na taxa da função; qualquer outra função (ou nenhuma) usa a taxa da
+// especialidade da agenda. Era duplicado nos ramos de contrato único e múltiplo,
+// e o do múltiplo tinha ficado sem o fallback da especialidade — o que pagaria 0
+// num contrato que nomeia a especialidade e não trouxe valorPA.
+function paDoContrato(
+  c: ContratoAtualItem,
+  especialidade: string,
+  { ccPA, taxasPA }: { ccPA: number; taxasPA: Record<string, number> },
+): number {
+  if (c.valorPA != null) return c.valorPA
+  if (c.funcao === FUNCAO_AC || c.funcao === FUNCAO_PS) return taxaPorFuncao(c.funcao, { ccPA, taxasPA })
+  return taxasPA[especialidade] ?? 0
+}
+
 function contratoLabel(c: ContratoAtualItem): string {
   const fn = labelFuncaoContrato(c.funcao) || c.funcao || "contrato"
   return c.numero ? `${fn} (${c.numero})` : fn
@@ -161,14 +275,18 @@ export function resolverPARow(
   if (isEspecialidadeSemPA(r.especialidade)) return paTratadoOutroContratoInfo(r.especialidade)
   const funcaoLinha = funcaoContratoPorEspecialidade(r.especialidade)
   const contratosAtuais = contratosAtuaisDoCadastro(cadastroContratual)
+  // Se TODO contrato vigente é banco de horas não existe PA por sessão a pagar,
+  // qualquer que seja a função da agenda. Sem este atalho, quem tem dois ou mais
+  // contratos e nenhum casando com a função da linha caía nos ramos de tabela
+  // padrão lá embaixo e recebia PA por cima de um valor fixo já contratado.
+  if (contratosAtuais.length && contratosAtuais.every(c => c.modeloFaturamento === "banco_horas")) {
+    const c = escolherContratoDaLinha(contratosAtuais, funcaoLinha, r.especialidade) || contratosAtuais[0]
+    return bancoDeHorasInfo(r.especialidade, c.valorTotal, contratoLabel(c))
+  }
   if (contratosAtuais.length === 1) {
     const c = contratosAtuais[0]
     if (c.modeloFaturamento === "banco_horas") return bancoDeHorasInfo(r.especialidade, c.valorTotal, contratoLabel(c))
-    const valor = c.valorPA != null
-      ? c.valorPA
-      : (c.funcao === FUNCAO_AC || c.funcao === FUNCAO_PS)
-        ? taxaPorFuncao(c.funcao, { ccPA, taxasPA })
-        : (taxasPA[r.especialidade] ?? 0)
+    const valor = paDoContrato(c, r.especialidade, { ccPA, taxasPA })
     return {
       valor, funcao: c.funcao, label: labelFuncaoContrato(c.funcao), contratoAtual: contratoLabel(c),
       cadastroContratoPendente: false,
@@ -176,10 +294,10 @@ export function resolverPARow(
     }
   }
   if (contratosAtuais.length > 1) {
-    const c = contratosAtuais.find(x => x.funcao === funcaoLinha) || contratosAtuais.find(x => !x.funcao)
+    const c = escolherContratoDaLinha(contratosAtuais, funcaoLinha, r.especialidade)
     if (c) {
       if (c.modeloFaturamento === "banco_horas") return bancoDeHorasInfo(r.especialidade, c.valorTotal, contratoLabel(c))
-      const valor = c.valorPA != null ? c.valorPA : taxaPorFuncao(c.funcao, { ccPA, taxasPA })
+      const valor = paDoContrato(c, r.especialidade, { ccPA, taxasPA })
       const substituicao = !!(r.profAgenda && r.profCsv && normKey(r.profAgenda) !== normKey(r.profCsv))
       return {
         valor, funcao: c.funcao, label: labelFuncaoContrato(c.funcao), contratoAtual: contratoLabel(c),
@@ -224,6 +342,7 @@ export type AnaliseFuturaConfig = {
   extraHols?: Feriado[]
   antigos?: Record<string, ContratoAntigoInfo> // profissional -> contrato antigo (Passo 9; vazio até lá)
   cadastroPrestadores?: Record<string, CadastroContratual> // profissional -> contrato(s) atual(is)/novo(s) cadastrados em Config
+  desligados?: DesligadosMap // nome na grade ("INATIVO-…") -> nome limpo + mês do último atendimento ativo
 }
 
 export type DowBreakItem = { dow: number; cnt: number; occ: number; mensal: number; feriados: Feriado[] }
@@ -279,6 +398,15 @@ export type ProfissionalAnalise = {
   taxaOcupacao: number | null
   ocupacao: OcupacaoAgregada
   diasTrabalhados: DiaTrabalhadoItem[]
+  /** Modalidade dos contratos VIGENTES. Sem contrato vigente = "atendimento". */
+  modalidade: ModalidadeAnalise
+  /** Valor fixo/mês do(s) contrato(s) vigente(s) em banco de horas. */
+  valorFixoBancoHoras: number | null
+  /** valorFixoBancoHoras ÷ horas agendadas no mês. */
+  valorHoraBancoHoras: number | null
+  numerosBancoHoras: string[]
+  /** Desligado no TiTa, ainda dentro da janela de exibição por pagamento. */
+  desligado: boolean
 }
 
 export type DiaTrabalhadoItem = { dow: number; horas: number }
@@ -302,20 +430,37 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
 
   const {
     taxasPA, diarias, etaBonus, ccPA, ccPE, ccLimDefault, presenca, feriados,
-    extraHols = [], antigos = {}, cadastroPrestadores = {},
+    extraHols = [], antigos = {}, cadastroPrestadores = {}, desligados = {},
   } = config
 
   const datas = rows.map(r => r["Data"]).filter(Boolean).sort() as string[]
   const [yr, mo] = (datas[0] || "2026-06-01").split("-").map(Number)
+  const mesAnalisado = `${yr}-${String(mo).padStart(2, "0")}`
   const cal = getCalendario(yr, mo, feriados, extraHols)
   const pct = presenca / 100
+
+  // Desligados: a grade traz o nome como "INATIVO-<nome>", mas o contrato está
+  // cadastrado no nome limpo. Renomear a linha aqui, uma vez, faz todo o resto do
+  // cálculo (ocupação, PA, cadastro, exibição) casar sem tratamento especial —
+  // e quem já passou da janela de pagamento é descartado antes de contar.
+  const nomesDesligadosVisiveis = new Set<string>()
+  const rowsVisiveis: CsvRow[] = []
+  for (const r of rows) {
+    const prof = String(r["Profissional"] ?? "")
+    if (!isProfDesligado(prof)) { rowsVisiveis.push(r); continue }
+    const info = desligados[prof.trim()] ?? { nomeLimpo: limparPrefixoDesligado(prof), mesUltimoAtendimento: null }
+    if (desligadoDeveSerOcultado(info, mesAnalisado)) continue
+    nomesDesligadosVisiveis.add(info.nomeLimpo)
+    rowsVisiveis.push({ ...r, "Profissional": info.nomeLimpo })
+  }
+  if (!rowsVisiveis.length) return { dadosPorProf: [], feriadosMes: cal.feriadosAtivos, allTerps: [], allUnits: [] }
 
   // Ocupação (donut / % de vagas) usa o mesmo motor de cronograma/indicadores/
   // (buildAllSlotsFromRows + calcularOcupacaoSemanal de ocupacaoProf.ts), para
   // que os dois lugares mostrem exatamente o mesmo número por profissional.
   // Só precisa de HI/HF numéricos (minutos), que essa query não seleciona por
   // padrão — derivados aqui a partir das colunas de horário já existentes.
-  const rowsParaOcupacao: CsvRow[] = rows.map(r => ({
+  const rowsParaOcupacao: CsvRow[] = rowsVisiveis.map(r => ({
     ...r,
     HI: timeToMin(r["Hora Inicial"] as string | undefined),
     HF: timeToMin(r["Hora Final"] as string | undefined),
@@ -323,7 +468,7 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
   const allSlotsOcupacao = buildAllSlotsFromRows(rowsParaOcupacao)
 
   const allSlots: Record<string, AllSlotsEntry> = {}
-  rows.forEach(r => {
+  rowsVisiveis.forEach(r => {
     const prof = r["Profissional"]?.trim()
     const terp = r["Terapia"]?.trim()
     const date = r["Data"]?.trim()
@@ -381,7 +526,7 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
   })
 
   const mapa: Record<string, MapaProf> = {}
-  rows.filter(r => r["Status do Agendamento"] === "Agendado" && !PROFS_IGNORAR.some(f => (r["Profissional"] || "").includes(f)))
+  rowsVisiveis.filter(r => r["Status do Agendamento"] === "Agendado" && !PROFS_IGNORAR.some(f => (r["Profissional"] || "").includes(f)))
     .forEach(r => {
       const prof = r["Profissional"]?.trim(), terp = r["Terapia"]?.trim()
       const date = r["Data"]?.trim(), pac = r["Nome Favorecido"]?.trim()
@@ -446,11 +591,43 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
     // exibidos na UI é possível e aceitável (não é bug, é ordem de arredondamento).
     let total100 = 0, totalX = 0
 
+    // O PA sai do contrato cadastrado, não da tabela de especialidade: mesma regra
+    // que a /rp já aplica (resolverPARow), reusada aqui em vez de reimplementada —
+    // contrato único manda, contrato duplo casa a função (AC/PS) com a terapia, e
+    // banco de horas zera o PA por sessão (o valor fixo entra à parte, abaixo).
+    // Sem contrato vigente cai na tabela de especialidade, como antes.
+    const cadastroContratual = buscarCadastroContratual(cadastroPrestadores, d.prof)
+    const contratoFuncoes = new Set(
+      Object.keys(d.terapias)
+        .map(terp => funcaoContratoPorEspecialidade(terp))
+        .filter((f): f is string => !!f),
+    )
+
+    // BANCO DE HORAS PURO = SÓ O VALOR FIXO (mesma regra da /rp, ver
+    // calcularRemuneracaoReal): o valor total do contrato é a remuneração inteira,
+    // PPD/ETA/PE não entram por cima. Precisa ser resolvido ANTES do mapa de
+    // terapias, porque zera PA, diária e bônus item a item — só zerar o total
+    // deixaria os detalhamentos da tela contando dinheiro que ninguém paga.
+    // Híbrido não zera nada: tem contrato de atendimento vigente ao lado.
+    const vigentes = resolverContratosVigentes(cadastroContratual)
+    const soBancoDeHoras = vigentes.modalidade === "banco_horas"
+
     const terapiaDetails: TerapiaDetalhe[] = Object.values(d.terapias).map(td => {
       const isCC = td.terp === "Coordenador de Caso"
       const isETA = td.terp === "Especialista Técnico de Área"
-      const pa = isCC ? ccPA : (taxasPA[td.terp] || 0)
-      const diar = isCC ? 0 : (diarias[td.terp] || 0)
+      // ESPECIALIDADES_SEM_PA ("Tratado em outro contrato") é regra da remuneração
+      // REAL: na /rp essas terapias não geram PA porque são pagas fora desta
+      // calculadora. A previsão sempre as projetou pela tabela de especialidade, e
+      // três delas têm taxa cadastrada — manter, para o fix de modalidade não
+      // derrubar valor que ninguém pediu para mudar. Exceção: banco de horas puro
+      // zera tudo, inclusive essas (senão a tabela de especialidade voltaria a
+      // pagar por sessão por cima do valor fixo, justamente por este caminho).
+      const paTabela = isCC ? ccPA : (taxasPA[td.terp] || 0)
+      const paInfo = isEspecialidadeSemPA(td.terp)
+        ? null
+        : resolverPARow({ especialidade: td.terp }, contratoFuncoes, { ccPA, taxasPA, cadastroContratual })
+      const pa = soBancoDeHoras ? 0 : (paInfo ? (paInfo.semPA ? 0 : paInfo.valor) : paTabela)
+      const diar = (isCC || soBancoDeHoras) ? 0 : (diarias[td.terp] || 0)
       const tDays = slotData.terpDays[td.terp] || {}
       const dowsPresent = new Set(Object.values(tDays))
       let mensalDiaria = 0
@@ -481,11 +658,14 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
         etaWeeks = adminDOWs.length > 0
           ? Math.max(...adminDOWs.map(dw => cal.counts[dw as 1 | 2 | 3 | 4 | 5] || 0))
           : 0
-        mensalETA100 = etaWeeks * etaBonus
+        // etaWeeks continua contando (é informação de agenda); o bônus é que não é pago.
+        mensalETA100 = soBancoDeHoras ? 0 : etaWeeks * etaBonus
       }
 
-      const monthly100 = isCC ? td.sessoes * ccPA : mensalDiaria + mensalPA100 + mensalETA100
-      const monthlyX = isCC ? td.sessoes * pct * ccPA : mensalDiaria + mensalPAX + mensalETA100
+      // `pa` (não ccPA) também no ramo CC: com contrato de banco de horas o PA por
+      // sessão é zero, e com PA contratado é o do contrato que vale.
+      const monthly100 = isCC ? td.sessoes * pa : mensalDiaria + mensalPA100 + mensalETA100
+      const monthlyX = isCC ? td.sessoes * pct * pa : mensalDiaria + mensalPAX + mensalETA100
 
       if (!isCC) {
         total100 += monthly100; totalX += monthlyX
@@ -499,7 +679,7 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
       }
       const ccSess100 = Object.entries(td.sessByDow).reduce((s, [dow, cnt]) => s + cnt * (cal.counts[parseInt(dow) as 1 | 2 | 3 | 4 | 5] || 0), 0)
       const ccSessX = ccSess100 * pct
-      const m100cc = ccSess100 * ccPA, mXcc = ccSessX * ccPA
+      const m100cc = ccSess100 * pa, mXcc = ccSessX * pa
       total100 += m100cc; totalX += mXcc
       return {
         terp: td.terp, sessoes: td.sessoes, pacientes: td.pacsSet.size, pacientesList: [...td.pacsSet].sort(),
@@ -509,21 +689,36 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
       }
     }).sort((a, b) => a.isCC ? -1 : b.isCC ? 1 : a.terp.localeCompare(b.terp))
 
-    const pe = hasCC ? pacCC * ccPE : 0
+    const pe = (hasCC && !soBancoDeHoras) ? pacCC * ccPE : 0
     total100 += pe; totalX += pe
 
-    const cF = antigos[d.prof] || null
+    const cF = buscarAntigo(antigos, d.prof)
     const salA = cF?.salario ?? null, temA = salA !== null && salA > 0
     // Valor/hora derivado do contrato antigo: valor total pago ÷ horas
     // efetivamente agendadas no mês (mesma base de "Dias trabalhados" acima:
     // horas por dia da semana × quantas vezes esse dia ocorre no mês).
     const horasMensais = diasTrabalhados.reduce((s, dt) => s + dt.horas * (cal.counts[dt.dow as 1 | 2 | 3 | 4 | 5] || 0), 0)
     const valorHoraDerivado = temA && horasMensais > 0 ? salA! / horasMensais : null
-    const d100 = temA ? ((total100 - salA!) / salA!) * 100 : null
-    const dX = temA ? ((totalX - salA!) / salA!) * 100 : null
+
+    // `modalidade` NÃO é condicionada a valorFixoMensal > 0 (era, e a /rp já não
+    // é): contrato de banco de horas com valor em branco zera o PA de todo jeito,
+    // então dizer que ele é "atendimento" esconderia justamente o cadastro
+    // faltando. O valor/hora é que continua nulo sem valor — dividir 0 pelas horas
+    // exibiria "R$ 0,00/hora" como se fosse um dado.
+    const temValorFixo = vigentes.valorFixoMensal > 0
+    const valorFixoBancoHoras = temValorFixo ? vigentes.valorFixoMensal : null
+    const valorHoraBancoHoras = temValorFixo && horasMensais > 0 ? vigentes.valorFixoMensal / horasMensais : null
+
+    // Banco de horas puro: total100/totalX já saem zerados (PA, diária, ETA e PE
+    // são zerados na origem), então a base de comparação é o valor fixo puro —
+    // fixo contra fixo. No híbrido os dois se somam, que é o que ele recebe.
+    const baseComparacao100 = vigentes.valorFixoMensal + total100
+    const baseComparacaoX = vigentes.valorFixoMensal + totalX
+    const d100 = temA ? ((baseComparacao100 - salA!) / salA!) * 100 : null
+    const dX = temA ? ((baseComparacaoX - salA!) / salA!) * 100 : null
+
     const terpN = terapiaDetails.map(t => t.terp)
-    const contratosVigentes = contratosAtuaisDoCadastro(buscarCadastroContratual(cadastroPrestadores, d.prof))
-    const contratoNovo = contratosVigentes.map(c => c.numero).filter(Boolean).join(" / ") || null
+    const contratoNovo = vigentes.numeros
 
     return {
       prof: d.prof, terapiaDetails, hasCC, pacCC, pe,
@@ -536,6 +731,10 @@ export function calcularAnaliseFutura(rows: CsvRow[], config: AnaliseFuturaConfi
       hasTA: terpN.includes("Terapia Alimentar"),
       allPacs: [...new Set(terapiaDetails.flatMap(t => t.pacientesList))].sort(),
       horasSemanaTotal, horasAbertas, horasComPac, taxaOcupacao, ocupacao, diasTrabalhados,
+      modalidade: vigentes.modalidade,
+      valorFixoBancoHoras, valorHoraBancoHoras,
+      numerosBancoHoras: vigentes.numerosBancoHoras,
+      desligado: nomesDesligadosVisiveis.has(d.prof),
     }
   }).sort((a, b) => a.prof.localeCompare(b.prof))
 
@@ -642,8 +841,19 @@ export type ProfRemunReal = {
   paBreakdown: PaBreakdownItem[]
   contratoFuncoes: string[]
   temContratoDuploAcPs: boolean
+  /** PA + PPD + PE + ETA apurados no período. NÃO inclui o valor fixo de banco de horas. */
   valorConfirmado: number
   valorPotencial: number
+  // ─── Modelo de faturamento do contrato vigente (/cadastros/contratos) ───
+  // "banco_horas" = valor total fixo no período em vez de PA por sessão;
+  // "hibrido" = tem contrato vigente dos dois tipos e recebe pelos dois.
+  /** Modalidade dos contratos VIGENTES. Sem contrato vigente = "atendimento". */
+  modalidade: ModalidadeAnalise
+  /** Soma dos valorTotal dos contratos vigentes em banco de horas. 0 = não cadastrado. */
+  valorFixoBancoHoras: number
+  numerosBancoHoras: string[]
+  /** valorConfirmado + valorFixoBancoHoras — o que a empresa paga a este profissional no mês. */
+  valorTotalAPagar: number
   sessoes: SessaoComPapel[]
 }
 
@@ -818,41 +1028,73 @@ export function calcularRemuneracaoReal(evoRows: SessaoReal[], config: Remunerac
       etaBonusPeriodo = etaWeeksPeriodo * etaBonus
     }
 
-    const contratosVigentes = contratosAtuaisDoCadastro(buscarCadastroContratual(cadastroPrestadores, p.prof))
-    const contratoNovo = contratosVigentes.map(ct => ct.numero).filter(Boolean).join(" / ") || null
+    // Modalidade lida do contrato cadastrado, igual à Análise Futura.
+    // Não usar `valorFixoMensal > 0` como gate: contrato de banco de horas com
+    // valor em branco zera o PA de todo jeito, então esconder a modalidade nesse
+    // caso é justamente o silêncio que faz o valor sumir.
+    const vigentes = resolverContratosVigentes(buscarCadastroContratual(cadastroPrestadores, p.prof))
+
+    // BANCO DE HORAS PURO = SÓ O VALOR FIXO. Regra do usuário (2026-08-03): o
+    // valor total do contrato é a remuneração inteira, PPD/ETA/PE não se somam
+    // por cima (o PA por sessão já vinha zerado de resolverPARow). Zerar aqui, na
+    // origem, e não só no total exibido: dashboardRP, XLSX e o demonstrativo de
+    // faturamento leem estes mesmos campos, e um total que não bate com as
+    // parcelas é pior que um total errado.
+    //
+    // No HÍBRIDO a regra não vale: existe contrato de atendimento vigente ao lado,
+    // e ele continua pagando o que sempre pagou.
+    const soBancoDeHoras = vigentes.modalidade === "banco_horas"
+    const pePago = soBancoDeHoras ? 0 : pe
+    const diariaPaga = soBancoDeHoras ? 0 : diariaPeriodo
+    const etaPago = soBancoDeHoras ? 0 : etaBonusPeriodo
+    const valorConfirmado = p.valorConfirmado + pePago + diariaPaga + etaPago
 
     return {
       ...p,
       pacientesQtd: p.pacientes.size,
       pacientesCCQtd,
       contrato: c?.contrato || "",
-      contratoNovo,
+      contratoNovo: vigentes.numeros,
       salAntigo: c?.salario || 0,
       temAntigo: (c?.salario || 0) > 0,
-      pe, diariaPeriodo, diariaDetalhe, etaWeeksPeriodo, etaBonusPeriodo,
+      // etaWeeksPeriodo é contagem de semanas, não dinheiro — fica como informação
+      // mesmo quando o bônus não é pago. As listas de PE são esvaziadas junto com o
+      // valor: a aba "PE proporcional" do XLSX e o bloco CC do card leem elas, e
+      // listar paciente com valor para quem não recebe PE é o mesmo erro do total.
+      pe: pePago,
+      diariaPeriodo: diariaPaga,
+      diariaDetalhe: soBancoDeHoras ? [] : diariaDetalhe,
+      etaWeeksPeriodo,
+      etaBonusPeriodo: etaPago,
       peProporcionalAtivo: usarRelatorioPE,
-      peBloqueado: !usarRelatorioPE && p.pacientesCC.size > 0,
+      peBloqueado: !soBancoDeHoras && !usarRelatorioPE && p.pacientesCC.size > 0,
       peStatusTexto: peStatusMensagem,
       peRelatorioPeriodo: peProporcional.inicio ? `${peProporcional.inicio} a ${peProporcional.fim}` : "",
       peDiasMes: peProporcional.diasMes || null,
-      peDetalhe,
-      peIntegralConfirmadoDetalhe,
-      peIntegralConfirmadoQtd: peIntegralConfirmadoDetalhe.length,
-      peIntegralConfirmadoValor: peIntegralConfirmadoDetalhe.reduce((s, x) => s + Number(x.valor || 0), 0),
-      peConfirmadoDetalhe,
-      peConfirmadoQtd: peConfirmadoDetalhe.length,
-      peConfirmadoValor: peConfirmadoDetalhe.reduce((s, x) => s + Number(x.valor || 0), 0),
-      peEmAberto: peProp?.emAberto || 0,
-      peAguardaDiretoria: peProp?.aguardaDiretoria || 0,
+      peDetalhe: soBancoDeHoras ? [] : peDetalhe,
+      peIntegralConfirmadoDetalhe: soBancoDeHoras ? [] : peIntegralConfirmadoDetalhe,
+      peIntegralConfirmadoQtd: soBancoDeHoras ? 0 : peIntegralConfirmadoDetalhe.length,
+      peIntegralConfirmadoValor: soBancoDeHoras ? 0 : peIntegralConfirmadoDetalhe.reduce((s, x) => s + Number(x.valor || 0), 0),
+      peConfirmadoDetalhe: soBancoDeHoras ? [] : peConfirmadoDetalhe,
+      peConfirmadoQtd: soBancoDeHoras ? 0 : peConfirmadoDetalhe.length,
+      peConfirmadoValor: soBancoDeHoras ? 0 : peConfirmadoDetalhe.reduce((s, x) => s + Number(x.valor || 0), 0),
+      peEmAberto: soBancoDeHoras ? 0 : (peProp?.emAberto || 0),
+      peAguardaDiretoria: soBancoDeHoras ? 0 : (peProp?.aguardaDiretoria || 0),
       peInfoTexto: PE_INFO_TEXTO,
       registrosNaoRealizados: p.pendentes + p.naoEvoluidas,
       paBreakdown: Object.values(p.paBreakdown),
       contratoFuncoes: [...(p.funcoesContrato || [])],
       temContratoDuploAcPs: p.funcoesContrato?.has(FUNCAO_AC) && p.funcoesContrato?.has(FUNCAO_PS),
-      valorConfirmado: p.valorConfirmado + pe + diariaPeriodo + etaBonusPeriodo,
-      valorPotencial: p.valorConfirmado + p.valorRecuperavel + pe + diariaPeriodo + etaBonusPeriodo,
+      valorConfirmado,
+      // No banco de horas puro nem o PA recuperável existe: regularizar evolução
+      // não muda um valor fixo. O potencial é o próprio confirmado.
+      valorPotencial: valorConfirmado + (soBancoDeHoras ? 0 : p.valorRecuperavel),
+      modalidade: vigentes.modalidade,
+      valorFixoBancoHoras: vigentes.valorFixoMensal,
+      numerosBancoHoras: vigentes.numerosBancoHoras,
+      valorTotalAPagar: valorConfirmado + vigentes.valorFixoMensal,
     }
-  }).sort((a, b) => b.valorConfirmado - a.valorConfirmado)
+  }).sort((a, b) => b.valorTotalAPagar - a.valorTotalAPagar)
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

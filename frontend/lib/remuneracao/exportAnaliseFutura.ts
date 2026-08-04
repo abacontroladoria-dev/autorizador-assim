@@ -90,7 +90,16 @@ export function exportarAnaliseXlsx(opts: ExportarAnaliseOpts): void {
 
   const resumo = dadosFiltrados.map(d => ({
     Profissional: d.prof,
+    Desligado: d.desligado ? "Sim" : "Não",
     Contrato: d.contrato || "",
+    // Modalidade do(s) contrato(s) VIGENTE(s): quem não tem contrato vigente em
+    // banco de horas é projetado por atendimento (PA por sessão).
+    Modalidade: d.modalidade === "banco_horas" ? "Banco de horas"
+      : d.modalidade === "hibrido" ? "Banco de horas + Atendimento"
+        : "Atendimento",
+    Contrato_Banco_Horas: d.numerosBancoHoras.join("; "),
+    Valor_Fixo_Banco_Horas: d.valorFixoBancoHoras ?? 0,
+    Banco_Horas_Valor_Hora: d.valorHoraBancoHoras != null ? +d.valorHoraBancoHoras.toFixed(2) : null,
     Horas_Agendadas_Mes: d.horasMensais != null ? +d.horasMensais.toFixed(2) : 0,
     Contrato_Antigo: d.salAntigo || 0,
     Contrato_Antigo_Valor_Hora: d.valorHoraDerivado != null ? +d.valorHoraDerivado.toFixed(2) : null,

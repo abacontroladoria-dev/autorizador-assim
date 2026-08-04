@@ -36,3 +36,17 @@ export const NOMES_FALSOS_PREFIXOS = ["Supervisor", "Supervisora", "Alinhamento"
 export const ETA_ADMIN_NOMES = ["Horário Administrativo"]
 
 export const PROFS_IGNORAR = ["Profissional Teste", "Testes Técnicos", "Combinar Consulta"]
+
+// O TiTa renomeia o profissional para "INATIVO-<nome>" quando ele é desligado — é o
+// único sinal de desligamento que existe (não há coluna de status em
+// csv_grades_profissionais nem tabela de profissionais). Regex de prefixo, não
+// substring: um nome que contenha "inativo" no meio não deve casar.
+const RE_PROF_DESLIGADO = /^\s*inativ[oa]\s*[-–—:]\s*/i
+
+export const isProfDesligado = (nome: unknown): boolean => RE_PROF_DESLIGADO.test(String(nome ?? ""))
+
+// O contrato do profissional fica cadastrado no nome limpo (sem prefixo), então
+// tirar o prefixo é o que faz o match do cadastro voltar a funcionar. Serve de
+// fallback quando o profissional_id não resolve o nome via agenda_tita.
+export const limparPrefixoDesligado = (nome: string): string =>
+  String(nome ?? "").replace(RE_PROF_DESLIGADO, "").trim()

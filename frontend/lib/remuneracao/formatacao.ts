@@ -103,3 +103,23 @@ export function validarCpfCnpj(v: unknown): boolean {
   if (!digitos) return true
   return digitos.length === 11 || digitos.length === 14
 }
+
+// Documento → texto mascarado, escolhendo o formato pela contagem de dígitos:
+// até 11 vira CPF, acima vira CNPJ. Formata parcialmente enquanto se digita
+// (não espera o documento estar completo), e trunca em 14 dígitos. Usado em
+// <input> de CPF/CNPJ pra que o operador consiga conferir o que digitou —
+// 11 ou 14 dígitos corridos sem pontuação são ilegíveis de bater com um papel.
+export function maskCpfCnpj(raw: string): string {
+  const d = onlyDigits(raw).slice(0, 14)
+  if (d.length <= 11) {
+    return d
+      .replace(/(\d{3})(\d)/, "$1.$2")
+      .replace(/(\d{3})(\d)/, "$1.$2")
+      .replace(/(\d{3})(\d{1,2})$/, "$1-$2")
+  }
+  return d
+    .replace(/(\d{2})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d)/, "$1/$2")
+    .replace(/(\d{4})(\d{1,2})$/, "$1-$2")
+}

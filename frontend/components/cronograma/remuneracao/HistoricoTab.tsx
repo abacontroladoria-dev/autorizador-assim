@@ -56,7 +56,10 @@ export function HistoricoTab() {
           const proj = projecaoPorProf.get(p.prof)
           return {
             prof: p.prof,
-            totalReal: p.valorConfirmado,
+            // valorTotalAPagar, não valorConfirmado: quem está em banco de horas
+            // tem o valor fixo do contrato fora da apuração por sessão, e o
+            // retrato do mês precisa registrar a folha inteira.
+            totalReal: p.valorTotalAPagar,
             salAntigo: p.salAntigo,
             total100: proj?.total100 ?? null,
             totalX: proj?.totalX ?? null,

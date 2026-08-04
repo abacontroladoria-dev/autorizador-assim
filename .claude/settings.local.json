@@ -25,7 +25,15 @@
       "Bash(node -e ' *)",
       "Bash(node scratch_inspect_xlsx.js \"C:/Users/Maquina001/Downloads/comparativo_julho_agosto_2026.xlsx\")",
       "Bash(npx eslint *)",
-      "Bash(grep -E \"^/|\\\\.tsx$|\\\\.ts$\")"
+      "Bash(grep -E \"^/|\\\\.tsx$|\\\\.ts$\")",
+      "Bash(git fetch *)",
+      "Bash(xargs grep -ln \"usuarios.*role\\\\|role.*usuarios\")",
+      "Bash(supabase --version)",
+      "Bash(docker port *)",
+      "Bash(docker exec *)",
+      "Bash(node -e \"console.log\\(require\\('./frontend/node_modules/next/package.json'\\).version\\)\")",
+      "Bash(curl -s -o /dev/null -w \"status=%{http_code} redirect=%{redirect_url}\\\\n\" \"http://localhost:3000/auditoria-assim/?tab=pendencias\")",
+      "Bash(curl -s -o /dev/null -w \"status=%{http_code}\\\\n\" \"http://localhost:3000/login/\")"
     ]
   }
 }

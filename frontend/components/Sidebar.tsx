@@ -8,6 +8,7 @@ import {
   FileText,
   ShieldCheck,
   ClipboardList,
+  ListChecks,
   CalendarDays,
   UserRound,
   Building2,
@@ -71,6 +72,8 @@ const pathIconMap: Record<string, any> = {
   "/agenda/salas": Building2,
   "/guias-digitais": FileText,
   "/auditoria-assim": ClipboardList,
+  "/auditoria-assim?tab=auditoria": ClipboardList,
+  "/auditoria-assim?tab=pendencias": ListChecks,
   "/cco": BarChart3,
   "/admin": ShieldCheck,
   "/admin/permissoes": KeyRound,
@@ -487,8 +490,14 @@ export default function Sidebar() {
               {canAccess("/cco") && (
                 <MenuItem label="Conciliação ASSIM" icon={BarChart3} path="/cco" />
               )}
-              {canAccess("/auditoria-assim") && (
-                <MenuItem label="Auditoria ASSIM" icon={ClipboardList} path="/auditoria-assim" />
+              {/* Duas visões da mesma rota. canAccess("/auditoria-assim?tab=…")
+                  resolve para o bare path '/auditoria-assim' de CODIGO_PARA_ROTAS,
+                  então nenhum código de permissão novo foi necessário. */}
+              {canAccess("/auditoria-assim?tab=pendencias") && (
+                <MenuItem label="Pendências ASSIM" icon={ListChecks} path="/auditoria-assim?tab=pendencias" />
+              )}
+              {canAccess("/auditoria-assim?tab=auditoria") && (
+                <MenuItem label="Auditoria ASSIM" icon={ClipboardList} path="/auditoria-assim?tab=auditoria" />
               )}
               {canAccess("/guias-digitais") && (
                 <MenuItem label="Guias Digitais" icon={FileText} path="/guias-digitais" />
