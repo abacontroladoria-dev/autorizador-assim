@@ -47,6 +47,25 @@ export async function getUsuarioPermissoes(usuarioId: string): Promise<UsuarioPe
   return data || []
 }
 
+// Todas as sobrescritas individuais, de todos os usuários — usado pela view
+// "por permissão" (quem tem acesso a X), que precisa do mapa completo de uma
+// vez para não fazer N chamadas. RLS libera select completo pra admin/diretoria
+// (ver 20260529110000_create_permissoes_tables.sql e
+// 20260713140000_diretoria_gerencia_permissoes.sql).
+export async function getAllUsuariosPermissoes(): Promise<UsuarioPermissao[]> {
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase
+    .from('usuarios_permissoes')
+    .select('*')
+
+  if (error) {
+    console.error('Erro ao buscar permissões de todos os usuários:', error)
+    return []
+  }
+
+  return data || []
+}
+
 export async function salvarPermissoesUsuario(
   usuarioId: string,
   permissoes: Record<string, boolean>
