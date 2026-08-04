@@ -99,6 +99,23 @@ function SidePanel({ atendimento, onReverterFalta }: Props) {
   const horarioIni =
     atendimento.horario?.slice(0, 5) || atendimento.hora_inicial?.slice(0, 5)
 
+  const confirmadoEm = atendimento.confirmado_em
+    ? (() => {
+        const d = new Date(atendimento.confirmado_em)
+        const data = d.toLocaleDateString('pt-BR', {
+          day: '2-digit',
+          month: '2-digit',
+        })
+        const hora = d.toLocaleTimeString('pt-BR', {
+          hour: '2-digit',
+          minute: '2-digit',
+        })
+        return atendimento.confirmado_por_nome
+          ? `${data} ${hora} · ${atendimento.confirmado_por_nome}`
+          : `${data} ${hora}`
+      })()
+    : null
+
   return (
     <div className="sticky top-0 max-h-[calc(100vh-7rem)] overflow-y-auto rounded-2xl border border-slate-200 bg-white">
       {/* CABEÇALHO */}
@@ -197,17 +214,7 @@ function SidePanel({ atendimento, onReverterFalta }: Props) {
               }
             />
             <Row label="Unidade" value={unidade} />
-            <Row
-              label="Confirmado em"
-              value={
-                atendimento.confirmado_em
-                  ? new Date(atendimento.confirmado_em).toLocaleTimeString(
-                      'pt-BR',
-                      { hour: '2-digit', minute: '2-digit' }
-                    )
-                  : null
-              }
-            />
+            <Row label="Confirmado em" value={confirmadoEm} />
           </dl>
         </section>
 
