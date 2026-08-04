@@ -37,6 +37,7 @@ import { getSupabaseClient } from '@/lib/supabase/client'
 import { changeUserRole, getAdminUsers } from '@/services/admin.service'
 import type { AdminUser } from '@/services/admin.service'
 import {
+  getAllUsuariosPermissoes,
   getPermissoes,
   getUsuarioPermissoes,
   restaurarPermissoesDoPerfil,
@@ -284,6 +285,17 @@ export default function PermissoesPageShell() {
   const [savingRole, setSavingRole] = useState(false)
   const [openGroups, setOpenGroups] = useState<Set<string>>(INITIAL_OPEN)
 
+  // ─── View "por permissão" (quem tem acesso a X) ──────────────────────────
+  const [viewMode, setViewMode] = useState<'usuario' | 'permissao'>('usuario')
+  const [allOverrides, setAllOverrides] = useState<Record<string, Record<string, boolean>>>({})
+  const [loadingOverrides, setLoadingOverrides] = useState(false)
+  const [selectedCodigo, setSelectedCodigo] = useState<string | null>(null)
+  const [permissaoSearch, setPermissaoSearch] = useState('')
+  const [userSearchByPerm, setUserSearchByPerm] = useState('')
+  const [onlyGranted, setOnlyGranted] = useState(true)
+  const [openGroupsPermView, setOpenGroupsPermView] = useState<Set<string>>(INITIAL_OPEN)
+  const [grantingUserId, setGrantingUserId] = useState<string | null>(null)
+
   useEffect(() => {
     setHeader('Permissões', 'Gerencie as permissões de acesso dos usuários aos módulos do sistema.')
   }, [setHeader])
@@ -312,6 +324,21 @@ export default function PermissoesPageShell() {
       setPermissoes(p)
     })
   }, [isAdmin])
+
+  useEffect(() => {
+    if (viewMode !== 'permissao' || isAdmin !== true) return
+    if (Object.keys(allOverrides).length > 0) return
+    setLoadingOverrides(true)
+    getAllUsuariosPermissoes().then(overrides => {
+      const map: Record<string, Record<string, boolean>> = {}
+      for (const o of overrides) {
+        if (!map[o.usuario_id]) map[o.usuario_id] = {}
+        map[o.usuario_id][o.permissao_codigo] = o.permitido
+      }
+      setAllOverrides(map)
+      setLoadingOverrides(false)
+    })
+  }, [viewMode, isAdmin, allOverrides])
 
   // ─── Computados ──────────────────────────────────────────────────────────
 
@@ -344,6 +371,50 @@ export default function PermissoesPageShell() {
     const rest = Array.from(map.entries()).filter(([g]) => !GROUP_ORDER.includes(g))
     return [...ordered, ...rest]
   }, [permissoes])
+
+  const permissaoGroupsFiltered = useMemo(() => {
+    if (!permissaoSearch) return sortedGroups
+    const q = permissaoSearch.toLowerCase()
+    return sortedGroups
+      .map(([g, items]) => [g, items.filter(p => p.nome.toLowerCase().includes(q))] as [string, Permissao[]])
+      .filter(([, items]) => items.length > 0)
+  }, [sortedGroups, permissaoSearch])
+
+  const selectedPermissao = useMemo(
+    () => permissoes.find(p => p.codigo === selectedCodigo) || null,
+    [permissoes, selectedCodigo]
+  )
+
+  const usersForSelectedCodigo = useMemo(() => {
+    if (!selectedCodigo) return []
+    return users.map(u => {
+      const overrideMap = allOverrides[u.id] || {}
+      const hasOverride = selectedCodigo in overrideMap
+      const roleDefault = getRoleDefaultPermissions(u.role || '').includes(selectedCodigo)
+      const granted = hasOverride ? overrideMap[selectedCodigo] : roleDefault
+      const origem: 'perfil' | 'override_liberado' | 'override_negado' = !hasOverride
+        ? 'perfil'
+        : overrideMap[selectedCodigo]
+          ? 'override_liberado'
+          : 'override_negado'
+      return { user: u, granted, origem }
+    })
+  }, [users, allOverrides, selectedCodigo])
+
+  const filteredUsersForSelectedCodigo = useMemo(() => {
+    let list = usersForSelectedCodigo
+    if (onlyGranted) list = list.filter(x => x.granted)
+    if (userSearchByPerm) {
+      const q = userSearchByPerm.toLowerCase()
+      list = list.filter(x => (x.user.nome || x.user.email || '').toLowerCase().includes(q))
+    }
+    return list
+  }, [usersForSelectedCodigo, onlyGranted, userSearchByPerm])
+
+  const grantedCountForSelectedCodigo = useMemo(
+    () => usersForSelectedCodigo.filter(x => x.granted).length,
+    [usersForSelectedCodigo]
+  )
 
   // ─── Handlers (lógica de negócio inalterada) ─────────────────────────────
 
@@ -411,8 +482,49 @@ export default function PermissoesPageShell() {
     setPerms(prev => ({ ...prev, [codigo]: value }))
   }
 
+  async function handleGrantAccessToCodigo(userId: string) {
+    if (!selectedCodigo) return
+    setGrantingUserId(userId)
+    const ok = await salvarPermissoesUsuario(userId, { [selectedCodigo]: true })
+    if (ok) {
+      setAllOverrides(prev => ({
+        ...prev,
+        [userId]: { ...prev[userId], [selectedCodigo]: true },
+      }))
+      toast.success('Acesso liberado com sucesso')
+    } else {
+      toast.error('Erro ao liberar acesso')
+    }
+    setGrantingUserId(null)
+  }
+
+  async function handleRevokeAccessToCodigo(userId: string) {
+    if (!selectedCodigo) return
+    setGrantingUserId(userId)
+    const ok = await salvarPermissoesUsuario(userId, { [selectedCodigo]: false })
+    if (ok) {
+      setAllOverrides(prev => ({
+        ...prev,
+        [userId]: { ...prev[userId], [selectedCodigo]: false },
+      }))
+      toast.success('Acesso retirado com sucesso')
+    } else {
+      toast.error('Erro ao retirar acesso')
+    }
+    setGrantingUserId(null)
+  }
+
   function toggleGroup(grupo: string) {
     setOpenGroups(prev => {
+      const next = new Set(prev)
+      if (next.has(grupo)) next.delete(grupo)
+      else next.add(grupo)
+      return next
+    })
+  }
+
+  function toggleGroupPermView(grupo: string) {
+    setOpenGroupsPermView(prev => {
       const next = new Set(prev)
       if (next.has(grupo)) next.delete(grupo)
       else next.add(grupo)
@@ -450,6 +562,211 @@ export default function PermissoesPageShell() {
 
   return (
     <div>
+      {/* ── Alternador de visão ── */}
+      <div className="inline-flex items-center gap-1 bg-slate-100 rounded-2xl p-1 mb-4">
+        <button
+          onClick={() => setViewMode('usuario')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-150 ${
+            viewMode === 'usuario' ? 'bg-white text-[#3A8FB7] shadow-sm' : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <UserRound size={14} />
+          Por usuário
+        </button>
+        <button
+          onClick={() => setViewMode('permissao')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-150 ${
+            viewMode === 'permissao' ? 'bg-white text-[#3A8FB7] shadow-sm' : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <Users size={14} />
+          Por permissão
+        </button>
+      </div>
+
+      {viewMode === 'permissao' ? (
+        <div className="flex gap-4 items-start">
+          {/* ── Lista de permissões ── */}
+          <div className="w-80 shrink-0">
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 space-y-3">
+              <h2 className="text-sm font-semibold text-slate-700 px-1">Módulos e abas</h2>
+
+              <div className="relative">
+                <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Buscar módulo ou aba..."
+                  value={permissaoSearch}
+                  onChange={e => setPermissaoSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-2 text-sm rounded-xl border border-slate-200 bg-slate-50 text-slate-700 placeholder-slate-400 focus:outline-none focus:border-[#3A8FB7] focus:ring-2 focus:ring-[#3A8FB7]/10"
+                />
+              </div>
+
+              <div className="space-y-2 max-h-[calc(100vh-260px)] overflow-y-auto">
+                {permissaoGroupsFiltered.map(([grupo, items]) => {
+                  const GroupIcon = GROUP_ICONS[grupo] || ShieldCheck
+                  const isOpen = openGroupsPermView.has(grupo)
+                  return (
+                    <div key={grupo} className="rounded-xl border border-slate-100 overflow-hidden">
+                      <div
+                        className="flex items-center gap-2 px-3 py-2 cursor-pointer hover:bg-slate-50/70 select-none"
+                        onClick={() => toggleGroupPermView(grupo)}
+                      >
+                        <GroupIcon size={13} className="text-slate-400" />
+                        <span className="flex-1 text-xs font-semibold text-slate-600">{grupo}</span>
+                        <ChevronDown
+                          size={12}
+                          className={`text-slate-400 transition-transform duration-200 ${isOpen ? 'rotate-180' : ''}`}
+                        />
+                      </div>
+                      {isOpen && (
+                        <div className="border-t border-slate-50">
+                          {items.map(p => {
+                            const Icon = MODULE_ICONS[p.codigo] || ShieldCheck
+                            const active = selectedCodigo === p.codigo
+                            return (
+                              <button
+                                key={p.codigo}
+                                onClick={() => setSelectedCodigo(p.codigo)}
+                                className={`w-full flex items-center gap-2.5 px-3 py-2 text-left transition-colors duration-100 ${
+                                  active ? 'bg-[#3A8FB7]/10' : 'hover:bg-slate-50'
+                                }`}
+                              >
+                                <div className="w-6 h-6 rounded-md bg-slate-100 flex items-center justify-center shrink-0">
+                                  <Icon size={12} className="text-slate-500" />
+                                </div>
+                                <span className={`text-sm truncate ${active ? 'text-[#3A8FB7] font-medium' : 'text-slate-600'}`}>
+                                  {p.nome}
+                                </span>
+                              </button>
+                            )
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  )
+                })}
+                {permissaoGroupsFiltered.length === 0 && (
+                  <p className="text-center text-sm text-slate-400 py-6">Nenhum módulo encontrado</p>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Painel: usuários com acesso ── */}
+          <div className="flex-1 space-y-4 min-w-0">
+            {!selectedCodigo || !selectedPermissao ? (
+              <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-12 flex flex-col items-center justify-center text-center min-h-96">
+                <div className="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center mb-4">
+                  <Users size={26} className="text-slate-300" />
+                </div>
+                <p className="text-slate-400 text-sm">
+                  Selecione um módulo ou aba para ver quem tem acesso.
+                </p>
+              </div>
+            ) : (
+              <>
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-5">
+                  <p className="text-xs font-medium text-slate-400 uppercase tracking-wider mb-3">
+                    Módulo selecionado
+                  </p>
+                  <div className="flex items-center justify-between gap-4 flex-wrap">
+                    <div className="flex items-center gap-3">
+                      <div className="w-11 h-11 rounded-2xl bg-[#3A8FB7]/10 flex items-center justify-center shrink-0">
+                        {(() => {
+                          const Icon = MODULE_ICONS[selectedPermissao.codigo] || ShieldCheck
+                          return <Icon size={18} className="text-[#3A8FB7]" />
+                        })()}
+                      </div>
+                      <div>
+                        <h2 className="text-lg font-bold text-slate-800">{selectedPermissao.nome}</h2>
+                        <p className="text-sm text-slate-400">{selectedPermissao.grupo || 'Outros'}</p>
+                      </div>
+                    </div>
+                    <span className="px-3 py-1 rounded-full text-xs font-semibold bg-[#3A8FB7]/10 text-[#3A8FB7]">
+                      {grantedCountForSelectedCodigo} de {users.length} usuários têm acesso
+                    </span>
+                  </div>
+                </div>
+
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 space-y-3">
+                  <div className="flex items-center gap-3 flex-wrap">
+                    <div className="relative flex-1 min-w-[200px]">
+                      <Search size={13} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Buscar usuário..."
+                        value={userSearchByPerm}
+                        onChange={e => setUserSearchByPerm(e.target.value)}
+                        className="w-full pl-8 pr-3 py-2 text-sm rounded-xl border border-slate-200 bg-slate-50 text-slate-700 placeholder-slate-400 focus:outline-none focus:border-[#3A8FB7] focus:ring-2 focus:ring-[#3A8FB7]/10"
+                      />
+                    </div>
+                    <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
+                      <Checkbox checked={onlyGranted} onChange={setOnlyGranted} />
+                      Somente com acesso
+                    </label>
+                  </div>
+
+                  {loadingOverrides ? (
+                    <div className="flex flex-col items-center justify-center py-10 gap-3">
+                      <div className="w-5 h-5 border-2 border-[#3A8FB7] border-t-transparent rounded-full animate-spin" />
+                      <span className="text-sm text-slate-400">Carregando permissões...</span>
+                    </div>
+                  ) : (
+                    <div className="space-y-0.5 max-h-[calc(100vh-420px)] overflow-y-auto">
+                      {filteredUsersForSelectedCodigo.map(({ user, granted }) => (
+                        <div
+                          key={user.id}
+                          className="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-slate-50 transition-colors duration-100"
+                        >
+                          <Avatar name={user.nome} userId={user.id} size="sm" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium truncate leading-tight text-slate-700">
+                              {user.nome || user.email}
+                            </p>
+                            <p className="text-xs text-slate-400 truncate leading-tight mt-0.5">
+                              {ROLE_LABELS[user.role || ''] || user.role || '—'}
+                            </p>
+                          </div>
+                          <span
+                            className={`shrink-0 w-24 text-center px-2.5 py-1 rounded-lg text-xs font-semibold ${
+                              granted
+                                ? 'bg-emerald-50 text-emerald-600'
+                                : 'bg-slate-100 text-slate-400'
+                            }`}
+                          >
+                            {granted ? 'Liberado' : 'Sem acesso'}
+                          </span>
+                          {granted ? (
+                            <button
+                              onClick={() => handleRevokeAccessToCodigo(user.id)}
+                              disabled={grantingUserId === user.id}
+                              className="shrink-0 px-3 py-1 text-xs font-semibold text-rose-500 border border-rose-200 rounded-lg hover:bg-rose-50 transition-colors duration-150 disabled:opacity-50"
+                            >
+                              {grantingUserId === user.id ? 'Retirando...' : 'Retirar acesso'}
+                            </button>
+                          ) : (
+                            <button
+                              onClick={() => handleGrantAccessToCodigo(user.id)}
+                              disabled={grantingUserId === user.id}
+                              className="shrink-0 px-3 py-1 text-xs font-semibold text-[#3A8FB7] border border-[#3A8FB7]/30 rounded-lg hover:bg-[#3A8FB7]/10 transition-colors duration-150 disabled:opacity-50"
+                            >
+                              {grantingUserId === user.id ? 'Liberando...' : 'Liberar acesso'}
+                            </button>
+                          )}
+                        </div>
+                      ))}
+                      {filteredUsersForSelectedCodigo.length === 0 && (
+                        <p className="text-center text-sm text-slate-400 py-6">Nenhum usuário encontrado</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      ) : (
       <div className="flex gap-4 items-start">
 
         {/* ── Lista de usuários ── */}
@@ -622,6 +939,7 @@ export default function PermissoesPageShell() {
           )}
         </div>
       </div>
+      )}
 
       {/* ── Modal: Editar perfil ── */}
       {selectedUser && (
