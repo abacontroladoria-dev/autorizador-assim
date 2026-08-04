@@ -6,7 +6,7 @@ import type { GradeComparativoRaw } from "@/lib/cronograma/comparativoSessoes"
 const FIELDS = "id, paciente_nome, dia_semana, hora_inicial, hora_final, profissional_nome, terapia_nome, terapia_exibicao_nome, status_agendamento, convenio_nome, sala_nome, data, unidade_nome"
 const PAGE = 1000
 
-const FIELDS_COMPARATIVO = "paciente_id, paciente_nome, sala_nome, convenio_nome, status_agendamento, data"
+const FIELDS_COMPARATIVO = "paciente_id, paciente_nome, sala_nome, convenio_nome, status_agendamento, data, hora_inicial, terapia_id, terapia_nome, dia_semana, profissional_id, profissional_nome"
 
 // Padrão de dupla codificação UTF-8 (mojibake): byte líder C2/C3 seguido de byte
 // de continuação (80–BF). Ex.: "Araújo" gravado como "AraÃºjo".
@@ -113,5 +113,11 @@ export async function buscarGradeComparativo(dataInicio: string, dataFim: string
     convenio_nome:       fixMojibake(r.convenio_nome as string | null),
     status_agendamento:  (r.status_agendamento as string | null) ?? "",
     data:                (r.data as string | null) ?? "",
+    hora_inicial:        (r.hora_inicial as string | null) ?? null,
+    terapia_id:          r.terapia_id === null || r.terapia_id === undefined ? null : Number(r.terapia_id),
+    terapia_nome:        fixMojibake(r.terapia_nome as string | null),
+    dia_semana:          (r.dia_semana as string | null) ?? null,
+    profissional_id:     r.profissional_id === null || r.profissional_id === undefined ? null : Number(r.profissional_id),
+    profissional_nome:   fixMojibake(r.profissional_nome as string | null),
   }))
 }
