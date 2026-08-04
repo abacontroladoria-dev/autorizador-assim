@@ -828,8 +828,8 @@ async function handleManualLista(p: any) {
         .from('fila_autorizacoes')
 		.update({
 		  status: 'concluido',
-		  completion_type: 'manual',
-		  numero_autorizacao: 'MANUAL',
+		  completion_type: 'presenca',
+		  numero_autorizacao: 'N/A',
 		  horario_autorizacao: new Date().toISOString(),
 		  completed_at: new Date().toISOString(),
 		  criado_por: criadoPor,
@@ -838,12 +838,12 @@ async function handleManualLista(p: any) {
 
       if (error) {
         console.log('ERRO COMPLETO:', JSON.stringify(error, null, 2))
-        toast.error('Erro ao atualizar manual')
+        toast.error('Erro ao atualizar presença')
         return
       }
 
-	
-      toast.success('Atualizado como manual 📝')
+
+      toast.success('Presença atualizada 📝')
 
     } else {
       // 🚀 SE NÃO EXISTE → INSERT PADRONIZADO
@@ -869,22 +869,22 @@ async function handleManualLista(p: any) {
       })
 
       if (!inserted) {
-        toast.error('Erro ao registrar manual')
+        toast.error('Erro ao registrar presença')
         return
       }
 
-      // 🔥 GARANTE QUE FIQUE COMO MANUAL (extra segurança)
+      // 🔥 GARANTE QUE FIQUE COMO PRESENÇA (extra segurança)
       await supabase
         .from('fila_autorizacoes')
 		.update({
-		  completion_type: 'manual',
-		  numero_autorizacao: 'MANUAL',
+		  completion_type: 'presenca',
+		  numero_autorizacao: 'N/A',
 		  horario_autorizacao: new Date().toISOString(),
 		  completed_at: new Date().toISOString(),
 		})
         .eq('id', inserted.id)
 
-      toast.success('Autorização manual registrada 📝')
+      toast.success('Presença registrada 📝')
     }
 
     // 🔥 REMOVE DA LISTA (igual falta)

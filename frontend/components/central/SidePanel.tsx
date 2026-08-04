@@ -137,7 +137,15 @@ function SidePanel({ atendimento, onReverterFalta }: Props) {
         <section>
           <SectionTitle>Autorização</SectionTitle>
           <dl className="space-y-2.5">
-            <Row label="Guia" value={atendimento.numero_autorizacao} mono />
+            <Row
+              label="Guia"
+              value={
+                atendimento.completion_type !== 'automated'
+                  ? 'N/A — fora ASSIM'
+                  : atendimento.numero_autorizacao
+              }
+              mono
+            />
             <Row label="Solicitado por" value={atendimento.criado_por} />
             <Row label="Forma" value={atendimento.forma_autorizacao} />
             <Row

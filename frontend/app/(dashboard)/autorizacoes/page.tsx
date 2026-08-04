@@ -18,7 +18,7 @@ const ItemAutorizacao = React.memo(
 	const status = getStatusConfig(a)
 	
     const statusColor =
-	  a.is_manual
+	  a.completion_type !== 'automated'
 		? "border-l-blue-400"
 		: a.status_assim === 'autorizado'
 		? "border-l-green-500"
@@ -83,13 +83,13 @@ const ItemAutorizacao = React.memo(
   className={`
     text-xs text-center leading-tight
     px-3 py-1.5 rounded-lg font-medium
-    ${a.is_manual
+    ${a.completion_type !== 'automated'
       ? 'bg-blue-100 text-blue-700'
       : 'bg-green-100 text-green-700'}
   `}
 >
   Solicitação<br />
-  {a.is_manual ? 'manual' : 'via sistema'}
+  {a.completion_type !== 'automated' ? 'Fora ASSIM' : 'ASSIM'}
 </span>
 </div>
 
@@ -447,13 +447,13 @@ useEffect(() => {
         <span
           className={`
             px-3 py-1.5 rounded-lg text-xs font-medium
-            ${selecionado.is_manual
+            ${selecionado.completion_type !== 'automated'
               ? 'bg-blue-100 text-blue-700'
               : 'bg-green-100 text-green-700'}
           `}
         >
           Solicitação<br />
-          {selecionado.is_manual ? 'manual' : 'via sistema'}
+          {selecionado.completion_type !== 'automated' ? 'Fora ASSIM' : 'ASSIM'}
         </span>
       </div>
 
@@ -508,7 +508,9 @@ useEffect(() => {
           <div>
             <p className="text-xs text-slate-400">Número</p>
             <p className="font-medium">
-              {selecionado.numero_autorizacao || '—'}
+              {selecionado.completion_type !== 'automated'
+                ? 'N/A — fora ASSIM'
+                : selecionado.numero_autorizacao || '—'}
             </p>
           </div>
         </div>
