@@ -19,6 +19,7 @@ import {
 } from "./constants"
 import {
   cFx,
+  espRealPorExibicao,
   exU,
   fm,
   fmtName,
@@ -104,9 +105,15 @@ export function runAlgorithm(
     for (const r of agend) {
       const pac = r["Nome Favorecido"]
       if (!pac || PACS_ADMIN.has(pac)) continue
-      const k = `${pac}|||${esp}`
-      if (cli.includes(r["Terapia"])) qtdOf[k] = (qtdOf[k] || 0) + 1
-      else if (ext.includes(r["Terapia"])) qtdOf[k] = (qtdOf[k] || 0) + 2 / 3
+      const terapia = r["Terapia"]
+      if (cli.includes(terapia)) {
+        const terapiaExib = String(r["Terapia Exibição"] || r["Terapia Exibicao"] || "").trim()
+        const k = `${pac}|||${espRealPorExibicao(terapia, terapiaExib, esp)}`
+        qtdOf[k] = (qtdOf[k] || 0) + 1
+      } else if (ext.includes(terapia)) {
+        const k = `${pac}|||${esp}`
+        qtdOf[k] = (qtdOf[k] || 0) + 2 / 3
+      }
     }
   }
 

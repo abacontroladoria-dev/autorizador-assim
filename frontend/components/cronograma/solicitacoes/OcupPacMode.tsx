@@ -4,16 +4,17 @@ import * as XLSX from "xlsx"
 import toast from "react-hot-toast"
 import { type CSSProperties, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import {
-  ABA_EXIB_PSICO_NAMES, B, DIAS_LIST, DIAS_ORD, EXCLUIR_OCUP, EXIB_NOME,
+  ABA_EXIB_PSICO_NAMES, B, DIAS_LIST, DIAS_ORD, EXCLUIR_OCUP, EXIB_ID, EXIB_NOME,
   HORAS_GRID, PACS_ADMIN, TERAPIA_TO_ESP, isProfBloqueadoTemp,
 } from "@/lib/cronograma/constants"
 import {
-  buildCronoUnitMeta, fm, fmtName, isLaudoComAlta, pm,
+  buildCronoUnitMeta, espRealPorExibicao, fm, fmtName, isLaudoComAlta, pm,
   shouldShowSessionUnit, unidadeBadgeText,
 } from "@/lib/cronograma/helpers"
 import { UnitHeaderBadges, CronoGlobalUnitBadge } from "@/components/cronograma/ui/UnitBadges"
 import { ConfirmarImplantacaoModal } from "./ConfirmarImplantacaoModal"
 import type { CsvRow, LaudoRow, CfgState, RecItem, InvItem } from "@/types/cronograma"
+import type { AceiteSessao } from "@/types/acompanhamento"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -44,12 +45,6 @@ interface Sugestao {
 }
 
 interface GapInfo { esp: string; aut: number; of: number; dif: number }
-
-interface AceiteSessao {
-  dia: string; hora: string; tP: string; prof: string; unidade: string
-  /** UUID da linha em csv_grades_profissionais de origem — usado para resolver o agendamento na TiTa. */
-  csvGradeId: string
-}
 
 interface AceitePacBundle {
   id: string; pac: string; ts: number; origem: "ocp-paciente"
@@ -103,6 +98,22 @@ const EXCLUIR_GAPS  = new Set([
 ])
 // Terapias vedadas para ASSIM Saúde, salvo exceção judicial LIMINAR com gap > 0
 const ASSIM_RESTR_TERAPIAS = new Set(["Fisioterapia Aquática", "Equoterapia"])
+
+// Aplicador ABA (AE)/(HS): a especialidade do laudo que determina se o paciente
+// está autorizado para Arteterapia/Habilidades Sociais (não confundir com a
+// especialidade padrão de TERAPIA_TO_ESP, usada só pra pontuar o déficit da
+// sugestão). Mesma regra de negócio de detectarInconsistencias
+// (inconsistencias.ts) — Gratuidade nunca oferta; ASSIM só com qtd autorizada
+// > 1; demais convênios sempre elegíveis, com exibição condicional (ver
+// terapiaExibicaoOverride em TodasSugestoesModal e regraFixaExibicaoAeHs).
+const AE_HS_LAUDO_ESP: Record<string, string> = {
+  "Aplicador ABA (AE)": "Arteterapia",
+  "Aplicador ABA (HS)": "Habilidades Sociais",
+}
+const AE_HS_EXIB_ID: Record<string, number> = {
+  "Aplicador ABA (AE)": EXIB_ID.ARTETERAPIA_ABA,
+  "Aplicador ABA (HS)": EXIB_ID.HS_ABA,
+}
 const SK         = "aba_ocup_pac_status_v1"
 const SK_ACEITES = "aba_ocup_pac_aceites_v1"
 const DIAS_UTIL  = DIAS_LIST.slice(0, 5)
@@ -146,8 +157,21 @@ function adjHs(hora: string): string[] {
   return [hi + 40, hi - 40].filter(v => v >= 0).map(fm)
 }
 
+// Sugestões (ainda não implantadas): não há terapia_exibicao real gravada ainda
+// pra AE/HS (depende de laudo+convênio, resolvido só na implantação — ver
+// terapiaExibicaoIdPorRegraFixa em services/tita/mappings.ts), então só o
+// Grupo 1 (sempre "Psicologia ABA") pode ser adiantado com segurança aqui.
 function tExib(tP: string): string | undefined {
   return ABA_EXIB_PSICO_NAMES.has(tP) ? EXIB_NOME[2271] : undefined
+}
+
+// Sessões já existentes (Agendado): usa a terapia_exibicao_nome real, já
+// sincronizada da TiTa para aquela sessão — mostrada só quando difere da
+// terapia de ação (ex.: "Aplicador ABA (AE)" exibindo "Arteterapia (Psicologia
+// ABA)"); quando são iguais (a maioria das terapias) não repete a informação.
+function tExibReal(tP: string, terapiaExibicaoNome: string | number | null | undefined): string | undefined {
+  const te = String(terapiaExibicaoNome || "").trim()
+  return te && te !== tP ? te : undefined
 }
 
 function countSlots(rows: CsvRow[]): number {
@@ -275,12 +299,28 @@ function buildSugestoes(
   const effDif = (e: string, extra = 0) => (espDif[e] ?? 0) - (proposedOf[e] ?? 0) - extra
 
   const isAssimSaude = /assim/i.test(conv)
+  const isGratuidade = /gratuidade/i.test(conv)
+  // Aplicador ABA (AE)/(HS): nunca oferta pra Gratuidade; ASSIM só com qtd
+  // autorizada (laudo de Arteterapia/Habilidades Sociais) > 1 — mesmo limiar de
+  // detectarInconsistencias. Demais convênios: sempre elegível (exibição
+  // resolvida depois, na implantação).
+  function aeHsBloqueado(terapia: string): boolean {
+    const laudoEsp = AE_HS_LAUDO_ESP[terapia]
+    if (!laudoEsp) return false
+    if (isGratuidade) return true
+    if (isAssimSaude) return (gapMap[`${pac}|||${laudoEsp}`]?.aut ?? 0) <= 1
+    return false
+  }
   const seenFree = new Set<string>()
   const allFreeRows: Array<CsvRow & { _hMin: number; _hora: string }> = []
   for (const r of cRows) {
     if (r["Status do Agendamento"] !== "Livre") continue
     if (isProfBloqueadoTemp(r.Profissional)) continue
-    if (EXCLUIR_OCUP.has(r.Terapia)) continue
+    // Aplicador ABA (AE) é a única exceção liberada de EXCLUIR_OCUP aqui — as
+    // demais (Coordenador de Caso, Supervisão ABA etc.) continuam fora da oferta
+    // de sugestões. Ver AE_HS_LAUDO_ESP acima para a condição real de elegibilidade.
+    if (EXCLUIR_OCUP.has(r.Terapia) && r.Terapia !== "Aplicador ABA (AE)") continue
+    if (aeHsBloqueado(r.Terapia)) continue
     const esp = TERAPIA_TO_ESP[r.Terapia]
     if (!esp || !espDif[esp]) continue
     // ASSIM Saúde: Fisioterapia Aquática e Equoterapia só se o paciente for LIMINAR (gap > 0 já garantido pelo check acima)
@@ -362,7 +402,8 @@ function buildSugestoes(
           if (isProfBloqueadoTemp(r.Profissional)) continue
           if (r["Dia da Semana"] !== dia) continue
           if (rowUnid(r) !== unid) continue
-          if (EXCLUIR_OCUP.has(r.Terapia)) continue
+          if (EXCLUIR_OCUP.has(r.Terapia) && r.Terapia !== "Aplicador ABA (AE)") continue
+          if (aeHsBloqueado(r.Terapia)) continue
           const compEsp = TERAPIA_TO_ESP[r.Terapia]
           // Desconta 1 do esp principal, pois ele já será adicionado neste slot.
           if (!compEsp || effDif(compEsp, compEsp === esp ? 1 : 0) <= 0) continue
@@ -624,6 +665,21 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     })
   }
 
+  // Aplicador ABA (AE)/(HS): resolve o terapia_exibicao_id aqui (cliente) porque
+  // depende de laudo + convênio, que só existem no navegador — o servidor recebe
+  // o valor já pronto via AceiteSessao.terapiaExibicaoOverride (ver
+  // confirmarImplantacao → /api/tita/confirmar-agendamento → prepararAgendamento).
+  // Mesmo limiar de negócio de detectarInconsistencias (inconsistencias.ts) e do
+  // gate de elegibilidade em buildSugestoes (aeHsBloqueado): ASSIM só com qtd > 1.
+  function terapiaExibicaoOverride(tP: string): number | undefined {
+    const laudoEsp = AE_HS_LAUDO_ESP[tP]
+    if (!laudoEsp) return undefined
+    const isAssim = /assim/i.test(conv)
+    const qtd = pacAllEsp.find(g => g.esp === laudoEsp)?.aut ?? 0
+    const limiar = isAssim ? 1 : 0
+    return qtd > limiar ? AE_HS_EXIB_ID[tP] : EXIB_ID.PSICOLOGIA_ABA
+  }
+
   function buildSelectedSessoes(): AceiteSessao[] {
     const sessoes: AceiteSessao[] = []
     for (const id of selectedIds) {
@@ -637,13 +693,13 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
         const vc = getActiveVComps(s).find(v => v.hora === hora)
         if (!vc) continue
         const ae = getActiveEntry(s)
-        sessoes.push({ dia: s.dia, hora, tP: vc.tP, prof: vc.prof, unidade: ae.unidade, csvGradeId: vc.csvGradeId })
+        sessoes.push({ dia: s.dia, hora, tP: vc.tP, prof: vc.prof, unidade: ae.unidade, csvGradeId: vc.csvGradeId, terapiaExibicaoOverride: terapiaExibicaoOverride(vc.tP) })
       } else {
         const s = sugestoes.find(x => x.id === id)
         if (!s || stOf(s) === "inviavel") continue
         const ae = getActiveEntry(s)
         if (!isVCompExcluded(s.id, s.hora)) {
-          sessoes.push({ dia: s.dia, hora: s.hora, tP: ae.tP, prof: ae.prof, unidade: ae.unidade, csvGradeId: ae.csvGradeId })
+          sessoes.push({ dia: s.dia, hora: s.hora, tP: ae.tP, prof: ae.prof, unidade: ae.unidade, csvGradeId: ae.csvGradeId, terapiaExibicaoOverride: terapiaExibicaoOverride(ae.tP) })
         }
       }
     }
@@ -674,7 +730,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
       else if (ADMIN_WARN.has(r.Terapia))       tipo = "adminWarn"
       res.push({
         dia: r["Dia da Semana"], hora,
-        tP: r.Terapia, tE: tExib(r.Terapia),
+        tP: r.Terapia, tE: tExibReal(r.Terapia, r["Terapia Exibição"] || r["Terapia Exibicao"]),
         prof: r.Profissional, unidade: rowUnid(r),
         tipo,
       })
@@ -939,7 +995,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                     const isSession = sessionStartSet.has(slot)
                     const isFirstAfternoon = slot === firstAfternoonSlot
                     return (
-                      <tr key={slot} style={{ height: "36px", borderTop: isFirstAfternoon ? "2px solid var(--border)" : isSession ? "1px solid var(--border)" : "none" }}>
+                      <tr key={slot} style={{ height: "38px", borderTop: isFirstAfternoon ? "2px solid var(--border)" : isSession ? "1px solid var(--border)" : "none" }}>
                         <td style={{ textAlign: "right", paddingRight: "4px", verticalAlign: "top", paddingTop: "5px", fontFamily: "monospace", fontVariantNumeric: "tabular-nums", fontSize: "12px", fontWeight: 800, color: B.navy, whiteSpace: "nowrap" }}>
                           {isSession ? slot : null}
                         </td>
@@ -1019,6 +1075,9 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                           <span style={{ fontSize: "10px", fontWeight: 600, color: isDark ? "white" : "#111827", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{c.tP}</span>
                                           <span style={{ fontSize: "8px", color: isDark ? "#d1d5db" : "#9ca3af", flexShrink: 0, whiteSpace: "nowrap", paddingRight: !isExpanded && (isSel || isRecusadaCard) ? "12px" : 0 }}>📍 {c.unidade}</span>
                                         </div>
+                                        {!isExpanded && c.tE && (
+                                          <div style={{ fontSize: "8px", fontStyle: "italic", color: isDark ? "#9ca3af" : "#9ca3af", lineHeight: "1", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>({c.tE})</div>
+                                        )}
                                         {!isExpanded && (
                                           <div style={{ fontSize: "11px", color: isDark ? "#d1d5db" : "#6b7280", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fmtName(c.prof)}</div>
                                         )}
@@ -1137,6 +1196,9 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                               <span style={{ fontSize: "10px", fontWeight: 600, color: "#111827", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{c.tP}</span>
                                               <span style={{ fontSize: "8px", color: "#9ca3af", flexShrink: 0, whiteSpace: "nowrap", paddingRight: isSel ? "12px" : 0 }}>📍 {c.unidade}</span>
                                             </div>
+                                            {c.tE && (
+                                              <div style={{ fontSize: "8px", fontStyle: "italic", color: "#9ca3af", lineHeight: "1", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>({c.tE})</div>
+                                            )}
                                             <div style={{ fontSize: "11px", color: "#6b7280", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fmtName(c.prof)}</div>
                                             {isDisc && <div style={{ fontSize: "11px", fontWeight: 700, color: "#ea580c", marginTop: "2px", display: "flex", alignItems: "center", gap: "3px" }}>⚠ {c.unidade}</div>}
                                             <div style={{ fontSize: "10px", fontWeight: 700, marginTop: "auto", display: "flex", alignItems: "center", gap: "3px" }}>
@@ -2016,8 +2078,10 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       const rawP = r["Nome Favorecido"]
       if (!rawP || PACS_ADMIN_OCUP_PAC.has(rawP) || EXCLUIR_GAPS.has(r.Terapia)) continue
       const p = agendMergeMap.get(rawP) ?? rawP
-      const esp = TERAPIA_TO_ESP[r.Terapia]
-      if (!esp) continue
+      const espPadrao = TERAPIA_TO_ESP[r.Terapia]
+      if (!espPadrao) continue
+      const terapiaExib = String(r["Terapia Exibição"] || r["Terapia Exibicao"] || "").trim()
+      const esp = espRealPorExibicao(r.Terapia, terapiaExib, espPadrao)
       const hm = pm(hiStr(r)) ?? hiMin(r)
       const dk = `${p}|||${r["Dia da Semana"]}|||${hm}|||${r.Terapia}|||${r.Profissional}`
       if (seenOf.has(dk)) continue
@@ -2212,8 +2276,10 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       const rawP = r["Nome Favorecido"]
       if (!rawP || EXCLUIR_GAPS.has(r.Terapia)) continue
       if ((agendMergeMap.get(rawP) ?? rawP) !== pac) continue
-      const esp = TERAPIA_TO_ESP[r.Terapia]
-      if (!esp) continue
+      const espPadrao = TERAPIA_TO_ESP[r.Terapia]
+      if (!espPadrao) continue
+      const terapiaExib = String(r["Terapia Exibição"] || r["Terapia Exibicao"] || "").trim()
+      const esp = espRealPorExibicao(r.Terapia, terapiaExib, espPadrao)
       const hm = pm(hiStr(r)) ?? hiMin(r)
       const dk = `${r["Dia da Semana"]}|||${hm}|||${r.Terapia}|||${r.Profissional}`
       if (seenOf.has(dk)) continue
