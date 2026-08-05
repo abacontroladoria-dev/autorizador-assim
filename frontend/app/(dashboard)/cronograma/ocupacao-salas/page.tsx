@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { DoorOpen, Eye, Loader2, Plus } from "lucide-react"
+import { DoorOpen, Eye, Loader2, Plus, Settings2 } from "lucide-react"
 import { useHeader } from "@/contexts/HeaderContext"
 import { SegmentedTabs } from "@/components/cronograma/ui/SegmentedTabs"
 import { StatCard } from "@/components/cronograma/ui/StatCard"
@@ -12,6 +12,7 @@ import { SalasGridView } from "@/components/cronograma/salas/SalasGridView"
 import { SalasHeatmapView } from "@/components/cronograma/salas/SalasHeatmapView"
 import { RegularizacoesView } from "@/components/cronograma/salas/RegularizacoesView"
 import { SalaEditModal } from "@/components/cronograma/salas/SalaEditModal"
+import { GerenciarCategoriasModal } from "@/components/cronograma/salas/GerenciarCategoriasModal"
 import type { Sala, SlotOcupacaoSala } from "@/lib/cronograma/salasTypes"
 
 type ViewTab = "grade" | "mapa" | "regularizacoes"
@@ -29,6 +30,7 @@ export default function OcupacaoSalasPage() {
   const [filtros, setFiltros] = useState<SalasFiltrosState>(SALAS_FILTROS_VAZIO)
   const [editando, setEditando] = useState<Sala | null | "novo">(null)
   const [isolada, setIsolada] = useState<{ id: string; nome: string } | null>(null)
+  const [gerenciandoCategorias, setGerenciandoCategorias] = useState(false)
 
   const unidades = useMemo(() => [...new Set(salasComOcupacao.map(s => s.sala.unidade_nome))].sort(), [salasComOcupacao])
   const nucleos = useMemo(() => [...new Set(salasComOcupacao.map(s => s.sala.nucleo).filter((n): n is string => !!n))].sort(), [salasComOcupacao])
@@ -102,6 +104,13 @@ export default function OcupacaoSalasPage() {
           )}
           <button
             type="button"
+            onClick={() => setGerenciandoCategorias(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-semibold text-foreground hover:bg-muted/50"
+          >
+            <Settings2 size={14} /> Gerenciar categorias
+          </button>
+          <button
+            type="button"
             onClick={() => setEditando("novo")}
             className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900"
           >
@@ -152,6 +161,13 @@ export default function OcupacaoSalasPage() {
           todasSalas={salas}
           onClose={() => setEditando(null)}
           onSaved={recarregarSalas}
+        />
+      )}
+
+      {gerenciandoCategorias && (
+        <GerenciarCategoriasModal
+          onClose={() => setGerenciandoCategorias(false)}
+          onChanged={recarregarSalas}
         />
       )}
     </div>

@@ -8,7 +8,8 @@
 import { useEffect, useRef, useState } from "react"
 import { ChevronDown } from "lucide-react"
 import { normTxt } from "@/lib/cronograma/constants"
-import { CAPACIDADE_LABEL_CURTO, STATUS_LABEL_CURTO } from "@/lib/cronograma/salasTypes"
+import { CAPACIDADE_LABEL_CURTO } from "@/lib/cronograma/salasTypes"
+import { useStatusLabels } from "@/hooks/useStatusLabels"
 import type { SalaCapacidade, SalaStatus, SalaComOcupacao } from "@/lib/cronograma/salasTypes"
 
 export interface SalasFiltrosState {
@@ -101,10 +102,12 @@ interface SalasFiltrosProps {
 }
 
 const CAPACIDADE_OPCOES: SalaCapacidade[] = ["unico", "duplo", "multiplo"]
-const STATUS_OPCOES: SalaStatus[] = ["operacional", "bloqueada", "adm"]
+const STATUS_OPCOES: SalaStatus[] = ["operacional", "bloqueada", "adm", "nti"]
 const TURNO_OPCOES = ["Manhã", "Tarde"] as const
 
 export function SalasFiltros({ value, onChange, unidades, nucleos, andares }: SalasFiltrosProps) {
+  const { labels: statusLabels } = useStatusLabels()
+
   function set<K extends keyof SalasFiltrosState>(key: K, v: SalasFiltrosState[K]) {
     onChange({ ...value, [key]: v })
   }
@@ -146,7 +149,7 @@ export function SalasFiltros({ value, onChange, unidades, nucleos, andares }: Sa
         values={value.status}
         options={STATUS_OPCOES}
         onChange={v => set("status", v as SalaStatus[])}
-        labelFor={o => STATUS_LABEL_CURTO[o as SalaStatus]}
+        labelFor={o => statusLabels[o as SalaStatus].label_curto}
       />
       <label className="flex flex-col gap-1 text-xs">
         <span className="font-semibold text-muted-foreground uppercase tracking-wide">&nbsp;</span>

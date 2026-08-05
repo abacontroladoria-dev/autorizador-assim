@@ -10,7 +10,14 @@ import { useEffect, useRef } from "react"
 import { AlertTriangle, Eye, EyeOff } from "lucide-react"
 import { textoFaixaOcupacaoSala } from "@/lib/cronograma/salas"
 import { CAPACIDADE_LABEL_CURTO } from "@/lib/cronograma/salasTypes"
-import type { SalaComOcupacao, SlotOcupacaoSala } from "@/lib/cronograma/salasTypes"
+import { useStatusLabels } from "@/hooks/useStatusLabels"
+import { TONE_SOLID } from "@/components/cronograma/ui/tones"
+import type { SalaComOcupacao, SlotOcupacaoSala, SalaStatus } from "@/lib/cronograma/salasTypes"
+
+/** Slot statuses "fora de operação" espelham 1:1 um status de sala — ver mesmo mapa em SalasGridView.tsx. */
+const SLOT_STATUS_PARA_SALA_STATUS: Partial<Record<SlotOcupacaoSala["status"], SalaStatus>> = {
+  adm: "adm", bloqueado: "bloqueada", nti: "nti",
+}
 
 /** Paleta pastel só do mapa de calor — mesmas 4 faixas de corFaixaOcupacao, tons mais suaves. */
 function corFaixaOcupacaoPastel(pct: number | null | undefined): string {
@@ -166,13 +173,17 @@ export function SalasHeatmapView({ salas, onIsolarSala, salaIsoladaId }: SalasHe
 }
 
 function HeatCell({ slot, bordaTopo }: { slot: SlotOcupacaoSala | undefined; bordaTopo: boolean }) {
+  const { labels: statusLabels } = useStatusLabels()
   const bordaCls = bordaTopo ? "border-t" : ""
 
-  if (!slot || slot.status === "adm") {
+  if (!slot) {
     return <td className={`border-l border-border bg-muted/30 px-1 py-2 text-center text-[10px] text-muted-foreground ${bordaCls}`}>ADM</td>
   }
-  if (slot.status === "bloqueado") {
-    return <td className={`border-l border-border bg-slate-300 px-1 py-2 text-center text-[10px] text-slate-700 dark:bg-slate-700 dark:text-slate-200 ${bordaCls}`}>Bloq.</td>
+  const salaStatus = SLOT_STATUS_PARA_SALA_STATUS[slot.status]
+  if (salaStatus) {
+    const l = statusLabels[salaStatus]
+    const tone = TONE_SOLID[l.tone]
+    return <td className={`border-l border-border px-1 py-2 text-center text-[10px] font-semibold ${tone.bg} ${tone.text} ${bordaCls}`}>{l.label_curto}</td>
   }
   if (!slot.alocacoes.length) {
     return <td className={`border-l border-border px-1 py-2 text-center text-[10px] text-muted-foreground ${bordaCls}`}>—</td>

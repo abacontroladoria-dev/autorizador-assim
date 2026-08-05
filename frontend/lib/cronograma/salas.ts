@@ -9,7 +9,7 @@ import { normalizarUnidadeOcupacao, turnoDoHorario, corFaixaOcupacao } from "./o
 import { DOW_PT } from "./ocupacaoConst"
 import { pm, fm, cleanTxt } from "./helpers"
 import { normTxt, HORAS_GRID } from "./constants"
-import { capacidadeProjetadaSala } from "./salasTypes"
+import { capacidadeProjetadaSala, STATUS_SLOT_EXCLUIDO } from "./salasTypes"
 import type {
   Sala,
   SalaCapacidade,
@@ -122,6 +122,7 @@ function statusDoSlot(
 ): StatusOcupacaoSlot {
   if (status === "adm") return "adm"
   if (status === "bloqueada") return "bloqueado"
+  if (status === "nti") return "nti"
   if (numAlocacoes === 0) return "livre"
   if (numAlocacoes >= capacidadeProjetada) return "ocupado"
   return "parcial"
@@ -283,7 +284,7 @@ export function calcularOcupacaoDaSala(sala: Sala, alocacoes: AlocacaoSala[], li
   const linhasUnidade = linhasDaUnidade(sala, linhas)
   const alocacoesSala = alocacoes.filter(a => a.sala_id === sala.id)
   const slots = calcularSlotsDaSala(sala, alocacoesSala, linhasSala, linhasUnidade)
-  const relevantes = slots.filter(s => s.status !== "adm" && s.status !== "bloqueado")
+  const relevantes = slots.filter(s => !STATUS_SLOT_EXCLUIDO.includes(s.status))
   const ocupados = relevantes.filter(s => s.status === "ocupado" || s.status === "parcial").length
   const pctOcupacaoSemanal = relevantes.length > 0 ? ocupados / relevantes.length : null
   return { sala, slots, pctOcupacaoSemanal }
@@ -305,7 +306,7 @@ export function calcularResumoUnidades(salas: Sala[], alocacoes: AlocacaoSala[],
     let slotsTotal = 0, slotsOcupados = 0, slotsLivres = 0, slotsBloqueados = 0
     let blocosTotal = 0, blocosPreenchidos = 0
     let capacidadeSimultanea = 0
-    let salasAtivas = 0, salasBloqueadas = 0, salasAdm = 0
+    let salasAtivas = 0, salasBloqueadas = 0, salasAdm = 0, salasNti = 0
     let inconsistencias = 0
     const salasPorCapacidade: Record<SalaCapacidade, number> = { unico: 0, duplo: 0, multiplo: 0 }
     const porTurnoAcc: Record<"Manhã" | "Tarde", ResumoTurnoUnidadeSalas> = {
@@ -318,12 +319,13 @@ export function calcularResumoUnidades(salas: Sala[], alocacoes: AlocacaoSala[],
       if (sala.status === "operacional") salasAtivas++
       else if (sala.status === "bloqueada") salasBloqueadas++
       else if (sala.status === "adm") salasAdm++
+      else if (sala.status === "nti") salasNti++
       capacidadeSimultanea += capacidadeProjetadaSala(sala.capacidade, sala.status)
       salasPorCapacidade[sala.capacidade]++
 
       const { slots } = calcularOcupacaoDaSala(sala, alocacoes, linhas)
       slots.forEach(slot => {
-        if (slot.status === "adm") return
+        if (slot.status === "adm" || slot.status === "nti") return
         const turnoBucket = porTurnoAcc[slot.turno]
         if (slot.status === "bloqueado") {
           slotsBloqueados++
@@ -369,6 +371,7 @@ export function calcularResumoUnidades(salas: Sala[], alocacoes: AlocacaoSala[],
       salasAtivas,
       salasBloqueadas,
       salasAdm,
+      salasNti,
       salasPorCapacidade,
       capacidadeSimultanea,
       slotsTotal,
@@ -409,7 +412,7 @@ export function listarSlotsDetalhados(
     if (normalizarUnidadeOcupacao(sala.unidade_nome) !== unidadeAlvo) return
     slots.forEach(slot => {
       if (slot.turno !== turno) return
-      if (slot.status === "adm" || slot.status === "bloqueado") return
+      if (STATUS_SLOT_EXCLUIDO.includes(slot.status)) return
       linhas.push({
         sala: sala.nome_exibicao,
         dow: slot.dow,
@@ -441,7 +444,7 @@ export function listarBlocosDetalhados(
     if (normalizarUnidadeOcupacao(sala.unidade_nome) !== unidadeAlvo) return
     slots.forEach(slot => {
       if (slot.turno !== turno) return
-      if (slot.status === "adm" || slot.status === "bloqueado") return
+      if (STATUS_SLOT_EXCLUIDO.includes(slot.status)) return
       slot.blocos.forEach(bloco => {
         linhas.push({
           ...bloco,
@@ -476,7 +479,7 @@ export function resumoOcupacaoDeItens(itens: SalaComOcupacao[]): ResumoOcupacaoI
 
   itens.forEach(item => {
     item.slots.forEach(slot => {
-      if (slot.status === "adm") return
+      if (slot.status === "adm" || slot.status === "nti") return
       if (slot.status === "bloqueado") {
         slotsBloqueados++
         return

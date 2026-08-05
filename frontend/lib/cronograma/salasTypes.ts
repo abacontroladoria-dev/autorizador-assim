@@ -4,7 +4,7 @@
 // docs internos: "Portar Ocupação de Salas + Dashboards".
 
 export type SalaCapacidade = "unico" | "duplo" | "multiplo"
-export type SalaStatus = "operacional" | "bloqueada" | "adm"
+export type SalaStatus = "operacional" | "bloqueada" | "adm" | "nti"
 
 /** Rótulo curto de capacidade — usado em badges/filtros (formulário de cadastro usa uma versão mais descritiva). */
 export const CAPACIDADE_LABEL_CURTO: Record<SalaCapacidade, string> = {
@@ -18,6 +18,7 @@ export const STATUS_LABEL_CURTO: Record<SalaStatus, string> = {
   operacional: "Operacional",
   bloqueada: "Bloqueada",
   adm: "Adm",
+  nti: "NTI",
 }
 
 /** Linha de `cronograma_salas` */
@@ -84,7 +85,10 @@ export interface AlocacaoInput {
   terapia_id?: number | null
 }
 
-export type StatusOcupacaoSlot = "livre" | "ocupado" | "parcial" | "bloqueado" | "adm"
+export type StatusOcupacaoSlot = "livre" | "ocupado" | "parcial" | "bloqueado" | "adm" | "nti"
+
+/** Slot statuses que representam sala fora de operação (sem agendamento possível) — excluídos de todo cálculo/contagem de % ocupação. */
+export const STATUS_SLOT_EXCLUIDO: readonly StatusOcupacaoSlot[] = ["adm", "bloqueado", "nti"]
 
 /** Uma alocação (profissional/terapia) dentro de um slot, cruzada com sessões reais para exibição informativa */
 export interface AlocacaoCardSlot {
@@ -185,6 +189,7 @@ export interface ResumoUnidadeSalas {
   salasAtivas: number
   salasBloqueadas: number
   salasAdm: number
+  salasNti: number
   salasPorCapacidade: Record<SalaCapacidade, number>
   capacidadeSimultanea: number
   slotsTotal: number

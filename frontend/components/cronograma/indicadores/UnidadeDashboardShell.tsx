@@ -168,11 +168,12 @@ export function UnidadeDashboardShell() {
               </div>
               <StatusPill tone={pctTone(r.pct)}>{r.pct !== null ? `${Math.round(r.pct * 100)}%` : "Sem base"}</StatusPill>
             </div>
-            <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground sm:grid-cols-5">
+            <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground sm:grid-cols-6">
               <div><span className="block text-sm font-bold text-foreground">{r.salasTotal}</span>Salas</div>
               <div><span className="block text-sm font-bold text-foreground">{r.salasAtivas}</span>Operacionais</div>
               <div><span className="block text-sm font-bold text-foreground">{r.salasAdm}</span>Administrativas</div>
               <div><span className="block text-sm font-bold text-foreground">{r.salasBloqueadas}</span>Bloqueadas</div>
+              <div><span className="block text-sm font-bold text-foreground">{r.salasNti}</span>NTI</div>
               <div className="inline-flex items-start gap-0.5">
                 <div><span className="block text-sm font-bold text-foreground">{r.inconsistencias}</span>Inconsistências</div>
                 <InfoTooltip text={`${r.inconsistencias} slot(s) com mais profissionais alocados do que a capacidade da sala (1, 2 ou 3, conforme Único/Duplo/Múltiplo).`} />
