@@ -20,6 +20,12 @@ export async function buscarGradePorId(
     .from("csv_grades_profissionais")
     .select("*")
     .eq("id", csvGradeId)
+    // Aqui o filtro é uma trava, não só deduplicação: se a TiTa alterou ou removeu
+    // este slot depois que a tela foi montada, o sync o deixou com ativo=false
+    // (migration 20260805130000). Devolver null faz o chamador responder
+    // "grade_not_found", que é o certo — agendar sobre um slot que não existe mais
+    // criaria um atendimento fantasma na TiTa.
+    .eq("ativo", true)
     .maybeSingle()
 
   if (error) throw error
@@ -152,6 +158,11 @@ export async function resolverIdFavorecido(
 ): Promise<number | null> {
   const supabase = client ?? (await createClient())
 
+  // Sem filtro de `ativo`, deliberadamente. Diferente das outras consultas da grade,
+  // esta não conta nem exibe sessões: só traduz nome → id_favorecido da TiTa. Esse id
+  // não muda, então uma linha inativada (sessão remarcada ou removida) ainda carrega a
+  // resposta certa. Filtrar por ativo só tornaria a busca capaz de falhar para um
+  // paciente cujas linhas foram todas inativadas, sem ganho de correção.
   const { data: rows, error } = await supabase
     .from("csv_grades_profissionais")
     .select("paciente_id")

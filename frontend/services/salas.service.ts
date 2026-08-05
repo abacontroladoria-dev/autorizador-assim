@@ -71,6 +71,16 @@ export async function buscarTerapiasDoProfissional(profissionalNome: string): Pr
     .from("csv_grades_profissionais")
     .select("terapia_exibicao_nome, terapia_nome, paciente_nome, paciente_id")
     .ilike("profissional_nome", nome)
+    // Versionamento: o sync marca a versão antiga com ativo=false em vez de apagar
+    // (migration 20260805130000). Sem o filtro, terapia de sessão já remarcada
+    // continuaria aparecendo na lista.
+    .eq("ativo", true)
+    // Esta é a única consulta da grade sem recorte de data, e o .limit(2000) só não
+    // truncava porque a tabela cobria 3 meses. Com o histórico de Jan–Jun semeado ela
+    // passa a truncar — e sem ORDER BY o corte seria arbitrário, deixando a lista de
+    // terapias instável entre chamadas. Ordenar por data desc torna o corte
+    // determinístico e mantém o recorte no que a pessoa faz mais recentemente.
+    .order("data", { ascending: false })
     .limit(2000)
   if (error) throw new Error(error.message)
   const nomes = (data ?? [])
@@ -244,6 +254,7 @@ export async function buscarLinhasAgendaParaSalas(dataInicio: string, dataFim: s
       .select(AGENDA_FIELDS)
       .gte("data", dataInicio)
       .lte("data", dataFim)
+      .eq("ativo", true)    // versionamento — ver nota em buscarTerapiasDoProfissional
       .order("data")
       .order("hora_inicial")
       .range(from, from + PAGE - 1)

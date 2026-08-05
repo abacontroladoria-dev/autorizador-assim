@@ -49,6 +49,7 @@ async function listarIdsPacientesAtivos(dataInicio: string, dataFim: string): Pr
       .select("paciente_id")
       .eq("status_agendamento", "Agendado")
       .eq("unidade_id", 280)
+      .eq("ativo", true)    // versionamento — ver migration 20260805130000
       .not("paciente_id", "is", null)
       .gte("data", dataInicio)
       .lte("data", dataFim)

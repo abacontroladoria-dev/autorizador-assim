@@ -97,7 +97,8 @@ export function useReposicaoFaltas(
           .select('data, dia_semana, hora_inicial, sala_nome, terapia_nome, terapia_exibicao_nome, profissional_nome')
           .ilike('paciente_nome', pacienteNome ?? '')
           .gte('data', semanaInicio)
-          .lte('data', semanaFim),
+          .lte('data', semanaFim)
+          .eq('ativo', true),   // versionamento — ver migration 20260805130000
 
         // csv_reposicao_faltas: snapshot diário da grade INTEIRA da clínica (todo mundo,
         // qualquer status), gerado especificamente para este módulo. Ao contrário de

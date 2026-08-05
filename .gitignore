@@ -31,6 +31,11 @@ integração/
 # devem ser versionados — se precisar de um script de debug local, mantenha
 # fora do repo ou em scripts/ com segredo vindo de variável de ambiente.
 backup_*.sql
+# 2026-08-05: o backup lógico de csv_grades_profissionais (scripts/backup-csv-grades.js)
+# também emite .json com as mesmas 54 mil linhas de nome de paciente e CPF de
+# profissional. Sem esta linha o .json ficava visível ao git — um `git add -A` de
+# distância de ir pro histórico de um repo público.
+backup_*.json
 /check_*.py
 /debug_*.py
 /invoke_*.py

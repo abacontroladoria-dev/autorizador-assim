@@ -80,6 +80,11 @@ export function BuscarReposicaoManual({
     sb.from('csv_grades_profissionais')
       .select('terapia_nome, terapia_exibicao_nome')
       .eq('status_agendamento', 'Livre')
+      // Versionamento (migration 20260805130000): quando um slot livre é ocupado na
+      // TiTa ele deixa de vir no CSV como 'Livre', e o sync o marca com ativo=false.
+      // ativo=false num slot 'Livre' significa exatamente "não está mais vago" — sem
+      // este filtro a tela ofereceria horário já tomado.
+      .eq('ativo', true)
       .gt('data', falta.dataOriginal)
       .lte('data', semanaFim)
       .then(({ data }) => {
@@ -113,6 +118,7 @@ export function BuscarReposicaoManual({
       .select('profissional_nome, terapia_nome, terapia_exibicao_nome, hora_inicial, data, dia_semana, sala_nome')
       .eq('terapia_nome', opcao.terapia)
       .eq('status_agendamento', 'Livre')   // slot sem paciente = disponível
+      .eq('ativo', true)                   // e ainda vago — ver nota no fallback acima
       .gt('data', falta.dataOriginal)
       .lte('data', semanaFim)
 

@@ -40,6 +40,11 @@ export async function buscarGradeComoCSVRows(dataInicio: string, dataFim: string
       .gte("data", dataInicio)
       .lte("data", dataFim)
       .eq("unidade_id", 280)
+      // Obrigatório desde que a tabela passou a versionar em vez de apagar: o sync
+      // não faz mais DELETE, ele marca a versão antiga com ativo=false e insere a
+      // nova. Sem este filtro uma sessão remarcada volta duas vezes — a antiga e a
+      // atual. Ver migration 20260805130000 e a Edge Function sync-grade-csv.
+      .eq("ativo", true)
       .order("data")
       .order("hora_inicial")
       .order("id")          // desempate único — paginação estável, sem pular/duplicar linhas
@@ -95,6 +100,7 @@ export async function buscarGradeComparativo(dataInicio: string, dataFim: string
       .select(FIELDS_COMPARATIVO)
       .gte("data", dataInicio)
       .lte("data", dataFim)
+      .eq("ativo", true)    // versionamento — ver nota em buscarGradeComoCSVRows
       .order("data")
       .order("id")
       .range(from, from + PAGE - 1)
