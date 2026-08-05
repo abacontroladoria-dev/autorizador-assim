@@ -1,19 +1,22 @@
 // Agregação para o dashboard no topo da aba relacionamento-prestador/rp: quanto a
 // empresa paga no mês e como esse total se reparte por especialidade. Decompõe
-// exatamente os mesmos quatro componentes somados em ProfRemunReal.valorConfirmado
-// (calculo.ts) — PA por sessão, PPD (diária), PE (Coordenador de Caso) e bônus ETA —
-// então totalVariavel bate, por construção, com a soma de valorConfirmado de todo mundo.
+// exatamente os mesmos componentes somados em ProfRemunReal.valorTotalAPagar
+// (calculo.ts) — PA por sessão, PPD (diária), PE (Coordenador de Caso), bônus ETA
+// e o valor fixo de banco de horas — então totalMes bate, por construção, com a
+// folha real.
 //
-// O valor fixo dos contratos de banco de horas fica FORA de porEspecialidade: não é
-// pago por sessão, logo não se reparte por especialidade nenhuma. Mas entra em
-// totalMes, senão o número que a tela chama de "total do mês que a empresa vai
-// pagar" ficaria menor que a folha real.
+// Banco de horas é valor fixo do CONTRATO, não por sessão — mas cada contrato
+// vigente em banco de horas tem UMA especialidade só (a `funcao` escolhida no
+// cadastro em /cadastros/contratos), então o valor dele é dessa especialidade
+// por definição. Regra de negócio: banco de horas SEMPRE é uma especialidade —
+// por isso o valor entra direto na barra dela, sem precisar adivinhar pela
+// sessão nem deixar nada de fora.
 import type { ProfRemunReal } from "./calculo"
 
 export type EspecialidadeTotal = {
   especialidade: string
   valor: number
-  /** Fração de totalVariavel (o valor fixo não se reparte por especialidade). */
+  /** Fração de totalMes. */
   pct: number
   profissionais: string[]
 }
@@ -25,12 +28,12 @@ export type TotalRPResumo = {
   totalBancoHoras: number
   /** Quantos profissionais têm valor fixo de banco de horas neste total. */
   profsBancoHoras: number
-  /** totalVariavel + totalBancoHoras. */
+  /** totalVariavel + totalBancoHoras — e também a soma de porEspecialidade. */
   totalMes: number
   porEspecialidade: EspecialidadeTotal[]
 }
 
-type ProfParaDashboard = Pick<ProfRemunReal, "prof" | "sessoes" | "diariaDetalhe" | "pe" | "etaBonusPeriodo" | "valorFixoBancoHoras">
+type ProfParaDashboard = Pick<ProfRemunReal, "prof" | "sessoes" | "diariaDetalhe" | "pe" | "etaBonusPeriodo" | "valorFixoBancoHoras" | "bancoHorasDetalhe">
 
 export function calcularTotalPorEspecialidade(resultado: ProfParaDashboard[]): TotalRPResumo {
   const mapa: Record<string, { valor: number; profs: Set<string> }> = {}
@@ -50,6 +53,9 @@ export function calcularTotalPorEspecialidade(resultado: ProfParaDashboard[]): T
     if (p.valorFixoBancoHoras > 0) {
       totalBancoHoras += p.valorFixoBancoHoras
       profsBancoHoras++
+      // Um item por contrato em banco de horas — cada um com sua própria
+      // especialidade e valor, então soma direto na barra dela.
+      p.bancoHorasDetalhe.forEach(bh => add(bh.funcao, bh.valorTotal, p.prof))
     }
     // PA por sessão: valorPA só é preenchido nas sessões que efetivamente entram
     // no acumulado (evolução própria ou substituição realizada) — ver calculo.ts.
@@ -64,13 +70,14 @@ export function calcularTotalPorEspecialidade(resultado: ProfParaDashboard[]): T
     if (p.etaBonusPeriodo > 0) add("Especialista Técnico de Área", p.etaBonusPeriodo, p.prof)
   })
 
-  const totalVariavel = Object.values(mapa).reduce((s, x) => s + x.valor, 0)
+  const totalMes = Object.values(mapa).reduce((s, x) => s + x.valor, 0)
+  const totalVariavel = totalMes - totalBancoHoras
 
   const porEspecialidade = Object.entries(mapa)
     .map(([especialidade, x]) => ({
       especialidade,
       valor: x.valor,
-      pct: totalVariavel > 0 ? x.valor / totalVariavel : 0,
+      pct: totalMes > 0 ? x.valor / totalMes : 0,
       profissionais: [...x.profs].sort(),
     }))
     .filter(x => x.valor > 0)
@@ -80,7 +87,7 @@ export function calcularTotalPorEspecialidade(resultado: ProfParaDashboard[]): T
     totalVariavel,
     totalBancoHoras,
     profsBancoHoras,
-    totalMes: totalVariavel + totalBancoHoras,
+    totalMes,
     porEspecialidade,
   }
 }

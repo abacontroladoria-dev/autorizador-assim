@@ -10,8 +10,9 @@
 // • <button type="button"> reais para foco de teclado
 // • tabular-nums em todos os valores monetários
 
-import { useMemo, useCallback, memo, useState } from "react"
-import { ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, XCircle, HelpCircle, Users, Lock, Wallet } from "lucide-react"
+import { useMemo, useCallback, memo, useState, useRef } from "react"
+import { createPortal } from "react-dom"
+import { ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, XCircle, HelpCircle, Users, Lock, Wallet, X } from "lucide-react"
 import { B } from "@/lib/cronograma/constants"
 import { fmt, isSim } from "@/lib/remuneracao/formatacao"
 import { formatDateBR } from "@/lib/remuneracao/datas"
@@ -123,17 +124,63 @@ function ClassBadge({ cls }: { cls: string }) {
 }
 
 // ─── Tooltip informativo inline ───────────────────────────────────────────────
+// Clicável, não só hover: um `title` nativo é minúsculo e não funciona em touch.
+// Renderizado via portal em document.body, mesmo padrão do InfoTooltip de
+// UnidadeDashboardShell.tsx — a tabela tem overflow-x-auto, e um balão
+// posicionado normalmente (absolute) dentro dela ficaria cortado na borda.
+const POPOVER_W = 260
 
 function InfoTooltip({ text }: { text: string }) {
+  const [aberto, setAberto] = useState(false)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+
+  function alternar(e: React.MouseEvent) {
+    e.stopPropagation()
+    if (!aberto && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect()
+      setPos({
+        top: r.bottom + 6,
+        left: Math.min(r.left, window.innerWidth - POPOVER_W - 16),
+      })
+    }
+    setAberto(v => !v)
+  }
+
   return (
-    <span
-      tabIndex={0}
-      className="ml-1 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-muted text-muted-foreground text-[9px] cursor-help align-middle focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-      title={text}
-      aria-label={text}
-    >
-      ?
-    </span>
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={alternar}
+        aria-label="Mais informações"
+        aria-expanded={aberto}
+        className="ml-1 inline-flex items-center justify-center w-3.5 h-3.5 rounded-full bg-muted text-muted-foreground text-[9px] align-middle transition-colors hover:bg-muted-foreground/20 hover:text-foreground focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+      >
+        ?
+      </button>
+      {aberto && pos && createPortal(
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setAberto(false)} />
+          <div
+            role="tooltip"
+            style={{ position: "fixed", top: pos.top, left: pos.left, width: POPOVER_W }}
+            className="z-50 rounded-lg border border-border bg-card p-3 pr-7 text-[11px] font-normal normal-case leading-relaxed text-foreground shadow-lg"
+          >
+            <button
+              type="button"
+              onClick={() => setAberto(false)}
+              aria-label="Fechar"
+              className="absolute right-1.5 top-1.5 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+            >
+              <X size={13} />
+            </button>
+            {text}
+          </div>
+        </>,
+        document.body,
+      )}
+    </>
   )
 }
 
@@ -166,8 +213,8 @@ const SessoesTabela = memo(function SessoesTabela({
             <th className="text-center p-1.5">Presença Recep.</th>
             <th className="text-center p-1.5">Presença TiTa</th>
             <th className="text-center p-1.5">Tratativa</th>
-            <th className={`text-right p-1.5 whitespace-nowrap font-semibold tabular-nums ${valorCls}`}>Valor PA</th>
-            <th className="text-left p-1.5">Motivo</th>
+            <th className={`text-center p-1.5 whitespace-nowrap font-semibold tabular-nums ${valorCls}`}>Valor PA</th>
+            <th className="text-center p-1.5 border-l border-border">Motivo</th>
           </tr>
         </thead>
         <tbody>
@@ -203,11 +250,13 @@ const SessoesTabela = memo(function SessoesTabela({
                     {s.possuiTratativa || "—"}
                   </StatusChip>
                 </td>
-                <td className={`p-1.5 text-right font-bold whitespace-nowrap tabular-nums ${valorCls}`}>
+                <td className={`p-1.5 text-center font-bold whitespace-nowrap tabular-nums ${valorCls}`}>
                   {s.valorPATexto || (paVal > 0 ? fmt(paVal) : "—")}
+                </td>
+                <td className="p-1.5 border-l border-border text-center text-muted-foreground text-[11px]">
+                  {isFeriado ? "Feriado/Ponto Fac." : s.motivo}
                   {s.explicacaoPA && <InfoTooltip text={s.explicacaoPA} />}
                 </td>
-                <td className="p-1.5 text-muted-foreground text-[11px]">{isFeriado ? "Feriado/Ponto Fac." : s.motivo}</td>
               </tr>
             )
           })}

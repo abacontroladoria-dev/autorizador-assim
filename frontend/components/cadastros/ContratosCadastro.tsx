@@ -1,8 +1,9 @@
 "use client"
 
-import { memo, useCallback, useEffect, useId, useMemo, useState } from "react"
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import toast from "react-hot-toast"
-import { AlertCircle, Check, ChevronLeft, ChevronRight, Loader2, Plus, Search, StickyNote, UserPlus } from "lucide-react"
+import { AlertCircle, Check, ChevronLeft, ChevronRight, ListFilter, Loader2, Plus, Search, StickyNote, UserPlus, X } from "lucide-react"
 import { getContratos, getProfissionaisRoster, upsertContrato } from "@/services/remuneracao.service"
 import {
   formatMoedaBRTexto,
@@ -10,10 +11,12 @@ import {
   maskMoedaBR,
   onlyDigits,
   parseNumeroBR,
+  splitDocumento,
   validarCpfCnpj,
 } from "@/lib/remuneracao/formatacao"
-import { ESPECIALIDADES_AGENDA, especialidadeForaDoVocabulario } from "@/lib/remuneracao/especialidades"
+import { normKey } from "@/lib/remuneracao/constants"
 import { useDraftRow, useDraftTable, type DraftTable, type SaveStatus } from "@/hooks/useDraftRow"
+import { useTerapiasAgendaPorProfissional } from "@/hooks/useTerapiasAgendaPorProfissional"
 import { useUnsavedChangesGuard } from "@/contexts/UnsavedChangesContext"
 import { UnsavedChangesModal } from "@/components/UnsavedChangesModal"
 import { NovoProfissionalModal, type NovoProfissionalPayload } from "./NovoProfissionalModal"
@@ -40,13 +43,14 @@ type LinhaBase = {
   profissionalNome: string
   cpf: string | null
   cnpj: string | null
+  razaoSocial: string | null
   documentoTipo: string | null
   contratosAtuais: ContratoAtualItem[]
 }
 
 type LinhaValor = {
-  cpf: string
-  cnpj: string
+  documento: string
+  razaoSocial: string
   documentoTipo: string
   contratos: ContratoItemEdit[]
 }
@@ -251,6 +255,8 @@ function LinhaContrato({
   nome,
   posicao,
   persistido,
+  mostrarFuncao,
+  terapiasAgenda,
   onPatch,
   onRemove,
   onAbrirObs,
@@ -260,6 +266,13 @@ function LinhaContrato({
   posicao: number
   /** Já existe no banco. Define se a saída da linha preserva ou descarta. */
   persistido: boolean
+  /** Só faz sentido escolher qual terapia cada contrato cobre quando há mais de
+   * um contrato vigente — com um só, o PA dele vale pra qualquer substituição
+   * (ver resolverPARow em lib/remuneracao/calculo.ts), então o campo é ruído. */
+  mostrarFuncao: boolean
+  /** Terapias reais da agenda TiTa deste profissional — mesma fonte do texto
+   * abaixo do nome (useTerapiasAgendaPorProfissional). */
+  terapiasAgenda: string[]
   onPatch: (patch: Partial<ContratoItemEdit>) => void
   onRemove: () => void
   onAbrirObs: () => void
@@ -329,32 +342,34 @@ function LinhaContrato({
         </button>
       </div>
 
-      {/* Vocabulário fechado, não texto livre: a mesma especialidade estava
-          gravada de N formas e nenhuma conferível com o que a agenda produz.
-          `value=""` é o estado vazio e a própria opção serve de rótulo.
-          A opção extra de valor fora do vocabulário NÃO é enfeite: um <select>
-          cujo value não casa com nenhuma <option> renderiza vazio, e o próximo
-          "Salvar tudo" gravaria esse vazio por cima do que estava no banco. */}
-      <select
-        value={item.funcao}
-        onChange={e => onPatch({ funcao: e.target.value })}
-        aria-label={`Especialidade da agenda do ${ref}`}
-        className={`${campo} min-w-40 flex-2 ${item.funcao ? "" : "text-muted-foreground"}`}
-      >
-        <option value="" className="bg-card text-muted-foreground">
-          Especialidade Agenda
-        </option>
-        {especialidadeForaDoVocabulario(item.funcao) && (
-          <option value={item.funcao} className="bg-card text-foreground">
-            {item.funcao} (fora da lista)
+      {/* Só aparece com 2+ contratos vigentes: é o único caso em que
+          resolverPARow precisa saber qual contrato cobre qual terapia pra
+          rotear o PA de substituição corretamente (ver escolherContratoDaLinha
+          em lib/remuneracao/calculo.ts). Opções vêm da agenda REAL do TiTa, não
+          de um vocabulário fixo — o operador escolhe entre o que o profissional
+          de fato atende, em vez de adivinhar um rótulo genérico. */}
+      {mostrarFuncao && (
+        <select
+          value={item.funcao}
+          onChange={e => onPatch({ funcao: e.target.value })}
+          aria-label={`Terapia coberta pelo ${ref}`}
+          className={`${campo} min-w-40 flex-2 ${item.funcao ? "" : "text-muted-foreground"}`}
+        >
+          <option value="" className="bg-card text-muted-foreground">
+            Qual terapia este contrato cobre?
           </option>
-        )}
-        {ESPECIALIDADES_AGENDA.map(esp => (
-          <option key={esp} value={esp} className="bg-card text-foreground">
-            {esp}
-          </option>
-        ))}
-      </select>
+          {item.funcao && !terapiasAgenda.includes(item.funcao) && (
+            <option value={item.funcao} className="bg-card text-foreground">
+              {item.funcao} (fora da agenda atual)
+            </option>
+          )}
+          {terapiasAgenda.map(t => (
+            <option key={t} value={t} className="bg-card text-foreground">
+              {t}
+            </option>
+          ))}
+        </select>
+      )}
 
       <select
         value={item.modeloFaturamento}
@@ -468,33 +483,39 @@ const GrupoProfissional = memo(function GrupoProfissional({
   linha,
   table,
   destaque,
+  terapiasAgenda,
 }: {
   linha: LinhaBase
   table: DraftTable
   destaque?: boolean
+  /** Terapias reais da agenda TiTa (ver useTerapiasAgendaPorProfissional) — só leitura. */
+  terapiasAgenda?: string[]
 }) {
   const [saveError, setSaveError] = useState<string | null>(null)
   const tituloId = useId()
 
   const save = useCallback(
     async (v: LinhaValor) => {
-      if (v.cpf.trim() && !validarCpfCnpj(v.cpf)) {
-        setSaveError("CPF incompleto — precisa de 11 dígitos, ou deixe o campo em branco.")
-        return false
-      }
-      if (v.cnpj.trim() && !validarCpfCnpj(v.cnpj)) {
-        setSaveError("CNPJ incompleto — precisa de 14 dígitos, ou deixe o campo em branco.")
+      if (v.documento.trim() && !validarCpfCnpj(v.documento)) {
+        setSaveError("Documento incompleto — precisa de 11 dígitos (CPF) ou 14 (CNPJ), ou deixe o campo em branco.")
         return false
       }
 
+      // Um só campo na tela, mas o banco ainda guarda cpf/cnpj em colunas
+      // separadas — splitDocumento decide a coluna pela contagem de dígitos
+      // e sempre zera a outra, pra nunca sobrar as duas preenchidas.
+      const documento = splitDocumento(v.documento)
       const { ok, error } = await upsertContrato({
         profissional_nome: linha.profissionalNome,
         documento_tipo: v.documentoTipo.trim() || null,
-        // Grava só dígitos: a máscara é de exibição, e os consumidores
-        // (formatCPF/formatCNPJ em lib/remuneracao/documento) reformatam a
-        // partir do cru — gravar normalizado também acerta linhas antigas.
-        cpf: onlyDigits(v.cpf) || null,
-        cnpj: onlyDigits(v.cnpj) || null,
+        ...documento,
+        // Razão Social só existe pra CNPJ. Sem isso, trocar de CNPJ pra CPF
+        // escondia o campo da tela (input só aparece com 14 dígitos) mas
+        // deixava o valor antigo intacto no banco — o próximo "Salvar tudo"
+        // regravava o mesmo texto por trás, e o documento voltava a exibir
+        // como PJ (ver montarInfoDocumentoPrestador: razaoSocial sozinha já
+        // basta pra `temPJ` virar true, mesmo sem CNPJ nenhum).
+        razao_social: documento.cnpj ? (v.razaoSocial.trim() || null) : null,
         // `observacoes` NÃO vai no payload do pai, de propósito. A observação
         // agora é por contrato (em contratos[].observacoes): a migration
         // 20260803120000 copiou o valor para o item e deixou a coluna do pai
@@ -522,8 +543,10 @@ const GrupoProfissional = memo(function GrupoProfissional({
 
   const initial = useMemo<LinhaValor>(
     () => ({
-      cpf: maskCpfCnpj(linha.cpf ?? ""),
-      cnpj: maskCpfCnpj(linha.cnpj ?? ""),
+      // Se um profissional antigo ainda tem as duas colunas preenchidas, o
+      // CNPJ prevalece na tela (mesmo critério da limpeza feita no banco).
+      documento: maskCpfCnpj(linha.cnpj || linha.cpf || ""),
+      razaoSocial: linha.razaoSocial ?? "",
       documentoTipo: linha.documentoTipo ?? "",
       contratos: linha.contratosAtuais.map(it => ({
         numero: it.numero ?? "",
@@ -535,7 +558,7 @@ const GrupoProfissional = memo(function GrupoProfissional({
         observacoes: it.observacoes ?? "",
       })),
     }),
-    [linha.cpf, linha.cnpj, linha.documentoTipo, linha.contratosAtuais],
+    [linha.cpf, linha.cnpj, linha.razaoSocial, linha.documentoTipo, linha.contratosAtuais],
   )
 
   const { value, update, status } = useDraftRow(linha.profissionalNome, initial, save, table)
@@ -567,7 +590,7 @@ const GrupoProfissional = memo(function GrupoProfissional({
   // efeito de reset — `react-hooks/set-state-in-effect` é erro neste projeto.
   const [obsAberta, setObsAberta] = useState<number | null>(null)
 
-  const semDocumento = !value.cpf.trim() && !value.cnpj.trim()
+  const semDocumento = !value.documento.trim()
   const vigentes = value.contratos.filter(c => c.vigente)
   const sujo = status === "dirty" || status === "error"
 
@@ -629,13 +652,27 @@ const GrupoProfissional = memo(function GrupoProfissional({
             escura (14,96:1), porque no escuro os próprios tokens do sidebar
             são neutros — o menu escuro também não tem acento azul, então os
             dois seguem combinando. */}
-        <h2
-          id={tituloId}
-          title={linha.profissionalNome}
-          className="min-w-48 flex-1 truncate text-md font-bold leading-tight tracking-tight text-sidebar-accent-foreground"
-        >
-          {linha.profissionalNome}
-        </h2>
+        <div className="min-w-48 flex-1">
+          <h2
+            id={tituloId}
+            title={linha.profissionalNome}
+            className="truncate text-md font-bold leading-tight tracking-tight text-sidebar-accent-foreground"
+          >
+            {linha.profissionalNome}
+          </h2>
+          {/* Terapias reais da agenda TiTa (1ª semana completa do mês
+              subsequente, mesma janela de Saída de Profissional) — só leitura,
+              pra conferir contra o que foi cadastrado, sem depender de um
+              dropdown que o operador tinha que adivinhar. */}
+          {terapiasAgenda && terapiasAgenda.length > 0 && (
+            <p
+              title={terapiasAgenda.join(", ")}
+              className="truncate text-[11px] text-muted-foreground"
+            >
+              <span className="font-semibold">Terapias na Agenda:</span> {terapiasAgenda.join(", ")}
+            </p>
+          )}
+        </div>
 
         {/* Avisos numa coluna própria, não colados no nome. Cada nome tem um
             comprimento, então chip colada nele começava num x diferente a cada
@@ -658,31 +695,32 @@ const GrupoProfissional = memo(function GrupoProfissional({
           ) : null}
         </div>
 
-        {/* Largura pela MÁSCARA, não arredondada para cima: `tabular-nums` já faz
-            todo CPF completo terminar no mesmo x (medido: 89px de texto para
-            "987.654.321-00"), mas as caixas de w-36/w-44 deixavam 39px e 44px de
-            vazio depois do último dígito — os números ficavam soltos no meio da
-            caixa em vez de formarem duas colunas. w-32/w-38 encostam a caixa no
-            texto (23px e 20px de folga, que absorvem variação de fonte sem
-            cortar) e ainda devolvem 40px para o nome do profissional, que trunca
-            em nome longo. */}
+        {/* Um só campo: o operador digita os dígitos corridos e a máscara
+            decide CPF ou CNPJ pela contagem (maskCpfCnpj/splitDocumento). w-38
+            é a largura do CNPJ completo ("00.000.000/0000-00", o mais longo
+            dos dois formatos), pela mesma lógica de "largura pela máscara,
+            não arredondada" — encosta a caixa no texto em vez de sobrar vazio. */}
         <div className="flex shrink-0 items-center gap-2">
           <input
-            value={value.cpf}
-            onChange={e => update({ cpf: maskCpfCnpj(e.target.value) })}
-            placeholder="CPF"
+            value={value.documento}
+            onChange={e => update({ documento: maskCpfCnpj(e.target.value) })}
+            placeholder="CPF ou CNPJ"
             inputMode="numeric"
-            aria-label={`CPF de ${linha.profissionalNome}`}
-            className={`${campoNaFaixa} w-32 tabular-nums`}
-          />
-          <input
-            value={value.cnpj}
-            onChange={e => update({ cnpj: maskCpfCnpj(e.target.value) })}
-            placeholder="CNPJ"
-            inputMode="numeric"
-            aria-label={`CNPJ de ${linha.profissionalNome}`}
+            aria-label={`CPF ou CNPJ de ${linha.profissionalNome}`}
             className={`${campoNaFaixa} w-38 tabular-nums`}
           />
+          {/* Só aparece com CNPJ (14 dígitos): Razão Social não existe pra CPF,
+              e mostrar o campo vazio pra todo mundo poluiria a faixa inteira à
+              toa pros profissionais PF, que são a maioria. */}
+          {onlyDigits(value.documento).length === 14 && (
+            <input
+              value={value.razaoSocial}
+              onChange={e => update({ razaoSocial: e.target.value })}
+              placeholder="Razão Social"
+              aria-label={`Razão Social de ${linha.profissionalNome}`}
+              className={`${campoNaFaixa} w-44`}
+            />
+          )}
         </div>
       </div>
 
@@ -707,6 +745,12 @@ const GrupoProfissional = memo(function GrupoProfissional({
             // vem de `initial`), então tudo daqui para frente foi adicionado
             // neste rascunho e ainda não existe lá.
             persistido={idx < linha.contratosAtuais.length}
+            // Só importa quantos estão VIGENTES: resolverPARow só precisa
+            // desambiguar entre contratos que a calculadora usa hoje. Um
+            // histórico (vigente=false) ao lado de um vigente único não é
+            // "múltiplo contrato" pra fins de pagamento — é só 1 valendo.
+            mostrarFuncao={value.contratos.filter(c => c.vigente).length > 1}
+            terapiasAgenda={terapiasAgenda || []}
             onPatch={patch => updateContrato(idx, patch)}
             onRemove={() => removeContrato(idx)}
             onAbrirObs={() => setObsAberta(idx)}
@@ -772,6 +816,7 @@ function montarLinhas(contratos: ContratoAtual[], roster: string[]): LinhaBase[]
       profissionalNome: nome,
       cpf: c?.cpf ?? null,
       cnpj: c?.cnpj ?? null,
+      razaoSocial: c?.razao_social ?? null,
       documentoTipo: c?.documento_tipo ?? null,
       // `c.observacoes` (nível do profissional) não é mais lido: virou backup
       // congelado na migration 20260803120000. A nota vive em cada item.
@@ -888,6 +933,122 @@ function ChipFiltro({
   )
 }
 
+// ─── Filtro de terapias (multi-seleção) ──────────────────────────────────────
+// Popover com checkboxes, não <select multiple> (péssimo em touch e exige
+// Ctrl+clique no desktop). Portal em document.body pelo mesmo motivo do
+// InfoTooltip de CardRemun.tsx: a toolbar não tem overflow-hidden aqui, mas
+// mesmo assim o painel pode ultrapassar a viewport se posicionado inline.
+const POPOVER_TERAPIAS_W = 260
+
+function FiltroTerapias({
+  opcoes,
+  selecionadas,
+  onChange,
+}: {
+  opcoes: string[]
+  selecionadas: Set<string>
+  onChange: (novo: Set<string>) => void
+}) {
+  const [aberto, setAberto] = useState(false)
+  const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
+  const btnRef = useRef<HTMLButtonElement>(null)
+
+  function alternarAberto() {
+    if (!aberto && btnRef.current) {
+      const r = btnRef.current.getBoundingClientRect()
+      setPos({ top: r.bottom + 6, left: Math.min(r.left, window.innerWidth - POPOVER_TERAPIAS_W - 16) })
+    }
+    setAberto(v => !v)
+  }
+
+  function alternarTerapia(t: string) {
+    const novo = new Set(selecionadas)
+    if (novo.has(t)) novo.delete(t)
+    else novo.add(t)
+    onChange(novo)
+  }
+
+  if (opcoes.length === 0) return null
+
+  return (
+    <>
+      <button
+        type="button"
+        ref={btnRef}
+        onClick={alternarAberto}
+        aria-pressed={selecionadas.size > 0}
+        aria-expanded={aberto}
+        className={`${CHIP_BASE} ${
+          selecionadas.size > 0
+            ? "border-foreground bg-foreground text-background"
+            : "border-border text-foreground hover:bg-muted"
+        }`}
+      >
+        <ListFilter size={12} />
+        Terapia
+        {selecionadas.size > 0 && (
+          <span
+            className={`rounded-full px-1.5 tabular-nums ${
+              selecionadas.size > 0 ? "bg-background/20" : "bg-muted text-muted-foreground"
+            }`}
+          >
+            {selecionadas.size}
+          </span>
+        )}
+      </button>
+      {aberto && pos && createPortal(
+        <>
+          <div className="fixed inset-0 z-40" onClick={() => setAberto(false)} />
+          <div
+            role="listbox"
+            aria-multiselectable="true"
+            style={{ position: "fixed", top: pos.top, left: pos.left, width: POPOVER_TERAPIAS_W }}
+            className="z-50 max-h-80 overflow-y-auto rounded-lg border border-border bg-card p-2 shadow-lg"
+          >
+            <div className="mb-1 flex items-center justify-between px-1">
+              <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                Terapia na agenda
+              </span>
+              <button
+                type="button"
+                onClick={() => setAberto(false)}
+                aria-label="Fechar"
+                className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+              >
+                <X size={13} />
+              </button>
+            </div>
+            {selecionadas.size > 0 && (
+              <button
+                type="button"
+                onClick={() => onChange(new Set())}
+                className="mb-1 w-full rounded-md px-1.5 py-1 text-left text-xs font-semibold text-foreground hover:bg-muted"
+              >
+                Limpar seleção
+              </button>
+            )}
+            {opcoes.map(t => (
+              <label
+                key={t}
+                className="flex cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-xs text-foreground hover:bg-muted"
+              >
+                <input
+                  type="checkbox"
+                  checked={selecionadas.has(t)}
+                  onChange={() => alternarTerapia(t)}
+                  className="rounded border-border"
+                />
+                {t}
+              </label>
+            ))}
+          </div>
+        </>,
+        document.body,
+      )}
+    </>
+  )
+}
+
 export function ContratosCadastro() {
   const [contratos, setContratos] = useState<ContratoAtual[]>([])
   const [roster, setRoster] = useState<string[]>([])
@@ -895,8 +1056,10 @@ export function ContratosCadastro() {
   const [busca, setBusca] = useState("")
   const [semDocumento, setSemDocumento] = useState(false)
   const [semVigente, setSemVigente] = useState(false)
+  const [terapiasFiltro, setTerapiasFiltro] = useState<Set<string>>(new Set())
   const [pagina, setPagina] = useState(1)
   const { table, dirtyCount, saving, saveAll } = useDraftTable()
+  const { terapiasPorProfissional } = useTerapiasAgendaPorProfissional()
 
   // Devolve o que carregou: quem cria um profissional precisa saber em que
   // página o nome novo caiu, e `linhas` só reflete isso no render seguinte.
@@ -948,14 +1111,29 @@ export function ContratosCadastro() {
     [linhas],
   )
 
+  // Opções do filtro de terapias: união de tudo que a agenda TiTa trouxe,
+  // não um vocabulário fixo — se a agenda não tem uma terapia, ela não
+  // aparece como opção (nada a filtrar por ela).
+  const todasTerapias = useMemo(() => {
+    const set = new Set<string>()
+    Object.values(terapiasPorProfissional).forEach(ts => ts.forEach(t => set.add(t)))
+    return [...set].sort((a, b) => a.localeCompare(b, "pt-BR"))
+  }, [terapiasPorProfissional])
+
   const filtradas = useMemo(() => {
     let r = linhas
     const q = busca.trim().toLowerCase()
     if (q) r = r.filter(l => l.profissionalNome.toLowerCase().includes(q))
     if (semDocumento) r = r.filter(l => !l.cpf && !l.cnpj)
     if (semVigente) r = r.filter(l => !l.contratosAtuais.some(c => c.vigente))
+    if (terapiasFiltro.size > 0) {
+      r = r.filter(l => {
+        const ts = terapiasPorProfissional[normKey(l.profissionalNome)] || []
+        return ts.some(t => terapiasFiltro.has(t))
+      })
+    }
     return r
-  }, [linhas, busca, semDocumento, semVigente])
+  }, [linhas, busca, semDocumento, semVigente, terapiasFiltro, terapiasPorProfissional])
 
   // Página derivada e travada no total: se a lista encolher (preencher os
   // documentos com o filtro "sem documento" ligado faz isso ao salvar), a
@@ -1029,7 +1207,7 @@ export function ContratosCadastro() {
     return () => clearTimeout(t)
   }, [destaque, pagina])
 
-  const filtrando = !!busca.trim() || semDocumento || semVigente
+  const filtrando = !!busca.trim() || semDocumento || semVigente || terapiasFiltro.size > 0
 
   // Filtrar remonta a lista inteira, então a página corrente perde sentido.
   const aplicarFiltro = (fn: () => void) => {
@@ -1041,6 +1219,7 @@ export function ContratosCadastro() {
       setBusca("")
       setSemDocumento(false)
       setSemVigente(false)
+      setTerapiasFiltro(new Set())
     })
 
   return (
@@ -1078,6 +1257,21 @@ export function ContratosCadastro() {
         >
           Sem contrato vigente
         </ChipFiltro>
+        <FiltroTerapias
+          opcoes={todasTerapias}
+          selecionadas={terapiasFiltro}
+          onChange={novo => aplicarFiltro(() => setTerapiasFiltro(novo))}
+        />
+        {filtrando && (
+          <button
+            type="button"
+            onClick={limparFiltros}
+            className={`${foco} inline-flex shrink-0 items-center gap-1 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground`}
+          >
+            <X size={12} />
+            Limpar filtros
+          </button>
+        )}
         <span className="ml-auto shrink-0 text-xs tabular-nums text-muted-foreground">
           {filtradas.length} de {linhas.length}
         </span>
@@ -1135,6 +1329,7 @@ export function ContratosCadastro() {
               linha={linha}
               table={table}
               destaque={destaque === linha.profissionalNome}
+              terapiasAgenda={terapiasPorProfissional[normKey(linha.profissionalNome)]}
             />
           ))}
         </div>

@@ -145,7 +145,7 @@ export function RemuneracaoRPDashboard({ resultado, especialidadeFiltro, onFiltr
                     onMouseLeave={() => setHoverEsp(null)}
                     onFocus={() => setHoverEsp(esp.especialidade)}
                     onBlur={() => setHoverEsp(null)}
-                    title={`${esp.especialidade}: ${fmt(esp.valor)} · ${(esp.pct * 100).toFixed(1)}% do total apurado por sessão/entrega · ${esp.profissionais.length} profissional(is)`}
+                    title={`${esp.especialidade}: ${fmt(esp.valor)} · ${(esp.pct * 100).toFixed(1)}% do total do mês · ${esp.profissionais.length} profissional(is)`}
                     aria-pressed={selected}
                     className={`w-full text-left transition-opacity duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-md ${dimmed ? "opacity-35" : "opacity-100"}`}
                   >
@@ -175,8 +175,7 @@ export function RemuneracaoRPDashboard({ resultado, especialidadeFiltro, onFiltr
 
           {totalBancoHoras > 0 && (
             <p className="mt-3 text-[11px] text-muted-foreground leading-snug">
-              As barras somam {fmt(totalVariavel)}. Os {fmt(totalBancoHoras)} de banco de horas não aparecem aqui:
-              são valor fixo de contrato, não pagamento por especialidade.
+              As barras somam {fmt(totalMes)} e já incluem o valor fixo de banco de horas — cada contrato em banco de horas tem uma especialidade só, então o valor dele entra direto na barra dela.
             </p>
           )}
         </div>
