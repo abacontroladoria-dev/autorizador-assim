@@ -8,11 +8,22 @@ import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 export const metadata: Metadata = {
-  manifest: '/manifest.json',
+  title: "Sistema Pulsar - Universo ABA",
+  description: "Sistema Pulsar",
+
+  manifest: "/manifest.json",
+
+  icons: {
+    icon: [
+      { url: "/icon.png" },
+    ],
+    apple: "/icon-192.png",
+  },
+
   appleWebApp: {
     capable: true,
-    statusBarStyle: 'default',
-    title: 'Disponib.',
+    statusBarStyle: "default",
+    title: "Pulsar",
   },
 };
 
@@ -28,7 +39,6 @@ export default function RootLayout({
   return (
     <html lang="pt-BR" className={cn("font-sans", geist.variable)} suppressHydrationWarning>
       <head>
-        <link rel="apple-touch-icon" href="/icon-192.png" />
         <script dangerouslySetInnerHTML={{ __html: `try{var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}` }} />
       </head>
       <body>
