@@ -47,8 +47,8 @@
 //   node scripts/reconciliar-grade-sobreposicao.js --apply
 
 const {
-  lerEnv, parsearBackup, chaveNatural, selecionarTudo, inserirLote, atualizarPorIds,
-  schemaFase1Pronto,
+  lerEnv, descreverDestino, parsearBackup, chaveNatural, selecionarTudo, inserirLote,
+  atualizarPorIds, schemaFase1Pronto,
 } = require("./lib/backup-grade")
 
 const JANELA_DE  = "2026-07-01"
@@ -87,6 +87,7 @@ async function main() {
   const aplicar = process.argv.slice(2).includes("--apply")
   const cfg     = lerEnv()
 
+  console.log(`Destino: ${descreverDestino(cfg)}`)
   console.log(`Janela de reconciliação: ${JANELA_DE} → ${JANELA_ATE}\n`)
 
   const { linhas: doXls } = parsearBackup({ de: JANELA_DE, ate: JANELA_ATE })

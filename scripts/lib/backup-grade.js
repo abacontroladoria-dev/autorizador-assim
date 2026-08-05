@@ -20,23 +20,48 @@ const TABELA = "csv_grades_profissionais"
 
 // ─── Env ──────────────────────────────────────────────────────────────────────
 
+/**
+ * Resolve a conexão. As variáveis de ambiente têm precedência sobre
+ * frontend/.env.local, para permitir apontar um script destes ao stack local
+ * (`supabase start`) sem editar o arquivo que a aplicação usa:
+ *
+ *   SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_SERVICE_ROLE_KEY=... node scripts/...
+ *
+ * Sem isso o único destino possível é produção, o que é ruim para um script
+ * cuja gravação é irreversível depois que o trigger de congelamento sobe.
+ */
 function lerEnv() {
-  if (!fs.existsSync(ENV_LOCAL)) throw new Error(`Não encontrei ${ENV_LOCAL}`)
-  const env = {}
-  for (const linha of fs.readFileSync(ENV_LOCAL, "utf8").split(/\r?\n/)) {
-    const m = linha.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
-    if (!m) continue
-    let valor = m[2].trim()
-    if ((valor.startsWith('"') && valor.endsWith('"')) || (valor.startsWith("'") && valor.endsWith("'"))) {
-      valor = valor.slice(1, -1)
+  let url = process.env.SUPABASE_URL || ""
+  let key = process.env.SUPABASE_SERVICE_ROLE_KEY || ""
+  let fonte = "variáveis de ambiente"
+
+  if (!url || !key) {
+    if (!fs.existsSync(ENV_LOCAL)) throw new Error(`Não encontrei ${ENV_LOCAL}`)
+    const env = {}
+    for (const linha of fs.readFileSync(ENV_LOCAL, "utf8").split(/\r?\n/)) {
+      const m = linha.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*)$/)
+      if (!m) continue
+      let valor = m[2].trim()
+      if ((valor.startsWith('"') && valor.endsWith('"')) || (valor.startsWith("'") && valor.endsWith("'"))) {
+        valor = valor.slice(1, -1)
+      }
+      env[m[1]] = valor
     }
-    env[m[1]] = valor
+    url = url || env.NEXT_PUBLIC_SUPABASE_URL || env.SUPABASE_URL || ""
+    key = key || env.SUPABASE_SERVICE_ROLE_KEY || ""
+    fonte = "frontend/.env.local"
   }
-  const url = env.NEXT_PUBLIC_SUPABASE_URL || env.SUPABASE_URL
-  const key = env.SUPABASE_SERVICE_ROLE_KEY
-  if (!url) throw new Error("NEXT_PUBLIC_SUPABASE_URL/SUPABASE_URL ausente em frontend/.env.local")
-  if (!key) throw new Error("SUPABASE_SERVICE_ROLE_KEY ausente em frontend/.env.local")
-  return { url: url.replace(/\/+$/, ""), key }
+
+  if (!url) throw new Error("NEXT_PUBLIC_SUPABASE_URL/SUPABASE_URL ausente (env ou frontend/.env.local)")
+  if (!key) throw new Error("SUPABASE_SERVICE_ROLE_KEY ausente (env ou frontend/.env.local)")
+  return { url: url.replace(/\/+$/, ""), key, fonte }
+}
+
+/** Rótulo do destino, para o script poder dizer onde vai escrever antes de escrever. */
+function descreverDestino(cfg) {
+  const local = /127\.0\.0\.1|localhost/.test(cfg.url)
+  const host  = cfg.url.replace(/^https?:\/\//, "").replace(/\/.*$/, "")
+  return `${local ? "LOCAL" : "PRODUÇÃO"}  ${host}  (via ${cfg.fonte})`
 }
 
 // ─── Parsing do "XLS" ─────────────────────────────────────────────────────────
@@ -236,6 +261,6 @@ async function atualizarPorIds(cfg, ids, patch, bloco = 100) {
 
 module.exports = {
   RAIZ, ARQUIVO, TABELA, UNIDADE_ID, UNIDADE_NOME,
-  lerEnv, parsearBackup, chaveNatural,
+  lerEnv, descreverDestino, parsearBackup, chaveNatural,
   contar, selecionarTudo, inserirLote, atualizarPorIds, schemaFase1Pronto,
 }

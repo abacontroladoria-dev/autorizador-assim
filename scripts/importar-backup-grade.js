@@ -32,7 +32,7 @@
 
 const path = require("path")
 const {
-  RAIZ, ARQUIVO, lerEnv, parsearBackup, contar, inserirLote,
+  RAIZ, ARQUIVO, lerEnv, descreverDestino, parsearBackup, contar, inserirLote,
 } = require("./lib/backup-grade")
 
 // Limite deste script: até onde a tabela está comprovadamente vazia.
@@ -105,16 +105,41 @@ async function main() {
   }
 
   const cfg = lerEnv()
+  console.log(`\nDestino: ${descreverDestino(cfg)}`)
 
   // Guarda de idempotência: sem isto, rodar duas vezes duplicaria 93.797 linhas
   // de histórico — e o trigger de congelamento impede apagá-las depois.
+  //
+  // A mensagem calcula o ponto de retomada a partir do próprio banco em vez de
+  // depender do que o processo anterior imprimiu. Motivo medido: uma interrupção
+  // dura (no Windows o Node pode abortar com a assertion UV_HANDLE_CLOSING do
+  // libuv) mata o processo sem passar pelo catch do laço, então a instrução de
+  // --resume-from nunca chega a ser impressa e o operador fica sem saber onde
+  // parou. Como cada lote é um INSERT único no PostgREST, ele é tudo-ou-nada e a
+  // contagem dividida pelo tamanho do lote dá exatamente os lotes concluídos.
   const jaImportado = await contar(cfg, `origem=eq.backup_xls&data=lte.${DATA_LIMITE}`)
   if (jaImportado > 0 && resumeDe === 0 && !forcar) {
+    const lotesFeitos = Math.floor(jaImportado / LOTE)
+    const parcial     = jaImportado % LOTE !== 0
     console.error(
       `\nAbortando: já existem ${jaImportado} linhas com origem='backup_xls' até ${DATA_LIMITE}.\n` +
-      `Rodar de novo duplicaria o histórico. Use --resume-from=N para continuar uma\n` +
-      `importação interrompida, ou --force se souber o que está fazendo.`,
+      `Rodar de novo do zero duplicaria o histórico.\n`,
     )
+    if (jaImportado === ESPERADO_TOTAL) {
+      console.error(`A importação já está completa (${ESPERADO_TOTAL} linhas). Nada a fazer.`)
+    } else if (parcial) {
+      console.error(
+        `A contagem não é múltipla de ${LOTE}, então um lote entrou pela metade — o que\n` +
+        `não deveria acontecer, já que cada lote é um INSERT atômico. Investigue antes\n` +
+        `de retomar.`,
+      )
+    } else {
+      console.error(
+        `Parece uma importação interrompida: ${lotesFeitos} de ${Math.ceil(ESPERADO_TOTAL / LOTE)} lotes concluídos.\n` +
+        `Para continuar de onde parou:\n\n` +
+        `  node scripts/importar-backup-grade.js --apply --resume-from=${lotesFeitos}\n`,
+      )
+    }
     process.exit(1)
   }
 
