@@ -267,6 +267,37 @@ export function getRefWeek(): { inicio: string; fim: string; label: string } {
   return getRefWeekDoMes(proximoMes.getFullYear(), proximoMes.getMonth() + 1)
 }
 
+/**
+ * Janela de carregamento exclusiva da Ocupação de Paciente: dia 1 ao dia 7 do
+ * mês seguinte (7 dias corridos, uma ocorrência de cada dia da semana).
+ *
+ * Ao contrário de getRefWeek() (1ª segunda-sexta INTEIRAMENTE dentro do mês
+ * seguinte — proposital para amostragem estatística "limpa" em Previsão de
+ * Receitas, Comparativo de Sessões etc.), esta janela existe para decidir
+ * quais horários livres existem de fato para IMPLANTAÇÃO em Ocupação de
+ * Paciente. A implantação cria uma série semanal recorrente a partir do slot
+ * escolhido (ver calcularDataInicial em services/tita/payload.ts); se o mês
+ * seguinte não começa numa segunda-feira, getRefWeek() pula a semana "quebrada"
+ * inteira — mesmo os dias dela que já são do mês novo — e a 1ª ocorrência
+ * daquele dia da semana no mês vira inalcançável por este fluxo (achado real:
+ * setembro/2026 começa numa terça, getRefWeek() só carrega 07/09–11/09, e a
+ * quinta-feira 03/09 nunca aparecia como sugestão, apesar de livre no banco).
+ *
+ * 7 dias corridos a partir do dia 1 garante, sem duplicar nenhum dia da
+ * semana, pegar a primeira ocorrência de cada um já dentro do mês novo.
+ */
+export function getJanelaOcupacaoPaciente(): { inicio: string; fim: string; label: string } {
+  const hoje = new Date()
+  const inicio = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1)
+  const fim = new Date(inicio)
+  fim.setDate(fim.getDate() + 6)
+  return {
+    inicio: inicio.toISOString().slice(0, 10),
+    fim: fim.toISOString().slice(0, 10),
+    label: `${fmtDate(inicio)} a ${fmtDate(fim)}`,
+  }
+}
+
 /** "Julho de 2026" — mesmo formato usado por mesReferenciaDeDatas em faturamentoProjecao.ts, mas a partir de um ano/mês explícito (seletor de mês), não derivado das datas dos dados carregados. */
 export function labelMesAno(ano: number, mes: number): string {
   const label = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(ano, mes - 1, 1))

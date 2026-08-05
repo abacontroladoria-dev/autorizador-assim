@@ -22,17 +22,22 @@ interface Props {
   dispError?: string | null
   onSelectDisp?: (file: File) => void
   onClearDisp?: () => void
+  // Sobrescreve o rótulo do "Período" — usado por Ocupação de Paciente, que carrega sua
+  // própria janela de grade (getJanelaOcupacaoPaciente) em vez do cRows deste layout.
+  periodLabel?: string
 }
 
 export function CronogramaUploadBadges({
   cRows, lRows, gradeLoading, loading, error, onSelectFile, onClear,
   showLaudos = true,
   showDisponibilidade = false, dispRows = [], dispLoading = false, dispError = null, onSelectDisp, onClearDisp,
+  periodLabel,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const dispInputRef = useRef<HTMLInputElement>(null)
   const [dragging, setDragging] = useState(false)
   const rw = getRefWeek()
+  const periodo = periodLabel ?? rw.label
   const gradeLoaded = cRows.length > 0
   const laudosLoaded = lRows.length > 0
   const dispLoaded = dispRows.length > 0
@@ -163,7 +168,7 @@ export function CronogramaUploadBadges({
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
         <CalendarDays size={11} />
         <span className="font-medium text-foreground/60">Período</span>
-        <span>{rw.label}</span>
+        <span>{periodo}</span>
       </div>
 
       {((showLaudos && error) || dispError) && <p className="text-[11px] text-destructive mt-0.5">{(showLaudos && error) || dispError}</p>}
