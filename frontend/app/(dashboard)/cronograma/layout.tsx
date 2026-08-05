@@ -7,7 +7,7 @@ import { CronogramaDataProvider, useCronogramaData } from "@/contexts/Cronograma
 import { useHeader } from "@/contexts/HeaderContext"
 import { buscarGradeComoCSVRows } from "@/lib/cronograma/gradeService"
 import { parseDisponibilidadeCSV } from "@/lib/cronograma/disponibilidade"
-import { getRefWeek } from "@/lib/cronograma/helpers"
+import { getRefWeek, getJanelaOcupacaoPaciente } from "@/lib/cronograma/helpers"
 import { CronogramaUploadBadges } from "@/components/cronograma/CronogramaUploadBadges"
 import type { LaudoRow } from "@/types/cronograma"
 
@@ -75,6 +75,11 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
   const isReposicaoPage = !!pathname?.includes('/reposicao')
   // Disponibilidade só é relevante na aba Novo Cronograma (solicitações ?tab=novo-cron).
   const isNovoCron = !!pathname?.includes('/solicitacoes') && searchParams.get('tab') === 'novo-cron'
+  // Ocupação de Paciente busca sua própria grade com getJanelaOcupacaoPaciente() (ver
+  // page.tsx da rota), não o cRows deste layout — o badge "Período" precisa mostrar essa
+  // janela aqui, senão mostra a janela errada (getRefWeek()) para a única aba que não a usa.
+  const isOcupacaoPacientePage =
+    pathname === '/cronograma/ocupacao-paciente' || !!pathname?.startsWith('/cronograma/ocupacao-paciente/')
   const gradeFetchedRef = useRef(false)
   const laudosFetchedRef = useRef(false)
 
@@ -194,10 +199,11 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
         dispError={dispError}
         onSelectDisp={handleDispFile}
         onClearDisp={handleClearDisp}
+        periodLabel={isOcupacaoPacientePage ? getJanelaOcupacaoPaciente().label : undefined}
       />
     )
     return () => setRightContent(null)
-  }, [cRows, lRows, dispRows, uploading, gradeLoading, uploadError, dispUploading, dispError, handleLaudosFile, handleClear, handleDispFile, handleClearDisp, setRightContent, isIndicadoresPage, isOcupacaoSalasPage, isReposicaoPage, isNovoCron])
+  }, [cRows, lRows, dispRows, uploading, gradeLoading, uploadError, dispUploading, dispError, handleLaudosFile, handleClear, handleDispFile, handleClearDisp, setRightContent, isIndicadoresPage, isOcupacaoSalasPage, isReposicaoPage, isNovoCron, isOcupacaoPacientePage])
 
   return <div>{children}</div>
 }
