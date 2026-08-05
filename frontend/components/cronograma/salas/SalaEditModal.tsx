@@ -6,8 +6,9 @@ import { useEffect, useMemo, useState } from "react"
 import { Loader2, Save, Trash2 } from "lucide-react"
 import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
 import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
-import { criarSala, atualizarSala, arquivarSala, listarNucleosDistintos } from "@/services/salas.service"
+import { criarSala, atualizarSala, arquivarSala, listarNucleos } from "@/services/salas.service"
 import { normNumeroSala, sugerirNumerosSalaDisponiveis } from "@/lib/cronograma/salas"
+import { useStatusLabels } from "@/hooks/useStatusLabels"
 import type { Sala, SalaInput, SalaCapacidade, SalaStatus } from "@/lib/cronograma/salasTypes"
 
 interface SalaEditModalProps {
@@ -24,12 +25,6 @@ const CAPACIDADE_LABEL: Record<SalaCapacidade, string> = {
   multiplo: "Múltiplo (3+ simultâneos)",
 }
 
-const STATUS_LABEL: Record<SalaStatus, string> = {
-  operacional: "Operacional",
-  bloqueada: "Bloqueada",
-  adm: "Administrativa (ADM)",
-}
-
 /** Unidades reais da operação (mesmo conjunto canônico usado em normalizarUnidadeOcupacao). */
 const UNIDADES = ["Realengo", "Fazendinha", "Padre Miguel", "Ambiente Natural"]
 
@@ -37,9 +32,10 @@ const INPUT_CLS = "w-full rounded-lg border border-border bg-card px-2.5 py-1.5 
 
 export function SalaEditModal({ sala, todasSalas, onClose, onSaved }: SalaEditModalProps) {
   const [nucleos, setNucleos] = useState<string[]>([])
+  const { labels: statusLabels } = useStatusLabels()
 
   useEffect(() => {
-    listarNucleosDistintos().then(setNucleos).catch(() => {})
+    listarNucleos().then(rows => setNucleos(rows.map(n => n.nome))).catch(() => {})
   }, [])
 
   const [form, setForm] = useState<SalaInput>({
@@ -218,7 +214,7 @@ export function SalaEditModal({ sala, todasSalas, onClose, onSaved }: SalaEditMo
         </Campo>
         <Campo label="Status">
           <select className={INPUT_CLS} value={form.status} onChange={e => set("status", e.target.value as SalaStatus)}>
-            {Object.entries(STATUS_LABEL).map(([k, l]) => <option key={k} value={k}>{l}</option>)}
+            {(Object.keys(statusLabels) as SalaStatus[]).map(k => <option key={k} value={k}>{statusLabels[k].label}</option>)}
           </select>
         </Campo>
         <Campo label="Referência na agenda (informativo, não afeta o cruzamento)" className="col-span-2">

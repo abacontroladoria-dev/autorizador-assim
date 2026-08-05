@@ -1,7 +1,7 @@
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { fixMojibake } from "@/lib/cronograma/gradeService"
 import { isFakePatient } from "@/lib/remuneracao/pacientes"
-import type { Sala, SalaInput, AgendaSalaRow, AlocacaoSala, AlocacaoInput } from "@/lib/cronograma/salasTypes"
+import type { Sala, SalaInput, AgendaSalaRow, AlocacaoSala, AlocacaoInput, SalaStatus } from "@/lib/cronograma/salasTypes"
 
 const TABLE = "cronograma_salas"
 const ALOCACOES_TABLE = "cronograma_salas_alocacoes"
@@ -85,12 +85,80 @@ export async function buscarTerapiasDoProfissional(profissionalNome: string): Pr
   return [...new Set(nomes)].sort()
 }
 
-/** Núcleos distintos já cadastrados — usado como sugestão (datalist) no formulário de sala. */
-export async function listarNucleosDistintos(): Promise<string[]> {
+export interface NucleoCadastrado {
+  id: string
+  nome: string
+}
+
+const NUCLEOS_TABLE = "cronograma_nucleos"
+
+/** Núcleos cadastrados (tabela própria, não mais derivado das salas existentes) — usado no select do formulário de sala e na tela de gerenciamento. */
+export async function listarNucleos(): Promise<NucleoCadastrado[]> {
   const sb = getSupabaseClient()
-  const { data, error } = await sb.from(TABLE).select("nucleo").not("nucleo", "is", null)
+  const { data, error } = await sb.from(NUCLEOS_TABLE).select("id, nome").order("nome")
   if (error) throw new Error(error.message)
-  return [...new Set((data ?? []).map(r => (r.nucleo as string).trim()).filter(Boolean))].sort()
+  return (data ?? []) as NucleoCadastrado[]
+}
+
+export async function criarNucleo(nome: string): Promise<NucleoCadastrado> {
+  const sb = getSupabaseClient()
+  const { data, error } = await sb.from(NUCLEOS_TABLE).insert({ nome: nome.trim() }).select("id, nome").single()
+  if (error) throw new Error(error.message)
+  return data as NucleoCadastrado
+}
+
+/** Renomear propaga automaticamente pra todas as salas que usam esse núcleo (FK ON UPDATE CASCADE). */
+export async function renomearNucleo(id: string, nome: string): Promise<NucleoCadastrado> {
+  const sb = getSupabaseClient()
+  const { data, error } = await sb.from(NUCLEOS_TABLE).update({ nome: nome.trim() }).eq("id", id).select("id, nome").single()
+  if (error) throw new Error(error.message)
+  return data as NucleoCadastrado
+}
+
+/** Falha (FK ON DELETE RESTRICT) se alguma sala ainda usa esse núcleo. */
+export async function excluirNucleo(id: string): Promise<void> {
+  const sb = getSupabaseClient()
+  const { error } = await sb.from(NUCLEOS_TABLE).delete().eq("id", id)
+  if (error) throw new Error(error.message)
+}
+
+/** Paleta fixa de cores do módulo Cronograma (ver components/cronograma/ui/tones.ts) — status usa só essas 6, nunca cor livre. */
+export type StatusTone = "green" | "amber" | "blue" | "purple" | "red" | "slate"
+
+export interface StatusLabel {
+  codigo: SalaStatus
+  label: string
+  label_curto: string
+  tone: StatusTone
+}
+
+const STATUS_LABELS_TABLE = "cronograma_status_labels"
+
+/**
+ * Rótulos + cor editáveis dos status fixos de sala (operacional/bloqueada/
+ * adm/nti). A lista de CÓDIGOS possíveis continua fixa (check constraint em
+ * cronograma_salas.status) — o cálculo de ocupação (capacidadeProjetadaSala,
+ * statusDoSlot) trata "qualquer status != operacional" de forma genérica,
+ * então adicionar um novo código fixo (ex.: nti) exige migration, não é uma
+ * opção livre criável aqui.
+ */
+export async function listarStatusLabels(): Promise<StatusLabel[]> {
+  const sb = getSupabaseClient()
+  const { data, error } = await sb.from(STATUS_LABELS_TABLE).select("codigo, label, label_curto, tone")
+  if (error) throw new Error(error.message)
+  return (data ?? []) as StatusLabel[]
+}
+
+export async function atualizarStatusLabel(codigo: SalaStatus, input: { label: string; label_curto: string; tone: StatusTone }): Promise<StatusLabel> {
+  const sb = getSupabaseClient()
+  const { data, error } = await sb
+    .from(STATUS_LABELS_TABLE)
+    .update({ label: input.label.trim(), label_curto: input.label_curto.trim(), tone: input.tone })
+    .eq("codigo", codigo)
+    .select("codigo, label, label_curto, tone")
+    .single()
+  if (error) throw new Error(error.message)
+  return data as StatusLabel
 }
 
 // ─── ALOCAÇÕES (planejamento de sala — não escreve na TiTa) ──────────────────
@@ -137,13 +205,16 @@ export interface ProfissionalOpcao {
  * alocação com o ID, não só o nome, e viabilizar o cruzamento por ID na aba
  * Regularizações.
  */
+/**
+ * Usa vw_cronograma_profissionais_salas (DISTINCT já feito no banco) em vez
+ * de paginar csv_grades_profissionais inteira (54 mil+ linhas para ~120
+ * profissionais distintos) — ver comentário na migration que criou a view.
+ */
 export async function listarTodosProfissionaisSalas(): Promise<ProfissionalOpcao[]> {
   const sb = getSupabaseClient()
   const { data, error } = await sb
-    .from("csv_grades_profissionais")
+    .from("vw_cronograma_profissionais_salas")
     .select("profissional_id, profissional_nome")
-    .not("profissional_nome", "is", null)
-    .limit(5000)
 
   if (error) throw new Error(error.message)
   const porNome = new Map<string, ProfissionalOpcao>()
