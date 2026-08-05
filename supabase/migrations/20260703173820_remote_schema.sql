@@ -2067,6 +2067,11 @@ grant truncate on table "public"."fila_bkp_titaid_faltas_jun" to "service_role";
 grant update on table "public"."fila_bkp_titaid_faltas_jun" to "service_role";
 
 
+-- Replay fix: 20260702000001_fix_csv_reposicao_faltas_rls.sql já cria esta
+-- policy, então o replay do zero (db pull/db reset) falhava com 42710 aqui.
+-- Idempotente: o estado final é o mesmo, e em prod nada re-executa.
+drop policy if exists "csv_reposicao_faltas_select_all" on "public"."csv_reposicao_faltas";
+
   create policy "csv_reposicao_faltas_select_all"
   on "public"."csv_reposicao_faltas"
   as permissive
