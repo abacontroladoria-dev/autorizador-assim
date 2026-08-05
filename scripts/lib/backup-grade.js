@@ -237,25 +237,70 @@ async function schemaFase1Pronto(cfg) {
   return r.ok
 }
 
+/**
+ * Repete a requisição em falha transitória. Medido contra produção: o seed de
+ * 188 lotes morreu no lote 29 com "fetch failed" — erro de socket do undici, não
+ * do PostgREST. Perder a importação inteira por causa de um blip de rede é
+ * desnecessário, e a retomada manual custa uma ida ao banco para descobrir onde
+ * parou.
+ *
+ * Só retenta o que pode dar certo numa segunda tentativa: erro de rede (o fetch
+ * nem chega a responder) e 5xx/429. Um 4xx é determinístico — payload inválido,
+ * coluna inexistente, violação de constraint — e repetir só atrasaria o erro.
+ *
+ * Seguro para INSERT porque cada lote é uma requisição única: ou o PostgREST
+ * gravou as 500 linhas e devolveu 2xx, ou não gravou nada. Não existe estado
+ * intermediário que uma repetição duplicaria.
+ */
+async function comRetentativa(rotulo, fn, tentativas = 4) {
+  let ultimoErro
+  for (let i = 1; i <= tentativas; i++) {
+    try {
+      return await fn()
+    } catch (e) {
+      ultimoErro = e
+      if (e.naoRetentar || i === tentativas) throw e
+      const espera = 500 * 2 ** (i - 1)   // 0,5s · 1s · 2s
+      console.log(`  ${rotulo}: ${e.message.slice(0, 60)} — tentativa ${i + 1}/${tentativas} em ${espera}ms`)
+      await new Promise(r => setTimeout(r, espera))
+    }
+  }
+  throw ultimoErro
+}
+
 async function inserirLote(cfg, lote) {
-  const r = await fetch(`${cfg.url}/rest/v1/${TABELA}`, {
-    method: "POST",
-    headers: cabecalhos(cfg, { "Content-Type": "application/json", Prefer: "return=minimal" }),
-    body: JSON.stringify(lote),
+  return comRetentativa("insert", async () => {
+    const r = await fetch(`${cfg.url}/rest/v1/${TABELA}`, {
+      method: "POST",
+      headers: cabecalhos(cfg, { "Content-Type": "application/json", Prefer: "return=minimal" }),
+      body: JSON.stringify(lote),
+    })
+    if (!r.ok) {
+      const e = new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 400)}`)
+      if (r.status < 500 && r.status !== 429) e.naoRetentar = true
+      throw e
+    }
   })
-  if (!r.ok) throw new Error(`HTTP ${r.status}: ${(await r.text()).slice(0, 400)}`)
 }
 
 /** PATCH por lista de ids (in.(...)), em blocos para não estourar a URL. */
 async function atualizarPorIds(cfg, ids, patch, bloco = 100) {
   for (let i = 0; i < ids.length; i += bloco) {
     const fatia = ids.slice(i, i + bloco)
-    const r = await fetch(`${cfg.url}/rest/v1/${TABELA}?id=in.(${fatia.join(",")})`, {
-      method: "PATCH",
-      headers: cabecalhos(cfg, { "Content-Type": "application/json", Prefer: "return=minimal" }),
-      body: JSON.stringify(patch),
+    // Idempotente por natureza: o PATCH grava valores fixos numa lista de ids, então
+    // repetir escreve exatamente o mesmo estado.
+    await comRetentativa("update", async () => {
+      const r = await fetch(`${cfg.url}/rest/v1/${TABELA}?id=in.(${fatia.join(",")})`, {
+        method: "PATCH",
+        headers: cabecalhos(cfg, { "Content-Type": "application/json", Prefer: "return=minimal" }),
+        body: JSON.stringify(patch),
+      })
+      if (!r.ok) {
+        const e = new Error(`HTTP ${r.status} ao atualizar: ${(await r.text()).slice(0, 400)}`)
+        if (r.status < 500 && r.status !== 429) e.naoRetentar = true
+        throw e
+      }
     })
-    if (!r.ok) throw new Error(`HTTP ${r.status} ao atualizar: ${(await r.text()).slice(0, 400)}`)
   }
 }
 
