@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import { AlertCircle, Loader2, UserPlus, X } from "lucide-react"
-import { maskCpfCnpj, maskMoedaBR, onlyDigits, parseNumeroBR, validarCpfCnpj } from "@/lib/remuneracao/formatacao"
+import { maskCpfCnpj, maskMoedaBR, onlyDigits, parseNumeroBR, splitDocumento, validarCpfCnpj } from "@/lib/remuneracao/formatacao"
 import { ESPECIALIDADES_AGENDA } from "@/lib/remuneracao/especialidades"
 
 export type NovoProfissionalPayload = {
@@ -10,6 +10,7 @@ export type NovoProfissionalPayload = {
   documento_tipo: string | null
   cpf: string | null
   cnpj: string | null
+  razao_social: string | null
   // Sem `observacoes` no nível do profissional: a nota é do CONTRATO desde a
   // migration 20260803120000, e mandar a chave aqui sobrescreveria a coluna que
   // ficou como backup congelado.
@@ -38,8 +39,8 @@ const foco = "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring
 
 const VAZIO = {
   nome: "",
-  cpf: "",
-  cnpj: "",
+  documento: "",
+  razaoSocial: "",
   observacoes: "",
   numero: "",
   funcao: "",
@@ -87,8 +88,9 @@ export function NovoProfissionalModal({
     const nome = v.nome.trim().replace(/\s+/g, " ")
     if (!nome) return setErro("Informe o nome do profissional.")
     if (duplicado) return setErro("Já existe um profissional com esse nome. Edite o bloco dele na lista.")
-    if (v.cpf.trim() && !validarCpfCnpj(v.cpf)) return setErro("CPF incompleto — precisa de 11 dígitos, ou deixe em branco.")
-    if (v.cnpj.trim() && !validarCpfCnpj(v.cnpj)) return setErro("CNPJ incompleto — precisa de 14 dígitos, ou deixe em branco.")
+    if (v.documento.trim() && !validarCpfCnpj(v.documento)) {
+      return setErro("Documento incompleto — precisa de 11 dígitos (CPF) ou 14 (CNPJ), ou deixe em branco.")
+    }
 
     // A observação entra no teste: digitar uma nota agora É pedir o item de
     // contrato, porque é nele que a nota mora. Aceitar as teclas e descartar
@@ -99,8 +101,8 @@ export function NovoProfissionalModal({
     const { ok, error } = await onSubmit({
       profissional_nome: nome,
       documento_tipo: null,
-      cpf: onlyDigits(v.cpf) || null,
-      cnpj: onlyDigits(v.cnpj) || null,
+      ...splitDocumento(v.documento),
+      razao_social: v.razaoSocial.trim() || null,
       contratos: temContrato
         ? [{
             numero: v.numero.trim(),
@@ -164,30 +166,31 @@ export function NovoProfissionalModal({
             )}
           </div>
 
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <label htmlFor="np-cpf" className={rotulo}>CPF</label>
-              <input
-                id="np-cpf"
-                value={v.cpf}
-                onChange={e => set({ cpf: maskCpfCnpj(e.target.value) })}
-                placeholder="000.000.000-00"
-                inputMode="numeric"
-                className={`${campo} mt-1 tabular-nums`}
-              />
-            </div>
-            <div>
-              <label htmlFor="np-cnpj" className={rotulo}>CNPJ</label>
-              <input
-                id="np-cnpj"
-                value={v.cnpj}
-                onChange={e => set({ cnpj: maskCpfCnpj(e.target.value) })}
-                placeholder="00.000.000/0000-00"
-                inputMode="numeric"
-                className={`${campo} mt-1 tabular-nums`}
-              />
-            </div>
+          <div>
+            <label htmlFor="np-documento" className={rotulo}>CPF ou CNPJ</label>
+            <input
+              id="np-documento"
+              value={v.documento}
+              onChange={e => set({ documento: maskCpfCnpj(e.target.value) })}
+              placeholder="000.000.000-00 ou 00.000.000/0000-00"
+              inputMode="numeric"
+              className={`${campo} mt-1 tabular-nums`}
+            />
           </div>
+
+          {/* Só aparece com CNPJ (14 dígitos): Razão Social não existe pra CPF. */}
+          {onlyDigits(v.documento).length === 14 && (
+            <div>
+              <label htmlFor="np-razao-social" className={rotulo}>Razão Social</label>
+              <input
+                id="np-razao-social"
+                value={v.razaoSocial}
+                onChange={e => set({ razaoSocial: e.target.value })}
+                placeholder="Razão social da empresa"
+                className={`${campo} mt-1`}
+              />
+            </div>
+          )}
 
           {/* Contrato é opcional: dá para cadastrar só o documento agora e
               registrar o contrato depois, direto no bloco da lista. */}

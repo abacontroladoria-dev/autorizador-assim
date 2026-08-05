@@ -54,6 +54,7 @@ export type ContratoAtual = {
   documento_tipo: string | null
   cpf: string | null
   cnpj: string | null
+  razao_social: string | null
   contratos: ContratoAtualItem[]
   /**
    * BACKUP CONGELADO — não é mais escrito. A observação virou por-contrato em

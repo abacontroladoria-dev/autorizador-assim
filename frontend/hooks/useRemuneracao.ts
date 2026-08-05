@@ -124,7 +124,13 @@ export function useAnaliseFutura() {
       const cadastroMap: Record<string, CadastroContratual> = {}
       ;(contratosData ?? []).forEach(r => {
         const contratos = Array.isArray(r.contratos) ? r.contratos : []
-        cadastroMap[r.profissional_nome] = { nome: r.profissional_nome, contratosAtuais: contratos }
+        cadastroMap[r.profissional_nome] = {
+          nome: r.profissional_nome,
+          contratosAtuais: contratos,
+          cnpj: r.cnpj ?? null,
+          cpf: r.cpf ?? null,
+          razaoSocial: r.razao_social ?? null,
+        }
         const antigo = deriveAntigoDeContratos(contratos)
         if (antigo) antigosMap[r.profissional_nome] = antigo
       })
@@ -193,7 +199,13 @@ export function useRemunRP() {
       const cadastroMap: Record<string, CadastroContratual> = {}
       ;(contratosData ?? []).forEach(r => {
         const contratos = Array.isArray(r.contratos) ? r.contratos : []
-        cadastroMap[r.profissional_nome] = { nome: r.profissional_nome, contratosAtuais: contratos }
+        cadastroMap[r.profissional_nome] = {
+          nome: r.profissional_nome,
+          contratosAtuais: contratos,
+          cnpj: r.cnpj ?? null,
+          cpf: r.cpf ?? null,
+          razaoSocial: r.razao_social ?? null,
+        }
         const antigo = deriveAntigoDeContratos(contratos)
         if (antigo) antigosMap[r.profissional_nome] = antigo
       })

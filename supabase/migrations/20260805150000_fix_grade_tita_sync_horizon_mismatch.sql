@@ -74,6 +74,7 @@ BEGIN
   END LOOP;
 END;
 $$;
+
 -- Backfill imediato: cobre já agora o horizonte completo (hoje -> fim do mês
 -- seguinte), sem esperar a próxima segunda 06:35.
 SELECT public.fn_sync_tita_grade();

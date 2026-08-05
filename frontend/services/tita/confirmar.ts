@@ -1,6 +1,6 @@
 import "server-only"
 
-import { buscarGradePorId, resolverGradeTerapeuta, resolverIdFavorecido } from "./mappings"
+import { buscarGradePorId, resolverGradeTerapeuta, resolverIdFavorecido, terapiaExibicaoIdPorRegraFixa } from "./mappings"
 import { montarPayloadAgendamento } from "./payload"
 import type { AgendaFavorecidoTita, AgendamentoTitaPayload, DisponibilidadeResponse, TitaApiResult } from "./types"
 
@@ -20,6 +20,7 @@ export interface PreparacaoAgendamento {
 export async function prepararAgendamento(
   csvGradeId: string,
   pacienteNome: string,
+  terapiaExibicaoOverride?: number,
 ): Promise<PreparacaoAgendamento> {
   try {
     const grade = await buscarGradePorId(csvGradeId)
@@ -49,7 +50,18 @@ export async function prepararAgendamento(
       )
       return { ok: false, erro: "id_grade_terapeuta_nao_encontrado" }
     }
-    if (gradeTerapeuta.idSala == null || gradeTerapeuta.terapiaExibicaoId == null) {
+    // Prioridade: override do cliente (Aplicador ABA AE/HS — depende de laudo +
+    // convênio do paciente, dado que só existe no navegador, ver
+    // terapiaExibicaoOverride em OcupPacMode.tsx) > valor sincronizado de
+    // grade_profissionais_tita > regra fixa por terapia_id (ver
+    // terapiaExibicaoIdPorRegraFixa em mappings.ts, usada quando o
+    // grade_terapeuta_id nunca teve histórico sincronizado — comum em slots
+    // nunca antes reservados na TiTa).
+    const terapiaExibicaoId = terapiaExibicaoOverride
+      ?? gradeTerapeuta.terapiaExibicaoId
+      ?? (grade.terapia_id != null ? terapiaExibicaoIdPorRegraFixa(grade.terapia_id) : null)
+
+    if (gradeTerapeuta.idSala == null || terapiaExibicaoId == null) {
       // Diagnóstico de cobertura de dados (achado da homologação: ~9% das grades
       // "Livre" têm terapia_exibicao_id sincronizado). Registrar exatamente os
       // campos que permitem localizar e corrigir a sincronização, sem tentar
@@ -64,6 +76,7 @@ export async function prepararAgendamento(
           grade_terapeuta_id: gradeTerapeuta.gradeTerapeutaId,
           id_sala: gradeTerapeuta.idSala,
           terapia_exibicao_id: gradeTerapeuta.terapiaExibicaoId,
+          terapia_id: grade.terapia_id,
         }),
       )
       return { ok: false, erro: "grade_terapeuta_sem_sala_ou_exibicao" }
@@ -81,7 +94,7 @@ export async function prepararAgendamento(
       return { ok: false, erro: "id_favorecido_nao_encontrado" }
     }
 
-    const payload = montarPayloadAgendamento(grade, idFavorecido, gradeTerapeuta)
+    const payload = montarPayloadAgendamento(grade, idFavorecido, { ...gradeTerapeuta, terapiaExibicaoId })
     return { ok: true, payload }
   } catch (err) {
     const mensagem = err instanceof Error ? err.message : String(err)

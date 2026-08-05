@@ -11,16 +11,6 @@ import { gerarPDF, gerarWord, montarInfoDocumentoPrestador, type PdfOpts } from 
 import { parseDateBR } from "@/lib/remuneracao/datas"
 import { RemuneracaoUploadBadges } from "./RemuneracaoUploadBadges"
 
-// ─── Tipo de documento ────────────────────────────────────────────────────────
-
-type TipoDoc = "auto" | "pf" | "pj"
-
-const TIPOS_DOC: { k: TipoDoc; label: string; desc: string }[] = [
-  { k: "auto", label: "Auto", desc: "PJ se houver CNPJ cadastrado, senão PF" },
-  { k: "pf",   label: "Pessoa Física",    desc: "Emitir com CPF" },
-  { k: "pj",   label: "Pessoa Jurídica",  desc: "Emitir com CNPJ / Razão Social" },
-]
-
 // ─── Componente principal ─────────────────────────────────────────────────────
 
 export function RemunIndividualTab() {
@@ -34,7 +24,6 @@ export function RemunIndividualTab() {
   const { setHeader, setRightContent } = useHeader()
 
   const [profSelecionado, setProfSelecionado] = useState<string>("")
-  const [tipoDoc, setTipoDoc]               = useState<TipoDoc>("auto")
   const [selectOpen, setSelectOpen]         = useState(false)
   const [searchQuery, setSearchQuery]       = useState("")
   const [highlightIdx, setHighlightIdx]     = useState(0)
@@ -109,7 +98,6 @@ export function RemunIndividualTab() {
   }, [evoRows])
 
   const pdfOpts: PdfOpts = {
-    remunIndPfPj:       tipoDoc,
     remPeriodo,
     ccPA, ccPE, etaBonus, taxasPA,
     cadastroPrestadores,
@@ -131,11 +119,6 @@ export function RemunIndividualTab() {
 
   return (
     <div className="space-y-5">
-      {/* Aviso de presença (igual ao RemunRPTab) */}
-      <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-        A coluna <strong>Presença Recep.</strong> é cruzada com <code>fila_autorizacoes</code> (mesma fonte usada em Reposição de Faltas). Sessões sem nenhum registro correspondente na fila mantêm presença assumida como &quot;Sim&quot;.
-      </div>
-
       {loading && <p className="text-sm text-muted-foreground">Calculando…</p>}
       {error   && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
@@ -231,36 +214,6 @@ export function RemunIndividualTab() {
             )}
           </div>
 
-          {/* Tipo de documento */}
-          {profSelecionado && (
-            <div className="border-t border-border pt-4">
-              <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-3">
-                Tipo de documento
-              </p>
-              <div className="flex flex-wrap gap-2">
-                {TIPOS_DOC.map(({ k, label, desc }) => (
-                  <button
-                    key={k}
-                    type="button"
-                    onClick={() => setTipoDoc(k)}
-                    title={desc}
-                    className={`px-4 py-2 rounded-xl text-xs font-bold border transition-all
-                      ${tipoDoc === k
-                        ? "text-white shadow-sm bg-[#222847] border-[#222847] dark:bg-slate-600 dark:border-slate-500"
-                        : "border-border text-foreground bg-background hover:bg-muted/50"}`}
-                  >
-                    {label}
-                  </button>
-                ))}
-              </div>
-              {tipoDoc === "auto" && (
-                <p className="mt-2 text-[11px] text-muted-foreground">
-                  Auto = PJ quando houver CNPJ/razão social cadastrado; senão PF.
-                </p>
-              )}
-            </div>
-          )}
-
           {/* Botões de exportação */}
           {dadosProfSelecionado && (
             <div className="border-t border-border pt-4 flex flex-wrap gap-3">
@@ -286,7 +239,7 @@ export function RemunIndividualTab() {
                 type="button"
                 id="btn-resumo-sessoes"
                 onClick={() => {
-                  const info = montarInfoDocumentoPrestador(dadosProfSelecionado, tipoDoc, pdfOpts.cadastroPrestadores)
+                  const info = montarInfoDocumentoPrestador(dadosProfSelecionado, pdfOpts.cadastroPrestadores)
                   exportResumoSessoesPdf(info, dadosProfSelecionado.sessoes || [])
                 }}
                 className="flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold border border-border text-foreground bg-background hover:bg-muted/50 active:scale-95 transition-all"

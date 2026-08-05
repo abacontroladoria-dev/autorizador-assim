@@ -2,7 +2,46 @@ import "server-only"
 
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/server"
+import { ABA_EXIB_PSICO_IDS, EXIB_ID } from "@/lib/cronograma/constants"
 import type { GradeProfissionalRow } from "./types"
+
+/**
+ * IDs cuja terapia_exibicao_id é sempre a própria terapia de ação (não Grupo 1,
+ * nem Aplicador ABA (AE)/(HS) — que dependem de laudo + convênio do paciente,
+ * ver terapiaExibicaoIdCondicional em payload.ts).
+ *
+ * Confirmado com auditoria de dados reais (2026-08-05, cruzando terapia_id ×
+ * terapia_exibicao_id em ~1000 amostras por terapia em grade_profissionais_tita):
+ * Apoio Operacional, Avaliação Neuropsicológica, Equoterapia, Especialista
+ * Técnico de Área, Estágio, Facilitador Técnico, Fisioterapia, Fonoaudiologia,
+ * Psiquiatra/Neurologista, Operações Clínicas, Técnico Terapêutico Particular,
+ * Terapia Ocupacional, Triagem — 100% dos casos históricos batem com a própria
+ * terapia; Psicomotricidade/Psicopedagogia/Musicoterapia — ≥96,8%. Aplicador
+ * Suporte, Psicologia, Fisioterapia Aquática e Terapia Alimentar têm exceções
+ * reais no histórico (8–18% dos casos vieram como "Psicologia ABA"), mas
+ * confirmado pelo usuário como regra de negócio para ESCREVER novos
+ * agendamentos: sempre a própria terapia, independente do que o histórico
+ * mostra (as exceções refletem sessões que já eram tratamento, não escrita
+ * nova via este fluxo).
+ */
+const GRUPO2_EXIBICAO_PROPRIA_IDS = new Set([
+  2280, 2268, 2267, 2281, 2277, 2278, 2258, 2250, 2695, 2279, 2289, 2255, 2270,
+  2251, 2253, 2254,
+  2331, 2259, 2249, 2274,
+])
+
+/**
+ * Regra fixa de terapia_exibicao_id por terapia_id — usada só quando
+ * grade_profissionais_tita não tem o valor sincronizado para aquele
+ * grade_terapeuta_id em NENHUMA data do seu histórico (ver resolverGradeTerapeuta
+ * abaixo). Não cobre Aplicador ABA (AE)/(HS) — ver terapiaExibicaoIdCondicional
+ * em payload.ts, que depende de laudo + convênio do paciente.
+ */
+export function terapiaExibicaoIdPorRegraFixa(terapiaId: number): number | null {
+  if (ABA_EXIB_PSICO_IDS.has(terapiaId)) return EXIB_ID.PSICOLOGIA_ABA
+  if (GRUPO2_EXIBICAO_PROPRIA_IDS.has(terapiaId)) return terapiaId
+  return null
+}
 
 /**
  * Busca o registro completo de csv_grades_profissionais pelo seu UUID (coluna id)

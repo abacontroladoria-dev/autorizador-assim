@@ -111,12 +111,6 @@ export function RemunRPTab() {
         <ContratosPendentesPanel resultado={resultado} />
       )}
 
-      {resultado && resultado.length > 0 && (
-        <div className="rounded-lg border border-dashed border-amber-300 bg-amber-50 px-4 py-3 text-xs text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-200">
-          A coluna <strong>Presença Recep.</strong> é cruzada com <code>fila_autorizacoes</code> (mesma fonte usada em Reposição de Faltas). Sessões sem nenhum registro correspondente na fila mantêm presença assumida como &quot;Sim&quot;.
-        </div>
-      )}
-
       {!peAnaliseCompleta && (evoRows.length > 0 || peRows.length > 0) && (
         <p className="text-xs text-amber-700 dark:text-amber-400">{peStatusMensagem}</p>
       )}

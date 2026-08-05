@@ -123,3 +123,13 @@ export function maskCpfCnpj(raw: string): string {
     .replace(/(\d{3})(\d)/, "$1/$2")
     .replace(/(\d{4})(\d{1,2})$/, "$1-$2")
 }
+
+// Documento único → cpf/cnpj separados pelo nº de dígitos, pra gravar nas duas
+// colunas que o banco ainda mantém. 11 dígitos vira CPF, 14 vira CNPJ — a
+// coluna que não bateu sempre volta null, nunca as duas preenchidas juntas.
+export function splitDocumento(v: unknown): { cpf: string | null; cnpj: string | null } {
+  const d = onlyDigits(v)
+  if (d.length === 11) return { cpf: d, cnpj: null }
+  if (d.length === 14) return { cpf: null, cnpj: d }
+  return { cpf: null, cnpj: null }
+}

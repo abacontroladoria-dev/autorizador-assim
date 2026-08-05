@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <title>Pulsar</title>
+  <rect x="0" y="0" width="100" height="100" fill="#222847"/>
+  <g transform="translate(10,-11.6216) scale(1.081081)">
+    <rect x="6" y="20" width="11" height="74" rx="5" fill="#FFF8F4"/>
+    <circle cx="40" cy="48" r="28" fill="#FFF8F4"/>
+    <circle cx="40" cy="48" r="14" fill="#E6357E"/>
+    <circle cx="36" cy="44" r="5" fill="#ffffff" opacity="0.4"/>
+  </g>
+</svg>

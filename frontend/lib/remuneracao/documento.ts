@@ -46,17 +46,24 @@ export interface DocInfo {
   contrato: string
 }
 
-export function montarInfoDocumentoPrestador(p: any, modoSelecionado: string, cadastros: Record<string, any>): DocInfo {
+export function montarInfoDocumentoPrestador(p: any, cadastros: Record<string, any>): DocInfo {
   const cadastro = findCadastroPrestador(cadastros, p?.prof)
   const rawCNPJ = pickFirst(cadastro.cnpj, cadastro.CNPJ, p?.cnpj, p?.CNPJ)
   const rawCPF = pickFirst(cadastro.cpf, cadastro.CPF, p?.cpf, p?.CPF)
   const razaoSocial = pickFirst(cadastro.razaoSocial, cadastro.razao_social, cadastro.razao, cadastro.nomePJ, cadastro.pessoaJuridica, p?.razaoSocial, p?.razao_social)
-  const temPJ = !!(formatCNPJ(rawCNPJ) || razaoSocial)
-  const tipo = modoSelecionado === "pj" ? "pj" : modoSelecionado === "pf" ? "pf" : temPJ ? "pj" : "pf"
+  const temCPFRegistrado = !!formatCPF(rawCPF)
+  // Só o CNPJ decide PJ — razaoSocial sozinha não vale como sinal: um cadastro
+  // que trocou de CNPJ pra CPF pode ter deixado a razão social antiga presa no
+  // banco (é campo escondido na tela quando o documento vira CPF), e usá-la
+  // aqui reabriria esse mesmo bug do lado da leitura.
+  const temPJ = !!formatCNPJ(rawCNPJ)
+  // Auto: usa o que estiver cadastrado (CNPJ ou CPF); sem nenhum dos dois
+  // cadastrado, o padrão é CNPJ — não existe mais escolha manual de PF/PJ.
+  const tipo = temPJ || !temCPFRegistrado ? "pj" : "pf"
   const nomePF = pickFirst(cadastro.nome, cadastro.nomeCompleto, p?.prof) || "NOME DO PRESTADOR"
   const principal = tipo === "pj" ? (razaoSocial || "RAZÃO SOCIAL NÃO CADASTRADA") : nomePF
   const responsavelLegal = pickFirst(cadastro.responsavelLegal, cadastro.responsavel, cadastro.representanteLegal, p?.prof) || nomePF
-  const docNumero = tipo === "pj" ? (formatCNPJ(rawCNPJ) || "00.000.000/0001-00") : (formatCPF(rawCPF) || "000.000.000-00")
+  const docNumero = tipo === "pj" ? (formatCNPJ(rawCNPJ) || "00.000.000/0000-00") : (formatCPF(rawCPF) || "000.000.000-00")
   
   return {
     tipo,
@@ -71,7 +78,6 @@ export function montarInfoDocumentoPrestador(p: any, modoSelecionado: string, ca
 }
 
 export interface PdfOpts {
-  remunIndPfPj: string
   remPeriodo?: { inicio: string, fim: string } | null
   ccPA: number
   ccPE: number
@@ -83,14 +89,14 @@ export interface PdfOpts {
 }
 
 export function montarHtmlDocumentoFaturamento(p: ProfRemunReal, opts: PdfOpts): string {
-  const { remunIndPfPj, remPeriodo, ccPA, ccPE, etaBonus, taxasPA, cadastroPrestadores, autoPrint = false, wordMode = false } = opts
+  const { remPeriodo, ccPA, ccPE, etaBonus, taxasPA, cadastroPrestadores, autoPrint = false, wordMode = false } = opts
   const totalSessoes = p.evoluidasProprias + p.substituicoesRealizadas
   const isCC = (p.pe ?? 0) > 0 || p.sessoes.some(s => s.especialidade === "Coordenador de Caso")
   const isETA = p.sessoes.some(s => s.especialidade === "Especialista Técnico de Área")
   const hasDiaria = (p.diariaPeriodo ?? 0) > 0
   const per = remPeriodo
   const periodoTxt = `${per?.inicio || "—"} a ${per?.fim || "—"}`
-  const docInfo = montarInfoDocumentoPrestador(p, remunIndPfPj, cadastroPrestadores)
+  const docInfo = montarInfoDocumentoPrestador(p, cadastroPrestadores)
   
   const peConfirmadoDetalhe = p.peConfirmadoDetalhe ?? p.peIntegralConfirmadoDetalhe ?? []
   const peConfirmadoQtd = p.peProporcionalAtivo ? (p.peConfirmadoQtd ?? peConfirmadoDetalhe.length) : (p.pacientesCCQtd || 0)
@@ -184,7 +190,6 @@ export function montarHtmlDocumentoFaturamento(p: ProfRemunReal, opts: PdfOpts):
 
   const fluxoHTML = `<div class="section-title">Resumo das Sessões do Período</div>
     <table class="cards"><tbody><tr>
-      <td class="card navy"><div class="card-ico">📅</div><div class="card-num">${p.agendadas}</div><div class="card-title">Total vinculadas</div></td>
       <td class="card green"><div class="card-ico">✅</div><div class="card-num">${p.evoluidasProprias}</div><div class="card-title">Evoluções próprias</div></td>
       <td class="card blue"><div class="card-ico">🔄</div><div class="card-num">${p.substituicoesRealizadas}</div><div class="card-title">Substituições</div></td>
       <td class="card total"><div class="card-ico">💰</div><div class="card-num">${totalSessoes}</div><div class="card-title">${p.modalidade === "banco_horas" ? "Cobertas pelo valor fixo" : "Total elegíveis ao PA"}</div></td>
@@ -221,7 +226,7 @@ export function montarHtmlDocumentoFaturamento(p: ProfRemunReal, opts: PdfOpts):
 .banner{background:#222847;color:#fff;border-radius:8px;padding:12px 16px;margin:12px 0 10px}.banner-title{font-size:13px;font-weight:bold;margin-bottom:4px}.banner-sub{font-size:10px;opacity:.86}
 .siglas{font-size:10px;color:#444;background:#f8fafc;border-left:3px solid #2A92C0;padding:8px 12px;margin:8px 0 14px;line-height:1.55}
 .section-title{font-size:12px;font-weight:bold;color:#222847;border-left:3px solid #2A92C0;padding-left:8px;margin:15px 0 8px}
-.cards{width:100%;border-collapse:separate;border-spacing:6px;margin:0 0 6px}.card{vertical-align:top;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;padding:8px;width:25%}.card-ico{font-size:15px}.card-num{font-size:20px;font-weight:bold;line-height:1;color:#222847}.card-title{font-size:10px;font-weight:bold;margin:2px 0}.card.green{background:#f0fdf4;border-color:#86efac}.card.green .card-num{color:#16a34a}.card.blue{background:#eff6ff;border-color:#93c5fd}.card.blue .card-num{color:#2563eb}.card.total{background:#222847;border-color:#222847;color:#fff}.card.total .card-num{color:#86efac}.card.navy{background:#e8e9f0}.card.navy .card-num{color:#222847}
+.cards{width:100%;border-collapse:separate;border-spacing:6px;margin:0 0 6px}.card{vertical-align:top;border:1px solid #e2e8f0;border-radius:8px;background:#f8fafc;padding:8px;width:33.33%}.card-ico{font-size:15px}.card-num{font-size:20px;font-weight:bold;line-height:1;color:#222847}.card-title{font-size:10px;font-weight:bold;margin:2px 0}.card.green{background:#f0fdf4;border-color:#86efac}.card.green .card-num{color:#16a34a}.card.blue{background:#eff6ff;border-color:#93c5fd}.card.blue .card-num{color:#2563eb}.card.total{background:#222847;border-color:#222847;color:#fff}.card.total .card-num{color:#86efac}
 table.fin{width:100%;border-collapse:collapse;margin-bottom:12px}table.fin th{background:#f0f4f8;text-align:left;padding:7px 10px;font-size:10px;color:#555;border-bottom:2px solid #e2e8f0}table.fin td{padding:7px 10px;font-size:10.5px;border-bottom:1px solid #f0f0f0}table.fin td span{font-size:9px;color:#666}.val{text-align:right;font-weight:bold}.total-row td{font-weight:bold;font-size:13px;background:#f0fdf4;padding:10px!important}.total-row .val{color:#3aaa5c;font-size:15px}.muted{color:#777;text-align:center}
 .pac-grid{width:100%;border-collapse:separate;border-spacing:4px}.pac-grid td{background:#f0f4f8;border-radius:4px;padding:5px 8px;font-size:9.5px;width:33.33%}
 .footer{margin-top:18px;padding-top:10px;border-top:1px solid #e2e8f0;font-size:8.5px;color:#777;text-align:center;line-height:1.55}.conf{margin-top:8px;padding:8px 10px;background:#fafafa;border:1px solid #e5e7eb;border-radius:4px;font-size:8px;color:#555}
@@ -256,7 +261,7 @@ export function gerarWord(p: ProfRemunReal, opts: PdfOpts): void {
   const url = URL.createObjectURL(blob)
   const a = document.createElement("a")
   a.href = url
-  const docInfo = montarInfoDocumentoPrestador(p, opts.remunIndPfPj, opts.cadastroPrestadores)
+  const docInfo = montarInfoDocumentoPrestador(p, opts.cadastroPrestadores)
   const nomeArq = p.prof.replace(/\s+/g, "_").replace(/[^a-zA-Z0-9_]/g, "")
   const periodo = opts.remPeriodo?.inicio ? opts.remPeriodo.inicio.replace(/\//g, "-") : "periodo"
   a.download = `Faturamento_${docInfo.tipo.toUpperCase()}_${nomeArq}_${periodo}.doc`

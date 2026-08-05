@@ -121,7 +121,13 @@ export type ContratoAtualItem = {
   modeloFaturamento?: "atendimento" | "banco_horas"
   valorTotal?: number
 }
-export type CadastroContratual = { nome?: string; contratosAtuais?: ContratoAtualItem[] }
+export type CadastroContratual = {
+  nome?: string
+  contratosAtuais?: ContratoAtualItem[]
+  cnpj?: string | null
+  cpf?: string | null
+  razaoSocial?: string | null
+}
 
 // Só contratos vigentes pagam PA por sessão — um contrato "antigo" é apenas
 // um item com vigente=false (ver migration 20260710120000), então esse
@@ -172,6 +178,14 @@ export type ContratosVigentesInfo = {
   /** Soma dos valorTotal dos contratos vigentes em banco de horas. */
   valorFixoMensal: number
   numerosBancoHoras: string[]
+  /**
+   * Um item por contrato vigente em banco de horas — cada contrato tem UMA
+   * especialidade (`funcao`, escolhida no cadastro), então o valor fixo dele
+   * é dessa especialidade por definição. Usado pra atribuir o valor fixo nas
+   * barras por especialidade do dashboard (dashboardRP.ts), sem precisar
+   * adivinhar pela sessão.
+   */
+  detalheBancoHoras: Array<{ numero: string | null; funcao: string; valorTotal: number }>
   /** Números de todos os contratos vigentes, juntos — é o `contratoNovo` exibido. */
   numeros: string | null
 }
@@ -192,6 +206,7 @@ export function resolverContratosVigentes(cadastro: CadastroContratual | null): 
     modalidade,
     valorFixoMensal: bancoHoras.reduce((s, c) => s + Number(c.valorTotal || 0), 0),
     numerosBancoHoras: bancoHoras.map(c => c.numero).filter((n): n is string => !!n),
+    detalheBancoHoras: bancoHoras.map(c => ({ numero: c.numero ?? null, funcao: c.funcao, valorTotal: Number(c.valorTotal || 0) })),
     numeros: vigentes.map(c => c.numero).filter(Boolean).join(" / ") || null,
   }
 }
@@ -852,6 +867,8 @@ export type ProfRemunReal = {
   /** Soma dos valorTotal dos contratos vigentes em banco de horas. 0 = não cadastrado. */
   valorFixoBancoHoras: number
   numerosBancoHoras: string[]
+  /** Um item por contrato vigente em banco de horas, com a especialidade dele — ver ContratosVigentesInfo.detalheBancoHoras. */
+  bancoHorasDetalhe: Array<{ numero: string | null; funcao: string; valorTotal: number }>
   /** valorConfirmado + valorFixoBancoHoras — o que a empresa paga a este profissional no mês. */
   valorTotalAPagar: number
   sessoes: SessaoComPapel[]
@@ -1092,6 +1109,7 @@ export function calcularRemuneracaoReal(evoRows: SessaoReal[], config: Remunerac
       modalidade: vigentes.modalidade,
       valorFixoBancoHoras: vigentes.valorFixoMensal,
       numerosBancoHoras: vigentes.numerosBancoHoras,
+      bancoHorasDetalhe: vigentes.detalheBancoHoras,
       valorTotalAPagar: valorConfirmado + vigentes.valorFixoMensal,
     }
   }).sort((a, b) => b.valorTotalAPagar - a.valorTotalAPagar)
