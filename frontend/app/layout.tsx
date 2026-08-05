@@ -13,9 +13,13 @@ export const metadata: Metadata = {
 
   manifest: "/manifest.json",
 
+  // Declarar `icons` aqui é intencional: quando este campo existe, o Next ignora
+  // por completo os ícones por convenção de arquivo (app/icon.*) — ver o guard
+  // `if (!resolvedMetadata.icons)` em resolve-metadata.js. É o que garante que só
+  // este ícone valha, mesmo que sobre um app/icon.svg antigo na árvore de build.
   icons: {
     icon: [
-      { url: "/icon.png" },
+      { url: "/icon.png", type: "image/png", sizes: "256x256" },
     ],
     apple: "/icon-192.png",
   },
