@@ -1,5 +1,28 @@
-import { ADMIN_ONLY, B, HORAS_GRID, normTxt } from "./constants"
+import { ADMIN_ONLY, B, EXIB_ID, EXIB_NOME, HORAS_GRID, normTxt } from "./constants"
 import type { Sugestao } from "@/types/cronograma"
+
+// ─── ESPECIALIDADE REAL (Aplicador ABA AE/HS) ────────────────────────────────
+
+/**
+ * Aplicador ABA (AE)/(HS): TERAPIA_TO_ESP assume um padrão (AE → "Psicologia
+ * ABA", HS → "Habilidades Sociais"), mas esse padrão só vale quando o paciente
+ * NÃO está autorizado para Arteterapia/Habilidades Sociais — a especialidade
+ * real para contagem de oferta (gap aut × of) é a que está de fato gravada na
+ * "Terapia Exibição" daquela sessão, não a terapia de ação (mesma regra de
+ * detectarInconsistencias em inconsistencias.ts). Sem isso, uma sessão de AE já
+ * implantada como Arteterapia infla "Psicologia ABA" e nunca fecha o gap de
+ * Arteterapia; o espelho também vale: HS implantado como Psicologia ABA (não
+ * autorizado) não deveria inflar "Habilidades Sociais".
+ */
+export function espRealPorExibicao(terapia: string, terapiaExibicao: string, espPadrao: string): string {
+  if (terapia === "Aplicador ABA (AE)") {
+    return terapiaExibicao === EXIB_NOME[EXIB_ID.ARTETERAPIA_ABA] ? "Arteterapia" : "Psicologia ABA"
+  }
+  if (terapia === "Aplicador ABA (HS)") {
+    return terapiaExibicao === EXIB_NOME[EXIB_ID.HS_ABA] ? "Habilidades Sociais" : "Psicologia ABA"
+  }
+  return espPadrao
+}
 
 // ─── TEMPO ────────────────────────────────────────────────────────────────────
 

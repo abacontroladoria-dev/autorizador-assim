@@ -8,6 +8,15 @@ export interface AceiteSessao {
   unidade: string
   /** UUID da linha em csv_grades_profissionais de origem — usado para resolver o agendamento na TiTa. */
   csvGradeId: string
+  /**
+   * terapia_exibicao_id resolvido no cliente para Aplicador ABA (AE)/(HS) — depende
+   * de laudo (Arteterapia/Habilidades Sociais) + convênio do paciente, dados que só
+   * existem no navegador (ver OcupPacMode.tsx). Quando presente, tem prioridade
+   * sobre qualquer valor sincronizado ou regra fixa no servidor (ver
+   * prepararAgendamento em services/tita/confirmar.ts) — só é preenchido pra AE/HS,
+   * as demais terapias resolvem normalmente no servidor.
+   */
+  terapiaExibicaoOverride?: number
 }
 
 export type SlotStatus = "confirmado" | "recusado" | "inviavel"

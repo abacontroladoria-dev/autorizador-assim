@@ -79,7 +79,7 @@ export async function POST(request: NextRequest) {
   // Fase 1: busca a grade e monta o payload de cada sessão (sem chamar a TiTa ainda).
   const inicioPreparacao = Date.now()
   const preparos = await Promise.all(
-    body.sessoes.map(async sessao => ({ sessao, preparo: await prepararAgendamento(sessao.csvGradeId, body.pac!) })),
+    body.sessoes.map(async sessao => ({ sessao, preparo: await prepararAgendamento(sessao.csvGradeId, body.pac!, sessao.terapiaExibicaoOverride) })),
   )
   const falhasPreparo = preparos.filter(p => !p.preparo.ok)
   console.log(
