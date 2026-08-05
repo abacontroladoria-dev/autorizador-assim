@@ -72,7 +72,7 @@ export async function buscarTerapiasDoProfissional(profissionalNome: string): Pr
     .select("terapia_exibicao_nome, terapia_nome, paciente_nome, paciente_id")
     .ilike("profissional_nome", nome)
     // Versionamento: o sync marca a versão antiga com ativo=false em vez de apagar
-    // (migration 20260805130000). Sem o filtro, terapia de sessão já remarcada
+    // (migration 20260805160000). Sem o filtro, terapia de sessão já remarcada
     // continuaria aparecendo na lista.
     .eq("ativo", true)
     // Esta é a única consulta da grade sem recorte de data, e o .limit(2000) só não

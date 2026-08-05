@@ -18,7 +18,7 @@
 //     ativo = false, motivo_inativacao = 'alterado', e a nova entra como linha
 //     nova. Mesmo versionamento de agenda_tita (20260530000000).
 //
-// Além disso, o trigger trg_congelar_grade_passada (20260805130200) rejeita
+// Além disso, o trigger trg_congelar_grade_passada (20260805160200) rejeita
 // UPDATE/DELETE em qualquer linha cuja data já passou. Ou seja: mesmo que algo
 // aqui regrida, o banco não deixa o passado ser tocado.
 //

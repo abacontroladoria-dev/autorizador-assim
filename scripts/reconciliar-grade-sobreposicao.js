@@ -39,7 +39,7 @@
 //               contém agendamentos marcados e não diz nada sobre esses slots,
 //               então compará-los seria inventar informação.
 //
-// Precisa rodar ANTES da migration do trigger (20260805130200): o movimento B é
+// Precisa rodar ANTES da migration do trigger (20260805160200): o movimento B é
 // UPDATE em data passada, que o trigger passa a bloquear.
 //
 // Uso:
@@ -60,7 +60,7 @@ const LOTE = 500
 const STATUS_COMPARAVEL = "Agendado"
 
 const CAMPOS_BASE  = "id,data,hora_inicial,profissional_id,paciente_id,terapia_id,status_agendamento,paciente_nome,profissional_nome,terapia_nome"
-// ativo/origem só existem depois da migration 20260805130000. O dry-run roda sem
+// ativo/origem só existem depois da migration 20260805160000. O dry-run roda sem
 // elas para permitir conferir os números antes de mexer no schema de produção.
 const CAMPOS_FASE1 = `${CAMPOS_BASE},ativo,origem`
 
@@ -96,7 +96,7 @@ async function main() {
   const schemaPronto = await schemaFase1Pronto(cfg)
   if (!schemaPronto) {
     console.log(
-      "\n⚠  A migration 20260805130000 (colunas ativo/origem) ainda não foi aplicada.\n" +
+      "\n⚠  A migration 20260805160000 (colunas ativo/origem) ainda não foi aplicada.\n" +
       "   Seguindo em modo degradado: dá para conferir os números, mas não gravar.",
     )
     if (aplicar) {

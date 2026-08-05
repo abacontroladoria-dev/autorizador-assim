@@ -311,7 +311,7 @@ serve(async (req: Request) => {
 
   try {
     const AGENDA_FIELDS = "tita_agendamento_id, paciente_id, paciente_nome, convenio_nome, terapia_id, terapia_nome, terapia_exibicao_id, terapia_exibicao_nome, hora_inicial, status_agendamento, data"
-    // eq("ativo", true): versionamento da grade (migration 20260805130000). O sync não
+    // eq("ativo", true): versionamento da grade (migration 20260805160000). O sync não
     // apaga mais — inativa a versão antiga e insere a nova. Sem o filtro, uma sessão
     // remarcada entraria duas vezes no snapshot e inflaria a previsão de receita do mês.
     const linhasRaw = await pageAll<AgendaSalaRow>(sb, "csv_grades_profissionais", AGENDA_FIELDS, q => q.gte("data", inicio).lte("data", fim).eq("ativo", true).order("data"))

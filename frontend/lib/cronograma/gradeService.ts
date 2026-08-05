@@ -43,7 +43,7 @@ export async function buscarGradeComoCSVRows(dataInicio: string, dataFim: string
       // Obrigatório desde que a tabela passou a versionar em vez de apagar: o sync
       // não faz mais DELETE, ele marca a versão antiga com ativo=false e insere a
       // nova. Sem este filtro uma sessão remarcada volta duas vezes — a antiga e a
-      // atual. Ver migration 20260805130000 e a Edge Function sync-grade-csv.
+      // atual. Ver migration 20260805160000 e a Edge Function sync-grade-csv.
       .eq("ativo", true)
       .order("data")
       .order("hora_inicial")

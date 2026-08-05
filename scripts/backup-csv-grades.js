@@ -116,7 +116,7 @@ async function main() {
   out.push("-- COMMIT;")
   out.push("")
   out.push("-- ─── Seção 4: recolocar o cadeado, se a seção 1 foi usada ───")
-  out.push("-- Reaplique a migration 20260805130200_trigger_congelar_grade_passada.sql.")
+  out.push("-- Reaplique a migration 20260805160200_trigger_congelar_grade_passada.sql.")
   fs.writeFileSync(caminhoSql, out.join("\n"), "utf8")
 
   const mb = f => (fs.statSync(f).size / 1024 / 1024).toFixed(1)

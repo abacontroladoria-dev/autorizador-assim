@@ -80,7 +80,7 @@ export function BuscarReposicaoManual({
     sb.from('csv_grades_profissionais')
       .select('terapia_nome, terapia_exibicao_nome')
       .eq('status_agendamento', 'Livre')
-      // Versionamento (migration 20260805130000): quando um slot livre é ocupado na
+      // Versionamento (migration 20260805160000): quando um slot livre é ocupado na
       // TiTa ele deixa de vir no CSV como 'Livre', e o sync o marca com ativo=false.
       // ativo=false num slot 'Livre' significa exatamente "não está mais vago" — sem
       // este filtro a tela ofereceria horário já tomado.

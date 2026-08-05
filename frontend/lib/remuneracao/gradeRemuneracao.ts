@@ -48,7 +48,7 @@ export async function buscarGradeParaAnalise(dataInicio: string, dataFim: string
       .gte("data", dataInicio)
       .lte("data", dataFim)
       .eq("unidade_id", 280)
-      // Versionamento (migration 20260805130000): o sync inativa a versão antiga em
+      // Versionamento (migration 20260805160000): o sync inativa a versão antiga em
       // vez de apagar. Aqui o filtro é especialmente crítico — esta consulta alimenta
       // o cálculo de remuneração, e contar a sessão remarcada duas vezes pagaria em
       // dobro.

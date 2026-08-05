@@ -61,7 +61,7 @@ serve(async (req: Request) => {
       .from("csv_grades_profissionais")
       .select("*")
       .eq("id", csvGradeProfissionalId)
-      // Trava de versionamento (migration 20260805130000): o sync não apaga mais, ele
+      // Trava de versionamento (migration 20260805160000): o sync não apaga mais, ele
       // marca a versão antiga com ativo=false. Se a TiTa alterou ou removeu este slot
       // depois que a tela foi montada, cair no "grade_not_found" abaixo é o certo —
       // agendar sobre um slot que já não existe criaria atendimento fantasma.

@@ -22,7 +22,7 @@ export async function buscarGradePorId(
     .eq("id", csvGradeId)
     // Aqui o filtro é uma trava, não só deduplicação: se a TiTa alterou ou removeu
     // este slot depois que a tela foi montada, o sync o deixou com ativo=false
-    // (migration 20260805130000). Devolver null faz o chamador responder
+    // (migration 20260805160000). Devolver null faz o chamador responder
     // "grade_not_found", que é o certo — agendar sobre um slot que não existe mais
     // criaria um atendimento fantasma na TiTa.
     .eq("ativo", true)

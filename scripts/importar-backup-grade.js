@@ -21,7 +21,7 @@
 //                             e inativar o que a TiTa removeu.
 //   2026-08-05 → …            ninguém: é a API que manda.
 //
-// Precisa rodar ANTES da migration do trigger (20260805130200): ela bloqueia
+// Precisa rodar ANTES da migration do trigger (20260805160200): ela bloqueia
 // UPDATE/DELETE em data passada, e a reconciliação seguinte precisa de UPDATE.
 // (INSERT em data passada continua permitido mesmo depois do trigger.)
 //
