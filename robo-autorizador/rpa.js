@@ -300,19 +300,28 @@ async function executarRpa(tarefa, verificarCancelamento, browser) {
 		// Data: monta a string direto dos dígitos capturados (sem passar por
 		// `new Date()`) para não sofrer conversão de fuso do processo Node — grava
 		// exatamente o horário que a própria ASSIM registrou para a autorização.
-		const { numeroGuia, dataConfirmacao } = await page.evaluate(() => {
+		const { numeroGuia, dataConfirmacao, trechoConfirmacao } = await page.evaluate(() => {
 		  const txt = (document.body && document.body.innerText) || '';
-		  const guiaMatch = txt.match(/Documento:\s*[A-Za-z0-9]+\s*\/\s*0*(\d+)/i);
+		  // Segunda tentativa mais tolerante: a primeira exige o prefixo alfanumérico
+  // colado no "/", e falha quando a ASSIM intercala espaço, hífen ou quebra.
+  const guiaMatch =
+    txt.match(/Documento:\s*[A-Za-z0-9]+\s*\/\s*0*(\d+)/i) ||
+    txt.match(/Documento:[^\n]*?\/\s*0*(\d{3,})/i);
 		  const dataMatch = txt.match(/Data:\s*(\d{2})\/(\d{2})\/(\d{2})\s*-\s*(\d{2}):(\d{2}):(\d{2})/);
 		  let dataConfirmacao = null;
 		  if (dataMatch) {
 			const [, dd, mm, yy, hh, mi, ss] = dataMatch;
 			dataConfirmacao = `20${yy}-${mm}-${dd}T${hh}:${mi}:${ss}`;
 		  }
-		  return { numeroGuia: guiaMatch ? guiaMatch[1] : null, dataConfirmacao };
+		  return {
+	numeroGuia: guiaMatch ? guiaMatch[1] : null,
+	dataConfirmacao,
+	// Guardado só para perícia quando a guia não é capturada.
+	trechoConfirmacao: txt.replace(/\s+/g, ' ').trim().slice(0, 500),
+  };
 		});
 		if (numeroGuia) console.log("🧾 Guia capturada:", numeroGuia);
-		else console.warn("⚠️ Não foi possível capturar o número da guia da tela");
+		else console.warn("⚠️ Não foi possível capturar o número da guia da tela — registrando como 'concluido_sem_guia'");
 		if (dataConfirmacao) console.log("🕒 Data/hora da confirmação capturada:", dataConfirmacao);
 		else console.warn("⚠️ Não foi possível capturar a data/hora da tela de confirmação");
 
@@ -325,11 +334,20 @@ async function executarRpa(tarefa, verificarCancelamento, browser) {
 		);
 
 		const updatePayload = {
-		  status: 'concluido',
+		  // Sem guia capturada a autorização até aconteceu na ASSIM, mas o vínculo
+		  // não existe. 'concluido' pintaria o card de verde e esconderia a lacuna;
+		  // 'concluido_sem_guia' a deixa visível e reprocessável no mesmo dia.
+		  status: numeroGuia ? 'concluido' : 'concluido_sem_guia',
 		  forma_autorizacao: formaValidacao,
 		  validacao_finalizada_em: new Date().toISOString()
 		};
-		if (numeroGuia)      updatePayload.numero_autorizacao = numeroGuia;
+		if (numeroGuia) {
+		  updatePayload.numero_autorizacao = numeroGuia;
+		  updatePayload.error_message = null;
+		} else {
+		  updatePayload.error_message =
+			`Guia não capturada na tela de confirmação. Trecho lido: ${trechoConfirmacao || '(vazio)'}`;
+		}
 		if (dataConfirmacao) updatePayload.horario_autorizacao = dataConfirmacao;
 
 		const { error } = await supabase

@@ -1322,6 +1322,20 @@ useEffect(() => {
   </div>
 
 </div>
+
+          {/* A ASSIM carimba a guia com a data em que ela foi emitida, não com a data
+              do atendimento. Autorizando adiantado, as duas divergem e o vínculo
+              automático guia↔sessão deixa de funcionar pelos caminhos que casam por
+              data — a recuperação passa a depender de reconciliar_guias_por_janela. */}
+          {dataSelecionada > hoje && (
+            <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <strong className="font-semibold">Autorização antecipada.</strong>{' '}
+              A ASSIM registrará a guia com a data de hoje, não com a data do
+              atendimento — o número da guia pode demorar a aparecer na Central de
+              Pacientes.
+            </div>
+          )}
+
           {loadingLista ? (
             <p className="text-sm text-slate-400">Carregando...</p>
           ) : (() => {
