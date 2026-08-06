@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { getSupabaseClient } from '@/lib/supabase/client'
+import { buscarGrade } from '@/lib/grade/fonte'
 import { calcularSugestoes, TERAPIA_APLICADOR_SUBSTITUTO, TERAPIA_COORDENADOR_DE_CASO } from '@/lib/cronograma/reposicao'
 import type { AgendaPacienteSlot, SlotLivre } from '@/lib/cronograma/reposicao'
 import type { ResultadoReposicao, SessaoAgendada, SessaoConcluida, SessaoFaltada, SessaoPresente } from '@/types/reposicao'
@@ -79,7 +80,7 @@ export function useReposicaoFaltas(
       // snapshot da semana em csv_reposicao_faltas ────────────────────────────
       // Nenhuma das tabelas relacionadas tem FK declarada no schema, portanto
       // nenhum join PostgREST é usado — tudo é cruzado por data+hora abaixo.
-      const [r1, r2, r3] = await Promise.all([
+      const [r1, gradeSemana, r3] = await Promise.all([
         sb
           .from('fila_autorizacoes')
           .select('id, paciente_id, paciente_nome, data_atendimento, horario, status, tipo_falta, tita_agendamento_id, terapia_nome, terapia_exibicao_id, justificativa_falta, falta_revertida_em')
@@ -92,17 +93,20 @@ export function useReposicaoFaltas(
           .gte('data_atendimento', semanaInicio)
           .lte('data_atendimento', semanaFim),
 
-        sb
-          .from('csv_grades_profissionais')
-          .select('data, dia_semana, hora_inicial, sala_nome, terapia_nome, terapia_exibicao_nome, profissional_nome')
-          .ilike('paciente_nome', pacienteNome ?? '')
-          .gte('data', semanaInicio)
-          .lte('data', semanaFim)
-          .eq('ativo', true),   // versionamento — ver migration 20260805160000
+        // Fonte "base" sem recorte de unidade: preserva o alcance que esta
+        // consulta sempre teve. O filtro é por nome do paciente, então slot
+        // 'Livre' (paciente_nome nulo) nunca casa de qualquer forma.
+        buscarGrade<Record<string, string | null>>({
+          campos: 'data, dia_semana, hora_inicial, sala_nome, terapia_nome, terapia_exibicao_nome, profissional_nome',
+          fonte: 'base',
+          de: semanaInicio,
+          ate: semanaFim,
+          refinar: q => q.ilike('paciente_nome', pacienteNome ?? ''),
+        }),
 
         // csv_reposicao_faltas: snapshot diário da grade INTEIRA da clínica (todo mundo,
-        // qualquer status), gerado especificamente para este módulo. Ao contrário de
-        // csv_grades_profissionais (só "hoje em diante"), essa tabela cobre a semana
+        // qualquer status), gerado especificamente para este módulo. Ao contrário da
+        // grade sincronizada (só "hoje em diante"), essa tabela cobre a semana
         // corrente inteira — inclusive dias já passados — então é a única fonte que tem
         // a linha original de uma FALTA (profissional/sala de antes de faltar).
         sb
@@ -113,8 +117,10 @@ export function useReposicaoFaltas(
           .lte('data', semanaFim),
       ])
 
-      if (r1.error || r2.error || r3.error || cancelled) {
-        if (!cancelled) setError((r1.error ?? r2.error ?? r3.error)?.message ?? 'Erro ao carregar dados')
+      // buscarGrade lança em vez de devolver { error }; quem trata é o
+      // carregar().catch(...) no fim deste efeito, que já faz setError + setLoading.
+      if (r1.error || r3.error || cancelled) {
+        if (!cancelled) setError((r1.error ?? r3.error)?.message ?? 'Erro ao carregar dados')
         if (!cancelled) setLoading(false)
         return
       }
@@ -176,7 +182,7 @@ export function useReposicaoFaltas(
 
       // ── Monta SessaoFaltada[] ─────────────────────────────────────────────
       // csv_grades_profissionais é cruzado por data + hora (Q2 já trouxe esses dados).
-      const csvRows = r2.data ?? []
+      const csvRows = gradeSemana
 
       // csv_grades_profissionais nunca tem a linha de uma FALTA (só cobre "hoje em
       // diante" — ver sync-grade-csv-daily), mas csv_reposicao_faltas (origemPorDataHora)

@@ -1,17 +1,15 @@
-// Busca a grade para a Análise Futura direto do Supabase (csv_grades_profissionais),
-// SEM upload. Espelha frontend/lib/cronograma/gradeService.ts (não editar aquele
-// arquivo — é compartilhado com Indicadores) com o mesmo filtro unidade_id=280 e
-// reparo de mojibake, mas mapeando para o formato de colunas que a Análise Futura
-// espera (ver Apêndice A.3 do plano).
+// Busca a grade para a Análise Futura direto do Supabase, SEM upload. Mesmo
+// recorte de frontend/lib/cronograma/gradeService.ts (unidade 280, slots Livre
+// inclusive), mapeando para o formato de colunas que a Análise Futura espera
+// (ver Apêndice A.3 do plano). A leitura em si vive em lib/grade/fonte.ts.
 
-import { getSupabaseClient } from "@/lib/supabase/client"
+import { buscarGrade, fixMojibake } from "@/lib/grade/fonte"
 import type { CsvRow } from "@/types/cronograma"
 
 // profissional_id é a chave estável do profissional no TiTa: quando alguém é
 // desligado o nome vira "INATIVO-<nome>" aqui, mas o id continua o mesmo e o
 // agenda_tita ainda guarda o nome limpo sob ele (ver getUltimoAtendimentoAtivo).
 const FIELDS = "paciente_id, paciente_nome, dia_semana, hora_inicial, hora_final, profissional_id, profissional_nome, terapia_nome, status_agendamento, sala_nome, data, unidade_nome"
-const PAGE = 1000
 
 const DIAS_PT = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"]
 
@@ -20,51 +18,23 @@ function diaSemanaDeData(data: string | null): string {
   return DIAS_PT[new Date(`${data}T12:00:00`).getDay()] ?? ""
 }
 
-// Padrão de dupla codificação UTF-8 (mojibake) — mesma lógica de gradeService.ts,
-// cópia própria pois aquele arquivo não a exporta.
-const MOJIBAKE_RE = /[Â-Ã][-¿]/
-
-function fixMojibake(s: string | null | undefined): string {
-  const str = s ?? ""
-  if (!str || !MOJIBAKE_RE.test(str)) return str
-  try {
-    return new TextDecoder("utf-8", { fatal: false }).decode(
-      Uint8Array.from(str, c => c.charCodeAt(0) & 0xff),
-    )
-  } catch {
-    return str
-  }
-}
-
 export async function buscarGradeParaAnalise(dataInicio: string, dataFim: string): Promise<CsvRow[]> {
-  const sb = getSupabaseClient()
-  const all: Record<string, string | number | null>[] = []
-
-  let from = 0
-  while (true) {
-    const { data, error } = await sb
-      .from("csv_grades_profissionais")
-      .select(FIELDS)
-      .gte("data", dataInicio)
-      .lte("data", dataFim)
-      .eq("unidade_id", 280)
-      // Versionamento (migration 20260805160000): o sync inativa a versão antiga em
-      // vez de apagar. Aqui o filtro é especialmente crítico — esta consulta alimenta
-      // o cálculo de remuneração, e contar a sessão remarcada duas vezes pagaria em
-      // dobro.
-      .eq("ativo", true)
-      .order("data")
-      .order("hora_inicial")
-      .order("profissional_nome")
-      .order("id")
-      .range(from, from + PAGE - 1)
-
-    if (error) throw new Error(error.message)
-    const rows = data ?? []
-    all.push(...(rows as typeof all))
-    if (rows.length < PAGE) break
-    from += PAGE
-  }
+  // A view já garante `ativo` — o filtro que aqui é especialmente crítico,
+  // porque esta consulta alimenta o cálculo de remuneração e contar a sessão
+  // remarcada duas vezes pagaria em dobro.
+  const all = await buscarGrade<Record<string, string | number | null>>({
+    campos: FIELDS,
+    fonte: "base",
+    unidade: 280,
+    de: dataInicio,
+    ate: dataFim,
+    ordem: [
+      { coluna: "data" },
+      { coluna: "hora_inicial" },
+      { coluna: "profissional_nome" },
+      { coluna: "id" },
+    ],
+  })
 
   return all.map(r => {
     const salaNome = fixMojibake(r.sala_nome as string | null)

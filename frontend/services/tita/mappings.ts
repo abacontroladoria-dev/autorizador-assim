@@ -2,6 +2,7 @@ import "server-only"
 
 import type { SupabaseClient } from "@supabase/supabase-js"
 import { createClient } from "@/lib/supabase/server"
+import { TABELA_GRADE } from "@/lib/grade/fonte"
 import { ABA_EXIB_PSICO_IDS, EXIB_ID } from "@/lib/cronograma/constants"
 import type { GradeProfissionalRow } from "./types"
 
@@ -48,6 +49,10 @@ export function terapiaExibicaoIdPorRegraFixa(terapiaId: number): number | null 
  * — identificador único, sem ambiguidade (ver auditoria da página de Ocupação de
  * Paciente). É a partir desse registro que id_favorecido, id_terapia_clinica,
  * id_terapia_exibicao e id_sala são obtidos para montarPayloadAgendamento.
+ *
+ * EXCEÇÃO deliberada ao ponto único de leitura (lib/grade/fonte.ts): precisa de
+ * `sala_id`, que vw_grade_base não projeta, e busca UMA linha por chave primária
+ * — nada aqui se beneficia da view. Continua na tabela crua.
  */
 export async function buscarGradePorId(
   csvGradeId: string,
@@ -56,7 +61,7 @@ export async function buscarGradePorId(
   const supabase = client ?? (await createClient())
 
   const { data, error } = await supabase
-    .from("csv_grades_profissionais")
+    .from(TABELA_GRADE)
     .select("*")
     .eq("id", csvGradeId)
     // Aqui o filtro é uma trava, não só deduplicação: se a TiTa alterou ou removeu
@@ -197,13 +202,15 @@ export async function resolverIdFavorecido(
 ): Promise<number | null> {
   const supabase = client ?? (await createClient())
 
-  // Sem filtro de `ativo`, deliberadamente. Diferente das outras consultas da grade,
-  // esta não conta nem exibe sessões: só traduz nome → id_favorecido da TiTa. Esse id
-  // não muda, então uma linha inativada (sessão remarcada ou removida) ainda carrega a
-  // resposta certa. Filtrar por ativo só tornaria a busca capaz de falhar para um
-  // paciente cujas linhas foram todas inativadas, sem ganho de correção.
+  // EXCEÇÃO deliberada ao ponto único de leitura (lib/grade/fonte.ts): as views
+  // impõem `ativo`, e aqui NÃO se quer isso. Diferente das outras consultas da
+  // grade, esta não conta nem exibe sessões: só traduz nome → id_favorecido da
+  // TiTa. Esse id não muda, então uma linha inativada (sessão remarcada ou
+  // removida) ainda carrega a resposta certa. Passar pela view só tornaria a
+  // busca capaz de falhar para um paciente cujas linhas foram todas inativadas,
+  // sem ganho de correção.
   const { data: rows, error } = await supabase
-    .from("csv_grades_profissionais")
+    .from(TABELA_GRADE)
     .select("paciente_id")
     .eq("paciente_nome", pacienteNome)
     .eq("status_agendamento", "Agendado")

@@ -57,6 +57,11 @@ serve(async (req: Request) => {
   try {
     // O UUID (coluna id) identifica o registro de forma única e inequívoca —
     // não é preciso combiná-lo com outra coluna para desambiguar.
+    //
+    // EXCEÇÃO deliberada ao ponto único de leitura (vw_grade_base, migration
+    // 20260806110000), gêmea de buscarGradePorId em services/tita/mappings.ts:
+    // precisa de `sala_id`, que a view não projeta, e busca UMA linha por chave
+    // primária — nada aqui se beneficia da view. Continua na tabela crua.
     const { data, error } = await supabase
       .from("csv_grades_profissionais")
       .select("*")

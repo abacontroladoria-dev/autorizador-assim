@@ -1,11 +1,10 @@
 import { getSupabaseClient } from "@/lib/supabase/client"
-import { fixMojibake } from "@/lib/cronograma/gradeService"
+import { buscarGrade, fixMojibake } from "@/lib/grade/fonte"
 import { isFakePatient } from "@/lib/remuneracao/pacientes"
 import type { Sala, SalaInput, AgendaSalaRow, AlocacaoSala, AlocacaoInput, SalaStatus } from "@/lib/cronograma/salasTypes"
 
 const TABLE = "cronograma_salas"
 const ALOCACOES_TABLE = "cronograma_salas_alocacoes"
-const PAGE = 1000
 
 export async function listarSalas(): Promise<Sala[]> {
   const sb = getSupabaseClient()
@@ -66,24 +65,26 @@ export async function bloquearSala(id: string, bloquear: boolean): Promise<Sala>
 export async function buscarTerapiasDoProfissional(profissionalNome: string): Promise<string[]> {
   const nome = profissionalNome.trim()
   if (!nome) return []
-  const sb = getSupabaseClient()
-  const { data, error } = await sb
-    .from("csv_grades_profissionais")
-    .select("terapia_exibicao_nome, terapia_nome, paciente_nome, paciente_id")
-    .ilike("profissional_nome", nome)
-    // Versionamento: o sync marca a versão antiga com ativo=false em vez de apagar
-    // (migration 20260805160000). Sem o filtro, terapia de sessão já remarcada
-    // continuaria aparecendo na lista.
-    .eq("ativo", true)
-    // Esta é a única consulta da grade sem recorte de data, e o .limit(2000) só não
-    // truncava porque a tabela cobria 3 meses. Com o histórico de Jan–Jun semeado ela
-    // passa a truncar — e sem ORDER BY o corte seria arbitrário, deixando a lista de
-    // terapias instável entre chamadas. Ordenar por data desc torna o corte
-    // determinístico e mantém o recorte no que a pessoa faz mais recentemente.
-    .order("data", { ascending: false })
-    .limit(2000)
-  if (error) throw new Error(error.message)
-  const nomes = (data ?? [])
+  const data = await buscarGrade<Record<string, unknown>>({
+    campos: "terapia_exibicao_nome, terapia_nome, paciente_nome, paciente_id",
+    fonte: "base",
+    refinar: q => q.ilike("profissional_nome", nome),
+    // Esta é a única consulta da grade sem recorte de data, e o teto de 2.000 só
+    // não truncava porque a tabela cobria 3 meses. Com o histórico de Jan–Jun
+    // semeado ela passa a truncar — e sem ORDER BY o corte seria arbitrário,
+    // deixando a lista de terapias instável entre chamadas. Ordenar por data desc
+    // torna o corte determinístico e mantém o recorte no que a pessoa faz mais
+    // recentemente.
+    //
+    // `id` não é enfeite: o teto de 2.000 são DUAS páginas de 1.000, e `data`
+    // sozinha não é única — 25 profissionais passam de 1.000 linhas (máx. 1.871),
+    // então a fronteira entre as páginas cai no meio de um grupo de mesma data.
+    // Sem desempate estável a segunda página pode repetir ou PULAR linha, e a
+    // terapia pulada some do dropdown de alocação.
+    ordem: [{ coluna: "data", desc: true }, { coluna: "id" }],
+    limite: 2000,
+  })
+  const nomes = data
     // Sessões de paciente fictício/administrativo (Ainda não selecionado,
     // Horário Administrativo, etc. — mesmo isFakePatient já usado em
     // buscarLinhasAgendaParaSalas) têm o mesmo texto placeholder no campo de
@@ -242,33 +243,21 @@ const AGENDA_FIELDS = [
   "dia_semana", "hora_inicial", "hora_final", "status_agendamento", "data",
 ].join(", ")
 
-/** Busca linhas de agendamento (csv_grades_profissionais) do período, para cruzar com o cadastro de salas. */
+/** Busca linhas de agendamento do período, para cruzar com o cadastro de salas. */
 export async function buscarLinhasAgendaParaSalas(dataInicio: string, dataFim: string): Promise<AgendaSalaRow[]> {
-  const sb = getSupabaseClient()
-  const all: AgendaSalaRow[] = []
+  // Fonte "base" sem recorte: a ocupação de salas conta tanto o horário
+  // ocupado quanto o slot 'Livre', e não se restringe à unidade 280.
+  const all = await buscarGrade<AgendaSalaRow>({
+    campos: AGENDA_FIELDS,
+    fonte: "base",
+    de: dataInicio,
+    ate: dataFim,
+    // `id` fecha a ordenação: um mês inteiro passa de 1.000 linhas e portanto
+    // pagina, e (data, hora_inicial) tem empate de sobra — sem desempate único
+    // a paginação pode repetir ou pular sessão.
+    ordem: [{ coluna: "data" }, { coluna: "hora_inicial" }, { coluna: "id" }],
+  })
 
-  let from = 0
-  while (true) {
-    const { data, error } = await sb
-      .from("csv_grades_profissionais")
-      .select(AGENDA_FIELDS)
-      .gte("data", dataInicio)
-      .lte("data", dataFim)
-      .eq("ativo", true)    // versionamento — ver nota em buscarTerapiasDoProfissional
-      .order("data")
-      .order("hora_inicial")
-      .range(from, from + PAGE - 1)
-
-    if (error) throw new Error(error.message)
-    const rows = (data ?? []) as unknown as AgendaSalaRow[]
-    all.push(...rows)
-    if (rows.length < PAGE) break
-    from += PAGE
-  }
-
-  // A sincronização da grade (Edge Function sync-grade-csv) grava texto com
-  // dupla codificação UTF-8 (mojibake) — reparado na leitura, mesmo tratamento
-  // já usado em gradeService.ts.
   return all
     .map(r => ({
       ...r,

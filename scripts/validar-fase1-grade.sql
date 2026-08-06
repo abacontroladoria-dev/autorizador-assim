@@ -6,6 +6,18 @@
 --     -v ON_ERROR_STOP=1 -f - < scripts/validar-fase1-grade.sql
 --
 -- Cada caso imprime PASSOU / FALHOU. Qualquer FALHOU invalida a entrega.
+--
+-- ATENÇÃO — a limpeza do fim é PARCIAL, por construção: o trigger
+-- trg_congelar_grade_passada bloqueia DELETE em data passada, então as ~4 linhas
+-- de teste com data no passado SOBREVIVEM (é o que a última consulta reporta).
+-- Rodar a bateria duas vezes sem limpar faz 1.8 e 2.1 falharem por contagem
+-- inflada, sem que nada esteja quebrado. Para uma segunda rodada limpa:
+--
+--   ALTER TABLE csv_grades_profissionais DISABLE TRIGGER trg_congelar_grade_passada;
+--   DELETE FROM csv_grades_profissionais WHERE profissional_nome = 'ZZ Teste Fase1';
+--   ALTER TABLE csv_grades_profissionais ENABLE  TRIGGER trg_congelar_grade_passada;
+--
+-- (só em banco local — nunca em produção).
 
 \set ON_ERROR_STOP off
 \timing off
@@ -195,7 +207,14 @@ BEGIN
   PERFORM pg_temp.registrar('3.1 semana do mês (calendário 1-7, 8-14, …)', 'mar: 1,1,2,…,5 / fev: 4', ok, NULLIF(detalhe, ''));
 END $$;
 
--- 3.2 A view existe, compila e exclui 'Livre', inativas e CPF
+-- 3.2 A view existe, compila, esconde CPF e exclui inativas — MAS enxerga 'Livre'.
+--
+-- Atenção ao histórico desta asserção: até a migration 20260806110000 a
+-- vw_grade_base excluía slots 'Livre' e fixava unidade_id = 280, e este bloco
+-- conferia exatamente isso. Aquilo impedia a view de ser o ponto único de
+-- leitura — consumidor legítimo precisa de 'Livre' (busca de reposição) e de
+-- todas as unidades (Comparativo de Sessões). Os dois recortes passaram para a
+-- vw_grade_atendimentos, conferida em 3.4.
 DO $$
 DECLARE tem_cpf boolean; n_livre int; n_inativa int;
 BEGIN
@@ -212,7 +231,7 @@ BEGIN
   SELECT count(*) INTO n_livre   FROM vw_grade_base WHERE profissional_nome = 'ZZ Teste Fase1' AND status_agendamento = 'Livre';
   SELECT count(*) INTO n_inativa FROM vw_grade_base v JOIN csv_grades_profissionais c ON c.id = v.id WHERE NOT c.ativo;
 
-  PERFORM pg_temp.registrar('3.2b vw_grade_base exclui slots Livre',  '0', n_livre   = 0, n_livre::text);
+  PERFORM pg_temp.registrar('3.2b vw_grade_base ENXERGA slots Livre', '1', n_livre = 1, n_livre::text);
   PERFORM pg_temp.registrar('3.2c vw_grade_base exclui linhas inativas', '0', n_inativa = 0, n_inativa::text);
 END $$;
 
@@ -223,6 +242,62 @@ BEGIN
   SELECT count(*) INTO n_errado FROM vw_grade_base
    WHERE is_congelado <> (data < (now() AT TIME ZONE 'America/Sao_Paulo')::date);
   PERFORM pg_temp.registrar('3.3 is_congelado bate com a regra do trigger', '0 divergências', n_errado = 0, n_errado::text);
+END $$;
+
+-- 3.4 vw_grade_atendimentos: o recorte que saiu da base (Agendado + unidade 280)
+DO $$
+DECLARE n_livre int; n_outra_unidade int; faltando text;
+BEGIN
+  -- O slot 'Livre' inserido em 3.2 está na unidade 280 e continua ativo, então
+  -- se aparecer aqui é porque o filtro de status não está valendo.
+  --
+  -- Qualificar por status_agendamento é obrigatório: os blocos 1.x e 2.x deixam
+  -- várias linhas 'Agendado' de 'ZZ Teste Fase1' na unidade 280, e essas DEVEM
+  -- aparecer em vw_grade_atendimentos. Contar todas as linhas do profissional
+  -- de teste mediria a coisa errada e falharia por motivo nenhum.
+  SELECT count(*) INTO n_livre
+    FROM vw_grade_atendimentos
+   WHERE profissional_nome = 'ZZ Teste Fase1' AND status_agendamento = 'Livre';
+  PERFORM pg_temp.registrar('3.4a vw_grade_atendimentos exclui slots Livre', '0', n_livre = 0, n_livre::text);
+
+  SELECT count(*) INTO n_outra_unidade
+    FROM vw_grade_atendimentos WHERE unidade_id IS DISTINCT FROM 280;
+  PERFORM pg_temp.registrar('3.4b vw_grade_atendimentos só tem unidade 280', '0', n_outra_unidade = 0, n_outra_unidade::text);
+
+  -- As 10 colunas de execução (migration 20260806100000) precisam existir na
+  -- base, senão todo consumidor que quiser saber o que ACONTECEU na sessão é
+  -- obrigado a voltar para a tabela crua — que é o que se quer evitar.
+  SELECT string_agg(c, ', ') INTO faltando
+    FROM unnest(ARRAY['status_execucao','justificativa','possui_tratativa',
+                      'tratativa_profissional_id','tratativa_profissional_nome',
+                      'tratativa_criada_em','tratativa_origem','evolucao_vinculo',
+                      'criado_em_tita','excluido_em_tita']) AS c
+   WHERE NOT EXISTS (SELECT 1 FROM information_schema.columns
+                      WHERE table_name = 'vw_grade_base' AND column_name = c);
+  PERFORM pg_temp.registrar('3.4c vw_grade_base expõe as 10 colunas de execução',
+                            'nenhuma faltando', faltando IS NULL, faltando);
+END $$;
+
+-- 3.5 vw_grade_opcoes: substitui a varredura paginada das listas de formulário
+DO $$
+DECLARE n_tipos int; n_total int; n_teste int; n_nulo int;
+BEGIN
+  SELECT count(DISTINCT tipo) INTO n_tipos FROM vw_grade_opcoes;
+  PERFORM pg_temp.registrar('3.5a vw_grade_opcoes tem os 3 tipos', '3', n_tipos = 3, n_tipos::text);
+
+  -- O ganho da view é a cardinalidade: se isto voltar às dezenas de milhares, o
+  -- DISTINCT parou de funcionar e o consumidor voltou a arrastar a grade inteira.
+  SELECT count(*) INTO n_total FROM vw_grade_opcoes;
+  PERFORM pg_temp.registrar('3.5b vw_grade_opcoes é da ordem de centenas', '< 5000',
+                            n_total < 5000, n_total::text);
+
+  -- Herda os filtros da base: nada de profissional de teste vaza para os selects.
+  SELECT count(*) INTO n_teste FROM vw_grade_opcoes
+   WHERE nome IN ('Profissional Teste', 'Testes Técnicos', 'Combinar Consulta');
+  PERFORM pg_temp.registrar('3.5c vw_grade_opcoes não traz profissional de teste', '0', n_teste = 0, n_teste::text);
+
+  SELECT count(*) INTO n_nulo FROM vw_grade_opcoes WHERE nome IS NULL;
+  PERFORM pg_temp.registrar('3.5d vw_grade_opcoes não traz nome nulo', '0', n_nulo = 0, n_nulo::text);
 END $$;
 
 -- ─── 4. Views de roster (piso de 30 dias) ─────────────────────────────────────

@@ -1,6 +1,7 @@
 import "server-only"
 
 import { supabaseService } from "@/lib/supabase/service"
+import { buscarGrade } from "@/lib/grade/fonte"
 import type { LaudoRow } from "@/types/cronograma"
 import type { PacienteLaudosApi, ErroLaudosApi } from "./types"
 
@@ -34,34 +35,26 @@ async function buscarLaudosPaciente(pacienteId: number): Promise<PacienteLaudosA
 }
 
 /**
- * IDs de pacientes com pelo menos uma linha "Agendado" em csv_grades_profissionais
- * no período — mesma fonte usada por resolverIdFavorecido (services/tita/mappings.ts)
- * para mapear nome → paciente_id na TiTa. Substitui o upload manual do Excel de
- * laudos como origem da lista de pacientes a consultar.
+ * IDs de pacientes com pelo menos uma linha "Agendado" no período — mesma fonte
+ * usada por resolverIdFavorecido (services/tita/mappings.ts) para mapear
+ * nome → paciente_id na TiTa. Substitui o upload manual do Excel de laudos como
+ * origem da lista de pacientes a consultar.
+ *
+ * Roda com service role, então o cliente é passado explicitamente.
  */
 async function listarIdsPacientesAtivos(dataInicio: string, dataFim: string): Promise<number[]> {
-  const ids = new Set<number>()
-  const PAGE = 1000
-  let from = 0
-  while (true) {
-    const { data, error } = await supabaseService
-      .from("csv_grades_profissionais")
-      .select("paciente_id")
-      .eq("status_agendamento", "Agendado")
-      .eq("unidade_id", 280)
-      .eq("ativo", true)    // versionamento — ver migration 20260805160000
-      .not("paciente_id", "is", null)
-      .gte("data", dataInicio)
-      .lte("data", dataFim)
-      .range(from, from + PAGE - 1)
-
-    if (error) throw new Error(error.message)
-    const rows = data ?? []
-    for (const r of rows as { paciente_id: number }[]) ids.add(r.paciente_id)
-    if (rows.length < PAGE) break
-    from += PAGE
-  }
-  return Array.from(ids)
+  // "atendimentos" já é Agendado + unidade 280 — exatamente o recorte de antes.
+  const linhas = await buscarGrade<{ paciente_id: number }>({
+    campos: "paciente_id",
+    de: dataInicio,
+    ate: dataFim,
+    refinar: q => q.not("paciente_id", "is", null),
+    // Sem ordenação estável a paginação pode pular linha, e uma linha pulada é
+    // um paciente inteiro sem laudo consultado. `id` basta por ser a PK.
+    ordem: [{ coluna: "id" }],
+    cliente: supabaseService,
+  })
+  return Array.from(new Set(linhas.map(r => r.paciente_id)))
 }
 
 function achatarPaciente(paciente: PacienteLaudosApi): LaudoRow[] {
