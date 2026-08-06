@@ -13,7 +13,7 @@ import { SalasHeatmapView } from "@/components/cronograma/salas/SalasHeatmapView
 import { RegularizacoesView } from "@/components/cronograma/salas/RegularizacoesView"
 import { SalaEditModal } from "@/components/cronograma/salas/SalaEditModal"
 import { GerenciarCategoriasModal } from "@/components/cronograma/salas/GerenciarCategoriasModal"
-import type { Sala, SlotOcupacaoSala } from "@/lib/cronograma/salasTypes"
+import { STATUS_SLOT_EXCLUIDO, type Sala, type SlotOcupacaoSala } from "@/lib/cronograma/salasTypes"
 
 type ViewTab = "grade" | "mapa" | "regularizacoes"
 
@@ -62,7 +62,24 @@ export default function OcupacaoSalasPage() {
   const totalBloqueadas = filtradas.filter(s => s.sala.status === "bloqueada").length
   const resumoFiltrado = useMemo(() => resumoOcupacaoDeItens(filtradas), [filtradas])
   const totalInconsistencias = resumoFiltrado.inconsistencias
-  const pctGeral = resumoFiltrado.pct
+
+  // Ocupação REAL (granular, por sessão/bloco de 40min) do recorte filtrado —
+  // mesmo critério de exclusão (STATUS_SLOT_EXCLUIDO) e mesma soma de
+  // slot.blocos usados em calcularResumoUnidades (salas.ts), só que sobre
+  // `filtradas` em vez de agrupado por unidade. Não usa resumoFiltrado.pct
+  // (esse é o binário "sala tem alguém alocado", que é o que já aparece em
+  // "Salas que contém profissional" na aba Ocupação Clínica).
+  const pctGranularFiltrado = useMemo(() => {
+    let blocosTotal = 0, blocosPreenchidos = 0
+    filtradas.forEach(item => {
+      item.slots.forEach(slot => {
+        if (STATUS_SLOT_EXCLUIDO.includes(slot.status)) return
+        blocosTotal += slot.blocos.length
+        blocosPreenchidos += slot.blocos.filter(b => b.status === "preenchido").length
+      })
+    })
+    return blocosTotal > 0 ? blocosPreenchidos / blocosTotal : null
+  }, [filtradas])
 
   return (
     <div className="flex flex-col gap-4">
@@ -70,8 +87,8 @@ export default function OcupacaoSalasPage() {
         <StatCard tone="slate" icon={<DoorOpen size={15} />} label="Salas cadastradas">
           <div className="text-2xl font-black text-foreground">{totalSalas}</div>
         </StatCard>
-        <StatCard tone="blue" icon={<DoorOpen size={15} />} label="Ocupação da semana">
-          <div className="text-2xl font-black text-foreground">{pctGeral !== null ? `${Math.round(pctGeral * 100)}%` : "—"}</div>
+        <StatCard tone="blue" icon={<DoorOpen size={15} />} label="Ocupação real do filtro">
+          <div className="text-2xl font-black text-foreground">{pctGranularFiltrado !== null ? `${Math.round(pctGranularFiltrado * 100)}%` : "—"}</div>
         </StatCard>
         <StatCard tone="red" icon={<DoorOpen size={15} />} label="Salas bloqueadas">
           <div className="text-2xl font-black text-foreground">{totalBloqueadas}</div>

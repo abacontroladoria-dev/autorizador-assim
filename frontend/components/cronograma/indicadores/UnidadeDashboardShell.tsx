@@ -3,14 +3,17 @@
 // UnidadeDashboardShell — dashboard de ocupação agregada por unidade, consumindo
 // useOcupacaoSalas() (cruzamento cronograma_salas × csv_grades_profissionais).
 
-import { useMemo, useRef, useState, type MouseEvent } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent } from "react"
 import { createPortal } from "react-dom"
-import { Building2, DoorOpen, Info, Loader2, Percent, X } from "lucide-react"
+import * as XLSX from "xlsx"
+import { Building2, DoorOpen, Download, Info, Loader2, Percent, X } from "lucide-react"
+import { useHeader } from "@/contexts/HeaderContext"
 import { StatCard } from "@/components/cronograma/ui/StatCard"
 import { StatusPill } from "@/components/cronograma/ui/StatusPill"
 import { useOcupacaoSalas } from "@/hooks/useOcupacaoSalas"
-import { CAPACIDADE_LABEL_CURTO } from "@/lib/cronograma/salasTypes"
-import { listarSlotsDetalhados, listarBlocosDetalhados } from "@/lib/cronograma/salas"
+import { CAPACIDADE_LABEL_CURTO, STATUS_LABEL_CURTO, STATUS_SLOT_EXCLUIDO, capacidadeProjetadaSala } from "@/lib/cronograma/salasTypes"
+import { listarSlotsDetalhados, listarBlocosDetalhados, resumoOcupacaoDeItens } from "@/lib/cronograma/salas"
+import { getRefWeek } from "@/lib/cronograma/helpers"
 import { OcupacaoDetalheModal, type DetalheOcupacao } from "./OcupacaoDetalheModal"
 import type { Tone } from "@/components/cronograma/ui/tones"
 
@@ -90,6 +93,7 @@ function pctTone(pct: number | null): Tone {
 
 export function UnidadeDashboardShell() {
   const { resumoUnidades, salasComOcupacao, loading, error } = useOcupacaoSalas()
+  const { setRightContent } = useHeader()
 
   // Pedido de drill-down (StatCard "Manhã/Tarde X/Y" clicado) — as linhas só
   // são calculadas (listarSlotsDetalhados/listarBlocosDetalhados) quando o
@@ -103,6 +107,105 @@ export function UnidadeDashboardShell() {
     }
     return { tipo: "bloco", unidade: pedido.unidade, turno: pedido.turno, linhas: listarBlocosDetalhados(salasComOcupacao, pedido.unidade, pedido.turno) }
   }, [pedido, salasComOcupacao])
+
+  const exportarXLSX = useCallback(() => {
+    const r2 = (v: number) => Math.round(v * 100) / 100
+    const pctVal = (v: number | null) => v !== null ? r2(v * 100) : 0
+
+    // ── Folha 1: por unidade ──────────────────────────────────────────────────
+    const unidRows = resumoUnidades.map(r => ({
+      Unidade: r.unidade,
+      Salas_Total: r.salasTotal,
+      Salas_Operacionais: r.salasAtivas,
+      Salas_Administrativas: r.salasAdm,
+      Salas_Bloqueadas: r.salasBloqueadas,
+      Salas_NTI: r.salasNti,
+      Salas_Unico: r.salasPorCapacidade.unico,
+      Salas_Duplo: r.salasPorCapacidade.duplo,
+      Salas_Multiplo: r.salasPorCapacidade.multiplo,
+      Capacidade_Simultanea: r.capacidadeSimultanea,
+      Slots_Ocupados: r.slotsOcupados,
+      Slots_Livres: r.slotsLivres,
+      Slots_Bloqueados: r.slotsBloqueados,
+      Slots_Total: r.slotsTotal,
+      Ocupacao_percent: pctVal(r.pct),
+      Blocos_Preenchidos: r.blocosPreenchidos,
+      Blocos_Livres: r.blocosTotal - r.blocosPreenchidos,
+      Blocos_Total: r.blocosTotal,
+      Ocupacao_Real_percent: pctVal(r.pctGranular),
+      Inconsistencias: r.inconsistencias,
+    }))
+
+    // ── Folha 2: por unidade e turno ─────────────────────────────────────────
+    const unidTurnoRows = resumoUnidades.flatMap(r => r.porTurno.map(t => ({
+      Unidade: r.unidade,
+      Turno: t.turno,
+      Slots_Ocupados: t.slotsOcupados,
+      Slots_Livres: t.slotsLivres,
+      Slots_Bloqueados: t.slotsBloqueados,
+      Slots_Total: t.slotsTotal,
+      Ocupacao_percent: pctVal(t.pct),
+      Blocos_Preenchidos: t.blocosPreenchidos,
+      Blocos_Livres: t.blocosTotal - t.blocosPreenchidos,
+      Blocos_Total: t.blocosTotal,
+      Ocupacao_Real_percent: pctVal(t.pctGranular),
+    })))
+
+    // ── Folha 3: por sala ─────────────────────────────────────────────────────
+    const salaRows = salasComOcupacao.map(item => {
+      const { sala, slots } = item
+      const resumo = resumoOcupacaoDeItens([item])
+      let blocosTotal = 0, blocosPreenchidos = 0
+      slots.forEach(slot => {
+        if (STATUS_SLOT_EXCLUIDO.includes(slot.status)) return
+        blocosTotal += slot.blocos.length
+        blocosPreenchidos += slot.blocos.filter(b => b.status === "preenchido").length
+      })
+      return {
+        Unidade: sala.unidade_nome,
+        Sala: sala.nome_exibicao,
+        Numero_Sala: sala.numero_sala,
+        Capacidade: CAPACIDADE_LABEL_CURTO[sala.capacidade],
+        Status: STATUS_LABEL_CURTO[sala.status],
+        Capacidade_Projetada: capacidadeProjetadaSala(sala.capacidade, sala.status),
+        Slots_Ocupados: resumo.slotsOcupados,
+        Slots_Livres: resumo.slotsTotal - resumo.slotsOcupados,
+        Slots_Bloqueados: resumo.slotsBloqueados,
+        Slots_Total: resumo.slotsTotal,
+        Ocupacao_percent: pctVal(resumo.pct),
+        Blocos_Preenchidos: blocosPreenchidos,
+        Blocos_Livres: blocosTotal - blocosPreenchidos,
+        Blocos_Total: blocosTotal,
+        Ocupacao_Real_percent: pctVal(blocosTotal > 0 ? blocosPreenchidos / blocosTotal : null),
+        Inconsistencias: resumo.inconsistencias,
+      }
+    }).sort((a, b) => {
+      const cmpUnidade = a.Unidade.localeCompare(b.Unidade)
+      if (cmpUnidade !== 0) return cmpUnidade
+      const na = parseInt(a.Numero_Sala, 10), nb = parseInt(b.Numero_Sala, 10)
+      if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb
+      return a.Numero_Sala.localeCompare(b.Numero_Sala)
+    })
+
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(unidRows),      'Ocupacao por unidade')
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(unidTurnoRows), 'Ocupacao por unidade e turno')
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(salaRows),      'Ocupacao por sala')
+
+    const nome = `Ocupacao_Salas_${getRefWeek().label.replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '')}.xlsx`
+    XLSX.writeFile(wb, nome)
+  }, [resumoUnidades, salasComOcupacao])
+
+  useEffect(() => {
+    setRightContent(
+      <button type="button" onClick={exportarXLSX} disabled={loading}
+        className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold text-white shadow-sm bg-emerald-700 hover:bg-emerald-800 dark:bg-emerald-600 dark:hover:bg-emerald-700 active:scale-95 transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+        <Download size={13} />
+        Exportar XLSX
+      </button>,
+    )
+    return () => setRightContent(null)
+  }, [exportarXLSX, loading, setRightContent])
 
   if (loading) {
     return (

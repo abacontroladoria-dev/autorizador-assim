@@ -212,7 +212,7 @@ type LinhaResumo = {
   ordem?: number
 }
 
-type SortKeyResumo = keyof LinhaResumo | 'pctDasOcupadas' | 'pctDoTotal'
+type SortKeyResumo = keyof LinhaResumo | 'pctDasOcupadas' | 'pctDoTotal' | 'horariosLivres'
 
 /** Deriva a tonalidade padrão do sistema (StatCard) a partir do % de ocupação — mesmos limiares de corFaixaOcupacao. */
 function toneOcupacao(pct: number | null | undefined): Tone {
@@ -237,6 +237,7 @@ function TabelaResumo({ linhas, sortPadrao = { key: 'label', dir: 'asc' }, recor
 
   const linhasCalc = useMemo(() => linhas.map(x => ({
     ...x,
+    horariosLivres: x.horariosTotal - x.horariosOcupados,
     pctDasOcupadas: totalOcupadas > 0 ? x.horariosOcupados / totalOcupadas : null,
     pctDoTotal:     totalSessoes  > 0 ? x.horariosTotal  / totalSessoes  : null,
   })), [linhas, totalOcupadas, totalSessoes])
@@ -256,40 +257,46 @@ function TabelaResumo({ linhas, sortPadrao = { key: 'label', dir: 'asc' }, recor
       <table className="w-full text-xs">
         <thead>
           <tr className="border-b border-border text-left text-muted-foreground">
-            <SortableTh label="Recorte" sortKey={recorteSortKey} activeKey={sort.key} dir={sort.dir} onClick={onSortClick} />
-            {temCapacidadeMultipla ? (
-              <>
-                <SortableTh label="Sessões" sortKey="horariosOcupados" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick} />
-                <SortableTh label="Vagas simult." sortKey="slotsOcupados" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick} />
-              </>
-            ) : (
-              <SortableTh label="Sessões" sortKey="horariosOcupados" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick} />
+            <SortableTh label="Recorte" sortKey={recorteSortKey} activeKey={sort.key} dir={sort.dir} onClick={onSortClick}
+              info="Nome da especialidade/terapia, unidade ou dia × turno, dependendo da tabela." />
+            <SortableTh label="Sessões ocupadas" sortKey="horariosOcupados" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick}
+              info="Quantidade de sessões preenchidas nesse recorte." />
+            <SortableTh label="Sessões livres" sortKey="horariosLivres" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick}
+              info="Quantidade de horários vagos nesse recorte." />
+            <SortableTh label="Sessões total" sortKey="horariosTotal" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick}
+              info="Soma de sessões ocupadas + livres nesse recorte." />
+            {temCapacidadeMultipla && (
+              <SortableTh label="Vagas simult." sortKey="slotsOcupados" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick}
+                info="Quando o recorte admite mais de um paciente por horário (ex.: Musicoterapia), vagas ocupadas sobre o total de vagas simultâneas." />
             )}
             <SortableTh label="% das ocupadas" sortKey="pctDasOcupadas" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick}
-              title="Percentual que as sessões ocupadas deste recorte representam sobre o total de sessões ocupadas de todos os recortes" />
+              info="Percentual que as sessões ocupadas deste recorte representam sobre o total de sessões OCUPADAS da Clínica." />
             <SortableTh label="% do total" sortKey="pctDoTotal" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick}
-              title="Percentual que o total de sessões (ocupadas + livres) deste recorte representa sobre o total geral de sessões" />
-            <SortableTh label="CH ocupada" sortKey="horasOcupadas" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick} />
-            <SortableTh label="CH livre" sortKey="horasLivres" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick} />
-            <SortableTh label="% ocup." sortKey="pct" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick} />
+              info="Percentual que o total de sessões (quer sejam OCUPADAS ou LIVRES) deste recorte representa sobre o TOTAL GERAL, quer OCUPADAS ou LIVRES de sessões." />
+            <SortableTh label="CH ocupada" sortKey="horasOcupadas" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick}
+              info="Carga horária ocupada nesse recorte, em horas." />
+            <SortableTh label="CH livre" sortKey="horasLivres" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick}
+              info="Carga horária livre nesse recorte, em horas." />
+            <SortableTh label="% ocup." sortKey="pct" activeKey={sort.key} dir={sort.dir} align="right" onClick={onSortClick}
+              info="Percentual de ocupação desse recorte (sessões ocupadas / sessões total)." />
           </tr>
         </thead>
         <tbody>
           {linhasOrdenadas.map(x => (
             <tr key={x.label} className="border-t border-border/40">
               <td className="py-1.5 pr-2 font-medium whitespace-nowrap">{x.label}</td>
-              {temCapacidadeMultipla ? (
-                <>
-                  <td className="py-1.5 px-2 text-right whitespace-nowrap text-muted-foreground" title={x.baseTexto}>
-                    {x.slotsTotal > 0 ? `${Math.round(x.horariosOcupados)}/${Math.round(x.horariosTotal)}` : '—'}
-                  </td>
-                  <td className="py-1.5 px-2 text-right whitespace-nowrap text-muted-foreground">
-                    {x.capacidadeMultipla ? `${Math.round(x.slotsOcupados)}/${Math.round(x.slotsTotal)}` : '—'}
-                  </td>
-                </>
-              ) : (
-                <td className="py-1.5 px-2 text-right whitespace-nowrap text-muted-foreground" title={x.baseTexto}>
-                  {x.slotsTotal > 0 ? `${Math.round(x.horariosOcupados)}/${Math.round(x.horariosTotal)}` : '—'}
+              <td className="py-1.5 px-2 text-right whitespace-nowrap text-muted-foreground" title={x.baseTexto}>
+                {x.slotsTotal > 0 ? Math.round(x.horariosOcupados) : '—'}
+              </td>
+              <td className="py-1.5 px-2 text-right whitespace-nowrap text-muted-foreground" title={x.baseTexto}>
+                {x.slotsTotal > 0 ? Math.round(x.horariosLivres) : '—'}
+              </td>
+              <td className="py-1.5 px-2 text-right whitespace-nowrap text-muted-foreground" title={x.baseTexto}>
+                {x.slotsTotal > 0 ? Math.round(x.horariosTotal) : '—'}
+              </td>
+              {temCapacidadeMultipla && (
+                <td className="py-1.5 px-2 text-right whitespace-nowrap text-muted-foreground">
+                  {x.capacidadeMultipla ? `${Math.round(x.slotsOcupados)}/${Math.round(x.slotsTotal)}` : '—'}
                 </td>
               )}
               <td className="py-1.5 px-2 text-right whitespace-nowrap text-muted-foreground">
@@ -307,7 +314,7 @@ function TabelaResumo({ linhas, sortPadrao = { key: 'label', dir: 'asc' }, recor
           ))}
           {!linhasOrdenadas.length && (
             <tr>
-              <td colSpan={temCapacidadeMultipla ? 8 : 7} className="py-4 text-center text-muted-foreground">Sem dados nos filtros atuais.</td>
+              <td colSpan={temCapacidadeMultipla ? 10 : 9} className="py-4 text-center text-muted-foreground">Sem dados nos filtros atuais.</td>
             </tr>
           )}
         </tbody>
@@ -555,8 +562,8 @@ export function OcupacaoProfShell() {
           Profissional:   d.prof,
           Unidade:        unidade,
           Especialidades: terp,
-          Ocupacao_pct:   pctVal(f.pct),
-          Ociosidade_pct: ocioVal(f.pct, f.ociosidade),
+          Ocupacao_percent:   pctVal(f.pct),
+          Ociosidade_percent: ocioVal(f.pct, f.ociosidade),
           Base_Compacta:  f.baseCompacta,
           Base_do_Calculo: f.baseTexto,
           CH_Ocupada: r2(f.horasOcupadas),
@@ -569,8 +576,11 @@ export function OcupacaoProfShell() {
     // ── Folha 2: por especialidade ───────────────────────────────────────────
     const espRows = dashboardEsp.map(e => ({
       Especialidade:  e.especialidade,
-      Ocupacao_pct:   pctVal(e.pct),
-      Ociosidade_pct: ocioVal(e.pct, e.ociosidade),
+      Ocupacao_percent:   pctVal(e.pct),
+      Ociosidade_percent: ocioVal(e.pct, e.ociosidade),
+      Sessoes_Ocupadas: Math.round(e.horariosOcupados),
+      Sessoes_Livres:   Math.round(e.horariosTotal - e.horariosOcupados),
+      Sessoes_Total:    Math.round(e.horariosTotal),
       Base_Compacta:  e.baseCompacta,
       Base_do_Calculo: e.baseTexto,
       CH_Ocupada: r2(e.horasOcupadas),
@@ -578,11 +588,41 @@ export function OcupacaoProfShell() {
       CH_Livre:   r2(e.horasLivres),
     }))
 
+    // ── Folha 2b: por especialidade × unidade ────────────────────────────────
+    const espUnidGrupos = new Map<string, typeof dadosFiltrados[number]['ocupacao']['slots']>()
+    for (const d of dadosFiltrados) {
+      for (const s of d.ocupacao?.slots ?? []) {
+        const k = `${s.terp}\x00${s.unidade}`
+        if (!espUnidGrupos.has(k)) espUnidGrupos.set(k, [])
+        espUnidGrupos.get(k)!.push(s)
+      }
+    }
+    const espUnidRows = [...espUnidGrupos.entries()].map(([k, slots]) => {
+      const sep = k.indexOf('\x00')
+      const terp    = k.slice(0, sep)
+      const unidade = k.slice(sep + 1)
+      const f = agregarOcupacaoDeSlots(slots)
+      return {
+        Especialidade:  terp,
+        Unidade:        unidade,
+        Ocupacao_percent:   pctVal(f.pct),
+        Ociosidade_percent: ocioVal(f.pct, f.ociosidade),
+        Sessoes_Ocupadas: Math.round(f.horariosOcupados),
+        Sessoes_Livres:   Math.round(f.horariosTotal - f.horariosOcupados),
+        Sessoes_Total:    Math.round(f.horariosTotal),
+        Base_Compacta:  f.baseCompacta,
+        Base_do_Calculo: f.baseTexto,
+        CH_Ocupada: r2(f.horasOcupadas),
+        CH_Total:   r2(f.horasTotal),
+        CH_Livre:   r2(f.horasLivres),
+      }
+    }).sort((a, b) => a.Especialidade.localeCompare(b.Especialidade) || a.Unidade.localeCompare(b.Unidade))
+
     // ── Folha 3: por unidade ─────────────────────────────────────────────────
     const unidRows = dashboardUnidades.map(u => ({
       Unidade:        u.unidade,
-      Ocupacao_pct:   pctVal(u.f.pct),
-      Ociosidade_pct: ocioVal(u.f.pct, u.f.ociosidade),
+      Ocupacao_percent:   pctVal(u.f.pct),
+      Ociosidade_percent: ocioVal(u.f.pct, u.f.ociosidade),
       Base_Compacta:  u.f.baseCompacta,
       Base_do_Calculo: u.f.baseTexto,
       CH_Ocupada: r2(u.f.horasOcupadas),
@@ -591,9 +631,12 @@ export function OcupacaoProfShell() {
     }))
 
     const wb = XLSX.utils.book_new()
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(profRows), 'Ocupacao profissional')
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(espRows),  'Ocupacao especialidade')
-    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(unidRows), 'Ocupacao unidade')
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(profRows),    'Ocupacao profissional')
+    // Nomes de aba no Excel são limitados a 31 caracteres — "especialidade" e "unidades/unidade"
+    // precisam ser abreviados pra caber ("Ocupacao especialidade - Todas Unids." tem 37).
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(espRows),     'Ocupacao espec. - Todas Unids.')
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(espUnidRows), 'Ocupacao espec. - por Unid.')
+    XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(unidRows),    'Ocupacao unidade')
 
     const nome = `Ocupacao_${(analMes ?? 'export').replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '')}.xlsx`
     XLSX.writeFile(wb, nome)

@@ -176,17 +176,24 @@ export function calcularSlotsDaSala(
     }
   })
 
-  // Mesmas linhas, mas agrupadas por HORÁRIO EXATO da SALA (dow|turno|minutos),
-  // SEM depender de profissional/cadastro — usado pra montar `blocos` ("Ocupação
-  // real" = TD_AGENDADO/TD_EXISTENTE). Uma sala com sessão real "Agendado" conta
-  // como preenchida mesmo que ninguém tenha sido cadastrado em
-  // cronograma_salas_alocacoes pra esse sala/dia/turno — cadastro é só
-  // planejamento (usado pelos `cards`/"Salas que contém profissional"), não
-  // condição pra contar ocupação real. Aqui SIM precisa da sala exata
-  // (`linhasSala`) — é a grade física de verdade, diferente do cruzamento por
-  // unidade usado só pra proporção "X/Y com paciente" dos cards acima.
-  const sessoesPorHora = new Map<string, AgendaSalaRow[]>()
-  linhasSala.forEach(r => {
+  // Mesmas linhas, mas agrupadas por HORÁRIO EXATO + PROFISSIONAL (dow|turno|
+  // minutos|profissional), usado pra montar `blocos` ("Ocupação real" =
+  // TD_AGENDADO/TD_EXISTENTE). Cada "cadeira" do bloco é amarrada à alocação
+  // planejada daquele assento (ver loop abaixo) — só conta preenchida se ESSE
+  // profissional específico tiver sessão real "Agendado" naquele horário exato.
+  //
+  // Cruza por `linhasUnidade` (não `linhasSala`), mesmo critério já usado acima
+  // pra `sessoesPorProfissional`/`sessoesPorProfissionalId`: a TiTa não é
+  // confiável pra registrar em qual sala física a sessão aconteceu (ex.:
+  // Coordenador de Caso é sempre lançado numa sala genérica de "Coordenação",
+  // nunca na sala onde a pessoa está fisicamente alocada). Exigir a sala exata
+  // aqui fazia esses blocos aparecerem sempre "livre" mesmo com sessão real
+  // acontecendo, subcontando a ocupação granular de qualquer sala que hospede
+  // esse tipo de terapia. A hora exata continua sendo exigida (`minutos` na
+  // chave) — só a exigência de sala exata foi relaxada.
+  const sessoesPorHoraProfissionalId = new Map<string, AgendaSalaRow>()
+  const sessoesPorHoraProfissional = new Map<string, AgendaSalaRow>()
+  linhasUnidade.forEach(r => {
     const dow = dowDeDiaSemana(r.dia_semana)
     if (!dow) return
     if (!normTxt(r.status_agendamento).includes("agendado")) return
@@ -194,8 +201,11 @@ export function calcularSlotsDaSala(
     if (minutos === null) return
     const turno = turnoDoHorario(minutos)
     const chaveHora = `${dow}|${turno}|${minutos}`
-    if (!sessoesPorHora.has(chaveHora)) sessoesPorHora.set(chaveHora, [])
-    sessoesPorHora.get(chaveHora)!.push(r)
+    if (r.profissional_id !== null && r.profissional_id !== undefined) {
+      sessoesPorHoraProfissionalId.set(`${chaveHora}|${r.profissional_id}`, r)
+    }
+    const prof = cleanTxt(r.profissional_nome)
+    if (prof) sessoesPorHoraProfissional.set(`${chaveHora}|${normTxt(prof)}`, r)
   })
 
   const alocacoesPorSlot = new Map<string, AlocacaoSala[]>()
@@ -232,25 +242,30 @@ export function calcularSlotsDaSala(
       const inconsistente = sala.status === "operacional" && cards.length > capacidadeProjetada
 
       // Blocos de 40min, um por "cadeira" (vaga simultânea, até capacidadeProjetada)
-      // × horário oficial do turno. "Preenchido" = existe sessão real "Agendado"
-      // nessa sala/dia/horário EXATO — independente de cadastro em
-      // cronograma_salas_alocacoes (TD_AGENDADO/TD_EXISTENTE puro). Cada sessão
-      // real concorrente naquele horário ocupa uma cadeira, até o limite da
-      // capacidade da sala; sessão excedente (mais gente que capacidade) não é
-      // contada (mesmo critério de `inconsistente`, que sinaliza esse excesso
-      // no cadastro — aqui só limitamos a contagem ao nº de cadeiras existentes).
+      // × horário oficial do turno. Cada cadeira corresponde à alocação planejada
+      // daquele assento (`alocacoesDoSlot[seat]`) — uma cadeira sem ninguém
+      // alocado nunca aparece preenchida. "Preenchido" = esse profissional
+      // específico tem sessão real "Agendado" na UNIDADE, nesse dia/turno/
+      // horário EXATO (ver comentário de `sessoesPorHoraProfissional*` acima —
+      // não exige mais a sala exata). Cadeiras além da capacidade (alocação
+      // excedente, já sinalizado por `inconsistente`) não geram bloco — o
+      // denominador continua limitado à capacidade física da sala.
       const horasTurno = HORAS_POR_TURNO[turno]
       const blocos: BlocoOcupacaoSlot[] = []
       for (const hora of horasTurno) {
         const minutos = pm(hora) ?? 0
         const horaFim = fm(minutos + 40)
-        const sessoesReaisNoHorario = sessoesPorHora.get(`${dow}|${turno}|${minutos}`) ?? []
+        const chaveHora = `${dow}|${turno}|${minutos}`
         for (let seat = 0; seat < capacidadeProjetada; seat++) {
-          const linhaReal = sessoesReaisNoHorario[seat]
+          const alocacao = alocacoesDoSlot[seat]
+          const linhaReal = alocacao
+            ? (alocacao.profissional_id !== null ? sessoesPorHoraProfissionalId.get(`${chaveHora}|${alocacao.profissional_id}`) : undefined)
+              ?? sessoesPorHoraProfissional.get(`${chaveHora}|${normTxt(alocacao.profissional_nome)}`)
+            : undefined
           blocos.push(linhaReal ? {
             hora, horaFim,
-            profissional: cleanTxt(linhaReal.profissional_nome),
-            terapia: cleanTxt(linhaReal.terapia_nome) || cleanTxt(linhaReal.terapia_exibicao_nome) || null,
+            profissional: alocacao!.profissional_nome,
+            terapia: alocacao!.terapia_nome ?? (cleanTxt(linhaReal.terapia_nome) || cleanTxt(linhaReal.terapia_exibicao_nome) || null),
             idAgendamento: linhaReal.tita_agendamento_id ?? null,
             status: "preenchido",
           } : {
