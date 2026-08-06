@@ -4,13 +4,33 @@
 // "comparativo_julho_agosto_2026.xlsx" — este módulo reproduz a mesma lógica
 // pra alimentar dashboards dentro do sistema (Indicadores > Comparativo de Sessões).
 
-import { normTxt } from "@/lib/cronograma/constants"
+import { normTxt, decodeEntidadesHtml } from "@/lib/cronograma/constants"
 
-/** Pacientes fictícios/administrativos — nunca contam em nenhum indicativo. */
+/**
+ * Ids de "paciente" fictícios/administrativos (ex.: 18565 "Horário
+ * Administrativo", 20479 "Supervisora Fernanda Lima") — placeholders que o
+ * sistema de origem usa pra preencher o campo Favorecido em horários
+ * administrativos (ex.: terapia "Especialista Técnico de Área"), já que a
+ * grade exige um "paciente" em toda linha. Do lado do PACIENTE isso nunca é
+ * sessão de verdade — sempre excluído (ver excluirPacientesFicticios,
+ * usado em calcularComparativo e calcularPorPacienteDaUnidade). Do lado do
+ * PROFISSIONAL é carga de trabalho real (ele estava alocado naquele horário)
+ * — por isso NÃO é filtrado na normalização (normalizarLinhasUpload/
+ * normalizarLinhasApi) nem nas agregações por profissional
+ * (agregarPorProfissional, calcularTurnoverProfissionais): filtrar ali
+ * apagava sessões reais do profissional (ex.: troca de terapia registrada
+ * como "Especialista Técnico de Área" desaparecia sem deixar rastro,
+ * parecendo uma queda de carga que nunca existiu).
+ */
 export const PACIENTES_FICTICIOS_IDS = new Set<number>([
   17795, 18565, 19196, 20471, 20472, 20473, 20475, 20476, 20477, 20478, 20479,
   20725, // Paciente Teste Sanderson
 ])
+
+/** Remove sessões de pacientes fictícios/administrativos — ver PACIENTES_FICTICIOS_IDS. Chamar só nas agregações do lado do PACIENTE, nunca nas do profissional. */
+export function excluirPacientesFicticios(sessoes: SessaoComparativo[]): SessaoComparativo[] {
+  return sessoes.filter(s => s.idFavorecido === null || !PACIENTES_FICTICIOS_IDS.has(s.idFavorecido))
+}
 
 export const UNIDADE_CONSERTAR = "Consertar Unidade no Sistema"
 export const UNIDADE_AMBIENTE_NATURAL = "Ambiente Natural - Casa ou Escola"
@@ -24,6 +44,48 @@ export function mapearUnidade(sala: string | null | undefined): string {
   if (/^Unid\.?\s*Padre Miguel/i.test(s)) return "Padre Miguel"
   if (normTxt(s) === normTxt("AT Externo Casa") || normTxt(s) === normTxt("AT Externo Escola")) return UNIDADE_AMBIENTE_NATURAL
   return UNIDADE_CONSERTAR
+}
+
+/**
+ * Corrige "Consertar Unidade no Sistema" quando é só um buraco pontual no
+ * relatório (Sala vazia numa sessão isolada), não uma unidade de fato
+ * desconhecida: se ≥90% de TODAS as sessões desse paciente (nesse conjunto)
+ * caem numa única unidade real, as sessões sem Sala desse mesmo paciente
+ * passam a herdar essa unidade — marcadas com `unidadeInferida: true` pra
+ * exibir um aviso (nunca escondido) de que aquele horário específico não
+ * tinha Sala informada na origem. Sem isso, um paciente com 21 sessões em
+ * Realengo e 1 sem Sala aparecia como se tivesse uma sessão "perdida" numa
+ * unidade indefinida, quando na prática é óbvio que também é Realengo. Abaixo
+ * de 90% (padrão inconsistente, ou paciente que de fato circula entre
+ * unidades) mantém "Consertar Unidade no Sistema" sem alteração.
+ */
+export function corrigirUnidadesPorPaciente(sessoes: SessaoComparativo[]): SessaoComparativo[] {
+  const porPaciente = new Map<string, SessaoComparativo[]>()
+  for (const s of sessoes) {
+    const chave = chaveDe(s)
+    const grupo = porPaciente.get(chave) ?? []
+    grupo.push(s)
+    porPaciente.set(chave, grupo)
+  }
+
+  const out: SessaoComparativo[] = []
+  for (const grupo of porPaciente.values()) {
+    const contagem = new Map<string, number>()
+    for (const s of grupo) {
+      if (s.unidade === UNIDADE_CONSERTAR) continue
+      contagem.set(s.unidade, (contagem.get(s.unidade) ?? 0) + 1)
+    }
+    let melhorUnidade: string | null = null
+    let melhorQtd = 0
+    for (const [u, qtd] of contagem) {
+      if (qtd > melhorQtd) { melhorUnidade = u; melhorQtd = qtd }
+    }
+    const cobre90 = melhorUnidade !== null && melhorQtd / grupo.length >= 0.9
+    for (const s of grupo) {
+      out.push(s.unidade === UNIDADE_CONSERTAR && cobre90 ? { ...s, unidade: melhorUnidade!, unidadeInferida: true } : s)
+    }
+  }
+  return out
 }
 
 /** Linha normalizada de sessão, já filtrada e pronta pra comparação. */
@@ -48,6 +110,15 @@ export interface SessaoComparativo {
    * pro cálculo via data quando a fonte não informa o dia da semana.
    */
   diaSemanaIndice: number | null
+  /**
+   * `true` quando `unidade` não veio do texto real da Sala (que estava
+   * vazio no relatório de origem) — foi inferida porque ≥90% das OUTRAS
+   * sessões desse mesmo paciente caem numa única unidade (ver
+   * corrigirUnidadesPorPaciente). Usado só pra mostrar um aviso discreto
+   * ("sala/unidade não informada nesse horário") — nunca deve mudar o
+   * cálculo em si, só a transparência sobre o dado.
+   */
+  unidadeInferida?: boolean
 }
 
 /**
@@ -61,6 +132,21 @@ export function filtrarSessoesPorTexto(sessoes: SessaoComparativo[], paciente: s
   if (!p && convenios.length === 0) return sessoes
   const setConvenios = new Set(convenios.map(normTxt))
   return sessoes.filter(s => (!p || normTxt(s.paciente).includes(p)) && (setConvenios.size === 0 || setConvenios.has(normTxt(s.convenio))))
+}
+
+/**
+ * Mesma ideia de filtrarSessoesPorTexto, só que pro lado do profissional:
+ * filtra por trecho do nome do profissional e/ou por um conjunto de
+ * especialidades selecionadas (checkbox — "ou"). Banco de filtros
+ * independente do de pacientes — ver FilterBarProfissional: buscar "Alice"
+ * aqui nunca deve recortar as sessões usadas pros indicativos de paciente,
+ * e vice-versa. `especialidades` vazio = sem filtro de especialidade.
+ */
+export function filtrarSessoesPorProfissionalTexto(sessoes: SessaoComparativo[], profissional: string, especialidades: string[]): SessaoComparativo[] {
+  const p = normTxt(profissional)
+  if (!p && especialidades.length === 0) return sessoes
+  const setEspecialidades = new Set(especialidades.map(normTxt))
+  return sessoes.filter(s => (!p || normTxt(s.profissional).includes(p)) && (setEspecialidades.size === 0 || setEspecialidades.has(normTxt(s.terapia))))
 }
 
 /**
@@ -114,7 +200,13 @@ function parseHoraAgendamento(raw: string): string {
   return s
 }
 
-/** Normaliza linhas cruas de um XLSX/CSV importado (ex.: relatório "agendamentos_profissionais"). */
+/**
+ * Normaliza linhas cruas de um XLSX/CSV importado (ex.: relatório
+ * "agendamentos_profissionais"). NÃO filtra pacientes fictícios aqui de
+ * propósito — ver PACIENTES_FICTICIOS_IDS: essas linhas são carga real do
+ * profissional, só não são sessão de paciente de verdade. Quem consome pro
+ * lado do paciente filtra explicitamente (excluirPacientesFicticios).
+ */
 export function normalizarLinhasUpload(raw: Record<string, unknown>[]): SessaoComparativo[] {
   const out: SessaoComparativo[] = []
   for (const row of raw) {
@@ -123,17 +215,16 @@ export function normalizarLinhasUpload(raw: Record<string, unknown>[]): SessaoCo
 
     const idStr = pick(row, ["Id Favorecido", "IdFavorecido", "Id_Favorecido", "ID Favorecido"])
     const idFavorecido = idStr ? Number(idStr.replace(/\D/g, "")) : null
-    if (idFavorecido !== null && PACIENTES_FICTICIOS_IDS.has(idFavorecido)) continue
 
     const sala = pick(row, ["Sala", "sala"])
     const data = normalizarDataAgendamento(pick(row, ["Data do Agendamento", "Data", "data"]))
     const diaSemanaTexto = pick(row, ["Dia da Semana", "Dia Semana", "dia_semana"])
     out.push({
       idFavorecido: idFavorecido !== null && !isNaN(idFavorecido) ? idFavorecido : null,
-      paciente: pick(row, ["Favorecido", "Nome Favorecido", "Paciente", "paciente"]),
+      paciente: decodeEntidadesHtml(pick(row, ["Favorecido", "Nome Favorecido", "Paciente", "paciente"])),
       sala,
       unidade: mapearUnidade(sala),
-      convenio: pick(row, ["Convênio", "Convenio", "convenio"]),
+      convenio: decodeEntidadesHtml(pick(row, ["Convênio", "Convenio", "convenio"])),
       data,
       hora: parseHoraAgendamento(pick(row, ["Hora Inicial", "Hora", "hora"])),
       idTerapia: (() => {
@@ -141,13 +232,13 @@ export function normalizarLinhasUpload(raw: Record<string, unknown>[]): SessaoCo
         const n = s ? Number(s.replace(/\D/g, "")) : NaN
         return isNaN(n) ? null : n
       })(),
-      terapia: pick(row, ["Especialidade", "especialidade", "Terapia", "terapia"]),
+      terapia: decodeEntidadesHtml(pick(row, ["Especialidade", "especialidade", "Terapia", "terapia"])),
       idProfissional: (() => {
         const s = pick(row, ["Id Profissional", "IdProfissional", "Id_Profissional"])
         const n = s ? Number(s.replace(/\D/g, "")) : NaN
         return isNaN(n) ? null : n
       })(),
-      profissional: pick(row, ["Profissional", "profissional"]),
+      profissional: decodeEntidadesHtml(pick(row, ["Profissional", "profissional"])),
       diaSemanaIndice: diaSemanaIndiceDe(diaSemanaTexto, data),
     })
   }
@@ -170,12 +261,11 @@ export interface GradeComparativoRaw {
   profissional_nome: string | null
 }
 
-/** Normaliza linhas vindas da API (csv_grade_profissionais), aplicando os mesmos filtros. */
+/** Normaliza linhas vindas da API (csv_grade_profissionais). NÃO filtra pacientes fictícios aqui — mesmo motivo de normalizarLinhasUpload (ver PACIENTES_FICTICIOS_IDS e excluirPacientesFicticios). */
 export function normalizarLinhasApi(raw: GradeComparativoRaw[]): SessaoComparativo[] {
   const out: SessaoComparativo[] = []
   for (const row of raw) {
     if (!isAgendado(row.status_agendamento)) continue
-    if (row.paciente_id !== null && PACIENTES_FICTICIOS_IDS.has(row.paciente_id)) continue
     const data = normalizarDataAgendamento(row.data ?? "")
     out.push({
       idFavorecido: row.paciente_id,
@@ -297,6 +387,43 @@ export function formatarDataSessao(raw: string): string {
   const d = parseDataAgendamento(raw)
   if (!d) return raw
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`
+}
+
+function parseIsoLocal(iso: string): Date | null {
+  const m = iso.match(/^(\d{4})-(\d{2})-(\d{2})/)
+  if (!m) return null
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
+}
+
+function diasCorridosEntre(isoInicio: string, isoFim: string): number {
+  const inicio = parseIsoLocal(isoInicio)
+  const fim = parseIsoLocal(isoFim)
+  if (!inicio || !fim) return 0
+  return Math.round((fim.getTime() - inicio.getTime()) / 86400000) + 1
+}
+
+/**
+ * Alguns relatórios exportam a mesma grade semanal recorrente repetida por
+ * várias semanas/meses (ex.: agenda fixa do profissional). Se o upload tiver
+ * mais de 7 dias corridos de intervalo, isso é sinal de repetição — nesse
+ * caso considera-se só a primeira ocorrência de cada dia da semana presente
+ * no arquivo (a primeira segunda, a primeira terça etc.), descartando as
+ * repetições das semanas seguintes. Uploads com até 7 dias corridos (uma
+ * semana) passam intactos.
+ */
+export function limitarPrimeirasOcorrenciasSemana(rows: SessaoComparativo[]): SessaoComparativo[] {
+  const datas = rows.map(r => r.data).filter(Boolean).sort()
+  if (datas.length === 0) return rows
+  if (diasCorridosEntre(datas[0], datas[datas.length - 1]) <= 7) return rows
+
+  const primeiraDataPorDiaSemana = new Map<number, string>()
+  for (const r of rows) {
+    if (r.diaSemanaIndice === null || !r.data) continue
+    const atual = primeiraDataPorDiaSemana.get(r.diaSemanaIndice)
+    if (!atual || r.data < atual) primeiraDataPorDiaSemana.set(r.diaSemanaIndice, r.data)
+  }
+
+  return rows.filter(r => r.diaSemanaIndice === null || !r.data || r.data === primeiraDataPorDiaSemana.get(r.diaSemanaIndice))
 }
 
 /**
@@ -491,8 +618,10 @@ function agregarPorPaciente(sessoesP1: SessaoComparativo[], sessoesP2: SessaoCom
  * reduziram na mesma unidade.
  */
 export function calcularPorPacienteDaUnidade(
-  sessoesP1: SessaoComparativo[], sessoesP2: SessaoComparativo[], unidade: string,
+  sessoesP1Raw: SessaoComparativo[], sessoesP2Raw: SessaoComparativo[], unidade: string,
 ): PacienteComparativo[] {
+  const sessoesP1 = excluirPacientesFicticios(sessoesP1Raw)
+  const sessoesP2 = excluirPacientesFicticios(sessoesP2Raw)
   const contexto = [...sessoesP1, ...sessoesP2]
   return agregarPorPaciente(
     dedupAssimSaude(sessoesP1.filter(s => s.unidade === unidade), contexto),
@@ -528,11 +657,152 @@ export function sessoesDoPaciente(
  * pode ser renomeado, o Id não.
  */
 export const ROTULO_PSICOLOGIA_ABA = "Psicologia ABA"
-export const IDS_PSICOLOGIA_ABA = new Set([2261, 2317, 2283, 2260, 2353, 2248, 2263, 2269, 2262, 2264, 2252])
+/**
+ * Ids Terapia que o relatório usa pra variantes de "Aplicador ABA" e papéis
+ * ligados (Coordenador de Caso, Supervisão ABA) — todos o mesmo trabalho de
+ * fato, só cotados sob especialidades diferentes. NÃO inclui 2283 (Aplicador
+ * ABA (HS) = "Habilidades Sociais", tratado como especialidade própria em
+ * constants.ts) nem 2252 (Psicoeducação, sem relação com ABA — estava aqui
+ * por erro e inflava o grupo com sessões de outra especialidade).
+ */
+export const IDS_PSICOLOGIA_ABA = new Set([2261, 2317, 2260, 2353, 2248, 2263, 2269, 2262, 2264])
 
 /** Chave estável de profissional: Id Profissional quando disponível, senão nome normalizado — mesmo padrão de chaveDe (pacientes). */
 function chaveProfissional(s: Pick<SessaoComparativo, "idProfissional" | "profissional">): string {
   return s.idProfissional !== null ? `id:${s.idProfissional}` : `nome:${normTxt(s.profissional)}`
+}
+
+/**
+ * Terapias em que 2+ sessões do MESMO profissional no MESMO horário são
+ * atendimentos individuais de verdade (não dupla/trio na mesma vaga) — cada
+ * linha continua contando 1 sessão em dedupSessaoDuplaProfissional. Fora
+ * dessas, 2+ sessões nesse padrão são pacientes atendidos JUNTOS na mesma
+ * vaga (comum em Terapia Ocupacional, por exemplo).
+ */
+const IDS_SEM_DEDUP_HORARIO_PROFISSIONAL = new Set([2251 /* Musicoterapia */, 2269 /* Aplicador ABA (EF) */])
+
+/**
+ * Colapsa sessões simultâneas do profissional (mesmo profissional, mesma
+ * data, mesma hora, mesma terapia) numa só — mede horários ocupados, não
+ * pacientes atendidos. Sem isso, um profissional que atende sempre em
+ * dupla/trio tem o total de sessões inflado 2x/3x: uma redução real de carga
+ * (ex.: parou de atender uma sala de dupla) parece maior do que é, ou uma
+ * mudança de dupla pra trio parece "aumento" sem ter aumentado nada de
+ * verdade. Mesma ideia de dedupAssimSaude, mas do lado do profissional (ali
+ * é sobre o PACIENTE ter 2 linhas pra 1 sessão só; aqui é sobre o
+ * PROFISSIONAL atender N pacientes na mesma vaga) — e aqui o critério é
+ * sempre por horário (não depende de convênio), exceto nas terapias em
+ * IDS_SEM_DEDUP_HORARIO_PROFISSIONAL, onde cada sessão é atendimento
+ * individual real. Usada em todo cálculo "por profissional" (agregarPorProfissional,
+ * calcularTurnoverProfissionais) — nunca na exibição da agenda em si, que
+ * continua mostrando cada paciente (ver AgendaGridProps.agruparRepetidos).
+ */
+export function dedupSessaoDuplaProfissional(sessoes: SessaoComparativo[]): SessaoComparativo[] {
+  const grupos = new Map<string, SessaoComparativo[]>()
+  for (const s of sessoes) {
+    const chaveTerapia = s.idTerapia !== null ? `id:${s.idTerapia}` : `nome:${normTxt(s.terapia)}`
+    const chave = `${chaveProfissional(s)}|||${s.data}|||${s.hora}|||${chaveTerapia}`
+    const grupo = grupos.get(chave) ?? []
+    grupo.push(s)
+    grupos.set(chave, grupo)
+  }
+  const out: SessaoComparativo[] = []
+  for (const grupo of grupos.values()) {
+    const semDedup = grupo[0].idTerapia !== null && IDS_SEM_DEDUP_HORARIO_PROFISSIONAL.has(grupo[0].idTerapia)
+    if (grupo.length > 1 && !semDedup) out.push(grupo[0])
+    else out.push(...grupo)
+  }
+  return out
+}
+
+/** Movimento de sessões de um profissional entre P1 e P2, somando TODAS as terapias — mesma forma de PacienteComparativo, mas por profissional. Base do turnover "de verdade" (por cabeça): ver calcularResumoMovimentoProfissionais. A visão por especialidade (quem saiu/entrou EM CADA terapia) é outra pergunta — ver calcularTurnoverProfissionais. */
+export interface ProfissionalMovimento {
+  idProfissional: number | null
+  profissional: string
+  p1: number
+  p2: number
+  diferenca: number
+}
+
+/** Agrega o total de sessões por profissional (todas as terapias somadas) — mesma lógica de agregarPorPaciente, por Id Profissional em vez de Id Favorecido. Resolve o caso do profissional com 2 terapias (ex.: Coordenador de Caso + Aplicador ABA) que aumentou numa e reduziu na outra: aqui ele entra uma vez só, no saldo líquido — não aparece ao mesmo tempo em "ganhos" e "perdas". */
+export function agregarPorProfissional(sessoesP1: SessaoComparativo[], sessoesP2: SessaoComparativo[]): ProfissionalMovimento[] {
+  interface Acc { profissional: string; p1: number; p2: number }
+  const mapa = new Map<string, Acc>()
+  function registrar(sessoes: SessaoComparativo[], lado: "p1" | "p2") {
+    for (const s of sessoes) {
+      if (s.idProfissional === null && !s.profissional) continue
+      const k = chaveProfissional(s)
+      const acc = mapa.get(k) ?? { profissional: s.profissional, p1: 0, p2: 0 }
+      acc[lado] += 1
+      if (s.profissional) acc.profissional = s.profissional
+      mapa.set(k, acc)
+    }
+  }
+  registrar(sessoesP1, "p1")
+  registrar(sessoesP2, "p2")
+  return [...mapa.entries()]
+    .map(([k, acc]) => ({
+      idProfissional: k.startsWith("id:") ? Number(k.slice(3)) : null,
+      profissional: acc.profissional,
+      p1: acc.p1, p2: acc.p2, diferenca: acc.p2 - acc.p1,
+    }))
+    .sort((a, b) => a.profissional.localeCompare(b.profissional, "pt-BR"))
+}
+
+/**
+ * Drill-down "Ver agendamentos" do "Por Profissional": sessões individuais
+ * (qualquer terapia) daquele profissional num período — mesma ideia de
+ * sessoesDoPaciente, mas sem o dedup do Assim Saúde (que é sobre o paciente
+ * ter 2 linhas pra 1 sessão só; não se aplica olhando do lado do
+ * profissional). Ordenado por data+hora.
+ */
+export function sessoesDoProfissional(
+  sessoes: SessaoComparativo[], profissional: Pick<SessaoComparativo, "idProfissional" | "profissional">,
+): SessaoComparativo[] {
+  const chave = chaveProfissional(profissional)
+  const filtradas = sessoes.filter(s => chaveProfissional(s) === chave)
+  return [...filtradas].sort((a, b) => {
+    const da = parseDataAgendamento(a.data)?.getTime() ?? 0
+    const db = parseDataAgendamento(b.data)?.getTime() ?? 0
+    if (da !== db) return da - db
+    return a.hora.localeCompare(b.hora)
+  })
+}
+
+export interface ResumoMovimentoProfissionais {
+  profissionaisAumentaram: number
+  sessoesAumentadas: number
+  profissionaisReduziram: number
+  sessoesReduzidas: number
+  profissionaisSemAlteracao: number
+  /** Zero sessões (nenhuma terapia) em P1 e ≥1 em P2 — profissional novo de fato, não só numa especialidade nova. */
+  profissionaisNovos: number
+  sessoesNovos: number
+  /** Zero sessões (nenhuma terapia) em P2 apesar de ter em P1 — profissional que realmente não está mais atendendo, não só saiu de uma especialidade específica (ver calcularTurnoverProfissionais pra esse recorte). */
+  profissionaisDesligados: number
+  sessoesDesligados: number
+}
+
+/** Resumo de aumento/redução/novos/desligados por profissional (headcount, soma de todas as terapias) — mesma ideia do resumo de pacientes (ComparativoResultado.resumo), reaproveitando classificarMovimento. Alimenta os cards "Ganhos/Perdas de profissionais". */
+export function calcularResumoMovimentoProfissionais(movimento: ProfissionalMovimento[]): ResumoMovimentoProfissionais {
+  let profissionaisAumentaram = 0, sessoesAumentadas = 0
+  let profissionaisReduziram = 0, sessoesReduzidas = 0
+  let profissionaisSemAlteracao = 0
+  let profissionaisNovos = 0, sessoesNovos = 0
+  let profissionaisDesligados = 0, sessoesDesligados = 0
+  for (const p of movimento) {
+    switch (classificarMovimento(p)) {
+      case "novos": profissionaisNovos++; sessoesNovos += p.diferenca; break
+      case "aumento": profissionaisAumentaram++; sessoesAumentadas += p.diferenca; break
+      case "desligados": profissionaisDesligados++; sessoesDesligados += -p.diferenca; break
+      case "reducao": profissionaisReduziram++; sessoesReduzidas += -p.diferenca; break
+      case "semAlteracao": profissionaisSemAlteracao++; break
+    }
+  }
+  return {
+    profissionaisAumentaram, sessoesAumentadas, profissionaisReduziram, sessoesReduzidas, profissionaisSemAlteracao,
+    profissionaisNovos, sessoesNovos, profissionaisDesligados, sessoesDesligados,
+  }
 }
 
 /** Chave de agrupamento por terapia pro turnover — por Id Terapia (nunca por nome, que pode ser renomeado), com o bucket sintético de Psicologia ABA quando `agrupar` está ativo. */
@@ -546,6 +816,13 @@ export interface ProfissionalTurnover {
   idProfissional: number | null
   profissional: string
   sessoes: number
+  /**
+   * Só setado nos profissionais de `saida`: `true` quando o profissional
+   * continua com sessão em P2 em ALGUMA OUTRA especialidade — ele não saiu da
+   * clínica, só parou de atender essa terapia específica. `false` = não tem
+   * mais nenhuma sessão em P2 (turnover real, ver calcularResumoMovimentoProfissionais).
+   */
+  aindaAtivo?: boolean
 }
 
 /** Movimento de um profissional dentro de um grupo de terapia — p1/p2/diferença, mesma ideia de PacienteComparativo. Base pra saida/entrada e pro resumo geral (aumento/redução/etc.). */
@@ -609,6 +886,11 @@ export function calcularTurnoverProfissionais(
   registrar(sessoesP1, "p1")
   registrar(sessoesP2, "p2")
 
+  // Quem ainda tem QUALQUER sessão em P2 (em qualquer terapia) — usado só pra
+  // marcar `aindaAtivo` em `saida` (ver ProfissionalTurnover): distingue quem
+  // saiu de fato da clínica de quem só parou de atender essa terapia específica.
+  const ativosP2Geral = new Set(sessoesP2.map(s => chaveProfissional(s)))
+
   const out: TurnoverTerapia[] = []
   for (const [chave, g] of grupos) {
     const terapia = chave === "grupo:psicologia-aba" ? ROTULO_PSICOLOGIA_ABA : (g.terapiaP2 || g.terapiaP1 || "—")
@@ -623,7 +905,7 @@ export function calcularTurnoverProfissionais(
     })
     const saida = movimento
       .filter(m => m.p1 > 0 && m.p2 === 0)
-      .map(m => ({ chave: m.chave, idProfissional: m.idProfissional, profissional: m.profissional, sessoes: m.p1 }))
+      .map(m => ({ chave: m.chave, idProfissional: m.idProfissional, profissional: m.profissional, sessoes: m.p1, aindaAtivo: ativosP2Geral.has(m.chave) }))
       .sort((a, b) => b.sessoes - a.sessoes)
     const entrada = movimento
       .filter(m => m.p1 === 0 && m.p2 > 0)
@@ -632,60 +914,6 @@ export function calcularTurnoverProfissionais(
     out.push({ chave, idTerapia: g.idTerapia, terapia, profissionaisP1: g.p1.size, profissionaisP2: g.p2.size, movimento, saida, entrada })
   }
   return out.sort((a, b) => a.terapia.localeCompare(b.terapia, "pt-BR"))
-}
-
-export interface ResumoTurnoverGeral {
-  totalP1: number
-  totalP2: number
-  diferenca: number
-  variacaoPct: number | null
-  profissionaisAumentaram: number
-  sessoesAumentadas: number
-  profissionaisNovosCaptados: number
-  sessoesNovosCaptados: number
-  profissionaisReduziram: number
-  sessoesReduzidas: number
-  profissionaisDesligados: number
-  sessoesDesligados: number
-  profissionaisSemAlteracao: number
-}
-
-/**
- * Resumo geral do turnover — análogo ao resumo de aumento/redução de
- * pacientes (ComparativoResultado.resumo), mas a unidade aqui é o par
- * profissional×terapia (o mesmo profissional em 2 terapias conta 2 vezes,
- * cada vínculo avaliado separadamente). Alimenta os cards "Ganhos/Perdas de
- * profissionais" no topo da seção de turnover.
- */
-export function calcularResumoTurnoverGeral(turnover: TurnoverTerapia[]): ResumoTurnoverGeral {
-  let totalP1 = 0, totalP2 = 0
-  let profissionaisAumentaram = 0, sessoesAumentadas = 0
-  let profissionaisNovosCaptados = 0, sessoesNovosCaptados = 0
-  let profissionaisReduziram = 0, sessoesReduzidas = 0
-  let profissionaisDesligados = 0, sessoesDesligados = 0
-  let profissionaisSemAlteracao = 0
-
-  for (const t of turnover) {
-    totalP1 += t.profissionaisP1
-    totalP2 += t.profissionaisP2
-    for (const m of t.movimento) {
-      if (m.diferenca > 0) {
-        if (m.p1 === 0) { profissionaisNovosCaptados++; sessoesNovosCaptados += m.diferenca }
-        else { profissionaisAumentaram++; sessoesAumentadas += m.diferenca }
-      } else if (m.diferenca < 0) {
-        if (m.p2 === 0) { profissionaisDesligados++; sessoesDesligados += -m.diferenca }
-        else { profissionaisReduziram++; sessoesReduzidas += -m.diferenca }
-      } else {
-        profissionaisSemAlteracao++
-      }
-    }
-  }
-
-  return {
-    totalP1, totalP2, diferenca: totalP2 - totalP1, variacaoPct: totalP1 > 0 ? (totalP2 - totalP1) / totalP1 : null,
-    profissionaisAumentaram, sessoesAumentadas, profissionaisNovosCaptados, sessoesNovosCaptados,
-    profissionaisReduziram, sessoesReduzidas, profissionaisDesligados, sessoesDesligados, profissionaisSemAlteracao,
-  }
 }
 
 /**
@@ -709,7 +937,12 @@ export function sessoesDoProfissionalNoGrupo(
 }
 
 /** Calcula os 4 indicativos comparando as sessões normalizadas de dois períodos. */
-export function calcularComparativo(sessoesP1Raw: SessaoComparativo[], sessoesP2Raw: SessaoComparativo[]): ComparativoResultado {
+export function calcularComparativo(sessoesP1Bruto: SessaoComparativo[], sessoesP2Bruto: SessaoComparativo[]): ComparativoResultado {
+  // Exclui pacientes fictícios/administrativos aqui, não na normalização —
+  // ver PACIENTES_FICTICIOS_IDS: essas sessões são carga real do
+  // profissional (fora do escopo deste cálculo, que é 100% do lado paciente).
+  const sessoesP1Raw = excluirPacientesFicticios(sessoesP1Bruto)
+  const sessoesP2Raw = excluirPacientesFicticios(sessoesP2Bruto)
   const contexto = [...sessoesP1Raw, ...sessoesP2Raw]
   const sessoesP1 = dedupAssimSaude(sessoesP1Raw, contexto)
   const sessoesP2 = dedupAssimSaude(sessoesP2Raw, contexto)
