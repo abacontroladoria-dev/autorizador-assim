@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { getSupabaseClient } from "@/lib/supabase/client"
+import { buscarGrade } from "@/lib/grade/fonte"
 import { calcularSugestoes } from "@/lib/cronograma/reposicao"
 import type { AgendaPacienteSlot, SlotLivre } from "@/lib/cronograma/reposicao"
 import type { SessaoAgendada, SessaoFaltada, SugestaoReposicao, ReposicaoAceiteEntry } from "@/types/reposicao"
@@ -74,30 +74,30 @@ export function BuscarReposicaoManual({
     if (!aberto || terapiasDoPaciente.length > 0 || terapiasFallback.length > 0) return
 
     setCarregandoFallback(true)
-    const sb = getSupabaseClient()
 
-    // Busca terapias com slot disponível na semana (paciente_nome null = vago)
-    sb.from('csv_grades_profissionais')
-      .select('terapia_nome, terapia_exibicao_nome')
-      .eq('status_agendamento', 'Livre')
-      // Versionamento (migration 20260805160000): quando um slot livre é ocupado na
-      // TiTa ele deixa de vir no CSV como 'Livre', e o sync o marca com ativo=false.
-      // ativo=false num slot 'Livre' significa exatamente "não está mais vago" — sem
-      // este filtro a tela ofereceria horário já tomado.
-      .eq('ativo', true)
-      .gt('data', falta.dataOriginal)
-      .lte('data', semanaFim)
-      .then(({ data }) => {
-        if (!data) { setCarregandoFallback(false); return }
-        const seen = new Set<string>()
-        setTerapiasFallback(
-          data
-            .filter((r: any) => { if (!r.terapia_nome || seen.has(r.terapia_nome)) return false; seen.add(r.terapia_nome); return true })
-            .map((r: any): TerapiaOpcao => ({ terapia: r.terapia_nome, terapiaExibicao: r.terapia_exibicao_nome ?? r.terapia_nome }))
-            .sort((a: TerapiaOpcao, b: TerapiaOpcao) => a.terapiaExibicao.localeCompare(b.terapiaExibicao, 'pt-BR'))
-        )
-        setCarregandoFallback(false)
-      })
+    // Busca terapias com slot disponível na semana (paciente_nome null = vago).
+    // Fonte "base": slot 'Livre' não é atendimento e não existe em
+    // vw_grade_atendimentos. A view já garante `ativo`, que aqui não é só
+    // deduplicação — quando um slot livre é ocupado na TiTa ele deixa de vir no
+    // CSV como 'Livre' e o sync o marca com ativo=false, ou seja, ativo=false num
+    // slot 'Livre' significa exatamente "não está mais vago". Sem isso a tela
+    // ofereceria horário já tomado.
+    buscarGrade<{ terapia_nome: string | null; terapia_exibicao_nome: string | null }>({
+      campos: 'terapia_nome, terapia_exibicao_nome',
+      fonte: 'base',
+      status: 'Livre',
+      ate: semanaFim,
+      refinar: q => q.gt('data', falta.dataOriginal),
+    }).then(data => {
+      const seen = new Set<string>()
+      setTerapiasFallback(
+        data
+          .filter(r => { if (!r.terapia_nome || seen.has(r.terapia_nome)) return false; seen.add(r.terapia_nome); return true })
+          .map((r): TerapiaOpcao => ({ terapia: r.terapia_nome as string, terapiaExibicao: r.terapia_exibicao_nome ?? (r.terapia_nome as string) }))
+          .sort((a: TerapiaOpcao, b: TerapiaOpcao) => a.terapiaExibicao.localeCompare(b.terapiaExibicao, 'pt-BR'))
+      )
+      setCarregandoFallback(false)
+    }).catch(() => setCarregandoFallback(false))
   }, [aberto, terapiasDoPaciente.length, terapiasFallback.length, falta.dataOriginal, semanaFim])
 
   const terapiasVisiveis = terapiasDoPaciente.length > 0 ? terapiasDoPaciente : terapiasFallback
@@ -112,19 +112,20 @@ export function BuscarReposicaoManual({
     setErro(null)
     setBuscandoSlots(true)
 
-    const sb = getSupabaseClient()
-    const { data: slotsRaw, error } = await sb
-      .from('csv_grades_profissionais')
-      .select('profissional_nome, terapia_nome, terapia_exibicao_nome, hora_inicial, data, dia_semana, sala_nome')
-      .eq('terapia_nome', opcao.terapia)
-      .eq('status_agendamento', 'Livre')   // slot sem paciente = disponível
-      .eq('ativo', true)                   // e ainda vago — ver nota no fallback acima
-      .gt('data', falta.dataOriginal)
-      .lte('data', semanaFim)
+    let slotsRaw: Record<string, string | null>[]
+    try {
+      slotsRaw = await buscarGrade<Record<string, string | null>>({
+        campos: 'profissional_nome, terapia_nome, terapia_exibicao_nome, hora_inicial, data, dia_semana, sala_nome',
+        fonte: 'base',
+        status: 'Livre',   // slot sem paciente = disponível; e ainda vago — ver nota no fallback acima
+        ate: semanaFim,
+        refinar: q => q.eq('terapia_nome', opcao.terapia).gt('data', falta.dataOriginal),
+      })
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : String(e)); setBuscandoSlots(false); return
+    }
 
-    if (error) { setErro(error.message); setBuscandoSlots(false); return }
-
-    const slots: SlotLivre[] = (slotsRaw ?? []).map((r: any): SlotLivre => ({
+    const slots: SlotLivre[] = slotsRaw.map((r: any): SlotLivre => ({
       profissional:    r.profissional_nome     ?? '',
       terapia:         r.terapia_nome          ?? '',
       terapiaExibicao: r.terapia_exibicao_nome ?? '',

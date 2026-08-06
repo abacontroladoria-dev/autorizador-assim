@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import {
   listarConvenioValores, listarConvenioValoresPaciente, listarConvenioPacoteAvaliacao,
-  listarConveniosAgenda, listarTerapiasAgenda, listarPacientesAgenda,
+  listarOpcoesAgenda,
   type OpcaoTerapia, type OpcaoPaciente,
 } from "@/services/convenioValores.service"
 import type { ConvenioValor, ConvenioValorPaciente, ConvenioPacoteAvaliacao } from "@/lib/cronograma/convenioValoresTypes"
@@ -39,22 +39,22 @@ export function useConvenioValores(): UseConvenioValoresResult {
     setLoading(true)
     setError(null)
 
+    // As três listas da agenda vêm juntas de uma requisição só (vw_grade_opcoes)
+    // — antes eram três varreduras paginadas da grade inteira.
     Promise.all([
       listarConvenioValores(),
       listarConvenioValoresPaciente(),
       listarConvenioPacoteAvaliacao(),
-      listarConveniosAgenda(),
-      listarTerapiasAgenda(),
-      listarPacientesAgenda(),
+      listarOpcoesAgenda(),
     ])
-      .then(([gerais, excecoes, pacotes, convenios, terapias, pacientes]) => {
+      .then(([gerais, excecoes, pacotes, opcoes]) => {
         if (cancelled) return
         setRegrasGerais(gerais)
         setExcecoesPaciente(excecoes)
         setPacotesAvaliacao(pacotes)
-        setConveniosAgenda(convenios)
-        setTerapiasAgenda(terapias)
-        setPacientesAgenda(pacientes)
+        setConveniosAgenda(opcoes.convenios)
+        setTerapiasAgenda(opcoes.terapias)
+        setPacientesAgenda(opcoes.pacientes)
         setLoading(false)
       })
       .catch(err => {
