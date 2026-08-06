@@ -1,5 +1,6 @@
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { pm, exU } from "@/lib/cronograma/helpers"
+import { decodeEntidadesHtml } from "@/lib/cronograma/constants"
 import type { CsvRow } from "@/types/cronograma"
 import type { GradeComparativoRaw } from "@/lib/cronograma/comparativoSessoes"
 
@@ -15,7 +16,7 @@ const MOJIBAKE_RE = /[Â-Ã][-¿]/
 // A sincronização da grade (Edge Function sync-grade-csv) grava texto com dupla
 // codificação UTF-8. Isto repara na leitura. Só atua quando o padrão está presente,
 // para não corromper texto já correto.
-export function fixMojibake(s: string | null | undefined): string {
+function fixMojibakeSemEntidades(s: string | null | undefined): string {
   const str = s ?? ""
   if (!str || !MOJIBAKE_RE.test(str)) return str
   try {
@@ -25,6 +26,16 @@ export function fixMojibake(s: string | null | undefined): string {
   } catch {
     return str
   }
+}
+
+/**
+ * Repara texto vindo da sincronização da grade: dupla codificação UTF-8
+ * (mojibake, ex.: "Araújo" gravado como "AraÃºjo") E entidades HTML cruas
+ * (ex.: "D&#039;avila" — ver decodeEntidadesHtml em constants.ts). São dois
+ * problemas independentes que podem aparecer juntos no mesmo nome.
+ */
+export function fixMojibake(s: string | null | undefined): string {
+  return decodeEntidadesHtml(fixMojibakeSemEntidades(s))
 }
 
 export async function buscarGradeComoCSVRows(dataInicio: string, dataFim: string): Promise<CsvRow[]> {

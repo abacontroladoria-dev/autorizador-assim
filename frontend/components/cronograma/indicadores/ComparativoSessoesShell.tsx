@@ -13,10 +13,11 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react"
 import * as XLSX from "xlsx"
 import {
   Upload, CheckCircle2, X, Loader2, TrendingUp, TrendingDown, Minus, Building2, Users, ArrowRightLeft,
-  DatabaseZap, AlertTriangle, ChevronUp, ChevronDown, ChevronsUpDown, ChevronRight, Filter, Search, SlidersHorizontal, UserCheck, CalendarDays,
+  DatabaseZap, AlertTriangle, Info, ChevronUp, ChevronDown, ChevronsUpDown, ChevronRight, Filter, Search, SlidersHorizontal, UserCheck, CalendarDays,
   Brain, Home, School, HandHelping, Paintbrush, ClipboardList, PawPrint, Dumbbell, Waves, MessageCircle, Music, Salad,
   BookOpenCheck, HeartHandshake, PersonStanding, BookOpen, Eye, Apple, Puzzle, ClipboardCheck, Footprints,
   UserMinus, UserPlus, UsersRound,
+  UserCog, ClipboardPlus, BrainCog, Stethoscope, Workflow, LifeBuoy, GraduationCap, Cog,
   type LucideIcon,
 } from "lucide-react"
 import { StatCard } from "@/components/cronograma/ui/StatCard"
@@ -26,11 +27,12 @@ import { TONE_SOFT, TONE_SOLID, TONE_ACCENT, type Tone } from "@/components/cron
 import { getRefWeek } from "@/lib/cronograma/helpers"
 import { tCor, normTxt } from "@/lib/cronograma/constants"
 import {
-  normalizarLinhasUpload, normalizarLinhasApi, calcularComparativo, calcularPorPacienteDaUnidade, classificarMovimento, rangeDatas,
-  filtrarSessoesPorTexto, passaFiltroNumerico, sessoesDoPaciente, validarDataMinimaUpload, DIAS_SEMANA_LABEL,
-  calcularTurnoverProfissionais, calcularResumoTurnoverGeral, sessoesDoProfissionalNoGrupo, ROTULO_PSICOLOGIA_ABA, IDS_PSICOLOGIA_ABA,
+  normalizarLinhasUpload, normalizarLinhasApi, corrigirUnidadesPorPaciente, calcularComparativo, calcularPorPacienteDaUnidade, classificarMovimento, rangeDatas,
+  filtrarSessoesPorTexto, filtrarSessoesPorProfissionalTexto, passaFiltroNumerico, sessoesDoPaciente, validarDataMinimaUpload, limitarPrimeirasOcorrenciasSemana, DIAS_SEMANA_LABEL,
+  calcularTurnoverProfissionais, agregarPorProfissional, calcularResumoMovimentoProfissionais, dedupSessaoDuplaProfissional,
+  sessoesDoProfissional, sessoesDoProfissionalNoGrupo, formatarDataSessao, ROTULO_PSICOLOGIA_ABA, IDS_PSICOLOGIA_ABA,
   type SessaoComparativo, type ComparativoResultado, type UnidadeComparativo, type PacienteComparativo, type CategoriaMovimento,
-  type TurnoverTerapia, type ProfissionalTurnover,
+  type TurnoverTerapia, type ProfissionalTurnover, type ProfissionalMovimento,
 } from "@/lib/cronograma/comparativoSessoes"
 import { buscarGradeComparativo } from "@/lib/cronograma/gradeService"
 
@@ -55,10 +57,17 @@ const FILTRO_CATEGORIAS: Record<FiltroCategoria, CategoriaMovimento[]> = {
   aumento: ["aumento"], novos: ["novos"], reducao: ["reducao"], desligados: ["desligados"], semAlteracao: ["semAlteracao"],
   ganhos: ["aumento", "novos"], perdas: ["reducao", "desligados"],
 }
-/** Mesmos rótulos de FILTRO_LABEL, mas pra profissionais em vez de pacientes — usado no resumo geral do turnover. */
+/**
+ * Mesmos rótulos de FILTRO_LABEL, mas pra profissionais em vez de pacientes —
+ * usado no resumo por cabeça (agregarPorProfissional/calcularResumoMovimentoProfissionais).
+ * "Que saíram" (não "desligados" — profissionais não são CLT) aqui é real:
+ * zero sessões em QUALQUER terapia em P2, não só numa especialidade
+ * específica (esse recorte por especialidade é outra seção — ver
+ * TurnoverProfissionaisSection).
+ */
 const FILTRO_LABEL_PROFISSIONAL: Record<FiltroCategoria, string> = {
   aumento: "Profissionais com aumento",
-  novos: "Novos profissionais captados",
+  novos: "Novos profissionais",
   reducao: "Profissionais com redução",
   desligados: "Profissionais que saíram",
   semAlteracao: "Sem alteração",
@@ -74,8 +83,8 @@ const RING_TONE: Record<Tone, string> = {
 /** Ordem de exibição dos dias da semana na agenda (Segunda a Sábado, Domingo por último) — índices de DIAS_SEMANA_LABEL (0 = domingo). */
 const ORDEM_DIAS_EXIBICAO = [1, 2, 3, 4, 5, 6, 0]
 
-/** Segunda a Sábado aparecem sempre na agenda, mesmo sem sessão nenhuma naquele dia — só assim fica visível que o paciente "não vem" num dia específico, em vez da coluna simplesmente não existir. Domingo só aparece se tiver sessão real. */
-const DIAS_UTEIS_SEMPRE_VISIVEIS = [1, 2, 3, 4, 5, 6]
+/** Segunda a Sexta aparecem sempre na agenda do paciente, mesmo sem sessão nenhuma naquele dia — só assim fica visível que o paciente "não vem" num dia específico, em vez da coluna simplesmente não existir. Sábado e Domingo só aparecem se tiverem sessão real (clínica não atende sábado). */
+const DIAS_UTEIS_SEMPRE_VISIVEIS = [1, 2, 3, 4, 5]
 
 function hexParaHsl(hex: string): [number, number, number] {
   const limpo = hex.replace("#", "")
@@ -99,6 +108,15 @@ function hexParaHsl(hex: string): [number, number, number] {
   return [h, s, l]
 }
 
+/** Cor hex -> rgba com opacidade — usado pra tingir fundo/borda de faixas temáticas por terapia (ver TurnoverProfissionaisSection) sem perder o matiz exato da terapia. */
+function hexParaRgba(hex: string, alpha: number): string {
+  const limpo = hex.replace("#", "")
+  const r = parseInt(limpo.slice(0, 2), 16)
+  const g = parseInt(limpo.slice(2, 4), 16)
+  const b = parseInt(limpo.slice(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
 function hslParaHex(h: number, s: number, l: number): string {
   const c = (1 - Math.abs(2 * l - 1)) * s
   const x = c * (1 - Math.abs((h / 60) % 2 - 1))
@@ -114,18 +132,45 @@ function hslParaHex(h: number, s: number, l: number): string {
   return `#${toHex(r)}${toHex(g)}${toHex(b)}`
 }
 
+/** Luminância relativa (WCAG) de uma cor hex — usada em vez da "lightness" do HSL porque HSL trata igualmente todos os matizes, mas o olho humano lê amarelo como muito mais claro que azul na mesma lightness (o canal verde pesa ~12x mais que o azul na percepção); um clamp por HSL lightness deixava amarelos "quase puros" (ex.: Psicopedagogia) passarem sem ficar de fato legíveis. */
+function luminanciaRelativa(hex: string): number {
+  const limpo = hex.replace("#", "")
+  const canal = (v: number) => {
+    const c = v / 255
+    return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4)
+  }
+  const r = canal(parseInt(limpo.slice(0, 2), 16))
+  const g = canal(parseInt(limpo.slice(2, 4), 16))
+  const b = canal(parseInt(limpo.slice(4, 6), 16))
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b
+}
+
+/** Razão de contraste (WCAG) entre uma cor e o fundo branco (L = 1) sobre o qual o ícone/dot é desenhado. */
+function contrasteComBranco(hex: string): number {
+  return 1.05 / (luminanciaRelativa(hex) + 0.05)
+}
+
+/** Contraste mínimo (WCAG 1.4.11, elementos gráficos) exigido do dot/ícone contra fundo branco. */
+const CONTRASTE_MINIMO_DOT = 3
+
 /**
  * Cor do dot de especialidade com piso de contraste: várias entradas de
  * TERAPIA_CORES são tons claros (ex.: "Aplicador ABA Escola" é um cinza bem
- * lavado) que na grade de agenda — onde é a cor que mais se repete — ficam
- * quase invisíveis sobre fundo branco. Clampa a luminosidade sem trocar a
- * identidade de cor (mantém o matiz); cinzas quase-brancos ficam num cinza
- * médio visível em vez de inventar uma cor que não existia.
+ * lavado, "Psicopedagogia" é um amarelo quase puro) que na grade de agenda —
+ * onde é a cor que mais se repete — ficam quase invisíveis sobre fundo
+ * branco. Escurece em passos (mantendo matiz e saturação) até bater o
+ * contraste mínimo medido por luminância perceptual, não por HSL lightness.
  */
 function corDotComContraste(nome: string): string {
-  const [h, s, l] = hexParaHsl(tCor(nome, true))
-  if (l <= 0.62) return tCor(nome, true)
-  return hslParaHex(h, s > 0.05 ? Math.max(s, 0.18) : 0, 0.55)
+  const original = tCor(nome, true)
+  if (contrasteComBranco(original) >= CONTRASTE_MINIMO_DOT) return original
+  const [h, s] = hexParaHsl(original)
+  const sAjustado = s > 0.05 ? Math.max(s, 0.18) : 0
+  for (let l = 0.55; l >= 0.12; l -= 0.02) {
+    const candidato = hslParaHex(h, sAjustado, l)
+    if (contrasteComBranco(candidato) >= CONTRASTE_MINIMO_DOT) return candidato
+  }
+  return hslParaHex(h, sAjustado, 0.12)
 }
 
 /** Ícone que remete ao nome da especialidade — só as que têm um símbolo óbvio (fala, escola, maçã...); o resto continua com a bolinha de cor pra não forçar um ícone genérico sem sentido. */
@@ -139,19 +184,28 @@ const ICONE_TERAPIA: Record<string, LucideIcon> = {
   [normTxt("Aplicador ABA Casa")]: Home,
   [normTxt("Aplicador ABA Escola")]: School,
   [normTxt("Aplicador Suporte")]: HandHelping,
+  [normTxt("Aplicador Suporte (MT)")]: HandHelping,
+  [normTxt("Apoio Operacional")]: LifeBuoy,
   [normTxt("Arteterapia")]: Paintbrush,
+  [normTxt("Avaliação Neuropsicológica")]: BrainCog,
   [normTxt("Coordenador de Caso")]: ClipboardList,
   [normTxt("Equoterapia")]: PawPrint,
+  [normTxt("Especialista Técnico de Área")]: ClipboardPlus,
+  [normTxt("Estágio")]: GraduationCap,
+  [normTxt("Facilitador Técnico")]: Cog,
   [normTxt("Fisioterapia")]: Dumbbell,
   [normTxt("Fisioterapia Aquática")]: Waves,
   [normTxt("Fonoaudiologia")]: MessageCircle,
   [normTxt("Musicoterapia")]: Music,
   [normTxt("Nutrição")]: Salad,
+  [normTxt("Operações Clínicas")]: Workflow,
   [normTxt("Psicoeducação")]: BookOpenCheck,
   [normTxt("Psicologia")]: HeartHandshake,
   [normTxt("Psicomotricidade")]: PersonStanding,
   [normTxt("Psicopedagogia")]: BookOpen,
+  [normTxt("Psiquiatra/Neurologista")]: Stethoscope,
   [normTxt("Supervisão ABA")]: Eye,
+  [normTxt("Técnico Terapêutico Particular")]: UserCog,
   [normTxt("Terapia Alimentar")]: Apple,
   [normTxt("Terapia Ocupacional")]: Puzzle,
   [normTxt("Triagem")]: ClipboardCheck,
@@ -159,11 +213,25 @@ const ICONE_TERAPIA: Record<string, LucideIcon> = {
   [normTxt("Psicologia ABA")]: Brain,
 }
 
+/** Alguns glifos do Lucide (ex.: PersonStanding) ocupam bem menos da caixa do que os outros ícones de terapia no mesmo `size` — fator de escala por especialidade pra compensar e manter o peso visual parecido entre ícones. */
+const ICONE_TERAPIA_ESCALA: Record<string, number> = {
+  [normTxt("Psicomotricidade")]: 1.4,
+}
+
+/** O aumento de escala (ver ICONE_TERAPIA_ESCALA) cresce a caixa do ícone a partir do canto superior esquerdo — sem compensar, o ícone "cresce pra direita" e destoa dos demais na mesma coluna/lista. Desloca de volta pra esquerda a mesma proporção que a escala adiciona de largura. */
+const ICONE_TERAPIA_DESLOCAMENTO: Record<string, number> = {
+  [normTxt("Psicomotricidade")]: -3,
+}
+
 /** Ícone (quando existe um mapeado) ou bolinha de cor (fallback) representando a especialidade — usado na agenda e em "Por especialidade". */
 function IconeOuDotTerapia({ nome, size = 14 }: { nome: string; size?: number }) {
   const Icone = ICONE_TERAPIA[normTxt(nome)]
   const cor = corDotComContraste(nome)
-  if (Icone) return <Icone size={size} style={{ color: cor }} className="shrink-0" />
+  if (Icone) {
+    const tamanho = size * (ICONE_TERAPIA_ESCALA[normTxt(nome)] ?? 1)
+    const deslocamento = ICONE_TERAPIA_DESLOCAMENTO[normTxt(nome)] ?? 0
+    return <Icone size={tamanho} style={{ color: cor, marginLeft: deslocamento }} className="shrink-0" />
+  }
   return (
     <span
       className="h-2.5 w-2.5 shrink-0 rounded-full ring-1 ring-black/10 dark:ring-white/20"
@@ -409,7 +477,14 @@ function MultiSelectDropdown({
   )
 }
 
-/** Banco de filtros compartilhado por "Por Unidade" e "Por Paciente" — Paciente/Convênio recortam as sessões antes do cálculo; P1/P2/Diferença mín. filtram cada tabela linha a linha. */
+/**
+ * Banco de filtros só do lado PACIENTE — compartilhado por "Por Unidade" e
+ * "Por Paciente". Paciente/Convênio/Unidade recortam as sessões antes do
+ * cálculo; P1/P2/Diferença mín. filtram cada tabela linha a linha.
+ * Independente do banco de filtros de profissional (ver FilterBarProfissional)
+ * — buscar um nome aqui nunca deve afetar "Por Profissional"/"Movimentação
+ * por Especialidade", e vice-versa.
+ */
 function FilterBar({
   paciente, onPaciente, convenios, onConvenios, convenioOptions, unidades, onUnidades, unidadeOptions,
   p1Min, onP1Min, p2Min, onP2Min, diferencaMin, onDiferencaMin, diferencaMax, onDiferencaMax, ativo, onLimpar,
@@ -455,6 +530,97 @@ function FilterBar({
       >
         <UserCheck size={11} />
         Apenas pacientes ativos
+      </button>
+
+      {ativo && (
+        <button
+          type="button"
+          onClick={onLimpar}
+          className="ml-auto inline-flex items-center gap-1 rounded-full border border-border px-2.5 py-1 text-[11px] font-semibold text-muted-foreground transition-colors hover:border-destructive/50 hover:text-destructive"
+        >
+          <X size={11} />
+          Limpar filtros
+        </button>
+      )}
+    </div>
+  )
+}
+
+interface FilterBarProfissionalProps {
+  profissional: string
+  onProfissional: (v: string) => void
+  especialidades: string[]
+  onEspecialidades: (v: string[]) => void
+  especialidadeOptions: string[]
+  unidades: string[]
+  onUnidades: (v: string[]) => void
+  unidadeOptions: string[]
+  p1Min: number | null
+  onP1Min: (v: number | null) => void
+  p2Min: number | null
+  onP2Min: (v: number | null) => void
+  diferencaMin: number | null
+  onDiferencaMin: (v: number | null) => void
+  diferencaMax: number | null
+  onDiferencaMax: (v: number | null) => void
+  ativo: boolean
+  onLimpar: () => void
+}
+
+/**
+ * Banco de filtros só do lado PROFISSIONAL — usado por "Quadro de
+ * Profissionais", "Por Profissional" e "Movimentação por Especialidade".
+ * Espelha o FilterBar de paciente, trocando Convênio por Especialidade
+ * (múltipla seleção) e o texto de busca por nome de profissional.
+ * Independente do banco de filtros de paciente (ver FilterBar) por design.
+ */
+function FilterBarProfissional({
+  profissional, onProfissional, especialidades, onEspecialidades, especialidadeOptions,
+  unidades, onUnidades, unidadeOptions,
+  p1Min, onP1Min, p2Min, onP2Min, diferencaMin, onDiferencaMin, diferencaMax, onDiferencaMax, ativo, onLimpar,
+}: FilterBarProfissionalProps) {
+  return (
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-card px-3 py-2">
+      <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
+        <SlidersHorizontal size={12} />
+        Filtros
+      </span>
+
+      <MultiSelectDropdown label="Especialidade" options={especialidadeOptions} selecionados={especialidades} onChange={onEspecialidades} vazio="Nenhuma especialidade carregada." />
+
+      <div className="relative">
+        <Search size={12} className="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <input
+          type="text"
+          value={profissional}
+          onChange={e => onProfissional(e.target.value)}
+          placeholder="Buscar profissional..."
+          className="w-40 rounded-md border border-border bg-card py-1 pl-6 pr-2 text-[11px] text-foreground outline-none focus:border-primary/60"
+        />
+      </div>
+
+      <MultiSelectDropdown label="Unidade" options={unidadeOptions} selecionados={unidades} onChange={onUnidades} vazio="Nenhuma unidade carregada." />
+
+      <div className="hidden h-5 w-px shrink-0 bg-border sm:block" />
+
+      <NumberFilterInput label="Período 1 ≥" value={p1Min} onChange={onP1Min} />
+      <NumberFilterInput label="Período 2 ≥" value={p2Min} onChange={onP2Min} />
+      <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+        Diferença
+        <NumberFilterInput label="entre" value={diferencaMin} onChange={onDiferencaMin} />
+        <NumberFilterInput label="e" value={diferencaMax} onChange={onDiferencaMax} />
+      </span>
+
+      <button
+        type="button"
+        onClick={() => onP2Min(p2Min === 1 ? null : 1)}
+        aria-pressed={p2Min === 1}
+        title="Filtrar profissionais com Período 2 ≥ 1"
+        className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold transition-colors
+          ${p2Min === 1 ? "border-primary/60 bg-primary/10 text-primary" : "border-border text-muted-foreground hover:border-primary/40 hover:text-foreground"}`}
+      >
+        <UserCheck size={11} />
+        Apenas profissionais ativos
       </button>
 
       {ativo && (
@@ -655,10 +821,10 @@ export function ComparativoSessoesShell() {
     setErrorP1(null)
     try {
       const raw = await parseXlsxGenerico(file)
-      const rows = normalizarLinhasUpload(raw)
+      const rows = corrigirUnidadesPorPaciente(normalizarLinhasUpload(raw))
       if (rows.length === 0) throw new Error("Nenhuma sessão agendada encontrada no arquivo.")
       validarDataMinimaUpload(rows)
-      setSessoesP1(rows)
+      setSessoesP1(limitarPrimeirasOcorrenciasSemana(rows))
       setFileNameP1(file.name)
     } catch (e: unknown) {
       setErrorP1(e instanceof Error ? e.message : "Erro ao processar arquivo.")
@@ -672,10 +838,10 @@ export function ComparativoSessoesShell() {
     setErrorP2(null)
     try {
       const raw = await parseXlsxGenerico(file)
-      const rows = normalizarLinhasUpload(raw)
+      const rows = corrigirUnidadesPorPaciente(normalizarLinhasUpload(raw))
       if (rows.length === 0) throw new Error("Nenhuma sessão agendada encontrada no arquivo.")
       validarDataMinimaUpload(rows)
-      setSessoesUploadP2(rows)
+      setSessoesUploadP2(limitarPrimeirasOcorrenciasSemana(rows))
       setFileNameP2(file.name)
     } catch (e: unknown) {
       setErrorP2(e instanceof Error ? e.message : "Erro ao processar arquivo.")
@@ -691,7 +857,7 @@ export function ComparativoSessoesShell() {
     buscarGradeComparativo(refWeek.inicio, refWeek.fim)
       .then(raw => {
         if (cancelado) return
-        const rows = normalizarLinhasApi(raw)
+        const rows = corrigirUnidadesPorPaciente(normalizarLinhasApi(raw))
         if (rows.length === 0) throw new Error("Nenhuma sessão agendada encontrada no período.")
         setSessoesApiP2(rows)
       })
@@ -832,19 +998,82 @@ export function ComparativoSessoesShell() {
     return { paciente: p, p1, p2, horarios, dias, porTerapia }
   }, [pacienteExpandido, porPacienteFiltrado, sessoesP1Filtradas, sessoesP2Filtradas, agruparPsicologiaAba])
 
-  // Turnover de profissionais por terapia — independente do drill-down por
-  // paciente acima, mas usa o MESMO banco de filtros (Paciente/Convênio/
-  // Unidade, já aplicados em sessoesP1Filtradas/P2Filtradas acima) — só assim
-  // Unidade filtra igual pros dois lados (pacientes e profissionais).
+  // Turnover de profissionais — independente do drill-down por paciente
+  // acima, e com o PRÓPRIO banco de filtros (ver filtrosProfAtivos/FilterBarProfissional
+  // abaixo): buscar "Alice" no filtro de paciente não pode recortar sessão de
+  // profissional nenhuma, e vice-versa — os dois bancos de filtro operam em
+  // cópias independentes das sessões brutas (sessoesP1/sessoesP2), nunca em
+  // sessoesP1Filtradas/P2Filtradas (que é só do lado paciente).
+  //
+  // Duas perguntas diferentes, dois cálculos diferentes:
+  // 1) "Perdemos profissional de fato?" — por CABEÇA, somando todas as
+  //    terapias (agregarPorProfissional). Um profissional com 2 especialidades
+  //    que aumentou numa e zerou a outra entra aqui pelo saldo líquido, uma
+  //    vez só — não aparece ao mesmo tempo em ganhos e perdas.
+  // 2) "Essa especialidade específica ganhou/perdeu gente?" — por vínculo
+  //    profissional×terapia (calcularTurnoverProfissionais, seção "Movimentação
+  //    por Especialidade" mais abaixo). Aqui sim o mesmo profissional pode
+  //    aparecer saindo de uma terapia e entrando em outra — é reavaliação de
+  //    especialidade, não desligamento.
+  const [filtroProfissional, setFiltroProfissional] = useState("")
+  const [filtroEspecialidades, setFiltroEspecialidades] = useState<string[]>([])
+  const [filtroUnidadesProf, setFiltroUnidadesProf] = useState<string[]>([])
+  const [filtroP1MinProf, setFiltroP1MinProf] = useState<number | null>(null)
+  const [filtroP2MinProf, setFiltroP2MinProf] = useState<number | null>(null)
+  const [filtroDiferencaMinProf, setFiltroDiferencaMinProf] = useState<number | null>(null)
+  const [filtroDiferencaMaxProf, setFiltroDiferencaMaxProf] = useState<number | null>(null)
+  const filtrosProfTextoAtivos = filtroProfissional.trim() !== "" || filtroEspecialidades.length > 0 || filtroUnidadesProf.length > 0
+  const filtrosProfAtivos = filtrosProfTextoAtivos || filtroP1MinProf !== null || filtroP2MinProf !== null || filtroDiferencaMinProf !== null || filtroDiferencaMaxProf !== null
+  function limparFiltrosProf() {
+    setFiltroProfissional(""); setFiltroEspecialidades([]); setFiltroUnidadesProf([])
+    setFiltroP1MinProf(null); setFiltroP2MinProf(null); setFiltroDiferencaMinProf(null); setFiltroDiferencaMaxProf(null)
+  }
+
+  const especialidadeOptions = useMemo(() => {
+    const set = new Set<string>()
+    for (const s of [...sessoesP1, ...sessoesP2]) if (s.terapia) set.add(s.terapia)
+    return [...set].sort((a, b) => a.localeCompare(b, "pt-BR"))
+  }, [sessoesP1, sessoesP2])
+
+  const sessoesP1FiltradasProf = useMemo(() => {
+    const porTexto = filtrarSessoesPorProfissionalTexto(sessoesP1, filtroProfissional, filtroEspecialidades)
+    return filtroUnidadesProf.length === 0 ? porTexto : porTexto.filter(s => filtroUnidadesProf.includes(s.unidade))
+  }, [sessoesP1, filtroProfissional, filtroEspecialidades, filtroUnidadesProf])
+  const sessoesP2FiltradasProf = useMemo(() => {
+    const porTexto = filtrarSessoesPorProfissionalTexto(sessoesP2, filtroProfissional, filtroEspecialidades)
+    return filtroUnidadesProf.length === 0 ? porTexto : porTexto.filter(s => filtroUnidadesProf.includes(s.unidade))
+  }, [sessoesP2, filtroProfissional, filtroEspecialidades, filtroUnidadesProf])
+
+  // Dedup de sessões simultâneas do profissional (dupla/trio na mesma vaga
+  // contando como 1 horário ocupado, não N sessões — ver
+  // dedupSessaoDuplaProfissional) ANTES de qualquer agregação por
+  // profissional. Sem isso, um profissional que atende em dupla tem o total
+  // inflado 2x, e uma queda de dupla-pra-individual (ou o inverso) aparece
+  // como um salto de carga que nunca existiu de verdade.
+  const sessoesP1ProfissionalDedup = useMemo(() => dedupSessaoDuplaProfissional(sessoesP1FiltradasProf), [sessoesP1FiltradasProf])
+  const sessoesP2ProfissionalDedup = useMemo(() => dedupSessaoDuplaProfissional(sessoesP2FiltradasProf), [sessoesP2FiltradasProf])
+
+  const movimentoProfissionais = useMemo(
+    () => agregarPorProfissional(sessoesP1ProfissionalDedup, sessoesP2ProfissionalDedup),
+    [sessoesP1ProfissionalDedup, sessoesP2ProfissionalDedup],
+  )
+  const resumoMovimentoProfissionais = useMemo(
+    () => calcularResumoMovimentoProfissionais(movimentoProfissionais),
+    [movimentoProfissionais],
+  )
+  const profissionaisAtivosP1 = useMemo(() => movimentoProfissionais.filter(p => p.p1 > 0).length, [movimentoProfissionais])
+  const profissionaisAtivosP2 = useMemo(() => movimentoProfissionais.filter(p => p.p2 > 0).length, [movimentoProfissionais])
+  const profissionaisRetidos = useMemo(() => movimentoProfissionais.filter(p => p.p1 > 0 && p.p2 > 0).length, [movimentoProfissionais])
+  const retencaoProfissionaisPct = profissionaisAtivosP1 > 0 ? profissionaisRetidos / profissionaisAtivosP1 : null
+
   const [agruparPsicologiaAbaTurnover, setAgruparPsicologiaAbaTurnover] = useState(false)
   const [turnoverExpandido, setTurnoverExpandido] = useState<string | null>(null)
 
   const turnover = useMemo(
-    () => calcularTurnoverProfissionais(sessoesP1Filtradas, sessoesP2Filtradas, agruparPsicologiaAbaTurnover),
-    [sessoesP1Filtradas, sessoesP2Filtradas, agruparPsicologiaAbaTurnover],
+    () => calcularTurnoverProfissionais(sessoesP1ProfissionalDedup, sessoesP2ProfissionalDedup, agruparPsicologiaAbaTurnover),
+    [sessoesP1ProfissionalDedup, sessoesP2ProfissionalDedup, agruparPsicologiaAbaTurnover],
   )
   const turnoverAtivo = turnover.find(t => t.chave === turnoverExpandido) ?? null
-  const resumoTurnover = useMemo(() => calcularResumoTurnoverGeral(turnover), [turnover])
 
   // Filtro por categoria de movimento (mesma lógica de "Por Paciente"): clicar
   // num card de Ganhos/Perdas de profissionais filtra a tabela "Por
@@ -853,22 +1082,47 @@ export function ComparativoSessoesShell() {
   function toggleFiltroTurnover(categoria: FiltroCategoria) {
     setFiltroCategoriaTurnover(prev => (prev === categoria ? null : categoria))
   }
-  const linhasProfissionalTerapia = useMemo(
-    () => turnover.flatMap(t => t.movimento.map(m => ({ ...m, terapia: t.terapia, chaveGrupo: t.chave }))),
-    [turnover],
-  )
   const [sortProfissionalTerapia, setSortProfissionalTerapia] = useState<SortCriterio[]>([{ key: "profissional", dir: "asc" }])
   function onSortProfissionalTerapia(key: string) {
     setSortProfissionalTerapia(prev => cicloOrdenacao(prev, key))
   }
-  const linhasProfissionalFiltrado = useMemo(() => {
-    let linhas = linhasProfissionalTerapia
+  const porProfissionalFiltrado = useMemo(() => {
+    let linhas = movimentoProfissionais
     if (filtroCategoriaTurnover) {
       const categorias = FILTRO_CATEGORIAS[filtroCategoriaTurnover]
-      linhas = linhas.filter(m => categorias.includes(classificarMovimento(m)))
+      linhas = linhas.filter(p => categorias.includes(classificarMovimento(p)))
     }
+    linhas = linhas.filter(p => passaFiltroNumerico(p, filtroP1MinProf, filtroP2MinProf, filtroDiferencaMinProf, filtroDiferencaMaxProf))
     return ordenarPorMulti(linhas, sortProfissionalTerapia)
-  }, [linhasProfissionalTerapia, filtroCategoriaTurnover, sortProfissionalTerapia])
+  }, [movimentoProfissionais, filtroCategoriaTurnover, filtroP1MinProf, filtroP2MinProf, filtroDiferencaMinProf, filtroDiferencaMaxProf, sortProfissionalTerapia])
+
+  // Drill-down "Ver agendamentos" de "Por Profissional" — mesmo padrão do
+  // drill-down "Por Paciente" acima, mas pra sessões do profissional (todas
+  // as terapias que ele atende, não uma só).
+  const [profissionalExpandido, setProfissionalExpandido] = useState<string | null>(null)
+  function chaveProfissionalLinha(p: Pick<ProfissionalMovimento, "idProfissional" | "profissional">): string {
+    return `${p.idProfissional ?? "s"}-${p.profissional}`
+  }
+  const sessoesProfissionalExpandido = useMemo(() => {
+    if (!profissionalExpandido) return null
+    const p = porProfissionalFiltrado.find(x => chaveProfissionalLinha(x) === profissionalExpandido)
+    if (!p) return null
+    const p1 = sessoesDoProfissional(sessoesP1FiltradasProf, p)
+    const p2 = sessoesDoProfissional(sessoesP2FiltradasProf, p)
+    // Mesmos horários/dias nos dois grids — pra comparar P1 x P2 lado a lado
+    // na mesma grade (slot vazio num lado e preenchido no outro salta aos olhos).
+    const todas = [...p1, ...p2]
+    const horarios = [...new Set(todas.map(s => s.hora))].sort()
+    const diasPresentes = new Set(todas.map(s => s.diaSemanaIndice).filter((d): d is number => d !== null))
+    const dias = ORDEM_DIAS_EXIBICAO.filter(d => DIAS_UTEIS_SEMPRE_VISIVEIS.includes(d) || diasPresentes.has(d))
+    const nomesAgrupar = agruparPsicologiaAbaTurnover ? nomesDoGrupoPsicologiaAba(todas) : undefined
+    // "Por Especialidade" tem que bater com o total dedupado das pills acima
+    // (profissional.p1/p2) — por isso conta em cima das sessões dedupadas
+    // (dedupSessaoDuplaProfissional), não das brutas usadas só pra desenhar a
+    // grade (que precisa das repetições pra mostrar o "(x2)").
+    const porTerapia = calcularResumoPorTerapia(dedupSessaoDuplaProfissional(p1), dedupSessaoDuplaProfissional(p2), nomesAgrupar)
+    return { profissional: p, p1, p2, horarios, dias, porTerapia }
+  }, [profissionalExpandido, porProfissionalFiltrado, sessoesP1FiltradasProf, sessoesP2FiltradasProf, agruparPsicologiaAbaTurnover])
 
   const [anoIni, mesIni, diaIni] = refWeek.inicio.split("-")
   const [anoFim, mesFim, diaFim] = refWeek.fim.split("-")
@@ -1192,7 +1446,7 @@ export function ComparativoSessoesShell() {
                             type="button"
                             onClick={() => setPacienteExpandido(chave)}
                             aria-pressed={aberta}
-                            className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-[11px] font-bold shadow-sm transition-all
+                            className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-bold shadow-sm transition-all
                               ${aberta
                                 ? "border-sky-300 bg-sky-100 text-sky-700 ring-2 ring-sky-200 dark:border-sky-700 dark:bg-sky-900/40 dark:text-sky-300 dark:ring-sky-800/50"
                                 : "border-border bg-gradient-to-r from-slate-50 to-sky-50 text-foreground hover:border-sky-300/60 hover:shadow-md dark:from-slate-800/60 dark:to-sky-950/30"}`}
@@ -1216,21 +1470,27 @@ export function ComparativoSessoesShell() {
             <DialogContent className="flex h-[92vh] w-[95vw] max-w-6xl flex-col overflow-hidden rounded-2xl p-0 sm:max-w-6xl">
               {sessoesPacienteExpandido && (
                 <>
-                  <DialogHeader className="gap-3 border-b border-border px-6 py-5">
+                  <DialogHeader className="gap-3 border-b border-sky-200 bg-sky-50 px-6 py-5 dark:border-sky-900/60 dark:bg-sky-950/40">
                     <DialogTitle className="text-lg font-bold text-foreground">
                       {sessoesPacienteExpandido.paciente.paciente}
                     </DialogTitle>
                     <DialogDescription asChild>
-                      <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-xs text-muted-foreground">
-                        <span>Id {sessoesPacienteExpandido.paciente.idFavorecido ?? "—"}</span>
-                        <span>{sessoesPacienteExpandido.paciente.convenio || "Sem convênio"}</span>
-                        <span className="flex items-center gap-1.5">
-                          {labelP1} <strong className="text-sm font-bold text-foreground">{sessoesPacienteExpandido.paciente.p1}</strong>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center rounded-full border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-muted-foreground shadow-sm">
+                          Id {sessoesPacienteExpandido.paciente.idFavorecido ?? "—"}
                         </span>
-                        <span className="flex items-center gap-1.5">
-                          {labelP2} <strong className="text-sm font-bold text-foreground">{sessoesPacienteExpandido.paciente.p2}</strong>
+                        <span className="inline-flex items-center rounded-full border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-muted-foreground shadow-sm">
+                          {sessoesPacienteExpandido.paciente.convenio || "Sem convênio"}
                         </span>
-                        <span className="flex items-center gap-1.5">
+                        <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card py-1 pl-2.5 pr-1 text-[11px] font-semibold text-muted-foreground shadow-sm">
+                          {labelP1}
+                          <strong className="rounded-full bg-muted px-2 py-0.5 text-xs font-bold text-foreground">{sessoesPacienteExpandido.paciente.p1}</strong>
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card py-1 pl-2.5 pr-1 text-[11px] font-semibold text-muted-foreground shadow-sm">
+                          {labelP2}
+                          <strong className="rounded-full bg-muted px-2 py-0.5 text-xs font-bold text-foreground">{sessoesPacienteExpandido.paciente.p2}</strong>
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-muted-foreground shadow-sm">
                           Diferença <DiffBadge v={sessoesPacienteExpandido.paciente.diferenca} />
                         </span>
                       </div>
@@ -1258,62 +1518,78 @@ export function ComparativoSessoesShell() {
             </DialogContent>
           </Dialog>
 
-          {/* Resumo geral do turnover — mesmo padrão visual E mesmo
-              comportamento de filtro do resumo de pacientes acima: clicar num
-              card filtra a tabela "Por Profissional" abaixo. */}
+          <FilterBarProfissional
+            profissional={filtroProfissional} onProfissional={setFiltroProfissional}
+            especialidades={filtroEspecialidades} onEspecialidades={setFiltroEspecialidades} especialidadeOptions={especialidadeOptions}
+            unidades={filtroUnidadesProf} onUnidades={setFiltroUnidadesProf} unidadeOptions={unidadeOptions}
+            p1Min={filtroP1MinProf} onP1Min={setFiltroP1MinProf}
+            p2Min={filtroP2MinProf} onP2Min={setFiltroP2MinProf}
+            diferencaMin={filtroDiferencaMinProf} onDiferencaMin={setFiltroDiferencaMinProf}
+            diferencaMax={filtroDiferencaMaxProf} onDiferencaMax={setFiltroDiferencaMaxProf}
+            ativo={filtrosProfAtivos} onLimpar={limparFiltrosProf}
+          />
+
+          {/* Quadro de profissionais — por CABEÇA (soma de todas as terapias),
+              não por vínculo profissional×terapia. Responde "perdemos gente de
+              fato?" sem duplicar quem só trocou de especialidade. */}
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <StatCard tone="slate" icon={<UsersRound size={15} />} label={labelP1}>
-              <div className="text-2xl font-black text-foreground">{resumoTurnover.totalP1}</div>
-              <div className="mt-0.5 text-xs text-muted-foreground">vínculos profissional × terapia</div>
+            <StatCard tone="slate" icon={<UsersRound size={15} />} label={`Profissionais ativos — ${labelP1}`}>
+              <div className="text-2xl font-black text-foreground">{profissionaisAtivosP1}</div>
             </StatCard>
-            <StatCard tone="blue" icon={<UsersRound size={15} />} label={labelP2}>
-              <div className="text-2xl font-black text-foreground">{resumoTurnover.totalP2}</div>
+            <StatCard tone="blue" icon={<UsersRound size={15} />} label={`Profissionais ativos — ${labelP2}`}>
+              <div className="text-2xl font-black text-foreground">{profissionaisAtivosP2}</div>
             </StatCard>
-            <StatCard tone={resumoTurnover.diferenca > 0 ? "green" : resumoTurnover.diferenca < 0 ? "red" : "slate"} icon={<ArrowRightLeft size={15} />} label="Diferença">
-              <div className="text-2xl font-black text-foreground">{resumoTurnover.diferenca > 0 ? "+" : ""}{resumoTurnover.diferenca}</div>
+            <StatCard tone={profissionaisAtivosP2 - profissionaisAtivosP1 > 0 ? "green" : profissionaisAtivosP2 - profissionaisAtivosP1 < 0 ? "red" : "slate"} icon={<ArrowRightLeft size={15} />} label="Saldo de quantidade de profissionais">
+              <div className="text-2xl font-black text-foreground">
+                {profissionaisAtivosP2 - profissionaisAtivosP1 > 0 ? "+" : ""}{profissionaisAtivosP2 - profissionaisAtivosP1}
+              </div>
             </StatCard>
-            <StatCard tone={resumoTurnover.diferenca > 0 ? "green" : resumoTurnover.diferenca < 0 ? "red" : "slate"} icon={<TrendingUp size={15} />} label="Variação %">
-              <div className="text-2xl font-black text-foreground">{fmtPct(resumoTurnover.variacaoPct)}</div>
+            <StatCard tone="slate" icon={<UserCheck size={15} />} label="Retenção">
+              <div className="text-2xl font-black text-foreground">{fmtPct(retencaoProfissionaisPct)}</div>
+              <div className="mt-0.5 text-xs text-muted-foreground">{profissionaisRetidos} de {profissionaisAtivosP1} continuam ativos</div>
             </StatCard>
           </div>
 
+          {/* Ganhos e Perdas — mesmo padrão visual do resumo de pacientes acima,
+              mas agora a unidade É o profissional (headcount): clicar num card
+              filtra a tabela "Por Profissional" abaixo por essa categoria. */}
           <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_180px]">
             <GroupCard
-              tone="green" icon={<TrendingUp size={14} />} title="Ganhos de profissionais" sign="pos"
-              totalQtd={resumoTurnover.profissionaisAumentaram + resumoTurnover.profissionaisNovosCaptados}
-              totalSessoes={resumoTurnover.sessoesAumentadas + resumoTurnover.sessoesNovosCaptados}
+              tone="green" icon={<TrendingUp size={14} />} title="Ganhos de profissionais" sign="pos" unidade="profissionais"
+              totalQtd={resumoMovimentoProfissionais.profissionaisAumentaram + resumoMovimentoProfissionais.profissionaisNovos}
+              totalSessoes={resumoMovimentoProfissionais.sessoesAumentadas + resumoMovimentoProfissionais.sessoesNovos}
               totalAtivo={filtroCategoriaTurnover === "ganhos"} onTotalClick={() => toggleFiltroTurnover("ganhos")}
             >
               <MetricButton
                 label="Profissionais com aumento" sign="pos" tone="green" unidade="profissionais"
-                qtd={resumoTurnover.profissionaisAumentaram} sessoes={resumoTurnover.sessoesAumentadas}
+                qtd={resumoMovimentoProfissionais.profissionaisAumentaram} sessoes={resumoMovimentoProfissionais.sessoesAumentadas}
                 active={filtroCategoriaTurnover === "aumento"} onClick={() => toggleFiltroTurnover("aumento")}
                 titulo="Filtrar Por Profissional: Profissionais com aumento"
               />
               <MetricButton
-                label="Novos profissionais captados" sign="pos" tone="green" unidade="profissionais"
-                qtd={resumoTurnover.profissionaisNovosCaptados} sessoes={resumoTurnover.sessoesNovosCaptados}
+                label="Novos profissionais" sign="pos" tone="green" unidade="profissionais"
+                qtd={resumoMovimentoProfissionais.profissionaisNovos} sessoes={resumoMovimentoProfissionais.sessoesNovos}
                 active={filtroCategoriaTurnover === "novos"} onClick={() => toggleFiltroTurnover("novos")}
-                titulo="Filtrar Por Profissional: Novos profissionais captados"
+                titulo="Filtrar Por Profissional: Novos profissionais"
               />
             </GroupCard>
             <GroupCard
-              tone="red" icon={<TrendingDown size={14} />} title="Perdas de profissionais" sign="neg"
-              totalQtd={resumoTurnover.profissionaisReduziram + resumoTurnover.profissionaisDesligados}
-              totalSessoes={resumoTurnover.sessoesReduzidas + resumoTurnover.sessoesDesligados}
+              tone="red" icon={<TrendingDown size={14} />} title="Perdas de profissionais" sign="neg" unidade="profissionais"
+              totalQtd={resumoMovimentoProfissionais.profissionaisReduziram + resumoMovimentoProfissionais.profissionaisDesligados}
+              totalSessoes={resumoMovimentoProfissionais.sessoesReduzidas + resumoMovimentoProfissionais.sessoesDesligados}
               totalAtivo={filtroCategoriaTurnover === "perdas"} onTotalClick={() => toggleFiltroTurnover("perdas")}
             >
               <MetricButton
                 label="Profissionais com redução" sign="neg" tone="red" unidade="profissionais"
-                qtd={resumoTurnover.profissionaisReduziram} sessoes={resumoTurnover.sessoesReduzidas}
+                qtd={resumoMovimentoProfissionais.profissionaisReduziram} sessoes={resumoMovimentoProfissionais.sessoesReduzidas}
                 active={filtroCategoriaTurnover === "reducao"} onClick={() => toggleFiltroTurnover("reducao")}
                 titulo="Filtrar Por Profissional: Profissionais com redução"
               />
               <MetricButton
                 label="Profissionais que saíram" sign="neg" tone="red" unidade="profissionais"
-                qtd={resumoTurnover.profissionaisDesligados} sessoes={resumoTurnover.sessoesDesligados}
+                qtd={resumoMovimentoProfissionais.profissionaisDesligados} sessoes={resumoMovimentoProfissionais.sessoesDesligados}
                 active={filtroCategoriaTurnover === "desligados"} onClick={() => toggleFiltroTurnover("desligados")}
-                titulo="Filtrar Por Profissional: Profissionais que saíram"
+                titulo="Filtrar Por Profissional: Profissionais que saíram (zero sessões em qualquer terapia)"
               />
             </GroupCard>
             <button
@@ -1327,7 +1603,7 @@ export function ComparativoSessoesShell() {
               {filtroCategoriaTurnover === "semAlteracao" && <span className="pointer-events-none absolute inset-1.5 rounded-xl ring-2 ring-slate-400" />}
               {filtroCategoriaTurnover === "semAlteracao" && <Filter size={11} className={TONE_SOFT.slate.text} />}
               <Minus size={16} className="text-muted-foreground" />
-              <div className="text-2xl font-black text-foreground">{resumoTurnover.profissionaisSemAlteracao}</div>
+              <div className="text-2xl font-black text-foreground">{resumoMovimentoProfissionais.profissionaisSemAlteracao}</div>
               <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Sem alteração</div>
             </button>
           </div>
@@ -1337,7 +1613,7 @@ export function ComparativoSessoesShell() {
               <UsersRound size={15} className="text-muted-foreground" />
               <span className="text-sm font-bold text-foreground">Por Profissional</span>
               <span className="text-xs text-muted-foreground">
-                {filtroCategoriaTurnover ? `${linhasProfissionalFiltrado.length} de ${linhasProfissionalTerapia.length}` : `(${linhasProfissionalTerapia.length})`}
+                {filtroCategoriaTurnover ? `${porProfissionalFiltrado.length} de ${movimentoProfissionais.length}` : `(${movimentoProfissionais.length})`}
               </span>
               <BotaoLimparOrdenacao criterios={sortProfissionalTerapia} onClear={() => setSortProfissionalTerapia([])} />
               {filtroCategoriaTurnover && (
@@ -1358,55 +1634,156 @@ export function ComparativoSessoesShell() {
                   deslizando de posição). Largura fixa por coluna evita isso. */}
               <table className="w-full table-fixed text-xs">
                 <colgroup>
-                  <col className="w-52" />
-                  <col />
-                  <col className="w-24" />
-                  <col className="w-24" />
-                  <col className="w-24" />
+                  <col className="w-[34%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[14%]" />
+                  <col className="w-[24%]" />
                 </colgroup>
                 <thead className="sticky top-0 bg-card">
                   <tr className="border-b border-border text-left text-muted-foreground">
                     <SortableTh label="Profissional" sortKey="profissional" criterios={sortProfissionalTerapia} onClick={onSortProfissionalTerapia} />
-                    <SortableTh label="Terapia" sortKey="terapia" criterios={sortProfissionalTerapia} onClick={onSortProfissionalTerapia} />
                     <SortableTh label={labelP1} sortKey="p1" criterios={sortProfissionalTerapia} align="right" onClick={onSortProfissionalTerapia} />
                     <SortableTh label={labelP2} sortKey="p2" criterios={sortProfissionalTerapia} align="right" onClick={onSortProfissionalTerapia} />
                     <SortableTh label="Diferença" sortKey="diferenca" criterios={sortProfissionalTerapia} align="right" onClick={onSortProfissionalTerapia} />
+                    <th className="py-1.5 pl-2" />
                   </tr>
                 </thead>
                 <tbody>
-                  {linhasProfissionalFiltrado.length === 0 && (
+                  {porProfissionalFiltrado.length === 0 && (
                     <tr><td colSpan={5} className="py-4 text-center text-muted-foreground">Nenhum profissional nessa categoria.</td></tr>
                   )}
-                  {linhasProfissionalFiltrado.map(m => (
-                    <tr key={`${m.chave}-${m.chaveGrupo}`} className="border-b border-border/40 last:border-0 hover:bg-muted/30">
-                      <td className="truncate py-1.5 pr-2 text-foreground">{m.profissional}</td>
-                      <td className="py-1.5 px-2 text-foreground">
-                        <span className="inline-flex min-w-0 items-center gap-1.5">
-                          <IconeOuDotTerapia nome={m.terapia} />
-                          <span className="truncate">{m.terapia}</span>
-                        </span>
-                      </td>
-                      <td className="py-1.5 px-2 text-right tabular-nums">{m.p1}</td>
-                      <td className="py-1.5 px-2 text-right tabular-nums">{m.p2}</td>
-                      <td className="py-1.5 pl-2 text-right"><DiffBadge v={m.diferenca} /></td>
-                    </tr>
-                  ))}
+                  {porProfissionalFiltrado.map(m => {
+                    const chave = chaveProfissionalLinha(m)
+                    const aberta = profissionalExpandido === chave
+                    return (
+                      <tr key={chave} className="border-b border-border/40 last:border-0 hover:bg-muted/30">
+                        <td className="truncate py-1.5 pr-2 text-foreground">{m.profissional}</td>
+                        <td className="py-1.5 px-2 text-right tabular-nums">{m.p1}</td>
+                        <td className="py-1.5 px-2 text-right tabular-nums">{m.p2}</td>
+                        <td className="py-1.5 pl-2 text-right"><DiffBadge v={m.diferenca} /></td>
+                        <td className="py-1.5 pl-2 pr-1 text-right">
+                          <button
+                            type="button"
+                            onClick={() => setProfissionalExpandido(chave)}
+                            aria-pressed={aberta}
+                            className={`inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-3 py-1 text-[11px] font-bold shadow-sm transition-all
+                              ${aberta
+                                ? "border-sky-300 bg-sky-100 text-sky-700 ring-2 ring-sky-200 dark:border-sky-700 dark:bg-sky-900/40 dark:text-sky-300 dark:ring-sky-800/50"
+                                : "border-border bg-gradient-to-r from-slate-50 to-sky-50 text-foreground hover:border-sky-300/60 hover:shadow-md dark:from-slate-800/60 dark:to-sky-950/30"}`}
+                          >
+                            <CalendarDays size={12} />
+                            Ver agendamentos
+                          </button>
+                        </td>
+                      </tr>
+                    )
+                  })}
                 </tbody>
               </table>
             </div>
           </div>
+
+          <Dialog open={profissionalExpandido !== null} onOpenChange={aberto => !aberto && setProfissionalExpandido(null)}>
+            <DialogContent className="flex h-[92vh] w-[95vw] max-w-6xl flex-col overflow-hidden rounded-2xl p-0 sm:max-w-6xl">
+              {sessoesProfissionalExpandido && (
+                <>
+                  <DialogHeader className="gap-3 border-b border-sky-200 bg-sky-50 px-6 py-5 dark:border-sky-900/60 dark:bg-sky-950/40">
+                    <DialogTitle className="text-lg font-bold text-foreground">
+                      {sessoesProfissionalExpandido.profissional.profissional}
+                    </DialogTitle>
+                    <DialogDescription asChild>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card py-1 pl-2.5 pr-1 text-[11px] font-semibold text-muted-foreground shadow-sm">
+                          {labelP1}
+                          <strong className="rounded-full bg-muted px-2 py-0.5 text-xs font-bold text-foreground">{sessoesProfissionalExpandido.profissional.p1}</strong>
+                        </span>
+                        <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card py-1 pl-2.5 pr-1 text-[11px] font-semibold text-muted-foreground shadow-sm">
+                          {labelP2}
+                          <strong className="rounded-full bg-muted px-2 py-0.5 text-xs font-bold text-foreground">{sessoesProfissionalExpandido.profissional.p2}</strong>
+                        </span>
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-muted-foreground shadow-sm">
+                          Diferença <DiffBadge v={sessoesProfissionalExpandido.profissional.diferenca} />
+                        </span>
+                      </div>
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="flex-1 overflow-y-auto px-6 py-5">
+                    <div className="grid gap-5">
+                      <AgendaGrid
+                        titulo={labelP1} sessoes={sessoesProfissionalExpandido.p1}
+                        horarios={sessoesProfissionalExpandido.horarios} dias={sessoesProfissionalExpandido.dias}
+                        agruparRepetidos contagemSessoes={sessoesProfissionalExpandido.profissional.p1}
+                      />
+                      <AgendaGrid
+                        titulo={labelP2} sessoes={sessoesProfissionalExpandido.p2}
+                        horarios={sessoesProfissionalExpandido.horarios} dias={sessoesProfissionalExpandido.dias}
+                        agruparRepetidos contagemSessoes={sessoesProfissionalExpandido.profissional.p2}
+                      />
+                    </div>
+                    <ResumoPorTerapiaTabela
+                      labelP1={labelP1} labelP2={labelP2}
+                      resumo={sessoesProfissionalExpandido.porTerapia}
+                      agrupado={agruparPsicologiaAbaTurnover} onToggleAgrupado={() => setAgruparPsicologiaAbaTurnover(prev => !prev)}
+                    />
+                  </div>
+                </>
+              )}
+            </DialogContent>
+          </Dialog>
+
+          <p className="text-xs text-muted-foreground">
+            Abaixo, a mesma movimentação vista por especialidade — um profissional pode aparecer saindo de uma terapia e entrando em outra sem ter saído da clínica (reavaliação de alocação, não saída de profissional).
+          </p>
 
           <TurnoverProfissionaisSection
             turnover={turnover}
             agrupado={agruparPsicologiaAbaTurnover} onToggleAgrupado={() => setAgruparPsicologiaAbaTurnover(prev => !prev)}
             expandido={turnoverExpandido} onExpandir={setTurnoverExpandido}
             grupoAtivo={turnoverAtivo}
-            sessoesP1={sessoesP1Filtradas} sessoesP2={sessoesP2Filtradas}
+            sessoesP1={sessoesP1FiltradasProf} sessoesP2={sessoesP2FiltradasProf}
             labelP1={labelP1} labelP2={labelP2}
           />
         </>
       )}
     </div>
+  )
+}
+
+/** Conta ocorrências repetidas de um mesmo nome de terapia num slot, preservando a ordem de primeira aparição — usado só quando `agruparRepetidos` está ativo (ver AgendaGridProps). */
+function agruparNomesRepetidos(nomes: string[]): { nome: string; qtd: number }[] {
+  const contagem = new Map<string, number>()
+  for (const nome of nomes) contagem.set(nome, (contagem.get(nome) ?? 0) + 1)
+  return [...contagem.entries()].map(([nome, qtd]) => ({ nome, qtd }))
+}
+
+/**
+ * Aviso discreto e clicável (não só `title` — funciona a touch, sem hover)
+ * pra sessão(ões) cuja unidade foi inferida por proximidade (ver
+ * corrigirUnidadesPorPaciente) porque a Sala vinha vazia no relatório de
+ * origem naquele horário específico. `<details>` em vez de tooltip nativo
+ * de propósito: mesmo padrão já usado em MultiSelectDropdown, funciona em
+ * qualquer dispositivo (clique/tap abre e fecha).
+ */
+function AvisoUnidadeInferida({ sessoes }: { sessoes: SessaoComparativo[] }) {
+  const relevantes = sessoes.filter(s => s.unidadeInferida)
+  if (relevantes.length === 0) return null
+  return (
+    <details className="relative ml-auto shrink-0" onClick={e => e.stopPropagation()}>
+      <summary
+        className="inline-flex cursor-pointer list-none items-center text-amber-500 hover:text-amber-600 dark:text-amber-400 dark:hover:text-amber-300"
+        title="Sala/Unidade não informada nesse horário — clique pra detalhes"
+      >
+        <Info size={13} />
+      </summary>
+      <div className="absolute right-0 z-20 mt-1 w-64 rounded-md border border-amber-200 bg-amber-50 p-2 text-[11px] leading-snug text-amber-900 shadow-md dark:border-amber-900/50 dark:bg-amber-950/40 dark:text-amber-200">
+        {relevantes.map((s, i) => (
+          <p key={i} className={i > 0 ? "mt-1.5" : ""}>
+            Sala/Unidade não informada nessa sessão ({formatarDataSessao(s.data)} às {s.hora}) — unidade &quot;{s.unidade}&quot; inferida pela concentração das demais sessões deste paciente.
+          </p>
+        ))}
+      </div>
+    </details>
   )
 }
 
@@ -1416,10 +1793,40 @@ interface AgendaGridProps {
   /** Horários (linhas) e dias (colunas) — os MESMOS pra P1 e P2, calculados a partir da união das sessões dos dois períodos, pra dar pra comparar lado a lado na mesma grade. */
   horarios: string[]
   dias: number[]
+  /**
+   * No drill-down "Por Paciente", 2 especialidades no mesmo slot são 2 sessões
+   * diferentes — cada uma na sua própria linha, sempre (não alterar). No
+   * drill-down "Por Profissional", 2 sessões da MESMA especialidade no mesmo
+   * slot são 2 pacientes atendidos juntos — vira 1 linha com "(xN)" em
+   * destaque, em vez de repetir a linha (repetição ali passa a impressão de
+   * bug de duplicação, não de acúmulo real).
+   */
+  agruparRepetidos?: boolean
+  /**
+   * Sobrescreve a contagem exibida no cabeçalho ("(N sessões)") — usada só no
+   * contexto de profissional, onde a grade continua mostrando cada paciente
+   * (`sessoes` fica intacta, com repetições), mas o número que representa a
+   * carga real do profissional é o de horários ocupados após
+   * dedupSessaoDuplaProfissional (o mesmo número já exibido nas pills
+   * Período 1/2 do cabeçalho do modal — ver sessoesProfissionalExpandido).
+   * Sem isso, o cabeçalho da grade mostraria "126 sessões" enquanto a pill do
+   * modal mostra "63" pro mesmo profissional/período.
+   */
+  contagemSessoes?: number
+  /**
+   * Sobrescreve o azul genérico da faixa de título por um tom derivado da cor
+   * hex desta terapia (ver hexParaRgba) — usado só no drill-down de uma
+   * especialidade específica (TurnoverProfissionaisSection), onde a grade
+   * inteira já é sobre aquela terapia e o azul genérico não faz sentido. Sem
+   * isso, mantém o azul (drill-downs "Por Paciente"/"Por Profissional", que
+   * misturam várias terapias na mesma grade).
+   */
+  corTema?: string
 }
 
-/** Grade semanal (dia da semana x horário) das sessões de um paciente num período — formato agenda, pra comparar visualmente P1 x P2. Usada no drill-down "Por Paciente". */
-function AgendaGrid({ titulo, sessoes, horarios, dias }: AgendaGridProps) {
+/** Grade semanal (dia da semana x horário) das sessões de um paciente ou profissional num período — formato agenda, pra comparar visualmente P1 x P2. Usada nos drill-downs "Por Paciente" e "Por Profissional". */
+function AgendaGrid({ titulo, sessoes, horarios, dias, agruparRepetidos = false, contagemSessoes, corTema }: AgendaGridProps) {
+  const estiloTitulo = corTema ? { backgroundColor: hexParaRgba(corTema, 0.14), borderColor: hexParaRgba(corTema, 0.4) } : undefined
   const porSlot = useMemo(() => {
     const m = new Map<string, SessaoComparativo[]>()
     for (const s of sessoes) {
@@ -1435,9 +1842,12 @@ function AgendaGrid({ titulo, sessoes, horarios, dias }: AgendaGridProps) {
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
-      <div className="flex items-baseline gap-2 border-b border-border bg-muted/30 px-5 py-3">
+      <div
+        className={`flex items-baseline gap-2 border-b px-5 py-3 ${corTema ? "" : "border-sky-200 bg-sky-50 dark:border-sky-900/60 dark:bg-sky-950/40"}`}
+        style={estiloTitulo}
+      >
         <span className="text-base font-bold uppercase tracking-wide text-foreground">{titulo}</span>
-        <span className="text-sm font-medium text-muted-foreground">({sessoes.length} sessões)</span>
+        <span className="text-sm font-medium text-muted-foreground">({contagemSessoes ?? sessoes.length} sessões)</span>
       </div>
       <div className="overflow-x-auto">
         {/* table-fixed + colgroup: mesma largura de coluna nos dois grids (mesmo
@@ -1446,13 +1856,13 @@ function AgendaGrid({ titulo, sessoes, horarios, dias }: AgendaGridProps) {
             P1 e P2 (ver texto completo no tooltip). Bordas verticais entre dias
             (divide-x) porque, com poucas colunas ocupando a largura cheia do
             modal, o espaço em branco entre elas parecia vazio demais. */}
-        <table className="w-full table-fixed divide-x divide-border/40 text-sm">
+        <table className="w-full table-fixed border-separate border-spacing-0 text-sm">
           <colgroup>
             <col className="w-16" />
             {dias.map(d => <col key={d} />)}
           </colgroup>
           <thead>
-            <tr className="divide-x divide-border/40 text-left text-muted-foreground">
+            <tr className="divide-x divide-border/40 border-b border-border text-left text-muted-foreground">
               <th className="py-2.5 pl-4 pr-4 font-semibold">Hora</th>
               {dias.map(d => (
                 <th key={d} className="truncate px-3 py-2.5 text-left font-semibold">{DIAS_SEMANA_LABEL[d]}</th>
@@ -1464,7 +1874,7 @@ function AgendaGrid({ titulo, sessoes, horarios, dias }: AgendaGridProps) {
               <tr><td colSpan={dias.length + 1} className="py-3 pl-4 text-muted-foreground">Sem sessões nesse período.</td></tr>
             )}
             {horarios.map((hora, i) => (
-              <tr key={hora} className={`divide-x divide-border/40 border-t border-border/40 ${i % 2 === 1 ? "bg-muted/15" : ""}`}>
+              <tr key={hora} className={`divide-x divide-border/40 ${i % 2 === 1 ? "bg-muted/15" : ""}`}>
                 <td className="py-2 pl-4 pr-4 font-medium tabular-nums text-muted-foreground">{hora}</td>
                 {dias.map(d => {
                   const celula = porSlot.get(`${d}|||${hora}`)
@@ -1474,24 +1884,37 @@ function AgendaGrid({ titulo, sessoes, horarios, dias }: AgendaGridProps) {
                   // linha por terapia, cada uma com sua própria bolinha de cor.
                   const nomes = celula?.flatMap(s => (s.terapia || "—").split(" + "))
                   const tooltip = celula?.map(s => `${s.terapia || "—"} (Id Terapia: ${s.idTerapia ?? "—"})`).join(" + ")
-                  // Faixa vertical na borda direita da célula, na cor da
+                  // Faixa vertical na borda esquerda da célula, na cor da
                   // terapia — reforça a identidade visual além do ícone,
-                  // ocupando a altura inteira do slot de 40min.
+                  // ocupando a altura inteira do slot de 40min. `border-left`
+                  // num <div> interno, de propósito — NÃO box-shadow direto na
+                  // <td>: box-shadow em table-cell tem histórico de renderização
+                  // inconsistente entre navegadores (linha vazando pra fora da
+                  // célula). border-left num elemento normal não tem essa
+                  // ambiguidade.
                   return (
-                    <td
-                      key={d}
-                      className="px-3 py-2 text-left text-foreground"
-                      style={nomes ? { boxShadow: `inset -3px 0 0 0 ${corDotComContraste(nomes[0])}` } : undefined}
-                      title={tooltip}
-                    >
-                      {nomes
-                        ? nomes.map((nome, i) => (
-                            <div key={i} className="flex min-w-0 items-center justify-start gap-2">
-                              <IconeOuDotTerapia nome={nome} />
-                              <span className="truncate font-medium">{nome}</span>
-                            </div>
-                          ))
-                        : <span className="text-muted-foreground/40">—</span>}
+                    <td key={d} className="p-0 text-left text-foreground" title={tooltip}>
+                      <div
+                        className="relative h-full px-3 py-2"
+                        style={nomes ? { borderLeft: `3px solid ${corDotComContraste(nomes[0])}` } : undefined}
+                      >
+                        {celula && (
+                          <div className="absolute right-1 top-1">
+                            <AvisoUnidadeInferida sessoes={celula} />
+                          </div>
+                        )}
+                        {nomes
+                          ? (agruparRepetidos ? agruparNomesRepetidos(nomes) : nomes.map(nome => ({ nome, qtd: 1 }))).map((item, i) => (
+                              <div key={i} className="flex min-w-0 items-center justify-start gap-2">
+                                <IconeOuDotTerapia nome={item.nome} />
+                                <span className="truncate font-medium">{item.nome}</span>
+                                {item.qtd > 1 && (
+                                  <span className="font-extrabold text-rose-600 dark:text-rose-400">(x{item.qtd})</span>
+                                )}
+                              </div>
+                            ))
+                          : <span className="text-muted-foreground/40">—</span>}
+                      </div>
                     </td>
                   )
                 })}
@@ -1585,11 +2008,11 @@ function somaSessoes(lista: ProfissionalTurnover[]): number {
   return lista.reduce((acc, p) => acc + p.sessoes, 0)
 }
 
-/** Horários/dias de uma lista de sessões — mesmo cálculo usado pra alimentar AgendaGrid, reaproveitado aqui pra agenda de um profissional isolado. */
+/** Horários/dias de uma lista de sessões — mesmo cálculo usado pra alimentar AgendaGrid, reaproveitado aqui pra agenda de um profissional isolado. Segunda a sexta sempre aparecem (mesma regra do drill-down "Por Paciente"/"Por Profissional" — ver DIAS_UTEIS_SEMPRE_VISIVEIS), mesmo sem sessão nenhuma naquele dia. */
 function construirAgendaDe(sessoes: SessaoComparativo[]) {
   const horarios = [...new Set(sessoes.map(s => s.hora))].sort()
   const diasPresentes = new Set(sessoes.map(s => s.diaSemanaIndice).filter((d): d is number => d !== null))
-  const dias = ORDEM_DIAS_EXIBICAO.filter(d => diasPresentes.has(d))
+  const dias = ORDEM_DIAS_EXIBICAO.filter(d => DIAS_UTEIS_SEMPRE_VISIVEIS.includes(d) || diasPresentes.has(d))
   return { horarios, dias }
 }
 
@@ -1649,9 +2072,8 @@ function TurnoverProfissionaisSection({
     <div className="rounded-xl border border-border bg-card p-4">
       <div className="mb-3 flex flex-wrap items-center gap-2">
         <UsersRound size={15} className="text-muted-foreground" />
-        <span className="text-sm font-bold text-foreground">Rotatividade de Profissionais por Terapia</span>
+        <span className="text-sm font-bold text-foreground">Movimentação por Especialidade</span>
         <span className="text-xs text-muted-foreground">({turnover.length})</span>
-        <span className="text-[11px] font-normal text-muted-foreground">quem atendia e não atende mais (e vice-versa), por especialidade</span>
         <BotaoLimparOrdenacao criterios={sortTurnover} onClear={() => setSortTurnover([])} />
 
         <div className="ml-auto flex items-center gap-2">
@@ -1669,6 +2091,17 @@ function TurnoverProfissionaisSection({
             Agrupar {ROTULO_PSICOLOGIA_ABA}
           </button>
         </div>
+      </div>
+
+      {/* Aviso com peso visual próprio — a distinção "trocou de especialidade"
+          vs. "saiu de fato" é o ponto mais fácil de ler errado nessa tabela
+          (ver conversa que motivou a seção "Quadro de Profissionais" acima),
+          por isso fica destacado, não como legenda pequena e apagada. */}
+      <div className="mb-4 flex items-start gap-2.5 rounded-lg border border-sky-200 bg-sky-50 px-3.5 py-2.5 dark:border-sky-900/50 dark:bg-sky-950/30">
+        <Info size={16} className="mt-0.5 shrink-0 text-sky-600 dark:text-sky-400" />
+        <p className="text-xs text-sky-900 dark:text-sky-200">
+          Quem parou/passou a atender cada terapia — <strong className="font-bold">não é saída de profissional</strong>: o mesmo pode continuar ativo em outra especialidade.
+        </p>
       </div>
 
       <div className="overflow-x-auto">
@@ -1690,9 +2123,9 @@ function TurnoverProfissionaisSection({
               <SortableTh label="Prof. Período 1" sortKey="profissionaisP1" criterios={sortTurnover} align="right" onClick={onSortTurnover} />
               <SortableTh label="Prof. Período 2" sortKey="profissionaisP2" criterios={sortTurnover} align="right" onClick={onSortTurnover} />
               <SortableTh label="Permaneceram" sortKey="permaneceram" criterios={sortTurnover} align="right" onClick={onSortTurnover} />
-              <SortableTh label="Saíram Prof." sortKey="saidaQtd" criterios={sortTurnover} align="right" onClick={onSortTurnover} />
+              <SortableTh label="Pararam nessa terapia" sortKey="saidaQtd" criterios={sortTurnover} align="right" onClick={onSortTurnover} />
               <SortableTh label="Redução Sessões" sortKey="saidaSessoes" criterios={sortTurnover} align="right" onClick={onSortTurnover} />
-              <SortableTh label="Entraram Prof." sortKey="entradaQtd" criterios={sortTurnover} align="right" onClick={onSortTurnover} />
+              <SortableTh label="Passaram a atender" sortKey="entradaQtd" criterios={sortTurnover} align="right" onClick={onSortTurnover} />
               <SortableTh label="Aumento Sessões" sortKey="entradaSessoes" criterios={sortTurnover} align="right" onClick={onSortTurnover} />
               <th className="py-1.5 pl-2" />
             </tr>
@@ -1750,23 +2183,38 @@ function TurnoverProfissionaisSection({
 
       <Dialog open={expandido !== null} onOpenChange={aberto => !aberto && fecharDialog()}>
         <DialogContent className="flex h-[96vh] w-[98vw] max-w-[1800px] flex-col overflow-hidden rounded-2xl p-0 sm:max-w-[1800px]">
-          {grupoAtivo && (
+          {grupoAtivo && (() => {
+            const corTerapia = tCor(grupoAtivo.terapia, true)
+            const estiloTema = { backgroundColor: hexParaRgba(corTerapia, 0.14), borderColor: hexParaRgba(corTerapia, 0.4) }
+            return (
             <>
-              <DialogHeader className="border-b border-border px-6 py-4">
+              <DialogHeader className="gap-3 border-b px-6 py-5" style={estiloTema}>
                 <DialogTitle className="text-lg font-bold text-foreground">{grupoAtivo.terapia}</DialogTitle>
-                <DialogDescription>
-                  {labelP1}: {grupoAtivo.profissionaisP1} profissionais · {labelP2}: {grupoAtivo.profissionaisP2} profissionais
+                <DialogDescription asChild>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card py-1 pl-2.5 pr-1 text-[11px] font-semibold text-muted-foreground shadow-sm">
+                      {labelP1}
+                      <strong className="rounded-full bg-muted px-2 py-0.5 text-xs font-bold text-foreground">{grupoAtivo.profissionaisP1}</strong>
+                    </span>
+                    <span className="inline-flex items-center gap-2 rounded-full border border-border bg-card py-1 pl-2.5 pr-1 text-[11px] font-semibold text-muted-foreground shadow-sm">
+                      {labelP2}
+                      <strong className="rounded-full bg-muted px-2 py-0.5 text-xs font-bold text-foreground">{grupoAtivo.profissionaisP2}</strong>
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-[11px] font-semibold text-muted-foreground shadow-sm">
+                      Diferença <DiffBadge v={grupoAtivo.profissionaisP2 - grupoAtivo.profissionaisP1} />
+                    </span>
+                  </div>
                 </DialogDescription>
               </DialogHeader>
               <div className="flex-1 overflow-y-auto px-6 py-5">
                 <div className="grid gap-6 lg:grid-cols-2">
                   <ListaProfissionaisTurnover
-                    titulo="Saíram" icone={UserMinus} tom="rose" lado="saida"
+                    titulo="Pararam de atender" icone={UserMinus} tom="rose" lado="saida"
                     lista={grupoAtivo.saida}
                     aberto={profissionalAberto} onAbrir={setProfissionalAberto}
                   />
                   <ListaProfissionaisTurnover
-                    titulo="Entraram" icone={UserPlus} tom="emerald" lado="entrada"
+                    titulo="Passaram a atender" icone={UserPlus} tom="emerald" lado="entrada"
                     lista={grupoAtivo.entrada}
                     aberto={profissionalAberto} onAbrir={setProfissionalAberto}
                   />
@@ -1779,20 +2227,54 @@ function TurnoverProfissionaisSection({
                   const lista = profissionalAberto.lado === "saida" ? grupoAtivo.saida : grupoAtivo.entrada
                   const p = lista.find(x => x.chave === profissionalAberto.chave)
                   if (!p) return null
-                  const sessoesOrigem = profissionalAberto.lado === "saida" ? sessoesP1 : sessoesP2
-                  const labelPeriodo = profissionalAberto.lado === "saida" ? labelP1 : labelP2
-                  const sessoesProf = sessoesDoProfissionalNoGrupo(sessoesOrigem, p, grupoAtivo.chave, agrupado)
-                  const { horarios, dias } = construirAgendaDe(sessoesProf)
+
+                  // "Entrou" só existe em P2, sempre dentro dessa terapia — 1 grid
+                  // só. "Parou" é sempre P1 dentro dessa terapia; se ele continua
+                  // ativo (aindaAtivo), mostra TAMBÉM a agenda completa dele em P2
+                  // — sem restringir à terapia que ele parou (aqui já é zero por
+                  // definição) — pra responder "como está a agenda dele hoje",
+                  // mesmo que hoje seja outra especialidade.
+                  if (profissionalAberto.lado === "entrada") {
+                    const sessoesProf = sessoesDoProfissionalNoGrupo(sessoesP2, p, grupoAtivo.chave, agrupado)
+                    const { horarios, dias } = construirAgendaDe(sessoesProf)
+                    return (
+                      <div className="mt-6 border-t border-border pt-5">
+                        <div className="mb-3 text-sm font-bold text-foreground">{p.profissional}</div>
+                        <AgendaGrid
+                          titulo={labelP2} sessoes={sessoesProf} horarios={horarios} dias={dias}
+                          agruparRepetidos contagemSessoes={p.sessoes} corTema={corTerapia}
+                        />
+                      </div>
+                    )
+                  }
+
+                  const sessoesProfP1 = sessoesDoProfissionalNoGrupo(sessoesP1, p, grupoAtivo.chave, agrupado)
+                  const { horarios: horariosP1, dias: diasP1 } = construirAgendaDe(sessoesProfP1)
+                  const sessoesProfP2Atual = p.aindaAtivo ? sessoesDoProfissional(sessoesP2, p) : []
+                  const { horarios: horariosP2, dias: diasP2 } = construirAgendaDe(sessoesProfP2Atual)
                   return (
                     <div className="mt-6 border-t border-border pt-5">
                       <div className="mb-3 text-sm font-bold text-foreground">{p.profissional}</div>
-                      <AgendaGrid titulo={labelPeriodo} sessoes={sessoesProf} horarios={horarios} dias={dias} />
+                      <div className="grid gap-5">
+                        <AgendaGrid
+                          titulo={labelP1} sessoes={sessoesProfP1} horarios={horariosP1} dias={diasP1}
+                          agruparRepetidos contagemSessoes={p.sessoes} corTema={corTerapia}
+                        />
+                        {p.aindaAtivo && (
+                          <AgendaGrid
+                            titulo={`${labelP2} (agenda atual — outra especialidade)`}
+                            sessoes={sessoesProfP2Atual} horarios={horariosP2} dias={diasP2}
+                            agruparRepetidos
+                          />
+                        )}
+                      </div>
                     </div>
                   )
                 })()}
               </div>
             </>
-          )}
+            )
+          })()}
         </DialogContent>
       </Dialog>
     </div>
@@ -1815,15 +2297,43 @@ function ListaProfissionaisTurnover({ titulo, icone: Icone, tom, lado, lista, ab
     ? "text-rose-600 dark:text-rose-400"
     : "text-emerald-600 dark:text-emerald-400"
 
+  // "Ainda ativo" só existe do lado "saida" (ver ProfissionalTurnover.aindaAtivo)
+  // — filtro só faz sentido, e só aparece, quando há pelo menos 1 caso.
+  const [somenteAindaAtivo, setSomenteAindaAtivo] = useState(false)
+  const temAindaAtivo = lado === "saida" && lista.some(p => p.aindaAtivo)
+  const listaFiltrada = somenteAindaAtivo ? lista.filter(p => p.aindaAtivo) : lista
+
   return (
     <div>
-      <div className={`mb-2 flex items-center gap-1.5 text-sm font-bold uppercase tracking-wide ${cor}`}>
+      <div className={`mb-2 flex flex-wrap items-center gap-1.5 text-sm font-bold uppercase tracking-wide ${cor}`}>
         <Icone size={15} />
-        {titulo} <span className="font-normal text-muted-foreground">({lista.length})</span>
+        {titulo}
+        <span className="font-normal text-muted-foreground">
+          ({listaFiltrada.length}{somenteAindaAtivo ? ` de ${lista.length}` : ""})
+        </span>
+        {temAindaAtivo && (
+          <button
+            type="button"
+            onClick={() => setSomenteAindaAtivo(v => !v)}
+            aria-pressed={somenteAindaAtivo}
+            title="Filtrar só quem parou de atender essa terapia mas continua ativo em outra"
+            className={`ml-auto inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-semibold normal-case tracking-normal transition-colors
+              ${somenteAindaAtivo
+                ? "border-sky-400 bg-sky-100 text-sky-700 dark:border-sky-700 dark:bg-sky-900/40 dark:text-sky-300"
+                : "border-border bg-card text-muted-foreground hover:border-sky-300/60 hover:text-foreground"}`}
+          >
+            <UserCheck size={12} />
+            Só ainda ativos
+          </button>
+        )}
       </div>
-      {lista.length === 0 && <div className="text-xs text-muted-foreground">Nenhum profissional.</div>}
+      {listaFiltrada.length === 0 && (
+        <div className="text-xs text-muted-foreground">
+          {somenteAindaAtivo ? "Nenhum profissional ainda ativo." : "Nenhum profissional."}
+        </div>
+      )}
       <div className="flex flex-col gap-2">
-        {lista.map(p => {
+        {listaFiltrada.map(p => {
           const estaAberto = aberto?.chave === p.chave && aberto.lado === lado
           return (
             <button
@@ -1832,9 +2342,25 @@ function ListaProfissionaisTurnover({ titulo, icone: Icone, tom, lado, lista, ab
               onClick={() => onAbrir(estaAberto ? null : { chave: p.chave, lado })}
               aria-pressed={estaAberto}
               className={`flex w-full items-center justify-between gap-2 rounded-lg border px-3 py-2 text-left transition-colors
-                ${estaAberto ? "border-sky-300 bg-sky-50 dark:border-sky-700 dark:bg-sky-950/30" : "border-border hover:bg-muted/40"}`}
+                ${estaAberto
+                  ? "border-sky-300 bg-sky-50 dark:border-sky-700 dark:bg-sky-950/30"
+                  : p.aindaAtivo
+                    ? "border-sky-300 bg-sky-50/70 hover:bg-sky-50 dark:border-sky-700/70 dark:bg-sky-950/25 dark:hover:bg-sky-950/35"
+                    : "border-border hover:bg-muted/40"}`}
             >
-              <span className="truncate text-sm font-medium text-foreground">{p.profissional}</span>
+              <span className="flex min-w-0 items-center gap-2">
+                <span className="truncate text-sm font-medium text-foreground">{p.profissional}</span>
+                {lado === "saida" && p.aindaAtivo && (
+                  <StatusPill
+                    tone="blue" variant="solid"
+                    className="shrink-0 ring-1 ring-sky-400/60"
+                    title="Continua com sessões em outra especialidade — não saiu da clínica."
+                  >
+                    <UserCheck size={12} />
+                    ainda ativo
+                  </StatusPill>
+                )}
+              </span>
               <span className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
                 {p.sessoes} sessões
                 {estaAberto ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
