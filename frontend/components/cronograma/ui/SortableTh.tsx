@@ -4,7 +4,9 @@
 // já usado em ComparativoSessoesShell.tsx). Extraído aqui pra reaproveitar em
 // qualquer tabela nova sem duplicar a lógica de comparação/ordenação.
 
+import { useState, type ReactNode } from "react"
 import { ChevronUp, ChevronDown, ChevronsUpDown } from "lucide-react"
+import { InfoTooltip } from "./InfoTooltip"
 
 export type SortDir = "asc" | "desc"
 
@@ -27,12 +29,20 @@ interface SortableThProps {
   dir: SortDir
   align?: "left" | "right"
   title?: string
+  /** Explicação da coluna exibida num painel ao clique/toque no ícone de lâmpada (em vez do `title` nativo, que não funciona em touch). */
+  info?: ReactNode
   onClick: (key: string) => void
 }
 
-export function SortableTh({ label, sortKey, activeKey, dir, align = "left", title, onClick }: SortableThProps) {
+export function SortableTh({ label, sortKey, activeKey, dir, align = "left", title, info, onClick }: SortableThProps) {
   const active = sortKey === activeKey
   const Icon = !active ? ChevronsUpDown : dir === "asc" ? ChevronUp : ChevronDown
+  const [infoOpen, setInfoOpen] = useState(false)
+  const labelEl = (
+    <span className={`rounded transition-shadow ${infoOpen ? "ring-2 ring-amber-400" : ""}`}>
+      {label}
+    </span>
+  )
   return (
     <th
       className={`py-1.5 ${align === "right" ? "px-2 text-right" : "pr-2"} font-semibold cursor-pointer select-none hover:text-foreground transition-colors`}
@@ -40,8 +50,10 @@ export function SortableTh({ label, sortKey, activeKey, dir, align = "left", tit
       onClick={() => onClick(sortKey)}
     >
       <span className={`inline-flex items-center gap-1 ${align === "right" ? "justify-end w-full" : ""}`}>
-        {label}
+        {align === "right" && info && <InfoTooltip ariaLabel={`Explicação da coluna ${label}`} onOpenChange={setInfoOpen}>{info}</InfoTooltip>}
+        {labelEl}
         <Icon size={12} className={active ? "text-foreground" : "opacity-40"} />
+        {align !== "right" && info && <InfoTooltip ariaLabel={`Explicação da coluna ${label}`} onOpenChange={setInfoOpen}>{info}</InfoTooltip>}
       </span>
     </th>
   )
