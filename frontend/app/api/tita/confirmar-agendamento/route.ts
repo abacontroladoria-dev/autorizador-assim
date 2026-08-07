@@ -135,7 +135,7 @@ export async function POST(request: NextRequest) {
     })
   }
 
-  // Fase 3: cria o agendamento na TiTa para todas as sessões.
+  // Fase 3: cria o agendamento na TiTa para cada sessão.
   // Achado da homologação: agendamento/create NÃO é transacional — cria a série
   // semanal inteira e marca cada ocorrência como "Planejado" ou "Conflito" em vez
   // de aceitar/rejeitar tudo (ver interpretarResultadoCriacao). Por isso "ok" aqui
@@ -144,31 +144,39 @@ export async function POST(request: NextRequest) {
   // TiTa de fato criou. Se a própria chamada falhar (erro_api), a reserva local do
   // Pulsar NÃO é persistida (ver confirmarImplantacao em OcupPacMode.tsx); sessões
   // já criadas com sucesso antes da falha permanecem criadas lá (sem rollback).
+  //
+  // Sequencial, não Promise.all: achado real em produção (2026-08-07) — duas
+  // chamadas concorrentes deste mesmo bundle, cada uma inserindo em lote em
+  // agenda_fav_items (uma linha por ocorrência semanal), causaram deadlock no
+  // MySQL da TiTa ("SQLSTATE[40001]: Deadlock found when trying to get lock") e
+  // uma das duas sessões foi rejeitada com 500 mesmo com dados corretos dos dois
+  // lados. criarAgendamento já reexecuta sozinho se a TiTa sinalizar deadlock (ver
+  // client.ts), mas evitar a concorrência entre sessões do mesmo bundle reduz a
+  // chance de o deadlock ocorrer.
   const inicioCriacao = Date.now()
-  const criacoes = await Promise.all(
-    preparos.map(async p => {
-      const inicioChamada = Date.now()
-      const resultado = await criarAgendamento(p.preparo.payload!)
-      const resumo = interpretarResultadoCriacao(resultado)
-      // Diagnóstico completo da operação, sem token: permite reconstruir o que
-      // aconteceu com cada sessão sem precisar reler os logs brutos da TiTa.
-      console.log(
-        `${LOG_TAG} criacao`,
-        JSON.stringify({
-          csvGradeId: p.sessao.csvGradeId,
-          id_grade_terapeuta: p.preparo.payload!.id_grade_terapeuta,
-          ids_favorecidos: p.preparo.payload!.ids_favorecidos,
-          id_agenda_fav: resumo.idAgendaFav,
-          status: resumo.status,
-          criadas: resumo.criadas,
-          conflitos: resumo.conflitos,
-          rejeitadas: resumo.rejeitadas,
-          duracaoMs: Date.now() - inicioChamada,
-        }),
-      )
-      return { sessao: p.sessao, resultado, resumo }
-    }),
-  )
+  const criacoes: Array<{ sessao: typeof preparos[number]["sessao"]; resultado: Awaited<ReturnType<typeof criarAgendamento>>; resumo: ReturnType<typeof interpretarResultadoCriacao> }> = []
+  for (const p of preparos) {
+    const inicioChamada = Date.now()
+    const resultado = await criarAgendamento(p.preparo.payload!)
+    const resumo = interpretarResultadoCriacao(resultado)
+    // Diagnóstico completo da operação, sem token: permite reconstruir o que
+    // aconteceu com cada sessão sem precisar reler os logs brutos da TiTa.
+    console.log(
+      `${LOG_TAG} criacao`,
+      JSON.stringify({
+        csvGradeId: p.sessao.csvGradeId,
+        id_grade_terapeuta: p.preparo.payload!.id_grade_terapeuta,
+        ids_favorecidos: p.preparo.payload!.ids_favorecidos,
+        id_agenda_fav: resumo.idAgendaFav,
+        status: resumo.status,
+        criadas: resumo.criadas,
+        conflitos: resumo.conflitos,
+        rejeitadas: resumo.rejeitadas,
+        duracaoMs: Date.now() - inicioChamada,
+      }),
+    )
+    criacoes.push({ sessao: p.sessao, resultado, resumo })
+  }
   const resultados: ResultadoSessao[] = criacoes.map(c => ({
     csvGradeId: c.sessao.csvGradeId,
     ok: c.resultado.ok,
