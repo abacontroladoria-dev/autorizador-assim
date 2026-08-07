@@ -36,6 +36,10 @@ backup_*.sql
 # profissional. Sem esta linha o .json ficava visível ao git — um `git add -A` de
 # distância de ir pro histórico de um repo público.
 backup_*.json
+# 2026-08-07: mesma regra para a pasta com os exports crus da TiTa usados na
+# conferência do /rp (66 MB de agendamento com nome de paciente). O padrão
+# backup_* acima não pega diretório.
+backup_agendamentos/
 /check_*.py
 /debug_*.py
 /invoke_*.py

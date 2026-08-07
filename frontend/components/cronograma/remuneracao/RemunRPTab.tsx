@@ -8,10 +8,9 @@ import { useRemuneracaoRPContext } from "@/contexts/RemuneracaoRPContext"
 import { RemuneracaoUploadBadges } from "./RemuneracaoUploadBadges"
 import { RemuneracaoRPDashboard } from "./RemuneracaoRPDashboard"
 import { PeCoordenadoresPanel, profTemPe, type PeFiltroKey } from "./PeCoordenadoresPanel"
-import { ContratosPendentesPanel } from "./ContratosPendentesPanel"
+import { EstadoGradeVazia } from "./EstadoGradeVazia"
 import { useParametrosGerais } from "@/hooks/useParametrosGerais"
 import { useTaxasEspecialidade } from "@/hooks/useTaxasEspecialidade"
-import { validarModeloRelatorio, parseHtmlTable, type CsvGradeRow } from "@/lib/remuneracao/relatorio"
 import { calcularTotalPorEspecialidade } from "@/lib/remuneracao/dashboardRP"
 import { exportarRemuneracaoRPXlsx } from "@/lib/remuneracao/exportRemuneracaoRP"
 import { B } from "@/lib/cronograma/constants"
@@ -24,8 +23,8 @@ const normKey = (v: unknown): string =>
 
 export function RemunRPTab() {
   const {
-    resultado, evoRows, csvName, setCsvName, carregarGrade, limparGrade,
-    peRows, peName, carregarPE, limparPE, peAnaliseCompleta, peStatusMensagem,
+    resultado, evoRows, csvName, controlesGrade,
+    peRows, peName, peAnaliseCompleta, peStatusMensagem,
     loading, error,
   } = useRemuneracaoRPContext()
 
@@ -72,20 +71,12 @@ export function RemunRPTab() {
 
   useEffect(() => {
     setHeader("Rem. Mês - Total", "Relacionamento Prestador")
-    setRightContent(<RemuneracaoUploadBadges
-      evoRows={evoRows}
-      peRows={peRows}
-      carregarGrade={carregarGrade}
-      carregarPE={carregarPE}
-      limparGrade={limparGrade}
-      limparPE={limparPE}
-      setCsvName={setCsvName}
-    />)
+    setRightContent(<RemuneracaoUploadBadges c={controlesGrade} />)
     return () => {
       setHeader("", "")
       setRightContent(null)
     }
-  }, [setHeader, setRightContent, evoRows, peRows, carregarGrade, carregarPE, limparGrade, limparPE, setCsvName])
+  }, [setHeader, setRightContent, controlesGrade])
 
   // Dados de configuração para o CardRemun — fallbacks seguros enquanto config carrega
   const ccPA     = parametros?.cc_pa_default ?? 50
@@ -105,10 +96,6 @@ export function RemunRPTab() {
 
       {resultado && resultado.length > 0 && (
         <PeCoordenadoresPanel resultado={resultado} filtroAtivo={peFiltro} onFiltro={setPeFiltro} />
-      )}
-
-      {resultado && resultado.length > 0 && (
-        <ContratosPendentesPanel resultado={resultado} />
       )}
 
       {!peAnaliseCompleta && (evoRows.length > 0 || peRows.length > 0) && (
@@ -200,9 +187,11 @@ export function RemunRPTab() {
       )}
 
       {!resultado && !loading && (
-        <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
-          Faça upload do relatório <code>csv_grade_profissionais</code> (mês completo) para calcular PA, PPD (diária) e ETA. Envie também <code>agendamentos_profissionais</code> para liberar o PE.
-        </div>
+        <EstadoGradeVazia
+          carregando={controlesGrade.gradeLoading}
+          periodo={controlesGrade.periodo}
+          erroResumo={controlesGrade.gradeErroResumo}
+        />
       )}
 
       {resultado && resultado.length > 0 && resultadoExibido && resultadoExibido.length === 0 && (

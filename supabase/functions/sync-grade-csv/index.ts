@@ -43,10 +43,16 @@
 //
 // ─── Custo de escrita ─────────────────────────────────────────────────────────
 //
-// Nos dois modos, linha cujo conteúdo não mudou não gera escrita nenhuma — nem um
-// UPDATE de carimbo. Isso é deliberado: esta tabela já apareceu no diagnóstico de
-// Disk IO do projeto, e reescrever ~14 mil linhas por dia só para reconfirmar os
-// mesmos valores geraria WAL à toa.
+// Nos dois modos, linha cujo conteúdo não mudou não gera escrita de conteúdo.
+// Isso é deliberado: esta tabela já apareceu no diagnóstico de Disk IO do
+// projeto, e reescrever ~14 mil linhas por dia só para reconfirmar os mesmos
+// valores geraria WAL à toa.
+//
+// A única exceção é o carimbo `visto_em`, e ela é amortizada: só é renovado
+// quando já passou de DIAS_REVALIDACAO, o que espalha o custo em ~1/7 por dia.
+// Vale a pena porque sem esse carimbo não há como distinguir "a TiTa confirmou
+// esta linha hoje" de "a TiTa parou de reportá-la" — e essa distinção é o que
+// revela linha ativa órfã (44 delas em julho/2026).
 
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2"
@@ -61,6 +67,25 @@ const LOTE    = 500
 
 /** Janela retroativa padrão do modo "execucao". Ver nota sobre o atraso medido. */
 const DIAS_RECAPTURA = 45
+
+/**
+ * De quanto em quanto tempo uma linha inalterada tem o `visto_em` renovado.
+ *
+ * `visto_em` passou a significar "a última vez que a TiTa confirmou que esta
+ * linha existe" — é o que permite identificar linha ativa que a TiTa não reporta
+ * mais (medido em julho/2026: 44 delas). Renovar em TODA linha vista, todo dia,
+ * seriam ~29 mil UPDATEs diários só de carimbo, exatamente o WAL que o desenho
+ * desta função evita. Renovando só o que está velho, o custo cai a ~1/7 disso e o
+ * sinal continua confiável: dentro da janela de 45 dias, `visto_em` mais antigo
+ * que o dobro deste prazo significa que a TiTa parou de devolver a linha.
+ */
+const DIAS_REVALIDACAO = 7
+
+/**
+ * Piso de plausibilidade da resposta da TiTa, como fração do que está ativo na
+ * janela. Abaixo disso a rodada insere, mas não inativa nada. Ver `sincronizarGrade`.
+ */
+const FRACAO_MINIMA_PLAUSIVEL = 0.8
 
 type Modo = "grade" | "execucao"
 
@@ -287,8 +312,11 @@ type Registro = Linha & Execucao
  * distintos, e os 6 repetidos são linhas idênticas duplicadas), então ele É a
  * identidade.
  *
- * Slot 'Livre' vem sem id (validado: 100% das linhas sem id são 'Livre'), e aí a
- * identidade é a coordenada física do slot — que também não colide.
+ * Linha sem id cai na coordenada física, que também não colide. São dois casos, e
+ * medido em julho/2026 (4.243 linhas sem id): 4.233 slots 'Livre' e 10 evoluções
+ * 'Sem Agendamento'. A afirmação antiga de que 100% eram 'Livre' era falsa — e
+ * era ela que sustentava a decisão de ignorar linha sem id no passe de execução,
+ * ver `chaveSemAgendamento`.
  */
 function chave(r: Pick<Linha, "tita_agendamento_id" | "data" | "hora_inicial" | "profissional_id" | "terapia_id" | "sala_id">): string {
   if (r.tita_agendamento_id !== null && r.tita_agendamento_id !== undefined) {
@@ -296,6 +324,29 @@ function chave(r: Pick<Linha, "tita_agendamento_id" | "data" | "hora_inicial" | 
   }
   return `L:${r.data}|${r.hora_inicial}|${r.profissional_id}|${r.terapia_id}|${r.sala_id}`
 }
+
+/**
+ * Identidade de uma evolução que não tem agendamento por trás.
+ *
+ * A TiTa emite `Status do Agendamento = 'Sem Agendamento'` quando alguém evolui
+ * um atendimento que nunca foi marcado: vem com paciente, profissional, terapia e
+ * horário, mas `ID Agendamento` vazio. É o que a /rp classifica como "Evolução
+ * sem agendamento" — não paga nada, e é justamente por isso que precisa aparecer.
+ *
+ * A sala fica FORA da chave, ao contrário de `chave()`: nessas linhas o `Id Sala`
+ * vem como "Ainda não selecionado" (null depois do parse) e o nome da sala é
+ * texto livre digitado por quem evoluiu — a mesma sessão apareceu como "sala 13"
+ * numa semana e "Sala 13" na outra. Paciente entra no lugar dela, e é mais
+ * discriminante: dois atendimentos no mesmo horário, com o mesmo profissional, na
+ * mesma terapia e com o mesmo paciente seriam a mesma sessão de qualquer forma.
+ */
+function chaveSemAgendamento(
+  r: Pick<Linha, "data" | "hora_inicial" | "profissional_id" | "terapia_id" | "paciente_id">,
+): string {
+  return `S:${r.data}|${r.hora_inicial}|${r.profissional_id}|${r.terapia_id}|${r.paciente_id}`
+}
+
+const SEM_AGENDAMENTO = "Sem Agendamento"
 
 /**
  * Campos que definem o "conteúdo" de uma linha para efeito de versionamento. Se
@@ -385,20 +436,30 @@ async function comRetentativa<T>(rotulo: string, fn: () => Promise<T>, tentativa
 }
 
 const CAMPOS_SELECT = ["id", ...CAMPOS_CONTEUDO, "tita_agendamento_id"].join(", ")
-const CAMPOS_SELECT_EXECUCAO = ["id", "tita_agendamento_id", ...CAMPOS_EXECUCAO].join(", ")
+const CAMPOS_SELECT_EXECUCAO = [
+  "id", "tita_agendamento_id", "visto_em",
+  // Agregados por agendamento, não campos do Registro — ver a contagem em
+  // sincronizarExecucao. Precisam vir no select para o sync saber se mudaram.
+  "tratativas", "tratativas_distintas",
+  // Coordenada física: é por ela que a evolução "Sem Agendamento" encontra a
+  // linha, já que essa não tem id nenhum dos dois lados. `status_agendamento`
+  // entra junto para desempatar candidatas na mesma coordenada.
+  "data", "hora_inicial", "profissional_id", "terapia_id", "paciente_id", "status_agendamento",
+  ...CAMPOS_EXECUCAO,
+].join(", ")
 
-async function carregarAtivas<T>(
-  sb: SupabaseClient, inicio: string, fim: string, campos: string,
+async function carregarPorAtividade<T>(
+  sb: SupabaseClient, inicio: string, fim: string, campos: string, ativo: boolean,
 ): Promise<T[]> {
   const todas: T[] = []
   for (let de = 0; ; de += PAGINA) {
-    const lote = await comRetentativa(`select ${de}`, async () => {
+    const lote = await comRetentativa(`select ${ativo ? "ativas" : "inativas"} ${de}`, async () => {
       const { data, error } = await sb
         .from("csv_grades_profissionais")
         .select(campos)
         .gte("data", inicio)
         .lte("data", fim)
-        .eq("ativo", true)
+        .eq("ativo", ativo)
         .order("id")
         .range(de, de + PAGINA - 1)
 
@@ -410,6 +471,12 @@ async function carregarAtivas<T>(
   }
 }
 
+const carregarAtivas = <T>(sb: SupabaseClient, inicio: string, fim: string, campos: string) =>
+  carregarPorAtividade<T>(sb, inicio, fim, campos, true)
+
+const carregarInativas = <T>(sb: SupabaseClient, inicio: string, fim: string, campos: string) =>
+  carregarPorAtividade<T>(sb, inicio, fim, campos, false)
+
 async function inserir(sb: SupabaseClient, linhas: Record<string, unknown>[]) {
   for (let i = 0; i < linhas.length; i += LOTE) {
     await comRetentativa(`insert lote ${i / LOTE}`, async () => {
@@ -420,13 +487,71 @@ async function inserir(sb: SupabaseClient, linhas: Record<string, unknown>[]) {
 }
 
 async function inativar(sb: SupabaseClient, ids: string[], motivo: "alterado" | "excluido") {
+  const agora = new Date().toISOString()
   for (let i = 0; i < ids.length; i += LOTE) {
     await comRetentativa(`inativar(${motivo}) lote ${i / LOTE}`, async () => {
       const { error } = await sb
         .from("csv_grades_profissionais")
-        .update({ ativo: false, motivo_inativacao: motivo })
+        // `inativado_em` é o carimbo que faltava: sem ele não havia como datar uma
+        // baixa depois do fato. updated_at não serve — não há trigger que o
+        // atualize nesta tabela, então ele marca a última escrita de conteúdo.
+        .update({ ativo: false, motivo_inativacao: motivo, inativado_em: agora })
         .in("id", ids.slice(i, i + LOTE))
       if (error) throw new Error(`inativar(${motivo}): ${error.message}`)
+    })
+  }
+}
+
+/**
+ * Desfaz uma inativação: a TiTa continua reportando a sessão, então a linha nunca
+ * deveria ter saído da grade.
+ *
+ * Permitido no passado desde 20260806120000. A assimetria é de propósito — o
+ * congelamento existe para impedir baixa retroativa (a TiTa apaga agendamento
+ * passado quando um terapeuta é desligado), e reativar é o oposto disso.
+ */
+async function reativar(sb: SupabaseClient, ids: string[]) {
+  for (let i = 0; i < ids.length; i += LOTE) {
+    await comRetentativa(`reativar lote ${i / LOTE}`, async () => {
+      const { error } = await sb
+        .from("csv_grades_profissionais")
+        .update({ ativo: true, motivo_inativacao: null, inativado_em: null, ausencia_confirmada_em: null })
+        .in("id", ids.slice(i, i + LOTE))
+      if (error) throw new Error(`reativar: ${error.message}`)
+    })
+  }
+}
+
+/**
+ * Registra que a TiTa foi consultada para a janela desta linha e não a devolveu.
+ *
+ * É o outro lado da reconciliação, e o que impede o guarda da remuneração de
+ * virar alarme permanente. Sem isto, uma alta de paciente — que retira dezenas
+ * de sessões futuras de uma vez, legitimamente — deixaria o cálculo bloqueado
+ * para sempre naquele mês. Carimbada uma vez, a linha é exclusão confirmada e
+ * para de contar; se ela voltar a aparecer na TiTa, `reativar` limpa o carimbo.
+ */
+async function confirmarAusencia(sb: SupabaseClient, ids: string[], agora: string) {
+  for (let i = 0; i < ids.length; i += LOTE) {
+    await comRetentativa(`confirmarAusencia lote ${i / LOTE}`, async () => {
+      const { error } = await sb
+        .from("csv_grades_profissionais")
+        .update({ ausencia_confirmada_em: agora })
+        .in("id", ids.slice(i, i + LOTE))
+      if (error) throw new Error(`confirmarAusencia: ${error.message}`)
+    })
+  }
+}
+
+/** Renova o "a TiTa confirmou que esta linha existe". Ver DIAS_REVALIDACAO. */
+async function marcarVistas(sb: SupabaseClient, ids: string[], agora: string) {
+  for (let i = 0; i < ids.length; i += LOTE) {
+    await comRetentativa(`marcarVistas lote ${i / LOTE}`, async () => {
+      const { error } = await sb
+        .from("csv_grades_profissionais")
+        .update({ visto_em: agora })
+        .in("id", ids.slice(i, i + LOTE))
+      if (error) throw new Error(`marcarVistas: ${error.message}`)
     })
   }
 }
@@ -548,7 +673,7 @@ async function buscarRegistros(dataInicio: string, dataFim: string): Promise<Reg
 // ─── Modo "grade" ─────────────────────────────────────────────────────────────
 
 async function sincronizarGrade(
-  sb: SupabaseClient, recebidos: Registro[], dataInicio: string, dataFim: string,
+  sb: SupabaseClient, recebidos: Registro[], dataInicio: string, dataFim: string, hoje: string,
 ) {
   // A TiTa pode devolver dias fora do range pedido; fora da janela não escrevemos,
   // e abaixo de hoje muito menos (o trigger rejeitaria, e é a regra do projeto).
@@ -591,7 +716,38 @@ async function sincronizarGrade(
   // tita_agendamento_id) sobrevive à mudança, mas as duas fatias são chamadas
   // independentes e não se enxergam. O saldo é correto (uma versão inativa, uma
   // ativa); só o motivo fica 'excluido' em vez de 'alterado'.
-  const idsExcluidos = existentes.filter(e => !vistos.has(chave(e))).map(e => e.id)
+  //
+  // ─── Duas guardas, pagas em julho/2026 ────────────────────────────────────
+  //
+  // Este trecho custou R$ 490,00 na primeira conferência da /rp lendo o banco.
+  // Das 43 linhas de julho que ele havia inativado, **as 43 continuavam sendo
+  // reportadas pela TiTa** — 100% de falso positivo, 25 delas em sessão já
+  // realizada e evoluída, ou seja dinheiro que sumiu calado da folha.
+  //
+  // (1) Nunca inativar no PRÓPRIO DIA da sessão. A auto-cura descrita acima só
+  //     funciona enquanto a data ainda é >= hoje, porque o piso da janela é
+  //     hoje: para uma linha de hoje, esta é a última rodada que a enxerga, e o
+  //     engano vira permanente. Cancelamento real do dia não se perde — chega
+  //     depois como status_execucao = 'Cancelado' pela passada de execução, que
+  //     é a representação correta de "a sessão não aconteceu".
+  //
+  // (2) Nunca inativar com base em resposta implausível. "Não veio na resposta"
+  //     só significa "foi apagado lá" se a resposta estiver inteira. Numa
+  //     resposta truncada, inativar é destruir. Inserir continua liberado: dado
+  //     a mais nunca foi o risco.
+  const naoVieram   = existentes.filter(e => !vistos.has(chave(e)))
+  const protegidas  = naoVieram.filter(e => e.data === hoje).length
+  const candidatas  = naoVieram.filter(e => e.data !== hoje).map(e => e.id)
+
+  const respostaMagra = existentes.length > 0
+    && naJanela.length < existentes.length * FRACAO_MINIMA_PLAUSIVEL
+  if (respostaMagra) {
+    console.warn(
+      `[sync-grade-csv] resposta implausível para ${dataInicio}..${dataFim}: `
+      + `${naJanela.length} linhas para ${existentes.length} ativas. Inserindo, mas NÃO inativando.`,
+    )
+  }
+  const idsExcluidos = respostaMagra ? [] : candidatas
 
   // Ordem: inativa antes de inserir, para que uma consulta concorrente nunca veja
   // as duas versões da mesma sessão como ativas ao mesmo tempo — duplicata
@@ -616,6 +772,12 @@ async function sincronizarGrade(
     alterados:   idsAlterados.length,
     excluidos:   idsExcluidos.length,
     inalterados: naJanela.length - aInserir.length,
+    // Não vieram na resposta e mesmo assim continuam ativas. Não é erro: são
+    // exatamente as duas guardas agindo. Se `naoInativadasPorSuspeita` aparecer
+    // com frequência, a resposta da TiTa está vindo curta e é isso que precisa
+    // de conserto — não a inativação.
+    protegidasDoDia:            protegidas,
+    naoInativadasPorSuspeita:   respostaMagra ? candidatas.length : 0,
   }
 }
 
@@ -626,38 +788,141 @@ async function sincronizarExecucao(
 ) {
   const naJanela = recebidos.filter(r => r.data && r.data >= dataInicio && r.data <= dataFim)
 
-  // Casamento por tita_agendamento_id. Slot 'Livre' não tem id e nunca tem
-  // tratativa, então fica fora dos dois lados sem perda.
+  // Casamento por tita_agendamento_id, com uma exceção tratada logo abaixo:
+  // evolução 'Sem Agendamento' não tem id e mesmo assim tem tratativa.
   const porId = new Map<number, Registro>()
+  // Quantas linhas a TiTa devolveu por agendamento e de quantas pessoas.
+  //
+  // O relatório emite uma linha por TRATATIVA, não por agendamento: evoluir a
+  // mesma sessão duas vezes produz dois registros com o mesmo id. Guardar só o
+  // último (que é o que `porId` faz, e continua fazendo) perdia essa informação
+  // — e com ela a diferença entre "a mesma pessoa salvou de novo" e "duas
+  // pessoas dizem ter atendido". A segunda decide pagamento, então precisa
+  // chegar ao frontend em vez de morrer aqui.
+  const contagem = new Map<number, { total: number; pessoas: Set<string> }>()
+
+  // O outro índice: evolução sem agendamento, casada por coordenada. Só entra
+  // aqui quem tem tratativa — slot 'Livre' também não tem id, e indexá-lo faria
+  // um horário vago competir com um atendimento real pela mesma chave.
+  const porCoordenada = new Map<string, Registro>()
+  const contagemCoord = new Map<string, { total: number; pessoas: Set<string> }>()
+
   for (const r of naJanela) {
-    if (r.tita_agendamento_id !== null) porId.set(r.tita_agendamento_id, r)
+    if (r.tita_agendamento_id === null) {
+      if (r.possui_tratativa !== true || r.paciente_id === null) continue
+      const k = chaveSemAgendamento(r)
+      porCoordenada.set(k, r)
+      const cc = contagemCoord.get(k) ?? { total: 0, pessoas: new Set<string>() }
+      cc.total++
+      const autor = r.tratativa_profissional_id !== null && r.tratativa_profissional_id !== undefined
+        ? String(r.tratativa_profissional_id)
+        : (r.tratativa_profissional_nome ?? "").trim()
+      if (autor) cc.pessoas.add(autor)
+      contagemCoord.set(k, cc)
+      continue
+    }
+    porId.set(r.tita_agendamento_id, r)
+
+    const c = contagem.get(r.tita_agendamento_id) ?? { total: 0, pessoas: new Set<string>() }
+    c.total++
+    // Id quando existe; nome quando não. Linha sem tratativa nenhuma não conta
+    // pessoa — senão uma sessão não evoluída pareceria ter autor.
+    const quem = r.tratativa_profissional_id !== null && r.tratativa_profissional_id !== undefined
+      ? String(r.tratativa_profissional_id)
+      : (r.tratativa_profissional_nome ?? "").trim()
+    if (quem) c.pessoas.add(quem)
+    contagem.set(r.tita_agendamento_id, c)
   }
 
-  type LinhaExec = Execucao & { id: string; tita_agendamento_id: number | null }
+  type LinhaExec = Execucao & {
+    id: string; tita_agendamento_id: number | null; visto_em: string | null
+    tratativas: number | null; tratativas_distintas: number | null
+    data: string | null; hora_inicial: string | null; status_agendamento: string | null
+    profissional_id: number | null; terapia_id: number | null; paciente_id: number | null
+  }
   const existentes = await carregarAtivas<LinhaExec>(sb, dataInicio, dataFim, CAMPOS_SELECT_EXECUCAO)
 
+  // Qual linha recebe cada evolução sem agendamento, decidido ANTES do laço.
+  //
+  // Sem isto a coordenada seria ambígua: só na janela de 45 dias há 4.147 linhas
+  // semeadas do backup XLS que também não têm id e também têm paciente, e uma
+  // delas pode cair na mesma coordenada. Duas linhas casando com a mesma evolução
+  // gravariam a mesma tratativa duas vezes — e "duas tratativas" é justamente o
+  // sinal que o frontend usa para decidir conflito de autoria.
+  //
+  // Ganha a linha que a própria TiTa marcou 'Sem Agendamento'; empate real cai na
+  // ordem do select, que é estável (order=id).
+  const donaDaCoordenada = new Map<string, LinhaExec>()
+  if (porCoordenada.size) {
+    for (const e of existentes) {
+      if (e.tita_agendamento_id !== null || e.paciente_id === null) continue
+      const k = chaveSemAgendamento(e)
+      if (!porCoordenada.has(k)) continue
+      const atual = donaDaCoordenada.get(k)
+      if (!atual || (e.status_agendamento === SEM_AGENDAMENTO && atual.status_agendamento !== SEM_AGENDAMENTO)) {
+        donaDaCoordenada.set(k, e)
+      }
+    }
+  }
+
   const aAtualizar: Record<string, unknown>[] = []
+  const idsRevalidar: string[] = []
+  const casados = new Set<number>()
+  const coordCasadas = new Set<string>()
+  const agora = new Date().toISOString()
+  const limiteRevalidacao = diasAntes(hojeSP(), DIAS_REVALIDACAO)
   let semId = 0
   let semCorrespondencia = 0
 
   for (const e of existentes) {
-    // Linha sem tita_agendamento_id é cega para esta passada. Na prática são as
-    // linhas semeadas do backup XLS (origem='backup_xls'), que nunca tiveram id:
-    // medido em produção, tita_csv preenche 100% dos 'Agendado' e backup_xls 0%.
-    // Fica contabilizado à parte de propósito — é a métrica que diz quanto da
-    // janela esta passada consegue enxergar, e some sozinha conforme a janela de
-    // 45 dias avança para além do período semeado.
-    if (e.tita_agendamento_id === null) { semId++; continue }
-    const novo = porId.get(e.tita_agendamento_id)
-    if (!novo) {
-      // A TiTa não devolveu esta linha. Não limpamos nada: valor capturado antes
-      // continua valendo. Zerar aqui apagaria evolução já registrada só porque a
-      // sessão saiu da agenda — que é o oposto do que este sistema existe para
-      // fazer.
-      semCorrespondencia++
-      continue
+    // Duas formas de casar, nesta ordem. Pelo id, que é a identidade real. Pela
+    // coordenada só quando não há id dos dois lados — evolução 'Sem Agendamento'
+    // é o único caso, e sem isto ela nunca chega ao banco.
+    let novo: Registro | undefined
+    let cont: { total: number; pessoas: Set<string> } | undefined
+
+    if (e.tita_agendamento_id === null) {
+      // Fora a evolução sem agendamento, linha sem id é cega para esta passada:
+      // são as semeadas do backup XLS (origem='backup_xls'), que nunca tiveram
+      // id, e os slots 'Livre'. Fica contabilizado à parte de propósito — é a
+      // métrica que diz quanto da janela esta passada consegue enxergar, e some
+      // sozinha conforme a janela de 45 dias avança para além do período semeado.
+      const k = e.paciente_id === null ? null : chaveSemAgendamento(e)
+      if (k === null || donaDaCoordenada.get(k)?.id !== e.id) { semId++; continue }
+      novo = porCoordenada.get(k)
+      if (!novo) { semId++; continue }
+      coordCasadas.add(k)
+      cont = contagemCoord.get(k)
+    } else {
+      novo = porId.get(e.tita_agendamento_id)
+      if (!novo) {
+        // A TiTa não devolveu esta linha. Não limpamos nada: valor capturado
+        // antes continua valendo. Zerar aqui apagaria evolução já registrada só
+        // porque a sessão saiu da agenda — que é o oposto do que este sistema
+        // existe para fazer.
+        semCorrespondencia++
+        continue
+      }
+      casados.add(e.tita_agendamento_id)
+      cont = contagem.get(e.tita_agendamento_id)
     }
-    if (!mudouExecucao(e, novo)) continue
+
+    // A TiTa confirmou que a linha existe. Renovar o carimbo em TODAS elas todo
+    // dia seriam ~29 mil UPDATEs só de data; renovando só o que já está velho, o
+    // sinal continua servindo para achar linha órfã e o custo fica em ~1/7.
+    if (!e.visto_em || e.visto_em.slice(0, 10) < limiteRevalidacao) idsRevalidar.push(e.id)
+
+    // A contagem é agregada (vem do conjunto de linhas do agendamento, não de
+    // uma linha só), então fica fora de `mudouExecucao`, que compara campo a
+    // campo do Registro. Sem este teste, um agendamento que ganhou uma segunda
+    // evolução mas cujo bloco de execução ficou idêntico — exatamente o duplo
+    // clique — nunca seria gravado.
+    const tratativas = cont ? cont.total : 1
+    const tratativasDistintas = cont ? Math.max(cont.pessoas.size, 1) : 1
+    const mudouContagem = (e.tratativas ?? null) !== tratativas
+      || (e.tratativas_distintas ?? null) !== tratativasDistintas
+
+    if (!mudouExecucao(e, novo) && !mudouContagem) continue
 
     aAtualizar.push({
       id: e.id,
@@ -668,13 +933,135 @@ async function sincronizarExecucao(
       tratativa_profissional_nome: novo.tratativa_profissional_nome,
       tratativa_criada_em:         novo.tratativa_criada_em,
       tratativa_origem:            novo.tratativa_origem,
+      tratativas,
+      tratativas_distintas:        tratativasDistintas,
       evolucao_vinculo:            novo.evolucao_vinculo,
       criado_em_tita:              novo.criado_em_tita,
       excluido_em_tita:            novo.excluido_em_tita,
     })
   }
 
+  // ─── Reconciliação: o sentido TiTa → linha ────────────────────────────────
+  //
+  // O laço acima só pergunta "para cada linha minha, o que a TiTa diz?". Nunca
+  // perguntou o contrário — e é exatamente aí que moravam os R$ 490,00 de julho:
+  // 23 sessões que a TiTa reportava como realizadas e evoluídas estavam com
+  // ativo = false no banco, e 2 nunca chegaram a ser inseridas. Todas dentro
+  // desta janela de 45 dias, todas visíveis nesta resposta, e invisíveis para o
+  // laço acima porque ele parte das linhas que existem.
+  //
+  // Esta passada é o mecanismo de auto-cura que o modo "grade" não pode ter: lá
+  // o piso é hoje, aqui a janela olha 45 dias para trás. Roda todo dia, então um
+  // engano dura no máximo 24h — e nunca mais do que a janela.
+  const orfas = [...porId.entries()].filter(([id]) => !casados.has(id))
+
+  let reativadas = 0
+  let inseridasRetroativas = 0
+  let ausenciasConfirmadas = 0
+
+  // Carregadas sempre, e não só quando há órfã: a reconciliação tem dois lados.
+  // Repor o que a TiTa ainda reporta é um; carimbar o que ela confirma não ter
+  // mais é o outro, e é o que faz o alarme do guarda apagar sozinho.
+  type LinhaInativa = { id: string; tita_agendamento_id: number | null; data: string | null; ausencia_confirmada_em: string | null }
+  const inativas = await carregarInativas<LinhaInativa>(
+    sb, dataInicio, dataFim, "id, tita_agendamento_id, data, ausencia_confirmada_em",
+  )
+
+  if (orfas.length) {
+    // Chave id+data, não id sozinho. Uma sessão remarcada deixa versão inativa na
+    // data de origem E na de destino com o MESMO tita_agendamento_id; casar só
+    // pelo id reativaria uma delas ao acaso e ressuscitaria a sessão no dia
+    // errado. Se não houver inativa na data que a TiTa afirma, o certo é inserir
+    // ali — `casados` já garantiu que não existe nenhuma ativa com esse id na
+    // janela, então não há risco de duplicar.
+    const inativaPorIdData = new Map<string, string>()
+    for (const i of inativas) {
+      if (i.tita_agendamento_id === null) continue
+      const k = `${i.tita_agendamento_id}|${i.data}`
+      if (!inativaPorIdData.has(k)) inativaPorIdData.set(k, i.id)
+    }
+
+    const idsReativar: string[] = []
+    const aInserir: Record<string, unknown>[] = []
+    const execucaoDasReativadas: Record<string, unknown>[] = []
+
+    for (const [titaId, r] of orfas) {
+      const uuidInativo = inativaPorIdData.get(`${titaId}|${r.data}`)
+      if (uuidInativo) {
+        // Existe e foi escondida. Desfazer a inativação preserva a identidade
+        // original — inserir uma segunda linha faria o histórico afirmar que a
+        // sessão foi alterada e recriada, o que não aconteceu.
+        idsReativar.push(uuidInativo)
+        execucaoDasReativadas.push({
+          id: uuidInativo,
+          status_execucao:             r.status_execucao,
+          justificativa:               r.justificativa,
+          possui_tratativa:            r.possui_tratativa,
+          tratativa_profissional_id:   r.tratativa_profissional_id,
+          tratativa_profissional_nome: r.tratativa_profissional_nome,
+          tratativa_criada_em:         r.tratativa_criada_em,
+          tratativa_origem:            r.tratativa_origem,
+          evolucao_vinculo:            r.evolucao_vinculo,
+          criado_em_tita:              r.criado_em_tita,
+          excluido_em_tita:            r.excluido_em_tita,
+        })
+      } else {
+        // Nunca entrou. Acontece com sessão criada na TiTa depois da rodada do
+        // modo "grade" do próprio dia: a janela daquele modo nunca mais desce
+        // até lá. INSERT é livre em qualquer data (o congelamento protege UPDATE
+        // e DELETE), então aqui é o único lugar do sistema que consegue repor.
+        inseridasRetroativas++
+        aInserir.push({ ...r, ativo: true, origem: "tita_csv", visto_em: agora })
+      }
+    }
+
+    if (idsReativar.length) {
+      await reativar(sb, idsReativar)
+      reativadas = idsReativar.length
+      // Depois de reativar, e não antes: a linha precisa estar de volta na grade
+      // para a execução ter onde pousar.
+      await aplicarExecucao(sb, execucaoDasReativadas)
+    }
+    if (aInserir.length) await inserir(sb, aInserir)
+  }
+
+  // Evolução sem agendamento que não achou linha nenhuma. Nasce depois do fato —
+  // alguém evolui hoje um atendimento que nunca foi marcado — e o modo "grade"
+  // tem piso em hoje, então a partir do dia seguinte nenhuma passada consegue
+  // inseri-la. Esta é a única porta. Medido em julho/2026: das 10 evoluções sem
+  // agendamento, 9 tinham linha (com execução vazia) e 1 não tinha nada.
+  const semAgendamentoNovas = [...porCoordenada.entries()].filter(([k]) => !coordCasadas.has(k))
+  if (semAgendamentoNovas.length) {
+    await inserir(sb, semAgendamentoNovas.map(([k, r]) => {
+      // Já entra com a contagem resolvida. Ela seria escrita de qualquer forma na
+      // rodada seguinte, mas até lá a linha afirmaria "uma tratativa" — e é essa
+      // contagem que separa evolução repetida de conflito de autoria.
+      const cc = contagemCoord.get(k)
+      return {
+        ...r, ativo: true, origem: "tita_csv", visto_em: agora,
+        tratativas: cc ? cc.total : 1,
+        tratativas_distintas: cc ? Math.max(cc.pessoas.size, 1) : 1,
+      }
+    }))
+  }
+
+  // Inativa que a TiTa não devolveu nesta janela: exclusão confirmada na origem.
+  // Só as que têm id — sem id não há como perguntar, e slot 'Livre' (o único caso
+  // sem id) não entra em cálculo de pagamento de qualquer forma.
+  const aConfirmar = inativas
+    .filter(i => !i.ausencia_confirmada_em && i.tita_agendamento_id !== null && !porId.has(i.tita_agendamento_id))
+    .map(i => i.id)
+  if (aConfirmar.length) {
+    await confirmarAusencia(sb, aConfirmar, agora)
+    ausenciasConfirmadas = aConfirmar.length
+  }
+
   const atualizadas = aAtualizar.length ? await aplicarExecucao(sb, aAtualizar) : 0
+  // Por último e sem retentativa crítica: é só carimbo. aplicarExecucao já renova
+  // o visto_em das linhas que passaram por ele, então tira-se a interseção.
+  const jaCarimbadas = new Set(aAtualizar.map(a => a.id as string))
+  const paraCarimbar = idsRevalidar.filter(id => !jaCarimbadas.has(id))
+  if (paraCarimbar.length) await marcarVistas(sb, paraCarimbar, agora)
 
   return {
     modo: "execucao" as const,
@@ -685,6 +1072,19 @@ async function sincronizarExecucao(
     semCorrespondencia,   // tem id, mas a TiTa não devolveu a linha nesta janela
     semId,                // linha semeada do XLS: esta passada não a alcança
     comTratativa: naJanela.filter(r => r.possui_tratativa === true).length,
+    // Reconciliação. Em regime normal os dois são 0; qualquer número aqui é uma
+    // sessão que estava fora da grade e voltou.
+    reativadas,
+    inseridasRetroativas,
+    // Evolução escrita sem agendamento por trás. Não é reconciliação: é captura
+    // de uma classe de linha que antes não entrava. `semAgendamentoCasadas` é a
+    // que achou linha e ganhou a execução; `inseridas`, a que não tinha linha.
+    semAgendamentoCasadas:  coordCasadas.size,
+    semAgendamentoInseridas: semAgendamentoNovas.length,
+    // Inativas que a TiTa confirmou não ter mais. Diferente das duas acima, um
+    // número aqui é normal: alta de paciente e cancelamento produzem isso.
+    ausenciasConfirmadas,
+    revalidadas: paraCarimbar.length,
   }
 }
 
@@ -713,7 +1113,7 @@ serve(async (req: Request) => {
       modo, ...body,
     }, 200, cors)
   }
-  const { inicio: dataInicio, fim: dataFim } = janela
+  const { inicio: dataInicio, fim: dataFim, hoje } = janela
 
   let recebidos: Registro[] | null
   try {
@@ -737,7 +1137,7 @@ serve(async (req: Request) => {
   try {
     const resultado = modo === "execucao"
       ? await sincronizarExecucao(sb, recebidos, dataInicio, dataFim)
-      : await sincronizarGrade(sb, recebidos, dataInicio, dataFim)
+      : await sincronizarGrade(sb, recebidos, dataInicio, dataFim, hoje)
 
     const resumo = { ok: true, dataInicio, dataFim, ...resultado }
     console.log(`[sync-grade-csv] ${JSON.stringify(resumo)}`)

@@ -1,10 +1,11 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Wallet, Users, X } from "lucide-react"
+import { Wallet, Users, X, ChevronRight, FileClock } from "lucide-react"
 import { fmt } from "@/lib/remuneracao/formatacao"
 import { B } from "@/lib/cronograma/constants"
 import { calcularTotalPorEspecialidade } from "@/lib/remuneracao/dashboardRP"
+import { SemContratoAnteriorModal } from "./SemContratoAnteriorModal"
 import type { ProfRemunReal } from "@/lib/remuneracao/calculo"
 
 // ─── Contagem animada do valor total (respeita prefers-reduced-motion) ───────
@@ -70,6 +71,10 @@ export function RemuneracaoRPDashboard({ resultado, especialidadeFiltro, onFiltr
   const animatedTotal = useCountUp(totalMes)
   const revealed = useReveal()
   const [hoverEsp, setHoverEsp] = useState<string | null>(null)
+  const [semAnteriorAberto, setSemAnteriorAberto] = useState(false)
+  const gatilhoSemAnterior = useRef<HTMLButtonElement>(null)
+
+  const semContratoAnterior = useMemo(() => resultado.filter(p => !p.temAntigo), [resultado])
 
   const maxValor = porEspecialidade[0]?.valor ?? 0
 
@@ -104,6 +109,47 @@ export function RemuneracaoRPDashboard({ resultado, especialidadeFiltro, onFiltr
               <span className="tabular-nums font-semibold text-amber-700 dark:text-amber-400">{fmt(totalBancoHoras)}</span>
               {" "}fixo de banco de horas ({profsBancoHoras} profissiona{profsBancoHoras !== 1 ? "is" : "l"})
             </div>
+          )}
+
+          {/* Pendência de cadastro, não de folha — mas tem de PARECER botão.
+              Como frase sublinhada em cinza-mudo passava batido, virou controle
+              com moldura, fundo próprio, rótulo em contraste cheio e contagem
+              em pastilha: o mesmo vocabulário do botão "Contém Inconsistência"
+              logo abaixo na página, que é o que a pessoa já reconhece como
+              clicável aqui. Neutro de propósito — nesta tela vermelho é
+              inconsistência (dinheiro em dúvida) e âmbar é banco de horas; um
+              terceiro sentido no mesmo matiz apagaria os dois. */}
+          {semContratoAnterior.length > 0 && (
+            <button
+              ref={gatilhoSemAnterior}
+              type="button"
+              onClick={() => setSemAnteriorAberto(true)}
+              aria-haspopup="dialog"
+              aria-expanded={semAnteriorAberto}
+              aria-label={
+                semContratoAnterior.length === 1
+                  ? "Ver o profissional sem contrato anterior cadastrado"
+                  : `Ver os ${semContratoAnterior.length} profissionais sem contrato anterior cadastrado`
+              }
+              className="group mt-4 inline-flex w-fit max-w-full items-center gap-2 self-start rounded-lg border border-border bg-background px-3 py-2 text-left shadow-sm transition-colors hover:border-foreground/25 hover:bg-muted/50 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <FileClock size={14} className="shrink-0 text-muted-foreground" aria-hidden />
+              {/* Rótulo curto + contagem em pastilha, e não a frase inteira:
+                  a coluna tem ~330px em notebook e "34 profissionais sem
+                  contrato anterior" não cabe sem truncar. A frase completa vive
+                  no aria-label e no título do modal. */}
+              <span className="min-w-0 flex-1 truncate text-xs font-semibold text-foreground">
+                Sem contrato anterior
+              </span>
+              <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-bold tabular-nums text-foreground">
+                {semContratoAnterior.length}
+              </span>
+              <ChevronRight
+                size={14}
+                className="shrink-0 text-muted-foreground transition-transform duration-150 group-hover:translate-x-0.5 motion-reduce:transition-none motion-reduce:group-hover:translate-x-0"
+                aria-hidden
+              />
+            </button>
           )}
         </div>
 
@@ -180,6 +226,14 @@ export function RemuneracaoRPDashboard({ resultado, especialidadeFiltro, onFiltr
           )}
         </div>
       </div>
+
+      <SemContratoAnteriorModal
+        aberto={semAnteriorAberto}
+        onOpenChange={setSemAnteriorAberto}
+        pendentes={semContratoAnterior}
+        total={resultado.length}
+        gatilho={gatilhoSemAnterior}
+      />
     </div>
   )
 }

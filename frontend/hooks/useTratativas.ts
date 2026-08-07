@@ -54,9 +54,16 @@ export function useTratativas() {
     let cancelled = false
     const dataMin = datasIso.reduce((a, b) => (b < a ? b : a))
     const dataMax = datasIso.reduce((a, b) => (b > a ? b : a))
-    buscarPresencaFilaAutorizacoes(dataMin, dataMax).then(indice => {
-      if (!cancelled) setPresencaIndice(indice)
-    })
+    buscarPresencaFilaAutorizacoes(dataMin, dataMax)
+      .then(indice => { if (!cancelled) setPresencaIndice(indice) })
+      // Aqui não há dinheiro (esta aba só conta tratativas), mas índice vazio
+      // faz toda falta parecer presença — então o erro precisa aparecer, e com
+      // texto legível. Antes imprimia `{}`.
+      .catch(err => {
+        if (cancelled) return
+        setPresencaIndice({ porId: new Map(), porChave: new Map() })
+        console.error("Presença indisponível; contagens podem contar falta como presença:", err instanceof Error ? err.message : err)
+      })
     return () => { cancelled = true }
   }, [evoRowsBase])
 

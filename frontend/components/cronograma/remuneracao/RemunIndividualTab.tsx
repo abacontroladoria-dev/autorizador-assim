@@ -16,8 +16,7 @@ import { RemuneracaoUploadBadges } from "./RemuneracaoUploadBadges"
 export function RemunIndividualTab() {
   const {
     resultado, evoRows, loading, error,
-    peRows, carregarGrade, carregarPE, limparGrade, limparPE, setCsvName,
-    cadastroPrestadores,
+    cadastroPrestadores, controlesGrade,
   } = useRemuneracaoRPContext()
   const { parametros } = useParametrosGerais()
   const { taxas_pa } = useTaxasEspecialidade()
@@ -31,20 +30,12 @@ export function RemunIndividualTab() {
 
   useEffect(() => {
     setHeader("Rem. Mês - Individual", "Relacionamento Prestador")
-    setRightContent(<RemuneracaoUploadBadges
-      evoRows={evoRows}
-      peRows={peRows}
-      carregarGrade={carregarGrade}
-      carregarPE={carregarPE}
-      limparGrade={limparGrade}
-      limparPE={limparPE}
-      setCsvName={setCsvName}
-    />)
+    setRightContent(<RemuneracaoUploadBadges c={controlesGrade} />)
     return () => {
       setHeader("", "")
       setRightContent(null)
     }
-  }, [setHeader, setRightContent, evoRows, peRows, carregarGrade, carregarPE, limparGrade, limparPE, setCsvName])
+  }, [setHeader, setRightContent, controlesGrade])
 
   // Limpa a seleção quando o resultado muda (novo CSV carregado)
   useEffect(() => {
