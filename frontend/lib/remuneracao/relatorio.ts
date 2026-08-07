@@ -29,6 +29,17 @@ export type SessaoReal = {
   diaSemana: string
   idFavorecido: string
   criacaoTratativa: string
+  /**
+   * Quantas evoluções a TiTa tem para ESTE agendamento, e de quantas pessoas
+   * diferentes. 1/1 é o normal.
+   *
+   * O relatório da TiTa emite uma linha por tratativa, não por agendamento —
+   * evoluir duas vezes vira duas linhas com o mesmo `ID Agendamento`. Sem contar
+   * isso, o upload pagava a sessão duas vezes (medido em julho/2026: 5 casos,
+   * R$ 95). Contar não basta: quem evoluiu duas vezes muda o que se deve fazer.
+   */
+  tratativas: number
+  tratativasDistintas: number
 }
 
 /** SessaoReal com campos extras injetados por calculo.ts (papel, valorPA, etc.) */
@@ -178,7 +189,8 @@ export function validarModeloRelatorio(tipo: string, rowsOrHeaders: CsvGradeRow[
 }
 
 export function classificarSessaoReal(
-  r: Pick<SessaoReal, "id" | "data" | "profAgenda" | "profCsv" | "possuiTratativa" | "presencaOrbita" | "statusFinal" | "statusCsv">,
+  r: Pick<SessaoReal, "id" | "data" | "profAgenda" | "profCsv" | "possuiTratativa" | "presencaOrbita" | "statusFinal" | "statusCsv">
+    & Partial<Pick<SessaoReal, "tratativas" | "tratativasDistintas">>,
   feriados?: Record<string, FeriadoInfo>
 ): string {
   const agenda = cleanTxt(r.profAgenda)
@@ -191,17 +203,85 @@ export function classificarSessaoReal(
   // antes de pagar — não pode ser silenciosamente descartada nem tratada como
   // evolução normal.
   if (possui && !cleanTxt(r.id)) return "Evolução sem agendamento"
+  // Duas PESSOAS evoluíram o mesmo agendamento. Só uma atendeu, e o sistema não
+  // tem como saber qual: ninguém recebe até alguém decidir. Vem antes de tudo
+  // porque a dúvida é sobre a autoria, que é o que decide o pagamento.
+  if (possui && (r.tratativasDistintas ?? 1) > 1) return "Evolução em conflito"
   if (cancelado && possui) return "Cancelado evoluído"
   if (!presenca && possui) return "Evolução sem presença"
   if (possui && agenda && csv && normKey(agenda) !== normKey(csv)) return "Substituição"
+  // Mesma pessoa salvou a evolução mais de uma vez. Não há dúvida de quem
+  // trabalhou, então PAGA — uma vez só, porque as cópias já foram descartadas em
+  // normalizarGradeParaSessao. Fica com nome próprio para aparecer na conferência:
+  // duplo clique é ruído de sistema, e ruído que ninguém vê não é corrigido.
+  // Deliberadamente depois de "Substituição": ali o rótulo precisa dizer quem
+  // recebe, que é informação mais urgente que a duplicidade.
+  if (possui && (r.tratativas ?? 1) > 1) return "Evolução duplicada"
   if (possui) return "Evolução normal"
   if (presenca && !possui && !cancelado) return "Pendente retroativa"
   if (cancelado) return feriados?.[dataParaISO(r.data)] ? "Feriado/Ponto Fac." : "Cancelado"
   return "Não evoluído"
 }
 
+/**
+ * Agrupa as linhas por `ID Agendamento` para descobrir evolução repetida.
+ *
+ * Duas fontes, um resultado. No upload a repetição É a repetição de linhas: o
+ * relatório da TiTa emite uma por tratativa. No banco a linha já vem colapsada
+ * (uma por `tita_agendamento_id`), e a contagem chega pronta nas colunas
+ * "Tratativas" / "Tratativas Distintas", que o sync preenche — sem elas o banco
+ * não teria como saber que houve duas, porque guardou só a última.
+ *
+ * Devolve, por id: quantas evoluções e de quantas pessoas, mais a linha que
+ * sobrevive (a de tratativa mais recente). O resto é descartado — um agendamento
+ * é uma sessão, e contar duas paga duas.
+ */
+function agruparPorAgendamento(rows: CsvGradeRow[]) {
+  const porId = new Map<string, { linhas: CsvGradeRow[]; pessoas: Set<string> }>()
+  for (const r of rows) {
+    const id = cleanTxt(getCol(r, ["ID Agendamento"]))
+    if (!id) continue
+    const g = porId.get(id) ?? { linhas: [], pessoas: new Set<string>() }
+    g.linhas.push(r)
+    // Id quando existe; nome normalizado quando não. O que importa é distinguir
+    // "a mesma pessoa salvou de novo" de "outra pessoa evoluiu a mesma sessão".
+    const quem = cleanTxt(getCol(r, ["Id Profissional Tratativa"]))
+      || normKey(getCol(r, ["Nome Profissional Tratativa"]))
+    if (quem) g.pessoas.add(quem)
+    porId.set(id, g)
+  }
+
+  const sobrevivente = new Map<string, CsvGradeRow>()
+  const contagem = new Map<string, { tratativas: number; distintas: number }>()
+  for (const [id, g] of porId) {
+    // A mais recente vence, mesmo critério que o sync usa ao escrever no banco —
+    // é o que mantém os dois caminhos com a mesma resposta.
+    const escolhida = g.linhas.reduce((a, b) =>
+      cleanTxt(getCol(b, ["Criação Tratativa"])) > cleanTxt(getCol(a, ["Criação Tratativa"])) ? b : a)
+    sobrevivente.set(id, escolhida)
+
+    // Do banco a contagem vem pronta; do upload ela é o número de linhas.
+    const doBanco = Number(getCol(escolhida, ["Tratativas"]))
+    const distintasBanco = Number(getCol(escolhida, ["Tratativas Distintas"]))
+    contagem.set(id, {
+      tratativas: Math.max(g.linhas.length, Number.isFinite(doBanco) ? doBanco : 0) || 1,
+      distintas: Math.max(g.pessoas.size, Number.isFinite(distintasBanco) ? distintasBanco : 0) || 1,
+    })
+  }
+  return { sobrevivente, contagem }
+}
+
 export function normalizarGradeParaSessao(rows: CsvGradeRow[], feriados?: Record<string, FeriadoInfo>): SessaoReal[] {
+  const { sobrevivente, contagem } = agruparPorAgendamento(rows)
+
   return rows
+    .filter(r => {
+      // Linha repetida do mesmo agendamento: só a sobrevivente segue. Sem isto,
+      // "pagar uma vez" seria impossível — as duas cópias somam.
+      const id = cleanTxt(getCol(r, ["ID Agendamento"]))
+      if (id && sobrevivente.get(id) !== r) return false
+      return true
+    })
     .filter(r => {
       const statusAgendamento = cleanTxt(getCol(r, ["Status do Agendamento"]))
       if (statusAgendamento === "Agendado") return true
@@ -239,6 +319,8 @@ export function normalizarGradeParaSessao(rows: CsvGradeRow[], feriados?: Record
         diaSemana: cleanTxt(getCol(r, ["Dia da Semana"])),
         idFavorecido: cleanTxt(getCol(r, ["Id Favorecido"])),
         criacaoTratativa: cleanTxt(getCol(r, ["Criação Tratativa"])),
+        tratativas: contagem.get(id)?.tratativas ?? 1,
+        tratativasDistintas: contagem.get(id)?.distintas ?? 1,
       }
       obj.classificacao = classificarSessaoReal(obj, feriados)
       return obj

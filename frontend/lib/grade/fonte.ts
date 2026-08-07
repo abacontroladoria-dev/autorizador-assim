@@ -43,6 +43,16 @@ export type FonteGrade = keyof typeof VIEW_POR_FONTE
 /** View de valores distintos para os selects de cadastro — ver buscarOpcoesGrade(). */
 export const VIEW_OPCOES = "vw_grade_opcoes"
 
+/**
+ * View do que as outras escondem — ver `medirSaudeGrade()`.
+ *
+ * Fora de `VIEW_POR_FONTE` de propósito: a projeção é enxuta e NÃO é
+ * intercambiável com as outras duas. `buscarGrade` promete que trocar `fonte`
+ * troca o recorte sem mudar as colunas disponíveis, e essa promessa vale mais do
+ * que reaproveitar o laço de paginação.
+ */
+export const VIEW_INATIVAS = "vw_grade_inativas"
+
 /** Tabela crua — só para as leituras por UUID citadas no cabeçalho. */
 export const TABELA_GRADE = "csv_grades_profissionais"
 
@@ -166,6 +176,73 @@ export async function buscarGrade<T>(cfg: BuscaGrade): Promise<T[]> {
   }
 
   return todas
+}
+
+/** O que falta na grade de um período. Ver `medirSaudeGrade()`. */
+export interface SaudeGrade {
+  /** Linhas fora da grade, sem versão ativa no lugar e sem ausência confirmada. */
+  inativas: number
+  /**
+   * Destas, as que eram atendimento ('Agendado'). Slot 'Livre' perdido não custa
+   * nada; sessão agendada perdida é folha a menos. Em julho/2026: 38 de 38.
+   */
+  inativasAgendadas: number
+}
+
+/**
+ * Quantas sessões do período sumiram da grade por inativação.
+ *
+ * Existe porque toda guarda de qualidade que tínhamos media a grade por dentro —
+ * contava `status_execucao` nulo entre as linhas que existem. Uma linha
+ * inativada não é uma linha com campo vazio: ela simplesmente não está lá, e
+ * nenhuma contagem interna a enxerga. Julho/2026 passou com 98,9% de cobertura e
+ * R$ 490,00 a menos na folha, porque 25 sessões realizadas estavam escondidas
+ * atrás de `ativo = false`.
+ *
+ * Três recortes, e cada um existe porque um alarme falso já apareceu sem ele:
+ *
+ *   `tem_substituta_ativa = false` — inativa com gêmea ativa é o versionamento
+ *     funcionando, a sessão continua na grade. Sem isto, as 5 versionadas de
+ *     julho manteriam o alarme aceso para sempre.
+ *
+ *   `ausencia_confirmada_em is null` — a reconciliação diária pergunta à TiTa e
+ *     carimba o que ela confirma não ter mais. Alta de paciente retira dezenas
+ *     de sessões de uma vez, legitimamente: em agosto/2026 um único paciente
+ *     respondeu por 59 delas. Contá-las travaria o mês para sempre.
+ *
+ *   `data <= hoje` — sessão futura cancelada não é perda, é agenda mudando.
+ *     Não há o que pagar nela. Mesmo critério de CoberturaGrade.agendados.
+ *
+ * O que sobra é a pergunta certa: sessão que já aconteceu, sumiu da grade e
+ * ninguém conferiu contra a TiTa. Em regime normal isso é zero em até 24h.
+ *
+ * Duas requisições HEAD com `count=exact`: não traz linha nenhuma, só o número.
+ */
+export async function medirSaudeGrade(
+  de: string, ate: string, unidade?: number, cliente?: unknown, hoje = new Date(),
+): Promise<SaudeGrade> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const sb: any = cliente ?? getSupabaseClient()
+
+  const iso = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}-${String(hoje.getDate()).padStart(2, "0")}`
+  const limite = ate < iso ? ate : iso
+  if (limite < de) return { inativas: 0, inativasAgendadas: 0 }
+
+  const contar = async (soAgendadas: boolean) => {
+    let q = sb.from(VIEW_INATIVAS).select("id", { count: "exact", head: true })
+      .gte("data", de)
+      .lte("data", limite)
+      .eq("tem_substituta_ativa", false)
+      .is("ausencia_confirmada_em", null)
+    if (unidade !== undefined) q = q.eq("unidade_id", unidade)
+    if (soAgendadas) q = q.eq("status_agendamento", "Agendado")
+    const { count, error } = await q
+    if (error) throw new Error(error.message)
+    return count ?? 0
+  }
+
+  const [inativas, inativasAgendadas] = await Promise.all([contar(false), contar(true)])
+  return { inativas, inativasAgendadas }
 }
 
 /** Uma opção de formulário vinda da agenda real. `id` é null para convênio (a fonte só tem nome). */

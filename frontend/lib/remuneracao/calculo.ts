@@ -888,12 +888,29 @@ type ProfMapEntry = {
   funcoesContrato: Set<string>
 }
 
-export function calcularRemuneracaoReal(evoRows: SessaoReal[], config: RemuneracaoRealConfig): ProfRemunReal[] {
+export function calcularRemuneracaoReal(evoRowsBrutas: SessaoReal[], config: RemuneracaoRealConfig): ProfRemunReal[] {
   const {
     taxasPA, diarias, etaBonus, ccPA, ccPE, antigos = {}, cadastroPrestadores = {},
     peAnaliseCompleta = false, peProporcional = PE_INATIVO,
     peStatusMensagem = "PE bloqueado: importe csv_grade_profissionais e agendamentos_profissionais para calcular com segurança.",
   } = config
+
+  // Profissional de teste não recebe. `calcularAnaliseFutura` já descartava, mas
+  // aqui — que é a folha de verdade — não descartava, e a assimetria só não
+  // aparecia porque a grade vinha do upload manual e ninguém comparava as duas.
+  //
+  // Com a grade lendo do banco a diferença ficou visível: `vw_grade_base` filtra
+  // esses nomes, o upload não. Medido em julho/2026, o upload trazia 82 sessões
+  // de "Testes Técnicos - Sanderson Rodrigues de Souza" — 39 delas de
+  // Fonoaudiologia, que tem diária de R$ 300 — para dentro do cálculo. Filtrar
+  // aqui é o que torna os dois caminhos comparáveis, e é a resposta certa nos
+  // dois: uma sessão de teste nunca foi trabalho a pagar.
+  //
+  // `includes`, não igualdade: os nomes reais vêm como "Testes Técnicos - Fulano".
+  const evoRows = evoRowsBrutas.filter(r => {
+    const nome = `${r.profAgenda || ""} ${r.profCsv || ""}`
+    return !PROFS_IGNORAR.some(f => nome.includes(f))
+  })
 
   const funcoesContratoPorProf: Record<string, Set<string>> = {}
   evoRows.forEach(r => {
@@ -947,7 +964,11 @@ export function calcularRemuneracaoReal(evoRows: SessaoReal[], config: Remunerac
     const fallbackPA = isEspecialidadeSemPA(r.especialidade)
       ? 0
       : isEtaAdminRow ? (taxasPA["Especialista Técnico de Área"] ?? 50) : (taxasPA[r.especialidade] ?? 0)
-    const eInc = ["Evolução sem presença", "Cancelado evoluído", "Evolução sem agendamento"].includes(r.classificacao)
+    // "Evolução em conflito" entra aqui: duas pessoas evoluíram o mesmo
+    // agendamento e não dá para saber qual atendeu, então não se paga nenhuma.
+    // "Evolução duplicada" NÃO entra — ali é a mesma pessoa salvando duas vezes,
+    // a autoria é certa e a cópia extra já foi descartada na normalização.
+    const eInc = ["Evolução sem presença", "Cancelado evoluído", "Evolução sem agendamento", "Evolução em conflito"].includes(r.classificacao)
     if (agenda) {
       const a = ensure(agenda)
       a.agendadas++

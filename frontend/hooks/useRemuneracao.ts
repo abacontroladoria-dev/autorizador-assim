@@ -1,8 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { getRefWeek } from "@/lib/cronograma/helpers"
-import { buscarGradeParaAnalise } from "@/lib/remuneracao/gradeRemuneracao"
+import {
+  buscarGradeParaAnalise, buscarGradeParaRP, checarPisoDeExecucao, avaliarCoberturaGrade,
+  type CoberturaGrade,
+} from "@/lib/remuneracao/gradeRemuneracao"
 import {
   calcularAnaliseFutura, calcularRemuneracaoReal, calcularPEProporcional,
   normalizarRelatorioPE, parsePeriodoArquivo, PE_INATIVO,
@@ -175,13 +178,54 @@ export function useAnaliseFutura() {
   }
 }
 
+/** Fonte da grade em uso. Quem carregou por último vence. */
+export type FonteGradeRP = "banco" | "upload"
+
+/** Props dos controles de grade injetados no header. Ver `controlesGrade`. */
+export type ControlesGradeRP = ReturnType<typeof useRemunRP>["controlesGrade"]
+
+export interface PeriodoRP { de: string; ate: string }
+
+function isoLocal(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
+export function periodoDoMes(ano: number, mes: number): PeriodoRP {
+  return { de: isoLocal(new Date(ano, mes - 1, 1)), ate: isoLocal(new Date(ano, mes, 0)) }
+}
+
+/** Último mês inteiro já encerrado — o que normalmente se está fechando. */
+function mesFechadoAnterior(): PeriodoRP {
+  const h = new Date()
+  const ref = new Date(h.getFullYear(), h.getMonth() - 1, 1)
+  return periodoDoMes(ref.getFullYear(), ref.getMonth() + 1)
+}
+
 export function useRemunRP() {
   const { parametros, loading: parametrosLoading, error: parametrosError } = useParametrosGerais()
   const { taxas_pa, diarias, loading: taxasLoading } = useTaxasEspecialidade()
   const { feriados, loading: feriadosLoading } = useFeriados()
-  const [evoRowsBase, setEvoRowsBase] = useState<SessaoReal[]>([])
+  // Guardamos as linhas CRUAS, não a versão já normalizada: assim a
+  // classificação é re-derivada quando os feriados chegarem. Normalizar no ato
+  // do carregamento congelava um `feriados` ainda vazio e nenhum cancelamento
+  // virava "Feriado/Ponto Fac.". Mesmo padrão de hooks/useTratativas.ts.
+  const [gradeRaw, setGradeRaw] = useState<CsvGradeRow[]>([])
   const [presencaIndice, setPresencaIndice] = useState<PresencaIndice>({ porId: new Map(), porChave: new Map() })
   const [csvName, setCsvName] = useState<string | null>(null)
+  const [fonteGrade, setFonteGrade] = useState<FonteGradeRP | null>(null)
+  const [periodo, setPeriodo] = useState<PeriodoRP>(mesFechadoAnterior)
+  /** Período que a grade em uso de fato cobre — pode diferir do escolhido. */
+  const [periodoCarregado, setPeriodoCarregado] = useState<PeriodoRP | null>(null)
+  const [gradeLoading, setGradeLoading] = useState(false)
+  const [gradeErro, setGradeErro] = useState<string | null>(null)
+  // Par do `gradeErro`: título de uma linha para o chip do cabeçalho e o número
+  // que dá concretude ao problema. Ver VeredictoGrade — a explicação vai no
+  // modal, o cabeçalho só cabe um chip.
+  const [gradeErroResumo, setGradeErroResumo] = useState<string | null>(null)
+  const [gradeErroDica, setGradeErroDica] = useState<string | null>(null)
+  const [gradeErroQtd, setGradeErroQtd] = useState<number | undefined>(undefined)
+  const [gradeAviso, setGradeAviso] = useState<string | null>(null)
+  const [coberturaGrade, setCoberturaGrade] = useState<CoberturaGrade | null>(null)
   const [peRows, setPeRows] = useState<PERow[]>([])
   const [peName, setPeName] = useState<string | null>(null)
   const [antigos, setAntigos] = useState<Record<string, ContratoAntigoInfo>>({})
@@ -217,34 +261,157 @@ export function useRemunRP() {
     return () => { isMounted = false }
   }, [])
 
-  const carregarGrade = useCallback((rows: Record<string, unknown>[]) => {
-    setEvoRowsBase(normalizarGradeParaSessao(rows, feriados))
-  }, [feriados])
+  // Os três campos da reprovação andam juntos sempre; separá-los já deixou o
+  // cabeçalho com um chip de um erro que não existia mais.
+  const limparReprovacao = useCallback(() => {
+    setGradeErro(null)
+    setGradeErroResumo(null)
+    setGradeErroDica(null)
+    setGradeErroQtd(undefined)
+  }, [])
+
+  const reprovar = useCallback((v: { erro: string; resumo: string; dica: string; quantidade?: number }) => {
+    setGradeErro(v.erro)
+    setGradeErroResumo(v.resumo)
+    setGradeErroDica(v.dica)
+    setGradeErroQtd(v.quantidade)
+    setGradeAviso(null)
+  }, [])
+
+  /** Upload manual: sobrepõe o que veio do banco. */
+  const carregarGrade = useCallback((rows: CsvGradeRow[], nomeArquivo?: string) => {
+    setGradeRaw(rows)
+    setFonteGrade("upload")
+    setCoberturaGrade(null)
+    setPeriodoCarregado(null)
+    limparReprovacao()
+    setGradeAviso(null)
+    if (nomeArquivo !== undefined) setCsvName(nomeArquivo)
+  }, [limparReprovacao])
 
   const limparGrade = useCallback(() => {
-    setEvoRowsBase([])
+    setGradeRaw([])
     setPresencaIndice({ porId: new Map(), porChave: new Map() })
     setCsvName(null)
-  }, [])
+    setFonteGrade(null)
+    setCoberturaGrade(null)
+    setPeriodoCarregado(null)
+    limparReprovacao()
+    setGradeAviso(null)
+  }, [limparReprovacao])
+
+  // Serializa as cargas: dois cliques seguidos em períodos diferentes poderiam
+  // terminar fora de ordem e deixar na tela a grade do período errado.
+  const cargaAtual = useRef(0)
+
+  const carregarGradeDoBanco = useCallback(async (alvo?: PeriodoRP) => {
+    const p = alvo ?? periodo
+    if (alvo) setPeriodo(alvo)
+
+    const piso = checarPisoDeExecucao(p.de)
+    if (!piso.ok) {
+      reprovar(piso)
+      return
+    }
+
+    const marca = ++cargaAtual.current
+    setGradeLoading(true)
+    limparReprovacao()
+    setGradeAviso(null)
+    try {
+      const { linhas, ...cobertura } = await buscarGradeParaRP(p.de, p.ate)
+      if (marca !== cargaAtual.current) return
+
+      const veredicto = avaliarCoberturaGrade(cobertura, p)
+      if (!veredicto.ok) {
+        // Nada do período reprovado entra no estado — nem as linhas, nem os
+        // contadores. Se já havia uma grade boa carregada, ela continua como
+        // está, e o badge segue descrevendo ELA. Os números do período
+        // reprovado vão para o modal.
+        reprovar(veredicto)
+        return
+      }
+      // Só os contadores: guardar `linhas` aqui manteria as ~19 mil vivas em
+      // duas referências sem ninguém usar a segunda.
+      setGradeRaw(linhas)
+      setCoberturaGrade(cobertura)
+      setFonteGrade("banco")
+      setCsvName(null)
+      setPeriodoCarregado(p)
+      setGradeAviso(veredicto.aviso)
+    } catch (err) {
+      if (marca !== cargaAtual.current) return
+      reprovar({
+        resumo: "Falha ao ler a grade",
+        erro: err instanceof Error ? err.message : "Não consegui ler a grade do banco.",
+        dica: "Nenhum dado foi alterado. Tente carregar de novo; se repetir, avise o time técnico "
+          + "com a mensagem acima e use o CSV exportado da TiTa enquanto isso.",
+      })
+    } finally {
+      if (marca === cargaAtual.current) setGradeLoading(false)
+    }
+  }, [periodo, reprovar, limparReprovacao])
+
+  // Primeira carga automática. Fica atrás de um ref, e não de um efeito com
+  // dependências, porque o provider vive no layout do segmento: as duas abas
+  // que usam a grade montam o mesmo componente de controles e disparariam duas
+  // buscas de ~19 páginas cada.
+  const jaAutoCarregou = useRef(false)
+  const carregarGradeAuto = useCallback(() => {
+    if (jaAutoCarregou.current) return
+    jaAutoCarregou.current = true
+    void carregarGradeDoBanco()
+  }, [carregarGradeDoBanco])
+
+  // Normaliza/classifica a partir das linhas cruas + feriados atuais. Reage
+  // tanto a uma carga nova quanto à chegada dos feriados.
+  const evoRowsBase = useMemo<SessaoReal[]>(
+    () => normalizarGradeParaSessao(gradeRaw, feriados),
+    [gradeRaw, feriados],
+  )
+
+  // A janela sai memoizada à parte porque `evoRowsBase` é um array novo sempre
+  // que os feriados chegam. Depender dele direto refaria a consulta à fila para
+  // o mesmo intervalo; depender das duas datas também evita refazê-la quando o
+  // operador recarrega o mesmo mês.
+  const janelaPresenca = useMemo(() => {
+    const datasIso = evoRowsBase.map(r => dataParaISO(r.data)).filter(Boolean)
+    if (datasIso.length === 0) return null
+    return {
+      min: datasIso.reduce((a, b) => (b < a ? b : a)),
+      max: datasIso.reduce((a, b) => (b > a ? b : a)),
+    }
+  }, [evoRowsBase])
 
   // Cruza a grade carregada com fila_autorizacoes (mesma tabela usada por
   // cronograma/reposicao) para saber a presença real registrada pela recepção —
   // sem isso, presencaOrbita ("Presença Recep.") sai sempre "Sim" (ver
   // normalizarGradeParaSessao).
+  const janelaMin = janelaPresenca?.min
+  const janelaMax = janelaPresenca?.max
   useEffect(() => {
-    const datasIso = evoRowsBase.map(r => dataParaISO(r.data)).filter(Boolean)
-    if (datasIso.length === 0) {
+    if (!janelaMin || !janelaMax) {
       setPresencaIndice({ porId: new Map(), porChave: new Map() })
       return
     }
     let cancelled = false
-    const dataMin = datasIso.reduce((a, b) => (b < a ? b : a))
-    const dataMax = datasIso.reduce((a, b) => (b > a ? b : a))
-    buscarPresencaFilaAutorizacoes(dataMin, dataMax).then(indice => {
-      if (!cancelled) setPresencaIndice(indice)
-    })
+    buscarPresencaFilaAutorizacoes(janelaMin, janelaMax)
+      .then(indice => { if (!cancelled) setPresencaIndice(indice) })
+      // Sem presença o cálculo não é "menos preciso", é errado para o lado de
+      // pagar: toda falta vira sessão presente. Então reprova a carga em vez de
+      // exibir um total que parece bom.
+      .catch(err => {
+        if (cancelled) return
+        setPresencaIndice({ porId: new Map(), porChave: new Map() })
+        reprovar({
+          resumo: "Falha ao ler a presença",
+          erro: `Não consegui ler as faltas em fila_autorizacoes: ${err instanceof Error ? err.message : String(err)}. `
+            + "Sem isso toda falta contaria como sessão presente, e o cálculo pagaria a mais.",
+          dica: "Nenhum dado foi alterado. Tente carregar de novo; se repetir, avise o time técnico.",
+        })
+      })
     return () => { cancelled = true }
-  }, [evoRowsBase])
+  }, [janelaMin, janelaMax, reprovar])
 
   // evoRows final: sobrepõe presencaOrbita conforme fila_autorizacoes — casando
   // primeiro pelo id do agendamento (mais confiável) e só then por
@@ -291,6 +458,31 @@ export function useRemunRP() {
     return calcularPEProporcional(peRows, parametros.cc_pe_default, evoRows, coordsAtivos)
   }, [parametros, peAnaliseCompleta, peRows, evoRows, coordsAtivos])
 
+  /**
+   * Tudo que os controles do header precisam, num objeto de identidade estável.
+   *
+   * Vai por prop, e não por contexto, porque `setRightContent` guarda o elemento
+   * em estado e quem o renderiza é o layout do dashboard — **acima** deste
+   * segmento, portanto fora do RemuneracaoRPProvider. Contexto é posicional na
+   * árvore de render, não no lugar onde o elemento foi criado.
+   *
+   * Memoizado porque o efeito que injeta o header depende deste objeto: uma
+   * identidade nova a cada render reinjetaria o header em laço.
+   */
+  const controlesGrade = useMemo(() => ({
+    evoRows, peRows, csvName,
+    carregarGrade, carregarPE, limparGrade, limparPE,
+    fonteGrade, periodo, setPeriodo, periodoCarregado, coberturaGrade,
+    carregarGradeDoBanco, carregarGradeAuto,
+    gradeLoading, gradeErro, gradeErroResumo, gradeErroDica, gradeErroQtd, gradeAviso,
+  }), [
+    evoRows, peRows, csvName,
+    carregarGrade, carregarPE, limparGrade, limparPE,
+    fonteGrade, periodo, periodoCarregado, coberturaGrade,
+    carregarGradeDoBanco, carregarGradeAuto,
+    gradeLoading, gradeErro, gradeErroResumo, gradeErroDica, gradeErroQtd, gradeAviso,
+  ])
+
   const resultado: ProfRemunReal[] | null = useMemo(() => {
     if (!parametros || !evoRows.length) return null
     return calcularRemuneracaoReal(evoRows, {
@@ -312,9 +504,19 @@ export function useRemunRP() {
     presenca: parametros?.presenca_padrao ?? 80,
     evoRows,
     csvName,
-    setCsvName,
     carregarGrade,
     limparGrade,
+    // Leitura pelo banco (padrão) — ver lib/remuneracao/gradeRemuneracao.ts
+    fonteGrade,
+    periodo,
+    periodoCarregado,
+    carregarGradeDoBanco,
+    gradeLoading,
+    gradeErro,
+    gradeAviso,
+    coberturaGrade,
+    /** Props dos controles do header — ver o comentário na definição. */
+    controlesGrade,
     peRows,
     peName,
     carregarPE,
