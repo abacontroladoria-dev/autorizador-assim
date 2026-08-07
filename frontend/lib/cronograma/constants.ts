@@ -278,6 +278,26 @@ export function normTxt(s: string | null | undefined): string {
   return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim()
 }
 
+const ENTIDADES_HTML: Record<string, string> = {
+  "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"",
+  "&#39;": "'", "&#039;": "'", "&apos;": "'",
+}
+
+/**
+ * Decodifica entidades HTML (ex.: "D&#039;avila" → "D'avila") que às vezes
+ * chegam cruas em nomes de profissional/paciente vindos do Tita/apptita —
+ * aparentemente o sistema de origem escapa o texto pra HTML em algum ponto e
+ * nunca decodifica de volta antes de exportar/sincronizar. Problema
+ * independente do mojibake de UTF-8 (ver fixMojibake em gradeService.ts) —
+ * um é encoding de caractere, o outro é escape de marcação; um nome pode ter
+ * os dois problemas ao mesmo tempo.
+ */
+export function decodeEntidadesHtml(s: string | null | undefined): string {
+  const str = s ?? ""
+  if (!str.includes("&")) return str
+  return str.replace(/&#0?39;|&apos;|&amp;|&lt;|&gt;|&quot;/g, m => ENTIDADES_HTML[m] ?? m)
+}
+
 export function isProfBloqueadoTemp(prof: string): boolean {
   return PROFISSIONAIS_BLOQUEADOS_TEMPORARIAMENTE.some(p => normTxt(prof) === normTxt(p))
 }

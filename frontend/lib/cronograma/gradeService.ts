@@ -8,7 +8,9 @@ const FIELDS = "id, paciente_nome, dia_semana, hora_inicial, hora_final, profiss
 const FIELDS_COMPARATIVO = "paciente_id, paciente_nome, sala_nome, convenio_nome, status_agendamento, data, hora_inicial, terapia_id, terapia_nome, dia_semana, profissional_id, profissional_nome"
 
 // Reexportado porque metade do módulo de cronograma já importa fixMojibake
-// daqui. A implementação vive em lib/grade/fonte.ts, junto da leitura.
+// daqui. A implementação (mojibake de UTF-8 + entidades HTML cruas, ex.:
+// "D&#039;avila" — ver decodeEntidadesHtml em constants.ts) vive em
+// lib/grade/fonte.ts, junto da leitura.
 export { fixMojibake }
 
 export async function buscarGradeComoCSVRows(dataInicio: string, dataFim: string): Promise<CsvRow[]> {

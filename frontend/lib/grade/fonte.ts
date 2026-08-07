@@ -30,6 +30,7 @@
 //   • sync-grade-csv — é o escritor.
 
 import { getSupabaseClient } from "@/lib/supabase/client"
+import { decodeEntidadesHtml } from "@/lib/cronograma/constants"
 
 /** Nome da view por trás de cada fonte. Único lugar do frontend que os conhece. */
 export const VIEW_POR_FONTE = {
@@ -70,7 +71,7 @@ const MOJIBAKE_RE = /[Â-Ã][-¿]/
  * 2.492 com "ç" correto. Mantido porque o custo é um teste de regex e a
  * garantia de que a API nunca mais devolverá texto malformado não existe.
  */
-export function fixMojibake(s: string | null | undefined): string {
+function fixMojibakeSemEntidades(s: string | null | undefined): string {
   const str = s ?? ""
   if (!str || !MOJIBAKE_RE.test(str)) return str
   try {
@@ -80,6 +81,16 @@ export function fixMojibake(s: string | null | undefined): string {
   } catch {
     return str
   }
+}
+
+/**
+ * Repara texto vindo da sincronização da grade: dupla codificação UTF-8
+ * (mojibake, ver fixMojibakeSemEntidades acima) E entidades HTML cruas (ex.:
+ * "D&#039;avila" — ver decodeEntidadesHtml em lib/cronograma/constants.ts).
+ * São dois problemas independentes que podem aparecer juntos no mesmo nome.
+ */
+export function fixMojibake(s: string | null | undefined): string {
+  return decodeEntidadesHtml(fixMojibakeSemEntidades(s))
 }
 
 /** Coluna a ordenar; `desc` inverte. Sem isto a paginação pode pular ou repetir linhas. */
