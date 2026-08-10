@@ -2,15 +2,11 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import Link from "next/link"
 import {
   CalendarDays,
   Users,
   UserX,
   UserMinus,
-  Stethoscope,
-  Calendar,
-  CalendarCheck,
 } from "lucide-react"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { useHeader } from "@/contexts/HeaderContext"
@@ -199,9 +195,9 @@ export default function Home() {
   return (
     <div className="space-y-2">
 
-      {/* ── 1. Header com saudação + atalhos ──────────────────────────── */}
-      <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_6px_24px_-2px_rgba(0,0,0,0.08)] px-7 py-6">
-        <div className="flex flex-col gap-6 xl:flex-row xl:items-center xl:justify-between xl:gap-8">
+      {/* ── 1. Header com saudação + Pulsar Connect ───────────────────── */}
+      <div className="bg-white rounded-2xl border border-slate-100 shadow-[0_1px_3px_rgba(0,0,0,0.04),0_6px_24px_-2px_rgba(0,0,0,0.08)] px-7 py-5">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between xl:gap-8">
           <div className="min-w-0">
             <h1 className="text-2xl font-bold text-slate-800 leading-tight">
               {greeting()}, {nomeUsuario}! 👋
@@ -209,7 +205,7 @@ export default function Home() {
             <p className="text-sm text-slate-400 mt-1 capitalize">
               {capitalize(formatDate())}
             </p>
-            <div className="mt-4 inline-flex items-center gap-2 text-xs text-slate-600 bg-slate-50 border border-slate-100 px-4 py-2 rounded-full">
+            <div className="mt-3 inline-flex items-center gap-2 text-xs text-slate-600 bg-slate-50 border border-slate-100 px-3.5 py-1.5 rounded-full">
               <span className="relative flex h-2 w-2">
                 <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                 <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
@@ -220,14 +216,7 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="ml-auto grid w-full grid-cols-1 gap-3 lg:grid-cols-[auto_minmax(220px,250px)] xl:w-auto">
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              <ShortcutButton href="/central-pacientes"  icon={Users}         label="Controle de Pacientes"  iconBg="bg-teal-50"   iconColor="text-teal-600"   accentHex="#0d9488" />
-              <ShortcutButton href="/central-terapeutas" icon={Stethoscope}   label="Controle de Terapeutas" iconBg="bg-blue-50"   iconColor="text-[#3A8FB7]" accentHex="#3A8FB7" />
-              <ShortcutButton href="/agenda/pacientes"   icon={Calendar}      label="Agenda Paciente"        iconBg="bg-purple-50" iconColor="text-purple-600" accentHex="#9333ea" />
-              <ShortcutButton href="/agenda/terapeutas"  icon={CalendarCheck} label="Agenda Terapeuta"       iconBg="bg-orange-50" iconColor="text-orange-500" accentHex="#f97316" />
-            </div>
-
+          <div className="ml-auto w-full max-w-sm xl:w-62.5 xl:max-w-none">
             <PulsarHubCard />
           </div>
         </div>
@@ -276,38 +265,5 @@ export default function Home() {
     </div>
   )
 }
-
-// ─── ShortcutButton ───────────────────────────────────────────────────────────
-
-function ShortcutButton({
-  href,
-  icon: Icon,
-  label,
-  iconBg,
-  iconColor,
-  accentHex,
-}: {
-  href: string
-  icon: typeof Users
-  label: string
-  iconBg: string
-  iconColor: string
-  accentHex: string
-}) {
-  return (
-    <Link
-      href={href}
-      className={`flex items-center gap-3 px-4 py-3 ${iconBg} rounded-xl border shadow-[0_1px_4px_rgba(0,0,0,0.07),0_3px_10px_rgba(0,0,0,0.06)] hover:shadow-[0_4px_14px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-sm transition-all duration-150`}
-      style={{ borderColor: `${accentHex}55` }}
-    >
-      <div className={`bg-white/80 ${iconColor} p-2 rounded-lg shrink-0 shadow-sm`} style={{ boxShadow: `0 1px 4px ${accentHex}25` }}>
-        <Icon size={16} />
-      </div>
-      <span className="text-xs font-semibold text-slate-700 leading-tight whitespace-nowrap">{label}</span>
-    </Link>
-  )
-}
-
-
 
 
