@@ -117,6 +117,8 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   relacionamento_prestador_analise: ['/relacionamento-prestador/analise'],
   relacionamento_prestador_rp: ['/relacionamento-prestador/rp'],
   relacionamento_prestador_individual: ['/relacionamento-prestador/individual'],
+  relacionamento_prestador_pep: ['/relacionamento-prestador/pep'],
+  relacionamento_prestador_pep_historico: ['/relacionamento-prestador/pep-historico'],
   relacionamento_prestador_historico: ['/relacionamento-prestador/historico'],
   relacionamento_prestador_legenda: ['/relacionamento-prestador/legenda'],
 }

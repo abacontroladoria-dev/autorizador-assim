@@ -69,9 +69,16 @@ function diaMes(iso: string): string {
 
 const BOTAO_PILULA = "flex items-center gap-1.5 rounded-full border border-dashed border-[#2A92C0]/60 bg-[#2A92C0]/5 text-[#2A92C0] hover:bg-[#2A92C0]/10 px-3 py-1 text-xs font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer"
 
+interface Props {
+  c: ControlesGradeRP
+  // Esconde o badge de "Upload PE" — usado na aba Entregas PEP, onde a PEP do
+  // Analista do Comportamento vem do registro manual, não desse relatório.
+  hidePe?: boolean
+}
+
 // Recebe por prop, não por contexto: o header renderiza este componente fora do
 // RemuneracaoRPProvider. Ver o comentário de `controlesGrade` em useRemuneracao.ts.
-export function RemuneracaoUploadBadges({ c }: { c: ControlesGradeRP }) {
+export function RemuneracaoUploadBadges({ c, hidePe = false }: Props) {
   const {
     evoRows, peRows, csvName, carregarGrade, carregarPE, limparGrade, limparPE,
     fonteGrade, periodo, setPeriodo, periodoCarregado, coberturaGrade,
@@ -272,24 +279,27 @@ export function RemuneracaoUploadBadges({ c }: { c: ControlesGradeRP }) {
           {uploadLoading ? "Lendo..." : "CSV"}
         </button>
 
-        {/* Badge 2: PE */}
-        {peLoaded ? (
-          <span className="flex items-center gap-1.5 rounded-full border border-green-200 bg-green-50 text-green-700 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400 px-3 py-1 text-xs font-medium">
-            <CheckCircle2 size={11} className="text-green-500" />
-            PE · {peRows.length.toLocaleString("pt-BR")} registros
-            <button onClick={limparPE} className="ml-0.5 text-green-600/50 hover:text-destructive transition-colors" title="Remover PE">
-              <X size={11} />
+        {/* Badge 2: PE — some inteiro na aba Entregas PEP (hidePe), já que a
+            fonte da PEP do Analista do Comportamento é o registro manual. */}
+        {!hidePe && (
+          peLoaded ? (
+            <span className="flex items-center gap-1.5 rounded-full border border-green-200 bg-green-50 text-green-700 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400 px-3 py-1 text-xs font-medium">
+              <CheckCircle2 size={11} className="text-green-500" />
+              PE · {peRows.length.toLocaleString("pt-BR")} registros
+              <button onClick={limparPE} className="ml-0.5 text-green-600/50 hover:text-destructive transition-colors" title="Remover PE">
+                <X size={11} />
+              </button>
+            </span>
+          ) : (
+            <button
+              onClick={() => !peLoading && peInputRef.current?.click()}
+              disabled={peLoading}
+              className={BOTAO_PILULA}
+            >
+              {peLoading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
+              {peLoading ? "Lendo..." : "Upload PE"}
             </button>
-          </span>
-        ) : (
-          <button
-            onClick={() => !peLoading && peInputRef.current?.click()}
-            disabled={peLoading}
-            className={BOTAO_PILULA}
-          >
-            {peLoading ? <Loader2 size={11} className="animate-spin" /> : <Upload size={11} />}
-            {peLoading ? "Lendo..." : "Upload PE"}
-          </button>
+          )
         )}
       </div>
 

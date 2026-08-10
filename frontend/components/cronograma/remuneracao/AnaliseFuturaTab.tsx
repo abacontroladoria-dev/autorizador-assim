@@ -249,7 +249,7 @@ function ContratoAntigoCard({ d }: { d: ProfissionalAnalise }) {
 // valor/hora é derivado, nunca cadastrado: valor fixo ÷ horas agendadas no mês.
 function BancoDeHorasCard({ d, presenca }: { d: ProfissionalAnalise; presenca: number | null }) {
   const c = TONE_CLS.amber
-  // Só o valor fixo: em banco de horas puro o cálculo já zera PA, PPD, ETA e PE na
+  // Só o valor fixo: em banco de horas puro o cálculo já zera PA, PPD, ETA e PEP na
   // origem. No híbrido eles continuam existindo, mas vêm do contrato de
   // atendimento ao lado — quem os mostra são os cards de presença, não este.
   const soFixo = d.modalidade === "banco_horas"
@@ -288,7 +288,7 @@ function BancoDeHorasCard({ d, presenca }: { d: ProfissionalAnalise; presenca: n
 
       {soFixo && (
         <p className="mt-3 text-xs text-muted-foreground leading-snug">
-          É a remuneração inteira: PA por sessão, PPD, bônus ETA e PE não se somam a um contrato
+          É a remuneração inteira: PA por sessão, PPD, bônus ETA e PEP não se somam a um contrato
           de valor fixo.
         </p>
       )}
@@ -356,7 +356,7 @@ function PresencaCard({
         <LinhaValorDescricao valor={fmt(pa)} descricao="PA · pagamento por atendimento" />
         {temPpd && <LinhaValorDescricao valor={fmt(ppd)} descricao="PPD · pagamento por diária" />}
         {temEta && <LinhaValorDescricao valor={fmt(etaBonusTotal)} descricao="Bônus ETA" />}
-        {d.pe > 0 && <LinhaValorDescricao valor={fmt(d.pe)} descricao="PE · pagamento por entrega" />}
+        {d.pe > 0 && <LinhaValorDescricao valor={fmt(d.pe)} descricao="PEP · parcela por entregas por paciente" />}
       </div>
 
       {delta !== null && (
@@ -396,7 +396,7 @@ function TerapiaDiasBloco({ td, presenca, ccPA, ccPE, etaBonus }: {
       <div className={`font-semibold text-xs mb-2 ${c.text}`}>
         {td.terp}
         <span className="ml-2 font-normal text-muted-foreground">
-          {td.isCC ? <>PA: {fmt(ccPA)}/sessão · PE: {fmt(ccPE)}/pac.</> : <>PA: {fmt(td.pa)}/sessão · PPD: {fmt(td.diar)}/dia</>}
+          {td.isCC ? <>PA: {fmt(ccPA)}/sessão · PEP: {fmt(ccPE)}/pac.</> : <>PA: {fmt(td.pa)}/sessão · PPD: {fmt(td.diar)}/dia</>}
         </span>
       </div>
 
@@ -435,7 +435,7 @@ function TerapiaDiasBloco({ td, presenca, ccPA, ccPE, etaBonus }: {
             ))}
             {td.isCC && (
               <tr className={c.text}>
-                <td colSpan={3} className="text-xs pt-1.5 truncate">PE ({td.pacientes} pac. × {fmt(ccPE)})</td>
+                <td colSpan={3} className="text-xs pt-1.5 truncate">PEP ({td.pacientes} pac. × {fmt(ccPE)})</td>
                 <td />
                 <td className="text-right font-bold tabular-nums">{fmt(td.pacientes * ccPE)}</td>
                 <td className="text-right font-bold tabular-nums">{fmt(td.pacientes * ccPE)}</td>
@@ -553,7 +553,7 @@ function ProfissionalCard({
                 ? `Contrato ${d.numerosBancoHoras.join(" / ") || "vigente"} está marcado como banco de horas, mas sem valor total cadastrado em Cadastros › Contratos.`
                 : d.modalidade === "hibrido"
                   ? "Tem contrato vigente em banco de horas e em atendimento — recebe pelos dois."
-                  : "Contrato vigente em banco de horas: o valor fixo é a remuneração inteira, sem PA, PPD, ETA ou PE por cima."}
+                  : "Contrato vigente em banco de horas: o valor fixo é a remuneração inteira, sem PA, PPD, ETA ou PEP por cima."}
             >
               <Wallet size={12} />
               {d.valorFixoBancoHoras === null

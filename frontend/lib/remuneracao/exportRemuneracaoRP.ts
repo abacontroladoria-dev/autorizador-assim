@@ -18,11 +18,6 @@ export type ExportarRemuneracaoRPOpts = {
   csvName?: string | null
 }
 
-function fmtDateObj(d: Date | null | undefined): string {
-  if (!d) return ""
-  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`
-}
-
 export function exportarRemuneracaoRPXlsx(opts: ExportarRemuneracaoRPOpts): void {
   const { resultado, evoRows, csvName } = opts
   if (!evoRows.length || !resultado.length) {
@@ -40,43 +35,20 @@ export function exportarRemuneracaoRPXlsx(opts: ExportarRemuneracaoRPOpts): void
     Substituido_por_Outro: p.substituidoPorOutro, Registros_Nao_Realizados: p.pendentes + p.naoEvoluidas,
     Canceladas: p.canceladas, Inconsistencias: p.inconsistencias,
     Pacientes_Unicos: p.pacientesQtd, Pacientes_CC: p.pacientesCCQtd,
-    PE_CC: p.pe, PE_Regra: p.peProporcionalAtivo ? "Regras PE 2026: faixas, evolução e conferências" : "Valor cheio por paciente único",
-    PE_Em_Aberto: p.peEmAberto || 0,
-    PE_Aguarda_Diretoria: p.peAguardaDiretoria || 0,
-    PE_Periodo_Relatorio: p.peRelatorioPeriodo || "",
+    // A PEP (Analista do Comportamento) é apurada e exportável na aba
+    // "PEP - Histórico" — não entra mais nesta planilha de PA/PPD/ETA.
     Contrato_Antigo_Salario: p.salAntigo,
     Tem_Contrato_Antigo: p.temAntigo ? "Sim" : "Não",
     Remuneracao_Confirmada: p.valorConfirmado,
     Potencial_Apos_Regularizacao: p.valorPotencial,
     // Modelo de faturamento do contrato vigente. Remuneracao_Confirmada continua
-    // sendo só a apuração variável (PA/PPD/PE/ETA) — quem soma a folha usa
+    // sendo só a apuração variável (PA/PPD/ETA) — quem soma a folha usa
     // Total_A_Pagar, que é a coluna que inclui o valor fixo do banco de horas.
     Modalidade: MODALIDADE_LABEL[p.modalidade],
     Contratos_Banco_Horas: p.numerosBancoHoras.join(" / "),
     Banco_Horas_Valor_Fixo: p.valorFixoBancoHoras,
     Total_A_Pagar: p.valorTotalAPagar,
   }))), "Resumo por profissional")
-
-  const peDetalhe = resultado.flatMap(p => (p.peDetalhe || []).map(x => ({
-    Profissional: p.prof,
-    Paciente: x.paciente,
-    Id_Favorecido: x.idFavorecido || "",
-    Inicio: fmtDateObj(x.inicio),
-    Fim: fmtDateObj(x.fim),
-    Fim_Usado: fmtDateObj(x.fimUsado),
-    Dias_Corridos: x.dias ?? "",
-    Dias_Efetivos: x.diasEfetivos ?? x.dias ?? "",
-    Dias_Mes: x.diasMes ?? "",
-    Valor_PE: x.valor ?? 0,
-    Situacao: x.situacao || "",
-    Tem_Evolucao: x.temEvolucao ? "Sim" : "Não",
-    Sessoes_Evoluidas: x.nSessoesEvoluidas || 0,
-    Arredondou_Fim_Mes: x.arredondouFimMes ? "Sim" : "Não",
-    Troca_Coordenador: x.trocaCoordenador ? "Sim" : "Não",
-    Conflito_Semana: x.conflitoSemana ? "Sim" : "Não",
-    Regra: x.observacao || "(dias efetivos / dias do mês) x PE",
-  })))
-  if (peDetalhe.length) XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(peDetalhe), "PE proporcional")
 
   const sessoesRecebe = resultado.flatMap(p => p.sessoes
     .filter(s => s.papel === "Substituição realizada" || (s.papel === "Agenda" && s.classificacao === "Evolução normal"))

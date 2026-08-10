@@ -46,6 +46,14 @@ export type ContratoAtualItem = {
    * tinha dois contratos tinha uma nota falando de um deles sem dizer qual.
    */
   observacoes?: string | null
+  /**
+   * Valor mensal da PEP por paciente (PRD "Sistema de Faturamento de
+   * Prestadores (PA/PEP)" Seção 6/13.3), só relevante para contrato de
+   * Analista do Comportamento. null/undefined = usa o valor de referência
+   * (remuneracao_config.cc_pe_default) — ver resolverValorPepMensal em
+   * calculo.ts.
+   */
+  valorPepMensal?: number | null
 }
 
 export type ContratoAtual = {

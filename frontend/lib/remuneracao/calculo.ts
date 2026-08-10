@@ -120,6 +120,8 @@ export type ContratoAtualItem = {
   vigente?: boolean
   modeloFaturamento?: "atendimento" | "banco_horas"
   valorTotal?: number
+  /** PEP (Seção 6/13.3 do PRD) — null/undefined usa remuneracao_config.cc_pe_default. */
+  valorPepMensal?: number | null
 }
 export type CadastroContratual = {
   nome?: string
@@ -132,7 +134,7 @@ export type CadastroContratual = {
 // Só contratos vigentes pagam PA por sessão — um contrato "antigo" é apenas
 // um item com vigente=false (ver migration 20260710120000), então esse
 // filtro já exclui automaticamente o histórico sem precisar de outra tabela.
-function contratosAtuaisDoCadastro(cadastro: CadastroContratual | null): ContratoAtualItem[] {
+export function contratosAtuaisDoCadastro(cadastro: CadastroContratual | null): ContratoAtualItem[] {
   return (cadastro?.contratosAtuais || [])
     .filter(c => c && c.vigente !== false)
     .map(c => ({
@@ -144,8 +146,18 @@ function contratosAtuaisDoCadastro(cadastro: CadastroContratual | null): Contrat
       // Ausente = "atendimento" (comportamento padrão de todo contrato já salvo).
       modeloFaturamento: (c.modeloFaturamento === "banco_horas" ? "banco_horas" : "atendimento") as "atendimento" | "banco_horas",
       valorTotal: c.valorTotal != null ? Number(c.valorTotal) : undefined,
+      valorPepMensal: c.valorPepMensal != null ? Number(c.valorPepMensal) : undefined,
     }))
-    .filter(c => c.funcao || c.valorPA != null || c.valorTotal != null || c.numero)
+    .filter(c => c.funcao || c.valorPA != null || c.valorTotal != null || c.numero || c.valorPepMensal != null)
+}
+
+// PEP (Seção 6/13.3 do PRD): mesmo padrão de paDoContrato — o valor do
+// contrato prevalece; sem ele, cai no valor de referência global
+// (remuneracao_config.cc_pe_default).
+export function resolverValorPepMensal(cadastro: CadastroContratual | null, ccPEDefault: number): number {
+  const contratos = contratosAtuaisDoCadastro(cadastro)
+  const comValor = contratos.find(c => c.valorPepMensal != null)
+  return comValor?.valorPepMensal ?? ccPEDefault
 }
 
 function buscarCadastroContratual(cadastros: Record<string, CadastroContratual>, prof: string): CadastroContratual | null {

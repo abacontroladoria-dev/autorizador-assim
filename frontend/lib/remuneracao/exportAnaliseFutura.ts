@@ -131,7 +131,7 @@ export function exportarAnaliseXlsx(opts: ExportarAnaliseOpts): void {
         Diaria: t.diar,
         Bonus_ETA_Semana: t.isETA ? etaBonus : 0,
         Semanas_ETA_Mes: t.isETA ? (t.etaWeeks || 0) : 0,
-        PE_por_Pac: t.isCC ? ccPE : 0,
+        PEP_por_Pac: t.isCC ? ccPE : 0,
         Sessoes_Semana: t.sessoes,
         Sessoes_Mes_100: t.sessoesMes100,
         Pacientes: t.pacientes,
@@ -143,13 +143,15 @@ export function exportarAnaliseXlsx(opts: ExportarAnaliseOpts): void {
         Total_Presenca: +t.monthlyX.toFixed(2),
       })
     })
-    // PE (Coordenador de Caso) é apurado por profissional, não por terapia —
-    // some `d.pe` diretamente em `Valor_100`/`Valor_Presenca_Config` do Resumo.
-    // Sem esta linha, somar Total_100 das terapias não bate com o Resumo quando há CC.
+    // PEP (Analista do Comportamento) é apurada por profissional, não por
+    // terapia — some `d.pe` diretamente em `Valor_100`/`Valor_Presenca_Config`
+    // do Resumo. Sem esta linha, somar Total_100 das terapias não bate com o
+    // Resumo quando há CC. (Projeção estimada a 100% de V — a apuração real
+    // por entrega fica na aba Entregas PEP / PEP - Histórico.)
     if (d.hasCC && d.pe > 0) {
       detalhe.push({
         Profissional: d.prof,
-        Terapia: "PE (Coordenador de Caso)",
+        Terapia: "PEP (Analista do Comportamento)",
         PA_Sessao: 0,
         Diaria: 0,
         Bonus_ETA_Semana: 0,
