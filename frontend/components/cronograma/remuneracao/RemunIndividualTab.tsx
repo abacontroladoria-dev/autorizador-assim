@@ -8,7 +8,9 @@ import { useParametrosGerais } from "@/hooks/useParametrosGerais"
 import { useTaxasEspecialidade } from "@/hooks/useTaxasEspecialidade"
 import { exportResumoSessoesPdf } from "@/lib/remuneracao/exportResumoSessoesPdf"
 import { gerarPDF, gerarWord, montarInfoDocumentoPrestador, type PdfOpts } from "@/lib/remuneracao/documento"
-import { parseDateBR } from "@/lib/remuneracao/datas"
+import { parseDateBR, competenciaDeLinhas } from "@/lib/remuneracao/datas"
+import { getApuracaoMes } from "@/services/pepApuracao.service"
+import type { PepApuracaoMensal } from "@/types/pep"
 import { RemuneracaoUploadBadges } from "./RemuneracaoUploadBadges"
 
 // ─── Componente principal ─────────────────────────────────────────────────────
@@ -39,6 +41,7 @@ export function RemunIndividualTab() {
       limparGrade={limparGrade}
       limparPE={limparPE}
       setCsvName={setCsvName}
+      hidePe
     />)
     return () => {
       setHeader("", "")
@@ -97,10 +100,26 @@ export function RemunIndividualTab() {
     return { inicio: fmt(min), fim: fmt(max) }
   }, [evoRows])
 
+  const competencia = useMemo(() => competenciaDeLinhas(evoRows), [evoRows])
+
+  // PEP apurada (pep_apuracao_mensal) do prestador selecionado, na competência
+  // da Grade carregada — leitura pura, a apuração de verdade acontece na aba
+  // Entregas PEP.
+  const [pepApuracao, setPepApuracao] = useState<PepApuracaoMensal[] | null>(null)
+  useEffect(() => {
+    if (!profSelecionado || !competencia) { setPepApuracao(null); return }
+    let cancelado = false
+    getApuracaoMes(profSelecionado, competencia).then(({ data }) => {
+      if (!cancelado) setPepApuracao(data)
+    })
+    return () => { cancelado = true }
+  }, [profSelecionado, competencia])
+
   const pdfOpts: PdfOpts = {
     remPeriodo,
     ccPA, ccPE, etaBonus, taxasPA,
     cadastroPrestadores,
+    pepApuracao,
   }
 
   // ── Estado: sem dados ──
@@ -111,7 +130,7 @@ export function RemunIndividualTab() {
           Nenhum dado carregado
         </p>
         <p className="text-sm text-muted-foreground max-w-xs">
-          Faça o upload da Grade e do PE nos botões no topo da tela para visualizar os dados de remuneração individual.
+          Faça o upload da Grade no botão no topo da tela para visualizar os dados de remuneração individual.
         </p>
       </div>
     )

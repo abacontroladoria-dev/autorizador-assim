@@ -62,11 +62,14 @@ interface DashboardProps {
   resultado: ProfRemunReal[]
   especialidadeFiltro: string | null
   onFiltroEspecialidade: (esp: string | null) => void
+  // PEP apurada (pep_apuracao_mensal), por prestador — leitura pura, não
+  // recalcula nada aqui. Sem isso a barra "Coordenador de Caso" fica zerada.
+  pepResumo?: Map<string, { potencial: number; alcancado: number }>
 }
 
-export function RemuneracaoRPDashboard({ resultado, especialidadeFiltro, onFiltroEspecialidade }: DashboardProps) {
+export function RemuneracaoRPDashboard({ resultado, especialidadeFiltro, onFiltroEspecialidade, pepResumo }: DashboardProps) {
   const { totalMes, totalVariavel, totalBancoHoras, profsBancoHoras, porEspecialidade } =
-    useMemo(() => calcularTotalPorEspecialidade(resultado), [resultado])
+    useMemo(() => calcularTotalPorEspecialidade(resultado, pepResumo), [resultado, pepResumo])
   const animatedTotal = useCountUp(totalMes)
   const revealed = useReveal()
   const [hoverEsp, setHoverEsp] = useState<string | null>(null)
@@ -99,7 +102,7 @@ export function RemuneracaoRPDashboard({ resultado, especialidadeFiltro, onFiltr
               número sem origem para quem confere a folha. */}
           {totalBancoHoras > 0 && (
             <div className="mt-2 text-xs text-muted-foreground leading-relaxed">
-              <span className="tabular-nums font-semibold text-foreground">{fmt(totalVariavel)}</span> em PA/PPD/PE/ETA
+              <span className="tabular-nums font-semibold text-foreground">{fmt(totalVariavel)}</span> em PA/PPD/PEP/ETA
               {" + "}
               <span className="tabular-nums font-semibold text-amber-700 dark:text-amber-400">{fmt(totalBancoHoras)}</span>
               {" "}fixo de banco de horas ({profsBancoHoras} profissiona{profsBancoHoras !== 1 ? "is" : "l"})

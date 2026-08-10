@@ -98,6 +98,8 @@ const pathIconMap: Record<string, any> = {
   "/relacionamento-prestador/analise": TrendingUp,
   "/relacionamento-prestador/rp": Wallet,
   "/relacionamento-prestador/individual": UserRound,
+  "/relacionamento-prestador/pep": ListChecks,
+  "/relacionamento-prestador/pep-historico": History,
   "/relacionamento-prestador/historico": LineChart,
   "/relacionamento-prestador/legenda": BookOpen,
   "/cronograma/indicadores?tab=profissionais": BarChart3,
@@ -565,7 +567,8 @@ export default function Sidebar() {
 
           {/* Relacionamento Prestador */}
           {(canAccess("/relacionamento-prestador/analise") || canAccess("/relacionamento-prestador/rp") ||
-            canAccess("/relacionamento-prestador/individual") ||
+            canAccess("/relacionamento-prestador/individual") || canAccess("/relacionamento-prestador/pep") ||
+            canAccess("/relacionamento-prestador/pep-historico") ||
             canAccess("/relacionamento-prestador/historico") || canAccess("/relacionamento-prestador/legenda")) && (
             <SidebarGroup title="Relacionamento Prestador" icon={Handshake}>
               {canAccess("/relacionamento-prestador/analise") && (
@@ -576,6 +579,12 @@ export default function Sidebar() {
               )}
               {canAccess("/relacionamento-prestador/individual") && (
                 <MenuItem label="Rem. Mês - Individual" icon={UserRound} path="/relacionamento-prestador/individual" />
+              )}
+              {canAccess("/relacionamento-prestador/pep") && (
+                <MenuItem label="Entregas PEP" icon={ListChecks} path="/relacionamento-prestador/pep" />
+              )}
+              {canAccess("/relacionamento-prestador/pep-historico") && (
+                <MenuItem label="PEP - Histórico" icon={History} path="/relacionamento-prestador/pep-historico" />
               )}
               {canAccess("/relacionamento-prestador/historico") && (
                 <MenuItem label="Histórico" icon={LineChart} path="/relacionamento-prestador/historico" />

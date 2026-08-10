@@ -1,9 +1,9 @@
 // Agregação para o dashboard no topo da aba relacionamento-prestador/rp: quanto a
 // empresa paga no mês e como esse total se reparte por especialidade. Decompõe
-// exatamente os mesmos componentes somados em ProfRemunReal.valorTotalAPagar
-// (calculo.ts) — PA por sessão, PPD (diária), PE (Coordenador de Caso), bônus ETA
-// e o valor fixo de banco de horas — então totalMes bate, por construção, com a
-// folha real.
+// os componentes somados em ProfRemunReal.valorTotalAPagar (calculo.ts) — PA por
+// sessão, PPD (diária), bônus ETA e o valor fixo de banco de horas — mais a PEP
+// (Coordenador de Caso), que vem à parte de pep_apuracao_mensal (pepPorProf),
+// não mais do antigo p.pe.
 //
 // Banco de horas é valor fixo do CONTRATO, não por sessão — mas cada contrato
 // vigente em banco de horas tem UMA especialidade só (a `funcao` escolhida no
@@ -22,7 +22,7 @@ export type EspecialidadeTotal = {
 }
 
 export type TotalRPResumo = {
-  /** PA + PPD + PE + ETA de todo mundo — a parte que varia por sessão/entrega. */
+  /** PA + PPD + PEP + ETA de todo mundo — a parte que varia por sessão/entrega. */
   totalVariavel: number
   /** Valor fixo dos contratos vigentes em banco de horas. */
   totalBancoHoras: number
@@ -33,9 +33,12 @@ export type TotalRPResumo = {
   porEspecialidade: EspecialidadeTotal[]
 }
 
-type ProfParaDashboard = Pick<ProfRemunReal, "prof" | "sessoes" | "diariaDetalhe" | "pe" | "etaBonusPeriodo" | "valorFixoBancoHoras" | "bancoHorasDetalhe">
+type ProfParaDashboard = Pick<ProfRemunReal, "prof" | "sessoes" | "diariaDetalhe" | "etaBonusPeriodo" | "valorFixoBancoHoras" | "bancoHorasDetalhe">
 
-export function calcularTotalPorEspecialidade(resultado: ProfParaDashboard[]): TotalRPResumo {
+export function calcularTotalPorEspecialidade(
+  resultado: ProfParaDashboard[],
+  pepPorProf?: Map<string, { alcancado: number }>
+): TotalRPResumo {
   const mapa: Record<string, { valor: number; profs: Set<string> }> = {}
 
   const add = (esp: string | undefined | null, valor: number, prof: string) => {
@@ -64,8 +67,10 @@ export function calcularTotalPorEspecialidade(resultado: ProfParaDashboard[]): T
     })
     // PPD (diária) já vem quebrado por especialidade.
     p.diariaDetalhe.forEach(dd => add(dd.esp, dd.total, p.prof))
-    // PE é exclusivo de Coordenador de Caso.
-    if (p.pe > 0) add("Coordenador de Caso", p.pe, p.prof)
+    // PEP é exclusiva de Analista do Comportamento (Coordenador de Caso na
+    // agenda) — vem de pep_apuracao_mensal, não mais de um campo em ProfRemunReal.
+    const pep = pepPorProf?.get(p.prof)?.alcancado ?? 0
+    if (pep > 0) add("Coordenador de Caso", pep, p.prof)
     // Bônus ETA é exclusivo de Especialista Técnico de Área.
     if (p.etaBonusPeriodo > 0) add("Especialista Técnico de Área", p.etaBonusPeriodo, p.prof)
   })

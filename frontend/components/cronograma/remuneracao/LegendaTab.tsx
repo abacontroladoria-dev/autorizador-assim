@@ -14,6 +14,8 @@ const ABAS = [
   { k: "ocupacao", nome: "Ocupação de Profissionais" },
   { k: "remunRP", nome: "Remun. — RP" },
   { k: "remunInd", nome: "Remun. Individual" },
+  { k: "pep", nome: "Entregas PEP" },
+  { k: "pepHist", nome: "PEP - Histórico" },
   { k: "hist", nome: "Histórico" },
   { k: "leg", nome: "Legenda" },
 ]
@@ -102,11 +104,12 @@ export function LegendaTab() {
             </div>
           </div>
           <div className="rounded-lg p-3 border-l-[3px] bg-violet-50 dark:bg-violet-950/30" style={{ borderLeftColor: B.purple }}>
-            <div className="font-bold text-sm mb-1" style={{ color: B.purple }}>PE – Valor por Entregas Técnicas</div>
+            <div className="font-bold text-sm mb-1" style={{ color: B.purple }}>PEP – Parcela por Entregas por Paciente</div>
             <div className="text-xs text-muted-foreground space-y-1">
-              <p>Exclusivo do <strong>Psicólogo Analista do Comportamento</strong> (antes chamado de Coordenador de Caso).</p>
-              <p>Valor fixo por <strong>paciente único</strong>. Atualmente: {fmt(ccPE)}/paciente/mês.</p>
-              <p><strong>Não é afetado pela % de presença</strong> — é pago pelo vínculo de acompanhamento.</p>
+              <p>Exclusivo do <strong>Analista do Comportamento</strong>. Valor de referência por paciente/mês: {fmt(ccPE)}.</p>
+              <p>Composto por 4 entregas recorrentes (Supervisão, Estudo, Treinamento de Aplicadores, Treinamento Parental), que juntas somam 100% do valor mensal do paciente.</p>
+              <p>3 entregas semestrais (Orientação Escolar, Relatório Técnico, PIC) não compõem o valor mensal, mas geram ajuste de faturamento se vencidas e não entregues.</p>
+              <p>Registro e apuração ficam na aba <strong>Entregas PEP</strong>; o histórico mensal fica em <strong>PEP - Histórico</strong>.</p>
             </div>
           </div>
           <div className="rounded-lg p-3 border-l-[3px] bg-orange-50 dark:bg-orange-950/30" style={{ borderLeftColor: B.orange }}>
@@ -166,7 +169,7 @@ export function LegendaTab() {
       </Secao>
 
       <div className="rounded-xl p-4 text-sm bg-muted text-foreground">
-        <strong>Para atualizar PA, PPD, PE ou o bônus ETA:</strong> acesse Cadastros → Variáveis & Taxas. Os valores ficam salvos no banco e valem para todos os usuários.
+        <strong>Para atualizar PA, PPD, PEP ou o bônus ETA:</strong> acesse Cadastros → Variáveis & Taxas. Os valores ficam salvos no banco e valem para todos os usuários.
       </div>
     </div>
   )

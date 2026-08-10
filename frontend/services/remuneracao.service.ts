@@ -107,6 +107,7 @@ export async function getContratos() {
           // entre "veio do banco" e "digitado no modal", senão o bloco nasceria
           // marcado como não salvo sem ninguém ter mexido nele.
           observacoes: it.observacoes ?? '',
+          valorPepMensal: it.valor_pep_mensal ?? null,
         })),
     }
   })
@@ -152,6 +153,7 @@ export async function upsertContrato(record: any): Promise<{ ok: boolean; error:
     // coluna exista: sem ela o insert volta PGRST204 e, como o delete acima já
     // rodou, o profissional fica sem contrato nenhum.
     observacoes: it.observacoes || null,
+    valor_pep_mensal: it.valorPepMensal ?? null,
   }))
   if (itens.length) {
     const { error: itensError } = await supabase.from('remuneracao_contratos_itens').insert(itens)

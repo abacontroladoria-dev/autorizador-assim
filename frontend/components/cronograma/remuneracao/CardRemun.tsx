@@ -12,7 +12,7 @@
 
 import { useMemo, useCallback, memo, useState, useRef } from "react"
 import { createPortal } from "react-dom"
-import { ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, XCircle, HelpCircle, Users, Lock, Wallet, X } from "lucide-react"
+import { ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, XCircle, HelpCircle, Wallet, X } from "lucide-react"
 import { B } from "@/lib/cronograma/constants"
 import { fmt, isSim } from "@/lib/remuneracao/formatacao"
 import { formatDateBR } from "@/lib/remuneracao/datas"
@@ -65,19 +65,6 @@ function useToneColor() {
 
 export type ExpandidoState = Record<string, boolean | null>
 
-interface PeLinhaItem {
-  paciente: string
-  situacao?: string
-  valor?: number | null
-  dias?: number
-  diasMes?: number
-  diasEfetivos?: number
-  inicio?: Date | string | null
-  fim?: Date | string | null
-  fimUsado?: Date | string | null
-  observacao?: string
-}
-
 interface CardRemunProps {
   p: ProfRemunReal
   expandido: ExpandidoState
@@ -89,6 +76,9 @@ interface CardRemunProps {
   etaBonus: number
   taxasPA: Record<string, number>
   dadosPorProf: Array<{ prof: string; limiteCC?: number; alertaCC?: boolean }>
+  // Leitura read-only de pep_apuracao_mensal para a competência da Grade
+  // carregada — null quando ainda não foi apurado na aba Entregas PEP.
+  pepResumo?: { potencial: number; alcancado: number } | null
 }
 
 const DEFAULT_CC_LIM = 8
@@ -97,13 +87,6 @@ const DEFAULT_CC_LIM = 8
 
 const normKey = (v: unknown): string =>
   String(v ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim()
-
-function fmtDataPE(d: Date | string | null | undefined): string {
-  if (!d) return ""
-  const dt = d instanceof Date ? d : new Date(d)
-  if (Number.isNaN(dt.getTime())) return ""
-  return `${String(dt.getDate()).padStart(2, "0")}/${String(dt.getMonth() + 1).padStart(2, "0")}/${dt.getFullYear()}`
-}
 
 // ─── Badge de classificação de sessão ─────────────────────────────────────────
 
@@ -269,32 +252,8 @@ const SessoesTabela = memo(function SessoesTabela({
   )
 })
 
-// ─── Linha de detalhe PE ──────────────────────────────────────────────────────
-
-function PeLinha({ x }: { x: PeLinhaItem }) {
-  const toneColor = useToneColor()
-  const inicio  = fmtDataPE(x.inicio)
-  const fim     = fmtDataPE(x.fim)
-  const fimUsado = fmtDataPE(x.fimUsado)
-  const periodo  = inicio && fim ? `${inicio} a ${fim}` : ""
-  const fimCalc  = fimUsado && fimUsado !== fim ? ` · cálculo até ${fimUsado}` : ""
-  return (
-    <div className="grid grid-cols-12 gap-2 px-2 py-1.5 border-t border-border text-[11px] items-start">
-      <div className="col-span-12 md:col-span-5 font-semibold min-w-0 text-foreground">{x.paciente}</div>
-      <div className="col-span-4 md:col-span-2 text-muted-foreground">{x.diasEfetivos ?? x.dias}/{x.diasMes} dias</div>
-      <div className="col-span-4 md:col-span-2 font-bold tabular-nums"
-           style={{ color: x.valor == null ? toneColor("amber") : toneColor("purple") }}>
-        {x.valor == null ? "Em aberto" : fmt(x.valor)}
-      </div>
-      <div className="col-span-4 md:col-span-3 text-muted-foreground">{x.situacao}</div>
-      {periodo && <div className="col-span-12 text-muted-foreground">Atendimentos: {periodo}{fimCalc}</div>}
-      {x.observacao && <div className="col-span-12 text-muted-foreground">{x.observacao}</div>}
-    </div>
-  )
-}
-
-// ─── Header colapsável genérico — reutilizado pelo bloco de PE e pelos
-// blocos de sessões (mesmo padrão: ícone/título + contagem, valor extra,
+// ─── Header colapsável genérico — reutilizado pelos blocos de sessões
+// (mesmo padrão: ícone/título + contagem, valor extra,
 // chevron) ──────────────────────────────────────────────────────────────────
 
 interface BlocoHeaderProps {
@@ -318,39 +277,6 @@ function BlocoHeader({ tone, titulo, extra, open, onToggle }: BlocoHeaderProps) 
       )}
       {open ? <ChevronDown size={12} className={c.text} /> : <ChevronRight size={12} className={c.text} />}
     </button>
-  )
-}
-
-// ─── Bloco colapsável PE ──────────────────────────────────────────────────────
-
-interface PeBlocoProps {
-  titulo: string
-  lista: PeLinhaItem[]
-  tone: Tone
-  total: number | null | undefined
-  open: boolean
-  onToggle: () => void
-}
-
-function PeBloco({ titulo, lista, tone, total, open, onToggle }: PeBlocoProps) {
-  return (
-    <div>
-      <BlocoHeader
-        tone={tone}
-        titulo={`${titulo} · ${lista.length} paciente(s)`}
-        extra={total != null ? fmt(total) : undefined}
-        open={open}
-        onToggle={onToggle}
-      />
-      {open && (
-        <div className="rounded-b-lg bg-card border-x border-b border-border overflow-hidden">
-          {lista.length
-            ? lista.map((x, i) => <PeLinha key={`${x.paciente}-${i}`} x={x} />)
-            : <div className="text-xs text-muted-foreground p-2">Nenhum paciente nesta situação.</div>
-          }
-        </div>
-      )}
-    </div>
   )
 }
 
@@ -469,7 +395,7 @@ function DonutCard({ title, statLabel, statColor, size, centerLabel, centerFontS
 
 export default function CardRemun({
   p, expandido, setExpandido, remBusca, forceOpen,
-  ccPA, ccPE, etaBonus, taxasPA, dadosPorProf,
+  ccPA, ccPE, etaBonus, taxasPA, dadosPorProf, pepResumo,
 }: CardRemunProps) {
   const isCC = useMemo(
     () => p.sessoes.some(s => s.especialidade === "Coordenador de Caso"),
@@ -506,17 +432,11 @@ export default function CardRemun({
   // Estado local de hover → propaga como highlightGroup para ambos os donuts
   const [cardHover, setCardHover] = useState<string | null>(null)
 
-  const peDetalheTela: PeLinhaItem[] = useMemo(() => p.peDetalhe ?? [], [p.peDetalhe])
-
-  const pePacientesTela = p.pacientesCCQtd ?? 0
-
-  const peValorTela = p.pe ?? 0
-
   // Banco de horas (modelo_faturamento do contrato em /cadastros/contratos): o PA
   // por sessão já vem zerado do cálculo, e o valor fixo do contrato entra aqui —
-  // sem isso o card mostrava "Recebe agora" contando só PPD/ETA/PE.
+  // sem isso o card mostrava "Recebe agora" contando só PPD/ETA/PEP.
   const emBancoDeHoras = p.modalidade !== "atendimento"
-  // Banco de horas PURO: o valor fixo é a remuneração inteira. PPD/ETA/PE já vêm
+  // Banco de horas PURO: o valor fixo é a remuneração inteira. PPD/ETA/PEP já vêm
   // zerados do cálculo, então o card não os desenha — só explica por quê.
   const soFixo = p.modalidade === "banco_horas"
   const fixoBancoHoras = p.valorFixoBancoHoras ?? 0
@@ -525,22 +445,6 @@ export default function CardRemun({
   // recebendo quase nada sem nenhum aviso. É pendência de cadastro, não R$ 0.
   const fixoNaoCadastrado = emBancoDeHoras && fixoBancoHoras <= 0
   const valorAPagarTela = p.valorTotalAPagar
-
-  const peGrupos = useMemo(() => {
-    const situacao = (x: PeLinhaItem) => String(x.situacao ?? "")
-    const total    = (xs: PeLinhaItem[]) => xs.reduce((s, x) => s + Number(x.valor ?? 0), 0)
-    const integral    = peDetalheTela.filter(x => situacao(x) === "PE integral")
-    const proporcional = peDetalheTela.filter(x => situacao(x).includes("proporcional"))
-    const aberto      = peDetalheTela.filter(x =>
-      x.valor == null || situacao(x).includes("Diretoria") || situacao(x).includes("Conflito") || situacao(x).includes("troca")
-    )
-    const zero = peDetalheTela.filter(x => situacao(x).startsWith("PE zero"))
-    return {
-      integral, proporcional, aberto, zero,
-      totalIntegral: total(integral),
-      totalProporcional: total(proporcional),
-    }
-  }, [peDetalheTela])
 
   const { sRecebe, sRegNaoRealizado, sNaoRecebe, sInc } = useMemo(() => {
     const byData = (a: SessaoComPapel, b: SessaoComPapel) =>
@@ -652,7 +556,7 @@ export default function CardRemun({
                     ? `Contrato ${p.numerosBancoHoras.join(" / ") || "vigente"} está marcado como banco de horas, mas sem valor total cadastrado em Cadastros › Contratos. O PA por sessão foi zerado e não há valor fixo para pagar no lugar.`
                     : p.modalidade === "hibrido"
                       ? "Tem contrato vigente em banco de horas e em atendimento — recebe pelos dois."
-                      : "Contrato vigente em banco de horas: o valor fixo do período é a remuneração inteira — sem PA por sessão, PPD, bônus ETA ou PE por cima."}
+                      : "Contrato vigente em banco de horas: o valor fixo do período é a remuneração inteira — sem PA por sessão, PPD, bônus ETA ou PEP por cima."}
                 >
                   <Wallet size={11} />
                   {fixoNaoCadastrado
@@ -747,7 +651,7 @@ export default function CardRemun({
               iconColor="#16a34a"
               icon={<CheckCircle2 size={16} />}
               titulo="Recebe agora"
-              tooltip="PA = Pagamento por Atendimento. Recebe agora soma evoluções próprias e substituições realizadas. Em contrato duplo AC+PS, a substituição usa a função do profissional substituído na agenda. Em contrato de banco de horas o valor fixo do contrato é a remuneração inteira: não há PA por sessão, PPD, bônus ETA nem PE."
+              tooltip="PA = Pagamento por Atendimento. Recebe agora soma evoluções próprias e substituições realizadas. Em contrato duplo AC+PS, a substituição usa a função do profissional substituído na agenda. Em contrato de banco de horas o valor fixo do contrato é a remuneração inteira: não há PA por sessão, PPD, bônus ETA nem PEP."
               valor={fmt(valorAPagarTela)}
               onHover={setCardHover}
             >
@@ -763,23 +667,19 @@ export default function CardRemun({
               )}
               {p.evoluidasProprias > 0 && <div>• {p.evoluidasProprias} evolução(ões) própria(s)</div>}
               {p.substituicoesRealizadas > 0 && <div>• {p.substituicoesRealizadas} substituição(ões)</div>}
-              {isCC && pePacientesTela > 0 && (
-                <div>• PE: {p.peProporcionalAtivo
-                  ? `${p.pacientesCCQtd} pac. analisado(s)`
-                  : `${p.pacientesCCQtd} pac. × ${fmt(ccPE)}`}
-                </div>
-              )}
-                {isCC && p.peBloqueado && (
-                  <div className="font-semibold" style={{ color: B.amber }}>• PE bloqueado: falta relatório 1 ou 2.</div>
+                {isCC && pepResumo && (
+                  <div style={{ color: B.purple }}>
+                    • PEP apurada: {fmt(pepResumo.alcancado)} <span className="text-muted-foreground">de {fmt(pepResumo.potencial)} potencial</span>
+                  </div>
                 )}
-                {isCC && ((p.peEmAberto ?? 0) + (p.peAguardaDiretoria ?? 0)) > 0 && (
-                  <div>• PE em aberto: {(p.peEmAberto ?? 0) + (p.peAguardaDiretoria ?? 0)} paciente(s)</div>
+                {isCC && !pepResumo && (
+                  <div className="text-muted-foreground">• PEP ainda não apurada este mês (aba Entregas PEP)</div>
                 )}
                 {(p.diariaPeriodo ?? 0) > 0 && <div>• PPD: {fmt(p.diariaPeriodo ?? 0)}</div>}
                 {(p.etaBonusPeriodo ?? 0) > 0 && <div>• Bônus ETA: {p.etaWeeksPeriodo}sem × {fmt(etaBonus)}</div>}
                 {soFixo && (
                   <div className="text-muted-foreground">
-                    • PPD, bônus ETA e PE não se somam a contrato de valor fixo.
+                    • PPD, bônus ETA e PEP não se somam a contrato de valor fixo.
                   </div>
                 )}
                 {/* "Elegível ao PA" com contrato em banco de horas era falso: as
@@ -850,115 +750,9 @@ export default function CardRemun({
             </div>{/* fim flex horizontal */}
           </div>{/* fim wrapper px-4 */}
 
-          {/* ── Bloco CC / PE ──────────────────────────────────────
-              Banco de horas puro não paga PE: o bloco inteiro sairia com zeros e
-              uma análise de PE por paciente que não vira dinheiro nenhum. */}
-          {!soFixo && isCC && (pePacientesTela > 0 || p.peBloqueado) && (
-            <div className="px-4 pb-4">
-              <div className="rounded-2xl overflow-hidden shadow-sm border border-purple-200 dark:border-purple-800/60">
-
-                {/* Cabeçalho */}
-                <div className="px-4 py-2.5 flex items-center gap-2.5"
-                     style={{ background: "linear-gradient(90deg, #7c3aed18 0%, #a855f718 100%)" }}>
-                  <div className="w-6 h-6 rounded-lg flex items-center justify-center flex-shrink-0"
-                       style={{ background: "#7c3aed20" }}>
-                    <Users size={13} strokeWidth={2.5} style={{ color: "#7c3aed" }} />
-                  </div>
-                  <span className="text-xs font-bold tracking-wide" style={{ color: "#6d28d9" }}>
-                    Psicólogo Analista (CC) — PA + PE
-                  </span>
-                  <InfoTooltip text="AC = Analista do Comportamento (Coordenador de Caso). PE = Valor por Entregas Técnicas por paciente único de CC." />
-                </div>
-
-                {/* Corpo 3 colunas */}
-                <div className="grid grid-cols-1 lg:grid-cols-12 divide-y lg:divide-y-0 lg:divide-x divide-purple-100 dark:divide-purple-900/40 bg-white dark:bg-background">
-
-                  {/* Coluna 1 — PA */}
-                  <div className="lg:col-span-3 px-4 py-3 space-y-1.5">
-                    <p className="text-[10px] font-bold uppercase tracking-wider text-purple-400">
-                      PA por sessões evoluídas
-                    </p>
-                    {(p.paBreakdown ?? []).map(b => (
-                      <div key={b.label} className="text-xs tabular-nums text-foreground/80 leading-snug">
-                        <span className="font-semibold">{b.label}:</span>{" "}
-                        {b.count} sess. × {fmt(b.rate)}
-                        {b.explicacao && <InfoTooltip text={b.explicacao} />}
-                        <div className="font-bold" style={{ color: "#7c3aed" }}>{fmt(b.total)}</div>
-                      </div>
-                    ))}
-                    <div className="pt-1 border-t border-purple-100 dark:border-purple-900/40">
-                      <span className="text-base font-black tabular-nums" style={{ color: "#7c3aed" }}>
-                        {fmt((p.paBreakdown ?? []).reduce((s, b) => s + b.total, 0))}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Coluna 2 — PE */}
-                  <div className="lg:col-span-6 px-4 py-3 space-y-2">
-                    <div className="flex items-center justify-between gap-2">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-purple-400">
-                        {p.peProporcionalAtivo ? "PE por regra 2026" : "PE bloqueado"}
-                        {p.peInfoTexto && <InfoTooltip text={p.peInfoTexto} />}
-                      </p>
-                      {p.peDiasMes && (
-                        <StatusChip tone="purple">
-                          mês-base {p.peDiasMes}d
-                        </StatusChip>
-                      )}
-                    </div>
-
-                    {p.peBloqueado ? (
-                      /* ── PE bloqueado: banner elegante ── */
-                      <div className={`rounded-xl px-4 py-3 flex items-start gap-3 border ${TONE_CHIP.amber.border} bg-gradient-to-br from-orange-50 to-amber-100 dark:from-orange-950/30 dark:to-amber-900/20`}>
-                        <div className="w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 mt-0.5 bg-amber-200 dark:bg-amber-800/60">
-                          <Lock size={16} strokeWidth={2.5} className={TONE_CHIP.amber.text} />
-                        </div>
-                        <div className="min-w-0">
-                          <div className="text-sm font-black text-amber-900 dark:text-amber-200">
-                            PE não calculado
-                          </div>
-                          <div className={`text-xs mt-0.5 leading-snug ${TONE_CHIP.amber.text}`}>
-                            Importe os relatórios 1 e 2 para liberar a análise completa.
-                          </div>
-                        </div>
-                      </div>
-                    ) : p.peProporcionalAtivo ? (
-                      <>
-                        <PeBloco titulo="PE integral confirmado"    lista={peGrupos.integral}    tone="green" total={peGrupos.totalIntegral}    open={blocoAberto("pe_integral")}    onToggle={() => togBloco("pe_integral")} />
-                        <PeBloco titulo="PE proporcional confirmado" lista={peGrupos.proporcional} tone="blue"  total={peGrupos.totalProporcional} open={blocoAberto("pe_proporcional")} onToggle={() => togBloco("pe_proporcional")} />
-                        <PeBloco titulo="PE em aberto / Diretoria" lista={peGrupos.aberto} tone="amber" total={null} open={blocoAberto("pe_aberto")} onToggle={() => togBloco("pe_aberto")} />
-                        <PeBloco titulo="PE zero automático"        lista={peGrupos.zero}   tone="red"   total={0}    open={blocoAberto("pe_zero")}   onToggle={() => togBloco("pe_zero")} />
-                      </>
-                    ) : (
-                      <div className="text-xs font-bold tabular-nums" style={{ color: "#7c3aed" }}>
-                        {pePacientesTela} pac. × {fmt(ccPE)}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Coluna 3 — Totais */}
-                  <div className="lg:col-span-3 px-4 py-3 space-y-3 bg-gradient-to-br from-purple-50 to-violet-50 dark:from-purple-950/30 dark:to-violet-950/30">
-                    <div>
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 mb-1">
-                        Total confirmado
-                      </p>
-                      <div className="text-xl font-black tabular-nums" style={{ color: B.green }}>
-                        {fmt(valorAPagarTela)}
-                      </div>
-                    </div>
-                    <div className="border-t border-purple-100 dark:border-purple-900/40 pt-3">
-                      <p className="text-[10px] font-bold uppercase tracking-wider text-purple-600 dark:text-purple-400 mb-1">
-                        PE confirmado
-                      </p>
-                      <div className="text-base font-black tabular-nums text-violet-600 dark:text-violet-400">
-                        {fmt(peValorTela)}
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
+          {/* O bloco "PA + PE" (faixas de dias/PeBloco) foi removido — a PEP
+              real é apurada na aba Entregas PEP e resumida no indicador
+              acima ("PEP apurada: ..."). */}
 
 
           {/* Toggle sessões */}

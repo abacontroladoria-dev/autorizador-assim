@@ -2,6 +2,7 @@ import { cleanTxt, onlyDigits, htmlEsc } from "./formatacao"
 import { normKey, ETA_ADMIN_NOMES } from "./constants"
 import { abreviarNomePaciente } from "./pacientes"
 import { PA_TEXTO_BANCO_HORAS, ProfRemunReal } from "./calculo"
+import type { PepApuracaoMensal } from "@/types/pep"
 
 export function formatCPF(v: string | null | undefined): string {
   const d = onlyDigits(v)
@@ -86,26 +87,30 @@ export interface PdfOpts {
   cadastroPrestadores: Record<string, any>
   autoPrint?: boolean
   wordMode?: boolean
+  // Apuração da PEP (pep_apuracao_mensal) do prestador na competência do
+  // período — null/undefined quando ainda não apurada na aba Entregas PEP.
+  pepApuracao?: PepApuracaoMensal[] | null
 }
 
 export function montarHtmlDocumentoFaturamento(p: ProfRemunReal, opts: PdfOpts): string {
-  const { remPeriodo, ccPA, ccPE, etaBonus, taxasPA, cadastroPrestadores, autoPrint = false, wordMode = false } = opts
+  const { remPeriodo, ccPA, etaBonus, taxasPA, cadastroPrestadores, autoPrint = false, wordMode = false, pepApuracao } = opts
   const totalSessoes = p.evoluidasProprias + p.substituicoesRealizadas
-  const isCC = (p.pe ?? 0) > 0 || p.sessoes.some(s => s.especialidade === "Coordenador de Caso")
+  const isCC = p.sessoes.some(s => s.especialidade === "Coordenador de Caso")
   const isETA = p.sessoes.some(s => s.especialidade === "Especialista Técnico de Área")
   const hasDiaria = (p.diariaPeriodo ?? 0) > 0
   const per = remPeriodo
   const periodoTxt = `${per?.inicio || "—"} a ${per?.fim || "—"}`
   const docInfo = montarInfoDocumentoPrestador(p, cadastroPrestadores)
-  
-  const peConfirmadoDetalhe = p.peConfirmadoDetalhe ?? p.peIntegralConfirmadoDetalhe ?? []
-  const peConfirmadoQtd = p.peProporcionalAtivo ? (p.peConfirmadoQtd ?? peConfirmadoDetalhe.length) : (p.pacientesCCQtd || 0)
-  const peConfirmadoValor = p.peProporcionalAtivo ? (p.peConfirmadoValor ?? peConfirmadoDetalhe.reduce((s, x) => s + Number(x.valor || 0), 0)) : (p.pe || 0)
+
+  // PEP — Parcela por Entregas por Paciente. Apurada por competência na aba
+  // Entregas PEP (calculoPEP.ts); aqui só lemos o resultado já persistido.
+  const pepPacientesQtd = pepApuracao?.length ?? 0
+  const pepTotal = (pepApuracao ?? []).reduce((s, a) => s + Number(a.valor_liquido || 0), 0)
   // Valor fixo do contrato em banco de horas: não é apurado por sessão, então não
   // está em p.valorConfirmado — entra como linha própria e soma no total, senão o
   // demonstrativo do prestador sairia sem a parte principal do que ele recebe.
   const fixoBancoHoras = p.valorFixoBancoHoras ?? 0
-  const valorConfirmadoPrestador = p.valorConfirmado - (p.pe || 0) + peConfirmadoValor + fixoBancoHoras
+  const valorConfirmadoPrestador = p.valorConfirmado - (p.pe || 0) + pepTotal + fixoBancoHoras
 
   const paBreakdown: Record<string, { count: number, rate: number, total: number, explicacao: string }> = {}
   const outroContratoBreakdown: Record<string, { count: number, explicacao: string, bancoHoras: boolean }> = {}
@@ -139,10 +144,7 @@ export function montarHtmlDocumentoFaturamento(p: ProfRemunReal, opts: PdfOpts):
     })
 
   const pacientesCC = isCC
-    ? (p.peProporcionalAtivo
-        ? Array.from(new Set(peConfirmadoDetalhe.map(x => String(x.paciente))))
-        : Array.from(new Set(p.sessoes.filter(s => s.especialidade === "Coordenador de Caso" && s.paciente).map(s => String(s.paciente))))
-      ).sort()
+    ? Array.from(new Set(p.sessoes.filter(s => s.especialidade === "Coordenador de Caso" && s.paciente).map(s => String(s.paciente)))).sort()
     : []
   const pacientesCCAbrev = pacientesCC.map(abreviarNomePaciente).filter(Boolean) as string[]
   
@@ -165,11 +167,10 @@ export function montarHtmlDocumentoFaturamento(p: ProfRemunReal, opts: PdfOpts):
     linhasFinanceiras += `<tr><td><strong>Banco de Horas – valor fixo do contrato</strong>${nums ? `<br><span>${esc(nums)}</span>` : ""}</td><td>valor total do período (não por sessão)</td><td class="val">${money(fixoBancoHoras)}</td></tr>`
   }
 
-  if (isCC && peConfirmadoValor > 0) {
-    const calcPE = p.peProporcionalAtivo
-      ? `${peConfirmadoQtd} paciente(s) com PE confirmado`
-      : `${p.pacientesCCQtd} paciente(s) × ${money(ccPE)}`
-    linhasFinanceiras += `<tr><td><strong>PE – Valor por Entregas Técnicas</strong></td><td>${calcPE}</td><td class="val">${money(peConfirmadoValor)}</td></tr>`
+  if (isCC && pepTotal > 0) {
+    linhasFinanceiras += `<tr><td><strong>PEP – Parcela por Entregas por Paciente</strong></td><td>${pepPacientesQtd} paciente(s) apurado(s)</td><td class="val">${money(pepTotal)}</td></tr>`
+  } else if (isCC) {
+    linhasFinanceiras += `<tr><td><strong>PEP – Parcela por Entregas por Paciente</strong></td><td class="muted">Ainda não apurada nesta competência</td><td class="val">—</td></tr>`
   }
   
   if (hasDiaria && p.diariaDetalhe) {
@@ -185,7 +186,7 @@ export function montarHtmlDocumentoFaturamento(p: ProfRemunReal, opts: PdfOpts):
   if (!linhasFinanceiras) linhasFinanceiras = `<tr><td colspan="3" class="muted">Nenhum valor confirmado para o período.</td></tr>`
 
   const siglasHTML = isCC
-    ? `<div class="siglas"><div><strong>PE</strong> – Valor unitário vinculado às entregas técnico-metodológicas por paciente</div><div><strong>PA</strong> – Valor unitário por atendimento efetivamente realizado</div></div>`
+    ? `<div class="siglas"><div><strong>PEP</strong> – Parcela por Entregas por Paciente, apurada por competência conforme as entregas registradas</div><div><strong>PA</strong> – Valor unitário por atendimento efetivamente realizado</div></div>`
     : `<div class="siglas"><div><strong>PA</strong> – Valor unitário por atendimento efetivamente realizado e aceito pela CONTRATANTE</div></div>`
 
   const fluxoHTML = `<div class="section-title">Resumo das Sessões do Período</div>

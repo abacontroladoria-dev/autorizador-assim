@@ -74,3 +74,11 @@ export function mesAnoDeLinhas(linhas: Array<Record<string, unknown>>): string {
   const mes = new Intl.DateTimeFormat("pt-BR", { month: "long" }).format(d)
   return `${mes.charAt(0).toUpperCase() + mes.slice(1)} ${d.getFullYear()}`
 }
+
+// Competência ('YYYY-MM') do mês coberto por linhas com campo `data` —
+// mesma convenção usada em pep_registros_entrega/pep_apuracao_mensal.
+export function competenciaDeLinhas(linhas: Array<{ data: string }>): string | null {
+  const d = linhas.map(r => parseDateBR(r.data)).find((v): v is Date => v !== null)
+  if (!d) return null
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+}

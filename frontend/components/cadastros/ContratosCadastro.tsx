@@ -37,6 +37,10 @@ type ContratoItemEdit = {
   modeloFaturamento: "atendimento" | "banco_horas"
   valorTotalTexto: string
   observacoes: string
+  // Valor mensal da PEP por paciente (V) — só relevante para contrato de
+  // Analista do Comportamento. Vazio = usa o valor de referência global
+  // (remuneracao_config.cc_pe_default), mesmo padrão de valorPA/paDoContrato.
+  valorPepMensalTexto: string
 }
 
 type LinhaBase = {
@@ -142,7 +146,8 @@ const itemEmBranco = (it: ContratoItemEdit) =>
   !it.funcao.trim() &&
   !it.valorPATexto.trim() &&
   !it.valorTotalTexto.trim() &&
-  !it.observacoes.trim()
+  !it.observacoes.trim() &&
+  !it.valorPepMensalTexto.trim()
 
 // Chip de incompletude, em DOIS níveis — porque as duas faltas não custam a
 // mesma coisa e antes eram desenhadas igual:
@@ -240,6 +245,38 @@ function CampoValor({
       <span className="w-13 shrink-0 select-none pr-2 text-xs text-muted-foreground">
         {unidadeDe(item.modeloFaturamento)}
       </span>
+    </div>
+  )
+}
+
+// Campo opcional do valor mensal da PEP (V) por paciente — só usado em
+// contrato de Analista do Comportamento. Vazio de propósito na maioria dos
+// contratos (PA), por isso mora fora de CampoValor: aqui a unidade é fixa
+// ("PEP/mês") e o campo em branco é um estado válido, não "valor zerado".
+function CampoValorPep({
+  texto,
+  descricao,
+  onChange,
+}: {
+  texto: string
+  descricao: string
+  onChange: (texto: string) => void
+}) {
+  return (
+    <div
+      className="inline-flex w-44 shrink-0 items-center rounded-md border border-border focus-within:ring-2 focus-within:ring-ring"
+      title="Valor mensal da PEP por paciente (V). Em branco, usa o valor de referência padrão."
+    >
+      <span className="select-none pl-2 text-xs text-muted-foreground">R$</span>
+      <input
+        value={texto}
+        onChange={e => onChange(maskMoedaBR(e.target.value))}
+        placeholder="padrão"
+        inputMode="numeric"
+        aria-label={descricao}
+        className="min-w-0 flex-1 bg-transparent px-1.5 py-1 text-right text-sm tabular-nums text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+      />
+      <span className="w-16 shrink-0 select-none pr-2 text-xs text-muted-foreground">PEP/mês</span>
     </div>
   )
 }
@@ -397,6 +434,12 @@ function LinhaContrato({
         }
       />
 
+      <CampoValorPep
+        texto={item.valorPepMensalTexto}
+        descricao={`Valor mensal da PEP (V) do ${ref} — só para Analista do Comportamento`}
+        onChange={texto => onPatch({ valorPepMensalTexto: texto })}
+      />
+
       <SeloEstado vigente={item.vigente} />
 
       {/* A saída da linha, rotulada por extenso — o × de 14px não dizia o que
@@ -533,6 +576,7 @@ const GrupoProfissional = memo(function GrupoProfissional({
             modeloFaturamento: it.modeloFaturamento,
             valorTotal: parseNumeroBR(it.valorTotalTexto) ?? 0,
             observacoes: it.observacoes.trim(),
+            valorPepMensal: it.valorPepMensalTexto.trim() ? parseNumeroBR(it.valorPepMensalTexto) : null,
           })),
       })
       setSaveError(error)
@@ -556,6 +600,7 @@ const GrupoProfissional = memo(function GrupoProfissional({
         modeloFaturamento: it.modeloFaturamento === "banco_horas" ? "banco_horas" : "atendimento",
         valorTotalTexto: formatMoedaBRTexto(it.valorTotal),
         observacoes: it.observacoes ?? "",
+        valorPepMensalTexto: it.valorPepMensal != null ? formatMoedaBRTexto(it.valorPepMensal) : "",
       })),
     }),
     [linha.cpf, linha.cnpj, linha.razaoSocial, linha.documentoTipo, linha.contratosAtuais],
@@ -578,6 +623,7 @@ const GrupoProfissional = memo(function GrupoProfissional({
           modeloFaturamento: "atendimento",
           valorTotalTexto: "",
           observacoes: "",
+          valorPepMensalTexto: "",
         },
       ],
     })

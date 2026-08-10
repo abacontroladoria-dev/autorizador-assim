@@ -7,13 +7,14 @@ import { useHeader } from "@/contexts/HeaderContext"
 import { useRemuneracaoRPContext } from "@/contexts/RemuneracaoRPContext"
 import { RemuneracaoUploadBadges } from "./RemuneracaoUploadBadges"
 import { RemuneracaoRPDashboard } from "./RemuneracaoRPDashboard"
-import { PeCoordenadoresPanel, profTemPe, type PeFiltroKey } from "./PeCoordenadoresPanel"
 import { ContratosPendentesPanel } from "./ContratosPendentesPanel"
 import { useParametrosGerais } from "@/hooks/useParametrosGerais"
 import { useTaxasEspecialidade } from "@/hooks/useTaxasEspecialidade"
+import { usePepApuracaoResumo } from "@/hooks/usePepApuracaoResumo"
 import { validarModeloRelatorio, parseHtmlTable, type CsvGradeRow } from "@/lib/remuneracao/relatorio"
 import { calcularTotalPorEspecialidade } from "@/lib/remuneracao/dashboardRP"
 import { exportarRemuneracaoRPXlsx } from "@/lib/remuneracao/exportRemuneracaoRP"
+import { competenciaDeLinhas } from "@/lib/remuneracao/datas"
 import { B } from "@/lib/cronograma/constants"
 import CardRemun, { type ExpandidoState } from "./CardRemun"
 import type { ProfRemunReal } from "@/lib/remuneracao/calculo"
@@ -25,18 +26,19 @@ const normKey = (v: unknown): string =>
 export function RemunRPTab() {
   const {
     resultado, evoRows, csvName, setCsvName, carregarGrade, limparGrade,
-    peRows, peName, carregarPE, limparPE, peAnaliseCompleta, peStatusMensagem,
+    peRows, peName, carregarPE, limparPE,
     loading, error,
   } = useRemuneracaoRPContext()
 
   const { parametros } = useParametrosGerais()
   const { taxas_pa } = useTaxasEspecialidade()
+  const competenciaPep = useMemo(() => competenciaDeLinhas(evoRows), [evoRows])
+  const { resumo: pepResumo } = usePepApuracaoResumo(competenciaPep)
 
   const [expandido, setExpandido] = useState<ExpandidoState>({})
   const [remBusca, setRemBusca] = useState("")
   const [apenasInconsistencia, setApenasInconsistencia] = useState(false)
   const [especialidadeFiltro, setEspecialidadeFiltro] = useState<string | null>(null)
-  const [peFiltro, setPeFiltro] = useState<PeFiltroKey | null>(null)
   const { setHeader, setRightContent } = useHeader()
 
   const profissionaisComInconsistencia = useMemo(
@@ -46,10 +48,10 @@ export function RemunRPTab() {
 
   const profissionaisPorEspecialidade = useMemo(() => {
     if (!especialidadeFiltro) return null
-    const { porEspecialidade } = calcularTotalPorEspecialidade(resultado ?? [])
+    const { porEspecialidade } = calcularTotalPorEspecialidade(resultado ?? [], pepResumo)
     const alvo = porEspecialidade.find(e => e.especialidade === especialidadeFiltro)
     return new Set(alvo?.profissionais ?? [])
-  }, [resultado, especialidadeFiltro])
+  }, [resultado, especialidadeFiltro, pepResumo])
 
   // Mesma lógica de match usada em CardRemun.filtrarSessoes — buscar aqui também
   // permite recolher da lista os profissionais sem nenhuma sessão correspondente,
@@ -65,10 +67,9 @@ export function RemunRPTab() {
   const resultadoExibido = useMemo(() => {
     let r = apenasInconsistencia ? profissionaisComInconsistencia : resultado
     if (profissionaisPorEspecialidade) r = r ? r.filter(p => profissionaisPorEspecialidade.has(p.prof)) : r
-    if (peFiltro) r = r ? r.filter(p => profTemPe(p, peFiltro)) : r
     if (buscaQ) r = r ? r.filter(profTemBusca) : r
     return r
-  }, [apenasInconsistencia, profissionaisComInconsistencia, resultado, profissionaisPorEspecialidade, peFiltro, buscaQ, profTemBusca])
+  }, [apenasInconsistencia, profissionaisComInconsistencia, resultado, profissionaisPorEspecialidade, buscaQ, profTemBusca])
 
   useEffect(() => {
     setHeader("Rem. Mês - Total", "Relacionamento Prestador")
@@ -80,6 +81,7 @@ export function RemunRPTab() {
       limparGrade={limparGrade}
       limparPE={limparPE}
       setCsvName={setCsvName}
+      hidePe
     />)
     return () => {
       setHeader("", "")
@@ -100,19 +102,12 @@ export function RemunRPTab() {
           resultado={resultado}
           especialidadeFiltro={especialidadeFiltro}
           onFiltroEspecialidade={setEspecialidadeFiltro}
+          pepResumo={pepResumo}
         />
       )}
 
       {resultado && resultado.length > 0 && (
-        <PeCoordenadoresPanel resultado={resultado} filtroAtivo={peFiltro} onFiltro={setPeFiltro} />
-      )}
-
-      {resultado && resultado.length > 0 && (
         <ContratosPendentesPanel resultado={resultado} />
-      )}
-
-      {!peAnaliseCompleta && (evoRows.length > 0 || peRows.length > 0) && (
-        <p className="text-xs text-amber-700 dark:text-amber-400">{peStatusMensagem}</p>
       )}
 
       {loading && <p className="text-sm text-muted-foreground">Carregando configuração…</p>}
@@ -162,7 +157,7 @@ export function RemunRPTab() {
         </div>
       )}
 
-      {resultado && resultado.length > 0 && (buscaQ || apenasInconsistencia || especialidadeFiltro || peFiltro) && (
+      {resultado && resultado.length > 0 && (buscaQ || apenasInconsistencia || especialidadeFiltro) && (
         <div className="flex items-center gap-2 flex-wrap text-xs">
           <span className="font-bold uppercase tracking-wide text-muted-foreground">Filtros ativos:</span>
           {buscaQ && (
@@ -183,15 +178,9 @@ export function RemunRPTab() {
               <button type="button" onClick={() => setEspecialidadeFiltro(null)} className="opacity-70 hover:opacity-100">×</button>
             </span>
           )}
-          {peFiltro && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 font-semibold text-foreground">
-              PE: {peFiltro}
-              <button type="button" onClick={() => setPeFiltro(null)} className="opacity-70 hover:opacity-100">×</button>
-            </span>
-          )}
           <button
             type="button"
-            onClick={() => { setRemBusca(""); setApenasInconsistencia(false); setEspecialidadeFiltro(null); setPeFiltro(null) }}
+            onClick={() => { setRemBusca(""); setApenasInconsistencia(false); setEspecialidadeFiltro(null) }}
             className="font-semibold text-foreground hover:opacity-70 transition-opacity"
           >
             limpar tudo
@@ -201,7 +190,7 @@ export function RemunRPTab() {
 
       {!resultado && !loading && (
         <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
-          Faça upload do relatório <code>csv_grade_profissionais</code> (mês completo) para calcular PA, PPD (diária) e ETA. Envie também <code>agendamentos_profissionais</code> para liberar o PE.
+          Faça upload do relatório <code>csv_grade_profissionais</code> (mês completo) para calcular PA, PPD (diária) e ETA. A PEP do Analista do Comportamento é registrada na aba Entregas PEP.
         </div>
       )}
 
@@ -209,11 +198,9 @@ export function RemunRPTab() {
         <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
           {especialidadeFiltro
             ? `Nenhum profissional com remuneração em "${especialidadeFiltro}" nesta grade.`
-            : peFiltro
-              ? "Nenhum profissional com PE nessa situação nesta grade."
-              : buscaQ
-                ? `Nenhuma sessão encontrada para "${remBusca}".`
-                : "Nenhum profissional com inconsistência nesta grade."}
+            : buscaQ
+              ? `Nenhuma sessão encontrada para "${remBusca}".`
+              : "Nenhum profissional com inconsistência nesta grade."}
         </div>
       )}
 
@@ -232,6 +219,7 @@ export function RemunRPTab() {
               etaBonus={etaBonus}
               taxasPA={taxasPA}
               dadosPorProf={[]}
+              pepResumo={pepResumo.get(p.prof) ?? null}
             />
           ))}
         </div>
