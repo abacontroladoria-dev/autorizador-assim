@@ -9,6 +9,7 @@ import { usePepEntregas } from "@/hooks/usePepEntregas"
 import { usePepApuracao } from "@/hooks/usePepApuracao"
 import { usePepCalendario } from "@/hooks/usePepCalendario"
 import { RemuneracaoUploadBadges } from "./RemuneracaoUploadBadges"
+import { COMPETENCIA_TESTE_PEP } from "@/lib/remuneracao/calculoPEP"
 import type { PepCatalogoItem, PepEvidencia, PepPlanejamentoSemestral, PepRegistroEntrega } from "@/types/pep"
 
 const money = (v: number) => `R$ ${v.toFixed(2).replace(".", ",")}`
@@ -170,6 +171,12 @@ export function PepEntregasTab() {
         </div>
         {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
       </div>
+
+      {competencia === COMPETENCIA_TESTE_PEP && (
+        <div className="rounded-2xl border border-amber-300 bg-amber-50 px-5 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+          <span className="font-bold">Modo teste (PRD Seção 13.7):</span> {COMPETENCIA_TESTE_PEP} apura e demonstra os descontos, mas paga 100% do potencial — por isso "Alcançado" ainda não reflete pendências. Os ajustes passam a valer a partir do mês seguinte.
+        </div>
+      )}
 
       {valorMensalPorPaciente > 0 && pacientes.length > 0 && (
         <div className="rounded-2xl border border-border bg-card p-5 shadow-sm flex items-center gap-6 flex-wrap">
