@@ -271,6 +271,28 @@ function agruparPorAgendamento(rows: CsvGradeRow[]) {
   return { sobrevivente, contagem }
 }
 
+/**
+ * Menor e maior data (ISO) de uma grade ainda CRUA. `null` quando nenhuma linha
+ * traz data legível.
+ *
+ * Lê da linha crua, e não de `SessaoReal`, para que a busca de presença em
+ * fila_autorizacoes possa sair JUNTO com a grade em vez de depois dela. O índice
+ * de presença precisa entrar no estado no mesmo instante que as linhas: até ele
+ * chegar, toda sessão vale como presente (ver `presencaOrbita` mais abaixo) e a
+ * tela exibe um total mais alto que o correto. Ver useRemunRP.
+ */
+export function janelaDeDatasDaGrade(rows: CsvGradeRow[]): { min: string; max: string } | null {
+  let min = ""
+  let max = ""
+  for (const r of rows) {
+    const iso = dataParaISO(getCol(r, ["Data"]))
+    if (!iso) continue
+    if (!min || iso < min) min = iso
+    if (!max || iso > max) max = iso
+  }
+  return min && max ? { min, max } : null
+}
+
 export function normalizarGradeParaSessao(rows: CsvGradeRow[], feriados?: Record<string, FeriadoInfo>): SessaoReal[] {
   const { sobrevivente, contagem } = agruparPorAgendamento(rows)
 
