@@ -15,6 +15,7 @@ export type PepTrilhaAuditoria = {
   depois: unknown
   motivo: string | null
   usuario_id: string | null
+  usuario_nome: string | null
   criado_em: string
 }
 
@@ -34,6 +35,11 @@ export async function registrarAuditoria(input: {
 }): Promise<void> {
   const supabase = getSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
+  // Denormalizado de propósito: se o usuário for renomeado depois, a trilha
+  // continua mostrando o nome de quem realmente fez a ação naquele momento.
+  const usuarioNome = user?.id
+    ? (await supabase.from('usuarios').select('nome').eq('id', user.id).maybeSingle()).data?.nome ?? null
+    : null
   const { error } = await supabase.from('pep_trilha_auditoria').insert({
     tabela: input.tabela,
     registro_id: input.registroId,
@@ -45,6 +51,7 @@ export async function registrarAuditoria(input: {
     depois: input.depois ?? null,
     motivo: input.motivo ?? null,
     usuario_id: user?.id ?? null,
+    usuario_nome: usuarioNome,
   })
   // Auditoria não pode derrubar a ação principal (salvar/excluir o registro
   // real) — só loga o erro. Perder uma linha de trilha é ruim; bloquear o

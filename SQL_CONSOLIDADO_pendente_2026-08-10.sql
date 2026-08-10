@@ -7,6 +7,11 @@
 --   20260810120000_add_valor_pep_mensal_contratos_itens.sql
 --   20260810130000_create_pep_trilha_auditoria.sql
 --   20260810140000_pep_faturamento_liberado.sql
+--   20260810150000_fix_pep_registro_conflito_upsert.sql  ← IMPORTANTE,
+--     corrige o erro "Não foi possível salvar a quantidade entregue" ao
+--     marcar itens por-paciente (TAP, Treinamento Parental, semestrais).
+--   20260810160000_pep_trilha_auditoria_usuario_nome.sql  ← adiciona o nome
+--     do usuário na trilha (antes só tinha usuario_id).
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
@@ -144,3 +149,33 @@ ALTER TABLE pep_apuracao_mensal
 ALTER TABLE pep_trilha_auditoria DROP CONSTRAINT IF EXISTS pep_trilha_auditoria_tabela_check;
 ALTER TABLE pep_trilha_auditoria ADD CONSTRAINT pep_trilha_auditoria_tabela_check
   CHECK (tabela IN ('registro_entrega', 'planejamento_semestral', 'apuracao_mensal'));
+
+-- ---------------------------------------------------------------------
+-- 6) 20260810150000_fix_pep_registro_conflito_upsert.sql
+-- BUGFIX: upsert de pep_registros_entrega falhava por causa de índices
+-- únicos parciais (ver comentário no arquivo original da migration).
+-- ---------------------------------------------------------------------
+
+ALTER TABLE pep_registros_entrega
+  ADD COLUMN IF NOT EXISTS chave_conflito text
+    GENERATED ALWAYS AS (COALESCE(paciente_nome, '§GERAL§:' || prestador_nome)) STORED;
+
+DROP INDEX IF EXISTS idx_pep_registro_por_paciente_unico;
+DROP INDEX IF EXISTS idx_pep_registro_geral_unico;
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_pep_registro_conflito_unico
+  ON pep_registros_entrega (chave_conflito, item_id, competencia);
+
+COMMENT ON COLUMN pep_registros_entrega.chave_conflito IS
+  'Coluna gerada só para permitir upsert por ON CONFLICT — nunca lida pela aplicação. Item por paciente: o próprio paciente_nome. Item GERAL (sem paciente): sentinel + prestador_nome, para não colidir entre prestadores diferentes.';
+
+-- ---------------------------------------------------------------------
+-- 7) 20260810160000_pep_trilha_auditoria_usuario_nome.sql
+-- BUGFIX: faltava o nome do usuário na trilha (só tinha usuario_id).
+-- ---------------------------------------------------------------------
+
+ALTER TABLE pep_trilha_auditoria
+  ADD COLUMN IF NOT EXISTS usuario_nome text;
+
+COMMENT ON COLUMN pep_trilha_auditoria.usuario_nome IS
+  'Nome do usuário no momento da ação, denormalizado de usuarios.nome — não é uma referência viva.';

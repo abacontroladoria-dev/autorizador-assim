@@ -181,9 +181,10 @@ export async function upsertRegistroEntrega(input: {
   const supabase = getSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
 
-  const onConflict = input.pacienteNome
-    ? 'paciente_nome,item_id,competencia'
-    : 'prestador_nome,item_id,competencia'
+  // chave_conflito é coluna gerada (migration 20260810150000) — unifica os
+  // dois casos (por paciente / GERAL) num único índice não-parcial, que é o
+  // que o Postgres consegue inferir de um ON CONFLICT sem WHERE.
+  const onConflict = 'chave_conflito,item_id,competencia'
 
   // Busca o estado anterior ANTES de sobrescrever — é o "antes" da trilha de
   // auditoria (Seção 11.4) e também decide se a ação é criação ou edição.

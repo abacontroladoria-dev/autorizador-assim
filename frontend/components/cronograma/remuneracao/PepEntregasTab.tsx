@@ -336,7 +336,7 @@ export function PepEntregasTab() {
           semanasCalendario={semanasCalendario}
           registro={registroDe(celulaAtiva.pacienteNome, celulaAtiva.item.id)}
           onFechar={() => setCelulaAtiva(null)}
-          onSalvar={async ({ quantidadeEntregue, evidencias, observacao }) => {
+          onSalvar={async ({ quantidadeEntregue, evidencias, observacao, motivo }) => {
             await marcarQuantidade({
               pacienteNome: celulaAtiva.pacienteNome,
               itemId: celulaAtiva.item.id,
@@ -344,6 +344,7 @@ export function PepEntregasTab() {
               quantidadeEsperada: quantidadeEsperada(celulaAtiva.item, semanasCalendario),
               observacao,
               evidencias,
+              motivo,
             })
             await recalcularApuracao()
             setCelulaAtiva(null)
@@ -380,7 +381,7 @@ export function PepEntregasTab() {
             await recalcularApuracao()
             setCelulaAtiva(null)
           }}
-          onSalvarEntrega={async ({ status, evidencias, observacao }) => {
+          onSalvarEntrega={async ({ status, evidencias, observacao, motivo }) => {
             const plano = celulaAtiva.pacienteNome ? planejamentoDe(celulaAtiva.pacienteNome, celulaAtiva.item.id) : null
             const antecipada = plano && competencia < plano.competencia_planejada ? plano : null
 
@@ -390,6 +391,7 @@ export function PepEntregasTab() {
               status,
               observacao,
               evidencias,
+              motivo,
             })
 
             // Regra: entrega semestral antecipada reprograma e recalcula a
