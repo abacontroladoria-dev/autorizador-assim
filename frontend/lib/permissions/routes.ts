@@ -94,7 +94,7 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   cronograma_solicitacoes: ['/cronograma/solicitacoes'],
   cronograma_saida_profissional: ['/cronograma/saida-profissional'],
   cronograma_ocupacao_paciente: ['/cronograma/ocupacao-paciente'],
-  cronograma_disponibilidade_interna: ['/cronograma/disponibilidade-interna'],
+  cronograma_disponibilidade_interna: ['/cronograma/ocupar-profissionais-disponiveis'],
   // Mesmo padrão de Indicadores: /cronograma/ocupacao tem 3 abas
   // (Aceites e Recusas, Diferença: Laudo e Oferta, Inconsistências e
   // Exceções), cada uma com seu próprio código de permissão.

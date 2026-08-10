@@ -138,7 +138,7 @@ export function DisponibilidadeInternaView() {
   const [detalhe, setDetalhe] = useState<LinhaDisponibilidade | null>(null)
 
   useEffect(() => {
-    setHeader("Disponibilidade Interna", `Profissionais já contratados que cobririam sessões pendentes (direto ou via remanejamento) — semana de referência: ${refWeekLabel}`)
+    setHeader("Ocupar Profissionais Disponíveis", `Profissionais já contratados que cobririam sessões pendentes (direto ou via remanejamento) — semana de referência: ${refWeekLabel}`)
     return () => setHeader("", "")
   }, [refWeekLabel, setHeader])
 
