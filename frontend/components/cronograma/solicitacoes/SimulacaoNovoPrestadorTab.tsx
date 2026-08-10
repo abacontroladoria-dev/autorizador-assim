@@ -11,25 +11,52 @@
 
 import { useMemo, useRef, useState } from "react"
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip as RechartsTooltip } from "recharts"
-import { Info, Lock, Star } from "lucide-react"
+import { CheckCircle2, Clock, Info, Lock, Sparkles, Star, Wallet } from "lucide-react"
 import {
-  avaliarPeriodo, calcularGaps, construirAgendaNovoProfissional, gapsParaMapa, montarPlanoRecomendado, ranquearUnidades,
+  avaliarPeriodo, calcularGaps, construirAgendaNovoProfissional, gapsParaMapa, limitarCandidatosPorGap, listarEspecialidades, montarPlanoRecomendado, ranquearUnidades,
   type PeriodoSimulado, type PeriodoAlvo, type SlotSimulado, type Turno,
 } from "@/lib/cronograma/simulacaoNovoPrestador"
-import { DIAS_UTIL, ESP_CLINICO, EXCLUIR_OCUP, TERAPIA_TO_ESP } from "@/lib/cronograma/constants"
-import { buildCronoUnitMeta, fmtH, fmtName, shouldShowSessionUnit, turnoNome, unidadeBadgeText } from "@/lib/cronograma/helpers"
+import { DIAS_UTIL, ESP_CLINICO, EXCLUIR_OCUP } from "@/lib/cronograma/constants"
+import { buildCronoUnitMeta, diaCurto, fmtH, fmtName, fmtReal, shouldShowSessionUnit, turnoNome, unidadeBadgeText } from "@/lib/cronograma/helpers"
+import { useGradeAgendamentos } from "@/hooks/useGradeAgendamentos"
+import { useOcupacaoSalas } from "@/hooks/useOcupacaoSalas"
+import { useConvenioValores } from "@/hooks/useConvenioValores"
+import { useFeriados } from "@/hooks/useFeriados"
+import { anexarModalidadeERemanejamento, anexarSala, anexarRemuneracaoEOrdenar } from "@/lib/cronograma/sugestaoContratacao"
+import { SugestoesContratacaoPanel } from "./SugestoesContratacaoPanel"
+import { RemanejamentoDetalheModal } from "./RemanejamentoDetalheModal"
+import { ProjecaoFinanceiraDetalheModal } from "./ProjecaoFinanceiraDetalheModal"
 import { UnitHeaderBadges, CronoGlobalUnitBadge } from "@/components/cronograma/ui/UnitBadges"
 import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
 import { StatusPill } from "@/components/cronograma/ui/StatusPill"
+import { StatCard } from "@/components/cronograma/ui/StatCard"
+import { InlineNotice } from "@/components/cronograma/ui/InlineNotice"
+import { TONE_ACCENT } from "@/components/cronograma/ui/tones"
 import { Button } from "@/components/ui/button"
 import type { CsvRow, LaudoRow } from "@/types/cronograma"
+import type { CandidatoNaSugestao, SugestaoContratacao } from "@/lib/cronograma/sugestaoContratacaoTypes"
 
 interface Props {
-  cRows: CsvRow[]
   lRows: LaudoRow[]
 }
 
 function hiStr(r: CsvRow): string { return String(r.HI_str || "") }
+
+/** Horários que o paciente já tem agendados nesse dia — informativo, pra
+ *  contextualizar a linha da tabela "Sessões e candidatos" independente da
+ *  modalidade (adjacência ou remanejamento). */
+function sessoesNoDiaDoPaciente(pac: string, dia: string, cRows: CsvRow[]): string[] {
+  const vistos = new Set<string>()
+  return cRows
+    .filter(r => r["Nome Favorecido"] === pac && r["Dia da Semana"] === dia && r["Status do Agendamento"] === "Agendado")
+    .map(hiStr)
+    .filter(h => {
+      if (vistos.has(h)) return false
+      vistos.add(h)
+      return true
+    })
+    .sort()
+}
 
 // ─── InfoTip ────────────────────────────────────────────────────────────────
 function InfoTip({ text }: { text: string }) {
@@ -142,7 +169,10 @@ function EspecialidadeCombobox({
 
 // ─── Cor por unidade (identidade visual consistente entre a grade do plano e o
 //     comparativo de barras — sempre acompanhada do nome por extenso, nunca só
-//     a cor, já que Realengo×Fazendinha não passam no teste de daltonismo) ────
+//     a cor, já que Realengo×Fazendinha não passam no teste de daltonismo).
+//     Não migrado pra tones.ts/StatusPill de propósito: Tone é sobre SIGNIFICADO
+//     (sucesso/alerta/erro), enquanto isto é identidade de ENTIDADE (a unidade
+//     física) — são sistemas semanticamente diferentes. ─────────────────────
 const UNIDADE_ESTILO: Record<string, { bg: string; text: string; bar: string }> = {
   Realengo: { bg: "bg-sky-50 dark:bg-sky-950/30", text: "text-sky-700 dark:text-sky-400", bar: "bg-sky-500" },
   Fazendinha: { bg: "bg-violet-50 dark:bg-violet-950/30", text: "text-violet-700 dark:text-violet-400", bar: "bg-violet-500" },
@@ -160,7 +190,7 @@ function PlanoGradeSemanal({ periodos }: { periodos: PeriodoSimulado[] }) {
     <div className="grid w-fit gap-1.5" style={{ gridTemplateColumns: `52px repeat(${dias.length}, 88px)` }}>
       <div />
       {dias.map(dia => (
-        <div key={`h-${dia}`} className="text-center text-[11px] font-bold text-muted-foreground">{dia.replace("-feira", "")}</div>
+        <div key={`h-${dia}`} className="text-center text-[11px] font-bold text-muted-foreground">{diaCurto(dia)}</div>
       ))}
       {(["manha", "tarde"] as Turno[]).flatMap(turno => [
         <div key={`t-${turno}`} className="flex items-center text-[11px] font-bold text-muted-foreground">{turnoNome[turno]}</div>,
@@ -225,7 +255,7 @@ function DetalheModal({ data, cRows, onClose }: { data: DetalheModalData; cRows:
         <div className="flex flex-wrap gap-1.5">
           <CronoGlobalUnitBadge unit={unitMeta.globalUnit} />
           <StatusPill tone="green" variant="solid" dense>
-            Hipótese: {terapiaProposta} · {slot.dia.replace("-feira", "")} {turnoNome[slot.turno]} {slot.hora} · {slot.unidade}
+            Hipótese: {terapiaProposta} · {diaCurto(slot.dia)} {turnoNome[slot.turno]} {slot.hora} · {slot.unidade}
           </StatusPill>
         </div>
       }
@@ -243,7 +273,7 @@ function DetalheModal({ data, cRows, onClose }: { data: DetalheModalData; cRows:
             <th className="w-[52px] pb-2 pr-2.5 text-right text-xs font-normal text-muted-foreground">Hora</th>
             {diasComSessao.map(d => (
               <th key={d} className={`min-w-[130px] pb-2 text-center text-[13px] font-extrabold ${d === slot.dia ? "text-violet-700 dark:text-violet-400" : "text-foreground"}`}>
-                <div>{d.replace("-feira", "")} {d === slot.dia && <span className="ml-0.5 rounded bg-emerald-50 dark:bg-emerald-950/30 px-1 py-px text-[10px] text-emerald-700 dark:text-emerald-400">hipótese</span>}</div>
+                <div>{diaCurto(d)} {d === slot.dia && <span className="ml-0.5 rounded bg-emerald-50 dark:bg-emerald-950/30 px-1 py-px text-[10px] text-emerald-700 dark:text-emerald-400">hipótese</span>}</div>
                 <UnitHeaderBadges dayMeta={unitMeta.byDay[d]} globalUnit={unitMeta.globalUnit} />
               </th>
             ))}
@@ -251,7 +281,7 @@ function DetalheModal({ data, cRows, onClose }: { data: DetalheModalData; cRows:
           <tbody>
             {horasGrid.map(hora => (
               <tr key={hora} className="border-t border-border">
-                <td className={`pr-2.5 pt-2 text-right align-top font-mono text-[15px] font-extrabold tabular-nums ${hora === slot.hora ? "text-violet-700 dark:text-violet-400" : "text-foreground"}`}>{hora}</td>
+                <td className={`pr-2.5 pt-2 text-right align-top font-mono text-[13px] font-extrabold tabular-nums ${hora === slot.hora ? "text-violet-700 dark:text-violet-400" : "text-foreground"}`}>{hora}</td>
                 {diasComSessao.map(d => {
                   const celulas = mapaCelulas[`${d}|||${hora}`] || []
                   return (
@@ -281,13 +311,21 @@ function DetalheModal({ data, cRows, onClose }: { data: DetalheModalData; cRows:
 }
 
 // ─── Componente principal ────────────────────────────────────────────────────
-export function SimulacaoNovoPrestadorTab({ cRows, lRows }: Props) {
+export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
+  const { cRows, loading: gradeLoading, error: gradeError, refWeek } = useGradeAgendamentos()
+  const { salasComOcupacao } = useOcupacaoSalas(refWeek.inicio, refWeek.fim)
+  const { regrasGerais, excecoesPaciente } = useConvenioValores()
+  const { feriados } = useFeriados()
   const [especialidade, setEspecialidade] = useState("")
   const [periodosSel, setPeriodosSel] = useState<Record<string, { manha?: boolean; tarde?: boolean }>>({})
   const [unidadeFixada, setUnidadeFixada] = useState("")
   const [detalhe, setDetalhe] = useState<DetalheModalData | null>(null)
+  const [detalheRemanejamento, setDetalheRemanejamento] = useState<{ sugestao: SugestaoContratacao; candidato: CandidatoNaSugestao } | null>(null)
+  const [detalheFinanceiroAberto, setDetalheFinanceiroAberto] = useState(false)
+  const [destaqueAplicado, setDestaqueAplicado] = useState(false)
+  const parametrosRef = useRef<HTMLDivElement>(null)
 
-  const espOptions = useMemo(() => [...new Set(Object.values(TERAPIA_TO_ESP))].filter(Boolean).sort(), [])
+  const espOptions = useMemo(() => listarEspecialidades(), [])
   const especialidadeValida = espOptions.includes(especialidade)
   const laudosCarregados = lRows.length > 0
 
@@ -323,9 +361,13 @@ export function SimulacaoNovoPrestadorTab({ cRows, lRows }: Props) {
 
   const periodosExibidos = useMemo((): PeriodoSimulado[] => {
     if (!podeSimular) return []
-    return unidadeFixada
+    const bruto = unidadeFixada
       ? periodosAlvo.map(p => avaliarPeriodo(p.dia, p.turno, unidadeFixada, especialidade, cRows, gapMap))
       : planoRecomendado
+    // planoRecomendado já sai limitado por limitarCandidatosPorGap (dentro de
+    // montarPlanoRecomendado) — chamar de novo aqui é inofensivo (idempotente)
+    // e cobre o caminho de unidade fixada, que não passa por lá.
+    return limitarCandidatosPorGap(bruto, gapMap, especialidade)
   }, [podeSimular, unidadeFixada, periodosAlvo, especialidade, cRows, gapMap, planoRecomendado])
 
   const slotsExibidos = useMemo((): SlotSimulado[] => periodosExibidos.flatMap(p => p.slots), [periodosExibidos])
@@ -337,15 +379,113 @@ export function SimulacaoNovoPrestadorTab({ cRows, lRows }: Props) {
 
   const escalaComparativo = Math.max(1, planoStats.totalSessoes, ...unitRank.map(u => u.totalSessoes))
 
-  const gruposPorDia = useMemo(() => {
-    const grupos: { dia: string; slots: SlotSimulado[] }[] = []
-    for (const slot of slotsExibidos) {
-      const ultimo = grupos[grupos.length - 1]
-      if (ultimo && ultimo.dia === slot.dia) ultimo.slots.push(slot)
-      else grupos.push({ dia: slot.dia, slots: [slot] })
+  const mesReferencia = useMemo(() => {
+    const [ano, mes] = refWeek.inicio.split("-").map(Number)
+    return ano && mes ? { ano, mes } : null
+  }, [refWeek.inicio])
+
+  const labelMesReferencia = useMemo(() => {
+    if (!mesReferencia) return ""
+    const label = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(mesReferencia.ano, mesReferencia.mes - 1, 1))
+    return label.charAt(0).toUpperCase() + label.slice(1)
+  }, [mesReferencia])
+
+  // Enriquece cada período exibido (modalidade adjacente/remanejamento, sala
+  // livre vinculada e valor de cada sessão pelo cadastro de valores) — mesmo
+  // pipeline usado pelo painel de sugestões automáticas, só que aplicado aos
+  // períodos escolhidos manualmente aqui (um "período" vira uma
+  // SugestaoContratacao de 1 turno só só pra reaproveitar os mesmos estágios).
+  const periodosEnriquecidos = useMemo((): SugestaoContratacao[] => {
+    if (!podeSimular) return []
+    const base: SugestaoContratacao[] = periodosExibidos.map((p, i) => ({
+      id: `periodo-${i}`,
+      unidade: p.unidade,
+      especialidade,
+      dia: p.dia,
+      turnos: [p.turno],
+      pctOcupacaoPrevista: 0,
+      faixaCascata: 50,
+      candidatos: p.slots.flatMap(s => s.candidatos.map(c => ({
+        paciente: c.pac, gap: c.gap, aut: c.aut, of: c.of, turno: p.turno, hora: s.hora,
+        modalidade: "adjacente" as const, valorSessaoProjetado: null, ordemNaVaga: 1,
+      }))),
+      modalidadeDominante: "adjacente",
+      salaVinculada: null,
+      projecaoRemuneracao: null,
+    }))
+    const comRemanejamento = anexarModalidadeERemanejamento(base, cRows, gapMap)
+    const comSala = anexarSala(comRemanejamento, salasComOcupacao)
+    return anexarRemuneracaoEOrdenar(comSala, cRows, regrasGerais, excecoesPaciente, mesReferencia, feriados)
+  }, [podeSimular, periodosExibidos, especialidade, cRows, gapMap, salasComOcupacao, regrasGerais, excecoesPaciente, mesReferencia, feriados])
+
+  // Soma só a melhor oferta de cada vaga (já resolvido por anexarRemuneracaoEOrdenar
+  // por período) — reflete o que se ganharia priorizando sempre o paciente mais
+  // rentável em cada disputa, nunca somando os dois lados de uma mesma vaga.
+  const resumoFinanceiro = useMemo(() => {
+    let semanal = 0, mensal = 0
+    for (const s of periodosEnriquecidos) {
+      semanal += s.projecaoRemuneracao?.receitaSemanalProjetada ?? 0
+      mensal += s.projecaoRemuneracao?.receitaMensalProjetada ?? 0
     }
-    return grupos
-  }, [slotsExibidos])
+    return { semanal, mensal }
+  }, [periodosEnriquecidos])
+
+  interface LinhaCandidato {
+    dia: string; unidade: string; sugestao: SugestaoContratacao; candidato: CandidatoNaSugestao
+    /** Quantos pacientes concorrem por essa mesma vaga (turno+hora) — > 1 significa que só um deles poderá ser atendido. */
+    concorrentesNaVaga: number
+    /** true quando o valor de sessão empata entre os concorrentes da vaga — a prioridade nesse caso vem da frequência semanal na clínica, não do valor. */
+    priorizadoPorFrequencia: boolean
+  }
+
+  const linhasExibidas = useMemo((): Omit<LinhaCandidato, "concorrentesNaVaga" | "priorizadoPorFrequencia">[] =>
+    periodosEnriquecidos.flatMap(s => s.candidatos.map(candidato => ({ dia: s.dia, unidade: s.unidade, sugestao: s, candidato }))),
+  [periodosEnriquecidos])
+
+  // Vagas reais = horários distintos (dia+turno+hora) — várias candidaturas podem disputar a mesma vaga.
+  const vagasExibidas = useMemo(
+    () => new Set(linhasExibidas.map(l => `${l.dia}|||${l.candidato.turno}|||${l.candidato.hora}`)).size,
+    [linhasExibidas],
+  )
+
+  const gruposPorDia = useMemo(() => {
+    const porDia = new Map<string, Omit<LinhaCandidato, "concorrentesNaVaga" | "priorizadoPorFrequencia">[]>()
+    for (const l of linhasExibidas) {
+      if (!porDia.has(l.dia)) porDia.set(l.dia, [])
+      porDia.get(l.dia)!.push(l)
+    }
+    return DIAS_UTIL
+      .filter(d => porDia.has(d))
+      .map(dia => {
+        const linhasDoDia = porDia.get(dia)!
+        const porVaga = new Map<string, typeof linhasDoDia>()
+        for (const l of linhasDoDia) {
+          const chave = `${l.candidato.turno}|||${l.candidato.hora}`
+          if (!porVaga.has(chave)) porVaga.set(chave, [])
+          porVaga.get(chave)!.push(l)
+        }
+        const empatePorVaga = new Map<string, boolean>()
+        for (const [chave, itens] of porVaga.entries()) {
+          const valores = itens.map(l => l.candidato.valorSessaoProjetado ?? -Infinity)
+          empatePorVaga.set(chave, valores.filter(v => v === Math.max(...valores)).length > 1)
+        }
+        const linhas: LinhaCandidato[] = linhasDoDia
+          .map(l => {
+            const chave = `${l.candidato.turno}|||${l.candidato.hora}`
+            return {
+              ...l,
+              concorrentesNaVaga: porVaga.get(chave)?.length ?? 1,
+              priorizadoPorFrequencia: empatePorVaga.get(chave) ?? false,
+            }
+          })
+          .sort((a, b) =>
+            a.candidato.turno.localeCompare(b.candidato.turno) ||
+            a.candidato.hora.localeCompare(b.candidato.hora) ||
+            a.candidato.ordemNaVaga - b.candidato.ordemNaVaga,
+          )
+        return { dia, linhas }
+      })
+  }, [linhasExibidas])
 
   const alternar = (dia: string, turno: Turno) => {
     setUnidadeFixada("")
@@ -362,34 +502,63 @@ export function SimulacaoNovoPrestadorTab({ cRows, lRows }: Props) {
   const selecionarTudo = () => { setUnidadeFixada(""); setPeriodosSel(Object.fromEntries(DIAS_UTIL.map(d => [d, { manha: true, tarde: true }]))) }
   const limparTudo = () => { setUnidadeFixada(""); setPeriodosSel({}) }
 
+  const aplicarSugestao = (esp: string, periodos: { dia: string; turno: Turno }[], unidade: string) => {
+    setEspecialidade(esp)
+    setPeriodosSel(Object.fromEntries(
+      DIAS_UTIL.map(dia => [dia, {
+        manha: periodos.some(p => p.dia === dia && p.turno === "manha"),
+        tarde: periodos.some(p => p.dia === dia && p.turno === "tarde"),
+      }]),
+    ))
+    setUnidadeFixada(unidade)
+
+    // Sem isso o usuário não percebe que a sugestão foi aplicada: os campos
+    // preenchidos ficam abaixo da dobra, dentro de "Parâmetros da simulação".
+    parametrosRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    setDestaqueAplicado(true)
+    setTimeout(() => setDestaqueAplicado(false), 2200)
+  }
+
   return (
     <div className="flex flex-col gap-3">
+      <SugestoesContratacaoPanel onAplicarSugestao={aplicarSugestao} />
 
       {/* Parâmetros */}
-      <div className="rounded-2xl border border-border bg-card p-4">
-        <div className="mb-3 text-[15px] font-extrabold text-foreground">Parâmetros da simulação</div>
+      <div
+        ref={parametrosRef}
+        className={`rounded-2xl border p-4 transition-colors duration-700 ${
+          destaqueAplicado
+            ? "border-emerald-400 bg-emerald-50/60 ring-4 ring-emerald-200 dark:border-emerald-600 dark:bg-emerald-950/20 dark:ring-emerald-900/40"
+            : "border-border bg-card"
+        }`}
+      >
+        <div className="mb-3 flex flex-wrap items-center gap-2">
+          <span className="text-[15px] font-extrabold text-foreground">Parâmetros da simulação</span>
+          {destaqueAplicado && (
+            <span className="animate-in fade-in slide-in-from-left-1 duration-300 flex items-center gap-1 rounded-full bg-emerald-600 px-2.5 py-1 text-[10px] font-bold text-white dark:bg-emerald-500">
+              <Sparkles size={11} /> Sugestão aplicada
+            </span>
+          )}
+        </div>
         <div className="mb-2.5 text-xs text-muted-foreground">
           Simule um novo profissional por especialidade, dia e turno para ver quantos pacientes com sessões pendentes ele conseguiria atender.
           <InfoTip text="A simulação considera pacientes com autorizado > ofertado que já frequentam a unidade naquele dia, sem conflito no horário e respeitando o sequenciamento clínico (mínimo 1 sessão no dia, sempre em blocos consecutivos de 40min)." />
         </div>
 
         {!laudosCarregados ? (
-          <div className="flex items-start gap-2 rounded-xl border border-amber-200 dark:border-amber-900 bg-amber-50 dark:bg-amber-950/30 px-3.5 py-3 text-xs text-amber-900 dark:text-amber-200">
-            <Lock size={15} className="mt-0.5 shrink-0" />
-            <span>
-              <strong>Relatório de laudos não anexado.</strong> Sem ele não é possível calcular quem tem sessões pendentes (autorizado × ofertado), então a simulação fica bloqueada. Anexe o relatório de laudos para liberar a especialidade e os dias/turnos.
-            </span>
-          </div>
+          <InlineNotice tone="amber" icon={<Lock size={15} />}>
+            <strong>Relatório de laudos não anexado.</strong> Sem ele não é possível calcular quem tem sessões pendentes (autorizado × ofertado), então a simulação fica bloqueada. Anexe o relatório de laudos para liberar a especialidade e os dias/turnos.
+          </InlineNotice>
         ) : (
         <div className="flex flex-wrap items-start gap-4">
-          <div className="flex w-64 flex-col gap-1">
+          <div className="flex w-full sm:w-64 flex-col gap-1">
             <span className="text-[11px] font-bold text-muted-foreground">Especialidade</span>
             <EspecialidadeCombobox value={especialidade} onChange={setEspecialidade} opcoes={espOptions} />
           </div>
 
-          <div className="w-fit rounded-xl border border-border bg-muted p-3">
+          <div className="w-full sm:w-fit rounded-xl border border-border bg-muted p-3">
             <div className="mb-2 flex items-center gap-2">
-              <span className="whitespace-nowrap text-xs font-extrabold text-foreground">
+              <span className="whitespace-nowrap text-sm font-extrabold text-foreground">
                 Dias e turnos afetados <InfoTip text="Marque manhã, tarde ou dia inteiro. A recomendação avalia cada período separadamente e pode indicar unidades diferentes por turno." />
               </span>
               <div className="ml-auto flex gap-1.5">
@@ -402,13 +571,13 @@ export function SimulacaoNovoPrestadorTab({ cRows, lRows }: Props) {
                 const diaInteiro = !!periodosSel[dia]?.manha && !!periodosSel[dia]?.tarde
                 return (
                   <div key={dia} className="flex items-center gap-1.5">
-                    <span className="w-[64px] shrink-0 text-xs font-extrabold text-foreground">{dia.replace("-feira", "")}</span>
+                    <span className="w-[64px] shrink-0 text-xs font-extrabold text-foreground">{diaCurto(dia)}</span>
                     {(["manha", "tarde"] as Turno[]).map(turno => (
                       <button
                         key={turno}
                         type="button"
                         onClick={() => alternar(dia, turno)}
-                        className={`h-8 w-20 shrink-0 rounded-lg border text-xs font-bold transition-colors ${periodosSel[dia]?.[turno] ? "border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-400" : "border-border bg-card text-muted-foreground hover:bg-muted/50"}`}
+                        className={`h-8 w-16 sm:w-20 shrink-0 rounded-lg border text-xs font-bold transition-colors ${periodosSel[dia]?.[turno] ? "border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-400" : "border-border bg-card text-muted-foreground hover:bg-muted/50"}`}
                       >
                         {turnoNome[turno]}
                       </button>
@@ -428,20 +597,52 @@ export function SimulacaoNovoPrestadorTab({ cRows, lRows }: Props) {
               <div className="mt-2 text-[11px] font-bold text-rose-600 dark:text-rose-400">Selecione pelo menos um dia/turno.</div>
             )}
           </div>
+
+          {podeSimular && (
+            <div className="w-full xl:w-fit">
+              <div className="mb-2 flex items-center gap-1 text-sm font-extrabold text-foreground">
+                Projeção financeira
+                <InfoTip text="Soma, por vaga de horário, só a receita do paciente mais rentável entre os que disputam aquele horário — priorizando sempre quem paga mais. Projeção mensal usa a mesma lógica de dias úteis × feriados da Previsão de Receitas." />
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <StatCard tone="green" icon={<Wallet size={14} />} label="Por semana">
+                  <div className="text-lg font-black tabular-nums text-emerald-700 dark:text-emerald-400">{fmtReal(resumoFinanceiro.semanal)}</div>
+                </StatCard>
+                <StatCard tone="green" icon={<Wallet size={14} />} label={`Projetado/mês (${labelMesReferencia})`}>
+                  <div className="text-lg font-black tabular-nums text-emerald-700 dark:text-emerald-400">{fmtReal(resumoFinanceiro.mensal)}</div>
+                </StatCard>
+              </div>
+              <Button variant="outline" size="xs" className="mt-2" onClick={() => setDetalheFinanceiroAberto(true)}>
+                Ver detalhe
+              </Button>
+            </div>
+          )}
         </div>
         )}
       </div>
 
-      {!cRows.length && (
-        <div className="rounded-xl border border-orange-200 dark:border-orange-900 bg-orange-50 dark:bg-orange-950/30 px-4 py-3.5 text-xs text-orange-800 dark:text-orange-300">
-          Carregue o CSV da grade e o relatório de laudos para usar esta ferramenta.
-        </div>
+      {gradeLoading && (
+        <InlineNotice tone="slate">
+          Carregando grade da semana de referência ({refWeek.label})…
+        </InlineNotice>
+      )}
+
+      {!gradeLoading && gradeError && (
+        <InlineNotice tone="red">
+          Falha ao carregar a grade da semana de referência: {gradeError}
+        </InlineNotice>
+      )}
+
+      {!gradeLoading && !gradeError && !cRows.length && (
+        <InlineNotice tone="amber">
+          Nenhuma sessão encontrada na semana de referência ({refWeek.label}). Verifique se a grade foi sincronizada, e anexe o relatório de laudos para usar esta ferramenta.
+        </InlineNotice>
       )}
 
       {cRows.length > 0 && especialidade && !especialidadeValida && (
-        <div className="rounded-xl border border-rose-200 dark:border-rose-900 bg-rose-50 dark:bg-rose-950/30 px-4 py-3.5 text-xs text-rose-800 dark:text-rose-300">
+        <InlineNotice tone="red">
           Escolha uma especialidade válida da lista para simular.
-        </div>
+        </InlineNotice>
       )}
 
       {/* Comparativo de unidades */}
@@ -462,20 +663,21 @@ export function SimulacaoNovoPrestadorTab({ cRows, lRows }: Props) {
               >
                 <div className="mb-2 flex items-center gap-1.5">
                   <Star size={13} className="text-sky-600 dark:text-sky-400" />
-                  <span className="text-[13px] font-extrabold text-foreground">Plano recomendado (misto)</span>
+                  <span className="text-sm font-extrabold text-foreground">Plano recomendado (misto)</span>
                   <InfoTip text="Escolhe a melhor unidade para cada dia/turno separadamente. Se Padre Miguel for escolhida em um turno, o sistema não mistura com outra unidade no outro turno do mesmo dia (restrição geográfica)." />
                 </div>
-                <div className="mb-2 text-[11px] text-muted-foreground">
-                  <strong className="text-foreground">{planoStats.nPacientes} pacientes</strong> · ~{planoStats.totalSessoes} sessões
+                <div className="mb-2 flex items-center gap-1 text-[11px] text-muted-foreground">
+                  <strong className="text-foreground">{planoStats.nPacientes} pacientes</strong> · ~{planoStats.totalSessoes} sessões/semana (estimativa)
+                  <InfoTip text="Estimativa do plano antes de resolver remanejamento e sala — o número final de vagas confirmadas aparece em 'Detalhamento' logo abaixo." />
                 </div>
                 <PlanoGradeSemanal periodos={planoRecomendado} />
               </button>
 
-              <div className="w-fit lg:border-l lg:border-border lg:pl-6">
+              <div className="w-full lg:w-fit lg:border-l lg:border-border lg:pl-6">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <div className="text-[12px] font-extrabold text-foreground">
+                  <div className="text-sm font-extrabold text-foreground">
                     Ou fixe numa unidade única
-                    <InfoTip text="Cada barra mostra quantas sessões você teria se contratasse o novo profissional só para essa unidade, nos mesmos dias/turnos escolhidos. A marca vertical indica o total do plano recomendado (misto)." />
+                    <InfoTip text="Cada barra mostra quantas sessões/semana (estimativa) você teria se contratasse o novo profissional só para essa unidade, nos mesmos dias/turnos escolhidos. A marca vertical indica o total do plano recomendado (misto)." />
                   </div>
                   {unidadeFixada && (
                     <Button variant="outline" size="xs" onClick={() => setUnidadeFixada("")}>Ver plano</Button>
@@ -493,15 +695,15 @@ export function SimulacaoNovoPrestadorTab({ cRows, lRows }: Props) {
                         key={u.unidade}
                         type="button"
                         onClick={() => setUnidadeFixada(ativo ? "" : u.unidade)}
-                        className={`grid grid-cols-[88px_140px_100px] items-center gap-3 rounded-lg border p-1.5 text-left transition-colors ${ativo ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30" : "border-transparent hover:bg-muted/50"}`}
+                        className={`flex flex-wrap sm:flex-nowrap items-center gap-3 rounded-lg border p-1.5 text-left transition-colors ${ativo ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30" : "border-transparent hover:bg-muted/50"}`}
                       >
-                        <span className={`text-[12.5px] font-bold ${cor.text}`}>{u.unidade}</span>
-                        <span className="relative h-5 rounded bg-muted">
+                        <span className={`w-full sm:w-[88px] shrink-0 text-[12.5px] font-bold ${cor.text}`}>{u.unidade}</span>
+                        <span className="relative h-5 min-w-[100px] flex-1 rounded bg-muted">
                           <span className={`absolute inset-y-0 left-0 rounded transition-[width] ${cor.bar}`} style={{ width: `${largura}%` }} />
                           <span className="absolute -top-1 -bottom-1 w-[2px] bg-foreground/60" style={{ left: `${referencia}%` }} />
                         </span>
-                        <span className="text-right">
-                          <span className="block text-[12.5px] font-black tabular-nums text-foreground">{u.totalSessoes} sessões</span>
+                        <span className="w-full sm:w-[100px] shrink-0 text-right">
+                          <span className="block text-[12.5px] font-black tabular-nums text-foreground">{u.totalSessoes} sessões/semana</span>
                           <span className={`block text-[10px] font-bold ${delta < 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>
                             {delta === 0 ? "igual ao plano" : `${delta} vs. plano`}
                           </span>
@@ -519,24 +721,29 @@ export function SimulacaoNovoPrestadorTab({ cRows, lRows }: Props) {
             <div className="overflow-hidden rounded-2xl border border-border bg-card">
               <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted px-4 py-2.5">
                 <span className="text-sm font-extrabold text-foreground">Detalhamento — {unidadeFixada || "Plano recomendado (misto)"}</span>
-                <span className="ml-auto text-[11px] text-muted-foreground">
-                  {planoStats.nPacientes} pacientes · {slotsExibidos.length} sessões · {Math.round((agendaNovoProf.slotsComCandidato / agendaNovoProf.totalSlots) * 100)}% de ocupação
+                <span className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground">
+                  {planoStats.nPacientes} pacientes · {slotsExibidos.length} vaga(s) de horário · {Math.round((agendaNovoProf.slotsComCandidato / agendaNovoProf.totalSlots) * 100)}% de ocupação
+                  <InfoTip text="Vagas de horário são os horários distintos do novo profissional com pelo menos um candidato — diferente do total de candidaturas na tabela 'Sessões e candidatos' abaixo, já que mais de um paciente pode disputar a mesma vaga." />
+                </span>
+                <span className="w-full text-[11px] font-bold text-emerald-700 dark:text-emerald-400">
+                  Projeção priorizando os mais rentáveis: {fmtReal(resumoFinanceiro.semanal)}/semana · {fmtReal(resumoFinanceiro.mensal)}/mês ({labelMesReferencia})
                 </span>
               </div>
 
               <div className="flex flex-col gap-4 p-4">
-                <div className="flex flex-wrap items-start gap-4">
+                <div className="grid grid-cols-1 xl:grid-cols-[auto_260px_1fr] gap-4 items-start">
                 {/* Agenda do novo profissional */}
-                <div className="w-fit shrink-0 rounded-xl bg-muted/40 p-3">
-                  <div className="text-[13px] font-extrabold text-foreground">Agenda do novo profissional</div>
+                <div className="w-full xl:w-fit shrink-0 rounded-xl bg-muted/40 p-3">
+                  <div className="text-sm font-extrabold text-foreground">Agenda do novo profissional</div>
                   <div className="mb-3 text-[11px] text-muted-foreground">Colorido: paciente(s) candidato(s) · Cinza: horário livre/ocioso</div>
+                  <div className="mb-1 text-[10px] font-bold text-muted-foreground sm:hidden">deslize para o lado →</div>
                   <div className="overflow-x-auto">
                     <table className="border-collapse text-[11px]" style={{ width: `${56 + agendaNovoProf.dias.length * 108}px` }}>
                       <thead>
                         <tr>
                           <th className="w-14" />
                           {agendaNovoProf.dias.map(dia => (
-                            <th key={dia} className="min-w-[108px] px-1 pb-2 text-center text-[12px] font-extrabold text-foreground">{dia.replace("-feira", "")}</th>
+                            <th key={dia} className="min-w-[108px] px-1 pb-2 text-center text-[12px] font-extrabold text-foreground">{diaCurto(dia)}</th>
                           ))}
                         </tr>
                       </thead>
@@ -570,22 +777,22 @@ export function SimulacaoNovoPrestadorTab({ cRows, lRows }: Props) {
                 </div>
 
                   {/* Carga semanal */}
-                  <div className="w-[260px] shrink-0 rounded-xl bg-muted/40 p-4">
-                    <div className="text-[13px] font-extrabold text-foreground">Carga semanal</div>
+                  <div className="w-full xl:w-[260px] shrink-0 rounded-xl bg-muted/40 p-4">
+                    <div className="text-sm font-extrabold text-foreground">Carga semanal</div>
                     <div className="mb-3 text-[11px] text-muted-foreground">Novo profissional hipotético</div>
-                    <div className="relative mx-auto h-[190px] w-[190px]">
+                    <div className="relative mx-auto aspect-square w-[150px] sm:w-[190px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
                           data={[
-                            { name: "Com candidato", value: agendaNovoProf.slotsComCandidato, color: "#059669" },
-                            { name: "Livre/ociosa", value: agendaNovoProf.slotsLivres, color: "#e11d48" },
+                            { name: "Com candidato", value: agendaNovoProf.slotsComCandidato, color: TONE_ACCENT.green },
+                            { name: "Livre/ociosa", value: agendaNovoProf.slotsLivres, color: TONE_ACCENT.red },
                           ].filter(s => s.value > 0)}
-                          cx="50%" cy="50%" innerRadius={58} outerRadius={84}
+                          cx="50%" cy="50%" innerRadius="62%" outerRadius="88%"
                           dataKey="value" strokeWidth={0} startAngle={90} endAngle={-270}
                         >
                           {[
-                            { color: "#059669" }, { color: "#e11d48" },
+                            { color: TONE_ACCENT.green }, { color: TONE_ACCENT.red },
                           ].filter((_, i) => [agendaNovoProf.slotsComCandidato, agendaNovoProf.slotsLivres][i] > 0)
                             .map((s, i) => <Cell key={i} fill={s.color} />)}
                         </Pie>
@@ -612,10 +819,11 @@ export function SimulacaoNovoPrestadorTab({ cRows, lRows }: Props) {
                 </div>
 
                   {/* Ocupação por dia */}
-                  <div className="min-w-[320px] flex-1 rounded-xl bg-muted/40 p-4">
-                    <div className="text-[13px] font-extrabold text-foreground">Ocupação por dia</div>
+                  <div className="min-w-0 xl:min-w-[320px] flex-1 rounded-xl bg-muted/40 p-4">
+                    <div className="text-sm font-extrabold text-foreground">Ocupação por dia</div>
                     <div className="mb-3 text-[11px] text-muted-foreground">Novo profissional hipotético</div>
-                    <table className="w-full text-[13px]">
+                    <div className="overflow-x-auto">
+                    <table className="w-full min-w-[420px] text-[13px]">
                     <thead>
                       <tr className="border-b border-border">
                         <th className="min-w-[80px] pb-2 pr-3 text-left text-[11px] font-bold text-muted-foreground">Dia</th>
@@ -627,76 +835,134 @@ export function SimulacaoNovoPrestadorTab({ cRows, lRows }: Props) {
                     <tbody>
                       {agendaNovoProf.porDia.map(row => (
                         <tr key={row.dia} className="border-b border-border last:border-b-0">
-                          <td className="py-2 pr-3 font-bold text-foreground">{row.dia.replace("-feira", "")}</td>
+                          <td className="py-2 pr-3 font-bold text-foreground">{diaCurto(row.dia)}</td>
                           <td className="py-2 pr-3 text-foreground">{row.unidades}</td>
                           <td className="py-2 pr-3 text-center tabular-nums text-foreground">{row.sessoes}/{row.totalSlots}</td>
                           <td className="py-2 text-right">
-                            <span className={`rounded-full px-2.5 py-1 text-[12px] font-bold ${row.pct >= 70 ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300" : row.pct >= 30 ? "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-300" : "bg-rose-100 text-rose-700 dark:bg-rose-900/40 dark:text-rose-300"}`}>
+                            <StatusPill tone={row.pct >= 70 ? "green" : row.pct >= 30 ? "amber" : "red"} variant="solid" dense>
                               {row.pct.toFixed(0)}%
-                            </span>
+                            </StatusPill>
                           </td>
                         </tr>
                       ))}
                     </tbody>
                     </table>
+                    </div>
                   </div>
                 </div>
 
                 <div className="border-t border-border pt-4">
                   <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <span className="text-[13px] font-extrabold text-foreground">Sessões e candidatos</span>
-                    <span className="ml-auto text-[11px] text-muted-foreground">{slotsExibidos.length} sessão(ões) com candidatos</span>
+                    <span className="text-sm font-extrabold text-foreground">Sessões e candidatos</span>
+                    <span className="ml-auto text-[11px] text-muted-foreground">{linhasExibidas.length} candidatura(s) elegível(is) em {vagasExibidas} vaga(s) de horário</span>
                   </div>
-                  {!slotsExibidos.length ? (
-                    <div className="p-6 text-center text-[13px] text-muted-foreground">Nenhuma sessão com candidatos nesta combinação.</div>
+                  {!linhasExibidas.length ? (
+                    <InlineNotice tone="slate" className="text-center justify-center">Nenhuma sessão com candidatos nesta combinação.</InlineNotice>
                   ) : (
                     <div className="flex flex-col gap-5">
+                      <div className="text-[10px] font-bold text-muted-foreground sm:hidden">deslize para o lado →</div>
                       {gruposPorDia.map(grupo => (
                   <div key={grupo.dia}>
                     <div className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wide text-muted-foreground">
                       {grupo.dia}
                     </div>
                     <div className="overflow-x-auto rounded-lg border border-border">
-                      <table className="w-full min-w-[560px] border-collapse text-[12.5px]">
+                      <table className="w-full min-w-[720px] border-collapse text-[12.5px]">
                         <thead>
                           <tr className="border-b border-border">
-                            <th className="px-3 py-2 text-left text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">Horário</th>
-                            <th className="px-3 py-2 text-left text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">Unidade</th>
-                            <th className="px-3 py-2 text-left text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">Paciente</th>
-                            <th className="px-3 py-2 text-right text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">Autorizado</th>
-                            <th className="px-3 py-2 text-right text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">Ofertado</th>
-                            <th className="px-3 py-2 text-right text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">Janela</th>
-                            <th className="px-3 py-2 text-right text-[10.5px] font-bold uppercase tracking-wide text-muted-foreground">Vagas a Oferecer</th>
+                            <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-muted-foreground" title="Pode oferecer agora / aguarda recusa do(s) anterior(es)">Prioridade</th>
+                            <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Horário</th>
+                            <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Unidade</th>
+                            <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Sala</th>
+                            <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Modalidade</th>
+                            <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Paciente</th>
+                            <th className="px-3 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Autorizado</th>
+                            <th className="px-3 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Ofertado</th>
+                            <th className="px-3 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Janela</th>
+                            <th className="px-3 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Vagas a Oferecer</th>
+                            <th className="px-3 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Valor da sessão</th>
                             <th className="px-3 py-2" />
                           </tr>
                         </thead>
                         <tbody>
-                          {grupo.slots.flatMap(slot => {
-                            const cor = estiloUnidade(slot.unidade)
-                            return slot.candidatos.map((c, ci) => (
-                              <tr key={`${slot.hora}-${slot.unidade}-${ci}`} className="border-b border-border last:border-b-0">
+                          {grupo.linhas.map((linha, i) => {
+                            const { candidato: c, sugestao, unidade } = linha
+                            const cor = estiloUnidade(unidade)
+                            const adjacente = c.modalidade === "adjacente"
+                            const sessoesNoDia = sessoesNoDiaDoPaciente(c.paciente, linha.dia, cRows)
+                            const disputada = linha.concorrentesNaVaga > 1
+                            return (
+                              <tr
+                                key={`${linha.dia}-${c.turno}-${c.hora}-${c.paciente}-${i}`}
+                                className={`border-b border-border last:border-b-0 ${disputada && c.ordemNaVaga > 1 ? "bg-muted/40 dark:bg-muted/20" : ""}`}
+                              >
                                 <td className="px-3 py-2">
-                                  <div className="text-[9.5px] font-bold uppercase text-sky-700 dark:text-sky-400">{turnoNome[slot.turno]}</div>
-                                  <div className="font-mono text-sm font-extrabold tabular-nums text-foreground">{slot.hora}</div>
+                                  {c.ordemNaVaga === 1 ? (
+                                    <CheckCircle2 size={15} className="text-emerald-600 dark:text-emerald-400" aria-label="Pode oferecer agora" />
+                                  ) : (
+                                    <Clock size={15} className="text-muted-foreground" aria-label="Aguarda recusa do(s) anterior(es)" />
+                                  )}
                                 </td>
                                 <td className="px-3 py-2">
-                                  <span className={`rounded-full px-2 py-0.5 text-[10.5px] font-bold ${cor.bg} ${cor.text}`}>{slot.unidade}</span>
+                                  <div className="text-[10px] font-bold uppercase text-sky-700 dark:text-sky-400">{turnoNome[c.turno]}</div>
+                                  <div className="font-mono text-sm font-bold tabular-nums text-foreground">{c.hora}</div>
                                 </td>
                                 <td className="px-3 py-2">
-                                  <div className="font-bold text-foreground">{c.pac}</div>
-                                  {c.sessoesNoDia.length > 0 && (
-                                    <div className="text-[10.5px] text-muted-foreground">Já neste dia: {c.sessoesNoDia.join(", ")}</div>
+                                  <span className={`rounded-full px-2 py-0.5 text-[10.5px] font-bold ${cor.bg} ${cor.text}`}>{unidade}</span>
+                                </td>
+                                <td className="px-3 py-2 text-foreground">
+                                  {sugestao.salaVinculada ? sugestao.salaVinculada.numeroSala : "Sem sala livre"}
+                                </td>
+                                <td className="px-3 py-2">
+                                  <StatusPill tone={adjacente ? "green" : "blue"} variant="soft" dense>
+                                    {adjacente ? "Adjacência" : "Remanejamento"}
+                                  </StatusPill>
+                                </td>
+                                <td className="px-3 py-2">
+                                  <div className="font-bold text-foreground">{c.paciente}</div>
+                                  {disputada && (
+                                    <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] font-bold text-muted-foreground">
+                                      <StatusPill tone={c.ordemNaVaga === 1 ? "green" : "slate"} dense>
+                                        {c.ordemNaVaga === 1 ? "Ofereça primeiro" : `${c.ordemNaVaga}ª opção`}
+                                      </StatusPill>
+                                      <span>
+                                        {c.ordemNaVaga === 1
+                                          ? `${linha.priorizadoPorFrequencia ? "mesmo valor, mas frequenta mais a clínica" : "mais rentável"} entre ${linha.concorrentesNaVaga} candidatos nesta vaga`
+                                          : "só se o(s) anterior(es) recusar(em)"}
+                                      </span>
+                                    </div>
+                                  )}
+                                  {sessoesNoDia.length > 0 && (
+                                    <div className="text-[10.5px] text-muted-foreground">Já neste dia: {sessoesNoDia.join(", ")}</div>
                                   )}
                                 </td>
                                 <td className="px-3 py-2 text-right tabular-nums text-foreground">{c.aut}</td>
                                 <td className="px-3 py-2 text-right tabular-nums text-foreground">{c.of}</td>
                                 <td className="px-3 py-2 text-right tabular-nums font-extrabold text-rose-600 dark:text-rose-400">−{c.gap}</td>
                                 <td className="px-3 py-2 text-right tabular-nums font-extrabold text-emerald-600 dark:text-emerald-400">+1</td>
+                                <td className="px-3 py-2 text-right tabular-nums text-foreground">
+                                  {c.valorSessaoProjetado !== null ? fmtReal(c.valorSessaoProjetado) : "Sem valor cadastrado"}
+                                </td>
                                 <td className="px-3 py-2 text-right">
-                                  <Button variant="outline" size="xs" onClick={() => setDetalhe({ pac: c.pac, slot, especialidade })}>Ver detalhe</Button>
+                                  {adjacente ? (
+                                    <Button
+                                      variant="outline" size="xs"
+                                      onClick={() => setDetalhe({
+                                        pac: c.paciente,
+                                        slot: { dia: linha.dia, turno: c.turno, unidade, hora: c.hora, candidatos: [] },
+                                        especialidade,
+                                      })}
+                                    >
+                                      Ver detalhe
+                                    </Button>
+                                  ) : (
+                                    <Button variant="outline" size="xs" onClick={() => setDetalheRemanejamento({ sugestao, candidato: c })}>
+                                      Ver antes/depois
+                                    </Button>
+                                  )}
                                 </td>
                               </tr>
-                            ))
+                            )
                           })}
                         </tbody>
                       </table>
@@ -713,6 +979,25 @@ export function SimulacaoNovoPrestadorTab({ cRows, lRows }: Props) {
       )}
 
       {detalhe && <DetalheModal data={detalhe} cRows={cRows} onClose={() => setDetalhe(null)} />}
+      {detalheRemanejamento?.candidato.remanejamento && (
+        <RemanejamentoDetalheModal
+          paciente={detalheRemanejamento.candidato.paciente}
+          terapiaHipotetica={detalheRemanejamento.sugestao.especialidade}
+          remanejamento={detalheRemanejamento.candidato.remanejamento}
+          cRows={cRows}
+          onClose={() => setDetalheRemanejamento(null)}
+        />
+      )}
+      {detalheFinanceiroAberto && (
+        <ProjecaoFinanceiraDetalheModal
+          periodosEnriquecidos={periodosEnriquecidos}
+          mesReferencia={mesReferencia}
+          labelMesReferencia={labelMesReferencia}
+          feriados={feriados}
+          cRows={cRows}
+          onClose={() => setDetalheFinanceiroAberto(false)}
+        />
+      )}
     </div>
   )
 }

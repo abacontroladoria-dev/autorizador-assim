@@ -76,6 +76,16 @@ export function fmtDate(d: Date): string {
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`
 }
 
+/** Número → "R$ 1.234,56" */
+export function fmtReal(v: number): string {
+  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+}
+
+/** "Segunda-feira" → "Segunda" */
+export function diaCurto(dia: string): string {
+  return dia.replace("-feira", "")
+}
+
 const PARTS = new Set(["de", "da", "do", "dos", "das", "e", "van", "von"])
 
 /** Nome completo → abreviado ("João Carlos de Lima" → "João Carlos") */

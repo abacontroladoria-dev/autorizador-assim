@@ -2,6 +2,7 @@ import { getSupabaseClient } from "@/lib/supabase/client"
 import { buscarGrade, fixMojibake } from "@/lib/grade/fonte"
 import { isFakePatient } from "@/lib/remuneracao/pacientes"
 import type { Sala, SalaInput, AgendaSalaRow, AlocacaoSala, AlocacaoInput, SalaStatus } from "@/lib/cronograma/salasTypes"
+import { registrarAuditoriaSala } from "@/services/salasAuditoria.service"
 
 const TABLE = "cronograma_salas"
 const ALOCACOES_TABLE = "cronograma_salas_alocacoes"
@@ -30,11 +31,17 @@ export async function criarSala(input: SalaInput): Promise<Sala> {
     .single()
 
   if (error) throw new Error(error.message)
-  return data as Sala
+  const sala = data as Sala
+  await registrarAuditoriaSala({
+    tabela: "sala", registroId: sala.id, acao: "criar",
+    unidadeNome: sala.unidade_nome, salaNome: sala.nome_exibicao, depois: sala,
+  })
+  return sala
 }
 
 export async function atualizarSala(id: string, input: Partial<SalaInput>): Promise<Sala> {
   const sb = getSupabaseClient()
+  const { data: antes } = await sb.from(TABLE).select("*").eq("id", id).maybeSingle()
   const { data, error } = await sb
     .from(TABLE)
     .update(input)
@@ -43,13 +50,25 @@ export async function atualizarSala(id: string, input: Partial<SalaInput>): Prom
     .single()
 
   if (error) throw new Error(error.message)
-  return data as Sala
+  const sala = data as Sala
+  await registrarAuditoriaSala({
+    tabela: "sala", registroId: sala.id, acao: "editar",
+    unidadeNome: sala.unidade_nome, salaNome: sala.nome_exibicao, antes: antes ?? null, depois: sala,
+  })
+  return sala
 }
 
 export async function arquivarSala(id: string): Promise<void> {
   const sb = getSupabaseClient()
+  const { data: antes } = await sb.from(TABLE).select("*").eq("id", id).maybeSingle()
   const { error } = await sb.from(TABLE).delete().eq("id", id)
   if (error) throw new Error(error.message)
+  await registrarAuditoriaSala({
+    tabela: "sala", registroId: id, acao: "excluir",
+    unidadeNome: (antes as Sala | null)?.unidade_nome ?? null,
+    salaNome: (antes as Sala | null)?.nome_exibicao ?? null,
+    antes: antes ?? null,
+  })
 }
 
 export async function bloquearSala(id: string, bloquear: boolean): Promise<Sala> {
@@ -115,22 +134,32 @@ export async function criarNucleo(nome: string): Promise<NucleoCadastrado> {
   const sb = getSupabaseClient()
   const { data, error } = await sb.from(NUCLEOS_TABLE).insert({ nome: nome.trim() }).select("id, nome").single()
   if (error) throw new Error(error.message)
-  return data as NucleoCadastrado
+  const nucleo = data as NucleoCadastrado
+  await registrarAuditoriaSala({ tabela: "nucleo", registroId: nucleo.id, acao: "criar", nucleoNome: nucleo.nome, depois: nucleo })
+  return nucleo
 }
 
 /** Renomear propaga automaticamente pra todas as salas que usam esse núcleo (FK ON UPDATE CASCADE). */
 export async function renomearNucleo(id: string, nome: string): Promise<NucleoCadastrado> {
   const sb = getSupabaseClient()
+  const { data: antes } = await sb.from(NUCLEOS_TABLE).select("id, nome").eq("id", id).maybeSingle()
   const { data, error } = await sb.from(NUCLEOS_TABLE).update({ nome: nome.trim() }).eq("id", id).select("id, nome").single()
   if (error) throw new Error(error.message)
-  return data as NucleoCadastrado
+  const nucleo = data as NucleoCadastrado
+  await registrarAuditoriaSala({ tabela: "nucleo", registroId: nucleo.id, acao: "editar", nucleoNome: nucleo.nome, antes: antes ?? null, depois: nucleo })
+  return nucleo
 }
 
 /** Falha (FK ON DELETE RESTRICT) se alguma sala ainda usa esse núcleo. */
 export async function excluirNucleo(id: string): Promise<void> {
   const sb = getSupabaseClient()
+  const { data: antes } = await sb.from(NUCLEOS_TABLE).select("id, nome").eq("id", id).maybeSingle()
   const { error } = await sb.from(NUCLEOS_TABLE).delete().eq("id", id)
   if (error) throw new Error(error.message)
+  await registrarAuditoriaSala({
+    tabela: "nucleo", registroId: id, acao: "excluir",
+    nucleoNome: (antes as NucleoCadastrado | null)?.nome ?? null, antes: antes ?? null,
+  })
 }
 
 /** Paleta fixa de cores do módulo Cronograma (ver components/cronograma/ui/tones.ts) — status usa só essas 6, nunca cor livre. */
@@ -162,6 +191,7 @@ export async function listarStatusLabels(): Promise<StatusLabel[]> {
 
 export async function atualizarStatusLabel(codigo: SalaStatus, input: { label: string; label_curto: string; tone: StatusTone }): Promise<StatusLabel> {
   const sb = getSupabaseClient()
+  const { data: antes } = await sb.from(STATUS_LABELS_TABLE).select("codigo, label, label_curto, tone").eq("codigo", codigo).maybeSingle()
   const { data, error } = await sb
     .from(STATUS_LABELS_TABLE)
     .update({ label: input.label.trim(), label_curto: input.label_curto.trim(), tone: input.tone })
@@ -169,7 +199,9 @@ export async function atualizarStatusLabel(codigo: SalaStatus, input: { label: s
     .select("codigo, label, label_curto, tone")
     .single()
   if (error) throw new Error(error.message)
-  return data as StatusLabel
+  const statusLabel = data as StatusLabel
+  await registrarAuditoriaSala({ tabela: "status_label", registroId: codigo, acao: "editar", antes: antes ?? null, depois: statusLabel })
+  return statusLabel
 }
 
 // ─── ALOCAÇÕES (planejamento de sala — não escreve na TiTa) ──────────────────
@@ -181,25 +213,54 @@ export async function listarAlocacoes(): Promise<AlocacaoSala[]> {
   return (data ?? []) as AlocacaoSala[]
 }
 
+/** Nome de exibição da sala, pra denormalizar na trilha de auditoria sem exigir join na leitura do histórico. */
+async function nomeDaSala(salaId: string): Promise<string | null> {
+  const sb = getSupabaseClient()
+  const { data } = await sb.from(TABLE).select("nome_exibicao").eq("id", salaId).maybeSingle()
+  return (data as { nome_exibicao: string } | null)?.nome_exibicao ?? null
+}
+
 export async function criarAlocacao(input: AlocacaoInput): Promise<AlocacaoSala> {
   const sb = getSupabaseClient()
   const { data, error } = await sb.from(ALOCACOES_TABLE).insert(input).select("*").single()
   if (error) throw new Error(error.message)
-  return data as AlocacaoSala
+  const alocacao = data as AlocacaoSala
+  await registrarAuditoriaSala({
+    tabela: "alocacao", registroId: alocacao.id, acao: "criar",
+    salaNome: await nomeDaSala(alocacao.sala_id), profissionalNome: alocacao.profissional_nome,
+    terapiaNome: alocacao.terapia_nome, diaSemana: alocacao.dow, turno: alocacao.turno, depois: alocacao,
+  })
+  return alocacao
 }
 
 /** Atualiza uma alocação existente (usado tanto para "mover" — muda sala/dia/turno — quanto para editar profissional/terapia). */
 export async function atualizarAlocacao(id: string, input: Partial<AlocacaoInput>): Promise<AlocacaoSala> {
   const sb = getSupabaseClient()
+  const { data: antes } = await sb.from(ALOCACOES_TABLE).select("*").eq("id", id).maybeSingle()
   const { data, error } = await sb.from(ALOCACOES_TABLE).update(input).eq("id", id).select("*").single()
   if (error) throw new Error(error.message)
-  return data as AlocacaoSala
+  const alocacao = data as AlocacaoSala
+  await registrarAuditoriaSala({
+    tabela: "alocacao", registroId: alocacao.id, acao: "editar",
+    salaNome: await nomeDaSala(alocacao.sala_id), profissionalNome: alocacao.profissional_nome,
+    terapiaNome: alocacao.terapia_nome, diaSemana: alocacao.dow, turno: alocacao.turno,
+    antes: antes ?? null, depois: alocacao,
+  })
+  return alocacao
 }
 
 export async function excluirAlocacao(id: string): Promise<void> {
   const sb = getSupabaseClient()
+  const { data: antes } = await sb.from(ALOCACOES_TABLE).select("*").eq("id", id).maybeSingle()
   const { error } = await sb.from(ALOCACOES_TABLE).delete().eq("id", id)
   if (error) throw new Error(error.message)
+  const alocacaoAntes = antes as AlocacaoSala | null
+  await registrarAuditoriaSala({
+    tabela: "alocacao", registroId: id, acao: "excluir",
+    salaNome: alocacaoAntes ? await nomeDaSala(alocacaoAntes.sala_id) : null,
+    profissionalNome: alocacaoAntes?.profissional_nome ?? null, terapiaNome: alocacaoAntes?.terapia_nome ?? null,
+    diaSemana: alocacaoAntes?.dow ?? null, turno: alocacaoAntes?.turno ?? null, antes: antes ?? null,
+  })
 }
 
 export interface ProfissionalOpcao {
