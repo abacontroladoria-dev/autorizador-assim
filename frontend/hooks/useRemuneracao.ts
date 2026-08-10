@@ -12,9 +12,12 @@ import {
   type AnaliseFuturaResult, type ProfRemunReal, type PERow, type ContratoAntigoInfo, type CadastroContratual, type ContratoAtualItem,
   type DesligadosMap,
 } from "@/lib/remuneracao/calculo"
-import { normalizarGradeParaSessao, classificarSessaoReal, type SessaoReal, type CsvGradeRow } from "@/lib/remuneracao/relatorio"
+import {
+  normalizarGradeParaSessao, classificarSessaoReal, janelaDeDatasDaGrade,
+  type SessaoReal, type CsvGradeRow,
+} from "@/lib/remuneracao/relatorio"
 import { buscarPresencaFilaAutorizacoes, presencaDaSessao, type PresencaIndice } from "@/lib/remuneracao/presencaReal"
-import { dataParaISO, mesAnoDeLinhas } from "@/lib/remuneracao/datas"
+import { mesAnoDeLinhas } from "@/lib/remuneracao/datas"
 import { isProfDesligado, limparPrefixoDesligado } from "@/lib/remuneracao/constants"
 import { getContratos, getUltimoAtendimentoAtivo } from "@/services/remuneracao.service"
 import { useParametrosGerais } from "./useParametrosGerais"
@@ -201,6 +204,31 @@ function mesFechadoAnterior(): PeriodoRP {
   return periodoDoMes(ref.getFullYear(), ref.getMonth() + 1)
 }
 
+const indicePresencaVazio = (): PresencaIndice => ({ porId: new Map(), porChave: new Map() })
+
+/**
+ * Sem presença o cálculo não é "menos preciso", é errado para o lado de pagar:
+ * toda falta vira sessão presente. Então a carga inteira é recusada, em vez de
+ * exibir um total que parece bom.
+ */
+function falhaDePresenca(e: unknown) {
+  return {
+    resumo: "Falha ao ler a presença",
+    erro: `Não consegui ler as faltas em fila_autorizacoes: ${e instanceof Error ? e.message : String(e)}. `
+      + "Sem isso toda falta contaria como sessão presente, e o cálculo pagaria a mais.",
+    dica: "Nenhum dado foi alterado. Tente carregar de novo; se repetir, avise o time técnico.",
+  }
+}
+
+function falhaDeGrade(e: unknown) {
+  return {
+    resumo: "Falha ao ler a grade",
+    erro: e instanceof Error ? e.message : "Não consegui ler a grade do banco.",
+    dica: "Nenhum dado foi alterado. Tente carregar de novo; se repetir, avise o time técnico "
+      + "com a mensagem acima e use o CSV exportado da TiTa enquanto isso.",
+  }
+}
+
 export function useRemunRP() {
   const { parametros, loading: parametrosLoading, error: parametrosError } = useParametrosGerais()
   const { taxas_pa, diarias, loading: taxasLoading } = useTaxasEspecialidade()
@@ -210,7 +238,9 @@ export function useRemunRP() {
   // do carregamento congelava um `feriados` ainda vazio e nenhum cancelamento
   // virava "Feriado/Ponto Fac.". Mesmo padrão de hooks/useTratativas.ts.
   const [gradeRaw, setGradeRaw] = useState<CsvGradeRow[]>([])
-  const [presencaIndice, setPresencaIndice] = useState<PresencaIndice>({ porId: new Map(), porChave: new Map() })
+  // Preenchido pelas duas cargas, no MESMO commit em que as linhas entram — ver
+  // carregarGrade / carregarGradeDoBanco.
+  const [presencaIndice, setPresencaIndice] = useState<PresencaIndice>(indicePresencaVazio)
   const [csvName, setCsvName] = useState<string | null>(null)
   const [fonteGrade, setFonteGrade] = useState<FonteGradeRP | null>(null)
   const [periodo, setPeriodo] = useState<PeriodoRP>(mesFechadoAnterior)
@@ -278,20 +308,49 @@ export function useRemunRP() {
     setGradeAviso(null)
   }, [])
 
+  // Serializa as cargas: dois cliques seguidos em períodos diferentes poderiam
+  // terminar fora de ordem e deixar na tela a grade do período errado. Vale para
+  // as duas fontes — um upload durante uma leitura do banco vence, e a leitura
+  // que chegar depois não pode sobrescrevê-lo.
+  const cargaAtual = useRef(0)
+
   /** Upload manual: sobrepõe o que veio do banco. */
-  const carregarGrade = useCallback((rows: CsvGradeRow[], nomeArquivo?: string) => {
-    setGradeRaw(rows)
-    setFonteGrade("upload")
-    setCoberturaGrade(null)
-    setPeriodoCarregado(null)
+  const carregarGrade = useCallback(async (rows: CsvGradeRow[], nomeArquivo?: string) => {
+    const marca = ++cargaAtual.current
+    setGradeLoading(true)
     limparReprovacao()
     setGradeAviso(null)
-    if (nomeArquivo !== undefined) setCsvName(nomeArquivo)
-  }, [limparReprovacao])
+    try {
+      // Mesma regra da leitura do banco: a presença entra no estado junto com as
+      // linhas, nunca depois. A janela sai do próprio arquivo — ele pode cobrir
+      // qualquer intervalo, inclusive um diferente do período escolhido no header.
+      const janela = janelaDeDatasDaGrade(rows)
+      const indice = janela
+        ? await buscarPresencaFilaAutorizacoes(janela.min, janela.max)
+        : indicePresencaVazio()
+      if (marca !== cargaAtual.current) return
+
+      setPresencaIndice(indice)
+      setGradeRaw(rows)
+      setFonteGrade("upload")
+      setCoberturaGrade(null)
+      setPeriodoCarregado(null)
+      if (nomeArquivo !== undefined) setCsvName(nomeArquivo)
+    } catch (e) {
+      if (marca !== cargaAtual.current) return
+      reprovar(falhaDePresenca(e))
+    } finally {
+      if (marca === cargaAtual.current) setGradeLoading(false)
+    }
+  }, [limparReprovacao, reprovar])
 
   const limparGrade = useCallback(() => {
+    // Invalida qualquer carga em voo: sem isto, a que estivesse a caminho
+    // repovoaria a tela que a pessoa acabou de limpar.
+    cargaAtual.current++
+    setGradeLoading(false)
     setGradeRaw([])
-    setPresencaIndice({ porId: new Map(), porChave: new Map() })
+    setPresencaIndice(indicePresencaVazio())
     setCsvName(null)
     setFonteGrade(null)
     setCoberturaGrade(null)
@@ -299,10 +358,6 @@ export function useRemunRP() {
     limparReprovacao()
     setGradeAviso(null)
   }, [limparReprovacao])
-
-  // Serializa as cargas: dois cliques seguidos em períodos diferentes poderiam
-  // terminar fora de ordem e deixar na tela a grade do período errado.
-  const cargaAtual = useRef(0)
 
   const carregarGradeDoBanco = useCallback(async (alvo?: PeriodoRP) => {
     const p = alvo ?? periodo
@@ -319,20 +374,45 @@ export function useRemunRP() {
     limparReprovacao()
     setGradeAviso(null)
     try {
-      const { linhas, ...cobertura } = await buscarGradeParaRP(p.de, p.ate)
+      // As duas consultas saem JUNTAS, e não uma depois da outra.
+      //
+      // A janela da presença é o próprio período pedido, então nunca foi preciso
+      // esperar a grade chegar para saber o que consultar. Encadeadas, a tela
+      // ficava alguns segundos (8.413 linhas em 9 páginas, julho/2026) exibindo
+      // um total calculado com o fallback "presente" de toda sessão — sempre
+      // MAIOR que o correto, e sem nada indicando que era parcial. Quem lia o
+      // número nesse intervalo lia um valor que paga a mais.
+      const [gradeRes, presencaRes] = await Promise.allSettled([
+        buscarGradeParaRP(p.de, p.ate),
+        buscarPresencaFilaAutorizacoes(p.de, p.ate),
+      ])
       if (marca !== cargaAtual.current) return
 
+      // A presença primeiro: a mensagem dela diz o que está em jogo (pagar a
+      // mais), e a da grade seria só ruído por cima disso.
+      if (presencaRes.status === "rejected") {
+        reprovar(falhaDePresenca(presencaRes.reason))
+        return
+      }
+      if (gradeRes.status === "rejected") {
+        reprovar(falhaDeGrade(gradeRes.reason))
+        return
+      }
+
+      const { linhas, ...cobertura } = gradeRes.value
       const veredicto = avaliarCoberturaGrade(cobertura, p)
       if (!veredicto.ok) {
         // Nada do período reprovado entra no estado — nem as linhas, nem os
         // contadores. Se já havia uma grade boa carregada, ela continua como
         // está, e o badge segue descrevendo ELA. Os números do período
-        // reprovado vão para o modal.
+        // reprovado vão para o modal. A presença já lida é descartada junto:
+        // é dela que a grade recusada precisaria.
         reprovar(veredicto)
         return
       }
       // Só os contadores: guardar `linhas` aqui manteria as ~19 mil vivas em
       // duas referências sem ninguém usar a segunda.
+      setPresencaIndice(presencaRes.value)
       setGradeRaw(linhas)
       setCoberturaGrade(cobertura)
       setFonteGrade("banco")
@@ -341,12 +421,7 @@ export function useRemunRP() {
       setGradeAviso(veredicto.aviso)
     } catch (err) {
       if (marca !== cargaAtual.current) return
-      reprovar({
-        resumo: "Falha ao ler a grade",
-        erro: err instanceof Error ? err.message : "Não consegui ler a grade do banco.",
-        dica: "Nenhum dado foi alterado. Tente carregar de novo; se repetir, avise o time técnico "
-          + "com a mensagem acima e use o CSV exportado da TiTa enquanto isso.",
-      })
+      reprovar(falhaDeGrade(err))
     } finally {
       if (marca === cargaAtual.current) setGradeLoading(false)
     }
@@ -369,49 +444,6 @@ export function useRemunRP() {
     () => normalizarGradeParaSessao(gradeRaw, feriados),
     [gradeRaw, feriados],
   )
-
-  // A janela sai memoizada à parte porque `evoRowsBase` é um array novo sempre
-  // que os feriados chegam. Depender dele direto refaria a consulta à fila para
-  // o mesmo intervalo; depender das duas datas também evita refazê-la quando o
-  // operador recarrega o mesmo mês.
-  const janelaPresenca = useMemo(() => {
-    const datasIso = evoRowsBase.map(r => dataParaISO(r.data)).filter(Boolean)
-    if (datasIso.length === 0) return null
-    return {
-      min: datasIso.reduce((a, b) => (b < a ? b : a)),
-      max: datasIso.reduce((a, b) => (b > a ? b : a)),
-    }
-  }, [evoRowsBase])
-
-  // Cruza a grade carregada com fila_autorizacoes (mesma tabela usada por
-  // cronograma/reposicao) para saber a presença real registrada pela recepção —
-  // sem isso, presencaOrbita ("Presença Recep.") sai sempre "Sim" (ver
-  // normalizarGradeParaSessao).
-  const janelaMin = janelaPresenca?.min
-  const janelaMax = janelaPresenca?.max
-  useEffect(() => {
-    if (!janelaMin || !janelaMax) {
-      setPresencaIndice({ porId: new Map(), porChave: new Map() })
-      return
-    }
-    let cancelled = false
-    buscarPresencaFilaAutorizacoes(janelaMin, janelaMax)
-      .then(indice => { if (!cancelled) setPresencaIndice(indice) })
-      // Sem presença o cálculo não é "menos preciso", é errado para o lado de
-      // pagar: toda falta vira sessão presente. Então reprova a carga em vez de
-      // exibir um total que parece bom.
-      .catch(err => {
-        if (cancelled) return
-        setPresencaIndice({ porId: new Map(), porChave: new Map() })
-        reprovar({
-          resumo: "Falha ao ler a presença",
-          erro: `Não consegui ler as faltas em fila_autorizacoes: ${err instanceof Error ? err.message : String(err)}. `
-            + "Sem isso toda falta contaria como sessão presente, e o cálculo pagaria a mais.",
-          dica: "Nenhum dado foi alterado. Tente carregar de novo; se repetir, avise o time técnico.",
-        })
-      })
-    return () => { cancelled = true }
-  }, [janelaMin, janelaMax, reprovar])
 
   // evoRows final: sobrepõe presencaOrbita conforme fila_autorizacoes — casando
   // primeiro pelo id do agendamento (mais confiável) e só then por

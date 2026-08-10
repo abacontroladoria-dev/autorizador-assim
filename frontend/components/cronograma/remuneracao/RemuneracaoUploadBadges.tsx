@@ -122,7 +122,10 @@ export function RemuneracaoUploadBadges({ c }: { c: ControlesGradeRP }) {
     setUploadErro(null)
     try {
       const rows = await parseGradeCsv(file)
-      carregarGrade(rows, file.name)
+      // Aguardado: carregarGrade lê a presença do período do arquivo antes de
+      // publicar as linhas, e é esse trecho que o "Lendo..." deste botão precisa
+      // cobrir. Sem o await, o botão voltava ao normal com a leitura em voo.
+      await carregarGrade(rows, file.name)
     } catch (err) {
       setUploadErro(err instanceof Error ? err.message : "Falha ao ler o arquivo.")
     } finally {
