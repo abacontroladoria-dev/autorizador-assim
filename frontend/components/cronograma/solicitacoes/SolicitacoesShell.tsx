@@ -70,7 +70,7 @@ function TabContent({
   const label = TABS.find(t => t.key === tab)?.label ?? tab
 
   if (tab === "simulacao") {
-    return <SimulacaoNovoPrestadorTab cRows={cRows} lRows={lRows} />
+    return <SimulacaoNovoPrestadorTab lRows={lRows} />
   }
 
   return (

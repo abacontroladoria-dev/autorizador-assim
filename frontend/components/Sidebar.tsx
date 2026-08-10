@@ -42,6 +42,7 @@ import {
   FileSignature,
   Percent,
   History,
+  UserSearch,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -87,6 +88,7 @@ const pathIconMap: Record<string, any> = {
   "/cadastros/taxas-e-parametros": Percent,
   "/cronograma/saida-profissional": LogOut,
   "/cronograma/ocupacao-paciente": TrendingUp,
+  "/cronograma/disponibilidade-interna": UserSearch,
   "/cronograma/ocupacao?tab=fila": Clock,
   "/cronograma/ocupacao?tab=recusados": XCircle,
   "/cronograma/ocupacao?tab=inviavel": AlertTriangle,
@@ -509,6 +511,7 @@ export default function Sidebar() {
 
           {/* Cronograma */}
           {(canAccess("/cronograma/saida-profissional") || canAccess("/cronograma/ocupacao-paciente") ||
+            canAccess("/cronograma/disponibilidade-interna") ||
             canAccess("/cronograma/ocupacao?tab=acompanhamento") || canAccess("/cronograma/ocupacao?tab=gaps") ||
             canAccess("/cronograma/ocupacao?tab=inconsistencias") ||
             canAccess("/cronograma/reposicao") || canAccess("/cronograma/ocupacao-salas")) && (
@@ -516,6 +519,7 @@ export default function Sidebar() {
               {canAccess("/cronograma/ocupacao-salas") && <MenuItem label="Ocupação de Salas" icon={DoorOpen} path="/cronograma/ocupacao-salas" />}
               {canAccess("/cronograma/saida-profissional") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/saida-profissional" />}
               {canAccess("/cronograma/ocupacao-paciente") && <MenuItem label="Ocupação Paciente" icon={UserCheck} path="/cronograma/ocupacao-paciente" />}
+              {canAccess("/cronograma/disponibilidade-interna") && <MenuItem label="Disponibilidade Interna" icon={UserSearch} path="/cronograma/disponibilidade-interna" />}
               {/* "Novo Cronograma" removido do menu — feature ainda não está pronta (ver SolicitacoesShell) */}
               {canAccess("/cronograma/solicitacoes") && <MenuItem label="Simulação de Novo Prestador" icon={UserPlus} path="/cronograma/solicitacoes?tab=simulacao" />}
               {canAccess("/cronograma/reposicao") && <MenuItem label="Reposição de Faltas" icon={RotateCcw} path="/cronograma/reposicao" />}

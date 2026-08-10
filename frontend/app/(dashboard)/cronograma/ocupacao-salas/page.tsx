@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { DoorOpen, Eye, Loader2, Plus, Settings2 } from "lucide-react"
+import { DoorOpen, Eye, History, Loader2, Plus, Settings2 } from "lucide-react"
 import { useHeader } from "@/contexts/HeaderContext"
 import { SegmentedTabs } from "@/components/cronograma/ui/SegmentedTabs"
 import { StatCard } from "@/components/cronograma/ui/StatCard"
@@ -13,6 +13,7 @@ import { SalasHeatmapView } from "@/components/cronograma/salas/SalasHeatmapView
 import { RegularizacoesView } from "@/components/cronograma/salas/RegularizacoesView"
 import { SalaEditModal } from "@/components/cronograma/salas/SalaEditModal"
 import { GerenciarCategoriasModal } from "@/components/cronograma/salas/GerenciarCategoriasModal"
+import { HistoricoAuditoriaModal } from "@/components/cronograma/salas/HistoricoAuditoriaModal"
 import { STATUS_SLOT_EXCLUIDO, type Sala, type SlotOcupacaoSala } from "@/lib/cronograma/salasTypes"
 
 type ViewTab = "grade" | "mapa" | "regularizacoes"
@@ -31,6 +32,7 @@ export default function OcupacaoSalasPage() {
   const [editando, setEditando] = useState<Sala | null | "novo">(null)
   const [isolada, setIsolada] = useState<{ id: string; nome: string } | null>(null)
   const [gerenciandoCategorias, setGerenciandoCategorias] = useState(false)
+  const [verHistorico, setVerHistorico] = useState(false)
 
   const unidades = useMemo(() => [...new Set(salasComOcupacao.map(s => s.sala.unidade_nome))].sort(), [salasComOcupacao])
   const nucleos = useMemo(() => [...new Set(salasComOcupacao.map(s => s.sala.nucleo).filter((n): n is string => !!n))].sort(), [salasComOcupacao])
@@ -121,6 +123,13 @@ export default function OcupacaoSalasPage() {
           )}
           <button
             type="button"
+            onClick={() => setVerHistorico(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-semibold text-foreground hover:bg-muted/50"
+          >
+            <History size={14} /> Histórico
+          </button>
+          <button
+            type="button"
             onClick={() => setGerenciandoCategorias(true)}
             className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-semibold text-foreground hover:bg-muted/50"
           >
@@ -187,6 +196,8 @@ export default function OcupacaoSalasPage() {
           onChanged={recarregarSalas}
         />
       )}
+
+      {verHistorico && <HistoricoAuditoriaModal onClose={() => setVerHistorico(false)} />}
     </div>
   )
 }

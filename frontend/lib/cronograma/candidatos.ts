@@ -18,7 +18,7 @@ import type { CsvRow } from "@/types/cronograma"
 // "Supervisão ABA" continua ignorada de propósito: é maleável (pode ser
 // deslocada para qualquer ponta do dia do paciente), então não deve ancorar
 // nem travar o sequenciamento.
-const IGNORAR_NO_SEQUENCIAMENTO = new Set(
+export const IGNORAR_NO_SEQUENCIAMENTO = new Set(
   [...EXCLUIR_OCUP].filter(t => t !== "Coordenador de Caso"),
 )
 

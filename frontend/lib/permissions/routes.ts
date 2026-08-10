@@ -12,6 +12,7 @@ export const roleDefaults: Record<string, string[]> = {
     'guias_digitais', 'auditoria_assim', 'usuarios', 'permissoes', 'cco',
     'autorizacoes', 'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
+    'cronograma_disponibilidade_interna',
     'ocupacao_clinica', 'ocupacao_clinica_gaps', 'ocupacao_clinica_inconsistencias',
     'ocupacao_profissionais', 'indicadores_ocupacao_unidades',
     'indicadores_pacientes', 'indicadores_previsao_receitas', 'indicadores_historico_receitas',
@@ -28,6 +29,7 @@ export const roleDefaults: Record<string, string[]> = {
     'escala_terapeutica', 'auditoria_assim',
     'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
+    'cronograma_disponibilidade_interna',
     'ocupacao_clinica', 'ocupacao_clinica_gaps', 'ocupacao_clinica_inconsistencias',
     'ocupacao_profissionais', 'indicadores_ocupacao_unidades',
     'indicadores_pacientes', 'indicadores_previsao_receitas', 'indicadores_historico_receitas',
@@ -63,6 +65,7 @@ export const roleDefaults: Record<string, string[]> = {
   cronograma: [
     'dashboard', 'cronograma_solicitacoes',
     'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
+    'cronograma_disponibilidade_interna',
     'ocupacao_clinica', 'ocupacao_clinica_gaps', 'ocupacao_clinica_inconsistencias',
   ],
 }
@@ -91,6 +94,7 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   cronograma_solicitacoes: ['/cronograma/solicitacoes'],
   cronograma_saida_profissional: ['/cronograma/saida-profissional'],
   cronograma_ocupacao_paciente: ['/cronograma/ocupacao-paciente'],
+  cronograma_disponibilidade_interna: ['/cronograma/disponibilidade-interna'],
   // Mesmo padrão de Indicadores: /cronograma/ocupacao tem 3 abas
   // (Aceites e Recusas, Diferença: Laudo e Oferta, Inconsistências e
   // Exceções), cada uma com seu próprio código de permissão.

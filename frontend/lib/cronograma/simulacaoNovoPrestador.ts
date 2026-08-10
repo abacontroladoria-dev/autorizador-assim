@@ -42,6 +42,11 @@ const EXCLUIR_ATENDIMENTO = new Set(
   [...EXCLUIR_GAPS].filter(t => t !== "Coordenador de Caso"),
 )
 
+/** Especialidades simuláveis — todas as que têm mapeamento terapia → especialidade. */
+export function listarEspecialidades(): string[] {
+  return [...new Set(Object.values(TERAPIA_TO_ESP))].filter(Boolean).sort()
+}
+
 export interface GapItem { pac: string; esp: string; aut: number; of: number; gap: number }
 
 export interface CandidatoSlot {
@@ -76,8 +81,32 @@ export interface UnidadeRanqueada {
   periodos: PeriodoSimulado[]
 }
 
-function hiStr(r: CsvRow): string { return String(r.HI_str || "") }
+export function hiStr(r: CsvRow): string { return String(r.HI_str || "") }
 function rowUnidade(r: CsvRow): string { return String(r.Unidade || "Desconhecida") }
+
+function agendaClinica(cRows: CsvRow[]): CsvRow[] {
+  return cRows.filter(r =>
+    r["Status do Agendamento"] === "Agendado" &&
+    !EXCLUIR_ATENDIMENTO.has(r.Terapia) &&
+    r["Nome Favorecido"] && !PACS_ADMIN.has(r["Nome Favorecido"]),
+  )
+}
+
+/** Pacientes com sessão clínica na unidade nesse dia, a partir de linhas JÁ
+ *  filtradas por agendaClinica — evita refiltrar cRows inteiro quando o
+ *  chamador (ex.: avaliarPeriodo) já tem esse recorte calculado. */
+function pacientesQueFrequentamUnidade(dia: string, unidade: string, agendClinico: CsvRow[]): Set<string> {
+  return new Set(
+    agendClinico.filter(r => r["Dia da Semana"] === dia && rowUnidade(r) === unidade).map(r => r["Nome Favorecido"]),
+  )
+}
+
+/** Pacientes que já têm sessão clínica na unidade nesse dia — mesma regra que
+ *  avaliarPeriodo usa pra decidir quem "frequenta" a unidade (reaproveitada
+ *  também pelo motor de remanejamento, remanejamento.ts). */
+export function pacientesDaUnidadeNoDia(dia: string, unidade: string, cRows: CsvRow[]): Set<string> {
+  return pacientesQueFrequentamUnidade(dia, unidade, agendaClinica(cRows))
+}
 
 /** Calcula, por paciente+especialidade, quantas sessões faltam (autorizado − ofertado). */
 export function calcularGaps(lRows: LaudoRow[], cRows: CsvRow[]): GapItem[] {
@@ -147,14 +176,8 @@ export function avaliarPeriodo(
   const pacientesValidos = new Set<string>()
   let totalSessoes = 0
 
-  const agendClinico = cRows.filter(r =>
-    r["Status do Agendamento"] === "Agendado" &&
-    !EXCLUIR_ATENDIMENTO.has(r.Terapia) &&
-    r["Nome Favorecido"] && !PACS_ADMIN.has(r["Nome Favorecido"]),
-  )
-  const pacientesDaUnidadeNoDia = new Set(
-    agendClinico.filter(r => r["Dia da Semana"] === dia && rowUnidade(r) === unidade).map(r => r["Nome Favorecido"]),
-  )
+  const agendClinico = agendaClinica(cRows)
+  const pacientesDaUnidade = pacientesQueFrequentamUnidade(dia, unidade, agendClinico)
 
   for (const hora of HORAS_GRID.filter(h => turnoFromHora(h) === turno)) {
     const pacientesJaConfirmados = new Set(
@@ -164,7 +187,7 @@ export function avaliarPeriodo(
         .filter(p => p && p !== "Ainda não selecionado"),
     )
 
-    const candidatos: CandidatoSlot[] = [...pacientesDaUnidadeNoDia]
+    const candidatos: CandidatoSlot[] = [...pacientesDaUnidade]
       .filter(pac => {
         const g = gapMap[`${pac}|||${especialidade}`]
         if (!g || pacientesJaConfirmados.has(pac)) return false
@@ -190,6 +213,56 @@ export function avaliarPeriodo(
   return { dia, turno, unidade, nPacientes: pacientesValidos.size, totalSessoes, slots }
 }
 
+/** Um paciente só pode aceitar, no total, `gap` sessões novas — mas
+ *  avaliarPeriodo é chamado independentemente por dia/turno/unidade e não sabe
+ *  disso: se o mesmo paciente for elegível em vários horários dentro do MESMO
+ *  plano (mesmo dia com várias horas livres, ou dias diferentes), ele aparece
+ *  como candidato em todos eles, inflando ocupação e receita como se fosse
+ *  aceitar todas as vagas ao mesmo tempo (ex.: gap=1 mas aparece em 3 horas).
+ *
+ *  Este teto corrige isso: por paciente, mantém no máximo `gap` aparições em
+ *  todo o conjunto de `periodos` informado — priorizando ficar nas vagas onde
+ *  ele é mais "insubstituível" (menos candidatos alternativos naquele
+ *  horário) e liberando as demais pra outro candidato (ou deixando vazia, se
+ *  não houver ninguém mais elegível ali). Precisa ser chamado sobre o
+ *  conjunto COMPLETO de períodos de um mesmo plano (todos os dias/turnos
+ *  avaliados juntos), nunca período a período isolado — senão o teto não vê
+ *  as outras aparições do mesmo paciente. */
+export function limitarCandidatosPorGap(
+  periodos: PeriodoSimulado[], gapMap: Record<string, GapItem>, especialidade: string,
+): PeriodoSimulado[] {
+  interface Ocorrencia { periodoIdx: number; slotIdx: number; alternativas: number }
+  const ocorrenciasPorPaciente = new Map<string, Ocorrencia[]>()
+
+  periodos.forEach((p, periodoIdx) => {
+    p.slots.forEach((s, slotIdx) => {
+      for (const c of s.candidatos) {
+        const lista = ocorrenciasPorPaciente.get(c.pac) ?? []
+        lista.push({ periodoIdx, slotIdx, alternativas: s.candidatos.length - 1 })
+        ocorrenciasPorPaciente.set(c.pac, lista)
+      }
+    })
+  })
+
+  const remover = new Set<string>()
+  for (const [pac, ocorrencias] of ocorrenciasPorPaciente) {
+    const gap = gapMap[`${pac}|||${especialidade}`]?.gap ?? 0
+    if (ocorrencias.length <= gap) continue
+    const excedentes = [...ocorrencias].sort((a, b) => a.alternativas - b.alternativas).slice(gap)
+    for (const e of excedentes) remover.add(`${e.periodoIdx}|||${e.slotIdx}|||${pac}`)
+  }
+  if (!remover.size) return periodos
+
+  return periodos.map((p, periodoIdx) => {
+    const slots = p.slots
+      .map((s, slotIdx) => ({ ...s, candidatos: s.candidatos.filter(c => !remover.has(`${periodoIdx}|||${slotIdx}|||${c.pac}`)) }))
+      .filter(s => s.candidatos.length > 0)
+    const pacientes = new Set(slots.flatMap(s => s.candidatos.map(c => c.pac)))
+    const totalSessoes = slots.reduce((soma, s) => soma + s.candidatos.length, 0)
+    return { ...p, slots, nPacientes: pacientes.size, totalSessoes }
+  })
+}
+
 export interface PeriodoAlvo { dia: string; turno: Turno }
 
 /** Ranqueia cada unidade candidata pela ocupação total que geraria, somando
@@ -201,7 +274,8 @@ export function ranquearUnidades(
   gapMap: Record<string, GapItem>,
 ): UnidadeRanqueada[] {
   return UNIDADES_SIMULACAO.map(unidade => {
-    const periodos = periodosAlvo.map(p => avaliarPeriodo(p.dia, p.turno, unidade, especialidade, cRows, gapMap))
+    const periodosBrutos = periodosAlvo.map(p => avaliarPeriodo(p.dia, p.turno, unidade, especialidade, cRows, gapMap))
+    const periodos = limitarCandidatosPorGap(periodosBrutos, gapMap, especialidade)
     const pacientes = new Set<string>()
     let totalSessoes = 0
     for (const periodo of periodos) {
@@ -247,7 +321,10 @@ export function montarPlanoRecomendado(
     idxsNoDia.forEach((i, j) => { escolhas[i] = melhorUnidadeFixa.periodos[j] })
   }
 
-  return escolhas
+  // Teto final sobre o PLANO INTEIRO (todos os dias/turnos escolhidos juntos)
+  // — sem isso, um paciente com gap=1 que for elegível em dois dias diferentes
+  // apareceria como candidato nos dois, como se pudesse aceitar ambos.
+  return limitarCandidatosPorGap(escolhas, gapMap, especialidade)
 }
 
 // ─── Hipótese: como ficaria a agenda do novo profissional ──────────────────

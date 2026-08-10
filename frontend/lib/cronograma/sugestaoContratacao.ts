@@ -1,0 +1,355 @@
+// ─── Motor de sugestão automática de contratação (Tarefa 1) ────────────────────
+// Cascata de ocupação prevista: tenta 70%, depois 60%, depois 50% — só desce de
+// faixa se a faixa anterior não render nenhuma sugestão. Sempre prioriza cobrir
+// o dia inteiro (manhã+tarde), caindo para turno avulso só quando isso rende
+// mais ocupação do que o dia inteiro. Reaproveita 100% do motor de
+// simulacaoNovoPrestador.ts — nenhuma regra de encaixe é duplicada aqui.
+
+import {
+  avaliarPeriodo, calcularGaps, construirAgendaNovoProfissional, gapsParaMapa, limitarCandidatosPorGap, listarEspecialidades, UNIDADES_SIMULACAO,
+  type GapItem, type Turno,
+} from "./simulacaoNovoPrestador"
+import { DIAS_UTIL, ESP_CLINICO, EXCLUIR_OCUP, NOME_PARA_TERAPIA_ID, normTxt } from "./constants"
+import { listarSlotsLivres, temCoberturaInterna } from "./disponibilidadeInterna"
+import { dowDeDiaSemana } from "./salas"
+import { normalizarUnidadeOcupacao } from "./ocupacaoProf"
+import { resolverValorSessao } from "./faturamentoProjecao"
+import { getCalendario, type CalendarioResult } from "../remuneracao/datas"
+import { encontrarCandidatosRemanejamento } from "./remanejamento"
+import type { CsvRow, LaudoRow } from "@/types/cronograma"
+import type { ConvenioValor, ConvenioValorPaciente } from "./convenioValoresTypes"
+import type { FeriadoInfo } from "@/types/feriados"
+import type { CandidatoNaSugestao, ProjecaoRemuneracaoSugestao, SalaVinculada, SugestaoContratacao } from "./sugestaoContratacaoTypes"
+import type { SalaComOcupacao } from "./salasTypes"
+
+const FAIXAS_CASCATA = [70, 60, 50] as const
+
+/** Reaproveitado pelo hook de composição do pipeline (útil pra estágios que
+ *  rodam fora de gerarCandidatosPorOcupacao, ex.: anexarModalidadeERemanejamento). */
+export function calcularGapMap(lRows: LaudoRow[], cRows: CsvRow[]): Record<string, GapItem> {
+  return gapsParaMapa(calcularGaps(lRows, cRows))
+}
+
+function idSugestao(unidade: string, especialidade: string, dia: string, turnos: Turno[]): string {
+  return `${unidade}|||${especialidade}|||${dia}|||${turnos.join(",")}`
+}
+
+function avaliarCombo(
+  unidade: string, especialidade: string, dia: string, turnos: Turno[],
+  cRows: CsvRow[], gapMap: Record<string, GapItem>,
+): { pct: number; candidatos: CandidatoNaSugestao[] } {
+  const periodosBrutos = turnos.map(turno => avaliarPeriodo(dia, turno, unidade, especialidade, cRows, gapMap))
+  // Sem isso, um paciente com gap=1 elegível em 3 horas do mesmo turno (ex.:
+  // KYLIAN) apareceria como candidato nas 3, inflando ocupação e receita como
+  // se fosse aceitar as 3 sessões — quando na real só pode aceitar 1.
+  const periodos = limitarCandidatosPorGap(periodosBrutos, gapMap, especialidade)
+  const agenda = construirAgendaNovoProfissional(periodos)
+  const pct = agenda.porDia[0]?.pct ?? 0
+  const candidatos: CandidatoNaSugestao[] = periodos.flatMap(p =>
+    p.slots.flatMap(s => s.candidatos.map(c => ({
+      paciente: c.pac, gap: c.gap, aut: c.aut, of: c.of, turno: p.turno, hora: s.hora,
+      modalidade: "adjacente" as const,
+      valorSessaoProjetado: null,
+      ordemNaVaga: 1,
+    }))),
+  )
+  return { pct, candidatos }
+}
+
+interface MelhorCombo { turnos: Turno[]; pct: number; candidatos: CandidatoNaSugestao[] }
+
+/** "porTurno" — filtro 1: escolhe o que render mais % entre manhã, tarde ou dia
+ *  inteiro isoladamente (comportamento original — pode ranquear alto mesmo que
+ *  só o turno sozinho bata 70%, sem o profissional aceitar os dois turnos).
+ *  "diaInteiro" — filtro 2: sempre avalia manhã+tarde JUNTOS, simulando que o
+ *  profissional aceita os dois turnos do dia — a % cai quando um dos turnos é
+ *  bem mais ocioso que o outro, e é exatamente essa % combinada que entra na
+ *  cascata 70/60/50. */
+export type ModoCascataOcupacao = "porTurno" | "diaInteiro"
+
+function melhorComboDoDia(
+  unidade: string, especialidade: string, dia: string, cRows: CsvRow[], gapMap: Record<string, GapItem>,
+  modo: ModoCascataOcupacao,
+): MelhorCombo {
+  const diaInteiro = avaliarCombo(unidade, especialidade, dia, ["manha", "tarde"], cRows, gapMap)
+  if (modo === "diaInteiro") return { turnos: ["manha", "tarde"], ...diaInteiro }
+
+  const manha = avaliarCombo(unidade, especialidade, dia, ["manha"], cRows, gapMap)
+  const tarde = avaliarCombo(unidade, especialidade, dia, ["tarde"], cRows, gapMap)
+  const melhorTurnoAvulso: MelhorCombo = manha.pct >= tarde.pct
+    ? { turnos: ["manha"], ...manha }
+    : { turnos: ["tarde"], ...tarde }
+
+  return melhorTurnoAvulso.pct > diaInteiro.pct
+    ? melhorTurnoAvulso
+    : { turnos: ["manha", "tarde"], ...diaInteiro }
+}
+
+/** Gera sugestões de contratação por cascata de ocupação prevista: 70% → 60% →
+ *  50%, retornando a primeira faixa que render pelo menos uma sugestão.
+ *  `modo` decide se a % considerada é a do melhor turno isolado ("porTurno")
+ *  ou sempre a de manhã+tarde combinados ("diaInteiro") — ver ModoCascataOcupacao. */
+export function gerarCandidatosPorOcupacao(
+  lRows: LaudoRow[], cRows: CsvRow[], modo: ModoCascataOcupacao = "porTurno",
+): SugestaoContratacao[] {
+  if (!cRows.length || !lRows.length) return []
+
+  const gapMap = gapsParaMapa(calcularGaps(lRows, cRows))
+  const especialidades = listarEspecialidades()
+
+  const combos: Omit<SugestaoContratacao, "faixaCascata">[] = []
+  for (const unidade of UNIDADES_SIMULACAO) {
+    for (const especialidade of especialidades) {
+      for (const dia of DIAS_UTIL) {
+        const { turnos, pct, candidatos } = melhorComboDoDia(unidade, especialidade, dia, cRows, gapMap, modo)
+        if (!candidatos.length) continue
+        combos.push({
+          id: idSugestao(unidade, especialidade, dia, turnos),
+          unidade, especialidade, dia, turnos,
+          pctOcupacaoPrevista: pct,
+          candidatos,
+          modalidadeDominante: "adjacente",
+          salaVinculada: null,
+          projecaoRemuneracao: null,
+        })
+      }
+    }
+  }
+
+  for (const faixa of FAIXAS_CASCATA) {
+    const doFaixa = combos.filter(c => c.pctOcupacaoPrevista >= faixa)
+    if (!doFaixa.length) continue
+    return doFaixa
+      .map(c => ({ ...c, faixaCascata: faixa }))
+      .sort((a, b) =>
+        b.pctOcupacaoPrevista - a.pctOcupacaoPrevista ||
+        a.unidade.localeCompare(b.unidade) ||
+        a.especialidade.localeCompare(b.especialidade),
+      )
+  }
+  return []
+}
+
+/** Complementa os candidatos por adjacência com candidatos por remanejamento
+ *  (Tarefa 5) nos horários do turno que ainda não têm candidato — nunca
+ *  substitui um candidato por adjacência já encontrado nesse horário. Define
+ *  modalidadeDominante pela modalidade mais frequente entre os candidatos. */
+export function anexarModalidadeERemanejamento(
+  sugestoes: SugestaoContratacao[], cRows: CsvRow[], gapMap: Record<string, GapItem>,
+): SugestaoContratacao[] {
+  return sugestoes.map(s => {
+    const horasCobertas = new Set(s.candidatos.map(c => `${c.turno}|||${c.hora}`))
+
+    const candidatosRemanejamento = s.turnos
+      .flatMap(turno => encontrarCandidatosRemanejamento(s.dia, turno, s.unidade, s.especialidade, cRows, gapMap))
+      .filter(({ hora, candidato }) => {
+        const chave = `${candidato.turno}|||${hora}`
+        if (horasCobertas.has(chave)) return false
+        horasCobertas.add(chave)
+        return true
+      })
+      .map(({ candidato }) => candidato)
+
+    if (!candidatosRemanejamento.length) return s
+
+    const candidatos = [...s.candidatos, ...candidatosRemanejamento]
+    const qtdAdjacente = candidatos.filter(c => c.modalidade === "adjacente").length
+    const modalidadeDominante = qtdAdjacente >= candidatosRemanejamento.length ? "adjacente" as const : "remanejamento" as const
+
+    return { ...s, candidatos, modalidadeDominante }
+  })
+}
+
+/** Remove candidatos cujo dia/hora/unidade/especialidade já pode ser coberto
+ *  por um profissional interno livre (Tarefa 4) — não sugere contratar o que já
+ *  dá pra suprir com quem já está na clínica. Descarta a sugestão inteira se
+ *  todos os seus candidatos forem cobertos internamente. */
+export function filtrarPorDisponibilidadeInterna(
+  sugestoes: SugestaoContratacao[], cRows: CsvRow[],
+): SugestaoContratacao[] {
+  const slotsLivres = listarSlotsLivres(cRows)
+  return sugestoes
+    .map(s => ({
+      ...s,
+      candidatos: s.candidatos.filter(c => !temCoberturaInterna(slotsLivres, s.dia, c.hora, s.unidade, s.especialidade)),
+    }))
+    .filter(s => s.candidatos.length > 0)
+}
+
+const TURNO_PARA_ALOCACAO: Record<Turno, "Manhã" | "Tarde"> = { manha: "Manhã", tarde: "Tarde" }
+
+/** Sala livre em TODOS os turnos exigidos pela sugestão (mesma unidade), com
+ *  menor pctOcupacaoSemanal (mais ociosa) entre as candidatas. */
+function encontrarSalaLivre(
+  unidade: string, dia: string, turnos: Turno[], salasComOcupacao: SalaComOcupacao[],
+): SalaVinculada | null {
+  const unidadeAlvo = normalizarUnidadeOcupacao(unidade)
+  const dow = dowDeDiaSemana(dia)
+  if (dow === null) return null
+  const turnosAlocacao = turnos.map(t => TURNO_PARA_ALOCACAO[t])
+
+  const candidatas = salasComOcupacao.filter(({ sala, slots }) => {
+    if (normalizarUnidadeOcupacao(sala.unidade_nome) !== unidadeAlvo) return false
+    return turnosAlocacao.every(turno =>
+      slots.some(s => s.dow === dow && s.turno === turno && s.status === "livre"),
+    )
+  })
+  if (!candidatas.length) return null
+
+  const melhor = candidatas.sort((a, b) => (a.pctOcupacaoSemanal ?? 0) - (b.pctOcupacaoSemanal ?? 0))[0]
+  return {
+    salaId: melhor.sala.id,
+    nomeExibicao: melhor.sala.nome_exibicao,
+    numeroSala: melhor.sala.numero_sala,
+    unidade: melhor.sala.unidade_nome,
+    pctOcupacaoSemanalAtual: melhor.pctOcupacaoSemanal,
+  }
+}
+
+/** Vincula a melhor sala livre disponível a cada sugestão (Tarefa 2). Nunca
+ *  bloqueia a sugestão — sem sala livre, salaVinculada fica null. */
+export function anexarSala(
+  sugestoes: SugestaoContratacao[], salasComOcupacao: SalaComOcupacao[],
+): SugestaoContratacao[] {
+  return sugestoes.map(s => ({
+    ...s,
+    salaVinculada: encontrarSalaLivre(s.unidade, s.dia, s.turnos, salasComOcupacao),
+  }))
+}
+
+/** Especialidade → nome de terapia representativo (mesma escolha usada no
+ *  detalhe da simulação: primeira terapia clínica da especialidade que não é
+ *  administrativa). */
+export function terapiaDaEspecialidade(especialidade: string): string {
+  return (ESP_CLINICO[especialidade] || [especialidade]).filter(t => !EXCLUIR_OCUP.has(t))[0] || especialidade
+}
+
+export function primeiroConvenioDoPaciente(paciente: string, cRows: CsvRow[]): string {
+  const row = cRows.find(r => r["Nome Favorecido"] === paciente && r["Convênio"])
+  return row?.["Convênio"] || "Não informado"
+}
+
+/** ID estável do paciente (csv_grades_profissionais.paciente_id) — sem isso,
+ *  resolverValorSessao nunca casa uma exceção de valor por paciente que tenha
+ *  paciente_id cadastrado (o caso normal, via tela de cadastro): a checagem
+ *  por ID só cai pro nome quando a exceção NÃO tem ID, e passar null aqui
+ *  fazia toda exceção com ID real ser ignorada, mesmo com o nome batendo. */
+function pacienteIdDoPaciente(paciente: string, cRows: CsvRow[]): number | null {
+  const row = cRows.find(r => r["Nome Favorecido"] === paciente && r.PacienteId != null)
+  return row?.PacienteId ?? null
+}
+
+function pacienteTemPsicologiaAba(paciente: string, cRows: CsvRow[]): boolean {
+  return cRows.some(r => r["Nome Favorecido"] === paciente && r.Terapia === "Psicologia ABA")
+}
+
+function projetarReceitaCandidato(
+  candidato: CandidatoNaSugestao, dia: string, especialidade: string, cRows: CsvRow[],
+  regrasGerais: ConvenioValor[], excecoesPaciente: ConvenioValorPaciente[], cal: CalendarioResult | null,
+): { valorSemana: number; valorMes: number; convenio: string; semValor: boolean } {
+  const convenio = primeiroConvenioDoPaciente(candidato.paciente, cRows)
+  const terapiaNome = terapiaDaEspecialidade(especialidade)
+  const temPsicologiaAba = pacienteTemPsicologiaAba(candidato.paciente, cRows)
+  const pacienteId = pacienteIdDoPaciente(candidato.paciente, cRows)
+  const terapiaId = NOME_PARA_TERAPIA_ID[normTxt(terapiaNome)] ?? null
+
+  const { valor, origem } = resolverValorSessao(regrasGerais, excecoesPaciente, {
+    convenio, pacienteId, paciente: candidato.paciente, terapiaId, terapiaNome, temPsicologiaAba,
+  })
+
+  const dow = dowDeDiaSemana(dia)
+  const ocorrenciasMes = dow !== null ? (cal?.counts[dow as 1 | 2 | 3 | 4 | 5] ?? 0) : 0
+  const valorSemana = valor ?? 0
+  return { valorSemana, valorMes: valorSemana * ocorrenciasMes, convenio, semValor: origem === "sem_valor" }
+}
+
+function chaveVaga(c: { turno: Turno; hora: string }): string {
+  return `${c.turno}|||${c.hora}`
+}
+
+/** Quantas sessões (qualquer terapia, qualquer dia) o paciente já tem agendadas
+ *  na semana — proxy de "quanto frequenta a clínica", usado só como desempate
+ *  quando dois candidatos da mesma vaga têm o mesmo valor de sessão. */
+function frequenciaSemanalPorPaciente(cRows: CsvRow[]): Map<string, number> {
+  const mapa = new Map<string, number>()
+  for (const r of cRows) {
+    if (r["Status do Agendamento"] !== "Agendado") continue
+    const pac = r["Nome Favorecido"]
+    if (!pac) continue
+    mapa.set(pac, (mapa.get(pac) ?? 0) + 1)
+  }
+  return mapa
+}
+
+/** Projeta a receita de cada sugestão (Tarefa 3) e ordena por lucratividade
+ *  (com % de ocupação como desempate). Quando mais de um paciente disputa a
+ *  MESMA vaga (mesmo turno+hora), só o mais rentável entra na receita
+ *  projetada — a vaga só pode ser ocupada por um paciente por vez, então
+ *  somar o valor de todos os concorrentes superestimaria a receita. Entre
+ *  candidatos com o MESMO valor de sessão, desempata por frequência semanal
+ *  na clínica (quem já frequenta mais tende a gerar mais receita ao longo do
+ *  tempo). Cada candidato ganha `ordemNaVaga` (1 = deveria ser ofertado
+ *  primeiro) pra a UI deixar essa priorização explícita. Sessões sem regra de
+ *  valor cadastrada contam à parte em sessoesSemValor — não derrubam a
+ *  sugestão pro fim da lista. */
+export function anexarRemuneracaoEOrdenar(
+  sugestoes: SugestaoContratacao[], cRows: CsvRow[],
+  regrasGerais: ConvenioValor[], excecoesPaciente: ConvenioValorPaciente[],
+  mesReferencia: { ano: number; mes: number } | null,
+  feriados: Record<string, FeriadoInfo> = {},
+): SugestaoContratacao[] {
+  const cal = mesReferencia ? getCalendario(mesReferencia.ano, mesReferencia.mes, feriados) : null
+  const frequenciaPorPaciente = frequenciaSemanalPorPaciente(cRows)
+
+  const comProjecao = sugestoes.map(s => {
+    const comValor = s.candidatos.map(candidato => {
+      const { valorSemana, valorMes, convenio, semValor } = projetarReceitaCandidato(
+        candidato, s.dia, s.especialidade, cRows, regrasGerais, excecoesPaciente, cal,
+      )
+      return { candidato, valorSemana, valorMes, convenio, semValor }
+    })
+
+    const porVaga = new Map<string, typeof comValor>()
+    for (const item of comValor) {
+      const chave = chaveVaga(item.candidato)
+      if (!porVaga.has(chave)) porVaga.set(chave, [])
+      porVaga.get(chave)!.push(item)
+    }
+
+    const porConvenioMap = new Map<string, number>()
+    let receitaSemanalProjetada = 0
+    let receitaMensalProjetada = 0
+    let sessoesSemValor = 0
+    const candidatosComOrdem: CandidatoNaSugestao[] = []
+
+    for (const itensDaVaga of porVaga.values()) {
+      const valorOrdenacao = (item: (typeof itensDaVaga)[number]) => item.semValor ? -Infinity : item.valorSemana
+      const ordenados = [...itensDaVaga].sort((a, b) =>
+        valorOrdenacao(b) - valorOrdenacao(a) ||
+        (frequenciaPorPaciente.get(b.candidato.paciente) ?? 0) - (frequenciaPorPaciente.get(a.candidato.paciente) ?? 0),
+      )
+      ordenados.forEach((item, i) => {
+        const ordemNaVaga = i + 1
+        candidatosComOrdem.push({ ...item.candidato, valorSessaoProjetado: item.semValor ? null : item.valorSemana, ordemNaVaga })
+        if (ordemNaVaga !== 1) return // só a melhor oferta da vaga conta na receita — a vaga só é ocupada uma vez
+        if (item.semValor) sessoesSemValor++
+        receitaSemanalProjetada += item.valorSemana
+        receitaMensalProjetada += item.valorMes
+        porConvenioMap.set(item.convenio, (porConvenioMap.get(item.convenio) ?? 0) + item.valorMes)
+      })
+    }
+
+    const projecaoRemuneracao: ProjecaoRemuneracaoSugestao = {
+      receitaSemanalProjetada, receitaMensalProjetada, sessoesSemValor,
+      porConvenio: [...porConvenioMap.entries()]
+        .map(([convenio, receita]) => ({ convenio, receitaMensalProjetada: receita }))
+        .sort((a, b) => b.receitaMensalProjetada - a.receitaMensalProjetada),
+    }
+    return { ...s, candidatos: candidatosComOrdem, projecaoRemuneracao }
+  })
+
+  return comProjecao.sort((a, b) =>
+    (b.projecaoRemuneracao?.receitaMensalProjetada ?? 0) - (a.projecaoRemuneracao?.receitaMensalProjetada ?? 0) ||
+    b.pctOcupacaoPrevista - a.pctOcupacaoPrevista,
+  )
+}
