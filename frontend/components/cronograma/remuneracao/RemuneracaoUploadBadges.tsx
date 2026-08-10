@@ -257,11 +257,14 @@ export function RemuneracaoUploadBadges({ c, hidePe = false }: Props) {
         )}
 
         {/* Sessões que o banco não sabe se aconteceram — não some dentro do
-            balde "Não evoluído", que é o maior da tela. */}
+            balde "Não evoluído", que é o maior da tela. O detalhamento
+            (gradeAviso) vai no title, não numa linha própria: o header tem
+            altura fixa, e uma terceira linha de texto estourava essa altura
+            e vazava visualmente para fora da caixa. */}
         {fonteGrade === "banco" && coberturaGrade && coberturaGrade.semExecucao > 0 && (
           <span
             className="flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[11px] font-medium text-amber-700 dark:border-amber-800 dark:bg-amber-950/30 dark:text-amber-400"
-            title="Sessões agendadas sem execução registrada no banco. Entram no cálculo como não evoluídas."
+            title={gradeAviso ?? "Sessões agendadas sem execução registrada no banco. Entram no cálculo como não evoluídas."}
           >
             <AlertTriangle size={10} />
             {coberturaGrade.semExecucao.toLocaleString("pt-BR")} sem execução
@@ -301,20 +304,21 @@ export function RemuneracaoUploadBadges({ c, hidePe = false }: Props) {
             </button>
           )
         )}
-      </div>
 
-      {/* Falha de upload é curta e local ao botão que a causou, então cabe aqui.
-          A reprovação da grade não: aquela vai para o chip acima e o modal. */}
-      {erroDeUpload && (
-        <p className="mt-0.5 max-w-96 truncate text-right text-[11px] text-destructive" title={erroDeUpload}>
-          {erroDeUpload}
-        </p>
-      )}
-      {!erroDeUpload && gradeAviso && (
-        <p className="mt-0.5 max-w-96 truncate text-right text-[11px] text-amber-600 dark:text-amber-400" title={gradeAviso}>
-          {gradeAviso}
-        </p>
-      )}
+        {/* Falha de upload é curta e local ao botão que a causou. Vira badge,
+            não parágrafo: o header tem altura fixa (h-20) e uma linha extra
+            de texto vazava para fora da caixa — o texto completo mora no
+            title. */}
+        {erroDeUpload && (
+          <span
+            className="flex items-center gap-1 rounded-full border border-destructive/30 bg-destructive/5 px-2.5 py-1 text-[11px] font-medium text-destructive"
+            title={erroDeUpload}
+          >
+            <AlertTriangle size={10} />
+            Falha no upload
+          </span>
+        )}
+      </div>
 
       <GradeIncompletaModal
         aberto={modalAberto}
