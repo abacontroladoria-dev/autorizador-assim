@@ -53,9 +53,7 @@ function normalizarEvidencias(evidencias: PepEvidencia[], n: number): PepEvidenc
 type CelulaAtiva = { pacienteNome: string | null; item: PepCatalogoItem } | null
 
 export function PepEntregasTab() {
-  const {
-    resultado, evoRows, peRows, carregarGrade, carregarPE, limparGrade, limparPE, setCsvName,
-  } = useRemuneracaoRPContext()
+  const { resultado, controlesGrade } = useRemuneracaoRPContext()
   const { setHeader, setRightContent } = useHeader()
 
   const [prestador, setPrestador] = useState("")
@@ -67,23 +65,12 @@ export function PepEntregasTab() {
   // Rem. Mês - Total e Individual — não precisa reanexar ao trocar de aba.
   useEffect(() => {
     setHeader("Entregas PEP", "Relacionamento Prestador")
-    setRightContent(
-      <RemuneracaoUploadBadges
-        evoRows={evoRows}
-        peRows={peRows}
-        carregarGrade={carregarGrade}
-        carregarPE={carregarPE}
-        limparGrade={limparGrade}
-        limparPE={limparPE}
-        setCsvName={setCsvName}
-        hidePe
-      />
-    )
+    setRightContent(<RemuneracaoUploadBadges c={controlesGrade} hidePe />)
     return () => {
       setHeader("", "")
       setRightContent(null)
     }
-  }, [setHeader, setRightContent, evoRows, peRows, carregarGrade, carregarPE, limparGrade, limparPE, setCsvName])
+  }, [setHeader, setRightContent, controlesGrade])
 
   const analistas = useMemo(
     () => Array.from(new Set(
