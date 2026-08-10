@@ -9,6 +9,7 @@ import { useEffect, useState } from "react"
 import { ChevronDown, ChevronRight, Loader2 } from "lucide-react"
 import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
 import { TONE_SOLID } from "@/components/cronograma/ui/tones"
+import { camposAlterados, camposSnapshot } from "@/lib/cronograma/auditoriaFormat"
 import { getTrilhaAuditoriaSala, type CronogramaTrilhaAcao, type CronogramaTrilhaAuditoria, type CronogramaTrilhaTabela } from "@/services/salasAuditoria.service"
 
 interface Props {
@@ -27,8 +28,10 @@ function nomeContextual(item: CronogramaTrilhaAuditoria): string {
   return item.sala_nome ?? item.nucleo_nome ?? item.registro_id
 }
 
-function formatarDataHora(iso: string): string {
-  return new Date(iso).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })
+function formatarDataHora(item: CronogramaTrilhaAuditoria): string {
+  // criado_em_brasilia já vem pronto do banco (DD/MM/AAAA HH:MM, horário de
+  // Brasília) — toLocaleString é só um fallback pra linhas antigas sem essa coluna.
+  return item.criado_em_brasilia ?? new Date(item.criado_em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })
 }
 
 export function HistoricoAuditoriaModal({ onClose }: Props) {
@@ -59,7 +62,9 @@ export function HistoricoAuditoriaModal({ onClose }: Props) {
         {itens.map(item => {
           const tone = TONE_SOLID[ACAO_TONE[item.acao]]
           const expandido = expandidoId === item.id
-          const temDetalhe = item.antes != null || item.depois != null
+          const alteracoes = item.acao === "editar" ? camposAlterados(item) : []
+          const snapshot = item.acao !== "editar" ? camposSnapshot(item) : []
+          const temDetalhe = alteracoes.length > 0 || snapshot.length > 0 || !!item.motivo
           return (
             <div key={item.id} className="rounded-lg border border-border px-2.5 py-2">
               <button
@@ -73,23 +78,27 @@ export function HistoricoAuditoriaModal({ onClose }: Props) {
                 <span className="flex-1 truncate text-sm font-semibold text-foreground">{nomeContextual(item)}</span>
                 <span className="shrink-0 text-right text-[11px] text-muted-foreground">
                   <div>{item.usuario_nome ?? "Usuário desconhecido"}</div>
-                  <div>{formatarDataHora(item.criado_em)}</div>
+                  <div>{formatarDataHora(item)}</div>
                 </span>
               </button>
               {expandido && (
-                <div className="mt-2 grid grid-cols-1 gap-2 border-t border-border pt-2 sm:grid-cols-2">
-                  <div>
-                    <div className="mb-1 text-[11px] font-semibold text-muted-foreground">Antes</div>
-                    <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted/50 p-2 text-[11px]">{item.antes ? JSON.stringify(item.antes, null, 2) : "—"}</pre>
-                  </div>
-                  <div>
-                    <div className="mb-1 text-[11px] font-semibold text-muted-foreground">Depois</div>
-                    <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-all rounded-md bg-muted/50 p-2 text-[11px]">{item.depois ? JSON.stringify(item.depois, null, 2) : "—"}</pre>
-                  </div>
+                <div className="mt-2 flex flex-col gap-1.5 border-t border-border pt-2">
+                  {alteracoes.length === 0 && snapshot.length === 0 && (
+                    <div className="text-sm text-muted-foreground">Nenhum outro detalhe registrado pra essa alteração.</div>
+                  )}
+                  {alteracoes.map(c => (
+                    <div key={c.label} className="text-sm text-foreground">
+                      <span className="font-semibold">{c.label}:</span> {c.antes} <span className="text-muted-foreground">→</span> {c.depois}
+                    </div>
+                  ))}
+                  {snapshot.map(c => (
+                    <div key={c.label} className="text-sm text-foreground">
+                      <span className="font-semibold">{c.label}:</span> {c.valor}
+                    </div>
+                  ))}
                   {item.motivo && (
-                    <div className="sm:col-span-2">
-                      <div className="mb-1 text-[11px] font-semibold text-muted-foreground">Motivo</div>
-                      <div className="text-sm text-foreground">{item.motivo}</div>
+                    <div className="text-sm text-foreground">
+                      <span className="font-semibold">Motivo:</span> {item.motivo}
                     </div>
                   )}
                 </div>

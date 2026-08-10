@@ -21,9 +21,11 @@ export type CronogramaTrilhaAuditoria = {
   usuario_id: string | null
   usuario_nome: string | null
   criado_em: string
+  /** Já formatado como DD/MM/AAAA HH:MM, horário de Brasília — preenchido por trigger no banco. */
+  criado_em_brasilia: string | null
 }
 
-const TABLE = "cronograma_ocupacao_trilha_auditoria"
+const TABLE = "cronograma_salas_auditoria"
 
 // Mesmo padrão de frontend/services/pepAuditoria.service.ts — chamado pelos
 // próprios serviços de escrita (salas.service.ts), nunca direto pela tela.
