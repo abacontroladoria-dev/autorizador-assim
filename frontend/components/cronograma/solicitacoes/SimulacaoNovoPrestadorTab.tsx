@@ -22,7 +22,7 @@ import { useGradeAgendamentos } from "@/hooks/useGradeAgendamentos"
 import { useOcupacaoSalas } from "@/hooks/useOcupacaoSalas"
 import { useConvenioValores } from "@/hooks/useConvenioValores"
 import { useFeriados } from "@/hooks/useFeriados"
-import { anexarModalidadeERemanejamento, anexarSala, anexarRemuneracaoEOrdenar, primeiroConvenioDoPaciente } from "@/lib/cronograma/sugestaoContratacao"
+import { anexarModalidadeERemanejamento, filtrarPorDisponibilidadeInterna, anexarSala, anexarRemuneracaoEOrdenar, primeiroConvenioDoPaciente } from "@/lib/cronograma/sugestaoContratacao"
 import { SugestoesContratacaoPanel } from "./SugestoesContratacaoPanel"
 import { RemanejamentoDetalheModal } from "./RemanejamentoDetalheModal"
 import { ProjecaoFinanceiraDetalheModal } from "./ProjecaoFinanceiraDetalheModal"
@@ -401,11 +401,15 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
     return label.charAt(0).toUpperCase() + label.slice(1)
   }, [mesReferencia])
 
-  // Enriquece cada período exibido (modalidade adjacente/remanejamento, sala
-  // livre vinculada e valor de cada sessão pelo cadastro de valores) — mesmo
-  // pipeline usado pelo painel de sugestões automáticas, só que aplicado aos
+  // Enriquece cada período exibido (modalidade adjacente/remanejamento,
+  // disponibilidade interna, sala livre vinculada e valor de cada sessão pelo
+  // cadastro de valores) — mesmo pipeline e mesma ordem usados pelo painel de
+  // sugestões automáticas (useSugestoesContratacao.ts), só que aplicado aos
   // períodos escolhidos manualmente aqui (um "período" vira uma
   // SugestaoContratacao de 1 turno só só pra reaproveitar os mesmos estágios).
+  // Sem o estágio de disponibilidade interna, a projeção financeira contava
+  // pacientes que já dá pra atender com quem existe — inflando a receita em
+  // relação ao que a sugestão automática mostra pro mesmo dia/turno/unidade.
   const periodosEnriquecidos = useMemo((): SugestaoContratacao[] => {
     if (!podeSimular) return []
     const base: SugestaoContratacao[] = periodosExibidos.map((p, i) => ({
@@ -425,7 +429,8 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
       projecaoRemuneracao: null,
     }))
     const comRemanejamento = anexarModalidadeERemanejamento(base, cRows, gapMap)
-    const comSala = anexarSala(comRemanejamento, salasComOcupacao)
+    const comDisponibilidade = filtrarPorDisponibilidadeInterna(comRemanejamento, cRows)
+    const comSala = anexarSala(comDisponibilidade, salasComOcupacao)
     return anexarRemuneracaoEOrdenar(comSala, cRows, regrasGerais, excecoesPaciente, mesReferencia, feriados)
   }, [podeSimular, periodosExibidos, especialidade, cRows, gapMap, salasComOcupacao, regrasGerais, excecoesPaciente, mesReferencia, feriados])
 
