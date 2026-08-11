@@ -14,7 +14,7 @@ import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip as RechartsTooltip } 
 import { CheckCircle2, Clock, Info, Lock, Sparkles, Star, Wallet } from "lucide-react"
 import {
   avaliarPeriodo, calcularGaps, construirAgendaNovoProfissional, gapsParaMapa, limitarCandidatosPorGap, listarEspecialidades, montarPlanoRecomendado, ranquearUnidades,
-  type PeriodoSimulado, type PeriodoAlvo, type SlotSimulado, type Turno,
+  type CandidatoSlot, type PeriodoSimulado, type PeriodoAlvo, type SlotSimulado, type Turno,
 } from "@/lib/cronograma/simulacaoNovoPrestador"
 import { DIAS_UTIL, ESP_CLINICO, EXCLUIR_OCUP } from "@/lib/cronograma/constants"
 import { buildCronoUnitMeta, diaCurto, fmtH, fmtName, fmtReal, shouldShowSessionUnit, turnoNome, unidadeBadgeText } from "@/lib/cronograma/helpers"
@@ -41,6 +41,33 @@ interface Props {
 }
 
 function hiStr(r: CsvRow): string { return String(r.HI_str || "") }
+
+/** Reagrupa os candidatos já enriquecidos (adjacência + remanejamento, com
+ *  disponibilidade interna descontada) de volta no formato de slots por hora
+ *  que a agenda visual (construirAgendaNovoProfissional) espera — sem isso, a
+ *  agenda/carga semanal/ocupação por dia mostrariam como "livre" um horário
+ *  que só tem candidato via remanejamento, mesmo já entrando na receita
+ *  projetada e em "Sessões e candidatos". */
+function periodosEnriquecidosParaSimulado(periodos: SugestaoContratacao[]): PeriodoSimulado[] {
+  return periodos.map(p => {
+    const porHora = new Map<string, CandidatoSlot[]>()
+    for (const c of p.candidatos) {
+      const lista = porHora.get(c.hora) ?? []
+      lista.push({ pac: c.paciente, gap: c.gap, aut: c.aut, of: c.of, sessoesNoDia: [] })
+      porHora.set(c.hora, lista)
+    }
+    const slots: SlotSimulado[] = [...porHora.entries()]
+      .map(([hora, candidatos]) => ({ dia: p.dia, turno: p.turnos[0], unidade: p.unidade, hora, candidatos }))
+    return {
+      dia: p.dia,
+      turno: p.turnos[0],
+      unidade: p.unidade,
+      nPacientes: new Set(slots.flatMap(s => s.candidatos.map(c => c.pac))).size,
+      totalSessoes: slots.reduce((soma, s) => soma + s.candidatos.length, 0),
+      slots,
+    }
+  })
+}
 
 /** Horários que o paciente já tem agendados nesse dia — informativo, pra
  *  contextualizar a linha da tabela "Sessões e candidatos" independente da
@@ -386,13 +413,6 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
     return limitarCandidatosPorGap(bruto, gapMap, especialidade)
   }, [podeSimular, unidadeFixada, periodosAlvo, especialidade, cRows, gapMap, planoRecomendado])
 
-  const slotsExibidos = useMemo((): SlotSimulado[] => periodosExibidos.flatMap(p => p.slots), [periodosExibidos])
-
-  const agendaNovoProf = useMemo(() =>
-    podeSimular ? construirAgendaNovoProfissional(periodosExibidos) : null,
-    [podeSimular, periodosExibidos],
-  )
-
   const escalaComparativo = Math.max(1, planoStats.totalVagas, ...unitRank.map(vagasDaUnidade))
 
   const mesReferencia = useMemo(() => {
@@ -438,6 +458,22 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
     const comSala = anexarSala(comDisponibilidade, salasComOcupacao)
     return anexarRemuneracaoEOrdenar(comSala, cRows, regrasGerais, excecoesPaciente, mesReferencia, feriados)
   }, [podeSimular, periodosExibidos, especialidade, cRows, gapMap, salasComOcupacao, regrasGerais, excecoesPaciente, mesReferencia, feriados])
+
+  // Agenda/carga semanal/ocupação por dia precisam refletir o MESMO conjunto
+  // de vagas que "Sessões e candidatos" e a projeção financeira (remanejamento
+  // incluído, disponibilidade interna descontada) — antes essa visualização
+  // vinha direto de periodosExibidos (só adjacência, sem descontar
+  // disponibilidade interna), então uma vaga preenchida por remanejamento
+  // aparecia como "livre/ociosa" aqui mesmo já tendo receita projetada.
+  const agendaNovoProf = useMemo(() =>
+    podeSimular ? construirAgendaNovoProfissional(periodosEnriquecidosParaSimulado(periodosEnriquecidos)) : null,
+    [podeSimular, periodosEnriquecidos],
+  )
+
+  const nPacientesExibidos = useMemo(
+    () => new Set(periodosEnriquecidos.flatMap(s => s.candidatos.map(c => c.paciente))).size,
+    [periodosEnriquecidos],
+  )
 
   // Soma só a melhor oferta de cada vaga (já resolvido por anexarRemuneracaoEOrdenar
   // por período) — reflete o que se ganharia priorizando sempre o paciente mais
@@ -746,7 +782,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
               <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted px-4 py-2.5">
                 <span className="text-sm font-extrabold text-foreground">Detalhamento — {unidadeFixada || "Plano recomendado (misto)"}</span>
                 <span className="ml-auto flex items-center gap-1 text-[11px] text-muted-foreground">
-                  {planoStats.nPacientes} pacientes · {slotsExibidos.length} vaga(s) de horário · {Math.round((agendaNovoProf.slotsComCandidato / agendaNovoProf.totalSlots) * 100)}% de ocupação
+                  {nPacientesExibidos} pacientes · {agendaNovoProf.slotsComCandidato} vaga(s) de horário · {Math.round((agendaNovoProf.slotsComCandidato / agendaNovoProf.totalSlots) * 100)}% de ocupação
                   <InfoTip text="Vagas de horário são os horários distintos do novo profissional com pelo menos um candidato — diferente do total de candidaturas na tabela 'Sessões e candidatos' abaixo, já que mais de um paciente pode disputar a mesma vaga." />
                 </span>
                 <span className="w-full text-[11px] font-bold text-emerald-700 dark:text-emerald-400">
