@@ -2,18 +2,22 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  AlertTriangle,
   CalendarDays,
   Check,
   ChevronDown,
   Clock,
   Loader2,
   MapPin,
+  Search,
   Users,
   X,
 } from 'lucide-react'
 import {
   listarModalSubstituicao,
+  listarTodosProfissionaisModal,
   atualizarStatusAtendimentosEmLote,
+  terapiasCompativeis,
   ABA_GROUP,
   COORD_CASO,
   type SlotModalSubstituicao,
@@ -25,8 +29,9 @@ import {
 } from '@/services/substituicoes.service'
 import { getSupabaseClient } from '@/lib/supabase/client'
 import type { GrupoTerapeutaMobile, ControleTerapeuticoItem } from './types'
-import { getIniciais, getPaciente } from './helpers'
+import { getIniciais, getPaciente, getProfissionaisUnicos, getStatusProfNaHora, terapiasIgnoradas } from './helpers'
 import ProfissionaisVerMaisModal from './ProfissionaisVerMaisModal'
+import SeletorTerapeutaForaEspecialidade from './SeletorTerapeutaForaEspecialidade'
 
 type SessaoCobertura = {
   id: number
@@ -34,7 +39,21 @@ type SessaoCobertura = {
   disponivel: boolean | null   // null = não decidido (pendente)
   substitutoId: number | null
   substitutoNome: string | null
+  substitutoTerapiaNome: string | null // terapia_nome real do substituto — usado p/ calcForaDaEspecialidade
   recomendadoId: number | null // profissional pré-selecionado pelo algoritmo
+  buscaOutraEspecialidade: boolean     // toggle "Buscar em outra especialidade" ativo nesta sessão
+  motivoExcecao: string                // motivo obrigatório quando fora da especialidade
+}
+
+/**
+ * Deriva se o substituto atual da sessão está fora da matriz terapiasCompativeis
+ * da Terapia Real da sessão. Não assume que toda seleção via o seletor de "outra
+ * especialidade" seja necessariamente fora — compara de fato.
+ */
+function calcForaDaEspecialidade(sessao: SessaoCobertura): boolean {
+  if (!sessao.substitutoId || !sessao.substitutoTerapiaNome) return false
+  const terapiaSessao = String((sessao.atendimento as any)?.terapia_nome || '')
+  return !terapiasCompativeis(terapiaSessao).includes(sessao.substitutoTerapiaNome)
 }
 
 type Props = {
@@ -57,8 +76,50 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
   const [salvando, setSalvando] = useState(false)
   const [abaAtiva, setAbaAtiva] = useState<'manha' | 'tarde'>('manha')
   const [verMaisSessao, setVerMaisSessao] = useState<SessaoCobertura | null>(null)
+  const [confirmandoExcecao, setConfirmandoExcecao] = useState(false)
+  const [todosProfissionais, setTodosProfissionais] = useState<SlotModalSubstituicao[] | null>(null)
+  const [carregandoTodos, setCarregandoTodos] = useState(false)
+  const todosProfissionaisFetchedRef = useRef(false)
   const dialogRef = useRef<HTMLDivElement>(null)
   const previousFocusRef = useRef<HTMLElement | null>(null)
+
+  // Busca sob demanda: só quando algum toggle "outra especialidade" é ativado.
+  // A busca é por unidade/dia (não por sessão), então uma única chamada serve todas.
+  const garantirTodosProfissionaisCarregados = useCallback(() => {
+    if (todosProfissionaisFetchedRef.current || !grupo) return
+    todosProfissionaisFetchedRef.current = true
+    setCarregandoTodos(true)
+    listarTodosProfissionaisModal({ unidade: grupo.unidade, dataAtendimento: data })
+      .then((todos) => {
+        setTodosProfissionais(
+          todos.filter(
+            (p) => p.profissional_nome !== grupo.terapeuta && !terapiasIgnoradas.includes(p.terapia_nome)
+          )
+        )
+      })
+      .finally(() => setCarregandoTodos(false))
+  }, [grupo, data])
+
+  // Assim que todosProfissionais carrega, resolve sessões com substituto ainda sem
+  // ID (substitutoNome preenchido mas fora da lista filtrada por especialidade) e
+  // reabre o toggle "outra especialidade" para elas.
+  useEffect(() => {
+    if (!todosProfissionais) return
+    setSessoes((prev) => prev.map((s) => {
+      if (s.substitutoNome && !s.substitutoId) {
+        const prof = todosProfissionais.find((p) => p.profissional_nome === s.substitutoNome)
+        if (prof != null) {
+          return {
+            ...s,
+            substitutoId: prof.profissional_id,
+            substitutoTerapiaNome: prof.terapia_nome,
+            buscaOutraEspecialidade: true,
+          }
+        }
+      }
+      return s
+    }))
+  }, [todosProfissionais])
 
   useEffect(() => {
     if (!grupo) return
@@ -70,6 +131,8 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
     setEtapa(jaIndisponivel ? 'cobertura' : 'motivo')
     setTipoOcorrencia('')
     setJustificativa('')
+    todosProfissionaisFetchedRef.current = false
+    setTodosProfissionais(null)
     document.body.style.overflow = 'hidden'
 
     const ordenados = [...grupo.atendimentos].sort((a, b) =>
@@ -90,7 +153,10 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
           substitutoNome: isSubstituido
             ? a.profissional_substituto_nome ?? null
             : null,
+          substitutoTerapiaNome: null,
           recomendadoId: null,
+          buscaOutraEspecialidade: false,
+          motivoExcecao: '',
         }
       })
     )
@@ -107,14 +173,25 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
         setProfissionais(semTerapeuta)
 
         // Resolve substitutoId por nome para sessões pré-carregadas sem ID
-        const profByName = new Map(semTerapeuta.map((p) => [p.profissional_nome, p.profissional_id]))
+        const profByName = new Map(semTerapeuta.map((p) => [p.profissional_nome, p]))
         setSessoes((prev) => prev.map((s) => {
           if (s.substitutoNome && !s.substitutoId) {
-            const id = profByName.get(s.substitutoNome)
-            if (id != null) return { ...s, substitutoId: id }
+            const prof = profByName.get(s.substitutoNome)
+            if (prof != null) {
+              return { ...s, substitutoId: prof.profissional_id, substitutoTerapiaNome: prof.terapia_nome }
+            }
           }
           return s
         }))
+
+        // Sessão já substituída por alguém fora da matriz de especialidade (persistida
+        // por uma exceção anterior) não casa contra semTerapeuta — carrega todos os
+        // profissionais da unidade/dia para resolver esses casos (ver efeito abaixo).
+        const temSubstitutoForaDaLista = ordenados.some((a) => {
+          const st = String(a.status ?? '').toLowerCase()
+          return st === 'substituido' && a.profissional_substituto_nome && !profByName.has(a.profissional_substituto_nome)
+        })
+        if (temSubstitutoForaDaLista) garantirTodosProfissionaisCarregados()
 
         // ── Recomendação automática ──────────────────────────────────
         // Apenas profissionais Livres participam da pré-seleção (spec).
@@ -247,6 +324,12 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
   const semCobertura = sessoes.filter((s) => s.disponivel === false && !s.substitutoId).length
   const totalDisponiveis = sessoes.filter((s) => s.disponivel).length
 
+  const sessoesForaEspecialidade = useMemo(() => sessoes.filter(calcForaDaEspecialidade), [sessoes])
+  const sessoesForaSemMotivo = useMemo(
+    () => sessoesForaEspecialidade.filter((s) => !s.motivoExcecao.trim()),
+    [sessoesForaEspecialidade]
+  )
+
   const horaInicial = sessoes[0]?.atendimento.hora_inicial
     ? String(sessoes[0].atendimento.hora_inicial).slice(0, 5)
     : ''
@@ -254,10 +337,17 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
     ? String(sessoes[sessoes.length - 1].atendimento.hora_final).slice(0, 5)
     : ''
 
-  function selecionarSubstituto(sessaoId: number, profId: number | null, profNome: string | null) {
+  function selecionarSubstituto(
+    sessaoId: number,
+    profId: number | null,
+    profNome: string | null,
+    profTerapiaNome: string | null = null
+  ) {
     setSessoes((prev) =>
       prev.map((s) =>
-        s.id === sessaoId ? { ...s, disponivel: false, substitutoId: profId, substitutoNome: profNome } : s
+        s.id === sessaoId
+          ? { ...s, disponivel: false, substitutoId: profId, substitutoNome: profNome, substitutoTerapiaNome: profTerapiaNome }
+          : s
       )
     )
   }
@@ -265,21 +355,61 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
   function marcarDisponivel(sessaoId: number) {
     setSessoes((prev) =>
       prev.map((s) =>
-        s.id === sessaoId ? { ...s, disponivel: true, substitutoId: null, substitutoNome: null } : s
+        s.id === sessaoId
+          ? { ...s, disponivel: true, substitutoId: null, substitutoNome: null,
+              substitutoTerapiaNome: null, buscaOutraEspecialidade: false, motivoExcecao: '' }
+          : s
       )
     )
   }
 
   function marcarTodosDisponiveis() {
     setSessoes((prev) =>
-      prev.map((s) => ({ ...s, disponivel: true, substitutoId: null, substitutoNome: null }))
+      prev.map((s) => ({ ...s, disponivel: true, substitutoId: null, substitutoNome: null,
+        substitutoTerapiaNome: null, buscaOutraEspecialidade: false, motivoExcecao: '' }))
     )
   }
 
   function marcarTodosIndisponiveis() {
     setSessoes((prev) =>
-      prev.map((s) => ({ ...s, disponivel: false, substitutoId: null, substitutoNome: null }))
+      prev.map((s) => ({ ...s, disponivel: false, substitutoId: null, substitutoNome: null,
+        substitutoTerapiaNome: null, buscaOutraEspecialidade: false, motivoExcecao: '' }))
     )
+  }
+
+  function toggleBuscaOutraEspecialidade(sessaoId: number, ativo: boolean) {
+    if (ativo) garantirTodosProfissionaisCarregados()
+    setSessoes((prev) =>
+      prev.map((s) => {
+        if (s.id !== sessaoId) return s
+        if (ativo) return { ...s, buscaOutraEspecialidade: true }
+        // Desligou o toggle com um substituto fora da especialidade selecionado → desfaz o pick
+        if (calcForaDaEspecialidade(s)) {
+          return {
+            ...s,
+            buscaOutraEspecialidade: false,
+            substitutoId: null,
+            substitutoNome: null,
+            substitutoTerapiaNome: null,
+            disponivel: false,
+            motivoExcecao: '',
+          }
+        }
+        return { ...s, buscaOutraEspecialidade: false }
+      })
+    )
+  }
+
+  function setMotivoExcecaoSessao(sessaoId: number, motivo: string) {
+    setSessoes((prev) => prev.map((s) => (s.id === sessaoId ? { ...s, motivoExcecao: motivo } : s)))
+  }
+
+  function handleClickConfirmar() {
+    if (sessoesForaEspecialidade.length > 0) {
+      setConfirmandoExcecao(true)
+      return
+    }
+    handleConfirmar()
   }
 
   async function handleConfirmar() {
@@ -358,8 +488,9 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
             : null
 
         await Promise.all(
-          sessoesSub.map((s) =>
-            registrarSubstituicao({
+          sessoesSub.map((s) => {
+            const fora = calcForaDaEspecialidade(s)
+            return registrarSubstituicao({
               sessao_id:                    s.id,
               paciente_id:                  (s.atendimento as any).paciente_id ?? null,
               paciente_nome:                ((s.atendimento as any).paciente_nome ?? null) as string | null,
@@ -375,8 +506,10 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
               competencia,
               motivo:                       motivoCompleto || null,
               usuario_responsavel:          usuarioResponsavel,
+              fora_da_especialidade:        fora,
+              motivo_excecao:               fora ? (s.motivoExcecao.trim() || null) : null,
             })
-          )
+          })
         )
       }
 
@@ -658,9 +791,13 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
                   profsUnicos={profsUnicosModal}
                   slotsMap={slotsMap}
                   recomendadoId={sessao.recomendadoId}
+                  todosProfissionais={todosProfissionais}
+                  carregandoTodos={carregandoTodos}
                   onSelecionar={selecionarSubstituto}
                   onMarcarDisponivel={marcarDisponivel}
                   onVerMais={() => setVerMaisSessao(sessao)}
+                  onToggleForaEspecialidade={toggleBuscaOutraEspecialidade}
+                  onMotivoExcecaoChange={setMotivoExcecaoSessao}
                 />
               ))}
             </div>
@@ -671,7 +808,12 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
         <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/60 flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2 text-base text-slate-500">
             <Users size={17} className="text-slate-400 shrink-0" />
-            {semCobertura > 0 ? (
+            {sessoesForaSemMotivo.length > 0 ? (
+              <span>
+                <b className="text-amber-700">{sessoesForaSemMotivo.length} {sessoesForaSemMotivo.length === 1 ? 'sessão fora da especialidade' : 'sessões fora da especialidade'}</b>{' '}
+                sem motivo da exceção preenchido.
+              </span>
+            ) : semCobertura > 0 ? (
               <span>
                 <b className="text-slate-700">{semCobertura} {semCobertura === 1 ? 'sessão' : 'sessões'}</b>{' '}
                 ainda sem cobertura. Selecione um substituto ou deixe como{' '}
@@ -691,8 +833,8 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
               Cancelar
             </button>
             <button
-              disabled={salvando}
-              onClick={handleConfirmar}
+              disabled={salvando || sessoesForaSemMotivo.length > 0}
+              onClick={handleClickConfirmar}
               className="px-6 h-11 rounded-xl bg-[#059669] text-white text-base font-semibold hover:bg-[#047857] disabled:opacity-50 transition flex items-center gap-2 focus-visible:ring-2 focus-visible:ring-[#059669]/50 focus-visible:ring-offset-1 focus-visible:outline-none"
             >
               {salvando ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
@@ -701,6 +843,52 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
           </div>
         </div>
       </div>
+
+      {/* ── Overlay de confirmação: substituição fora da especialidade ── */}
+      {confirmandoExcecao && (
+        <div
+          onClick={() => setConfirmandoExcecao(false)}
+          className="fixed inset-0 z-70 bg-black/60 flex items-center justify-center p-4"
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            className="bg-white w-full max-w-md rounded-2xl overflow-hidden shadow-2xl"
+          >
+            <div className="px-6 py-5 flex items-start gap-3 border-b border-amber-100 bg-amber-50">
+              <AlertTriangle size={22} className="text-amber-500 shrink-0 mt-0.5" />
+              <div>
+                <h3 className="text-base font-bold text-slate-800">Confirmar substituição fora da especialidade?</h3>
+                <p className="text-sm text-slate-600 mt-1">
+                  {sessoesForaEspecialidade.length} {sessoesForaEspecialidade.length === 1 ? 'sessão será coberta' : 'sessões serão cobertas'}{' '}
+                  por profissional de outra especialidade. A exceção será registrada no histórico com o motivo informado.
+                </p>
+              </div>
+            </div>
+            <div className="px-6 py-4 space-y-2 max-h-48 overflow-y-auto">
+              {sessoesForaEspecialidade.map((s) => (
+                <div key={s.id} className="text-xs text-slate-600 flex items-center justify-between gap-2">
+                  <span className="truncate">{String(s.atendimento.hora_inicial).slice(0, 5)} · {getPaciente(s.atendimento)}</span>
+                  <span className="font-semibold text-amber-700 truncate">{s.substitutoNome}</span>
+                </div>
+              ))}
+            </div>
+            <div className="px-6 py-4 border-t border-slate-100 bg-slate-50/60 flex justify-end gap-2">
+              <button
+                onClick={() => setConfirmandoExcecao(false)}
+                className="px-5 h-10 rounded-xl border border-slate-200 bg-white text-sm font-semibold text-slate-600 hover:bg-slate-50 transition focus-visible:ring-2 focus-visible:ring-[#3A8FB7]/50 focus-visible:outline-none"
+              >
+                Voltar e revisar
+              </button>
+              <button
+                onClick={() => { setConfirmandoExcecao(false); handleConfirmar() }}
+                className="px-5 h-10 rounded-xl bg-amber-600 text-white text-sm font-semibold hover:bg-amber-700 transition focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:ring-offset-1 focus-visible:outline-none"
+              >
+                Sim, confirmar exceção
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ── Modal Ver mais ── */}
       {verMaisSessao && (
@@ -722,7 +910,8 @@ export default function CoberturaModal({ grupo, data, onClose, onSuccess }: Prop
           }}
           substitutoAtualId={verMaisSessao.substitutoId}
           onSelect={(id, nome) => {
-            selecionarSubstituto(verMaisSessao.id, id, nome)
+            const prof = profissionais.find((p) => p.profissional_id === id)
+            selecionarSubstituto(verMaisSessao.id, id, nome, prof?.terapia_nome ?? null)
             setVerMaisSessao(null)
           }}
           onClose={() => setVerMaisSessao(null)}
@@ -740,18 +929,26 @@ const SessionRow = memo(function SessionRow({
   profsUnicos,
   slotsMap,
   recomendadoId,
+  todosProfissionais,
+  carregandoTodos,
   onSelecionar,
   onMarcarDisponivel,
   onVerMais,
+  onToggleForaEspecialidade,
+  onMotivoExcecaoChange,
 }: {
   sessao: SessaoCobertura
   profissionais: SlotModalSubstituicao[]
   profsUnicos: { id: number; nome: string; unidade: string; terapia_nome: string }[]
   slotsMap: Map<number, SlotModalSubstituicao[]>
   recomendadoId: number | null
-  onSelecionar: (id: number, profId: number | null, nome: string | null) => void
+  todosProfissionais: SlotModalSubstituicao[] | null
+  carregandoTodos: boolean
+  onSelecionar: (id: number, profId: number | null, nome: string | null, terapiaNome?: string | null) => void
   onMarcarDisponivel: (id: number) => void
   onVerMais: () => void
+  onToggleForaEspecialidade: (sessaoId: number, ativo: boolean) => void
+  onMotivoExcecaoChange: (sessaoId: number, motivo: string) => void
 }) {
   const hora = String(sessao.atendimento.hora_inicial).slice(0, 5)
   const horaFim = String(sessao.atendimento.hora_final).slice(0, 5)
@@ -822,6 +1019,15 @@ const SessionRow = memo(function SessionRow({
   const restante = Math.max(0, profsOrdenados.length - 5)
   const selecionadoId = sessao.substitutoId
   const temSubstituto = !!selecionadoId || !!sessao.substitutoNome
+  const foraDaEspecialidadeAtual = calcForaDaEspecialidade(sessao)
+  const toggleManualRef = useRef<HTMLButtonElement>(null)
+
+  // Esc no campo de busca cancela a substituição manual e devolve o foco ao botão
+  // que a abriu — assim um 2º Esc (agora capturado pelo diálogo) fecha o modal.
+  function cancelarSubstituicaoManual() {
+    onToggleForaEspecialidade(sessao.id, false)
+    toggleManualRef.current?.focus()
+  }
 
   return (
     <div className="flex flex-col md:flex-row md:items-stretch bg-white border border-slate-100 rounded-xl overflow-hidden hover:border-slate-200 transition">
@@ -885,6 +1091,7 @@ const SessionRow = memo(function SessionRow({
         <p className="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wide">
           Profissionais compatíveis da semana
         </p>
+
         <div className="flex flex-nowrap md:flex-wrap gap-2 items-start overflow-x-auto pb-1 md:pb-0">
           {/* Profissionais */}
           {top3.map((prof) => (
@@ -893,7 +1100,7 @@ const SessionRow = memo(function SessionRow({
               prof={prof}
               selecionado={selecionadoId === prof.id}
               recomendado={recomendadoId === prof.id}
-              onClick={() => onSelecionar(sessao.id, prof.id, prof.nome)}
+              onClick={() => onSelecionar(sessao.id, prof.id, prof.nome, prof.terapia_nome)}
             />
           ))}
 
@@ -908,7 +1115,53 @@ const SessionRow = memo(function SessionRow({
               <span className="text-xs text-slate-400 text-center leading-tight">Ver mais</span>
             </button>
           )}
+
+          {/* Substituição manual — fora da matriz de especialidade */}
+          <button
+            ref={toggleManualRef}
+            type="button"
+            role="switch"
+            aria-checked={sessao.buscaOutraEspecialidade}
+            onClick={() => onToggleForaEspecialidade(sessao.id, !sessao.buscaOutraEspecialidade)}
+            className={`flex flex-col items-center justify-center gap-1 p-2 rounded-xl border-2 transition shrink-0 w-25 min-h-22 ml-auto focus-visible:ring-2 focus-visible:ring-amber-400 focus-visible:outline-none ${
+              sessao.buscaOutraEspecialidade
+                ? 'border-amber-500 bg-amber-50'
+                : 'border-dashed border-amber-300 hover:border-amber-500 bg-white'
+            }`}
+          >
+            <Search size={16} className="text-amber-500" />
+            <span className="text-[11px] font-semibold text-amber-700 text-center leading-tight">
+              Substituição Manual
+            </span>
+          </button>
         </div>
+
+        {sessao.buscaOutraEspecialidade && (
+          <div className="mt-3 pt-3 border-t border-dashed border-slate-200 space-y-2">
+            <SeletorTerapeutaForaEspecialidade
+              todosProfissionais={todosProfissionais ?? []}
+              carregando={carregandoTodos}
+              hora={hora}
+              valorSelecionadoId={foraDaEspecialidadeAtual ? sessao.substitutoId : null}
+              onSelect={(id, nome, terapiaNome) => onSelecionar(sessao.id, id, nome, terapiaNome)}
+              onCancel={cancelarSubstituicaoManual}
+            />
+            {foraDaEspecialidadeAtual && (
+              <div>
+                <label className="block text-[11px] font-semibold text-amber-700 mb-1">
+                  Motivo da exceção (obrigatório)
+                </label>
+                <input
+                  type="text"
+                  value={sessao.motivoExcecao}
+                  onChange={(e) => onMotivoExcecaoChange(sessao.id, e.target.value)}
+                  placeholder="Ex.: nenhum terapeuta da especialidade disponível neste horário"
+                  className="w-full rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs outline-none focus:ring-2 focus:ring-amber-400"
+                />
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {/* Col 4 – Seleção atual */}
@@ -929,6 +1182,11 @@ const SessionRow = memo(function SessionRow({
               <span className="text-xs font-semibold text-[#3A8FB7]">Seleção atual</span>
             </div>
             <p className="text-sm font-bold text-slate-800 leading-snug">{sessao.substitutoNome}</p>
+            {foraDaEspecialidadeAtual && (
+              <span className="inline-block mt-1 text-[10px] font-semibold text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded-full">
+                Fora da especialidade
+              </span>
+            )}
           </div>
         ) : sessao.disponivel === false ? (
           <div className="bg-slate-50 border border-slate-200 rounded-xl p-3 w-full">
@@ -1074,42 +1332,3 @@ function formatarData(data: string): string {
   return `${dia} de ${meses[mes - 1]} de ${ano} (${diasSemana[date.getDay()]})`
 }
 
-function getProfissionaisUnicos(
-  slots: SlotModalSubstituicao[]
-): { id: number; nome: string; unidade: string; terapia_nome: string }[] {
-  const map = new Map<number, { id: number; nome: string; unidade: string; terapia_nome: string }>()
-  for (const s of slots) {
-    if (!map.has(s.profissional_id)) {
-      map.set(s.profissional_id, {
-        id: s.profissional_id,
-        nome: s.profissional_nome,
-        unidade: s.unidade,
-        terapia_nome: s.terapia_nome,
-      })
-    }
-  }
-  return Array.from(map.values())
-}
-
-function getStatusProfNaHora(
-  profSlots: SlotModalSubstituicao[],
-  hora: string
-): { status: 'livre' | 'ocupado' | 'sem_agenda_hoje'; paciente: string | null } {
-  if (profSlots.length > 0 && profSlots.every((s) => s.status_slot === 'sem_agenda_hoje')) {
-    return { status: 'sem_agenda_hoje', paciente: null }
-  }
-
-  const hojeSlots = profSlots.filter((s) => s.status_slot !== 'sem_agenda_hoje')
-  const horaNorm = hora.slice(0, 5)
-  const slotNaHora = hojeSlots.find((s) => s.hora.slice(0, 5) === horaNorm)
-
-  if (!slotNaHora) {
-    return { status: 'livre', paciente: null }
-  }
-
-  if (slotNaHora.status_slot?.toLowerCase() === 'livre') {
-    return { status: 'livre', paciente: null }
-  }
-
-  return { status: 'ocupado', paciente: slotNaHora.paciente_nome }
-}

@@ -19,6 +19,8 @@ export type RegistroSubstituicao = {
   competencia: string
   motivo?: string | null
   usuario_responsavel?: string | null
+  fora_da_especialidade?: boolean
+  motivo_excecao?: string | null
 }
 
 export type CriteriaData = {
@@ -45,6 +47,8 @@ export async function registrarSubstituicao(payload: RegistroSubstituicao): Prom
       competencia:                  payload.competencia,
       motivo:                       payload.motivo ?? null,
       usuario_responsavel:          payload.usuario_responsavel ?? null,
+      fora_da_especialidade:        payload.fora_da_especialidade ?? false,
+      motivo_excecao:               payload.fora_da_especialidade ? (payload.motivo_excecao ?? null) : null,
     })
     if (error) console.error('[substituicoes] Erro ao registrar histórico:', error)
   } catch (err) {
