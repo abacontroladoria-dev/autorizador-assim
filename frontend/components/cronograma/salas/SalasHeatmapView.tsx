@@ -7,7 +7,7 @@
 // Ocupação de Profissionais).
 
 import { useEffect, useRef } from "react"
-import { AlertTriangle, Eye, EyeOff } from "lucide-react"
+import { AlertTriangle, Eye, EyeOff, ShieldCheck } from "lucide-react"
 import { textoFaixaOcupacaoSala } from "@/lib/cronograma/salas"
 import { CAPACIDADE_LABEL_CURTO } from "@/lib/cronograma/salasTypes"
 import { useStatusLabels } from "@/hooks/useStatusLabels"
@@ -51,9 +51,11 @@ interface SalasHeatmapViewProps {
   onIsolarSala: (id: string, nome: string) => void
   /** Id da sala em modo solo, se houver — usado só para trocar o ícone do botão para indicar o estado ativo. */
   salaIsoladaId: string | null
+  /** Ids de sala com pelo menos uma regra em "Exclusividade de salas com terapias" — só pra exibir o selo ao lado do nome da sala. */
+  salasComExclusividade: Set<string>
 }
 
-export function SalasHeatmapView({ salas, onIsolarSala, salaIsoladaId }: SalasHeatmapViewProps) {
+export function SalasHeatmapView({ salas, onIsolarSala, salaIsoladaId, salasComExclusividade }: SalasHeatmapViewProps) {
   const salaRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map())
   /** Sala isolada mais recente — guardado à parte porque `salaIsoladaId` já
       vira null no MESMO clique que dispara o efeito abaixo (precisamos saber
@@ -112,7 +114,14 @@ export function SalasHeatmapView({ salas, onIsolarSala, salaIsoladaId }: SalasHe
                     <td rowSpan={2} className="sticky left-0 z-10 w-[200px] max-w-[200px] border-t border-border bg-card px-3 py-2 align-top">
                       <div className="flex items-start gap-1.5">
                         <div className="min-w-0 flex-1">
-                          <div className="truncate font-semibold text-foreground" title={sala.nome_exibicao}>{sala.nome_exibicao}</div>
+                          <div className="flex items-center gap-1">
+                            <span className="truncate font-semibold text-foreground" title={sala.nome_exibicao}>{sala.nome_exibicao}</span>
+                            {salasComExclusividade.has(sala.id) && (
+                              <span title="Sala com exclusividade cadastrada (Exclusividade de salas com terapias)">
+                                <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-blue-600 dark:text-blue-400" strokeWidth={2.5} />
+                              </span>
+                            )}
+                          </div>
                           <div className="truncate text-[11px] text-muted-foreground" title={sala.unidade_nome}>{sala.unidade_nome}</div>
                         </div>
                         <button
@@ -192,13 +201,14 @@ function HeatCell({ slot, bordaTopo }: { slot: SlotOcupacaoSala | undefined; bor
   const capacidadeTotal = slot.alocacoes.reduce((s, a) => s + a.sessoesCapacidadeTurno, 0)
   const pct = capacidadeTotal > 0 ? sessoesTotal / capacidadeTotal : null
   const cor = corFaixaOcupacaoPastel(pct)
+  const inconsistente = slot.inconsistente || slot.violaExclusividade
   return (
     <td
-      className={`relative border-l border-border px-1 py-2 text-center text-[10px] font-semibold ${bordaCls} ${slot.inconsistente ? "ring-2 ring-inset ring-red-500" : ""}`}
+      className={`relative border-l border-border px-1 py-2 text-center text-[10px] font-semibold ${bordaCls} ${inconsistente ? "ring-2 ring-inset ring-red-500" : ""}`}
       style={{ background: cor, color: "#222847" }}
-      title={`${slot.alocacoes.length} alocação(ões) · ${sessoesTotal} sessão(ões) de ${capacidadeTotal} no turno${slot.inconsistente ? " · ⚠️ EXCEDE CAPACIDADE" : ""}`}
+      title={`${slot.alocacoes.length} alocação(ões) · ${sessoesTotal} sessão(ões) de ${capacidadeTotal} no turno${slot.inconsistente ? " · ⚠️ EXCEDE CAPACIDADE DE PROF. POR SALA" : ""}${slot.violaExclusividade ? " · ⚠️ FERE EXCLUSIVIDADE" : ""}`}
     >
-      {slot.inconsistente && (
+      {inconsistente && (
         <AlertTriangle
           className="absolute right-0.5 top-0.5 h-3 w-3 text-red-600 drop-shadow-sm"
           strokeWidth={2.5}

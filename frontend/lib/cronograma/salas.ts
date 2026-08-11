@@ -10,6 +10,7 @@ import { DOW_PT } from "./ocupacaoConst"
 import { pm, fm, cleanTxt } from "./helpers"
 import { normTxt, HORAS_GRID } from "./constants"
 import { capacidadeProjetadaSala, STATUS_SLOT_EXCLUIDO } from "./salasTypes"
+import { construirIndiceExclusividadeTerapia, verificarExclusividade, type IndiceExclusividadeTerapia } from "./exclusividadeTerapia"
 import type {
   Sala,
   SalaCapacidade,
@@ -24,7 +25,10 @@ import type {
   StatusOcupacaoSlot,
   SlotDetalhado,
   BlocoDetalhado,
+  SalaTerapiaExclusiva,
 } from "./salasTypes"
+
+const INDICE_EXCLUSIVIDADE_VAZIO = construirIndiceExclusividadeTerapia([])
 
 export { corFaixaOcupacao }
 
@@ -140,6 +144,8 @@ export function calcularSlotsDaSala(
   alocacoesSala: AlocacaoSala[],
   linhasSala: AgendaSalaRow[],
   linhasUnidade: AgendaSalaRow[] = linhasSala,
+  indiceExclusividade: IndiceExclusividadeTerapia = INDICE_EXCLUSIVIDADE_VAZIO,
+  nomeDaSalaPorId: (salaId: string) => string = id => id,
 ): SlotOcupacaoSala[] {
   const capacidadeProjetada = capacidadeProjetadaSala(sala.capacidade, sala.status)
 
@@ -227,6 +233,7 @@ export function calcularSlotsDaSala(
           ?? sessoesPorProfissional.get(`${dow}|${turno}|${normTxt(a.profissional_nome)}`)
           ?? 0
         const sessoesLimitadas = Math.min(sessoesReais, capacidadeBloco)
+        const verificacao = verificarExclusividade(sala.id, a.terapia_id, indiceExclusividade, nomeDaSalaPorId)
         return {
           alocacaoId: a.id,
           profissionalNome: a.profissional_nome,
@@ -235,11 +242,13 @@ export function calcularSlotsDaSala(
           sessoesCapacidadeTurno: capacidadeBloco,
           pctOcupacao: capacidadeBloco > 0 ? sessoesLimitadas / capacidadeBloco : null,
           semCruzamentoCsv: sessoesReais === 0,
+          violacaoExclusividade: verificacao.status === "bloqueado" ? { direcao: verificacao.direcao, motivo: verificacao.motivo } : null,
         }
       })
 
       const status = statusDoSlot(sala.status, capacidadeProjetada, cards.length)
       const inconsistente = sala.status === "operacional" && cards.length > capacidadeProjetada
+      const violaExclusividade = cards.some(c => c.violacaoExclusividade !== null)
 
       // Blocos de 40min, um por "cadeira" (vaga simultânea, até capacidadeProjetada)
       // × horário oficial do turno. Cada cadeira corresponde à alocação planejada
@@ -286,6 +295,7 @@ export function calcularSlotsDaSala(
         alocacoes: cards,
         status,
         inconsistente,
+        violaExclusividade,
         blocos,
       })
     }
@@ -294,11 +304,23 @@ export function calcularSlotsDaSala(
   return slots
 }
 
-export function calcularOcupacaoDaSala(sala: Sala, alocacoes: AlocacaoSala[], linhas: AgendaSalaRow[]): SalaComOcupacao {
+/** Resolve um `sala_id` em rótulo legível ("Unidade · Nome de exibição") — usado nas mensagens de violação de exclusividade. */
+export function construirNomeDaSalaPorId(salas: Sala[]): (salaId: string) => string {
+  const porId = new Map(salas.map(s => [s.id, `${s.unidade_nome} · ${s.nome_exibicao}`]))
+  return (salaId: string) => porId.get(salaId) ?? "sala removida"
+}
+
+export function calcularOcupacaoDaSala(
+  sala: Sala,
+  alocacoes: AlocacaoSala[],
+  linhas: AgendaSalaRow[],
+  indiceExclusividade: IndiceExclusividadeTerapia = INDICE_EXCLUSIVIDADE_VAZIO,
+  nomeDaSalaPorId: (salaId: string) => string = id => id,
+): SalaComOcupacao {
   const linhasSala = linhasDaSala(sala, linhas)
   const linhasUnidade = linhasDaUnidade(sala, linhas)
   const alocacoesSala = alocacoes.filter(a => a.sala_id === sala.id)
-  const slots = calcularSlotsDaSala(sala, alocacoesSala, linhasSala, linhasUnidade)
+  const slots = calcularSlotsDaSala(sala, alocacoesSala, linhasSala, linhasUnidade, indiceExclusividade, nomeDaSalaPorId)
   const relevantes = slots.filter(s => !STATUS_SLOT_EXCLUIDO.includes(s.status))
   const ocupados = relevantes.filter(s => s.status === "ocupado" || s.status === "parcial").length
   const pctOcupacaoSemanal = relevantes.length > 0 ? ocupados / relevantes.length : null
@@ -307,7 +329,9 @@ export function calcularOcupacaoDaSala(sala: Sala, alocacoes: AlocacaoSala[], li
 
 // ─── RESUMO POR UNIDADE (adaptado de calcularResumoSalas) ────────────────────
 
-export function calcularResumoUnidades(salas: Sala[], alocacoes: AlocacaoSala[], linhas: AgendaSalaRow[]): ResumoUnidadeSalas[] {
+export function calcularResumoUnidades(salas: Sala[], alocacoes: AlocacaoSala[], linhas: AgendaSalaRow[], exclusividades: SalaTerapiaExclusiva[] = []): ResumoUnidadeSalas[] {
+  const indiceExclusividade = construirIndiceExclusividadeTerapia(exclusividades)
+  const nomeDaSalaPorId = construirNomeDaSalaPorId(salas)
   const porUnidade = new Map<string, Sala[]>()
   salas.forEach(s => {
     const unidade = normalizarUnidadeOcupacao(s.unidade_nome)
@@ -338,7 +362,7 @@ export function calcularResumoUnidades(salas: Sala[], alocacoes: AlocacaoSala[],
       capacidadeSimultanea += capacidadeProjetadaSala(sala.capacidade, sala.status)
       salasPorCapacidade[sala.capacidade]++
 
-      const { slots } = calcularOcupacaoDaSala(sala, alocacoes, linhas)
+      const { slots } = calcularOcupacaoDaSala(sala, alocacoes, linhas, indiceExclusividade, nomeDaSalaPorId)
       slots.forEach(slot => {
         if (slot.status === "adm" || slot.status === "nti") return
         const turnoBucket = porTurnoAcc[slot.turno]
@@ -356,7 +380,7 @@ export function calcularResumoUnidades(salas: Sala[], alocacoes: AlocacaoSala[],
           slotsLivres++
           turnoBucket.slotsLivres++
         }
-        if (slot.inconsistente) inconsistencias++
+        if (slot.inconsistente || slot.violaExclusividade) inconsistencias++
 
         // Ocupação granular: soma direto de slot.blocos (já calculado bloco a
         // bloco, por horário EXATO, em calcularSlotsDaSala) — mesma fonte lida
@@ -501,7 +525,7 @@ export function resumoOcupacaoDeItens(itens: SalaComOcupacao[]): ResumoOcupacaoI
       }
       slotsTotal++
       if (slot.status === "ocupado" || slot.status === "parcial") slotsOcupados++
-      if (slot.inconsistente) inconsistencias++
+      if (slot.inconsistente || slot.violaExclusividade) inconsistencias++
     })
   })
 

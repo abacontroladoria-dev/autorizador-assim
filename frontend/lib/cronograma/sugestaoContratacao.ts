@@ -20,7 +20,8 @@ import type { CsvRow, LaudoRow } from "@/types/cronograma"
 import type { ConvenioValor, ConvenioValorPaciente } from "./convenioValoresTypes"
 import type { FeriadoInfo } from "@/types/feriados"
 import type { CandidatoNaSugestao, ProjecaoRemuneracaoSugestao, SalaVinculada, SugestaoContratacao } from "./sugestaoContratacaoTypes"
-import type { SalaComOcupacao } from "./salasTypes"
+import type { SalaComOcupacao, SalaTerapiaExclusiva } from "./salasTypes"
+import { construirIndiceExclusividadeTerapia, type IndiceExclusividadeTerapia } from "./exclusividadeTerapia"
 
 const FAIXAS_CASCATA = [70, 60, 50] as const
 
@@ -290,25 +291,43 @@ export function filtrarPorDisponibilidadeInterna(
 
 const TURNO_PARA_ALOCACAO: Record<Turno, "Manhã" | "Tarde"> = { manha: "Manhã", tarde: "Tarde" }
 
-/** Sala livre em TODOS os turnos exigidos pela sugestão (mesma unidade), com
- *  menor pctOcupacaoSemanal (mais ociosa) entre as candidatas. */
+/** Sala livre em TODOS os turnos exigidos pela sugestão (mesma unidade),
+ *  respeitando exclusividade de sala×terapia: salas reservadas só entram como
+ *  candidatas pra terapias que constam na sua lista; terapias com regra
+ *  'obrigatoria' só podem usar as salas reservadas pra elas. Entre as
+ *  candidatas restantes, prioriza as reservadas pra essa terapia (regra
+ *  'preferencial') e por fim a de menor pctOcupacaoSemanal (mais ociosa). */
 function encontrarSalaLivre(
   unidade: string, dia: string, turnos: Turno[], salasComOcupacao: SalaComOcupacao[],
+  terapiaId: number | null, indiceExclusividade: IndiceExclusividadeTerapia,
 ): SalaVinculada | null {
   const unidadeAlvo = normalizarUnidadeOcupacao(unidade)
   const dow = dowDeDiaSemana(dia)
   if (dow === null) return null
   const turnosAlocacao = turnos.map(t => TURNO_PARA_ALOCACAO[t])
 
-  const candidatas = salasComOcupacao.filter(({ sala, slots }) => {
+  const livres = salasComOcupacao.filter(({ sala, slots }) => {
     if (normalizarUnidadeOcupacao(sala.unidade_nome) !== unidadeAlvo) return false
     return turnosAlocacao.every(turno =>
       slots.some(s => s.dow === dow && s.turno === turno && s.status === "livre"),
     )
   })
-  if (!candidatas.length) return null
+  if (!livres.length) return null
 
-  const melhor = candidatas.sort((a, b) => (a.pctOcupacaoSemanal ?? 0) - (b.pctOcupacaoSemanal ?? 0))[0]
+  const { salaParaTerapias, terapiasObrigatorias } = indiceExclusividade
+  const ehExclusivaDaTerapia = (salaId: string) => terapiaId !== null && (salaParaTerapias.get(salaId)?.has(terapiaId) ?? false)
+  const ehSalaReservada = (salaId: string) => (salaParaTerapias.get(salaId)?.size ?? 0) > 0
+
+  const permitidas = livres.filter(({ sala }) => {
+    if (ehSalaReservada(sala.id)) return ehExclusivaDaTerapia(sala.id)
+    return terapiaId === null || !terapiasObrigatorias.has(terapiaId)
+  })
+  if (!permitidas.length) return null
+
+  const preferidas = permitidas.filter(({ sala }) => ehExclusivaDaTerapia(sala.id))
+  const pool = preferidas.length ? preferidas : permitidas
+
+  const melhor = pool.sort((a, b) => (a.pctOcupacaoSemanal ?? 0) - (b.pctOcupacaoSemanal ?? 0))[0]
   return {
     salaId: melhor.sala.id,
     nomeExibicao: melhor.sala.nome_exibicao,
@@ -318,15 +337,23 @@ function encontrarSalaLivre(
   }
 }
 
-/** Vincula a melhor sala livre disponível a cada sugestão (Tarefa 2). Nunca
- *  bloqueia a sugestão — sem sala livre, salaVinculada fica null. */
+/** Vincula a melhor sala livre disponível a cada sugestão (Tarefa 2),
+ *  respeitando exclusividade de sala×terapia (Tarefa 6 — ver
+ *  ExclusividadeTerapiaModal.tsx). Nunca bloqueia a sugestão — sem sala
+ *  livre compatível, salaVinculada fica null. */
 export function anexarSala(
   sugestoes: SugestaoContratacao[], salasComOcupacao: SalaComOcupacao[],
+  exclusividades: SalaTerapiaExclusiva[] = [],
 ): SugestaoContratacao[] {
-  return sugestoes.map(s => ({
-    ...s,
-    salaVinculada: encontrarSalaLivre(s.unidade, s.dia, s.turnos, salasComOcupacao),
-  }))
+  const indiceExclusividade = construirIndiceExclusividadeTerapia(exclusividades)
+  return sugestoes.map(s => {
+    const terapiaNome = terapiaDaEspecialidade(s.especialidade)
+    const terapiaId = NOME_PARA_TERAPIA_ID[normTxt(terapiaNome)] ?? null
+    return {
+      ...s,
+      salaVinculada: encontrarSalaLivre(s.unidade, s.dia, s.turnos, salasComOcupacao, terapiaId, indiceExclusividade),
+    }
+  })
 }
 
 /** Especialidade → nome de terapia representativo (mesma escolha usada no

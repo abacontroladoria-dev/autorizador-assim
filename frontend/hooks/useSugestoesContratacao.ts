@@ -4,12 +4,15 @@
 // grade da semana de referência + salas + valores de convênio + feriados, e
 // roda os 5 estágios do motor em lib/cronograma/sugestaoContratacao.ts.
 
-import { useMemo } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { useGradeAgendamentos } from "./useGradeAgendamentos"
 import { useOcupacaoSalas } from "./useOcupacaoSalas"
 import { useConvenioValores } from "./useConvenioValores"
 import { useFeriados } from "./useFeriados"
+import { listarExclusividadesTerapia } from "@/services/salas.service"
+import type { SalaTerapiaExclusiva } from "@/lib/cronograma/salasTypes"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
+import { filtrarCapacidadeLivreReservada } from "@/lib/cronograma/helpers"
 import {
   calcularTodosCombos, filtrarCombosPorFaixa, anexarModalidadeERemanejamento, filtrarPorDisponibilidadeInterna,
   anexarSala, anexarRemuneracaoEOrdenar, calcularGapMap, TODAS_FAIXAS_CASCATA,
@@ -32,11 +35,23 @@ export function useSugestoesContratacao(
   modo: ModoCascataOcupacao = "porTurno",
   faixasSelecionadas: ReadonlySet<FaixaCascata> = TODAS_FAIXAS_CASCATA,
 ): UseSugestoesContratacaoResult {
-  const { cRows, loading: loadingGrade, error: errorGrade, refWeek } = useGradeAgendamentos()
+  const { cRows: cRowsBrutos, loading: loadingGrade, error: errorGrade, refWeek } = useGradeAgendamentos()
+  // Amanda Ribeiro/Gracielle Rayane têm muitos horários "Livre" DE PROPÓSITO
+  // (não é capacidade real) — as sugestões automáticas de contratação (parte
+  // da tab "Simulação de Novo Prestador") não podem descontar esses horários
+  // como disponibilidade interna já existente.
+  const cRows = useMemo(() => filtrarCapacidadeLivreReservada(cRowsBrutos), [cRowsBrutos])
   const { lRows } = useCronogramaData()
   const { salasComOcupacao, loading: loadingSalas, error: errorSalas } = useOcupacaoSalas(refWeek.inicio, refWeek.fim)
   const { regrasGerais, excecoesPaciente, loading: loadingValores, error: errorValores } = useConvenioValores()
   const { feriados, loading: loadingFeriados } = useFeriados()
+
+  const [exclusividades, setExclusividades] = useState<SalaTerapiaExclusiva[]>([])
+  useEffect(() => {
+    let cancelled = false
+    listarExclusividadesTerapia().then(r => { if (!cancelled) setExclusividades(r) }).catch(() => {})
+    return () => { cancelled = true }
+  }, [])
 
   const mesReferencia = useMemo(() => {
     const [ano, mes] = refWeek.inicio.split("-").map(Number)
@@ -57,9 +72,9 @@ export function useSugestoesContratacao(
     const base = filtrarCombosPorFaixa(todosCombos, faixasSelecionadas)
     const comRemanejamento = anexarModalidadeERemanejamento(base, cRows, gapMap)
     const comDisponibilidade = filtrarPorDisponibilidadeInterna(comRemanejamento, cRows, gapMap)
-    const comSala = anexarSala(comDisponibilidade, salasComOcupacao)
+    const comSala = anexarSala(comDisponibilidade, salasComOcupacao, exclusividades)
     return anexarRemuneracaoEOrdenar(comSala, cRows, regrasGerais, excecoesPaciente, mesReferencia, feriados)
-  }, [todosCombos, faixasSelecionadas, cRows, lRows, salasComOcupacao, regrasGerais, excecoesPaciente, mesReferencia, feriados])
+  }, [todosCombos, faixasSelecionadas, cRows, lRows, salasComOcupacao, exclusividades, regrasGerais, excecoesPaciente, mesReferencia, feriados])
 
   return {
     sugestoes,

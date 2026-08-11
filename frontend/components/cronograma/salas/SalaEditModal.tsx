@@ -6,10 +6,12 @@ import { useEffect, useMemo, useState } from "react"
 import { Loader2, Save, Trash2 } from "lucide-react"
 import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
 import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
-import { criarSala, atualizarSala, arquivarSala, listarNucleos } from "@/services/salas.service"
+import { criarSala, atualizarSala, arquivarSala, listarNucleos, listarExclusividadesTerapia } from "@/services/salas.service"
 import { normNumeroSala, sugerirNumerosSalaDisponiveis } from "@/lib/cronograma/salas"
 import { useStatusLabels } from "@/hooks/useStatusLabels"
-import type { Sala, SalaInput, SalaCapacidade, SalaStatus } from "@/lib/cronograma/salasTypes"
+import type { Sala, SalaInput, SalaCapacidade, SalaStatus, SalaTerapiaExclusiva, ModoExclusividadeTerapia } from "@/lib/cronograma/salasTypes"
+
+const MODO_LABEL: Record<ModoExclusividadeTerapia, string> = { obrigatoria: "Obrigatória", preferencial: "Preferencial" }
 
 interface SalaEditModalProps {
   sala: Sala | null
@@ -33,10 +35,16 @@ const INPUT_CLS = "w-full rounded-lg border border-border bg-card px-2.5 py-1.5 
 export function SalaEditModal({ sala, todasSalas, onClose, onSaved }: SalaEditModalProps) {
   const [nucleos, setNucleos] = useState<string[]>([])
   const { labels: statusLabels } = useStatusLabels()
+  const [exclusividades, setExclusividades] = useState<SalaTerapiaExclusiva[]>([])
 
   useEffect(() => {
     listarNucleos().then(rows => setNucleos(rows.map(n => n.nome))).catch(() => {})
   }, [])
+
+  useEffect(() => {
+    if (!sala) return
+    listarExclusividadesTerapia().then(rows => setExclusividades(rows.filter(r => r.sala_id === sala.id))).catch(() => {})
+  }, [sala])
 
   const [form, setForm] = useState<SalaInput>({
     unidade_nome: sala?.unidade_nome ?? "",
@@ -232,6 +240,20 @@ export function SalaEditModal({ sala, todasSalas, onClose, onSaved }: SalaEditMo
             onChange={e => set("observacoes", e.target.value)}
           />
         </Campo>
+        {sala && exclusividades.length > 0 && (
+          <Campo label="Exclusividade de terapia (definida em Exclusividade de salas com terapias)" className="col-span-2">
+            <div className="flex flex-wrap gap-1.5 rounded-lg border border-border bg-muted/30 px-2.5 py-2">
+              {exclusividades
+                .slice()
+                .sort((a, b) => a.terapia_nome.localeCompare(b.terapia_nome))
+                .map(e => (
+                  <span key={e.id} className="rounded-full border border-border bg-card px-2 py-0.5 text-[11px] font-semibold text-foreground">
+                    {e.terapia_nome} <span className="font-normal text-muted-foreground">· {MODO_LABEL[e.modo]}</span>
+                  </span>
+                ))}
+            </div>
+          </Campo>
+        )}
       </div>
       {error && <div className="mt-3 text-xs font-semibold text-rose-600 dark:text-rose-400">{error}</div>}
 

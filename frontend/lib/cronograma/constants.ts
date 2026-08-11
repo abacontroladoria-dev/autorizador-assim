@@ -78,6 +78,21 @@ export const ABA_CLI_EXCL = new Set([
 
 export const ABA_EXT = new Set(["Aplicador ABA Casa", "Aplicador ABA Escola", "Aplicador ABA Escola/Casa"])
 
+// Profissionais com muitos horários "Livre" DE PROPÓSITO (motivo interno,
+// não é capacidade real disponível pra crescer) — pedido do usuário
+// (2026-08-11): NENHUMA ferramenta de ocupação/oportunidade pode oferecer
+// vaga pra esses IDs, sem exceção — inclui as duas abas de "Ocupar
+// Profissionais Disponíveis" (Por Nome do Profissional e Por Unidade/Dia/
+// Especialidade) e a "Simulação de Novo Prestador". Nomes completos (não os
+// abreviados usados antes, que nunca batiam com "Profissional" da grade —
+// ver comparação normalizada em filtrarCapacidadeLivreReservada/helpers.ts):
+//   8649 — Gracielle Rayane Faria Miranda
+//   8648 — Amanda Ribeiro Campos
+export const PROFISSIONAIS_SEM_CAPACIDADE_LIVRE = new Set([
+  "Gracielle Rayane Faria Miranda",
+  "Amanda Ribeiro Campos",
+])
+
 // Terapias que NÃO são sessões clínicas do paciente (sem presença do paciente —
 // profissional planeja/administra). Usado tanto pra excluir de checagens de
 // buraco/min_sessoes (inconsistencias.ts) quanto pra saber quando uma sessão
