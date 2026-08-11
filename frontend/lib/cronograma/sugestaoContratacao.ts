@@ -85,28 +85,41 @@ function melhorComboDoDia(
     : { turnos: ["manha", "tarde"], ...diaInteiro }
 }
 
-/** Gera sugestões de contratação por cascata de ocupação prevista: 70% → 60% →
- *  50%, retornando a primeira faixa que render pelo menos uma sugestão.
- *  `modo` decide se a % considerada é a do melhor turno isolado ("porTurno")
- *  ou sempre a de manhã+tarde combinados ("diaInteiro") — ver ModoCascataOcupacao. */
+export type FaixaCascata = (typeof FAIXAS_CASCATA)[number]
+
+/** Todas as faixas de ocupação prevista (70/60/50), cada combo classificado
+ *  na maior faixa que atinge — usado como valor padrão de `faixasSelecionadas`
+ *  em gerarCandidatosPorOcupacao, mostrando tudo até o usuário filtrar. */
+export const TODAS_FAIXAS_CASCATA: ReadonlySet<FaixaCascata> = new Set(FAIXAS_CASCATA)
+
+/** Gera sugestões de contratação por faixa de ocupação prevista: cada combo
+ *  (unidade+especialidade+dia) entra na MAIOR faixa que atinge (70%, senão
+ *  60%, senão 50%) — `faixasSelecionadas` filtra quais dessas faixas o
+ *  usuário quer ver, podendo escolher uma, duas ou as três juntas. `modo`
+ *  decide se a % considerada é a do melhor turno isolado ("porTurno") ou
+ *  sempre a de manhã+tarde combinados ("diaInteiro") — ver ModoCascataOcupacao. */
 export function gerarCandidatosPorOcupacao(
   lRows: LaudoRow[], cRows: CsvRow[], modo: ModoCascataOcupacao = "porTurno",
+  faixasSelecionadas: ReadonlySet<FaixaCascata> = TODAS_FAIXAS_CASCATA,
 ): SugestaoContratacao[] {
-  if (!cRows.length || !lRows.length) return []
+  if (!cRows.length || !lRows.length || !faixasSelecionadas.size) return []
 
   const gapMap = gapsParaMapa(calcularGaps(lRows, cRows))
   const especialidades = listarEspecialidades()
 
-  const combos: Omit<SugestaoContratacao, "faixaCascata">[] = []
+  const combos: SugestaoContratacao[] = []
   for (const unidade of UNIDADES_SIMULACAO) {
     for (const especialidade of especialidades) {
       for (const dia of DIAS_UTIL) {
         const { turnos, pct, candidatos } = melhorComboDoDia(unidade, especialidade, dia, cRows, gapMap, modo)
         if (!candidatos.length) continue
+        const faixaCascata = FAIXAS_CASCATA.find(f => pct >= f)
+        if (!faixaCascata || !faixasSelecionadas.has(faixaCascata)) continue
         combos.push({
           id: idSugestao(unidade, especialidade, dia, turnos),
           unidade, especialidade, dia, turnos,
           pctOcupacaoPrevista: pct,
+          faixaCascata,
           candidatos,
           modalidadeDominante: "adjacente",
           salaVinculada: null,
@@ -116,18 +129,11 @@ export function gerarCandidatosPorOcupacao(
     }
   }
 
-  for (const faixa of FAIXAS_CASCATA) {
-    const doFaixa = combos.filter(c => c.pctOcupacaoPrevista >= faixa)
-    if (!doFaixa.length) continue
-    return doFaixa
-      .map(c => ({ ...c, faixaCascata: faixa }))
-      .sort((a, b) =>
-        b.pctOcupacaoPrevista - a.pctOcupacaoPrevista ||
-        a.unidade.localeCompare(b.unidade) ||
-        a.especialidade.localeCompare(b.especialidade),
-      )
-  }
-  return []
+  return combos.sort((a, b) =>
+    b.pctOcupacaoPrevista - a.pctOcupacaoPrevista ||
+    a.unidade.localeCompare(b.unidade) ||
+    a.especialidade.localeCompare(b.especialidade),
+  )
 }
 
 /** Complementa os candidatos por adjacência com candidatos por remanejamento

@@ -12,7 +12,8 @@ import { useFeriados } from "./useFeriados"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 import {
   gerarCandidatosPorOcupacao, anexarModalidadeERemanejamento, filtrarPorDisponibilidadeInterna,
-  anexarSala, anexarRemuneracaoEOrdenar, calcularGapMap, type ModoCascataOcupacao,
+  anexarSala, anexarRemuneracaoEOrdenar, calcularGapMap, TODAS_FAIXAS_CASCATA,
+  type ModoCascataOcupacao, type FaixaCascata,
 } from "@/lib/cronograma/sugestaoContratacao"
 import type { SugestaoContratacao } from "@/lib/cronograma/sugestaoContratacaoTypes"
 import type { CsvRow } from "@/types/cronograma"
@@ -27,7 +28,10 @@ export interface UseSugestoesContratacaoResult {
   cRows: CsvRow[]
 }
 
-export function useSugestoesContratacao(modo: ModoCascataOcupacao = "porTurno"): UseSugestoesContratacaoResult {
+export function useSugestoesContratacao(
+  modo: ModoCascataOcupacao = "porTurno",
+  faixasSelecionadas: ReadonlySet<FaixaCascata> = TODAS_FAIXAS_CASCATA,
+): UseSugestoesContratacaoResult {
   const { cRows, loading: loadingGrade, error: errorGrade, refWeek } = useGradeAgendamentos()
   const { lRows } = useCronogramaData()
   const { salasComOcupacao, loading: loadingSalas, error: errorSalas } = useOcupacaoSalas(refWeek.inicio, refWeek.fim)
@@ -42,12 +46,12 @@ export function useSugestoesContratacao(modo: ModoCascataOcupacao = "porTurno"):
   const sugestoes = useMemo((): SugestaoContratacao[] => {
     if (!cRows.length || !lRows.length) return []
     const gapMap = calcularGapMap(lRows, cRows)
-    const base = gerarCandidatosPorOcupacao(lRows, cRows, modo)
+    const base = gerarCandidatosPorOcupacao(lRows, cRows, modo, faixasSelecionadas)
     const comRemanejamento = anexarModalidadeERemanejamento(base, cRows, gapMap)
     const comDisponibilidade = filtrarPorDisponibilidadeInterna(comRemanejamento, cRows)
     const comSala = anexarSala(comDisponibilidade, salasComOcupacao)
     return anexarRemuneracaoEOrdenar(comSala, cRows, regrasGerais, excecoesPaciente, mesReferencia, feriados)
-  }, [cRows, lRows, modo, salasComOcupacao, regrasGerais, excecoesPaciente, mesReferencia, feriados])
+  }, [cRows, lRows, modo, faixasSelecionadas, salasComOcupacao, regrasGerais, excecoesPaciente, mesReferencia, feriados])
 
   return {
     sugestoes,

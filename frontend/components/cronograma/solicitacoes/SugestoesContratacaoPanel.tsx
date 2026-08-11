@@ -14,7 +14,7 @@ import { SegmentedTabs } from "@/components/cronograma/ui/SegmentedTabs"
 import { InlineNotice } from "@/components/cronograma/ui/InlineNotice"
 import { RemanejamentoDetalheModal } from "./RemanejamentoDetalheModal"
 import type { CandidatoNaSugestao, SugestaoContratacao } from "@/lib/cronograma/sugestaoContratacaoTypes"
-import type { ModoCascataOcupacao } from "@/lib/cronograma/sugestaoContratacao"
+import type { ModoCascataOcupacao, FaixaCascata } from "@/lib/cronograma/sugestaoContratacao"
 import type { CsvRow } from "@/types/cronograma"
 import type { Turno } from "@/lib/cronograma/simulacaoNovoPrestador"
 
@@ -29,6 +29,8 @@ const FAIXA_LABEL: Record<70 | 60 | 50, string> = {
   60: "≥ 60% de ocupação prevista",
   50: "≥ 50% de ocupação prevista",
 }
+
+const FAIXAS_FILTRO: FaixaCascata[] = [70, 60, 50]
 
 function CardSugestao({
   sugestao, cRows, onAplicar,
@@ -144,12 +146,27 @@ function CardSugestao({
 
 export function SugestoesContratacaoPanel({ onAplicarSugestao }: Props) {
   const [modo, setModo] = useState<ModoCascataOcupacao>("diaInteiro")
+  const [faixasSelecionadas, setFaixasSelecionadas] = useState<ReadonlySet<FaixaCascata>>(new Set(FAIXAS_FILTRO))
   const [pagina, setPagina] = useState(0)
-  const { sugestoes, loading, error, laudosCarregados, refWeekLabel, cRows } = useSugestoesContratacao(modo)
+  const { sugestoes, loading, error, laudosCarregados, refWeekLabel, cRows } = useSugestoesContratacao(modo, faixasSelecionadas)
 
   if (!laudosCarregados) return null
 
   const mudarModo = (novo: ModoCascataOcupacao) => { setModo(novo); setPagina(0) }
+
+  const alternarFaixa = (faixa: FaixaCascata) => {
+    setFaixasSelecionadas(prev => {
+      const proxima = new Set(prev)
+      if (proxima.has(faixa)) {
+        if (proxima.size === 1) return prev // sempre precisa sobrar pelo menos 1 faixa marcada
+        proxima.delete(faixa)
+      } else {
+        proxima.add(faixa)
+      }
+      return proxima
+    })
+    setPagina(0)
+  }
 
   const totalPaginas = Math.max(1, Math.ceil(sugestoes.length / SUGESTOES_POR_PAGINA))
   const paginaAtual = Math.min(pagina, totalPaginas - 1)
@@ -183,12 +200,36 @@ export function SugestoesContratacaoPanel({ onAplicarSugestao }: Props) {
           : "Sempre soma manhã + tarde do mesmo dia antes de calcular a % — simula um profissional que aceita os dois turnos, então a % cai se um dos turnos for bem mais ocioso que o outro."}
       </div>
 
+      <div className="mb-3 flex flex-wrap items-center gap-2">
+        <span className="text-[11px] font-bold text-muted-foreground">Faixa de ocupação:</span>
+        {FAIXAS_FILTRO.map(faixa => {
+          const ativa = faixasSelecionadas.has(faixa)
+          return (
+            <button
+              key={faixa}
+              type="button"
+              onClick={() => alternarFaixa(faixa)}
+              aria-pressed={ativa}
+              className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                ativa
+                  ? "border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-400"
+                  : "border-border bg-card text-muted-foreground hover:bg-muted/50"
+              }`}
+            >
+              ≥ {faixa}%
+            </button>
+          )
+        })}
+      </div>
+
       {loading && <InlineNotice tone="slate">Calculando sugestões…</InlineNotice>}
 
       {!loading && error && <InlineNotice tone="red">Falha ao calcular sugestões: {error}</InlineNotice>}
 
       {!loading && !error && !sugestoes.length && (
-        <InlineNotice tone="slate">Nenhuma sugestão com ocupação prevista acima de 50% no momento.</InlineNotice>
+        <InlineNotice tone="slate">
+          Nenhuma sugestão com ocupação prevista ≥ {Math.min(...faixasSelecionadas)}% no momento — tente marcar uma faixa mais baixa acima.
+        </InlineNotice>
       )}
 
       {!loading && !error && !!sugestoes.length && (
