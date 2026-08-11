@@ -135,55 +135,6 @@ export function tentarRemanejamento(
   return null
 }
 
-export interface TransferenciaProfissional {
-  paciente: string
-  terapia: string
-  dia: string
-  hora: string
-  unidade: string
-  profissionalOrigem: string
-  profissionalDestino: string
-}
-
-/** O paciente ocupa a agenda do profissional A nesse dia/hora/unidade —
- *  existe OUTRO profissional B, livre no MESMO dia/hora/unidade, que faz a
- *  mesma terapia, pro paciente ser transferido pra ele? Diferente de
- *  tentarRemanejamento (que move a sessão do paciente pra outro HORÁRIO
- *  mantendo o MESMO profissional — não abre capacidade nenhuma do
- *  profissional em questão pra atender alguém novo), isso de fato libera a
- *  agenda de A naquele horário. Mesmo princípio da opção E1 de saida.ts
- *  ("profissional equivalente livre no mesmo slot"), adaptado aqui: lá o
- *  profissional de origem está SAINDO da clínica; aqui ele só está sendo
- *  liberado pra um paciente diferente. */
-export function tentarTransferirParaOutroProfissional(
-  pacienteOcupante: string, dia: string, hora: string, unidade: string, profissionalOrigem: string, cRows: CsvRow[],
-): TransferenciaProfissional | null {
-  const conflito = cRows.find(r =>
-    r["Status do Agendamento"] === "Agendado" &&
-    r["Nome Favorecido"] === pacienteOcupante &&
-    r["Dia da Semana"] === dia &&
-    hiStr(r) === hora &&
-    r["Profissional"] === profissionalOrigem,
-  )
-  if (!conflito || !movivel(conflito.Terapia)) return null
-
-  const destino = cRows.find(r =>
-    r["Status do Agendamento"] === "Livre" &&
-    r["Profissional"] &&
-    r["Profissional"] !== profissionalOrigem &&
-    r.Terapia === conflito.Terapia &&
-    r["Dia da Semana"] === dia &&
-    hiStr(r) === hora &&
-    rowUnidade(r) === unidade,
-  )
-  if (!destino) return null
-
-  return {
-    paciente: pacienteOcupante, terapia: conflito.Terapia, dia, hora, unidade,
-    profissionalOrigem, profissionalDestino: destino.Profissional,
-  }
-}
-
 export interface CandidatoRemanejamento {
   hora: string
   candidato: CandidatoNaSugestao

@@ -2,18 +2,14 @@
 
 // Disponibilidade Interna (Tarefa 4) — antes de abrir vaga de contratação,
 // mostra se um profissional já contratado consegue cobrir a necessidade.
-// Duas modalidades:
+// Duas modalidades, na mesma lógica das 7 possibilidades de saida.ts:
 //   1) Direto (E1) — o profissional já tem horário "Livre" exato na grade.
-//   2) Via transferência (E1 de saida.ts, adaptado) — o profissional está
-//      ocupado ali com OUTRO paciente, mas existe um profissional
-//      EQUIVALENTE (mesma terapia) livre no MESMO dia/hora/unidade, pro
-//      paciente ocupante ser transferido pra ele — só assim o profissional
-//      original fica de fato livre pro paciente novo. Importante: isso NÃO É
-//      remanejamento.ts/tentarRemanejamento — aquela função move a sessão do
-//      paciente pra OUTRO HORÁRIO mantendo o MESMO profissional, o que não
-//      libera capacidade nenhuma do profissional em questão (ele continua
-//      com a agenda cheia, só embaralhada). Só é oferecida quando não há
-//      cobertura direta no mesmo dia/hora/unidade/especialidade.
+//   2) Via remanejamento (E2/E6/E7) — o profissional está ocupado ali com
+//      OUTRO paciente, mas essa sessão pode ser movida pra ponta adjacente do
+//      cronograma desse outro paciente (mesmo profissional, mesma regra de
+//      remanejamento.ts já usada no painel de sugestões automáticas),
+//      liberando o horário. Só é oferecida quando não há cobertura direta
+//      no mesmo dia/hora/unidade/especialidade — sem duplicar a mesma vaga.
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ArrowRightLeft, ChevronDown, ChevronLeft, ChevronRight, Search, Users, X } from "lucide-react"
@@ -22,14 +18,15 @@ import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 import { useGradeAgendamentos } from "@/hooks/useGradeAgendamentos"
 import { avaliarPeriodo, calcularGaps, gapsParaMapa, type GapItem, type Turno } from "@/lib/cronograma/simulacaoNovoPrestador"
 import { listarOportunidadesDiretas } from "@/lib/cronograma/disponibilidadeInterna"
-import { tentarTransferirParaOutroProfissional, type TransferenciaProfissional } from "@/lib/cronograma/remanejamento"
+import { tentarRemanejamento } from "@/lib/cronograma/remanejamento"
 import { TERAPIA_TO_ESP } from "@/lib/cronograma/constants"
 import { turnoFromHora, turnoNome, fmtName } from "@/lib/cronograma/helpers"
 import { SortableTh, ordenarPor, type SortDir } from "@/components/cronograma/ui/SortableTh"
 import { Button } from "@/components/ui/button"
+import { RemanejamentoDetalheModal } from "./RemanejamentoDetalheModal"
 import { PacienteAgendaHipoteticaModal } from "./PacienteAgendaHipoteticaModal"
-import { TransferenciaProfissionalModal } from "./TransferenciaProfissionalModal"
-import { ProfissionalAgendaTransferenciaModal } from "./ProfissionalAgendaTransferenciaModal"
+import { ProfissionalAgendaRemanejamentoModal } from "./ProfissionalAgendaRemanejamentoModal"
+import type { RemanejamentoDetalhe } from "@/lib/cronograma/sugestaoContratacaoTypes"
 import type { CsvRow } from "@/types/cronograma"
 
 const POR_PAGINA = 50
@@ -83,8 +80,8 @@ interface LinhaDisponibilidade {
   unidade: string
   terapia: string
   especialidade: string
-  modalidade: "direto" | "transferencia"
-  transferencia?: TransferenciaProfissional
+  modalidade: "direto" | "remanejamento"
+  remanejamento?: RemanejamentoDetalhe
   pacientes: { pac: string; gap: number }[]
 }
 
@@ -105,13 +102,7 @@ function linhasDiretas(rows: CsvRow[], gapMap: Record<string, GapItem>): LinhaDi
   }))
 }
 
-/** Profissional A está ocupado com outro paciente naquele dia/hora — só entra
- *  aqui se existir um profissional B EQUIVALENTE (mesma terapia) livre no
- *  MESMO dia/hora/unidade pra quem esse paciente possa ser transferido
- *  (tentarTransferirParaOutroProfissional). Isso de fato libera a agenda de A
- *  pro paciente novo — diferente da versão anterior, que só reorganizava a
- *  agenda do PRÓPRIO profissional A sem abrir capacidade nenhuma. */
-function linhasViaTransferencia(
+function linhasViaRemanejamento(
   rows: CsvRow[], gapMap: Record<string, GapItem>, jaCobertos: Set<string>,
 ): LinhaDisponibilidade[] {
   const cachePeriodo = new Map<string, ReturnType<typeof avaliarPeriodo>>()
@@ -135,7 +126,7 @@ function linhasViaTransferencia(
     vistos.add(chaveVista)
 
     const chaveCoberta = `${dia}|||${hora}|||${unidade}|||${especialidade}`
-    if (jaCobertos.has(chaveCoberta)) continue // já tem cobertura direta ali — transferência seria redundante
+    if (jaCobertos.has(chaveCoberta)) continue // já tem cobertura direta ali — remanejamento seria redundante
 
     const turno = turnoFromHora(hora)
     const chavePeriodo = `${dia}|||${turno}|||${unidade}|||${especialidade}`
@@ -147,12 +138,12 @@ function linhasViaTransferencia(
     const slotAvaliado = periodo.slots.find(s => s.hora === hora)
     if (!slotAvaliado?.candidatos.length) continue
 
-    const detalhe = tentarTransferirParaOutroProfissional(pacienteOcupante, dia, hora, unidade, prof, rows)
+    const detalhe = tentarRemanejamento(pacienteOcupante, dia, hora, unidade, rows)
     if (!detalhe) continue
 
     out.push({
       profissional: prof, dia, turno, hora, unidade, terapia: row.Terapia, especialidade,
-      modalidade: "transferencia", transferencia: detalhe,
+      modalidade: "remanejamento", remanejamento: detalhe,
       pacientes: slotAvaliado.candidatos.map(c => ({ pac: c.pac, gap: c.gap })),
     })
   }
@@ -168,8 +159,8 @@ function useLinhasDisponibilidade(): { linhas: LinhaDisponibilidade[]; loading: 
     const gapMap = gapsParaMapa(calcularGaps(lRows, rows))
     const diretas = linhasDiretas(rows, gapMap)
     const cobertas = new Set(diretas.map(l => `${l.dia}|||${l.hora}|||${l.unidade}|||${l.especialidade}`))
-    const transferidas = linhasViaTransferencia(rows, gapMap, cobertas)
-    return [...diretas, ...transferidas]
+    const remanejadas = linhasViaRemanejamento(rows, gapMap, cobertas)
+    return [...diretas, ...remanejadas]
   }, [rows, lRows])
 
   return { linhas, loading, error, refWeekLabel: refWeek.label, cRows: rows }
@@ -183,7 +174,7 @@ export function DisponibilidadeInternaView() {
   const [detalheProfissional, setDetalheProfissional] = useState<LinhaDisponibilidade | null>(null)
 
   useEffect(() => {
-    setHeader("Ocupar Profissionais Disponíveis", `Profissionais já contratados que cobririam sessões pendentes (direto ou via transferência) — semana de referência: ${refWeekLabel}`)
+    setHeader("Ocupar Profissionais Disponíveis", `Profissionais já contratados que cobririam sessões pendentes (direto ou via remanejamento) — semana de referência: ${refWeekLabel}`)
     return () => setHeader("", "")
   }, [refWeekLabel, setHeader])
 
@@ -225,7 +216,7 @@ export function DisponibilidadeInternaView() {
   }, [linhasOrdenadas, busca, profissionaisSel, especialidadesSel, unidadesSel, modalidadesSel])
 
   const qtdDireto = linhas.filter(l => l.modalidade === "direto").length
-  const qtdTransferencia = linhas.length - qtdDireto
+  const qtdRemanejamento = linhas.length - qtdDireto
 
   const totalPaginas = Math.max(1, Math.ceil(linhasFiltradas.length / POR_PAGINA))
   const paginaAtual = Math.min(pagina, totalPaginas - 1)
@@ -256,7 +247,7 @@ export function DisponibilidadeInternaView() {
     <div className="flex flex-col gap-3">
       <div className="rounded-xl border border-sky-200 dark:border-sky-900 bg-sky-50 dark:bg-sky-950/30 px-4 py-3 text-xs text-sky-900 dark:text-sky-200">
         <strong>{linhas.length}</strong> oportunidade(s) de cobertura interna antes de abrir vaga de contratação —{" "}
-        <strong>{qtdDireto}</strong> com horário já livre, <strong>{qtdTransferencia}</strong> possíveis transferindo o paciente ocupante para outro profissional equivalente livre no mesmo horário.
+        <strong>{qtdDireto}</strong> com horário já livre, <strong>{qtdRemanejamento}</strong> possíveis via remanejamento de uma sessão já existente.
       </div>
 
       <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card p-3">
@@ -273,7 +264,7 @@ export function DisponibilidadeInternaView() {
         <MultiSelectDropdown label="Profissional" opcoes={opcoesProfissionais} selecionadas={profissionaisSel} onChange={v => { setProfissionaisSel(v); setPagina(0) }} />
         <MultiSelectDropdown label="Especialidade" opcoes={opcoesEspecialidades} selecionadas={especialidadesSel} onChange={v => { setEspecialidadesSel(v); setPagina(0) }} />
         <MultiSelectDropdown label="Unidade" opcoes={opcoesUnidades} selecionadas={unidadesSel} onChange={v => { setUnidadesSel(v); setPagina(0) }} />
-        <MultiSelectDropdown label="Modalidade" opcoes={["direto", "transferencia"]} selecionadas={modalidadesSel} onChange={v => { setModalidadesSel(v); setPagina(0) }} />
+        <MultiSelectDropdown label="Modalidade" opcoes={["direto", "remanejamento"]} selecionadas={modalidadesSel} onChange={v => { setModalidadesSel(v); setPagina(0) }} />
         {filtroAtivo && (
           <Button variant="outline" size="xs" className="gap-1" onClick={limparFiltros}>
             <X size={12} /> Limpar filtros
@@ -286,7 +277,7 @@ export function DisponibilidadeInternaView() {
         <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
           {filtroAtivo
             ? "Nenhuma linha corresponde aos filtros selecionados."
-            : "Nenhum profissional interno (direto ou via transferência) cobre pacientes com sessões pendentes na semana de referência."}
+            : "Nenhum profissional interno (direto ou via remanejamento) cobre pacientes com sessões pendentes na semana de referência."}
         </div>
       ) : (
         <div className="overflow-x-auto rounded-xl border border-border">
@@ -328,7 +319,7 @@ export function DisponibilidadeInternaView() {
                           : "bg-sky-50 text-sky-700 dark:bg-sky-950/30 dark:text-sky-400"
                       }`}>
                         {!direto && <ArrowRightLeft size={10} />}
-                        {direto ? "Direto" : "Via transferência"}
+                        {direto ? "Direto" : "Via remanejamento"}
                       </span>
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums font-extrabold text-emerald-600 dark:text-emerald-400">{l.pacientes.length}</td>
@@ -371,20 +362,23 @@ export function DisponibilidadeInternaView() {
         </div>
       )}
 
-      {detalhePaciente?.transferencia && detalhePaciente.pacientes[0] && (
-        <TransferenciaProfissionalModal
-          transferencia={detalhePaciente.transferencia}
-          pacienteNovo={detalhePaciente.pacientes[0].pac}
+      {detalhePaciente?.remanejamento && detalhePaciente.pacientes[0] && (
+        <RemanejamentoDetalheModal
+          paciente={detalhePaciente.remanejamento.pacienteRemanejado}
+          terapiaHipotetica={detalhePaciente.terapia}
+          profissionalHipotetico={detalhePaciente.profissional}
+          remanejamento={detalhePaciente.remanejamento}
           cRows={cRows}
           onClose={() => setDetalhePaciente(null)}
         />
       )}
 
-      {detalheProfissional?.transferencia && detalheProfissional.pacientes[0] && (
-        <ProfissionalAgendaTransferenciaModal
-          transferencia={detalheProfissional.transferencia}
-          pacienteNovo={detalheProfissional.pacientes[0].pac}
-          terapiaNova={detalheProfissional.terapia}
+      {detalheProfissional?.remanejamento && detalheProfissional.pacientes[0] && (
+        <ProfissionalAgendaRemanejamentoModal
+          profissional={detalheProfissional.profissional}
+          pacienteHipotetico={detalheProfissional.pacientes[0].pac}
+          terapiaHipotetica={detalheProfissional.terapia}
+          remanejamento={detalheProfissional.remanejamento}
           cRows={cRows}
           onClose={() => setDetalheProfissional(null)}
         />
