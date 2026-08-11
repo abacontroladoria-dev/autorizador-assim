@@ -188,6 +188,7 @@ export function SugestoesContratacaoPanel({ onAplicarSugestao }: Props) {
           value={modo}
           onChange={mudarModo}
           ariaLabel="Critério de ocupação prevista"
+          size="lg"
           tabs={[
             { value: "diaInteiro", label: "Manhã + tarde juntos" },
             { value: "porTurno", label: "Melhor turno isolado" },
@@ -210,7 +211,7 @@ export function SugestoesContratacaoPanel({ onAplicarSugestao }: Props) {
               type="button"
               onClick={() => alternarFaixa(faixa)}
               aria-pressed={ativa}
-              className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors ${
+              className={`rounded-full border px-4 py-2 text-sm font-bold transition-colors ${
                 ativa
                   ? "border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-400"
                   : "border-border bg-card text-muted-foreground hover:bg-muted/50"

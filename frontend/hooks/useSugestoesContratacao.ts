@@ -11,7 +11,7 @@ import { useConvenioValores } from "./useConvenioValores"
 import { useFeriados } from "./useFeriados"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 import {
-  gerarCandidatosPorOcupacao, anexarModalidadeERemanejamento, filtrarPorDisponibilidadeInterna,
+  calcularTodosCombos, filtrarCombosPorFaixa, anexarModalidadeERemanejamento, filtrarPorDisponibilidadeInterna,
   anexarSala, anexarRemuneracaoEOrdenar, calcularGapMap, TODAS_FAIXAS_CASCATA,
   type ModoCascataOcupacao, type FaixaCascata,
 } from "@/lib/cronograma/sugestaoContratacao"
@@ -43,15 +43,23 @@ export function useSugestoesContratacao(
     return ano && mes ? { ano, mes } : null
   }, [refWeek.inicio])
 
+  // Parte cara (varre unidade × especialidade × dia) — não depende de
+  // faixasSelecionadas, então marcar/desmarcar uma faixa no filtro não repete
+  // essa varredura, só o filtro leve abaixo.
+  const todosCombos = useMemo(
+    () => calcularTodosCombos(lRows, cRows, modo),
+    [lRows, cRows, modo],
+  )
+
   const sugestoes = useMemo((): SugestaoContratacao[] => {
     if (!cRows.length || !lRows.length) return []
     const gapMap = calcularGapMap(lRows, cRows)
-    const base = gerarCandidatosPorOcupacao(lRows, cRows, modo, faixasSelecionadas)
+    const base = filtrarCombosPorFaixa(todosCombos, faixasSelecionadas)
     const comRemanejamento = anexarModalidadeERemanejamento(base, cRows, gapMap)
     const comDisponibilidade = filtrarPorDisponibilidadeInterna(comRemanejamento, cRows)
     const comSala = anexarSala(comDisponibilidade, salasComOcupacao)
     return anexarRemuneracaoEOrdenar(comSala, cRows, regrasGerais, excecoesPaciente, mesReferencia, feriados)
-  }, [cRows, lRows, modo, faixasSelecionadas, salasComOcupacao, regrasGerais, excecoesPaciente, mesReferencia, feriados])
+  }, [todosCombos, faixasSelecionadas, cRows, lRows, salasComOcupacao, regrasGerais, excecoesPaciente, mesReferencia, feriados])
 
   return {
     sugestoes,

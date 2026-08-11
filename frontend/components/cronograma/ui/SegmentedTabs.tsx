@@ -18,10 +18,18 @@ interface SegmentedTabsProps<T extends string> {
   tabs: SegmentedTab<T>[]
   className?: string
   ariaLabel?: string
+  /** "sm" (padrão, densidade de dashboard) ou "lg" pra quando a escolha é uma
+   *  decisão de destaque na tela, não um filtro secundário. */
+  size?: "sm" | "lg"
+}
+
+const SIZE_CLS: Record<"sm" | "lg", string> = {
+  sm: "px-3 py-1 text-xs",
+  lg: "px-4 py-2 text-sm",
 }
 
 export function SegmentedTabs<T extends string>({
-  value, onChange, tabs, className = "", ariaLabel,
+  value, onChange, tabs, className = "", ariaLabel, size = "sm",
 }: SegmentedTabsProps<T>) {
   return (
     <div role="tablist" aria-label={ariaLabel} className={`inline-flex flex-wrap gap-1.5 ${className}`}>
@@ -34,7 +42,7 @@ export function SegmentedTabs<T extends string>({
             role="tab"
             aria-selected={active}
             onClick={() => onChange(t.value)}
-            className={`inline-flex items-center gap-1 px-3 py-1 rounded-full text-xs font-semibold border transition-colors ${
+            className={`inline-flex items-center gap-1 rounded-full font-semibold border transition-colors ${SIZE_CLS[size]} ${
               active
                 ? "bg-slate-900 text-white dark:bg-white dark:text-slate-900 border-slate-900 dark:border-white"
                 : "bg-transparent text-foreground border-border hover:bg-muted/50"

@@ -92,17 +92,16 @@ export type FaixaCascata = (typeof FAIXAS_CASCATA)[number]
  *  em gerarCandidatosPorOcupacao, mostrando tudo até o usuário filtrar. */
 export const TODAS_FAIXAS_CASCATA: ReadonlySet<FaixaCascata> = new Set(FAIXAS_CASCATA)
 
-/** Gera sugestões de contratação por faixa de ocupação prevista: cada combo
- *  (unidade+especialidade+dia) entra na MAIOR faixa que atinge (70%, senão
- *  60%, senão 50%) — `faixasSelecionadas` filtra quais dessas faixas o
- *  usuário quer ver, podendo escolher uma, duas ou as três juntas. `modo`
- *  decide se a % considerada é a do melhor turno isolado ("porTurno") ou
- *  sempre a de manhã+tarde combinados ("diaInteiro") — ver ModoCascataOcupacao. */
-export function gerarCandidatosPorOcupacao(
+/** Varre unidade × especialidade × dia avaliando ocupação prevista — a parte
+ *  cara do motor (cada combo chama avaliarPeriodo, que varre cRows). Não
+ *  recebe `faixasSelecionadas` de propósito: o resultado não depende de quais
+ *  faixas o usuário marcou, só de `modo`/cRows/lRows, então dá pra memoizar
+ *  esse cálculo separado do filtro e não repeti-lo toda vez que o usuário só
+ *  troca quais faixas (70/60/50) quer ver (ver useSugestoesContratacao.ts). */
+export function calcularTodosCombos(
   lRows: LaudoRow[], cRows: CsvRow[], modo: ModoCascataOcupacao = "porTurno",
-  faixasSelecionadas: ReadonlySet<FaixaCascata> = TODAS_FAIXAS_CASCATA,
 ): SugestaoContratacao[] {
-  if (!cRows.length || !lRows.length || !faixasSelecionadas.size) return []
+  if (!cRows.length || !lRows.length) return []
 
   const gapMap = gapsParaMapa(calcularGaps(lRows, cRows))
   const especialidades = listarEspecialidades()
@@ -114,7 +113,7 @@ export function gerarCandidatosPorOcupacao(
         const { turnos, pct, candidatos } = melhorComboDoDia(unidade, especialidade, dia, cRows, gapMap, modo)
         if (!candidatos.length) continue
         const faixaCascata = FAIXAS_CASCATA.find(f => pct >= f)
-        if (!faixaCascata || !faixasSelecionadas.has(faixaCascata)) continue
+        if (!faixaCascata) continue
         combos.push({
           id: idSugestao(unidade, especialidade, dia, turnos),
           unidade, especialidade, dia, turnos,
@@ -128,12 +127,38 @@ export function gerarCandidatosPorOcupacao(
       }
     }
   }
+  return combos
+}
 
-  return combos.sort((a, b) =>
-    b.pctOcupacaoPrevista - a.pctOcupacaoPrevista ||
-    a.unidade.localeCompare(b.unidade) ||
-    a.especialidade.localeCompare(b.especialidade),
-  )
+/** Filtra os combos já calculados pelas faixas selecionadas — leve, não repete
+ *  nenhum cálculo de ocupação, só filtra e ordena. */
+export function filtrarCombosPorFaixa(
+  combos: SugestaoContratacao[], faixasSelecionadas: ReadonlySet<FaixaCascata> = TODAS_FAIXAS_CASCATA,
+): SugestaoContratacao[] {
+  if (!faixasSelecionadas.size) return []
+  return combos
+    .filter(c => faixasSelecionadas.has(c.faixaCascata))
+    .sort((a, b) =>
+      b.pctOcupacaoPrevista - a.pctOcupacaoPrevista ||
+      a.unidade.localeCompare(b.unidade) ||
+      a.especialidade.localeCompare(b.especialidade),
+    )
+}
+
+/** Gera sugestões de contratação por faixa de ocupação prevista: cada combo
+ *  (unidade+especialidade+dia) entra na MAIOR faixa que atinge (70%, senão
+ *  60%, senão 50%) — `faixasSelecionadas` filtra quais dessas faixas o
+ *  usuário quer ver, podendo escolher uma, duas ou as três juntas. `modo`
+ *  decide se a % considerada é a do melhor turno isolado ("porTurno") ou
+ *  sempre a de manhã+tarde combinados ("diaInteiro") — ver ModoCascataOcupacao.
+ *  Combina calcularTodosCombos + filtrarCombosPorFaixa; prefira as duas
+ *  funções separadas quando quiser memoizar a parte cara independente da
+ *  seleção de faixas (ver useSugestoesContratacao.ts). */
+export function gerarCandidatosPorOcupacao(
+  lRows: LaudoRow[], cRows: CsvRow[], modo: ModoCascataOcupacao = "porTurno",
+  faixasSelecionadas: ReadonlySet<FaixaCascata> = TODAS_FAIXAS_CASCATA,
+): SugestaoContratacao[] {
+  return filtrarCombosPorFaixa(calcularTodosCombos(lRows, cRows, modo), faixasSelecionadas)
 }
 
 /** Complementa os candidatos por adjacência com candidatos por remanejamento
