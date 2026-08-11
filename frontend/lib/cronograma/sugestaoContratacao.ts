@@ -164,11 +164,16 @@ export function gerarCandidatosPorOcupacao(
 /** Complementa os candidatos por adjacência com candidatos por remanejamento
  *  (Tarefa 5) nos horários do turno que ainda não têm candidato — nunca
  *  substitui um candidato por adjacência já encontrado nesse horário. Define
- *  modalidadeDominante pela modalidade mais frequente entre os candidatos. */
+ *  modalidadeDominante pela modalidade mais frequente entre os candidatos.
+ *  Aplica o teto de gap por cima do conjunto JÁ COMBINADO (ver
+ *  limitarCandidatosPorGapNaSugestao) — sem isso um paciente já no limite do
+ *  gap na camada de adjacência ainda ganharia candidatos extras de
+ *  remanejamento em outras vagas, ultrapassando quantas sessões ele pode
+ *  aceitar. */
 export function anexarModalidadeERemanejamento(
   sugestoes: SugestaoContratacao[], cRows: CsvRow[], gapMap: Record<string, GapItem>,
 ): SugestaoContratacao[] {
-  return sugestoes.map(s => {
+  const comRemanejamento = sugestoes.map(s => {
     const horasCobertas = new Set(s.candidatos.map(c => `${c.turno}|||${c.hora}`))
 
     const candidatosRemanejamento = s.turnos
@@ -189,6 +194,60 @@ export function anexarModalidadeERemanejamento(
 
     return { ...s, candidatos, modalidadeDominante }
   })
+
+  return limitarCandidatosPorGapNaSugestao(comRemanejamento, gapMap)
+}
+
+/** Mesmo teto de limitarCandidatosPorGap (simulacaoNovoPrestador.ts), mas
+ *  sobre candidatos já enriquecidos com adjacência + remanejamento juntos,
+ *  possivelmente espalhados por várias vagas (SugestaoContratacao[]) — sem
+ *  isso um paciente com gap=1 pode acabar candidato em 2+ horários ao mesmo
+ *  tempo, um por adjacência e outro por remanejamento, cada camada calculada
+ *  isoladamente sem saber da outra. Mesma prioridade "menos alternativas
+ *  primeiro" do teto original: corta onde o paciente tem MAIS concorrentes
+ *  (mais fácil de substituir), mantendo onde ele é mais insubstituível.
+ *  Agrupa por paciente+especialidade, já que o gap é por especialidade —
+ *  cada `SugestaoContratacao` carrega a sua própria (s.especialidade). */
+function limitarCandidatosPorGapNaSugestao(
+  sugestoes: SugestaoContratacao[], gapMap: Record<string, GapItem>,
+): SugestaoContratacao[] {
+  interface Ocorrencia { sugestaoIdx: number; vagaChave: string; alternativas: number }
+
+  const porVaga = new Map<string, number>()
+  sugestoes.forEach((s, sugestaoIdx) => {
+    for (const c of s.candidatos) {
+      const chave = `${sugestaoIdx}|||${c.turno}|||${c.hora}`
+      porVaga.set(chave, (porVaga.get(chave) ?? 0) + 1)
+    }
+  })
+
+  const ocorrenciasPorPacienteEsp = new Map<string, Ocorrencia[]>()
+  sugestoes.forEach((s, sugestaoIdx) => {
+    for (const c of s.candidatos) {
+      const vagaChave = `${sugestaoIdx}|||${c.turno}|||${c.hora}`
+      const chavePac = `${c.paciente}|||${s.especialidade}`
+      const lista = ocorrenciasPorPacienteEsp.get(chavePac) ?? []
+      lista.push({ sugestaoIdx, vagaChave, alternativas: (porVaga.get(vagaChave) ?? 1) - 1 })
+      ocorrenciasPorPacienteEsp.set(chavePac, lista)
+    }
+  })
+
+  const remover = new Set<string>() // vagaChave|||paciente
+  for (const [chavePac, ocorrencias] of ocorrenciasPorPacienteEsp) {
+    const [paciente, especialidade] = chavePac.split("|||")
+    const gap = gapMap[`${paciente}|||${especialidade}`]?.gap ?? 0
+    if (ocorrencias.length <= gap) continue
+    const excedentes = [...ocorrencias].sort((a, b) => a.alternativas - b.alternativas).slice(gap)
+    for (const e of excedentes) remover.add(`${e.vagaChave}|||${paciente}`)
+  }
+  if (!remover.size) return sugestoes
+
+  return sugestoes
+    .map((s, sugestaoIdx) => ({
+      ...s,
+      candidatos: s.candidatos.filter(c => !remover.has(`${sugestaoIdx}|||${c.turno}|||${c.hora}|||${c.paciente}`)),
+    }))
+    .filter(s => s.candidatos.length > 0)
 }
 
 /** Reduz a fila de candidatos de cada vaga pela capacidade interna já livre
