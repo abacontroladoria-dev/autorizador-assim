@@ -9,7 +9,7 @@
 // cálculo vive em lib/cronograma/simulacaoNovoPrestador.ts; este arquivo é só
 // a UI. Não há mais fluxo de WhatsApp/oferta aqui — é puramente informativo.
 
-import { useMemo, useRef, useState } from "react"
+import { startTransition, useMemo, useRef, useState } from "react"
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip as RechartsTooltip } from "recharts"
 import { CheckCircle2, Clock, Info, Lock, Sparkles, Star, Wallet } from "lucide-react"
 import {
@@ -444,33 +444,47 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
       })
   }, [linhasExibidas])
 
+  // startTransition mantém o clique responsivo: o recálculo do plano (cadeia
+  // de useMemo em ranquearUnidades/montarPlanoRecomendado/periodosEnriquecidos,
+  // que varre a grade inteira) é pesado e síncrono — sem isso, o navegador
+  // trava até o cálculo terminar antes de sequer repintar o botão pressionado.
   const alternar = (dia: string, turno: Turno) => {
-    setUnidadeFixada("")
-    setPeriodosSel(prev => ({ ...prev, [dia]: { ...prev[dia], [turno]: !prev[dia]?.[turno] } }))
-  }
-  const alternarDiaInteiro = (dia: string) => {
-    setUnidadeFixada("")
-    setPeriodosSel(prev => {
-      const atual = prev[dia] || {}
-      const todosMarcados = !!atual.manha && !!atual.tarde
-      return { ...prev, [dia]: { manha: !todosMarcados, tarde: !todosMarcados } }
+    startTransition(() => {
+      setUnidadeFixada("")
+      setPeriodosSel(prev => ({ ...prev, [dia]: { ...prev[dia], [turno]: !prev[dia]?.[turno] } }))
     })
   }
-  const selecionarTudo = () => { setUnidadeFixada(""); setPeriodosSel(Object.fromEntries(DIAS_UTIL.map(d => [d, { manha: true, tarde: true }]))) }
-  const limparTudo = () => { setUnidadeFixada(""); setPeriodosSel({}) }
+  const alternarDiaInteiro = (dia: string) => {
+    startTransition(() => {
+      setUnidadeFixada("")
+      setPeriodosSel(prev => {
+        const atual = prev[dia] || {}
+        const todosMarcados = !!atual.manha && !!atual.tarde
+        return { ...prev, [dia]: { manha: !todosMarcados, tarde: !todosMarcados } }
+      })
+    })
+  }
+  const selecionarTudo = () => startTransition(() => {
+    setUnidadeFixada("")
+    setPeriodosSel(Object.fromEntries(DIAS_UTIL.map(d => [d, { manha: true, tarde: true }])))
+  })
+  const limparTudo = () => startTransition(() => { setUnidadeFixada(""); setPeriodosSel({}) })
 
   const aplicarSugestao = (esp: string, periodos: { dia: string; turno: Turno }[], unidade: string) => {
-    setEspecialidade(esp)
-    setPeriodosSel(Object.fromEntries(
-      DIAS_UTIL.map(dia => [dia, {
-        manha: periodos.some(p => p.dia === dia && p.turno === "manha"),
-        tarde: periodos.some(p => p.dia === dia && p.turno === "tarde"),
-      }]),
-    ))
-    setUnidadeFixada(unidade)
+    startTransition(() => {
+      setEspecialidade(esp)
+      setPeriodosSel(Object.fromEntries(
+        DIAS_UTIL.map(dia => [dia, {
+          manha: periodos.some(p => p.dia === dia && p.turno === "manha"),
+          tarde: periodos.some(p => p.dia === dia && p.turno === "tarde"),
+        }]),
+      ))
+      setUnidadeFixada(unidade)
+    })
 
     // Sem isso o usuário não percebe que a sugestão foi aplicada: os campos
     // preenchidos ficam abaixo da dobra, dentro de "Parâmetros da simulação".
+    // Ficam fora do startTransition acima (não dependem do recálculo pesado).
     parametrosRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
     setDestaqueAplicado(true)
     setTimeout(() => setDestaqueAplicado(false), 2200)
@@ -615,7 +629,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
             <div className="flex flex-col lg:flex-row items-start gap-6 p-4">
               <button
                 type="button"
-                onClick={() => setUnidadeFixada("")}
+                onClick={() => startTransition(() => setUnidadeFixada(""))}
                 className={`w-full lg:w-[500px] shrink-0 rounded-xl border-2 p-3 text-left transition-colors ${!unidadeFixada ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30" : "border-border bg-card hover:bg-muted/40"}`}
               >
                 <div className="mb-2 flex items-center gap-1.5">
@@ -639,7 +653,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                     <InfoTip text="Cada barra mostra quantas vagas de horário você teria se contratasse o novo profissional só para essa unidade, nos mesmos dias/turnos escolhidos. A marca vertical indica o total do plano recomendado (misto)." />
                   </div>
                   {unidadeFixada && (
-                    <Button variant="outline" size="xs" onClick={() => setUnidadeFixada("")}>Ver plano</Button>
+                    <Button variant="outline" size="xs" onClick={() => startTransition(() => setUnidadeFixada(""))}>Ver plano</Button>
                   )}
                 </div>
                 <div className="flex flex-col gap-3">
@@ -654,7 +668,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                       <button
                         key={u.unidade}
                         type="button"
-                        onClick={() => setUnidadeFixada(ativo ? "" : u.unidade)}
+                        onClick={() => startTransition(() => setUnidadeFixada(ativo ? "" : u.unidade))}
                         className={`flex items-center gap-3 sm:gap-4 rounded-xl border p-3 text-left transition-colors ${ativo ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30" : "border-transparent hover:bg-muted/50"}`}
                       >
                         <span className={`w-20 sm:w-[110px] shrink-0 truncate text-[12.5px] sm:text-sm font-bold ${cor.text}`}>{u.unidade}</span>
