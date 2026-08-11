@@ -11,7 +11,6 @@ import { useSugestoesContratacao } from "@/hooks/useSugestoesContratacao"
 import { diaCurto, fmtReal, turnoNome } from "@/lib/cronograma/helpers"
 import { Button } from "@/components/ui/button"
 import { SegmentedTabs } from "@/components/cronograma/ui/SegmentedTabs"
-import { StatusPill } from "@/components/cronograma/ui/StatusPill"
 import { InlineNotice } from "@/components/cronograma/ui/InlineNotice"
 import { RemanejamentoDetalheModal } from "./RemanejamentoDetalheModal"
 import type { CandidatoNaSugestao, SugestaoContratacao } from "@/lib/cronograma/sugestaoContratacaoTypes"
@@ -37,8 +36,6 @@ function CardSugestao({
   const [aberto, setAberto] = useState(false)
   const [detalheRemanejamento, setDetalheRemanejamento] = useState<CandidatoNaSugestao | null>(null)
 
-  const verde = sugestao.modalidadeDominante === "adjacente"
-
   const qtdAdjacente = sugestao.candidatos.filter(c => c.modalidade === "adjacente").length
   const candidatosRemanejamento = sugestao.candidatos.filter(c => c.modalidade === "remanejamento")
   const qtdRemanejamento = candidatosRemanejamento.length
@@ -54,9 +51,6 @@ function CardSugestao({
             <span className="text-[12.5px] font-extrabold text-foreground">{sugestao.especialidade}</span>
             <span className="text-muted-foreground">·</span>
             <span className="text-[12.5px] font-bold text-foreground">{sugestao.unidade}</span>
-            <StatusPill tone={verde ? "green" : "blue"} variant="soft" dense>
-              {verde ? "Horário adjacente" : "Com remanejamento"}
-            </StatusPill>
           </div>
           <div className="mt-1 text-[11px] text-muted-foreground">
             {diaCurto(sugestao.dia)} · {sugestao.turnos.map(t => turnoNome[t]).join(" + ")} · {FAIXA_LABEL[sugestao.faixaCascata]}

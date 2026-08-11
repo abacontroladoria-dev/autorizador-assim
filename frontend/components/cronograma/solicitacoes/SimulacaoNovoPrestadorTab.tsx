@@ -22,7 +22,7 @@ import { useGradeAgendamentos } from "@/hooks/useGradeAgendamentos"
 import { useOcupacaoSalas } from "@/hooks/useOcupacaoSalas"
 import { useConvenioValores } from "@/hooks/useConvenioValores"
 import { useFeriados } from "@/hooks/useFeriados"
-import { anexarModalidadeERemanejamento, anexarSala, anexarRemuneracaoEOrdenar } from "@/lib/cronograma/sugestaoContratacao"
+import { anexarModalidadeERemanejamento, anexarSala, anexarRemuneracaoEOrdenar, primeiroConvenioDoPaciente } from "@/lib/cronograma/sugestaoContratacao"
 import { SugestoesContratacaoPanel } from "./SugestoesContratacaoPanel"
 import { RemanejamentoDetalheModal } from "./RemanejamentoDetalheModal"
 import { ProjecaoFinanceiraDetalheModal } from "./ProjecaoFinanceiraDetalheModal"
@@ -90,13 +90,24 @@ function EspecialidadeCombobox({
   const [ativoIdx, setAtivoIdx] = useState(-1)
   const listRef = useRef<HTMLDivElement>(null)
 
+  // Sincroniza o texto quando `value` muda por fora (ex.: "Aplicar" sugestão),
+  // sem depender de efeito — padrão documentado do React pra "ajustar estado
+  // quando uma prop muda". Não atrapalha a digitação: enquanto o usuário
+  // digita, cada tecla já manda onChange("") pro pai, então `value` fica
+  // parado em "" entre uma tecla e outra e essa comparação nunca dispara.
+  const [ultimoValor, setUltimoValor] = useState(value)
+  if (value !== ultimoValor) {
+    setUltimoValor(value)
+    setTexto(value)
+  }
+
   const filtradas = useMemo(() => {
     const q = texto.trim().toLowerCase()
     if (!q) return opcoes
     return opcoes.filter(o => o.toLowerCase().includes(q))
   }, [texto, opcoes])
 
-  const selecionar = (esp: string) => { onChange(esp); setTexto(esp); setAberto(false); setAtivoIdx(-1) }
+  const selecionar = (esp: string) => { onChange(esp); setTexto(esp); setUltimoValor(esp); setAberto(false); setAtivoIdx(-1) }
   const valida = opcoes.includes(value)
 
   return (
@@ -109,7 +120,7 @@ function EspecialidadeCombobox({
         aria-expanded={aberto}
         aria-controls={aberto ? "sim-esp-listbox" : undefined}
         value={texto}
-        onChange={e => { setTexto(e.target.value); onChange(""); setAberto(true); setAtivoIdx(-1) }}
+        onChange={e => { setTexto(e.target.value); setUltimoValor(""); onChange(""); setAberto(true); setAtivoIdx(-1) }}
         onFocus={() => setAberto(true)}
         onBlur={() => { setTimeout(() => setAberto(false), 150); if (value) setTexto(value) }}
         onKeyDown={e => {
@@ -683,7 +694,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                     <Button variant="outline" size="xs" onClick={() => setUnidadeFixada("")}>Ver plano</Button>
                   )}
                 </div>
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-2">
                   {unitRank.map(u => {
                     const cor = estiloUnidade(u.unidade)
                     const largura = (u.totalSessoes / escalaComparativo) * 100
@@ -695,15 +706,15 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                         key={u.unidade}
                         type="button"
                         onClick={() => setUnidadeFixada(ativo ? "" : u.unidade)}
-                        className={`flex flex-wrap sm:flex-nowrap items-center gap-3 rounded-lg border p-1.5 text-left transition-colors ${ativo ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30" : "border-transparent hover:bg-muted/50"}`}
+                        className={`flex items-center gap-2 sm:gap-3 rounded-lg border p-2 text-left transition-colors ${ativo ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30" : "border-transparent hover:bg-muted/50"}`}
                       >
-                        <span className={`w-full sm:w-[88px] shrink-0 text-[12.5px] font-bold ${cor.text}`}>{u.unidade}</span>
-                        <span className="relative h-5 min-w-[100px] flex-1 rounded bg-muted">
+                        <span className={`w-14 sm:w-[88px] shrink-0 truncate text-[11px] sm:text-[12.5px] font-bold ${cor.text}`}>{u.unidade}</span>
+                        <span className="relative h-6 min-w-[56px] flex-1 rounded bg-muted">
                           <span className={`absolute inset-y-0 left-0 rounded transition-[width] ${cor.bar}`} style={{ width: `${largura}%` }} />
                           <span className="absolute -top-1 -bottom-1 w-[2px] bg-foreground/60" style={{ left: `${referencia}%` }} />
                         </span>
-                        <span className="w-full sm:w-[100px] shrink-0 text-right">
-                          <span className="block text-[12.5px] font-black tabular-nums text-foreground">{u.totalSessoes} sessões/semana</span>
+                        <span className="w-[76px] sm:w-[100px] shrink-0 text-right">
+                          <span className="block text-[11px] sm:text-[12.5px] font-black tabular-nums text-foreground">{u.totalSessoes} sessões/semana</span>
                           <span className={`block text-[10px] font-bold ${delta < 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>
                             {delta === 0 ? "igual ao plano" : `${delta} vs. plano`}
                           </span>
@@ -875,6 +886,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                             <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Unidade</th>
                             <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Sala</th>
                             <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Modalidade</th>
+                            <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Convênio</th>
                             <th className="px-3 py-2 text-left text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Paciente</th>
                             <th className="px-3 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Autorizado</th>
                             <th className="px-3 py-2 text-right text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Ofertado</th>
@@ -917,6 +929,9 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                                   <StatusPill tone={adjacente ? "green" : "blue"} variant="soft" dense>
                                     {adjacente ? "Adjacência" : "Remanejamento"}
                                   </StatusPill>
+                                </td>
+                                <td className="px-3 py-2 text-foreground">
+                                  {primeiroConvenioDoPaciente(c.paciente, cRows)}
                                 </td>
                                 <td className="px-3 py-2">
                                   <div className="font-bold text-foreground">{c.paciente}</div>
