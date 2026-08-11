@@ -10,10 +10,16 @@ import { AuditRepository }        from '../repositories/audit.repository'
 import { ConversationRepository } from '../repositories/conversation.repository'
 import { MessageRepository }      from '../repositories/message.repository'
 import { ContactRepository }      from '../repositories/contact.repository'
+import { AppointmentRepository }  from '../repositories/appointment.repository'
+import { AvailabilityRepository } from '../repositories/availability.repository'
+import { AgentSettingsRepository }    from '../repositories/agent-settings.repository'
+import { AgentCredentialsRepository } from '../repositories/agent-credentials.repository'
 
-import { ConversationService } from './conversation.service'
-import { MessageService }      from './message.service'
-import { ContactService }      from './contact.service'
+import { ConversationService }  from './conversation.service'
+import { MessageService }       from './message.service'
+import { ContactService }       from './contact.service'
+import { AppointmentService }   from './appointment.service'
+import { AgentSettingsService } from './agent-settings.service'
 
 // ============================================================================
 // ProviderFactory
@@ -118,10 +124,66 @@ export function createContactService(userClient: SupabaseClient): ContactService
   )
 }
 
+// createAppointmentService(userClient):
+//   Para as rotas da página de Agendamentos — RLS do usuário aplicada.
+//
+// createAppointmentSystemService():
+//   Para o agente de IA e workers de WhatsApp, que não têm sessão de usuário.
+//   Usa service role, então a RLS de central.appointments não se aplica: a
+//   restrição de organização passa a ser responsabilidade do caller, que
+//   sempre informa orgId explicitamente ao service.
+export function createAppointmentService(userClient: SupabaseClient): AppointmentService {
+  return new AppointmentService(
+    new AppointmentRepository(userClient),
+    new AvailabilityRepository(userClient),
+    new AuditRepository(supabaseService),   // sempre service role
+  )
+}
+
+export function createAppointmentSystemService(): AppointmentService {
+  return new AppointmentService(
+    new AppointmentRepository(supabaseService),
+    new AvailabilityRepository(supabaseService),
+    new AuditRepository(supabaseService),
+  )
+}
+
+// createAgentSettingsService(userClient):
+//   Para a tela de configuração. A RLS de central.agent_settings restringe
+//   leitura e escrita a central_role = 'admin', então a permissão é imposta
+//   pelo banco, não só pela rota.
+//
+//   AgentCredentialsRepository recebe service role obrigatoriamente: a migration
+//   20260810120300 tirou de `authenticated` o privilégio de LER
+//   elevenlabs_api_key (mantendo o de gravá-la). Com o cliente do usuário, a
+//   leitura da chave responderia 403 — que é a proteção funcionando.
+//
+// createAgentSettingsSystemService():
+//   Para o worker de envio de áudio, que precisa dos parâmetros de voz sem
+//   sessão de usuário. Usa service role em tudo: a organização passa a ser
+//   responsabilidade do caller, que sempre informa orgId.
+export function createAgentSettingsService(userClient: SupabaseClient): AgentSettingsService {
+  return new AgentSettingsService(
+    new AgentSettingsRepository(userClient),
+    new AgentCredentialsRepository(supabaseService),  // credencial: só service role
+    new AuditRepository(supabaseService),             // sempre service role
+  )
+}
+
+export function createAgentSettingsSystemService(): AgentSettingsService {
+  return new AgentSettingsService(
+    new AgentSettingsRepository(supabaseService),
+    new AgentCredentialsRepository(supabaseService),
+    new AuditRepository(supabaseService),
+  )
+}
+
 // Exportar para permitir que Sprint 2 registre providers no bootstrap
 export { providerFactory }
 
 // Re-exports das classes para uso em testes e composição avançada
-export { ConversationService } from './conversation.service'
-export { MessageService }      from './message.service'
-export { ContactService }      from './contact.service'
+export { ConversationService }  from './conversation.service'
+export { MessageService }       from './message.service'
+export { ContactService }       from './contact.service'
+export { AppointmentService }   from './appointment.service'
+export { AgentSettingsService } from './agent-settings.service'

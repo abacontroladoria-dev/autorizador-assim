@@ -148,44 +148,85 @@ export class MessageRepository {
     return data as Message
   }
 
-  // Persiste mensagem + attachments em sequência (FK: attachment.message_id).
-  // Supabase JS não suporta transação explícita — a ordem garante integridade:
-  // attachments referenciam messages.id que já existe após o primeiro INSERT.
-  // Se o INSERT de attachments falhar, a mensagem já foi criada mas sem mídia
-  // (estado inconsistente tolerável: worker de storage detecta e retenta).
+  // Persiste mensagem + attachments atomicamente, via
+  // central.criar_mensagem_com_anexos (migration 20260810120400).
+  //
+  // A versão anterior fazia dois INSERTs sem transação e documentava o estado
+  // intermediário como "inconsistente tolerável, worker de storage detecta e
+  // retenta". Não é tolerável para áudio de WhatsApp: `body` de mensagem de
+  // áudio é vazio, então mensagem sem anexo é indistinguível de mensagem sem
+  // conteúdo — o orquestrador não tem o que responder e o responsável conclui
+  // que a clínica ignorou o áudio dele. E o worker de storage não existe.
+  //
+  // A RPC é SECURITY INVOKER: os privilégios de quem chama continuam valendo.
   async createWithAttachments(
     messageInput:     CreateMessageInput,
     attachmentInputs: CreateAttachmentInput[]
   ): Promise<Message> {
-    const message = await this.create(messageInput)
+    const { data, error } = await (this.supabase as any)
+      .schema('central')
+      .rpc('criar_mensagem_com_anexos', {
+        p_mensagem: {
+          organization_id:     messageInput.organization_id,
+          conversation_id:     messageInput.conversation_id,
+          external_message_id: messageInput.external_message_id ?? null,
+          direction:           messageInput.direction,
+          message_type:        messageInput.message_type ?? 'text',
+          body:                messageInput.body ?? null,
+          provider:            messageInput.provider ?? null,
+          sent_by_user_id:     messageInput.sent_by_user_id ?? null,
+          sent_by_ai:          messageInput.sent_by_ai ?? false,
+          reply_to_message_id: messageInput.reply_to_message_id ?? null,
+          status:              messageInput.status ?? 'pending',
+          sent_at:             messageInput.sent_at ?? null,
+        },
+        p_anexos: attachmentInputs.map(a => ({
+          // organization_id e message_id NÃO viajam: a função os toma da
+          // mensagem que acabou de criar, para anexo não cair em outra org.
+          file_name:      a.file_name      ?? null,
+          file_type:      a.file_type      ?? null,
+          file_size:      a.file_size      ?? null,
+          external_url:   a.external_url   ?? null,
+          storage_status: a.storage_status ?? 'pending',
+          duration_secs:  a.duration_secs  ?? null,
+        })),
+      })
 
-    if (attachmentInputs.length > 0) {
-      const rows = attachmentInputs.map(a => ({
-        organization_id: message.organization_id,
-        message_id:      message.id,
-        file_name:       a.file_name      ?? null,
-        file_type:       a.file_type      ?? null,
-        file_size:       a.file_size      ?? null,
-        external_url:    a.external_url   ?? null,
-        storage_path:    a.storage_path   ?? null,
-        storage_status:  a.storage_status ?? 'pending',
-        duration_secs:   a.duration_secs  ?? null,
-      }))
-
-      const { error } = await (this.supabase as any)
-        .schema('central')
-        .from('message_attachments')
-        .insert(rows)
-
-      if (error) throw error
-    }
-
-    return { ...message, attachments: [] }
+    if (error) throw error
+    return { ...(data as Message), attachments: [] }
   }
 
   // Atualiza status de entrega: pending → sent → delivered → read.
   // Disparado por webhooks de status do provider (Evolution: MESSAGE_UPDATE).
   // Supabase Realtime emite o evento de UPDATE automaticamente → UI atualiza tick.
+  // Fecha o envio: grava a identidade que o provider devolveu e marca 'sent'.
+  //
+  // Existe separado de updateStatus porque as duas coisas precisam acontecer no
+  // MESMO update. Em dois updates, uma falha entre eles deixaria a mensagem
+  // 'sent' sem external_message_id — e sem esse id o webhook de entrega não
+  // encontra a mensagem (updateDeliveryStatus busca por ele), então o "entregue"
+  // e o "lido" nunca chegariam a esta linha.
+  async confirmarEnvio(
+    id:         string,
+    externalId: string,
+    sentAt?:    string,
+  ): Promise<Message> {
+    const { data, error } = await (this.supabase as any)
+      .schema('central')
+      .from('messages')
+      .update({
+        external_message_id: externalId,
+        status:              'sent',
+        sent_at:             sentAt ?? new Date().toISOString(),
+      })
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) throw error
+    return data as Message
+  }
+
   async updateStatus(id: string, status: MessageStatus): Promise<void> {
     const { error } = await (this.supabase as any)
       .schema('central')

@@ -38,6 +38,17 @@ export type ConversationEventType =
   | 'contact.updated'
   | 'contact.merged'
   | 'patient_link.created'
+  // Agendamentos — o rastro de quem prometeu qual vaga a quem.
+  // Vale tanto para operador humano (performed_by = uuid) quanto para o agente
+  // de IA (performed_by = null, payload.criadoPorIa = true).
+  | 'appointment.created'
+  | 'appointment.updated'
+  | 'appointment.rescheduled'
+  | 'appointment.cancelled'
+  | 'appointment.deleted'
+  // Configuração do agente. Payload lista quais campos mudaram e sinaliza
+  // troca de credencial — nunca o valor da credencial.
+  | 'agent_settings.updated'
   // Infra
   | 'webhook.received'
   | 'webhook.failed'

@@ -89,6 +89,104 @@ export class MissingContactPhoneError extends CentralError {
 }
 
 // ----------------------------------------------------------------------------
+// Agendamento
+// ----------------------------------------------------------------------------
+
+export class AppointmentNotFoundError extends CentralError {
+  constructor(id: string) {
+    super(`Agendamento ${id} não encontrado`, 'APPOINTMENT_NOT_FOUND', { id })
+  }
+}
+
+// A vaga pedida não existe como 'Livre' na grade do TiTa.
+// Distinto de SlotAlreadyBookedError de propósito: aqui o horário nunca foi
+// oferecível (o profissional não tem essa vaga), lá ele existia e foi tomado.
+// O agente responde ao paciente de formas diferentes nos dois casos.
+export class SlotNotInGradeError extends CentralError {
+  constructor(profissionalId: number, date: string, time: string) {
+    super(
+      `Não existe vaga livre na grade para o profissional ${profissionalId} em ${date} às ${time}`,
+      'SLOT_NOT_IN_GRADE',
+      { profissionalId, date, time }
+    )
+  }
+}
+
+// A vaga existia na grade mas já foi prometida por nós a outra pessoa.
+// Também é o erro em que a violação de uq_appointments_slot_ocupada (23505) é
+// traduzida — o índice é a garantia real contra corrida entre duas reservas
+// simultâneas, e o usuário precisa ver "esse horário acabou de ser preenchido".
+export class SlotAlreadyBookedError extends CentralError {
+  constructor(profissionalId: number, date: string, time: string) {
+    super(
+      `A vaga de ${date} às ${time} já está reservada`,
+      'SLOT_ALREADY_BOOKED',
+      { profissionalId, date, time }
+    )
+  }
+}
+
+export class SlotInPastError extends CentralError {
+  constructor(date: string, time: string | null) {
+    super(
+      `Não é possível agendar em ${date}${time ? ` às ${time}` : ''}: o horário já passou`,
+      'SLOT_IN_PAST',
+      { date, time }
+    )
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Voz (ElevenLabs)
+// ----------------------------------------------------------------------------
+
+// Não há chave da ElevenLabs gravada para a organização.
+// Separado de TtsProviderError de propósito: aqui nada foi tentado contra a
+// ElevenLabs, então não faz sentido a UI sugerir "tente novamente".
+export class TtsNotConfiguredError extends CentralError {
+  constructor(
+    orgId: string,
+    motivo = 'Nenhuma chave da ElevenLabs configurada para esta organização'
+  ) {
+    super(motivo, 'TTS_NOT_CONFIGURED', { orgId })
+  }
+}
+
+// A ElevenLabs foi chamada e recusou. `statusUpstream` e `mensagemUpstream`
+// existem porque a mensagem do provider é a única informação útil aqui: chave
+// inválida, voz que não pertence à conta e cota estourada são três problemas
+// diferentes que o usuário resolve de três formas diferentes. Genericizar isso
+// em "erro ao gerar áudio" é o que fazia a tela antiga ser impossível de
+// depurar.
+export class TtsProviderError extends CentralError {
+  constructor(
+    public readonly statusUpstream: number,
+    public readonly mensagemUpstream: string,
+    // detail.status / detail.code / detail.type da resposta, quando vem.
+    public readonly codigoUpstream: string | null = null
+  ) {
+    super(mensagemUpstream, 'TTS_PROVIDER_ERROR', { statusUpstream, codigoUpstream })
+  }
+
+  // Cota esgotada é verificada ANTES de credencial porque a ElevenLabs devolve
+  // 401 nesse caso — classificar pelo status faria "acabaram os caracteres"
+  // aparecer como "sua chave está errada", e o admin trocaria uma chave que
+  // estava correta.
+  get cotaEsgotada(): boolean {
+    return /quota|limit_reached|exceeded/i.test(this.codigoUpstream ?? '')
+  }
+
+  // true quando a própria credencial é o problema — a UI pede outra chave em
+  // vez de mandar tentar de novo. Chave inválida chega como HTTP 400 com
+  // detail.status = 'invalid_api_key', então o código manda mais que o status.
+  get chaveRejeitada(): boolean {
+    if (this.cotaEsgotada) return false
+    if (/api_key|authentication|unauthorized|permission/i.test(this.codigoUpstream ?? '')) return true
+    return this.statusUpstream === 401 || this.statusUpstream === 403
+  }
+}
+
+// ----------------------------------------------------------------------------
 // Channel
 // ----------------------------------------------------------------------------
 

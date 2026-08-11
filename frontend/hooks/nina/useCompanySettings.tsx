@@ -1,81 +1,85 @@
 'use client'
 
-import React, { createContext, useContext, useEffect, useState } from 'react'
-import { getSupabaseClient } from '@/lib/supabase/client'
+import React, { createContext, useCallback, useContext, useEffect, useState } from 'react'
 import { useAuth } from './useAuth'
+
+// ============================================================================
+// CompanySettingsProvider
+//
+// Antes lia nina_settings_public e user_roles direto do browser — nenhuma das
+// duas existe neste banco, então toda montagem da Central disparava dois 404 e
+// caía em valores genéricos ("Sua Empresa", "Agente").
+//
+// Agora lê /api/central/organization, que serve central.organizations. Precisa
+// ser rota de servidor porque o schema central não é exposto ao PostgREST.
+// ============================================================================
 
 interface CompanySettings {
   companyName: string
-  sdrName: string
-  loading: boolean
-  isAdmin: boolean
-  refetch: () => Promise<void>
+  sdrName:     string
+  timezone:    string
+  loading:     boolean
+  isAdmin:     boolean
+  centralRole: string | null
+  // Erro de carregamento fica visível para o consumidor em vez de virar valor
+  // genérico silencioso: o painel afirmar o nome errado da clínica é pior do
+  // que admitir que não carregou.
+  erro:        string | null
+  refetch:     () => Promise<void>
 }
 
 const CompanySettingsContext = createContext<CompanySettings | undefined>(undefined)
 
 export const CompanySettingsProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [companyName, setCompanyName] = useState('')
-  const [sdrName, setSdrName] = useState('')
-  const [loading, setLoading] = useState(true)
-  const [isAdmin, setIsAdmin] = useState(false)
+  const [sdrName, setSdrName]         = useState('')
+  const [timezone, setTimezone]       = useState('America/Sao_Paulo')
+  const [centralRole, setCentralRole] = useState<string | null>(null)
+  const [isAdmin, setIsAdmin]         = useState(false)
+  const [loading, setLoading]         = useState(true)
+  const [erro, setErro]               = useState<string | null>(null)
   const { user } = useAuth()
 
-  const fetchSettings = async () => {
+  const fetchSettings = useCallback(async () => {
     if (!user) {
       setLoading(false)
       return
     }
 
+    setLoading(true)
+    setErro(null)
     try {
-      setLoading(true)
-      const supabase = getSupabaseClient()
+      const resp = await fetch('/api/central/organization/')
+      const body = await resp.json().catch(() => null)
 
-      const { data: roleData } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', user.id)
-        .maybeSingle()
-
-      setIsAdmin(roleData?.role === 'admin')
-
-      try {
-        const { data: viewData, error } = await (supabase as any)
-          .from('nina_settings_public')
-          .select('company_name, sdr_name')
-          .limit(1)
-          .maybeSingle()
-        const data = viewData as { company_name?: string; sdr_name?: string } | null
-
-        if (data) {
-          setCompanyName(data.company_name || 'Sua Empresa')
-          setSdrName(data.sdr_name || 'Agente')
-        } else {
-          setCompanyName('Sua Empresa')
-          setSdrName('Agente')
-        }
-      } catch (dbError) {
-        // nina_settings_public table/view may not exist yet
-        // Use default values
-        setCompanyName('Sua Empresa')
-        setSdrName('Agente')
+      if (!resp.ok) {
+        setErro(body?.error?.message ?? `Falha ao carregar a organização (HTTP ${resp.status})`)
+        return
       }
-    } catch (error) {
-      console.error('[useCompanySettings] Error:', error)
+
+      const org = body?.data ?? {}
+      setCompanyName(org.nome      ?? '')
+      setSdrName(org.agentName     ?? '')
+      setTimezone(org.timezone     ?? 'America/Sao_Paulo')
+      setCentralRole(org.centralRole ?? null)
+      setIsAdmin(!!org.isAdmin)
+    } catch (err) {
+      setErro('Falha de rede ao carregar a organização')
     } finally {
       setLoading(false)
     }
-  }
-
-  useEffect(() => {
-    fetchSettings()
   }, [user])
+
+  useEffect(() => { void fetchSettings() }, [fetchSettings])
 
   const value: CompanySettings = {
     companyName,
     sdrName,
+    timezone,
     loading,
     isAdmin,
+    centralRole,
+    erro,
     refetch: fetchSettings,
   }
 

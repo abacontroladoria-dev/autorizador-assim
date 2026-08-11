@@ -19,6 +19,7 @@ import {
   ProviderError,
 } from '../types/errors.types'
 import { mapProviderStatus } from '../utils/provider-status'
+import { isUniqueViolation } from '../utils/pg-errors'
 
 // ============================================================================
 // MessageService
@@ -92,7 +93,19 @@ export class MessageService {
   // -------------------------------------------------------------------------
   // send
   // Envia mensagem outbound via provider.
-  // Só persiste após confirmação do provider — nunca salva mensagem não enviada.
+  //
+  // Ordem: PERSISTE, envia, atualiza o status.
+  //
+  // A versão anterior fazia o inverso — chamava o provider e só persistia depois,
+  // "para nunca salvar mensagem não enviada". Para registro clínico a troca está
+  // no sentido errado: se o INSERT falhar depois de a Meta aceitar, a mensagem
+  // existe no WhatsApp do responsável e NÃO existe no histórico da clínica.
+  // Ninguém descobre, porque não sobra rastro de nada.
+  //
+  // Invertida, o pior caso passa a ser uma linha `status = 'failed'` visível na
+  // conversa — que é honesta e acionável. Não é coincidência que
+  // central.messages.status já tenha default 'pending': o schema sempre assumiu
+  // esta ordem, era o código que divergia.
   // -------------------------------------------------------------------------
   async send(input: SendMessageInput): Promise<Message> {
     // 1. Validar conversa ativa
@@ -111,7 +124,22 @@ export class MessageService {
 
     const provider = this.factory.get(channel.provider)
 
-    // 3. Enviar via provider — falha aqui NÃO persiste a mensagem
+    // 3. Registrar a intenção ANTES de existir rede no caminho.
+    // Sem external_message_id ainda — ele só existe depois do aceite do provider.
+    const pendente = await this.msg.create({
+      organization_id:     conversation.organization_id,
+      conversation_id:     input.conversationId,
+      direction:           'outbound',
+      message_type:        input.messageType ?? 'text',
+      body:                input.body,
+      provider:            channel.provider,
+      sent_by_user_id:     input.sentByUserId,
+      sent_by_ai:          input.sentByAi         ?? false,
+      reply_to_message_id: input.replyToMessageId ?? undefined,
+      status:              'pending',
+    })
+
+    // 4. Enviar
     let result
     try {
       result = await provider.sendMessage(channel, {
@@ -121,26 +149,28 @@ export class MessageService {
         replyToId:   undefined,  // reply de outbound não mapeado no provider ainda
       })
     } catch (err) {
+      // A mensagem fica registrada como falha em vez de desaparecer. O erro
+      // continua subindo: quem chamou precisa saber que não foi entregue.
+      await this.msg.updateStatus(pendente.id, 'failed').catch(erroStatus => {
+        console.error('[MessageService] Falha ao marcar mensagem como failed', {
+          messageId: pendente.id,
+          conversationId: input.conversationId,
+          erroStatus: erroStatus instanceof Error ? erroStatus.message : String(erroStatus),
+        })
+      })
       throw new ProviderError(channel.provider, err)
     }
 
-    // 4. Persistir após confirmação do provider
-    const message = await this.msg.create({
-      organization_id:     conversation.organization_id,
-      conversation_id:     input.conversationId,
-      external_message_id: result.externalId,
-      direction:           'outbound',
-      message_type:        input.messageType ?? 'text',
-      body:                input.body,
-      provider:            channel.provider,
-      sent_by_user_id:     input.sentByUserId,
-      sent_by_ai:          input.sentByAi         ?? false,
-      reply_to_message_id: input.replyToMessageId ?? undefined,
-      status:              'sent',
-      sent_at:             result.sentAt,
-    })
+    // 5. Confirmar com a identidade que o provider devolveu.
+    // Se ESTE update falhar, a mensagem existe como 'pending' com o corpo certo —
+    // recuperável por reconciliação, ao contrário de não existir.
+    const message = await this.msg.confirmarEnvio(
+      pendente.id,
+      result.externalId,
+      result.sentAt,
+    )
 
-    // 5. Side effects
+    // 6. Side effects
     void this.audit.insert({
       organization_id: conversation.organization_id,
       conversation_id: input.conversationId,
@@ -165,7 +195,16 @@ export class MessageService {
   // -------------------------------------------------------------------------
   // receive
   // Persiste mensagem inbound recebida via webhook.
-  // Idempotente: retorna mensagem existente se external_message_id já processado.
+  //
+  // Idempotente em duas camadas, e a segunda é a que vale:
+  //   1. Consulta prévia por external_message_id — resolve a reentrega comum,
+  //      que chega segundos ou minutos depois.
+  //   2. Captura de 23505 no INSERT — resolve a reentrega SIMULTÂNEA, em que as
+  //      duas requisições passam pela consulta antes de qualquer uma inserir.
+  //      Aqui quem garante é uq_messages_ext_id.
+  //
+  // Sem a camada 2, a segunda entrega estoura e a rota responde 500 — e 5xx é
+  // justamente o que faz a Meta reentregar. O laço se alimenta do próprio erro.
   // -------------------------------------------------------------------------
   async receive(input: ReceiveMessageInput): Promise<Message> {
     // 1. Checar idempotência — webhook pode ser entregue mais de uma vez
@@ -199,24 +238,40 @@ export class MessageService {
       duration_secs:   a.durationSecs ?? undefined,
     }))
 
-    // 4. Persistir mensagem (+ attachments se houver)
+    // 4. Persistir mensagem (+ attachments se houver), atomicamente.
     // Trigger DB atualiza conversation.last_message_at automaticamente após INSERT
-    const message = await this.msg.createWithAttachments(
-      {
-        organization_id:     input.orgId,
-        conversation_id:     input.conversationId,
-        external_message_id: input.externalMessageId,
-        direction:           'inbound',
-        message_type:        input.messageType,
-        body:                input.body,
-        provider:            input.provider,
-        // Mensagem inbound não tem sent_by_user_id nem sent_by_ai
-        status:              'delivered',   // inbound já chegou entregue
-        sent_at:             input.sentAt,
-        reply_to_message_id: replyToMessageId,
-      },
-      attachmentInputs
-    )
+    let message: Message
+    try {
+      message = await this.msg.createWithAttachments(
+        {
+          organization_id:     input.orgId,
+          conversation_id:     input.conversationId,
+          external_message_id: input.externalMessageId,
+          direction:           'inbound',
+          message_type:        input.messageType,
+          body:                input.body,
+          provider:            input.provider,
+          // Mensagem inbound não tem sent_by_user_id nem sent_by_ai
+          status:              'delivered',   // inbound já chegou entregue
+          sent_at:             input.sentAt,
+          reply_to_message_id: replyToMessageId,
+        },
+        attachmentInputs
+      )
+    } catch (err) {
+      // Entrega simultânea: o outro processo inseriu entre a consulta e este
+      // INSERT. Buscar de novo e devolver a que venceu — o webhook responde 200
+      // e a Meta para de reentregar.
+      if (isUniqueViolation(err)) {
+        const jaGravada = await this.msg.findByExternalId(
+          input.externalMessageId,
+          input.orgId,
+          input.provider
+        )
+        if (jaGravada) return jaGravada
+      }
+      throw err
+    }
 
     // 5. Side effects — não bloqueiam o retorno
     void this.audit.insert({

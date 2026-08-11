@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { getSupabaseClient } from '@/lib/supabase/client'
 import { useAuth } from './useAuth'
 
 export interface OnboardingStep {
@@ -30,7 +29,11 @@ const WIZARD_SEEN_KEY = 'onboarding_wizard_seen'
 export function useOnboardingStatus(): OnboardingStatus {
   const { user } = useAuth()
   const [loading, setLoading] = useState(true)
-  const [isAdmin, setIsAdmin] = useState(false)
+  // Permanece no contrato do hook, mas hoje é sempre false: a fonte era
+  // `user_roles`, tabela do projeto Nina morto. Nenhum consumidor lê este campo
+  // — quem precisa de permissão usa useCompanySettings, que lê central_role
+  // pela rota /api/central/organization.
+  const isAdmin = false
   const [steps, setSteps] = useState<OnboardingStep[]>([
     {
       id: 'identity',
@@ -94,84 +97,25 @@ export function useOnboardingStatus(): OnboardingStatus {
     }
 
     setLoading(true)
-    const supabase = getSupabaseClient()
     try {
-      const { data: roleData } = await supabase
-        .from('user_roles')
-        .select('role')
-        .eq('user_id', user.id)
-        .maybeSingle()
-
-      const userIsAdmin = roleData?.role === 'admin'
-      setIsAdmin(userIsAdmin)
-
-      const { data: settings } = await supabase
-        .from('nina_settings')
-        .select('*')
-        .limit(1)
-        .maybeSingle()
-
-      if (settings) {
-        setSteps(prev =>
-          prev.map(step => {
-            switch (step.id) {
-              case 'identity':
-                return {
-                  ...step,
-                  isComplete: !!(settings.company_name && settings.sdr_name),
-                }
-              case 'whatsapp':
-                return {
-                  ...step,
-                  isComplete: !!(
-                    settings.whatsapp_access_token &&
-                    settings.whatsapp_phone_number_id &&
-                    (settings as any).whatsapp_business_account_id
-                  ),
-                }
-              case 'agent':
-                return {
-                  ...step,
-                  isComplete: !!(settings.company_name && settings.sdr_name),
-                }
-              case 'elevenlabs':
-                return {
-                  ...step,
-                  isComplete: !!settings.elevenlabs_api_key,
-                }
-              case 'business_hours':
-                const isDefaultConfig =
-                  settings.timezone === 'America/Sao_Paulo' &&
-                  settings.business_hours_start === '09:00:00' &&
-                  settings.business_hours_end === '18:00:00' &&
-                  JSON.stringify(settings.business_days) === '[1,2,3,4,5]'
-                return {
-                  ...step,
-                  isComplete: !isDefaultConfig || hasSeenWizard,
-                }
-              case 'verification':
-                return {
-                  ...step,
-                  isComplete: !!(
-                    settings.company_name &&
-                    settings.sdr_name &&
-                    settings.whatsapp_access_token &&
-                    settings.system_prompt_override
-                  ),
-                }
-              case 'finish':
-                return {
-                  ...step,
-                  isComplete: hasSeenWizard,
-                }
-              default:
-                return step
-            }
-          })
+      // As duas consultas que existiam aqui — `user_roles` e `nina_settings` —
+      // foram removidas. Ambas as tabelas pertencem ao projeto Supabase do CRM
+      // Nina, que não existe mais (o host não resolve em DNS), então cada
+      // montagem deste hook custava dois 404 e as duas respostas voltavam nulas:
+      // `isAdmin` já era sempre false e nenhum passo era marcado como completo.
+      // Remover não muda comportamento observável — só para de bater numa porta
+      // que não existe.
+      //
+      // A fonte real destes dados está em central.organizations e
+      // central.agent_settings, atrás de /api/central/organization e
+      // /api/central/agent-settings. Religar os passos do wizard a elas é
+      // trabalho de outra etapa: onboarding não faz parte da camada de IA, e a
+      // rota de organização hoje é somente leitura.
+      setSteps(prev =>
+        prev.map(step =>
+          step.id === 'finish' ? { ...step, isComplete: hasSeenWizard } : step
         )
-      }
-    } catch (error) {
-      console.error('Error fetching onboarding status:', error)
+      )
     } finally {
       setLoading(false)
     }

@@ -14,7 +14,6 @@ import {
   Clock,
   User,
   Layers,
-  Sparkles,
   ChevronDown,
   ChevronUp
 } from 'lucide-react'
@@ -44,7 +43,6 @@ const componentIcons: Record<string, React.ReactNode> = {
   agent_prompt: <Bot className="w-4 h-4" />,
   elevenlabs: <Mic className="w-4 h-4" />,
   business_hours: <Clock className="w-4 h-4" />,
-  lovable_ai: <Sparkles className="w-4 h-4" />,
   pipeline: <Layers className="w-4 h-4" />,
   profile: <User className="w-4 h-4" />,
   nina_settings: <Bot className="w-4 h-4" />,
@@ -56,7 +54,6 @@ const componentLabels: Record<string, string> = {
   agent_prompt: 'Agente IA',
   elevenlabs: 'ElevenLabs',
   business_hours: 'Horário',
-  lovable_ai: 'Lovable AI',
   pipeline: 'Pipeline',
   profile: 'Perfil',
   nina_settings: 'Configurações',

@@ -1,58 +1,55 @@
-import React, { useState, useEffect, forwardRef, useImperativeHandle, useRef } from 'react';
-import { Save, MessageSquare, Mic, Eye, EyeOff, Copy, Check, Loader2, Send, ChevronDown, Volume2, Download, Upload, FileAudio, HelpCircle } from 'lucide-react';
+import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
+import {
+  Mic, Volume2, Loader2, Eye, EyeOff, Check, ChevronDown, Download, Play,
+  AlertTriangle, KeyRound, MessageSquare, ExternalLink, Brain,
+} from 'lucide-react';
 import { Button } from '../Button';
-import { getNinaSupabaseClient } from '@/lib/supabase/nina-client';
-import { __NINA_SUPABASE_URL__ } from '@/lib/constants';
 import { toast } from 'sonner';
 import * as Collapsible from '@radix-ui/react-collapsible';
-import { useCompanySettings } from '@/hooks/nina/useCompanySettings';
-import { useAuth } from '@/hooks/nina/useAuth';
+import {
+  obterConfiguracao,
+  salvarConfiguracao,
+  listarVozesDaConta,
+  obterStatusOpenAI,
+  testarVoz,
+  audioParaUrl,
+  VozApiError,
+  type ConfiguracaoAgente,
+  type VozDaConta,
+  type ContaElevenLabs,
+  type ResultadoTeste,
+  type StatusOpenAI,
+} from '@/services/connect/voz';
 
-interface NinaSettings {
-  id?: string;
-  whatsapp_access_token: string | null;
-  whatsapp_phone_number_id: string | null;
-  whatsapp_verify_token: string | null;
-  elevenlabs_api_key: string | null;
-  elevenlabs_voice_id: string;
-  elevenlabs_model: string | null;
-  elevenlabs_stability: number;
-  elevenlabs_similarity_boost: number;
-  elevenlabs_style: number;
-  elevenlabs_speed: number | null;
-  elevenlabs_speaker_boost: boolean;
-  audio_response_enabled: boolean;
-}
+// ============================================================================
+// Aba "APIs" das Configurações.
+//
+// O que mudou e por quê: esta tela falava com um segundo projeto Supabase (o do
+// Nina) que não existe mais — o host não resolve nem em DNS. Salvar a chave da
+// ElevenLabs exibia sucesso e não gravava nada; o teste de áudio invocava uma
+// Edge Function inexistente. Agora tudo passa por /api/central/*, que fala com
+// o banco do Pulsar.
+//
+// A chave da ElevenLabs não é mais carregada para o estado do React. A tela
+// mostra a máscara (quatro últimos caracteres) e envia uma chave nova só quando
+// o admin digita uma.
+//
+// As vozes vêm da conta ElevenLabs, não de uma lista fixa no código: voz que
+// sai do catálogo público — ou voz clonada da clínica — deixava a lista antiga
+// mentindo, e o erro resultante parecia problema de credencial.
+// ============================================================================
 
-const VOICE_OPTIONS = [
-  { id: '33B4UnXyTNbgLmdEDh5P', name: 'Keren - Young Brazilian Female', desc: 'Feminina, brasileira (Padrão)' },
-  { id: '9BWtsMINqrJLrRacOk9x', name: 'Aria', desc: 'Feminina, natural' },
-  { id: 'CwhRBWXzGAHq8TQ4Fs17', name: 'Roger', desc: 'Masculina, confiante' },
-  { id: 'EXAVITQu4vr4xnSDxMaL', name: 'Sarah', desc: 'Feminina, suave' },
-  { id: 'FGY2WhTYpPnrIDTdsKH5', name: 'Laura', desc: 'Feminina, expressiva' },
-  { id: 'IKne3meq5aSn9XLyUdCD', name: 'Charlie', desc: 'Masculina, casual' },
-  { id: 'JBFqnCBsd6RMkjVDRZzb', name: 'George', desc: 'Masculina, britânica' },
-  { id: 'N2lVS1w4EtoT3dr4eOWO', name: 'Callum', desc: 'Masculina, transatlântica' },
-  { id: 'SAz9YHcvj6GT2YYXdXww', name: 'River', desc: 'Não-binária, americana' },
-  { id: 'TX3LPaxmHKxFdv7VOQHJ', name: 'Liam', desc: 'Masculina, articulada' },
-  { id: 'XB0fDUnXU5powFXDhCwa', name: 'Charlotte', desc: 'Feminina, sueca' },
-  { id: 'Xb7hH8MSUJpSbSDYk0k2', name: 'Alice', desc: 'Feminina, britânica' },
-  { id: 'XrExE9yKIg1WjnnlVkGX', name: 'Matilda', desc: 'Feminina, calorosa' },
-  { id: 'bIHbv24MWmeRgasZH58o', name: 'Will', desc: 'Masculina, amigável' },
-  { id: 'cgSgspJ2msm6clMCkdW9', name: 'Jessica', desc: 'Feminina, expressiva' },
-  { id: 'cjVigY5qzO86Huf0OWal', name: 'Eric', desc: 'Masculina, amigável' },
-  { id: 'iP95p4xoKVk53GoZ742B', name: 'Chris', desc: 'Masculina, casual' },
-  { id: 'nPczCjzI2devNBz1zQrb', name: 'Brian', desc: 'Masculina, profunda' },
-  { id: 'onwK4e9ZLuTAKqWW03F9', name: 'Daniel', desc: 'Masculina, britânica' },
-  { id: 'pFZP5JQG7iQjIQuC4Bku', name: 'Lily', desc: 'Feminina, britânica' },
-  { id: 'pqHfZKP75CvOlQylNhV4', name: 'Bill', desc: 'Masculina, americana' },
+// Modelos podem ser constante enquanto as vozes não podem: modelo é global da
+// ElevenLabs (poucos, estáveis, iguais para todas as contas), voz é do
+// inventário de cada conta e muda sem aviso.
+const MODELOS = [
+  { id: 'eleven_multilingual_v2', nome: 'Multilingual v2', nota: 'Melhor prosódia em português' },
+  { id: 'eleven_turbo_v2_5',      nome: 'Turbo v2.5',      nota: 'Mais rápido e mais barato' },
+  { id: 'eleven_flash_v2_5',      nome: 'Flash v2.5',      nota: 'Menor latência, dicção mais dura' },
 ];
 
-const MODEL_OPTIONS = [
-  { id: 'eleven_turbo_v2_5', name: 'Turbo v2.5 (Recomendado)' },
-  { id: 'eleven_turbo_v2', name: 'Turbo v2' },
-  { id: 'eleven_multilingual_v2', name: 'Multilingual v2' },
-];
+const TEXTO_TESTE_PADRAO =
+  'Olá! Aqui é da clínica. Confirmando a sessão de terapia ocupacional na terça-feira às nove horas.';
 
 export interface ApiSettingsRef {
   save: () => Promise<void>;
@@ -60,398 +57,207 @@ export interface ApiSettingsRef {
   isSaving: boolean;
 }
 
-const ApiSettings = forwardRef<ApiSettingsRef>((props, ref) => {
-  const { companyName } = useCompanySettings();
-  const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [showWhatsAppToken, setShowWhatsAppToken] = useState(false);
-  const [showElevenLabsKey, setShowElevenLabsKey] = useState(false);
-  const [copiedWebhook, setCopiedWebhook] = useState(false);
-  const [webhookOpen, setWebhookOpen] = useState(false);
-  const [advancedVoiceOpen, setAdvancedVoiceOpen] = useState(false);
-  const [testSectionOpen, setTestSectionOpen] = useState(false);
-  const [testPhone, setTestPhone] = useState('');
-  const [testMessage, setTestMessage] = useState('');
-  const [testSending, setTestSending] = useState(false);
+// Rascunho editável — o que o admin mexeu antes de salvar.
+interface Rascunho {
+  vozId:           string | null;
+  modeloVoz:       string;
+  stability:       number;
+  similarityBoost: number;
+  style:           number;
+  speed:           number;
+  speakerBoost:    boolean;
+  ttsAtivo:        boolean;
+}
 
-  // Audio test states
-  const [audioTestOpen, setAudioTestOpen] = useState(false);
-  const [audioTestText, setAudioTestText] = useState('Olá! Esta é uma mensagem de teste para verificar a qualidade da voz.');
-  const [audioGenerating, setAudioGenerating] = useState(false);
-  const [audioUrl, setAudioUrl] = useState<string | null>(null);
-  const [audioStats, setAudioStats] = useState<{ duration_ms: number; size_kb: number } | null>(null);
-  const audioRef = useRef<HTMLAudioElement>(null);
-
-  // Audio simulation states
-  const [audioSimulateOpen, setAudioSimulateOpen] = useState(false);
-  const [audioSimulatePhone, setAudioSimulatePhone] = useState('');
-  const [audioSimulateName, setAudioSimulateName] = useState('');
-  const [audioFile, setAudioFile] = useState<File | null>(null);
-  const [audioSimulating, setAudioSimulating] = useState(false);
-  const [audioSimulateResult, setAudioSimulateResult] = useState<{
-    transcription: string;
-    contact_id: string;
-    conversation_id: string;
-    message_id: string;
-    queued_for_nina: boolean;
-  } | null>(null);
-  const audioFileInputRef = useRef<HTMLInputElement>(null);
-
-  // Gera um verify token único para esta instalação
-  const generateUniqueToken = () => `verify-${crypto.randomUUID().slice(0, 8)}`;
-
-  const [settings, setSettings] = useState<NinaSettings>({
-    whatsapp_access_token: null,
-    whatsapp_phone_number_id: null,
-    whatsapp_verify_token: generateUniqueToken(),
-    elevenlabs_api_key: null,
-    elevenlabs_voice_id: '33B4UnXyTNbgLmdEDh5P',
-    elevenlabs_model: 'eleven_turbo_v2_5',
-    elevenlabs_stability: 0.75,
-    elevenlabs_similarity_boost: 0.80,
-    elevenlabs_style: 0.30,
-    elevenlabs_speed: 1.0,
-    elevenlabs_speaker_boost: true,
-    audio_response_enabled: false,
-  });
-
-  // Auto-save ElevenLabs API key when field loses focus
-  const handleElevenLabsKeyBlur = async () => {
-    if (!settings.id || !settings.elevenlabs_api_key) return;
-
-    try {
-      const { error } = await getNinaSupabaseClient()
-        .from('nina_settings')
-        .update({
-          elevenlabs_api_key: settings.elevenlabs_api_key,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', settings.id);
-
-      if (error) throw error;
-      toast.success('API Key da ElevenLabs salva automaticamente');
-    } catch (error) {
-      console.error('Error auto-saving ElevenLabs key:', error);
-    }
+function rascunhoDe(c: ConfiguracaoAgente): Rascunho {
+  return {
+    vozId:           c.vozId,
+    modeloVoz:       c.modeloVoz,
+    stability:       c.stability,
+    similarityBoost: c.similarityBoost,
+    style:           c.style,
+    speed:           c.speed,
+    speakerBoost:    c.speakerBoost,
+    ttsAtivo:        c.ttsAtivo,
   };
+}
 
-  const webhookUrl = `${__NINA_SUPABASE_URL__}/functions/v1/whatsapp-webhook`;
+const ApiSettings = forwardRef<ApiSettingsRef>((props, ref) => {
+  const [config, setConfig]     = useState<ConfiguracaoAgente | null>(null);
+  const [rascunho, setRascunho] = useState<Rascunho | null>(null);
+  const [carregando, setCarregando] = useState(true);
+  const [salvando, setSalvando]     = useState(false);
+  const [erroConfig, setErroConfig] = useState<string | null>(null);
+  const [semPermissao, setSemPermissao] = useState(false);
 
-  useEffect(() => {
-    setTestMessage(`Olá! Esta é uma mensagem de teste do sistema ${companyName}. 🚀`);
-  }, [companyName]);
+  // Credencial
+  const [chaveNova, setChaveNova] = useState('');
+  const [mostrarChave, setMostrarChave] = useState(false);
+  const [verificando, setVerificando] = useState(false);
 
-  useEffect(() => {
-    loadSettings();
+  // Inventário da conta
+  const [vozes, setVozes] = useState<VozDaConta[] | null>(null);
+  const [conta, setConta] = useState<ContaElevenLabs | null>(null);
+  const [erroVozes, setErroVozes] = useState<VozApiError | null>(null);
+
+  // OpenAI — só leitura. Estado separado do resto porque a origem é outra
+  // (variável de ambiente do servidor, não o banco): uma falha aqui não deve
+  // derrubar a configuração de voz, nem o contrário.
+  const [statusIa, setStatusIa] = useState<StatusOpenAI | null>(null);
+  const [erroStatusIa, setErroStatusIa] = useState<string | null>(null);
+
+  // Teste de áudio
+  const [testeAberto, setTesteAberto] = useState(false);
+  const [avancadoAberto, setAvancadoAberto] = useState(false);
+  const [textoTeste, setTextoTeste] = useState(TEXTO_TESTE_PADRAO);
+  const [gerando, setGerando] = useState(false);
+  const [audioUrl, setAudioUrl] = useState<string | null>(null);
+  const [stats, setStats] = useState<ResultadoTeste | null>(null);
+
+  // Guarda a URL do Blob para revogar: sem isso cada teste vaza alguns KB e o
+  // <audio> anterior segue ocupando memória até a navegação.
+  const audioUrlRef = useRef<string | null>(null);
+  const trocarAudio = useCallback((url: string | null) => {
+    if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
+    audioUrlRef.current = url;
+    setAudioUrl(url);
+  }, []);
+  useEffect(() => () => {
+    if (audioUrlRef.current) URL.revokeObjectURL(audioUrlRef.current);
   }, []);
 
+  const carregarVozes = useCallback(async () => {
+    try {
+      const { vozes, conta } = await listarVozesDaConta();
+      setVozes(vozes);
+      setConta(conta);
+      setErroVozes(null);
+      return true;
+    } catch (err) {
+      setVozes(null);
+      setConta(null);
+      setErroVozes(err instanceof VozApiError ? err : null);
+      return false;
+    }
+  }, []);
+
+  // Não propaga erro: o bloco da OpenAI é informativo, e um 500 aqui não pode
+  // impedir o admin de configurar a voz.
+  const carregarStatusIa = useCallback(async () => {
+    try {
+      setStatusIa(await obterStatusOpenAI());
+      setErroStatusIa(null);
+    } catch (err) {
+      setStatusIa(null);
+      setErroStatusIa(err instanceof Error ? err.message : 'Falha ao consultar o status da OpenAI');
+    }
+  }, []);
+
+  const carregar = useCallback(async () => {
+    setCarregando(true);
+    setErroConfig(null);
+    try {
+      const c = await obterConfiguracao();
+      setConfig(c);
+      setRascunho(rascunhoDe(c));
+      setChaveNova('');
+      if (c.chaveConfigurada) await carregarVozes();
+      await carregarStatusIa();
+    } catch (err) {
+      if (err instanceof VozApiError && err.semPermissao) setSemPermissao(true);
+      else setErroConfig(err instanceof Error ? err.message : 'Falha ao carregar a configuração');
+    } finally {
+      setCarregando(false);
+    }
+  }, [carregarVozes, carregarStatusIa]);
+
+  useEffect(() => { carregar(); }, [carregar]);
+
+  // ---------------------------------------------------------------------------
+  // Salvar — acionado pelo botão "Salvar Alterações" do cabeçalho (via ref)
+  // ---------------------------------------------------------------------------
+  const salvar = useCallback(async () => {
+    if (!rascunho) return;
+    setSalvando(true);
+    try {
+      const trocouChave = chaveNova.trim().length > 0;
+      const atualizado = await salvarConfiguracao({
+        ...rascunho,
+        ...(trocouChave ? { chaveApi: chaveNova.trim() } : {}),
+      });
+      setConfig(atualizado);
+      setRascunho(rascunhoDe(atualizado));
+      setChaveNova('');
+      toast.success('Configuração de voz salva');
+      if (trocouChave) await carregarVozes();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Falha ao salvar';
+      toast.error('Não foi possível salvar', { description: msg });
+    } finally {
+      setSalvando(false);
+    }
+  }, [rascunho, chaveNova, carregarVozes]);
+
   useImperativeHandle(ref, () => ({
-    save: handleSave,
-    cancel: loadSettings,
-    isSaving: saving
+    save: salvar,
+    cancel: carregar,
+    isSaving: salvando,
   }));
 
-  const loadSettings = async () => {
-    if (!user?.id) {
-      console.log('[ApiSettings] No user, skipping load');
-      setLoading(false);
+  // Grava a chave e imediatamente pergunta à ElevenLabs quem ela é. Substitui o
+  // auto-save silencioso no blur: o admin acabou de colar uma credencial, a
+  // pergunta na cabeça dele é "funcionou?", e a resposta chega agora.
+  const verificarChave = async () => {
+    const chave = chaveNova.trim();
+    if (!chave) {
+      toast.error('Cole a API Key antes de verificar');
       return;
     }
-
+    setVerificando(true);
     try {
-      // Fetch global nina_settings (no user_id filter - single tenant)
-      const { data, error } = await getNinaSupabaseClient()
-        .from('nina_settings')
-        .select('*')
-        .limit(1)
-        .maybeSingle();
-
-      if (error) throw error;
-
-      // Se não existe registro, admin precisa configurar via onboarding
-      if (!data) {
-        console.log('[ApiSettings] No global settings found');
-        setLoading(false);
-        return;
-      }
-
-      // Load settings from global data
-      const uniqueToken = data.whatsapp_verify_token || generateUniqueToken();
-      setSettings({
-        id: data.id,
-        whatsapp_access_token: data.whatsapp_access_token,
-        whatsapp_phone_number_id: data.whatsapp_phone_number_id,
-        whatsapp_verify_token: uniqueToken,
-        elevenlabs_api_key: data.elevenlabs_api_key,
-        elevenlabs_voice_id: data.elevenlabs_voice_id,
-        elevenlabs_model: data.elevenlabs_model,
-        elevenlabs_stability: data.elevenlabs_stability,
-        elevenlabs_similarity_boost: data.elevenlabs_similarity_boost,
-        elevenlabs_style: data.elevenlabs_style,
-        elevenlabs_speed: data.elevenlabs_speed,
-        elevenlabs_speaker_boost: data.elevenlabs_speaker_boost,
-        audio_response_enabled: data.audio_response_enabled || false,
-      });
-    } catch (error) {
-      console.error('[ApiSettings] Error loading settings:', error);
-      toast.error('Erro ao carregar configurações');
+      const atualizado = await salvarConfiguracao({ chaveApi: chave });
+      setConfig(atualizado);
+      setChaveNova('');
+      const okVozes = await carregarVozes();
+      if (okVozes) toast.success('Chave aceita pela ElevenLabs');
+      else toast.error('Chave gravada, mas a ElevenLabs a recusou');
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Falha ao gravar a chave';
+      toast.error('Não foi possível gravar a chave', { description: msg });
     } finally {
-      setLoading(false);
+      setVerificando(false);
     }
   };
 
-  const handleSave = async () => {
-    setSaving(true);
+  const gerarAudio = async () => {
+    if (!textoTeste.trim()) {
+      toast.error('Escreva um texto para converter');
+      return;
+    }
+    setGerando(true);
+    trocarAudio(null);
+    setStats(null);
     try {
-      if (settings.whatsapp_phone_number_id && !/^\d+$/.test(settings.whatsapp_phone_number_id)) {
-        toast.error('Phone Number ID deve conter apenas números');
-        return;
-      }
-
-      // Update global settings (no user_id filter - RLS handles admin check)
-      const { error } = await getNinaSupabaseClient()
-        .from('nina_settings')
-        .update({
-          whatsapp_access_token: settings.whatsapp_access_token,
-          whatsapp_phone_number_id: settings.whatsapp_phone_number_id,
-          whatsapp_verify_token: settings.whatsapp_verify_token,
-          elevenlabs_api_key: settings.elevenlabs_api_key,
-          elevenlabs_voice_id: settings.elevenlabs_voice_id,
-          elevenlabs_model: settings.elevenlabs_model,
-          elevenlabs_stability: settings.elevenlabs_stability,
-          elevenlabs_similarity_boost: settings.elevenlabs_similarity_boost,
-          elevenlabs_style: settings.elevenlabs_style,
-          elevenlabs_speed: settings.elevenlabs_speed,
-          elevenlabs_speaker_boost: settings.elevenlabs_speaker_boost,
-          audio_response_enabled: settings.audio_response_enabled,
-          updated_at: new Date().toISOString(),
-        })
-        .eq('id', settings.id!);
-
-      if (error) throw error;
-
-      toast.success('Configurações de APIs salvas com sucesso!');
-    } catch (error) {
-      console.error('Error saving settings:', error);
-      toast.error('Erro ao salvar configurações');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const copyWebhookUrl = () => {
-    navigator.clipboard.writeText(webhookUrl);
-    setCopiedWebhook(true);
-    toast.success('URL do webhook copiada!');
-    setTimeout(() => setCopiedWebhook(false), 2000);
-  };
-
-  const handleGenerateAudio = async () => {
-    if (!settings.elevenlabs_api_key) {
-      toast.error('Configure sua API Key da ElevenLabs primeiro');
-      return;
-    }
-
-    if (!audioTestText.trim()) {
-      toast.error('Insira um texto para converter em áudio');
-      return;
-    }
-
-    setAudioGenerating(true);
-    setAudioUrl(null);
-    setAudioStats(null);
-
-    try {
-      const { data, error } = await getNinaSupabaseClient().functions.invoke('test-elevenlabs-tts', {
-        body: {
-          text: audioTestText,
-          apiKey: settings.elevenlabs_api_key,
-          voiceId: settings.elevenlabs_voice_id,
-          model: settings.elevenlabs_model,
-          stability: settings.elevenlabs_stability,
-          similarityBoost: settings.elevenlabs_similarity_boost,
-          speed: settings.elevenlabs_speed,
-        }
-      });
-
-      if (error) throw error;
-
-      if (data?.success && data?.audioBase64) {
-        // Create audio URL from base64
-        const audioBlob = new Blob(
-          [Uint8Array.from(atob(data.audioBase64), c => c.charCodeAt(0))],
-          { type: 'audio/mpeg' }
-        );
-        const url = URL.createObjectURL(audioBlob);
-        setAudioUrl(url);
-        setAudioStats({ duration_ms: data.duration_ms, size_kb: data.size_kb });
-        toast.success(`Áudio gerado em ${(data.duration_ms / 1000).toFixed(1)}s`);
-      } else {
-        throw new Error(data?.error || 'Erro ao gerar áudio');
-      }
-    } catch (error) {
-      console.error('Error generating audio:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Erro ao gerar áudio';
-      toast.error(errorMessage);
-    } finally {
-      setAudioGenerating(false);
-    }
-  };
-
-  const handleDownloadAudio = () => {
-    if (!audioUrl) return;
-    const a = document.createElement('a');
-    a.href = audioUrl;
-    a.download = 'elevenlabs-test.mp3';
-    a.click();
-  };
-
-  const handleTestMessage = async () => {
-    if (!settings.whatsapp_access_token || !settings.whatsapp_phone_number_id) {
-      toast.error('⚠️ Preencha e SALVE as credenciais do WhatsApp primeiro!', {
-        description: 'Clique em "Salvar Alterações" no topo da página antes de testar.'
-      });
-      return;
-    }
-
-    if (!testPhone.trim()) {
-      toast.error('Insira um número de telefone');
-      return;
-    }
-
-    if (!testMessage.trim()) {
-      toast.error('Insira uma mensagem');
-      return;
-    }
-
-    if (!testPhone.startsWith('+')) {
-      toast.error('O número deve estar no formato internacional (ex: +5511999999999)');
-      return;
-    }
-
-    setTestSending(true);
-    try {
-      const { data, error } = await getNinaSupabaseClient().functions.invoke('test-whatsapp-message', {
-        body: {
-          phone_number: testPhone,
-          message: testMessage
-        }
-      });
-
-      if (error) throw error;
-
-      if (data?.success) {
-        toast.success('Mensagem enviada com sucesso! ✅', {
-          description: `ID: ${data.message_id}`
+      const resultado = await testarVoz(textoTeste);
+      trocarAudio(audioParaUrl(resultado));
+      setStats(resultado);
+      toast.success(`Áudio gerado em ${(resultado.geracaoMs / 1000).toFixed(1)}s`);
+    } catch (err) {
+      if (err instanceof VozApiError) {
+        // A mensagem é a da ElevenLabs — é ela que diz se o problema é a chave,
+        // a voz ou a cota.
+        toast.error(err.faltaConfigurar ? 'Configuração incompleta' : 'A ElevenLabs recusou', {
+          description: err.message,
         });
       } else {
-        throw new Error(data?.error || 'Erro desconhecido');
+        toast.error('Falha ao gerar áudio');
       }
-    } catch (error) {
-      console.error('Error sending test message:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Erro ao enviar mensagem de teste';
-      toast.error('Falha ao enviar mensagem', {
-        description: errorMessage
-      });
     } finally {
-      setTestSending(false);
+      setGerando(false);
     }
   };
 
-  const handleSimulateAudioWebhook = async () => {
-    if (!audioSimulatePhone.trim()) {
-      toast.error('Insira um número de telefone');
-      return;
-    }
-
-    if (!audioFile) {
-      toast.error('Selecione um arquivo de áudio');
-      return;
-    }
-
-    // Validate phone format
-    const cleanPhone = audioSimulatePhone.replace(/\D/g, '');
-    if (cleanPhone.length < 10) {
-      toast.error('Número de telefone inválido');
-      return;
-    }
-
-    setAudioSimulating(true);
-    setAudioSimulateResult(null);
-
-    try {
-      // Convert file to base64
-      const arrayBuffer = await audioFile.arrayBuffer();
-      const base64 = btoa(
-        new Uint8Array(arrayBuffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-      );
-
-      const { data, error } = await getNinaSupabaseClient().functions.invoke('simulate-audio-webhook', {
-        body: {
-          phone: cleanPhone,
-          name: audioSimulateName.trim() || undefined,
-          audio_base64: base64,
-          audio_mime_type: audioFile.type || 'audio/ogg'
-        }
-      });
-
-      if (error) throw error;
-
-      if (data?.success) {
-        setAudioSimulateResult({
-          transcription: data.transcription,
-          contact_id: data.contact_id,
-          conversation_id: data.conversation_id,
-          message_id: data.message_id,
-          queued_for_nina: data.queued_for_nina
-        });
-        toast.success('Áudio simulado com sucesso!', {
-          description: `Transcrição: "${data.transcription?.substring(0, 50)}..."`
-        });
-      } else {
-        throw new Error(data?.error || 'Erro ao simular áudio');
-      }
-    } catch (error) {
-      console.error('Error simulating audio webhook:', error);
-      const errorMessage = error instanceof Error ? error.message : 'Erro ao simular recebimento de áudio';
-      toast.error('Falha na simulação', {
-        description: errorMessage
-      });
-    } finally {
-      setAudioSimulating(false);
-    }
-  };
-
-  const handleAudioFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      // Validate file type
-      const validTypes = ['audio/ogg', 'audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/m4a', 'audio/webm', 'audio/mp4'];
-      if (!validTypes.includes(file.type) && !file.name.match(/\.(ogg|mp3|wav|m4a|webm|mp4)$/i)) {
-        toast.error('Formato de áudio não suportado', {
-          description: 'Use .ogg, .mp3, .wav, .m4a ou .webm'
-        });
-        return;
-      }
-
-      // Validate file size (max 10MB)
-      if (file.size > 10 * 1024 * 1024) {
-        toast.error('Arquivo muito grande', {
-          description: 'O arquivo deve ter no máximo 10MB'
-        });
-        return;
-      }
-
-      setAudioFile(file);
-      setAudioSimulateResult(null);
-    }
-  };
-
-  const whatsappConfigured = settings.whatsapp_access_token && settings.whatsapp_phone_number_id;
-  const elevenlabsConfigured = settings.elevenlabs_api_key;
-
-  if (loading) {
+  if (carregando) {
     return (
       <div className="flex items-center justify-center p-12">
         <Loader2 className="w-8 h-8 animate-spin text-cyan-500" />
@@ -459,610 +265,540 @@ const ApiSettings = forwardRef<ApiSettingsRef>((props, ref) => {
     );
   }
 
+  if (semPermissao) {
+    return (
+      <div className="rounded-xl border border-amber-500/20 bg-amber-500/5 p-6 text-sm text-amber-300">
+        Apenas administradores da Central de Atendimento podem ver as credenciais do agente.
+      </div>
+    );
+  }
+
+  if (erroConfig || !config || !rascunho) {
+    return (
+      <div className="rounded-xl border border-rose-500/20 bg-rose-500/5 p-6">
+        <p className="text-sm text-rose-300">{erroConfig ?? 'Configuração indisponível'}</p>
+        <Button variant="ghost" size="sm" onClick={carregar} className="mt-3 text-slate-300">
+          Tentar novamente
+        </Button>
+      </div>
+    );
+  }
+
+  const vozSelecionada = vozes?.find(v => v.voiceId === rascunho.vozId) ?? null;
+  // Voz gravada que não está mais no inventário da conta: gerar áudio vai falhar
+  // e a mensagem da ElevenLabs não deixa óbvio que a causa é esta.
+  const vozOrfa = !!rascunho.vozId && !!vozes && !vozSelecionada;
+  const restantes = conta && conta.caracteresLimite !== null && conta.caracteresUsados !== null
+    ? conta.caracteresLimite - conta.caracteresUsados
+    : null;
+
   return (
     <div className="space-y-6">
-      {/* WhatsApp Cloud API + Webhook */}
-      <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <div className="flex items-center gap-3">
-            <MessageSquare className="w-5 h-5 text-cyan-400" />
-            <h3 className="font-semibold text-white">WhatsApp Cloud API</h3>
-          </div>
-          <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium ${
-            whatsappConfigured
-              ? 'bg-emerald-500/10 text-emerald-400'
-              : 'bg-amber-500/10 text-amber-400'
-          }`}>
-            <span className={`h-2 w-2 rounded-full ${whatsappConfigured ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
-            {whatsappConfigured ? 'Configurado' : 'Aguardando'}
-          </div>
-        </div>
-
-        {/* Mini-guia de configuração */}
-        <details className="mb-4">
-          <summary className="text-xs text-cyan-400 cursor-pointer hover:text-cyan-300 flex items-center gap-2 py-2">
-            <HelpCircle className="w-4 h-4" />
-            Como obter as credenciais do WhatsApp?
-          </summary>
-          <div className="mt-2 p-4 rounded-lg bg-slate-950 border border-slate-800 text-xs space-y-3">
-            <div className="space-y-2">
-              <p className="text-white font-medium">📋 Passo a passo:</p>
-              <ol className="list-decimal list-inside space-y-1.5 text-slate-400">
-                <li>Acesse o <a href="https://developers.facebook.com" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">Meta for Developers</a></li>
-                <li>Crie ou selecione um App do tipo "Business"</li>
-                <li>Adicione o produto "WhatsApp" ao app</li>
-                <li>Na seção "API Setup", copie o <strong className="text-white">Access Token</strong> temporário (ou gere um permanente)</li>
-                <li>Copie também o <strong className="text-white">Phone Number ID</strong> (número de identificação)</li>
-                <li>Em "Configuration" → "Webhook", cole a URL e o Verify Token abaixo</li>
-              </ol>
-            </div>
-            <div className="pt-2 border-t border-slate-700">
-              <p className="text-slate-500">
-                📚 <a href="https://developers.facebook.com/docs/whatsapp/cloud-api/get-started" target="_blank" rel="noopener noreferrer" className="text-cyan-400 hover:underline">Documentação oficial do WhatsApp Cloud API</a>
-              </p>
-            </div>
-          </div>
-        </details>
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-4">
-          <div>
-            <label className="text-xs font-medium text-slate-400 mb-1.5 block">
-              Access Token <span className="text-red-400">*</span>
-            </label>
-            <div className="relative">
-              <input
-                type={showWhatsAppToken ? "text" : "password"}
-                value={settings.whatsapp_access_token || ''}
-                onChange={(e) => setSettings({ ...settings, whatsapp_access_token: e.target.value })}
-                placeholder="EAAxxxxxxxxxxxxxxx..."
-                className="h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 pr-10 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
-              />
-              <button
-                type="button"
-                onClick={() => setShowWhatsAppToken(!showWhatsAppToken)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-              >
-                {showWhatsAppToken ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
-
-          <div>
-            <label className="text-xs font-medium text-slate-400 mb-1.5 block">
-              Phone Number ID <span className="text-red-400">*</span>
-            </label>
-            <input
-              type="text"
-              value={settings.whatsapp_phone_number_id || ''}
-              onChange={(e) => setSettings({ ...settings, whatsapp_phone_number_id: e.target.value })}
-              placeholder="123456789012345"
-              className="h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
-            />
-          </div>
-        </div>
-
-        {/* Webhook Collapsible */}
-        <Collapsible.Root open={webhookOpen} onOpenChange={setWebhookOpen}>
-          <Collapsible.Trigger className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-300 transition-colors">
-            <ChevronDown className={`w-4 h-4 transition-transform ${webhookOpen ? 'rotate-180' : ''}`} />
-            Configuração de Webhook
-          </Collapsible.Trigger>
-          <Collapsible.Content className="mt-3 space-y-3">
-            <div>
-              <label className="text-xs font-medium text-slate-400 mb-1.5 block">Callback URL</label>
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  value={webhookUrl}
-                  readOnly
-                  className="h-9 flex-1 rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-400 font-mono"
-                />
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={copyWebhookUrl}
-                  className="px-3"
-                >
-                  {copiedWebhook ? <Check className="w-4 h-4" /> : <Copy className="w-4 h-4" />}
-                </Button>
-              </div>
-            </div>
-            <div>
-              <label className="text-xs font-medium text-slate-400 mb-1.5 block">Verify Token</label>
-              <input
-                type="text"
-                value={settings.whatsapp_verify_token || ''}
-                onChange={(e) => setSettings({ ...settings, whatsapp_verify_token: e.target.value })}
-                className="h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
-              />
-            </div>
-          </Collapsible.Content>
-        </Collapsible.Root>
-      </div>
-
-      {/* ElevenLabs */}
+      {/* ---------------------------------------------------------------- */}
+      {/* ElevenLabs                                                        */}
+      {/* ---------------------------------------------------------------- */}
       <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-6">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center gap-3">
             <Mic className="w-5 h-5 text-violet-400" />
-            <h3 className="font-semibold text-white">ElevenLabs (Text-to-Speech)</h3>
+            <h3 className="font-semibold text-white">ElevenLabs — voz da atendente</h3>
           </div>
           <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium ${
-            elevenlabsConfigured
-              ? 'bg-emerald-500/10 text-emerald-400'
-              : 'bg-amber-500/10 text-amber-400'
+            erroVozes                ? 'bg-rose-500/10 text-rose-400'
+            : config.chaveConfigurada && vozes ? 'bg-emerald-500/10 text-emerald-400'
+            : 'bg-amber-500/10 text-amber-400'
           }`}>
-            <span className={`h-2 w-2 rounded-full ${elevenlabsConfigured ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
-            {elevenlabsConfigured ? 'Configurado' : 'Aguardando'}
+            <span className={`h-2 w-2 rounded-full ${
+              erroVozes ? 'bg-rose-500' : config.chaveConfigurada && vozes ? 'bg-emerald-500' : 'bg-amber-500'
+            }`} />
+            {erroVozes ? 'Chave recusada' : config.chaveConfigurada && vozes ? 'Verificada' : 'Aguardando chave'}
           </div>
         </div>
 
-        <div className="space-y-4">
+        {/* API Key */}
+        <div className="space-y-3">
           <div>
-            <label className="text-xs font-medium text-slate-400 mb-1.5 block">API Key</label>
-            <div className="relative">
-              <input
-                type={showElevenLabsKey ? "text" : "password"}
-                value={settings.elevenlabs_api_key || ''}
-                onChange={(e) => setSettings({ ...settings, elevenlabs_api_key: e.target.value })}
-                onBlur={handleElevenLabsKeyBlur}
-                placeholder="sk_xxxxxxxxxxxxxxxxxxxxxxxx"
-                className="h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 pr-10 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
-              />
-              <button
-                type="button"
-                onClick={() => setShowElevenLabsKey(!showElevenLabsKey)}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
-              >
-                {showElevenLabsKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-              </button>
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
-            <div>
-              <label className="text-xs font-medium text-slate-400 mb-1.5 block">Voz</label>
-              <select
-                value={settings.elevenlabs_voice_id}
-                onChange={(e) => setSettings({ ...settings, elevenlabs_voice_id: e.target.value })}
-                className="h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
-              >
-                {VOICE_OPTIONS.map(voice => (
-                  <option key={voice.id} value={voice.id}>{voice.name} - {voice.desc}</option>
-                ))}
-              </select>
-            </div>
-
-            <div>
-              <label className="text-xs font-medium text-slate-400 mb-1.5 block">Modelo</label>
-              <select
-                value={settings.elevenlabs_model || 'eleven_turbo_v2_5'}
-                onChange={(e) => setSettings({ ...settings, elevenlabs_model: e.target.value })}
-                className="h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
-              >
-                {MODEL_OPTIONS.map(model => (
-                  <option key={model.id} value={model.id}>{model.name}</option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          {/* Audio Response Toggle */}
-          <div className="p-4 bg-violet-500/5 border border-violet-500/20 rounded-lg">
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <div className="flex items-center gap-2 mb-1">
-                  <Volume2 className="w-4 h-4 text-violet-400" />
-                  <span className="text-sm font-medium text-white">Respostas em Áudio</span>
-                </div>
-                <p className="text-xs text-slate-400">
-                  Quando ativado, o agente responderá com áudios em vez de texto
-                </p>
-              </div>
-              <label className="relative inline-flex items-center cursor-pointer">
+            <label className="text-xs font-medium text-slate-400 mb-1.5 block">
+              API Key
+              {config.chaveConfigurada && (
+                <span className="ml-2 font-mono text-slate-500">
+                  gravada: {config.chaveMascarada}
+                </span>
+              )}
+            </label>
+            <div className="flex gap-2">
+              <div className="relative flex-1">
                 <input
-                  type="checkbox"
-                  checked={settings.audio_response_enabled}
-                  onChange={(e) => setSettings({ ...settings, audio_response_enabled: e.target.checked })}
-                  disabled={!elevenlabsConfigured}
-                  className="sr-only peer"
+                  type={mostrarChave ? 'text' : 'password'}
+                  value={chaveNova}
+                  onChange={e => setChaveNova(e.target.value)}
+                  placeholder={config.chaveConfigurada
+                    ? 'Cole uma chave nova apenas se for substituir'
+                    : 'sk_...'}
+                  autoComplete="off"
+                  className="h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 pr-10 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
                 />
-                <div className={`w-11 h-6 bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-violet-500/50 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-500 ${!elevenlabsConfigured ? 'opacity-50 cursor-not-allowed' : ''}`}></div>
-              </label>
+                <button
+                  type="button"
+                  onClick={() => setMostrarChave(!mostrarChave)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300"
+                >
+                  {mostrarChave ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                </button>
+              </div>
+              <Button
+                onClick={verificarChave}
+                disabled={verificando || !chaveNova.trim()}
+                className="bg-violet-600 hover:bg-violet-700 gap-2 shrink-0"
+              >
+                {verificando
+                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Verificando</>
+                  : <><KeyRound className="w-4 h-4" /> Gravar e verificar</>}
+              </Button>
             </div>
-            {!elevenlabsConfigured && (
-              <p className="text-xs text-amber-400 mt-2">
-                ⚠️ Configure a API Key da ElevenLabs para habilitar respostas em áudio
-              </p>
-            )}
-            {settings.audio_response_enabled && elevenlabsConfigured && (
-              <p className="text-xs text-emerald-400 mt-2">
-                ✅ Áudios recebidos serão transcritos automaticamente e o agente responderá com áudio
-              </p>
-            )}
+            <p className="text-xs text-slate-500 mt-1.5">
+              A chave fica no servidor. Esta tela nunca a recebe de volta — só os quatro últimos caracteres.
+            </p>
           </div>
 
-          {/* Advanced Voice Settings Collapsible */}
-          <Collapsible.Root open={advancedVoiceOpen} onOpenChange={setAdvancedVoiceOpen}>
-            <Collapsible.Trigger className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-300 transition-colors">
-              <ChevronDown className={`w-4 h-4 transition-transform ${advancedVoiceOpen ? 'rotate-180' : ''}`} />
-              Configurações Avançadas de Voz
-            </Collapsible.Trigger>
-            <Collapsible.Content className="mt-3 p-4 bg-slate-950/50 rounded-lg border border-slate-800 space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <div className="flex justify-between items-center mb-2">
-                    <label className="text-xs text-slate-400">Stability</label>
-                    <span className="text-xs font-mono text-slate-300">{settings.elevenlabs_stability.toFixed(2)}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={settings.elevenlabs_stability}
-                    onChange={(e) => setSettings({ ...settings, elevenlabs_stability: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-violet-500"
-                  />
-                </div>
-
-                <div>
-                  <div className="flex justify-between items-center mb-2">
-                    <label className="text-xs text-slate-400">Similarity</label>
-                    <span className="text-xs font-mono text-slate-300">{settings.elevenlabs_similarity_boost.toFixed(2)}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={settings.elevenlabs_similarity_boost}
-                    onChange={(e) => setSettings({ ...settings, elevenlabs_similarity_boost: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-violet-500"
-                  />
-                </div>
-
-                <div>
-                  <div className="flex justify-between items-center mb-2">
-                    <label className="text-xs text-slate-400">Style</label>
-                    <span className="text-xs font-mono text-slate-300">{settings.elevenlabs_style.toFixed(2)}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.05"
-                    value={settings.elevenlabs_style}
-                    onChange={(e) => setSettings({ ...settings, elevenlabs_style: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-violet-500"
-                  />
-                </div>
-
-                <div>
-                  <div className="flex justify-between items-center mb-2">
-                    <label className="text-xs text-slate-400">Speed</label>
-                    <span className="text-xs font-mono text-slate-300">{settings.elevenlabs_speed?.toFixed(1) || '1.0'}</span>
-                  </div>
-                  <input
-                    type="range"
-                    min="0.5"
-                    max="2"
-                    step="0.1"
-                    value={settings.elevenlabs_speed || 1.0}
-                    onChange={(e) => setSettings({ ...settings, elevenlabs_speed: parseFloat(e.target.value) })}
-                    className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-violet-500"
-                  />
-                </div>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <label className="relative inline-flex items-center cursor-pointer">
-                  <input
-                    type="checkbox"
-                    checked={settings.elevenlabs_speaker_boost}
-                    onChange={(e) => setSettings({ ...settings, elevenlabs_speaker_boost: e.target.checked })}
-                    className="sr-only peer"
-                  />
-                  <div className="w-9 h-5 bg-slate-700 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-violet-500/50 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-violet-500"></div>
-                </label>
-                <span className="text-sm text-slate-300">Speaker Boost</span>
-              </div>
-            </Collapsible.Content>
-          </Collapsible.Root>
-
-          {/* Audio Test Section */}
-          <Collapsible.Root open={audioTestOpen} onOpenChange={setAudioTestOpen} className="mt-4">
-            <Collapsible.Trigger className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-300 transition-colors">
-              <ChevronDown className={`w-4 h-4 transition-transform ${audioTestOpen ? 'rotate-180' : ''}`} />
-              <Volume2 className="w-4 h-4" />
-              Testar Áudio
-            </Collapsible.Trigger>
-            <Collapsible.Content className="mt-3 p-4 bg-slate-950/50 rounded-lg border border-slate-800 space-y-4">
-              <div>
-                <label className="text-xs font-medium text-slate-400 mb-1.5 block">Texto para converter em áudio</label>
-                <textarea
-                  value={audioTestText}
-                  onChange={(e) => setAudioTestText(e.target.value)}
-                  placeholder="Digite o texto que deseja converter em áudio..."
-                  rows={3}
-                  maxLength={1000}
-                  className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-violet-500/50 resize-none"
-                />
-                <p className="text-xs text-slate-500 mt-1">{audioTestText.length}/1000 caracteres</p>
-              </div>
-
-              <div className="flex items-center gap-3">
-                <Button
-                  onClick={handleGenerateAudio}
-                  disabled={audioGenerating || !settings.elevenlabs_api_key}
-                  className="bg-violet-600 hover:bg-violet-700"
-                >
-                  {audioGenerating ? (
-                    <>
-                      <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                      Gerando...
-                    </>
-                  ) : (
-                    <>
-                      <Volume2 className="w-4 h-4 mr-2" />
-                      Gerar e Ouvir
-                    </>
-                  )}
-                </Button>
-
-                {audioUrl && (
-                  <Button
-                    onClick={handleDownloadAudio}
-                    variant="ghost"
-                    size="sm"
-                    className="text-slate-400 hover:text-slate-200"
+          {/* Resultado da verificação */}
+          {erroVozes && (
+            <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-3">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-4 h-4 text-rose-400 mt-0.5 shrink-0" />
+                <div className="text-xs">
+                  <p className="text-rose-300 font-medium">
+                    {erroVozes.chaveRejeitada
+                      ? 'A ElevenLabs recusou esta chave'
+                      : erroVozes.cotaEsgotada
+                        // Aqui a chave está certa: trocá-la não resolve nada.
+                        ? 'Cota de caracteres esgotada'
+                        : erroVozes.faltaConfigurar
+                          ? 'Nenhuma chave gravada'
+                          : 'A ElevenLabs respondeu com erro'}
+                  </p>
+                  {/* Mensagem original do provider: é ela que distingue chave
+                      inválida de cota estourada. */}
+                  <p className="text-slate-400 mt-1">{erroVozes.message}</p>
+                  <a
+                    href="https://elevenlabs.io/app/settings/api-keys"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex items-center gap-1 text-cyan-400 hover:underline mt-2"
                   >
-                    <Download className="w-4 h-4 mr-1" />
-                    Baixar
-                  </Button>
+                    Abrir as chaves da minha conta <ExternalLink className="w-3 h-3" />
+                  </a>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {conta && (
+            <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-3 text-xs">
+              <div className="flex items-center justify-between text-slate-400">
+                <span>Plano <span className="text-slate-200 font-medium">{conta.tier ?? '—'}</span></span>
+                {restantes !== null && (
+                  <span className={restantes < 1000 ? 'text-amber-400' : 'text-slate-400'}>
+                    {restantes.toLocaleString('pt-BR')} caracteres restantes
+                  </span>
                 )}
               </div>
+              {conta.caracteresLimite ? (
+                <div className="mt-2 h-1.5 w-full rounded-full bg-slate-800 overflow-hidden">
+                  <div
+                    className="h-full rounded-full bg-violet-500"
+                    style={{ width: `${Math.min(100, ((conta.caracteresUsados ?? 0) / conta.caracteresLimite) * 100)}%` }}
+                  />
+                </div>
+              ) : null}
+            </div>
+          )}
+        </div>
 
-              {!settings.elevenlabs_api_key && (
-                <p className="text-xs text-amber-400">
-                  ⚠️ Configure sua API Key da ElevenLabs acima para testar
-                </p>
+        {/* Voz e modelo */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mt-5">
+          <div>
+            <label className="text-xs font-medium text-slate-400 mb-1.5 block">
+              Voz {vozes && <span className="text-slate-600">({vozes.length} na sua conta)</span>}
+            </label>
+            <select
+              value={rascunho.vozId ?? ''}
+              onChange={e => setRascunho({ ...rascunho, vozId: e.target.value || null })}
+              disabled={!vozes}
+              className="h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-violet-500/50 disabled:opacity-50"
+            >
+              <option value="">
+                {vozes ? 'Selecione uma voz' : 'Grave uma chave para listar as vozes'}
+              </option>
+              {/* Voz gravada fora do inventário continua na lista para o admin
+                  ver o que está configurado — marcada como indisponível. */}
+              {vozOrfa && (
+                <option value={rascunho.vozId ?? ''}>
+                  {rascunho.vozId} — indisponível nesta conta
+                </option>
               )}
+              {vozes?.map(v => (
+                <option key={v.voiceId} value={v.voiceId}>
+                  {v.nome}{v.idioma ? ` — ${v.idioma}` : ''}{v.categoria ? ` (${v.categoria})` : ''}
+                </option>
+              ))}
+            </select>
+            {vozOrfa && (
+              <p className="text-xs text-amber-400 mt-1.5">
+                A voz gravada não está na sua conta ElevenLabs. Escolha outra, senão a geração de áudio falha.
+              </p>
+            )}
+            {vozSelecionada?.previewUrl && (
+              <button
+                type="button"
+                onClick={() => new Audio(vozSelecionada.previewUrl!).play()}
+                className="inline-flex items-center gap-1.5 text-xs text-cyan-400 hover:underline mt-1.5"
+              >
+                <Play className="w-3 h-3" /> Ouvir amostra (não consome cota)
+              </button>
+            )}
+          </div>
+
+          <div>
+            <label className="text-xs font-medium text-slate-400 mb-1.5 block">Modelo</label>
+            <select
+              value={rascunho.modeloVoz}
+              onChange={e => setRascunho({ ...rascunho, modeloVoz: e.target.value })}
+              className="h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 focus:outline-none focus:ring-2 focus:ring-violet-500/50"
+            >
+              {MODELOS.map(m => (
+                <option key={m.id} value={m.id}>{m.nome} — {m.nota}</option>
+              ))}
+              {/* Modelo gravado que não está na lista (ex: lançamento novo) não
+                  pode desaparecer do select, senão salvar o troca sem aviso. */}
+              {!MODELOS.some(m => m.id === rascunho.modeloVoz) && (
+                <option value={rascunho.modeloVoz}>{rascunho.modeloVoz}</option>
+              )}
+            </select>
+          </div>
+        </div>
+
+        {/* Respostas em áudio */}
+        <div className="mt-5 p-4 bg-violet-500/5 border border-violet-500/20 rounded-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <div className="flex items-center gap-2 mb-1">
+                <Volume2 className="w-4 h-4 text-violet-400" />
+                <span className="text-sm font-medium text-white">Responder em áudio</span>
+              </div>
+              <p className="text-xs text-slate-400">
+                Quando ativado, a atendente responde por áudio em vez de texto.
+              </p>
+            </div>
+            <label className="relative inline-flex items-center cursor-pointer">
+              <input
+                type="checkbox"
+                checked={rascunho.ttsAtivo}
+                onChange={e => setRascunho({ ...rascunho, ttsAtivo: e.target.checked })}
+                disabled={!config.chaveConfigurada || !rascunho.vozId}
+                className="sr-only peer"
+              />
+              <div className={`w-11 h-6 bg-slate-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-violet-500 ${
+                !config.chaveConfigurada || !rascunho.vozId ? 'opacity-50 cursor-not-allowed' : ''
+              }`} />
+            </label>
+          </div>
+          {(!config.chaveConfigurada || !rascunho.vozId) && (
+            <p className="text-xs text-amber-400 mt-2">
+              Grave a chave e escolha uma voz para poder ativar.
+            </p>
+          )}
+          {/* O envio de áudio depende do canal de WhatsApp, que ainda não existe. */}
+          {rascunho.ttsAtivo && (
+            <p className="text-xs text-slate-400 mt-2">
+              O áudio só chega ao paciente quando o canal de WhatsApp estiver conectado.
+            </p>
+          )}
+        </div>
+
+        {/* Parâmetros avançados */}
+        <Collapsible.Root open={avancadoAberto} onOpenChange={setAvancadoAberto} className="mt-4">
+          <Collapsible.Trigger className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-300 transition-colors">
+            <ChevronDown className={`w-4 h-4 transition-transform ${avancadoAberto ? 'rotate-180' : ''}`} />
+            Ajuste fino da voz
+          </Collapsible.Trigger>
+          <Collapsible.Content className="mt-3 p-4 bg-slate-950/50 rounded-lg border border-slate-800 space-y-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <Slider
+                rotulo="Stability" dica="Baixo = mais expressivo, alto = mais monótono"
+                valor={rascunho.stability} min={0} max={1} passo={0.05}
+                onChange={v => setRascunho({ ...rascunho, stability: v })}
+              />
+              <Slider
+                rotulo="Similarity" dica="Fidelidade ao timbre original da voz"
+                valor={rascunho.similarityBoost} min={0} max={1} passo={0.05}
+                onChange={v => setRascunho({ ...rascunho, similarityBoost: v })}
+              />
+              <Slider
+                rotulo="Style" dica="Acima de 0,50 a dicção começa a falhar"
+                valor={rascunho.style} min={0} max={1} passo={0.05}
+                onChange={v => setRascunho({ ...rascunho, style: v })}
+              />
+              <Slider
+                rotulo="Velocidade" dica="1,0 = natural"
+                valor={rascunho.speed} min={0.5} max={2} passo={0.1}
+                onChange={v => setRascunho({ ...rascunho, speed: v })}
+              />
+            </div>
+
+            <label className="flex items-center gap-3 cursor-pointer">
+              <span className="relative inline-flex items-center">
+                <input
+                  type="checkbox"
+                  checked={rascunho.speakerBoost}
+                  onChange={e => setRascunho({ ...rascunho, speakerBoost: e.target.checked })}
+                  className="sr-only peer"
+                />
+                <span className="w-9 h-5 bg-slate-700 rounded-full peer peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-[2px] after:start-[2px] after:bg-white after:rounded-full after:h-4 after:w-4 after:transition-all peer-checked:bg-violet-500" />
+              </span>
+              <span className="text-sm text-slate-300">Speaker Boost</span>
+              <span className="text-xs text-slate-500">aproxima o timbre original, com mais latência</span>
+            </label>
+          </Collapsible.Content>
+        </Collapsible.Root>
+
+        {/* Teste de áudio */}
+        <Collapsible.Root open={testeAberto} onOpenChange={setTesteAberto} className="mt-4">
+          <Collapsible.Trigger className="flex items-center gap-2 text-sm text-slate-400 hover:text-slate-300 transition-colors">
+            <ChevronDown className={`w-4 h-4 transition-transform ${testeAberto ? 'rotate-180' : ''}`} />
+            <Volume2 className="w-4 h-4" />
+            Ouvir antes de usar
+          </Collapsible.Trigger>
+          <Collapsible.Content className="mt-3 p-4 bg-slate-950/50 rounded-lg border border-slate-800 space-y-4">
+            <div>
+              <textarea
+                value={textoTeste}
+                onChange={e => setTextoTeste(e.target.value)}
+                rows={3}
+                maxLength={1000}
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-violet-500/50 resize-none"
+              />
+              <p className="text-xs text-slate-500 mt-1">
+                {textoTeste.length}/1000 caracteres — cobrados da cota da conta
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <Button
+                onClick={gerarAudio}
+                disabled={gerando || !config.chaveConfigurada || !rascunho.vozId}
+                className="bg-violet-600 hover:bg-violet-700 gap-2"
+              >
+                {gerando
+                  ? <><Loader2 className="w-4 h-4 animate-spin" /> Gerando</>
+                  : <><Volume2 className="w-4 h-4" /> Gerar e ouvir</>}
+              </Button>
 
               {audioUrl && (
-                <div className="space-y-2">
-                  <audio
-                    ref={audioRef}
-                    src={audioUrl}
-                    controls
-                    className="w-full h-10"
-                    autoPlay
-                  />
-                  {audioStats && (
-                    <p className="text-xs text-slate-500">
-                      ✅ Gerado em {(audioStats.duration_ms / 1000).toFixed(1)}s • {audioStats.size_kb}KB
-                    </p>
-                  )}
-                </div>
+                <a
+                  href={audioUrl}
+                  download="teste-voz.mp3"
+                  className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-200"
+                >
+                  <Download className="w-4 h-4" /> Baixar
+                </a>
               )}
-            </Collapsible.Content>
-          </Collapsible.Root>
+            </div>
+
+            {/* O teste usa a voz e os parâmetros JÁ SALVOS. Avisar disso evita a
+                conclusão errada de que os sliders não fazem efeito. */}
+            {(!config.chaveConfigurada || !rascunho.vozId) ? (
+              <p className="text-xs text-amber-400">Grave a chave e escolha uma voz para testar.</p>
+            ) : (
+              <p className="text-xs text-slate-500">
+                O teste usa a configuração salva. Ajustou os controles? Salve antes de gerar.
+              </p>
+            )}
+
+            {audioUrl && (
+              <div className="space-y-2">
+                <audio src={audioUrl} controls autoPlay className="w-full h-10" />
+                {stats && (
+                  <p className="text-xs text-slate-500 flex items-center gap-1.5">
+                    <Check className="w-3 h-3 text-emerald-400" />
+                    {(stats.geracaoMs / 1000).toFixed(1)}s para gerar • {stats.tamanhoKb} KB • {stats.caracteres} caracteres cobrados
+                  </p>
+                )}
+              </div>
+            )}
+          </Collapsible.Content>
+        </Collapsible.Root>
+      </div>
+
+      {/* ---------------------------------------------------------------- */}
+      {/* OpenAI — deliberadamente sem campo                                */}
+      {/*                                                                   */}
+      {/* Este bloco existe para responder uma pergunta que a tela deixava   */}
+      {/* sem resposta: "onde eu cadastro a chave da OpenAI?". Ela não se     */}
+      {/* cadastra aqui — é variável de runtime no Coolify. Ausência sem      */}
+      {/* explicação parece defeito, e o caminho natural para quem procura o  */}
+      {/* campo é concluir que falta implementar e ir criar uma coluna no     */}
+      {/* banco, que é exatamente o que a decisão evitou.                     */}
+      {/* ---------------------------------------------------------------- */}
+      <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-6">
+        <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center gap-3">
+            <Brain className="w-5 h-5 text-cyan-400" />
+            <h3 className="font-semibold text-white">OpenAI — o raciocínio da atendente</h3>
+          </div>
+          <div className={`flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium ${
+            erroStatusIa            ? 'bg-rose-500/10 text-rose-400'
+            : statusIa?.configurada ? 'bg-emerald-500/10 text-emerald-400'
+            : 'bg-amber-500/10 text-amber-400'
+          }`}>
+            <span className={`h-2 w-2 rounded-full ${
+              erroStatusIa ? 'bg-rose-500' : statusIa?.configurada ? 'bg-emerald-500' : 'bg-amber-500'
+            }`} />
+            {erroStatusIa            ? 'Status indisponível'
+             : statusIa?.configurada ? 'Configurada'
+             : 'Não configurada'}
+          </div>
+        </div>
+
+        {/* A chave não aparece nem mascarada: o admin não a colou por aqui,
+            então mostrar pedaço dela seria expor sem nenhum ganho de
+            reconhecimento. O que a tela mostra é o modelo, que é a decisão de
+            custo e comportamento. */}
+        {statusIa?.configurada && statusIa.modelo && (
+          <div className="rounded-lg border border-slate-800 bg-slate-950/50 p-3 flex items-center justify-between">
+            <span className="text-xs text-slate-400">Modelo ativo</span>
+            <span className="text-xs font-mono text-emerald-300">{statusIa.modelo}</span>
+          </div>
+        )}
+
+        {statusIa && !statusIa.configurada && statusIa.motivo && (
+          <div className="rounded-lg border border-amber-500/20 bg-amber-500/5 p-3">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400 mt-0.5 shrink-0" />
+              <p className="text-xs text-amber-300">{statusIa.motivo}</p>
+            </div>
+          </div>
+        )}
+
+        {erroStatusIa && (
+          <div className="rounded-lg border border-rose-500/20 bg-rose-500/5 p-3">
+            <p className="text-xs text-rose-300">{erroStatusIa}</p>
+            <Button variant="ghost" size="sm" onClick={carregarStatusIa} className="mt-2 text-slate-300">
+              Tentar novamente
+            </Button>
+          </div>
+        )}
+
+        <div className="mt-4 space-y-3">
+          {/* Instrução, não justificativa. A versão anterior explicava ARG e
+              Dockerfile — verdadeiro, mas quem lê está diante de duas caixas de
+              seleção no Coolify e precisa saber qual marcar. */}
+          <p className="text-sm text-slate-400">
+            A chave não se cadastra aqui: ela é variável de ambiente do servidor,
+            definida no Coolify.
+          </p>
+          <p className="text-sm text-slate-400">
+            Ao criar as variáveis, marque{' '}
+            <span className="text-slate-200">Available at Runtime</span> e deixe{' '}
+            <span className="text-slate-200">Buildtime</span> desmarcado — em
+            buildtime a chave fica gravada na imagem e aparece no log de build.
+            Variável nova só chega ao ar no próximo deploy.
+          </p>
+
+          <div className="rounded-lg border border-slate-800 bg-slate-950/50 divide-y divide-slate-800">
+            <div className="flex items-center justify-between gap-4 px-3 py-2">
+              <code className="text-xs font-mono text-cyan-300">OPENAI_API_KEY</code>
+              <span className="text-xs text-slate-500 text-right">a chave da conta</span>
+            </div>
+            <div className="flex items-center justify-between gap-4 px-3 py-2">
+              <code className="text-xs font-mono text-cyan-300">OPENAI_MODEL</code>
+              <span className="text-xs text-slate-500 text-right">
+                {statusIa?.modelosPermitidos.length
+                  ? statusIa.modelosPermitidos.join(' ou ')
+                  : 'obrigatória, sem valor padrão'}
+              </span>
+            </div>
+          </div>
+
+          {/* A allowlist fechada é decisão de custo. Dizer isso na tela evita a
+              tentativa de "só trocar a variável" para um modelo mais novo e a
+              conclusão de que o sistema está com bug quando ele recusa. */}
+          <p className="text-xs text-slate-500">
+            As duas são obrigatórias e não têm valor padrão. Se uma faltar, ou se o
+            modelo não estiver na lista, a chamada falha com erro explícito — o
+            sistema não escolhe outro modelo por conta própria. Incluir um modelo
+            novo exige alteração de código, porque cada um cobra um preço diferente.
+          </p>
+
+          {/* Honestidade sobre o efeito: configurar as variáveis hoje não muda
+              nada visível, e sem esta frase o admin conclui que configurou errado. */}
+          <p className="text-xs text-slate-500">
+            Configurar as variáveis não liga a atendente. Quem as usa é o
+            orquestrador, que vem junto com o canal de WhatsApp.
+          </p>
         </div>
       </div>
 
-      {/* Test Message Collapsible */}
-      <Collapsible.Root open={testSectionOpen} onOpenChange={setTestSectionOpen}>
-        <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-6">
-          <Collapsible.Trigger className="flex items-center gap-2 text-sm font-medium text-slate-300 hover:text-white transition-colors w-full">
-            <Send className="w-4 h-4" />
-            <span>Teste de Envio</span>
-            <ChevronDown className={`w-4 h-4 ml-auto transition-transform ${testSectionOpen ? 'rotate-180' : ''}`} />
-          </Collapsible.Trigger>
-          <Collapsible.Content className="mt-4 space-y-4">
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs font-medium text-slate-400 mb-1.5 block">Telefone</label>
-                <input
-                  type="tel"
-                  value={testPhone}
-                  onChange={(e) => setTestPhone(e.target.value)}
-                  placeholder="+5511999999999"
-                  className="h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-medium text-slate-400 mb-1.5 block">Mensagem</label>
-                <input
-                  type="text"
-                  value={testMessage}
-                  onChange={(e) => setTestMessage(e.target.value)}
-                  placeholder="Mensagem de teste..."
-                  className="h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/50"
-                />
-              </div>
-            </div>
-
-            <div className="flex justify-end">
-              <Button
-                onClick={handleTestMessage}
-                disabled={testSending}
-                className="shadow-lg shadow-cyan-500/20"
-              >
-                {testSending ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Enviando...
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-4 h-4 mr-2" />
-                    Enviar Teste
-                  </>
-                )}
-              </Button>
-            </div>
-          </Collapsible.Content>
+      {/* ---------------------------------------------------------------- */}
+      {/* WhatsApp — deliberadamente sem campos                             */}
+      {/*                                                                   */}
+      {/* Os campos antigos (Access Token, Phone Number ID, Verify Token)   */}
+      {/* gravavam no projeto Supabase do Nina, que não existe mais, e o    */}
+      {/* webhook exibido apontava para lá. Recolocá-los agora exigiria     */}
+      {/* escolher o provider — Meta Cloud API ou Evolution —, e essa       */}
+      {/* decisão muda o formato das credenciais. Campo que não grava é     */}
+      {/* pior que campo ausente: parece configurado.                       */}
+      {/* ---------------------------------------------------------------- */}
+      <div className="rounded-xl border border-slate-800 bg-slate-900/50 p-6">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-3">
+            <MessageSquare className="w-5 h-5 text-slate-500" />
+            <h3 className="font-semibold text-white">WhatsApp</h3>
+          </div>
+          <div className="flex items-center gap-2 px-3 py-1 rounded-full text-xs font-medium bg-slate-500/10 text-slate-400">
+            <span className="h-2 w-2 rounded-full bg-slate-500" />
+            Não conectado
+          </div>
         </div>
-      </Collapsible.Root>
-
-      {/* Simulate Audio Reception - Seção Avançada (escondida por padrão) */}
-      <details className="group">
-        <summary className="cursor-pointer text-xs text-slate-500 hover:text-slate-400 flex items-center gap-2 py-2">
-          <ChevronDown className="w-3 h-3 transition-transform group-open:rotate-180" />
-          Ferramentas Avançadas de Teste
-        </summary>
-        <div className="mt-2">
-      <Collapsible.Root open={audioSimulateOpen} onOpenChange={setAudioSimulateOpen}>
-        <div className="rounded-xl border border-amber-500/20 bg-slate-900/50 p-6">
-          <Collapsible.Trigger className="flex items-center gap-2 text-sm font-medium text-slate-300 hover:text-white transition-colors w-full">
-            <FileAudio className="w-4 h-4 text-amber-400" />
-            <span>Simular Recebimento de Áudio</span>
-            <ChevronDown className={`w-4 h-4 ml-auto transition-transform ${audioSimulateOpen ? 'rotate-180' : ''}`} />
-          </Collapsible.Trigger>
-          <Collapsible.Content className="mt-4 space-y-4">
-            <p className="text-xs text-slate-400">
-              Simula o recebimento de um áudio pelo WhatsApp. O áudio será transcrito e processado pela IA.
-            </p>
-
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-              <div>
-                <label className="text-xs font-medium text-slate-400 mb-1.5 block">Telefone do Contato *</label>
-                <input
-                  type="tel"
-                  value={audioSimulatePhone}
-                  onChange={(e) => setAudioSimulatePhone(e.target.value)}
-                  placeholder="5511999999999"
-                  className="h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-medium text-slate-400 mb-1.5 block">Nome do Contato (opcional)</label>
-                <input
-                  type="text"
-                  value={audioSimulateName}
-                  onChange={(e) => setAudioSimulateName(e.target.value)}
-                  placeholder="João da Silva"
-                  className="h-9 w-full rounded-lg border border-slate-700 bg-slate-950 px-3 text-sm text-slate-100 placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-amber-500/50"
-                />
-              </div>
-            </div>
-
-            {/* File Upload */}
-            <div>
-              <label className="text-xs font-medium text-slate-400 mb-1.5 block">Arquivo de Áudio *</label>
-              <div
-                className={`border-2 border-dashed rounded-lg p-4 text-center cursor-pointer transition-colors ${
-                  audioFile
-                    ? 'border-amber-500/50 bg-amber-500/5'
-                    : 'border-slate-700 hover:border-slate-600 bg-slate-950/50'
-                }`}
-                onClick={() => audioFileInputRef.current?.click()}
-              >
-                <input
-                  ref={audioFileInputRef}
-                  type="file"
-                  accept=".ogg,.mp3,.wav,.m4a,.webm,audio/*"
-                  onChange={handleAudioFileChange}
-                  className="hidden"
-                />
-                {audioFile ? (
-                  <div className="flex items-center justify-center gap-2">
-                    <FileAudio className="w-5 h-5 text-amber-400" />
-                    <div className="text-left">
-                      <p className="text-sm text-slate-200">{audioFile.name}</p>
-                      <p className="text-xs text-slate-500">{(audioFile.size / 1024).toFixed(1)} KB</p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setAudioFile(null);
-                        setAudioSimulateResult(null);
-                      }}
-                      className="ml-2 text-slate-500 hover:text-slate-300"
-                    >
-                      ✕
-                    </button>
-                  </div>
-                ) : (
-                  <div>
-                    <Upload className="w-8 h-8 mx-auto text-slate-500 mb-2" />
-                    <p className="text-sm text-slate-400">Clique ou arraste um arquivo de áudio</p>
-                    <p className="text-xs text-slate-600 mt-1">.ogg, .mp3, .wav, .m4a, .webm (máx 10MB)</p>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="flex justify-end">
-              <Button
-                onClick={handleSimulateAudioWebhook}
-                disabled={audioSimulating || !audioFile || !audioSimulatePhone.trim()}
-                className="bg-amber-600 hover:bg-amber-700 shadow-lg shadow-amber-500/20"
-              >
-                {audioSimulating ? (
-                  <>
-                    <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-                    Processando...
-                  </>
-                ) : (
-                  <>
-                    <FileAudio className="w-4 h-4 mr-2" />
-                    Simular Áudio Recebido
-                  </>
-                )}
-              </Button>
-            </div>
-
-            {/* Result Display */}
-            {audioSimulateResult && (
-              <div className="p-4 bg-emerald-500/10 border border-emerald-500/20 rounded-lg space-y-3">
-                <div className="flex items-center gap-2 text-emerald-400">
-                  <Check className="w-4 h-4" />
-                  <span className="text-sm font-medium">Áudio processado com sucesso!</span>
-                </div>
-
-                <div className="space-y-2 text-sm">
-                  <div>
-                    <span className="text-slate-400">Transcrição:</span>
-                    <p className="text-slate-200 mt-1 p-2 bg-slate-950/50 rounded border border-slate-800">
-                      "{audioSimulateResult.transcription}"
-                    </p>
-                  </div>
-
-                  <div className="grid grid-cols-2 gap-2 text-xs">
-                    <div>
-                      <span className="text-slate-500">Contact ID:</span>
-                      <p className="text-slate-300 font-mono">{audioSimulateResult.contact_id.slice(0, 8)}...</p>
-                    </div>
-                    <div>
-                      <span className="text-slate-500">Conversation ID:</span>
-                      <p className="text-slate-300 font-mono">{audioSimulateResult.conversation_id.slice(0, 8)}...</p>
-                    </div>
-                    <div>
-                      <span className="text-slate-500">Message ID:</span>
-                      <p className="text-slate-300 font-mono">{audioSimulateResult.message_id.slice(0, 8)}...</p>
-                    </div>
-                    <div>
-                      <span className="text-slate-500">Nina:</span>
-                      <p className={audioSimulateResult.queued_for_nina ? 'text-emerald-400' : 'text-amber-400'}>
-                        {audioSimulateResult.queued_for_nina ? '✅ Processando' : '⏸️ Não enfileirado'}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            )}
-          </Collapsible.Content>
-        </div>
-      </Collapsible.Root>
-        </div>
-      </details>
+        <p className="text-sm text-slate-400">
+          O canal de WhatsApp ainda não está implementado. A atendente virtual já consulta a
+          grade e agenda sessões — falta o canal por onde ela conversa.
+        </p>
+        <p className="text-xs text-slate-500 mt-2">
+          Falta um número dedicado com App Business aprovado na Meta. As credenciais mudam
+          conforme o provider, então os campos entram junto com a integração — e a chave da
+          OpenAI, que o orquestrador consome, é a do bloco acima.
+        </p>
+      </div>
     </div>
   );
 });
+
+// Slider com valor tabular — números alinhados evitam o texto pular a cada
+// arrasto do controle.
+function Slider({
+  rotulo, dica, valor, min, max, passo, onChange,
+}: {
+  rotulo: string; dica: string; valor: number;
+  min: number; max: number; passo: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <div>
+      <div className="flex justify-between items-center mb-1">
+        <label className="text-xs text-slate-400">{rotulo}</label>
+        <span className="text-xs font-mono tabular-nums text-slate-300">{valor.toFixed(2)}</span>
+      </div>
+      <input
+        type="range"
+        min={min} max={max} step={passo} value={valor}
+        onChange={e => onChange(parseFloat(e.target.value))}
+        className="w-full h-2 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-violet-500"
+      />
+      <p className="text-[11px] text-slate-600 mt-1">{dica}</p>
+    </div>
+  );
+}
 
 ApiSettings.displayName = 'ApiSettings';
 

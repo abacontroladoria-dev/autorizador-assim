@@ -1,49 +1,55 @@
 import type { NextConfig } from "next";
-import path from "path";
+
+const isDev = process.env.NODE_ENV !== 'production';
+
+// ── connect-src do CSP, derivado do ambiente em vez de fixo ────────────────
+//
+// Antes esta lista era hardcoded com o host do Supabase de produção. O efeito
+// colateral era que apontar o app para QUALQUER outro Supabase — em especial a
+// stack local em 127.0.0.1:54321 — fazia o browser bloquear a chamada antes de
+// ela sair da página. O sintoma é traiçoeiro: "Failed to fetch" no login sem
+// nenhuma requisição aparecendo no devtools, porque o CSP corta antes da rede.
+//
+// Derivar do env garante que em produção o valor resolve para o mesmo host de
+// sempre, e que testar contra o banco local passa a funcionar sem editar config.
+function origensSupabase(): string[] {
+  const urls = [
+    process.env.NEXT_PUBLIC_SUPABASE_URL,
+  ].filter((u): u is string => !!u && u.startsWith('http'));
+
+  const origens = new Set<string>();
+  for (const url of urls) {
+    try {
+      const { origin, protocol, host } = new URL(url);
+      origens.add(origin);
+      // Realtime usa websocket no mesmo host
+      origens.add(`${protocol === 'https:' ? 'wss:' : 'ws:'}//${host}`);
+    } catch {
+      // URL malformada no env: ignorar em vez de derrubar o build
+    }
+  }
+  return [...origens];
+}
 
 const nextConfig: NextConfig = {
   output: 'standalone',
   trailingSlash: true,
-  allowedDevOrigins: ['192.168.0.241'],
+  // 127.0.0.1 é tratado como origem distinta de localhost pelo Next 16: sem isso
+  // os recursos de dev são bloqueados e a página nunca hidrata (o form cai para
+  // submit nativo e o handler React nunca roda).
+  allowedDevOrigins: ['192.168.0.241', '127.0.0.1'],
   typescript: {
     tsconfigPath: './tsconfig.json'
   },
   turbopack: { root: __dirname },
 
-  webpack(config, { webpack: wp }) {
-
-    // ── Replace Nina's build-time globals (import.meta.env.VITE_NINA_*)
-    //    with values from Pulsar's .env.local (NEXT_PUBLIC_NINA_*).
-    //    These globals are also defined in nina-api-oficial/vite.config.ts for
-    //    standalone Vite builds.
-    config.plugins.push(
-      new wp.DefinePlugin({
-        '__NINA_SUPABASE_URL__': JSON.stringify(process.env.NEXT_PUBLIC_NINA_SUPABASE_URL ?? ''),
-        '__NINA_SUPABASE_KEY__': JSON.stringify(process.env.NEXT_PUBLIC_NINA_SUPABASE_ANON_KEY ?? ''),
-        '__NINA_PROJECT_ID__': JSON.stringify(process.env.NEXT_PUBLIC_NINA_PROJECT_ID ?? ''),
-        // These cover any Nina file that still reads import.meta.env directly.
-        'import.meta.env.VITE_NINA_SUPABASE_URL': JSON.stringify(process.env.NEXT_PUBLIC_NINA_SUPABASE_URL ?? ''),
-        'import.meta.env.VITE_NINA_SUPABASE_ANON_KEY': JSON.stringify(process.env.NEXT_PUBLIC_NINA_SUPABASE_ANON_KEY ?? ''),
-        'import.meta.env.VITE_NINA_PROJECT_ID': JSON.stringify(process.env.NEXT_PUBLIC_NINA_PROJECT_ID ?? ''),
-        'import.meta.env.MODE': JSON.stringify(process.env.NODE_ENV ?? 'development'),
-        'import.meta.env.DEV': String(process.env.NODE_ENV !== 'production'),
-        'import.meta.env.PROD': String(process.env.NODE_ENV === 'production'),
-        'import.meta.env.SSR': 'false',
-      })
-    );
-
-    // ── Module resolution for Nina files: nina-api-oficial/ is a sibling of
-    //    frontend/, so webpack's default node_modules traversal never reaches
-    //    frontend/node_modules when resolving Nina imports. Adding it explicitly
-    //    ensures packages like class-variance-authority, zod, sonner, etc. are
-    //    found without duplicating them inside nina-api-oficial/.
-    config.resolve.modules = [
-      path.resolve(__dirname, 'node_modules'),
-      ...(config.resolve.modules ?? ['node_modules']),
-    ];
-
-    return config;
-  },
+  // O hook webpack() que existia aqui foi removido: ele servia a um esquema de
+  // importar arquivos de nina-api-oficial/ (projeto Vite irmão, do CRM Nina) que
+  // nunca chegou a existir. Definia nove globais — __NINA_SUPABASE_URL__ e
+  // companhia, mais import.meta.env.* — e nenhuma delas tinha uma única
+  // referência no código; e tsconfig.json exclui `../nina-api-oficial` do
+  // programa, então nada de lá é compilado. Sob Turbopack o hook não roda em dev
+  // de todo modo.
 
   async headers() {
     return [
@@ -56,7 +62,6 @@ const nextConfig: NextConfig = {
           { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
           {
             key: 'Content-Security-Policy',
-            // Added Nina's Supabase to connect-src so Nina API/Realtime calls succeed.
             value: [
               "default-src 'self'",
               "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
@@ -65,15 +70,16 @@ const nextConfig: NextConfig = {
               "font-src 'self'",
               [
                 "connect-src 'self'",
-                // Pulsar Supabase
-                "https://wmugemamnqxjfpxrlwes.supabase.co",
-                "wss://wmugemamnqxjfpxrlwes.supabase.co",
-                // Nina Supabase (Phase 1 backend)
-                "https://mlttucjfmqnzbctwysks.supabase.co",
-                "wss://mlttucjfmqnzbctwysks.supabase.co",
-                // Local dev
-                "http://127.0.0.1:3010",
-                "http://localhost:3010",
+                // Hosts do Supabase em uso, derivados do ambiente
+                ...origensSupabase(),
+                // Stack local do Supabase CLI — apenas em desenvolvimento
+                ...(isDev
+                  ? [
+                      'http://127.0.0.1:54321', 'ws://127.0.0.1:54321',
+                      'http://localhost:54321', 'ws://localhost:54321',
+                      'http://127.0.0.1:3010',  'http://localhost:3010',
+                    ]
+                  : []),
               ].join(' '),
               "frame-ancestors 'none'",
             ].join('; '),

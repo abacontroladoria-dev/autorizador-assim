@@ -4,6 +4,7 @@ import React, { useState } from 'react'
 import { MessageSquare, Users, LayoutDashboard, Kanban, Calendar, Settings as SettingsIcon, LogOut, ArrowLeft, ChevronLeft } from 'lucide-react'
 import { usePathname } from 'next/navigation'
 import { useAuth } from '@/hooks/nina/useAuth'
+import { useUsuarioAtual } from '@/hooks/useUsuarioAtual'
 import Link from 'next/link'
 import { toast } from 'sonner'
 
@@ -17,7 +18,8 @@ const menuItems = [
 ]
 
 const SidebarContent = ({ collapsed }: { collapsed: boolean }) => {
-  const { user, signOut } = useAuth()
+  const { signOut } = useAuth()
+  const usuario = useUsuarioAtual()
   const pathname = usePathname()
   const currentPath = pathname.replace('/connect/', '')
 
@@ -31,13 +33,7 @@ const SidebarContent = ({ collapsed }: { collapsed: boolean }) => {
     }
   }
 
-  const getUserInitials = () => {
-    if (!user?.email) return 'US'
-    return user.email.substring(0, 2).toUpperCase()
-  }
-
-  const getDisplayName = () =>
-    user?.user_metadata?.full_name || 'Usuário'
+  const inicial = usuario.primeiroNome.charAt(0).toUpperCase() || 'U'
 
   return (
     <>
@@ -81,20 +77,37 @@ const SidebarContent = ({ collapsed }: { collapsed: boolean }) => {
         </button>
       </div>
 
-      {/* User footer */}
+      {/* User footer — mesma identidade do sidebar do Pulsar: nome e papel.
+          O e-mail sai da linha de baixo e vira title, para o papel ocupar o
+          lugar que informa mais. */}
       <div className="border-t border-slate-800 pt-3 px-2">
-        <div className="flex items-center gap-3 p-2 rounded-xl hover:bg-slate-800/60 transition-colors cursor-pointer group">
-          <div className="w-9 h-9 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-200 border border-slate-600 shrink-0">
-            {getUserInitials()}
+        <div
+          className="flex items-center gap-3 p-2 rounded-xl hover:bg-slate-800/60 transition-colors group"
+          title={collapsed ? `${usuario.primeiroNome} — ${usuario.roleLabel ?? 'sem papel'}` : usuario.email}
+        >
+          <div className="w-9 h-9 rounded-full bg-slate-700 flex items-center justify-center text-sm font-semibold text-slate-100 border border-slate-600 shrink-0">
+            {inicial}
           </div>
           {!collapsed && (
             <div className="flex-1 overflow-hidden">
-              <p className="text-sm font-medium text-slate-100 whitespace-nowrap">
-                {getDisplayName()}
+              <p className="text-sm font-medium text-slate-100 truncate">
+                {usuario.primeiroNome}
               </p>
-              <p className="text-xs text-slate-500 truncate">
-                {user?.email || 'email@example.com'}
-              </p>
+              {usuario.roleLabel && (
+                <p className="text-xs text-slate-500 truncate">
+                  {usuario.roleLabel}
+                </p>
+              )}
+              {/* Sem central_role toda chamada a /api/central/* responde 401.
+                  Dizer isso é mais útil que exibir só o papel do Pulsar e
+                  deixar a pessoa concluir que a Central está quebrada.
+                  Exige perfilLido: se a leitura do perfil falhou, o que não se
+                  sabe é se há acesso — afirmar que não há seria inventar. */}
+              {usuario.perfilLido && !usuario.temAcessoCentral && (
+                <p className="text-[11px] text-amber-500/80 truncate">
+                  Sem acesso à Central
+                </p>
+              )}
             </div>
           )}
           <button

@@ -496,9 +496,15 @@ export default function Sidebar() {
             </SidebarGroup>
           )}
 
-          {/* Pulsar Connect — disponível para todos os usuários autenticados */}
-          <hr className="my-2 border-sidebar-border" />
-          <MenuItem label="Pulsar Connect" icon={Zap} path="/connect" />
+          {/* Pulsar Connect — o proxy só libera /connect para admin ou para quem
+              recebeu a permissão `connect`. Antes o item aparecia para todos e
+              levava a /sem-permissao. */}
+          {canAccess("/connect") && (
+            <>
+              <hr className="my-2 border-sidebar-border" />
+              <MenuItem label="Pulsar Connect" icon={Zap} path="/connect" />
+            </>
+          )}
 
         </nav>
 

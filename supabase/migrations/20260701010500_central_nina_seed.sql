@@ -41,21 +41,24 @@ where id = 'a0000000-0000-0000-0000-000000000001';
 -- Todos os campos de credencial ficam NULL — devem ser preenchidos no painel
 -- de configurações após o deploy.
 --
--- auto_response_enabled = false:
---   Segurança: o agente NÃO responde automaticamente por padrão.
---   Admin deve ativar explicitamente após validar o system_prompt.
+-- Autonomia do agente:
+--   Esta migration NÃO define autonomia. `ai_model_mode` e
+--   `auto_response_enabled` — que existiam aqui — foram substituídos por
+--   `ai_mode` na 20260811100000, que nasce com default 'off'. O agente começa
+--   desligado, e ligá-lo é ação explícita de um admin pela tela.
+--
+--   Modelo do LLM também saiu daqui: é OPENAI_MODEL, variável de runtime.
+--   Deixar 'gpt-4o' gravado no banco criava a ilusão de que o banco escolhe o
+--   modelo, quando nenhum consumidor OpenAI jamais leu essa coluna.
 -- ============================================================================
 insert into central.agent_settings (
   id,
   organization_id,
   inbox_id,
-  ai_model_mode,
   system_prompt,
-  auto_response_enabled,
   response_delay_min,
   response_delay_max,
   message_breaking_enabled,
-  openai_assistant_id,
   elevenlabs_api_key,
   elevenlabs_voice_id,
   elevenlabs_model,
@@ -68,13 +71,10 @@ values (
   'b0000000-0000-0000-0000-000000000001',   -- UUID fixo para idempotência
   'a0000000-0000-0000-0000-000000000001',
   null,                                      -- org-level default
-  'gpt-4o',
   null,                                      -- system_prompt: configurar no painel
-  false,                                     -- auto_response desligado por segurança
   3,                                         -- delay mínimo: 3 segundos
   8,                                         -- delay máximo: 8 segundos
   true,                                      -- message_breaking: quebrará respostas longas
-  null,                                      -- openai_assistant_id: configurar no painel
   null,                                      -- elevenlabs_api_key: configurar no painel
   null,                                      -- elevenlabs_voice_id: configurar no painel
   'eleven_multilingual_v2',
@@ -83,9 +83,14 @@ values (
   1.00,
   false                                      -- TTS desligado por padrão
 )
-on conflict on constraint uq_agent_settings_org_default do update
+-- uq_agent_settings_org_default é um índice único PARCIAL (where inbox_id is null),
+-- não uma constraint de tabela — ON CONFLICT ON CONSTRAINT não o aceita.
+-- A inferência precisa repetir o mesmo predicado do índice.
+--
+-- ai_mode NÃO entra no do update: reaplicar o seed não deve desligar um agente
+-- que o admin ligou.
+on conflict (organization_id) where inbox_id is null do update
   set
-    ai_model_mode            = excluded.ai_model_mode,
     response_delay_min       = excluded.response_delay_min,
     response_delay_max       = excluded.response_delay_max,
     message_breaking_enabled = excluded.message_breaking_enabled,

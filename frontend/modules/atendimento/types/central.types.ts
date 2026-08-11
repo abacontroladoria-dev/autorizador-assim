@@ -40,10 +40,27 @@ export type ProviderType =
   | 'meta_waba'
   | 'instagram'
 
-export type AIMode =
-  | 'off'
-  | 'assisted'
-  | 'autonomous'
+// Autonomia do agente. Espelha central.agent_settings.ai_mode e o CHECK
+// ck_agent_settings_ai_mode (migration 20260811100000).
+//
+//   off        → o agente não é acionado; nenhuma chamada ao LLM acontece
+//   assisted   → o agente responde, a resposta fica como rascunho e NÃO sai
+//   autonomous → o agente responde e a resposta é enfileirada para envio
+//
+// Este eixo NÃO escolhe modelo. O modelo é OPENAI_MODEL, variável de runtime
+// validada em modules/atendimento/llm/modelo.ts. Foram deliberadamente
+// separados: a coluna antiga `ai_model_mode` misturava os dois e fazia a
+// escolha de modelo acontecer em silêncio.
+//
+// O array vem antes do tipo para haver uma allowlist verificável em runtime —
+// tipo derivado do valor garante que os dois não divirjam.
+export const AI_MODES = ['off', 'assisted', 'autonomous'] as const
+
+export type AIMode = typeof AI_MODES[number]
+
+export function isAIMode(valor: unknown): valor is AIMode {
+  return typeof valor === 'string' && (AI_MODES as readonly string[]).includes(valor)
+}
 
 export type NotificationPriority =
   | 'low'
@@ -273,6 +290,86 @@ export interface MessagingProvider {
 // Evita dependência circular entre message.service.ts e services/index.ts.
 export interface ProviderResolver {
   get(type: ProviderType): MessagingProvider
+}
+
+// ----------------------------------------------------------------------------
+// Agendamentos
+// ----------------------------------------------------------------------------
+
+// Espelha central.appointment_type (migration 20260701010000).
+// Adaptado do Nina comercial (demo/meeting/support/followup) para clínico.
+export type AppointmentType =
+  | 'triagem'
+  | 'retorno'
+  | 'reuniao'
+  | 'followup'
+  | 'demo'
+  | 'other'
+
+// Espelha ck_appointments_status (migration 20260810100000).
+// scheduled e confirmed OCUPAM a vaga; cancelled e no_show a liberam.
+export type AppointmentStatus =
+  | 'scheduled'
+  | 'confirmed'
+  | 'cancelled'
+  | 'completed'
+  | 'no_show'
+
+// Status que ocupam a vaga — mesma lista do predicado de uq_appointments_slot_ocupada.
+// Exportada para que a checagem no TypeScript nunca divirja da do banco.
+export const STATUS_QUE_OCUPAM_VAGA: readonly AppointmentStatus[] = ['scheduled', 'confirmed']
+
+export interface Appointment {
+  id:                string
+  organization_id:   string
+  contact_id:        string | null
+  conversation_id:   string | null
+  title:             string
+  description:       string | null
+  // date: 'YYYY-MM-DD'. time: 'HH:MM:SS' (Postgres time, sem fuso).
+  date:              string
+  time:              string | null
+  duration:          number | null
+  type:              AppointmentType
+  attendees:         string[] | null
+  meeting_url:       string | null
+  status:            AppointmentStatus
+  // Preenchido só depois que a sessão é criada no TiTa — não serve para reservar.
+  tita_session_id:   number | null
+  created_by_ai:     boolean
+  // Identidade da vaga (migration 20260810100000)
+  profissional_id:   number | null
+  profissional_nome: string | null
+  terapia_id:        number | null
+  terapia_nome:      string | null
+  unidade_id:        number | null
+  sala_nome:         string | null
+  tita_paciente_id:  number | null
+  created_at:        string
+  updated_at:        string
+}
+
+// Retorno de central.listar_vagas_disponiveis.
+// Não é uma tabela: é a grade do TiTa menos o que já prometemos.
+export interface VagaDisponivel {
+  data:              string
+  dia_semana:        string | null
+  hora_inicial:      string
+  hora_final:        string | null
+  profissional_id:   number
+  profissional_nome: string | null
+  terapia_id:        number | null
+  terapia_nome:      string | null
+  unidade_id:        number | null
+  unidade_nome:      string | null
+  sala_nome:         string | null
+}
+
+// Retorno de central.vaga_esta_disponivel — os três motivos de recusa separados.
+export interface DiagnosticoVaga {
+  existe_na_grade: boolean
+  ja_reservada:    boolean
+  no_passado:      boolean
 }
 
 // ----------------------------------------------------------------------------

@@ -12,6 +12,7 @@ export const roleDefaults: Record<string, string[]> = {
     'guias_digitais', 'auditoria_assim', 'usuarios', 'permissoes', 'cco',
     'autorizacoes', 'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'ocupacao_clinica', 'ocupacao_profissionais',
+    'connect',
   ],
   diretoria: [
     'dashboard', 'atendimentos', 'gestao',
@@ -57,6 +58,13 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   cronograma_solicitacoes: ['/cronograma/solicitacoes'],
   ocupacao_clinica: ['/cronograma/ocupacao'],
   ocupacao_profissionais: ['/cronograma/indicadores'],
+  // O Pulsar Connect não tinha código de permissão: o proxy derivava as rotas
+  // permitidas deste mapa, '/connect' nunca aparecia, e todo não-admin que
+  // clicasse no item do menu caía em /sem-permissao. O item era visível para
+  // todos e levava a lugar nenhum. Com o código, sidebar e proxy voltam a
+  // decidir pela mesma fonte — e conceder Connect a alguém que não é admin
+  // passa a ser um clique em /admin/permissoes, não uma mudança de código.
+  connect: ['/connect'],
 }
 
 // Converte um conjunto de códigos de permissão em rotas permitidas,

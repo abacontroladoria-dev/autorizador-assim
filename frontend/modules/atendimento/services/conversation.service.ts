@@ -10,6 +10,7 @@ import {
   ConversationNotFoundError,
   ConversationAlreadyClosedError,
 } from '../types/errors.types'
+import { isUniqueViolation } from '../utils/pg-errors'
 
 // ============================================================================
 // ConversationService
@@ -92,7 +93,7 @@ export class ConversationService {
     } catch (err) {
       // Race condition: outro processo criou a conversa primeiro.
       // PostgreSQL retorna code 23505 em violação de unique constraint.
-      if (this.isUniqueConstraintViolation(err)) {
+      if (isUniqueViolation(err)) {
         const found = await this.conv.findActiveByContactAndChannel(contactId, channelId)
         if (found) return { conversation: found, created: false }
       }
@@ -281,10 +282,4 @@ export class ConversationService {
     return conv
   }
 
-  // PostgreSQL retorna code '23505' em violação de unique constraint.
-  // Supabase JS propaga o código no objeto de erro retornado pelo postgrest.
-  private isUniqueConstraintViolation(err: unknown): boolean {
-    if (!err || typeof err !== 'object') return false
-    return (err as Record<string, unknown>)['code'] === '23505'
-  }
 }
