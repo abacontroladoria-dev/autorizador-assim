@@ -10,7 +10,7 @@ import {
   type GapItem, type Turno,
 } from "./simulacaoNovoPrestador"
 import { DIAS_UTIL, ESP_CLINICO, EXCLUIR_OCUP, NOME_PARA_TERAPIA_ID, normTxt } from "./constants"
-import { listarSlotsLivres, contarProfissionaisLivres } from "./disponibilidadeInterna"
+import { capacidadeDiretaRestante } from "./disponibilidadeInterna"
 import { dowDeDiaSemana } from "./salas"
 import { normalizarUnidadeOcupacao } from "./ocupacaoProf"
 import { resolverValorSessao } from "./faturamentoProjecao"
@@ -250,20 +250,24 @@ function limitarCandidatosPorGapNaSugestao(
     .filter(s => s.candidatos.length > 0)
 }
 
-/** Reduz a fila de candidatos de cada vaga pela capacidade interna já livre
- *  (Tarefa 4) — não é tudo-ou-nada: 1 profissional interno livre nesse exato
- *  dia/hora/unidade/especialidade cobre 1 paciente da fila, não a vaga
- *  inteira. Ex.: 4 candidatos disputando uma vaga e 1 profissional já livre
- *  → sobram 3 candidatos que realmente precisariam de contratação nova; só
- *  quando a capacidade cobre TODOS os candidatos da vaga ela some de vez.
- *  Os candidatos restantes de uma vaga parcialmente coberta ganham
+/** Reduz a fila de candidatos de cada vaga pela capacidade interna AINDA
+ *  disponível (Tarefa 4) — não é tudo-ou-nada: 1 profissional interno livre
+ *  nesse exato dia/hora/unidade/especialidade cobre 1 paciente da fila, não a
+ *  vaga inteira. Ex.: 4 candidatos disputando uma vaga e 1 profissional já
+ *  livre → sobram 3 candidatos que realmente precisariam de contratação
+ *  nova; só quando a capacidade cobre TODOS os candidatos da vaga ela some de
+ *  vez. A capacidade vem de `capacidadeDiretaRestante`, a MESMA fonte usada
+ *  pela tela "Ocupar Profissionais Disponíveis" — já descontando os
+ *  pacientes reais que essa tela já casou com esses profissionais livres,
+ *  pra não contar a mesma vaga livre como cobertura duas vezes. Os
+ *  candidatos restantes de uma vaga parcialmente coberta ganham
  *  `cobertosInternamente` com quantos já têm cobertura, pra UI avisar sem
  *  esconder a necessidade real de contratação. Descarta a sugestão inteira
  *  só quando todas as suas vagas somem. */
 export function filtrarPorDisponibilidadeInterna(
-  sugestoes: SugestaoContratacao[], cRows: CsvRow[],
+  sugestoes: SugestaoContratacao[], cRows: CsvRow[], gapMap: Record<string, GapItem>,
 ): SugestaoContratacao[] {
-  const slotsLivres = listarSlotsLivres(cRows)
+  const capacidadePorGrupo = capacidadeDiretaRestante(cRows, gapMap)
   return sugestoes
     .map(s => {
       const porVaga = new Map<string, CandidatoNaSugestao[]>()
@@ -273,7 +277,7 @@ export function filtrarPorDisponibilidadeInterna(
         porVaga.get(chave)!.push(c)
       }
       const candidatos = [...porVaga.values()].flatMap(daVaga => {
-        const capacidade = contarProfissionaisLivres(slotsLivres, s.dia, daVaga[0].hora, s.unidade, s.especialidade)
+        const capacidade = capacidadePorGrupo.get(`${s.dia}|||${daVaga[0].hora}|||${s.unidade}|||${s.especialidade}`) ?? 0
         if (capacidade <= 0) return daVaga
         const restantes = daVaga.slice(0, Math.max(0, daVaga.length - capacidade))
         const cobertos = daVaga.length - restantes.length
