@@ -84,12 +84,24 @@ export interface UnidadeRanqueada {
 export function hiStr(r: CsvRow): string { return String(r.HI_str || "") }
 function rowUnidade(r: CsvRow): string { return String(r.Unidade || "Desconhecida") }
 
+// avaliarPeriodo chama agendaClinica(cRows) a cada invocação, e é chamado
+// repetidas vezes (por unidade candidata, e de novo na restrição geográfica
+// de Padre Miguel) com o MESMO cRows dentro de um único clique — sem esse
+// cache, o filtro sobre cRows inteiro roda ~9-15x por clique. cRows só muda
+// quando os dados da grade são recarregados, então uma entrada por
+// referência (WeakMap) é suficiente e nunca fica obsoleta.
+const agendaClinicaCache = new WeakMap<CsvRow[], CsvRow[]>()
+
 function agendaClinica(cRows: CsvRow[]): CsvRow[] {
-  return cRows.filter(r =>
+  const cache = agendaClinicaCache.get(cRows)
+  if (cache) return cache
+  const resultado = cRows.filter(r =>
     r["Status do Agendamento"] === "Agendado" &&
     !EXCLUIR_ATENDIMENTO.has(r.Terapia) &&
     r["Nome Favorecido"] && !PACS_ADMIN.has(r["Nome Favorecido"]),
   )
+  agendaClinicaCache.set(cRows, resultado)
+  return resultado
 }
 
 /** Pacientes com sessão clínica na unidade nesse dia, a partir de linhas JÁ

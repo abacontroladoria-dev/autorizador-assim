@@ -5,7 +5,7 @@
 // especialidade/dias/turnos/unidade no formulário já existente, reaproveitando
 // 100% da grade e do comparativo já renderizados abaixo.
 
-import { useState } from "react"
+import { startTransition, useState } from "react"
 import { ArrowRight, Building2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Sparkles, Users } from "lucide-react"
 import { useSugestoesContratacao } from "@/hooks/useSugestoesContratacao"
 import { diaCurto, fmtReal, turnoNome } from "@/lib/cronograma/helpers"
@@ -152,9 +152,12 @@ export function SugestoesContratacaoPanel({ onAplicarSugestao }: Props) {
 
   if (!laudosCarregados) return null
 
-  const mudarModo = (novo: ModoCascataOcupacao) => { setModo(novo); setPagina(0) }
+  // startTransition: mudar modo/faixa dispara calcularTodosCombos/pipeline de
+  // enriquecimento (varre unidade × especialidade × dia), pesado e síncrono —
+  // sem isso o clique trava até o recálculo terminar.
+  const mudarModo = (novo: ModoCascataOcupacao) => startTransition(() => { setModo(novo); setPagina(0) })
 
-  const alternarFaixa = (faixa: FaixaCascata) => {
+  const alternarFaixa = (faixa: FaixaCascata) => startTransition(() => {
     setFaixasSelecionadas(prev => {
       const proxima = new Set(prev)
       if (proxima.has(faixa)) {
@@ -166,7 +169,7 @@ export function SugestoesContratacaoPanel({ onAplicarSugestao }: Props) {
       return proxima
     })
     setPagina(0)
-  }
+  })
 
   const totalPaginas = Math.max(1, Math.ceil(sugestoes.length / SUGESTOES_POR_PAGINA))
   const paginaAtual = Math.min(pagina, totalPaginas - 1)

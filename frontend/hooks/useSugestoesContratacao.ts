@@ -56,7 +56,7 @@ export function useSugestoesContratacao(
     const gapMap = calcularGapMap(lRows, cRows)
     const base = filtrarCombosPorFaixa(todosCombos, faixasSelecionadas)
     const comRemanejamento = anexarModalidadeERemanejamento(base, cRows, gapMap)
-    const comDisponibilidade = filtrarPorDisponibilidadeInterna(comRemanejamento, cRows)
+    const comDisponibilidade = filtrarPorDisponibilidadeInterna(comRemanejamento, cRows, gapMap)
     const comSala = anexarSala(comDisponibilidade, salasComOcupacao)
     return anexarRemuneracaoEOrdenar(comSala, cRows, regrasGerais, excecoesPaciente, mesReferencia, feriados)
   }, [todosCombos, faixasSelecionadas, cRows, lRows, salasComOcupacao, regrasGerais, excecoesPaciente, mesReferencia, feriados])

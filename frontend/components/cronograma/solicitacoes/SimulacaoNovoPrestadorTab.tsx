@@ -9,15 +9,15 @@
 // cálculo vive em lib/cronograma/simulacaoNovoPrestador.ts; este arquivo é só
 // a UI. Não há mais fluxo de WhatsApp/oferta aqui — é puramente informativo.
 
-import { useMemo, useRef, useState } from "react"
+import { startTransition, useMemo, useRef, useState } from "react"
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip as RechartsTooltip } from "recharts"
 import { CheckCircle2, Clock, Info, Lock, Sparkles, Star, Wallet } from "lucide-react"
 import {
   avaliarPeriodo, calcularGaps, construirAgendaNovoProfissional, gapsParaMapa, limitarCandidatosPorGap, listarEspecialidades, montarPlanoRecomendado, ranquearUnidades,
   type CandidatoSlot, type PeriodoSimulado, type PeriodoAlvo, type SlotSimulado, type Turno,
 } from "@/lib/cronograma/simulacaoNovoPrestador"
-import { DIAS_UTIL, ESP_CLINICO, EXCLUIR_OCUP } from "@/lib/cronograma/constants"
-import { buildCronoUnitMeta, diaCurto, fmtH, fmtName, fmtReal, shouldShowSessionUnit, turnoNome, unidadeBadgeText } from "@/lib/cronograma/helpers"
+import { DIAS_UTIL } from "@/lib/cronograma/constants"
+import { diaCurto, fmtH, fmtName, fmtReal, turnoNome } from "@/lib/cronograma/helpers"
 import { useGradeAgendamentos } from "@/hooks/useGradeAgendamentos"
 import { useOcupacaoSalas } from "@/hooks/useOcupacaoSalas"
 import { useConvenioValores } from "@/hooks/useConvenioValores"
@@ -25,9 +25,8 @@ import { useFeriados } from "@/hooks/useFeriados"
 import { anexarModalidadeERemanejamento, filtrarPorDisponibilidadeInterna, anexarSala, anexarRemuneracaoEOrdenar, primeiroConvenioDoPaciente } from "@/lib/cronograma/sugestaoContratacao"
 import { SugestoesContratacaoPanel } from "./SugestoesContratacaoPanel"
 import { RemanejamentoDetalheModal } from "./RemanejamentoDetalheModal"
+import { PacienteAgendaHipoteticaModal } from "./PacienteAgendaHipoteticaModal"
 import { ProjecaoFinanceiraDetalheModal } from "./ProjecaoFinanceiraDetalheModal"
-import { UnitHeaderBadges, CronoGlobalUnitBadge } from "@/components/cronograma/ui/UnitBadges"
-import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
 import { StatusPill } from "@/components/cronograma/ui/StatusPill"
 import { StatCard } from "@/components/cronograma/ui/StatCard"
 import { InlineNotice } from "@/components/cronograma/ui/InlineNotice"
@@ -247,106 +246,7 @@ function PlanoGradeSemanal({ periodos }: { periodos: PeriodoSimulado[] }) {
   )
 }
 
-// ─── Modal de detalhe: agenda atual do paciente + sessão hipotética ─────────
 interface DetalheModalData { pac: string; slot: SlotSimulado; especialidade: string }
-
-function DetalheModal({ data, cRows, onClose }: { data: DetalheModalData; cRows: CsvRow[]; onClose: () => void }) {
-  const { pac, slot, especialidade } = data
-  const terapiaProposta = (ESP_CLINICO[especialidade] || [especialidade]).filter(t => !EXCLUIR_OCUP.has(t))[0] || especialidade
-
-  const sessoesPaciente = useMemo(() => {
-    const vistos = new Set<string>()
-    const res: { dia: string; hora: string; terapia: string; prof: string; unidade: string }[] = []
-    for (const r of cRows) {
-      if (r["Nome Favorecido"] !== pac || r["Status do Agendamento"] !== "Agendado") continue
-      const k = `${r["Dia da Semana"]}|||${hiStr(r)}|||${r.Terapia}|||${r.Profissional}`
-      if (vistos.has(k)) continue
-      vistos.add(k)
-      res.push({ dia: r["Dia da Semana"], hora: hiStr(r), terapia: r.Terapia, prof: r.Profissional, unidade: String(r.Unidade || "Desconhecida") })
-    }
-    return res
-  }, [pac, cRows])
-
-  type CelulaInfo = { terapia: string; prof: string; proposta: boolean; unidade: string }
-  const mapaCelulas: Record<string, CelulaInfo[]> = {}
-  for (const s of sessoesPaciente) {
-    const k = `${s.dia}|||${s.hora}`
-    ;(mapaCelulas[k] ??= []).push({ terapia: s.terapia, prof: s.prof, proposta: false, unidade: s.unidade })
-  }
-  const kProposta = `${slot.dia}|||${slot.hora}`
-  ;(mapaCelulas[kProposta] ??= []).push({ terapia: terapiaProposta, prof: "Novo profissional", proposta: true, unidade: slot.unidade })
-
-  const diasComSessao = [...new Set([slot.dia, ...sessoesPaciente.map(s => s.dia)])]
-    .sort((a, b) => DIAS_UTIL.indexOf(a as typeof DIAS_UTIL[number]) - DIAS_UTIL.indexOf(b as typeof DIAS_UTIL[number]))
-  const horasGrid = [...new Set(Object.keys(mapaCelulas).map(k => k.split("|||")[1]))].sort()
-  const unitMeta = buildCronoUnitMeta(
-    diasComSessao,
-    Object.fromEntries(Object.entries(mapaCelulas).map(([k, cs]) => [k, cs.map(c => ({ tP: c.terapia, unidade: c.unidade }))])),
-  )
-
-  return (
-    <ScheduleModal
-      title={pac}
-      maxWidth={860}
-      onClose={onClose}
-      subtitle={
-        <div className="flex flex-wrap gap-1.5">
-          <CronoGlobalUnitBadge unit={unitMeta.globalUnit} />
-          <StatusPill tone="green" variant="solid" dense>
-            Hipótese: {terapiaProposta} · {diaCurto(slot.dia)} {turnoNome[slot.turno]} {slot.hora} · {slot.unidade}
-          </StatusPill>
-        </div>
-      }
-      footer={<Button variant="outline" size="sm" onClick={onClose}>Fechar</Button>}
-    >
-      <div className="mb-2 flex flex-wrap gap-3 text-[10px] text-muted-foreground">
-        <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30" /> Sessão hipotética</span>
-        <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-border bg-muted" /> Sessão existente</span>
-      </div>
-      {!horasGrid.length ? (
-        <div className="py-8 text-center text-muted-foreground">Nenhuma sessão encontrada.</div>
-      ) : (
-        <table className="w-full min-w-[380px] border-collapse">
-          <thead><tr>
-            <th className="w-[52px] pb-2 pr-2.5 text-right text-xs font-normal text-muted-foreground">Hora</th>
-            {diasComSessao.map(d => (
-              <th key={d} className={`min-w-[130px] pb-2 text-center text-[13px] font-extrabold ${d === slot.dia ? "text-violet-700 dark:text-violet-400" : "text-foreground"}`}>
-                <div>{diaCurto(d)} {d === slot.dia && <span className="ml-0.5 rounded bg-emerald-50 dark:bg-emerald-950/30 px-1 py-px text-[10px] text-emerald-700 dark:text-emerald-400">hipótese</span>}</div>
-                <UnitHeaderBadges dayMeta={unitMeta.byDay[d]} globalUnit={unitMeta.globalUnit} />
-              </th>
-            ))}
-          </tr></thead>
-          <tbody>
-            {horasGrid.map(hora => (
-              <tr key={hora} className="border-t border-border">
-                <td className={`pr-2.5 pt-2 text-right align-top font-mono text-[13px] font-extrabold tabular-nums ${hora === slot.hora ? "text-violet-700 dark:text-violet-400" : "text-foreground"}`}>{hora}</td>
-                {diasComSessao.map(d => {
-                  const celulas = mapaCelulas[`${d}|||${hora}`] || []
-                  return (
-                    <td key={d} className="p-0.5 align-top">
-                      {celulas.map((c, ci) => (
-                        <div key={ci} className={`mb-0.5 flex min-h-[58px] flex-col gap-0.5 rounded-lg border px-2 py-1.5 ${c.proposta ? "border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30" : "border-border bg-muted"}`}>
-                          <div className="text-xs font-bold leading-tight text-foreground">{c.terapia}</div>
-                          <div className="text-[11px] text-muted-foreground">{fmtName(c.prof)}</div>
-                          {shouldShowSessionUnit(unitMeta, d, hora) && c.unidade && c.unidade !== "Desconhecida" && (
-                            <div className="w-fit rounded-full bg-sky-50 dark:bg-sky-950/30 px-1.5 py-px text-[10px] font-extrabold text-sky-700 dark:text-sky-400">
-                              {unidadeBadgeText(c.unidade)}
-                            </div>
-                          )}
-                          {c.proposta && <div className="mt-auto text-[11px] font-bold text-emerald-700 dark:text-emerald-400">Sessão hipotética</div>}
-                        </div>
-                      ))}
-                    </td>
-                  )
-                })}
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </ScheduleModal>
-  )
-}
 
 // ─── Componente principal ────────────────────────────────────────────────────
 export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
@@ -454,7 +354,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
       projecaoRemuneracao: null,
     }))
     const comRemanejamento = anexarModalidadeERemanejamento(base, cRows, gapMap)
-    const comDisponibilidade = filtrarPorDisponibilidadeInterna(comRemanejamento, cRows)
+    const comDisponibilidade = filtrarPorDisponibilidadeInterna(comRemanejamento, cRows, gapMap)
     const comSala = anexarSala(comDisponibilidade, salasComOcupacao)
     return anexarRemuneracaoEOrdenar(comSala, cRows, regrasGerais, excecoesPaciente, mesReferencia, feriados)
   }, [podeSimular, periodosExibidos, especialidade, cRows, gapMap, salasComOcupacao, regrasGerais, excecoesPaciente, mesReferencia, feriados])
@@ -544,33 +444,47 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
       })
   }, [linhasExibidas])
 
+  // startTransition mantém o clique responsivo: o recálculo do plano (cadeia
+  // de useMemo em ranquearUnidades/montarPlanoRecomendado/periodosEnriquecidos,
+  // que varre a grade inteira) é pesado e síncrono — sem isso, o navegador
+  // trava até o cálculo terminar antes de sequer repintar o botão pressionado.
   const alternar = (dia: string, turno: Turno) => {
-    setUnidadeFixada("")
-    setPeriodosSel(prev => ({ ...prev, [dia]: { ...prev[dia], [turno]: !prev[dia]?.[turno] } }))
-  }
-  const alternarDiaInteiro = (dia: string) => {
-    setUnidadeFixada("")
-    setPeriodosSel(prev => {
-      const atual = prev[dia] || {}
-      const todosMarcados = !!atual.manha && !!atual.tarde
-      return { ...prev, [dia]: { manha: !todosMarcados, tarde: !todosMarcados } }
+    startTransition(() => {
+      setUnidadeFixada("")
+      setPeriodosSel(prev => ({ ...prev, [dia]: { ...prev[dia], [turno]: !prev[dia]?.[turno] } }))
     })
   }
-  const selecionarTudo = () => { setUnidadeFixada(""); setPeriodosSel(Object.fromEntries(DIAS_UTIL.map(d => [d, { manha: true, tarde: true }]))) }
-  const limparTudo = () => { setUnidadeFixada(""); setPeriodosSel({}) }
+  const alternarDiaInteiro = (dia: string) => {
+    startTransition(() => {
+      setUnidadeFixada("")
+      setPeriodosSel(prev => {
+        const atual = prev[dia] || {}
+        const todosMarcados = !!atual.manha && !!atual.tarde
+        return { ...prev, [dia]: { manha: !todosMarcados, tarde: !todosMarcados } }
+      })
+    })
+  }
+  const selecionarTudo = () => startTransition(() => {
+    setUnidadeFixada("")
+    setPeriodosSel(Object.fromEntries(DIAS_UTIL.map(d => [d, { manha: true, tarde: true }])))
+  })
+  const limparTudo = () => startTransition(() => { setUnidadeFixada(""); setPeriodosSel({}) })
 
   const aplicarSugestao = (esp: string, periodos: { dia: string; turno: Turno }[], unidade: string) => {
-    setEspecialidade(esp)
-    setPeriodosSel(Object.fromEntries(
-      DIAS_UTIL.map(dia => [dia, {
-        manha: periodos.some(p => p.dia === dia && p.turno === "manha"),
-        tarde: periodos.some(p => p.dia === dia && p.turno === "tarde"),
-      }]),
-    ))
-    setUnidadeFixada(unidade)
+    startTransition(() => {
+      setEspecialidade(esp)
+      setPeriodosSel(Object.fromEntries(
+        DIAS_UTIL.map(dia => [dia, {
+          manha: periodos.some(p => p.dia === dia && p.turno === "manha"),
+          tarde: periodos.some(p => p.dia === dia && p.turno === "tarde"),
+        }]),
+      ))
+      setUnidadeFixada(unidade)
+    })
 
     // Sem isso o usuário não percebe que a sugestão foi aplicada: os campos
     // preenchidos ficam abaixo da dobra, dentro de "Parâmetros da simulação".
+    // Ficam fora do startTransition acima (não dependem do recálculo pesado).
     parametrosRef.current?.scrollIntoView({ behavior: "smooth", block: "start" })
     setDestaqueAplicado(true)
     setTimeout(() => setDestaqueAplicado(false), 2200)
@@ -715,7 +629,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
             <div className="flex flex-col lg:flex-row items-start gap-6 p-4">
               <button
                 type="button"
-                onClick={() => setUnidadeFixada("")}
+                onClick={() => startTransition(() => setUnidadeFixada(""))}
                 className={`w-full lg:w-[500px] shrink-0 rounded-xl border-2 p-3 text-left transition-colors ${!unidadeFixada ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30" : "border-border bg-card hover:bg-muted/40"}`}
               >
                 <div className="mb-2 flex items-center gap-1.5">
@@ -739,7 +653,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                     <InfoTip text="Cada barra mostra quantas vagas de horário você teria se contratasse o novo profissional só para essa unidade, nos mesmos dias/turnos escolhidos. A marca vertical indica o total do plano recomendado (misto)." />
                   </div>
                   {unidadeFixada && (
-                    <Button variant="outline" size="xs" onClick={() => setUnidadeFixada("")}>Ver plano</Button>
+                    <Button variant="outline" size="xs" onClick={() => startTransition(() => setUnidadeFixada(""))}>Ver plano</Button>
                   )}
                 </div>
                 <div className="flex flex-col gap-3">
@@ -754,7 +668,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                       <button
                         key={u.unidade}
                         type="button"
-                        onClick={() => setUnidadeFixada(ativo ? "" : u.unidade)}
+                        onClick={() => startTransition(() => setUnidadeFixada(ativo ? "" : u.unidade))}
                         className={`flex items-center gap-3 sm:gap-4 rounded-xl border p-3 text-left transition-colors ${ativo ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30" : "border-transparent hover:bg-muted/50"}`}
                       >
                         <span className={`w-20 sm:w-[110px] shrink-0 truncate text-[12.5px] sm:text-sm font-bold ${cor.text}`}>{u.unidade}</span>
@@ -1047,7 +961,15 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
         </>
       )}
 
-      {detalhe && <DetalheModal data={detalhe} cRows={cRows} onClose={() => setDetalhe(null)} />}
+      {detalhe && (
+        <PacienteAgendaHipoteticaModal
+          paciente={detalhe.pac}
+          slot={detalhe.slot}
+          especialidade={detalhe.especialidade}
+          cRows={cRows}
+          onClose={() => setDetalhe(null)}
+        />
+      )}
       {detalheRemanejamento?.candidato.remanejamento && (
         <RemanejamentoDetalheModal
           paciente={detalheRemanejamento.candidato.paciente}
