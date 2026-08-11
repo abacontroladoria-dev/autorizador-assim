@@ -676,11 +676,11 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
               <div className="text-[11px] text-muted-foreground">{periodosAlvo.length} período(s) simulado(s) em {unitRank.length} unidade(s) candidatas</div>
             </div>
 
-            <div className="flex flex-wrap items-start gap-6 p-4">
+            <div className="flex flex-col lg:flex-row items-start gap-6 p-4">
               <button
                 type="button"
                 onClick={() => setUnidadeFixada("")}
-                className={`w-fit rounded-xl border-2 p-3 text-left transition-colors ${!unidadeFixada ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30" : "border-border bg-card hover:bg-muted/40"}`}
+                className={`w-full lg:w-[500px] shrink-0 rounded-xl border-2 p-3 text-left transition-colors ${!unidadeFixada ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30" : "border-border bg-card hover:bg-muted/40"}`}
               >
                 <div className="mb-2 flex items-center gap-1.5">
                   <Star size={13} className="text-sky-600 dark:text-sky-400" />
@@ -691,11 +691,13 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                   <strong className="text-foreground">{planoStats.nPacientes} paciente(s)</strong> disputando {planoStats.totalVagas} vaga(s) de horário
                   <InfoTip text="Estimativa do plano antes de resolver remanejamento, disponibilidade interna e sala — o número final de vagas confirmadas aparece em 'Detalhamento' logo abaixo." />
                 </div>
-                <PlanoGradeSemanal periodos={planoRecomendado} />
+                <div className="overflow-x-auto">
+                  <PlanoGradeSemanal periodos={planoRecomendado} />
+                </div>
               </button>
 
-              <div className="w-full lg:w-fit lg:border-l lg:border-border lg:pl-6">
-                <div className="mb-2 flex items-center justify-between gap-2">
+              <div className="w-full flex-1 min-w-0 lg:border-l lg:border-border lg:pl-6">
+                <div className="mb-3 flex items-center justify-between gap-2">
                   <div className="text-sm font-extrabold text-foreground">
                     Ou fixe numa unidade única
                     <InfoTip text="Cada barra mostra quantas vagas de horário você teria se contratasse o novo profissional só para essa unidade, nos mesmos dias/turnos escolhidos. A marca vertical indica o total do plano recomendado (misto)." />
@@ -704,7 +706,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                     <Button variant="outline" size="xs" onClick={() => setUnidadeFixada("")}>Ver plano</Button>
                   )}
                 </div>
-                <div className="flex flex-col gap-2">
+                <div className="flex flex-col gap-3">
                   {unitRank.map(u => {
                     const cor = estiloUnidade(u.unidade)
                     const vagasUnidade = vagasDaUnidade(u)
@@ -717,15 +719,15 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                         key={u.unidade}
                         type="button"
                         onClick={() => setUnidadeFixada(ativo ? "" : u.unidade)}
-                        className={`flex items-center gap-2 sm:gap-3 rounded-lg border p-2 text-left transition-colors ${ativo ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30" : "border-transparent hover:bg-muted/50"}`}
+                        className={`flex items-center gap-3 sm:gap-4 rounded-xl border p-3 text-left transition-colors ${ativo ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30" : "border-transparent hover:bg-muted/50"}`}
                       >
-                        <span className={`w-14 sm:w-[88px] shrink-0 truncate text-[11px] sm:text-[12.5px] font-bold ${cor.text}`}>{u.unidade}</span>
-                        <span className="relative h-6 min-w-[56px] flex-1 rounded bg-muted">
-                          <span className={`absolute inset-y-0 left-0 rounded transition-[width] ${cor.bar}`} style={{ width: `${largura}%` }} />
-                          <span className="absolute -top-1 -bottom-1 w-[2px] bg-foreground/60" style={{ left: `${referencia}%` }} />
+                        <span className={`w-20 sm:w-[110px] shrink-0 truncate text-[12.5px] sm:text-sm font-bold ${cor.text}`}>{u.unidade}</span>
+                        <span className="relative h-8 min-w-[72px] flex-1 rounded-lg bg-muted">
+                          <span className={`absolute inset-y-0 left-0 rounded-lg transition-[width] ${cor.bar}`} style={{ width: `${largura}%` }} />
+                          <span className="absolute -top-1.5 -bottom-1.5 w-[2px] bg-foreground/60" style={{ left: `${referencia}%` }} />
                         </span>
-                        <span className="w-[76px] sm:w-[100px] shrink-0 text-right">
-                          <span className="block text-[11px] sm:text-[12.5px] font-black tabular-nums text-foreground">{vagasUnidade} vaga(s)/semana</span>
+                        <span className="w-[92px] sm:w-[120px] shrink-0 text-right">
+                          <span className="block text-[12.5px] sm:text-sm font-black tabular-nums text-foreground">{vagasUnidade} vaga(s)/semana</span>
                           <span className={`block text-[10px] font-bold ${delta < 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>
                             {delta === 0 ? "igual ao plano" : `${delta} vs. plano`}
                           </span>
