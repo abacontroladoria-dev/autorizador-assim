@@ -4,7 +4,15 @@
 // "Rótulo: valor antigo → valor novo" (edição) ou "Rótulo: valor" (criação/exclusão).
 
 import { CAPACIDADE_LABEL_CURTO, STATUS_LABEL_CURTO, type SalaCapacidade, type SalaStatus } from "./salasTypes"
-import type { CronogramaTrilhaAuditoria, CronogramaTrilhaTabela } from "@/services/salasAuditoria.service"
+import type { CronogramaTrilhaAcao, CronogramaTrilhaTabela } from "@/services/salasAuditoria.service"
+
+/** Só o mínimo necessário pra calcular o resumo — usado tanto ao gravar (antes de a linha existir) quanto ao ler a trilha já salva. */
+export interface AuditoriaEntrada {
+  tabela: CronogramaTrilhaTabela
+  acao: CronogramaTrilhaAcao
+  antes?: unknown
+  depois?: unknown
+}
 
 const DOW_NOME: Record<number, string> = {
   1: "Segunda-feira", 2: "Terça-feira", 3: "Quarta-feira", 4: "Quinta-feira", 5: "Sexta-feira",
@@ -76,7 +84,7 @@ function camposConhecidos(tabela: CronogramaTrilhaTabela, registro: Record<strin
 }
 
 /** Linhas "campo: antes → depois", só dos campos que de fato mudaram. */
-export function camposAlterados(item: CronogramaTrilhaAuditoria): CampoAlteracao[] {
+export function camposAlterados(item: AuditoriaEntrada): CampoAlteracao[] {
   const antes = (item.antes ?? {}) as Record<string, unknown>
   const depois = (item.depois ?? {}) as Record<string, unknown>
   const base = Object.keys(depois).length ? depois : antes
@@ -91,8 +99,25 @@ export function camposAlterados(item: CronogramaTrilhaAuditoria): CampoAlteracao
 }
 
 /** Linhas "campo: valor" — usado em criação (depois) e exclusão (antes). */
-export function camposSnapshot(item: CronogramaTrilhaAuditoria): CampoSnapshot[] {
+export function camposSnapshot(item: AuditoriaEntrada): CampoSnapshot[] {
   const registro = (item.acao === "excluir" ? item.antes : item.depois ?? item.antes) as Record<string, unknown> | null
   if (!registro) return []
   return camposConhecidos(item.tabela, registro).map(([campo, label]) => ({ label, valor: formatarValor(campo, registro[campo]) }))
+}
+
+/**
+ * Uma linha só, pronta pra ler direto na planilha do Supabase (coluna
+ * `resumo`) sem abrir o JSON de antes/depois — "Núcleo: Terapia ABA →
+ * Especialidades Terapêuticas · Capacidade: Duplo → Único".
+ */
+export function resumoAlteracao(item: AuditoriaEntrada): string {
+  if (item.acao === "editar") {
+    const alteracoes = camposAlterados(item)
+    return alteracoes.length
+      ? alteracoes.map(c => `${c.label}: ${c.antes} → ${c.depois}`).join(" · ")
+      : "Nenhum campo alterado."
+  }
+  const snapshot = camposSnapshot(item)
+  if (!snapshot.length) return item.acao === "criar" ? "Registro criado." : "Registro excluído."
+  return snapshot.map(c => `${c.label}: ${c.valor}`).join(" · ")
 }

@@ -1,4 +1,5 @@
 import { getSupabaseClient } from "@/lib/supabase/client"
+import { resumoAlteracao } from "@/lib/cronograma/auditoriaFormat"
 
 export type CronogramaTrilhaTabela = "sala" | "alocacao" | "nucleo" | "status_label"
 export type CronogramaTrilhaAcao = "criar" | "editar" | "excluir"
@@ -23,6 +24,8 @@ export type CronogramaTrilhaAuditoria = {
   criado_em: string
   /** Já formatado como DD/MM/AAAA HH:MM, horário de Brasília — preenchido por trigger no banco. */
   criado_em_brasilia: string | null
+  /** Resumo em uma linha ("Núcleo: X → Y · Capacidade: A → B") — pra ler direto na planilha do Supabase, sem abrir o JSON. */
+  resumo: string | null
 }
 
 const TABLE = "cronograma_salas_auditoria"
@@ -67,6 +70,7 @@ export async function registrarAuditoriaSala(input: {
     motivo: input.motivo ?? null,
     usuario_id: user?.id ?? null,
     usuario_nome: usuarioNome,
+    resumo: resumoAlteracao(input),
   })
   // Auditoria não pode derrubar a ação principal (salvar/excluir o registro
   // real) — só loga o erro.

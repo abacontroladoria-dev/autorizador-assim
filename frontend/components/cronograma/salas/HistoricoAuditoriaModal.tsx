@@ -81,6 +81,9 @@ export function HistoricoAuditoriaModal({ onClose }: Props) {
                   <div>{formatarDataHora(item)}</div>
                 </span>
               </button>
+              {item.resumo && (
+                <div className="mt-1 pl-[22px] text-[12px] text-muted-foreground">{item.resumo}</div>
+              )}
               {expandido && (
                 <div className="mt-2 flex flex-col gap-1.5 border-t border-border pt-2">
                   {alteracoes.length === 0 && snapshot.length === 0 && (
