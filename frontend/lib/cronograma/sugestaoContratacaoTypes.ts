@@ -28,6 +28,11 @@ export interface CandidatoNaSugestao {
    *  (mais rentável). Só o de ordem 1 entra na receita projetada da sugestão,
    *  já que a vaga só pode ser ocupada por um paciente por vez. */
   ordemNaVaga: number
+  /** Só presente quando a vaga teve cobertura interna PARCIAL (ver
+   *  filtrarPorDisponibilidadeInterna): quantos candidatos da fila original
+   *  dessa mesma vaga já têm profissional interno livre — não é a vaga
+   *  inteira que está coberta, só essa quantidade da fila. */
+  cobertosInternamente?: number
 }
 
 export interface ProjecaoRemuneracaoSugestao {

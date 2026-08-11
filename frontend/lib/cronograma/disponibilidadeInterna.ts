@@ -28,9 +28,16 @@ export function listarSlotsLivres(cRows: CsvRow[]): SlotLivre[] {
     }))
 }
 
-/** Existe algum profissional interno já livre nesse dia/hora/unidade/especialidade? */
-export function temCoberturaInterna(
+/** Quantos profissionais internos distintos já estão livres nesse exato
+ *  dia/hora/unidade/especialidade — não é sim/não: um profissional livre
+ *  cobre UM paciente da fila de candidatos daquela vaga, não a vaga inteira
+ *  (ver filtrarPorDisponibilidadeInterna em sugestaoContratacao.ts). */
+export function contarProfissionaisLivres(
   slotsLivres: SlotLivre[], dia: string, hora: string, unidade: string, especialidade: string,
-): boolean {
-  return slotsLivres.some(s => s.dia === dia && s.hora === hora && s.unidade === unidade && s.especialidade === especialidade)
+): number {
+  return new Set(
+    slotsLivres
+      .filter(s => s.dia === dia && s.hora === hora && s.unidade === unidade && s.especialidade === especialidade)
+      .map(s => s.profissional),
+  ).size
 }

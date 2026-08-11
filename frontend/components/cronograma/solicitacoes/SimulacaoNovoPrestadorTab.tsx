@@ -360,15 +360,20 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
     [podeSimular, periodosAlvo, especialidade, cRows, gapMap],
   )
 
+  // totalVagas conta horários distintos (slots), não candidatos — um mesmo
+  // horário pode ter vários pacientes concorrendo (ver "Sessões e candidatos"),
+  // então somar candidatos.length inflaria a contagem de vagas reais.
   const planoStats = useMemo(() => {
     const pacientes = new Set<string>()
-    let totalSessoes = 0
+    let totalVagas = 0
     for (const p of planoRecomendado) {
-      totalSessoes += p.totalSessoes
+      totalVagas += p.slots.length
       p.slots.forEach(s => s.candidatos.forEach(c => pacientes.add(c.pac)))
     }
-    return { nPacientes: pacientes.size, totalSessoes }
+    return { nPacientes: pacientes.size, totalVagas }
   }, [planoRecomendado])
+
+  const vagasDaUnidade = (u: { periodos: PeriodoSimulado[] }) => u.periodos.reduce((soma, p) => soma + p.slots.length, 0)
 
   const periodosExibidos = useMemo((): PeriodoSimulado[] => {
     if (!podeSimular) return []
@@ -388,7 +393,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
     [podeSimular, periodosExibidos],
   )
 
-  const escalaComparativo = Math.max(1, planoStats.totalSessoes, ...unitRank.map(u => u.totalSessoes))
+  const escalaComparativo = Math.max(1, planoStats.totalVagas, ...unitRank.map(vagasDaUnidade))
 
   const mesReferencia = useMemo(() => {
     const [ano, mes] = refWeek.inicio.split("-").map(Number)
@@ -683,8 +688,8 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                   <InfoTip text="Escolhe a melhor unidade para cada dia/turno separadamente. Se Padre Miguel for escolhida em um turno, o sistema não mistura com outra unidade no outro turno do mesmo dia (restrição geográfica)." />
                 </div>
                 <div className="mb-2 flex items-center gap-1 text-[11px] text-muted-foreground">
-                  <strong className="text-foreground">{planoStats.nPacientes} pacientes</strong> · ~{planoStats.totalSessoes} sessões/semana (estimativa)
-                  <InfoTip text="Estimativa do plano antes de resolver remanejamento e sala — o número final de vagas confirmadas aparece em 'Detalhamento' logo abaixo." />
+                  <strong className="text-foreground">{planoStats.nPacientes} paciente(s)</strong> disputando {planoStats.totalVagas} vaga(s) de horário
+                  <InfoTip text="Estimativa do plano antes de resolver remanejamento, disponibilidade interna e sala — o número final de vagas confirmadas aparece em 'Detalhamento' logo abaixo." />
                 </div>
                 <PlanoGradeSemanal periodos={planoRecomendado} />
               </button>
@@ -693,7 +698,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <div className="text-sm font-extrabold text-foreground">
                     Ou fixe numa unidade única
-                    <InfoTip text="Cada barra mostra quantas sessões/semana (estimativa) você teria se contratasse o novo profissional só para essa unidade, nos mesmos dias/turnos escolhidos. A marca vertical indica o total do plano recomendado (misto)." />
+                    <InfoTip text="Cada barra mostra quantas vagas de horário você teria se contratasse o novo profissional só para essa unidade, nos mesmos dias/turnos escolhidos. A marca vertical indica o total do plano recomendado (misto)." />
                   </div>
                   {unidadeFixada && (
                     <Button variant="outline" size="xs" onClick={() => setUnidadeFixada("")}>Ver plano</Button>
@@ -702,9 +707,10 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                 <div className="flex flex-col gap-2">
                   {unitRank.map(u => {
                     const cor = estiloUnidade(u.unidade)
-                    const largura = (u.totalSessoes / escalaComparativo) * 100
-                    const referencia = (planoStats.totalSessoes / escalaComparativo) * 100
-                    const delta = u.totalSessoes - planoStats.totalSessoes
+                    const vagasUnidade = vagasDaUnidade(u)
+                    const largura = (vagasUnidade / escalaComparativo) * 100
+                    const referencia = (planoStats.totalVagas / escalaComparativo) * 100
+                    const delta = vagasUnidade - planoStats.totalVagas
                     const ativo = unidadeFixada === u.unidade
                     return (
                       <button
@@ -719,7 +725,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                           <span className="absolute -top-1 -bottom-1 w-[2px] bg-foreground/60" style={{ left: `${referencia}%` }} />
                         </span>
                         <span className="w-[76px] sm:w-[100px] shrink-0 text-right">
-                          <span className="block text-[11px] sm:text-[12.5px] font-black tabular-nums text-foreground">{u.totalSessoes} sessões/semana</span>
+                          <span className="block text-[11px] sm:text-[12.5px] font-black tabular-nums text-foreground">{vagasUnidade} vaga(s)/semana</span>
                           <span className={`block text-[10px] font-bold ${delta < 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>
                             {delta === 0 ? "igual ao plano" : `${delta} vs. plano`}
                           </span>
@@ -954,6 +960,11 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                                   )}
                                   {sessoesNoDia.length > 0 && (
                                     <div className="text-[10.5px] text-muted-foreground">Já neste dia: {sessoesNoDia.join(", ")}</div>
+                                  )}
+                                  {!!c.cobertosInternamente && c.ordemNaVaga === linha.concorrentesNaVaga && (
+                                    <div className="mt-0.5 text-[10.5px] text-muted-foreground">
+                                      + {c.cobertosInternamente} paciente(s) desta vaga já atendido(s) por profissional existente
+                                    </div>
                                   )}
                                 </td>
                                 <td className="px-3 py-2 text-right tabular-nums text-foreground">{c.aut}</td>

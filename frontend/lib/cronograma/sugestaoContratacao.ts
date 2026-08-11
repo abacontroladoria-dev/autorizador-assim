@@ -10,7 +10,7 @@ import {
   type GapItem, type Turno,
 } from "./simulacaoNovoPrestador"
 import { DIAS_UTIL, ESP_CLINICO, EXCLUIR_OCUP, NOME_PARA_TERAPIA_ID, normTxt } from "./constants"
-import { listarSlotsLivres, temCoberturaInterna } from "./disponibilidadeInterna"
+import { listarSlotsLivres, contarProfissionaisLivres } from "./disponibilidadeInterna"
 import { dowDeDiaSemana } from "./salas"
 import { normalizarUnidadeOcupacao } from "./ocupacaoProf"
 import { resolverValorSessao } from "./faturamentoProjecao"
@@ -160,19 +160,37 @@ export function anexarModalidadeERemanejamento(
   })
 }
 
-/** Remove candidatos cujo dia/hora/unidade/especialidade já pode ser coberto
- *  por um profissional interno livre (Tarefa 4) — não sugere contratar o que já
- *  dá pra suprir com quem já está na clínica. Descarta a sugestão inteira se
- *  todos os seus candidatos forem cobertos internamente. */
+/** Reduz a fila de candidatos de cada vaga pela capacidade interna já livre
+ *  (Tarefa 4) — não é tudo-ou-nada: 1 profissional interno livre nesse exato
+ *  dia/hora/unidade/especialidade cobre 1 paciente da fila, não a vaga
+ *  inteira. Ex.: 4 candidatos disputando uma vaga e 1 profissional já livre
+ *  → sobram 3 candidatos que realmente precisariam de contratação nova; só
+ *  quando a capacidade cobre TODOS os candidatos da vaga ela some de vez.
+ *  Os candidatos restantes de uma vaga parcialmente coberta ganham
+ *  `cobertosInternamente` com quantos já têm cobertura, pra UI avisar sem
+ *  esconder a necessidade real de contratação. Descarta a sugestão inteira
+ *  só quando todas as suas vagas somem. */
 export function filtrarPorDisponibilidadeInterna(
   sugestoes: SugestaoContratacao[], cRows: CsvRow[],
 ): SugestaoContratacao[] {
   const slotsLivres = listarSlotsLivres(cRows)
   return sugestoes
-    .map(s => ({
-      ...s,
-      candidatos: s.candidatos.filter(c => !temCoberturaInterna(slotsLivres, s.dia, c.hora, s.unidade, s.especialidade)),
-    }))
+    .map(s => {
+      const porVaga = new Map<string, CandidatoNaSugestao[]>()
+      for (const c of s.candidatos) {
+        const chave = chaveVaga(c)
+        if (!porVaga.has(chave)) porVaga.set(chave, [])
+        porVaga.get(chave)!.push(c)
+      }
+      const candidatos = [...porVaga.values()].flatMap(daVaga => {
+        const capacidade = contarProfissionaisLivres(slotsLivres, s.dia, daVaga[0].hora, s.unidade, s.especialidade)
+        if (capacidade <= 0) return daVaga
+        const restantes = daVaga.slice(0, Math.max(0, daVaga.length - capacidade))
+        const cobertos = daVaga.length - restantes.length
+        return cobertos > 0 ? restantes.map(c => ({ ...c, cobertosInternamente: cobertos })) : restantes
+      })
+      return { ...s, candidatos }
+    })
     .filter(s => s.candidatos.length > 0)
 }
 
