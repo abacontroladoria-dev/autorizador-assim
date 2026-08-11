@@ -296,33 +296,37 @@ export type SlotModalSubstituicao = {
 }
 
 /**
- * Busca profissionais para o modal de substituição usando Terapia Real (terapia_nome).
- * Compatibilidade por terapia_exibicao_nome é incorreta — este serviço usa terapia_nome.
- * Para o Grupo ABA, busca os três subtipos + Coordenador de Caso em uma única query.
+ * Merge de slots do dia (vw_modal_substituicao_terapeutas) com a escala da semana
+ * (vw_terapeutas_semana) para uma unidade/dia. Quando `terapiasFiltro` é informado,
+ * restringe as duas queries a essas Terapias Reais; quando omitido, busca TODOS os
+ * profissionais da unidade/dia, sem filtro de especialidade.
  */
-export async function listarModalSubstituicao(params: {
-  terapiaNome: string   // Terapia Real
+async function buscarSlotsUnidadeDia(params: {
   unidade: string
   dataAtendimento: string
+  terapiasFiltro?: string[]
 }): Promise<SlotModalSubstituicao[]> {
   try {
-    const terapiasQuery = terapiasCompativeis(params.terapiaNome)
+    let queryHoje = supabase
+      .from('vw_modal_substituicao_terapeutas')
+      .select('profissional_id, profissional_nome, terapia_nome, terapia_exibicao_nome, unidade, hora, status_slot, paciente_nome, sala_nome')
+      .eq('unidade', params.unidade)
+      .eq('data_grade', params.dataAtendimento)
+
+    let querySemana = supabase
+      .from('vw_terapeutas_semana')
+      .select('profissional_id, profissional_nome, terapia_nome, terapia_exibicao_nome, unidade, turno_semana')
+      .eq('unidade', params.unidade)
+
+    if (params.terapiasFiltro) {
+      queryHoje = queryHoje.in('terapia_nome', params.terapiasFiltro)
+      querySemana = querySemana.in('terapia_nome', params.terapiasFiltro)
+    }
 
     const [{ data: slotsHoje, error: erroHoje }, { data: semana, error: erroSemana }] =
       await Promise.all([
-        supabase
-          .from('vw_modal_substituicao_terapeutas')
-          .select('profissional_id, profissional_nome, terapia_nome, terapia_exibicao_nome, unidade, hora, status_slot, paciente_nome, sala_nome')
-          .in('terapia_nome', terapiasQuery)
-          .eq('unidade', params.unidade)
-          .eq('data_grade', params.dataAtendimento)
-          .order('profissional_nome', { ascending: true })
-          .order('hora', { ascending: true }),
-        supabase
-          .from('vw_terapeutas_semana')
-          .select('profissional_id, profissional_nome, terapia_nome, terapia_exibicao_nome, unidade, turno_semana')
-          .in('terapia_nome', terapiasQuery)
-          .eq('unidade', params.unidade),
+        queryHoje.order('profissional_nome', { ascending: true }).order('hora', { ascending: true }),
+        querySemana,
       ])
 
     if (erroHoje) console.error('Erro ao listar slots do dia:', erroHoje)
@@ -352,21 +356,45 @@ export async function listarModalSubstituicao(params: {
       })
     }
 
-    const result = [...slots, ...slotsAdicionais].sort((a, b) =>
+    return [...slots, ...slotsAdicionais].sort((a, b) =>
       a.profissional_nome.localeCompare(b.profissional_nome, 'pt-BR')
     )
-
-    console.log(
-      '[Cobertura] carregados →',
-      'slotsHoje:', slots.length,
-      '| semana:', semana?.length ?? 0,
-      '| total:', result.length,
-      '| terapias:', terapiasQuery,
-    )
-
-    return result
   } catch (err) {
     console.error('Erro ao listar modal substituição:', err)
     return []
   }
+}
+
+/**
+ * Busca profissionais para o modal de substituição usando Terapia Real (terapia_nome).
+ * Compatibilidade por terapia_exibicao_nome é incorreta — este serviço usa terapia_nome.
+ * Para o Grupo ABA, busca os três subtipos + Coordenador de Caso em uma única query.
+ */
+export async function listarModalSubstituicao(params: {
+  terapiaNome: string   // Terapia Real
+  unidade: string
+  dataAtendimento: string
+}): Promise<SlotModalSubstituicao[]> {
+  const terapiasQuery = terapiasCompativeis(params.terapiaNome)
+  const result = await buscarSlotsUnidadeDia({ ...params, terapiasFiltro: terapiasQuery })
+
+  console.log(
+    '[Cobertura] carregados →',
+    'total:', result.length,
+    '| terapias:', terapiasQuery,
+  )
+
+  return result
+}
+
+/**
+ * Todos os profissionais ativos da unidade/dia, SEM filtro de especialidade.
+ * Usado exclusivamente pelo seletor "Buscar em outra especialidade" — substituição
+ * fora da matriz terapiasCompativeis, para casos de exceção sem padrão fixo.
+ */
+export async function listarTodosProfissionaisModal(params: {
+  unidade: string
+  dataAtendimento: string
+}): Promise<SlotModalSubstituicao[]> {
+  return buscarSlotsUnidadeDia({ ...params, terapiasFiltro: undefined })
 }
