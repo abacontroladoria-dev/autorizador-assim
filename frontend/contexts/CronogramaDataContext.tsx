@@ -174,6 +174,11 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
   pacBundlesRef.current = pacBundles
 
   const hasRealtimeFiredRef = useRef(false)
+  // Evita que o load inicial de profMap/pacBundles/conf (fase 4, async) sobrescreva
+  // com um snapshot antigo do banco um aceite que o usuário já fez em memória
+  // enquanto esse fetch ainda estava em voo (ex.: aceitar uma sugestão em
+  // OcupPacMode antes do loadAcomp() terminar apagava o aceite ao resolver).
+  const hasAcompActedRef = useRef(false)
   const pendingWriteKeys = useRef(new Set<string>())
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -337,7 +342,7 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
             await sb.from("acomp_prof_map").upsert(rows, { onConflict: "id" })
             for (const k of novasProf) remoteProf[k] = legacyProf[k]
           }
-          setProfMap(remoteProf)
+          if (!hasAcompActedRef.current) setProfMap(remoteProf)
         }
 
         // pacBundles
@@ -353,7 +358,7 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
             await sb.from("acomp_pac_bundles").upsert(rows, { onConflict: "id" })
             remoteBundles.push(...novasBundles)
           }
-          setPacBundles(remoteBundles)
+          if (!hasAcompActedRef.current) setPacBundles(remoteBundles)
         }
 
         // conf
@@ -369,7 +374,7 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
             await sb.from("acomp_conf").upsert(rows, { onConflict: "id" })
             remoteConf.push(...novasConf)
           }
-          setConf(remoteConf)
+          if (!hasAcompActedRef.current) setConf(remoteConf)
         }
       } catch (e) {
         const msg = (e as Error).message || ""
@@ -494,6 +499,7 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
 
   // Grava statusMap de acompanhamento por profissional, por diff de linhas
   const persistProfMap = useCallback((next: Record<string, string>) => {
+    hasAcompActedRef.current = true
     const prev = profMapRef.current
     setProfMap(next)
     try { localStorage.setItem(SK_PROF_LEGACY, JSON.stringify(next)) } catch {}
@@ -528,6 +534,7 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
 
   // Grava bundles de aceite do OcupPacMode (upsert dos alterados, delete dos removidos)
   const persistPacBundles = useCallback((next: AceitePacBundle[]) => {
+    hasAcompActedRef.current = true
     // Capturado ANTES do setState — é o estado que estava persistido, base do diff.
     const prev = pacBundlesRef.current
     setPacBundles(next)
@@ -577,6 +584,7 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
   // cancelado/recusado desfazendo uma Reserva Pendente) — mesma estratégia de
   // persistPacBundles, para não deixar linhas órfãs que ressuscitam no próximo load.
   const persistConf = useCallback((next: ConfItem[]) => {
+    hasAcompActedRef.current = true
     const prev = confRef.current
     setConf(next)
     try { localStorage.setItem(SK_CONF_LEGACY, JSON.stringify(next)) } catch {}
