@@ -48,8 +48,8 @@ export function SolicitacoesShell({ cRows, lRows, dispRows, cfg }: ShellProps) {
   useEffect(() => {
     if (raw === "saida") { router.replace("/cronograma/saida-profissional"); return }
     if (raw === "ocup-pac") { router.replace("/cronograma/ocupacao-paciente"); return }
-    if (raw === "novo-cron") { router.replace("/cronograma/solicitacoes?tab=simulacao"); return }
-    if (!raw) router.replace("/cronograma/solicitacoes?tab=simulacao")
+    if (raw === "novo-cron") { router.replace("/relacionamento-prestador/solicitacoes?tab=simulacao"); return }
+    if (!raw) router.replace("/relacionamento-prestador/solicitacoes?tab=simulacao")
   }, [raw, router])
 
   return (

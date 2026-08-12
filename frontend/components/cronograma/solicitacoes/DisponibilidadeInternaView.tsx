@@ -291,7 +291,7 @@ export function DisponibilidadeInternaView() {
   const [detalheRemanejamento, setDetalheRemanejamento] = useState<OportunidadeProfissional | null>(null)
 
   useEffect(() => {
-    if (!rawTab) router.replace("/cronograma/ocupar-profissionais-disponiveis?tab=nome")
+    if (!rawTab) router.replace("/relacionamento-prestador/ocupar-profissionais-disponiveis?tab=nome")
   }, [rawTab, router])
 
   useEffect(() => {
@@ -335,7 +335,7 @@ export function DisponibilidadeInternaView() {
               type="button"
               role="tab"
               aria-selected={ativo}
-              onClick={() => router.replace(`/cronograma/ocupar-profissionais-disponiveis?tab=${tab.key}`)}
+              onClick={() => router.replace(`/relacionamento-prestador/ocupar-profissionais-disponiveis?tab=${tab.key}`)}
               className={`rounded-xl px-3.5 py-2 text-sm font-semibold transition-colors ${ativo ? "bg-violet-600 text-white shadow-sm" : "text-muted-foreground hover:bg-muted/60"}`}
             >
               {tab.label}

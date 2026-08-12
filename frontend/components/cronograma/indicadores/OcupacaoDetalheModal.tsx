@@ -3,7 +3,7 @@
 // OcupacaoDetalheModal — drill-down de auditoria dos StatCards "Manhã/Tarde
 // X/Y ocupados" (Dashboard por Unidade, binário) e "X/Y preenchidos" (Ocupação
 // Real, granular) em UnidadeDashboardShell.tsx. Mesma fonte de dados de
-// /cronograma/ocupacao-salas/ (calcularOcupacaoDaSala, lib/cronograma/salas.ts)
+// /relacionamento-prestador/ocupacao-salas/ (calcularOcupacaoDaSala, lib/cronograma/salas.ts)
 // — aqui só lemos as linhas já "achatadas" por listarSlotsDetalhados/
 // listarBlocosDetalhados, sem recalcular nada.
 //
@@ -101,7 +101,7 @@ export function OcupacaoDetalheModal({ detalhe, onClose }: OcupacaoDetalheModalP
   return (
     <ScheduleModal
       title={`${unidade} — ${turno} — ${tipo === "slot" ? "Slots ocupados" : "Blocos preenchidos"}`}
-      subtitle={`${ocupados} ${rotuloOcupado.toLowerCase()} de ${total} · ${livres} livres — mesmos dados de /cronograma/ocupacao-salas/`}
+      subtitle={`${ocupados} ${rotuloOcupado.toLowerCase()} de ${total} · ${livres} livres — mesmos dados de /relacionamento-prestador/ocupacao-salas/`}
       maxWidth={1360}
       onClose={onClose}
     >

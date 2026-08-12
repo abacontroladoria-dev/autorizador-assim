@@ -7,8 +7,8 @@
 // só trocando o agrupamento de "por profissional" pra "por categoria" — nunca
 // mexe na agenda de ninguém, é só visualização.
 
-import { listarOportunidadesDiretas, listarSlotsLivres } from "./disponibilidadeInterna"
-import { encontrarCandidatosRemanejamento } from "./remanejamento"
+import { listarOportunidadesDiretas, listarSlotsLivres, type OportunidadeDireta } from "./disponibilidadeInterna"
+import { encontrarCandidatosRemanejamento, construirIndiceRemanejamento, type IndiceRemanejamento } from "./remanejamento"
 import { filtrarCapacidadeLivreReservada, turnoFromHora } from "./helpers"
 import { hiStr, type GapItem, type Turno } from "./simulacaoNovoPrestador"
 import { DIAS_UTIL, TERAPIA_TO_ESP, TODAS_ESP, UNID_COR } from "./constants"
@@ -38,6 +38,18 @@ export interface VagaCategoria {
 export function gerarVagasCategoria(
   unidade: string, dia: string, especialidade: string,
   cRowsBrutos: CsvRow[], gapMap: Record<string, GapItem>,
+  /**
+   * Pré-calculados opcionais — quando informados, poupam recomputar do zero
+   * o que NÃO depende da combinação unidade/dia/especialidade sendo avaliada.
+   * Essenciais quando esta função é chamada em varredura (ex.:
+   * rankearOportunidadesInternas, abaixo, que testa toda combinação
+   * unidade×dia×especialidade): sem eles, cada chamada recalculava
+   * `listarOportunidadesDiretas` (o dataset INTEIRO) e o índice de
+   * remanejamento do zero, multiplicando o custo pelo nº de combinações. Uma
+   * chamada isolada (ex.: a grade de UMA combinação em OcupacaoCategoriaView)
+   * segue funcionando igual sem informar nada.
+   */
+  diretasPrecalculadas?: OportunidadeDireta[], indiceRemanejamento?: IndiceRemanejamento,
 ): VagaCategoria[] {
   const cRows = filtrarCapacidadeLivreReservada(cRowsBrutos)
   const slots = listarSlotsLivres(cRows).filter(
@@ -45,7 +57,8 @@ export function gerarVagasCategoria(
   )
   if (!slots.length) return []
 
-  const diretas = listarOportunidadesDiretas(cRows, gapMap).filter(
+  const todasDiretas = diretasPrecalculadas ?? listarOportunidadesDiretas(cRows, gapMap)
+  const diretas = todasDiretas.filter(
     o => o.unidade === unidade && o.dia === dia && o.especialidade === especialidade,
   )
 
@@ -75,7 +88,7 @@ export function gerarVagasCategoria(
   const turnosPresentes = [...new Set(slotsSemDireta.map(s => turnoFromHora(s.hora)))]
   const candidatosPorHora = new Map<string, { pac: string; gap: number; aut: number; of: number; remanejamento: RemanejamentoDetalhe }[]>()
   for (const turno of turnosPresentes) {
-    for (const { hora, candidato } of encontrarCandidatosRemanejamento(dia, turno, unidade, especialidade, cRows, gapMap)) {
+    for (const { hora, candidato } of encontrarCandidatosRemanejamento(dia, turno, unidade, especialidade, cRows, gapMap, indiceRemanejamento)) {
       if (!candidato.remanejamento) continue
       const lista = candidatosPorHora.get(hora) ?? []
       lista.push({ pac: candidato.paciente, gap: candidato.gap, aut: candidato.aut, of: candidato.of, remanejamento: candidato.remanejamento })
@@ -157,13 +170,22 @@ export interface CategoriaComOportunidade {
  *  com pelo menos 1 oportunidade — combinação sem nenhuma não ajuda o
  *  usuário a decidir onde olhar. */
 export function rankearOportunidadesInternas(
-  cRows: CsvRow[], gapMap: Record<string, GapItem>,
+  cRowsBrutos: CsvRow[], gapMap: Record<string, GapItem>,
 ): CategoriaComOportunidade[] {
+  // Pré-calculados UMA VEZ pra toda a varredura (3 unidades × 5 dias × 13
+  // especialidades = ~195 combinações) — sem isso, gerarVagasCategoria
+  // recomputava listarOportunidadesDiretas (o dataset inteiro) e refazia
+  // todo scan de remanejamento a cada combinação, multiplicando o custo por
+  // ~195x e travando a aba antes do primeiro paint.
+  const cRows = filtrarCapacidadeLivreReservada(cRowsBrutos)
+  const diretasGlobais = listarOportunidadesDiretas(cRows, gapMap)
+  const indiceRemanejamento = construirIndiceRemanejamento(cRows)
+
   const resultado: CategoriaComOportunidade[] = []
   for (const unidade of Object.keys(UNID_COR)) {
     for (const dia of DIAS_UTIL) {
       for (const especialidade of TODAS_ESP) {
-        const vagas = gerarVagasCategoria(unidade, dia, especialidade, cRows, gapMap)
+        const vagas = gerarVagasCategoria(unidade, dia, especialidade, cRows, gapMap, diretasGlobais, indiceRemanejamento)
         if (!vagas.length) continue
         for (const turno of TURNOS) {
           const doTurno = vagas.filter(v => v.turno === turno)
