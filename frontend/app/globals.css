@@ -728,3 +728,19 @@ html {
 /* Acompanhamento (Ocupação) — hover de linhas de tabela/lista */
 .acomp-tr { transition: background-color .1s ease; }
 .acomp-tr:hover { background-color: var(--muted); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Acessibilidade — prefers-reduced-motion
+   Nenhuma transição/animação do app respeitava essa preferência (audit
+   2026-08-12). Corta pra praticamente instantâneo em vez de remover o
+   feedback de estado inteiro — quem pediu redução de movimento ainda vê a
+   barra encher, só sem a animação.
+   ══════════════════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

@@ -5,9 +5,14 @@
 // São dois destinos, com recortes de coluna diferentes e NÃO intercambiáveis:
 //   buscarGradeParaAnalise → Análise Futura (aba /analise). Projeção; só precisa
 //       da identidade da sessão.
-//   buscarGradeParaRP      → Remuneração Real (abas /rp e /individual). Precisa
-//       também das colunas de execução da Fase 2, e é dinheiro — ver a guarda
-//       de cobertura em avaliarCoberturaGrade().
+//   buscarGradeParaRP      → Remuneração Real (abas /rp e /individual) E Análise
+//       de Tratativas (/analise-tratativas, via o alias buscarGradeParaTratativas
+//       logo abaixo). Precisa também das colunas de execução da Fase 2 — nas
+//       duas telas, porque rodam a mesma pipeline de classificação
+//       (normalizarGradeParaSessao/classificarSessaoReal). Em /rp é dinheiro —
+//       ver a guarda de cobertura em avaliarCoberturaGrade(); em Tratativas é a
+//       mesma guarda, com o parâmetro `contexto` trocando o texto para não falar
+//       em pagamento numa tela que nunca calcula nem mostra R$.
 
 import { buscarGrade, fixMojibake, medirSaudeGrade } from "@/lib/grade/fonte"
 import type { CsvRow } from "@/types/cronograma"
@@ -21,6 +26,17 @@ import { limparPrefixoDesligado } from "./constants"
 const FIELDS = "paciente_id, paciente_nome, dia_semana, hora_inicial, hora_final, profissional_id, profissional_nome, terapia_nome, status_agendamento, sala_nome, data, unidade_nome"
 
 const DIAS_PT = ["Domingo", "Segunda-feira", "Terça-feira", "Quarta-feira", "Quinta-feira", "Sexta-feira", "Sábado"]
+
+const MESES_PT_EXTENSO = [
+  "janeiro", "fevereiro", "março", "abril", "maio", "junho",
+  "julho", "agosto", "setembro", "outubro", "novembro", "dezembro",
+]
+
+/** "2026-06-01" → "junho de 2026" — minúsculo, para embutir em frase. */
+function mesPorExtenso(dataIso: string): string {
+  const [ano, mes] = dataIso.split("-").map(Number)
+  return `${MESES_PT_EXTENSO[mes - 1]} de ${ano}`
+}
 
 function diaSemanaDeData(data: string | null): string {
   if (!data) return ""
@@ -82,6 +98,11 @@ export async function buscarGradeParaAnalise(dataInicio: string, dataFim: string
  * para todo mundo, sem erro nenhum. Num fluxo de pagamento é a falha a impedir.
  */
 export const PISO_EXECUCAO_GRADE = "2026-07-01"
+
+/** O banco tem (ou pode ter) execução capturada para esta data? Mesmo piso de checarPisoDeExecucao. */
+export function temExecucaoRegistrada(dataIso: string): boolean {
+  return dataIso >= PISO_EXECUCAO_GRADE
+}
 
 /** Julho/2026 medido em produção deu 99,70%; a perda estrutural é ~0,30%. */
 const COBERTURA_MINIMA = 0.95
@@ -334,6 +355,15 @@ export async function buscarGradeParaRP(de: string, ate: string, hoje = new Date
 }
 
 /**
+ * Alias para a Análise de Tratativas — mesma consulta, mesmo mapeamento.
+ * Existe só para quem lê hooks/useTratativas.ts não estranhar uma função
+ * "ParaRP" numa tela sem nada de remuneração; a query e as colunas são
+ * idênticas às de /rp porque as duas telas rodam a mesma pipeline de
+ * classificação (normalizarGradeParaSessao → classificarSessaoReal).
+ */
+export const buscarGradeParaTratativas = buscarGradeParaRP
+
+/**
  * Reprovar é um estado com duas audiências, e por isso tem dois textos.
  *
  * `resumo` vai no cabeçalho, que é uma faixa de chips de status: precisa caber
@@ -352,18 +382,32 @@ export type VeredictoGrade =
   | { ok: false; erro: string; resumo: string; dica: string; quantidade?: number }
 
 /**
+ * Só troca o texto de "o que está em jogo" nas duas guardas abaixo — a
+ * matemática (limiares, contagens) é a mesma para as duas telas. "pagamento"
+ * é o padrão (histórico, usado por /rp e /individual); "tratativas" é usado
+ * pela Análise de Tratativas, que nunca calcula nem mostra R$ — falar em
+ * "pagar a menos"/"fechar o pagamento" lá seria falso.
+ */
+export type ContextoGrade = "pagamento" | "tratativas"
+
+/**
  * Barra o período ANTES de consultar. Passo separado de propósito: um mês são
  * ~19 requisições paginadas, e período sem captura não passaria na guarda
  * seguinte de qualquer forma.
  */
-export function checarPisoDeExecucao(de: string): VeredictoGrade {
+export function checarPisoDeExecucao(de: string, contexto: ContextoGrade = "pagamento"): VeredictoGrade {
   if (de && de < PISO_EXECUCAO_GRADE) {
     return {
       ok: false,
-      resumo: `Período anterior a ${formatDateBR(PISO_EXECUCAO_GRADE)}`,
-      erro: `O banco só passou a registrar execução em ${formatDateBR(PISO_EXECUCAO_GRADE)}. `
-        + "Antes dessa data ele não sabe quem evoluiu, e o cálculo pagaria R$ 0,00 a todo mundo.",
-      dica: "Para períodos anteriores, use o CSV exportado da TiTa. Não há o que reconciliar aqui — o dado nunca existiu no banco.",
+      resumo: `Períodos anteriores a ${formatDateBR(PISO_EXECUCAO_GRADE)}`,
+      erro: contexto === "pagamento"
+        ? `O banco só passou a registrar execução em ${formatDateBR(PISO_EXECUCAO_GRADE)}. `
+          + "Antes dessa data ele não sabe quem evoluiu, e o cálculo pagaria R$ 0,00 a todo mundo."
+        : `A partir de ${formatDateBR(PISO_EXECUCAO_GRADE)}, o sistema passou a registrar as execuções no banco de `
+          + "dados. Por isso, não temos informações suficientes para identificar quem realizou cada tratativa antes dessa data.",
+      dica: contexto === "pagamento"
+        ? "Para períodos anteriores, use o CSV exportado da TiTa. Não há o que reconciliar aqui — o dado nunca existiu no banco."
+        : `Para ${mesPorExtenso(de)} e períodos anteriores, os dados devem ser consultados diretamente no CSV exportado da TiTa.`,
     }
   }
   return { ok: true, aviso: null }
@@ -386,20 +430,24 @@ export function avaliarCoberturaGrade(
   grade: CoberturaGrade,
   periodo: { de: string; ate: string },
   hoje = new Date(),
+  contexto: ContextoGrade = "pagamento",
 ): VeredictoGrade {
   const { de, ate } = periodo
+  const dePagamento = contexto === "pagamento"
 
   if (grade.inativasAgendadas > 0) {
     const n = grade.inativasAgendadas
-    // "fora da grade", não "ativo = false": quem lê esta tela fecha pagamento, e
-    // o nome da coluna do banco não é vocabulário dela.
+    // "fora da grade", não "ativo = false": quem lê esta tela fecha pagamento
+    // (ou audita tratativas), e o nome da coluna do banco não é vocabulário dela.
     return {
       ok: false,
       resumo: "Grade incompleta",
       quantidade: n,
       erro: `${n === 1 ? "Uma sessão agendada" : `${n} sessões agendadas`} do período `
         + `${n === 1 ? "não está" : "não estão"} na grade e `
-        + `${n === 1 ? "ficou" : "ficaram"} fora do cálculo. Fechar o pagamento assim paga a menos.`,
+        + (dePagamento
+          ? `${n === 1 ? "ficou" : "ficaram"} fora do cálculo. Fechar o pagamento assim paga a menos.`
+          : `${n === 1 ? "ficou" : "ficaram"} fora da contagem — algumas tratativas podem estar invisíveis nesta tela.`),
       dica: "O sync confere isso contra a TiTa todo dia: repõe o que ela ainda reporta e marca o que "
         + "ela confirma ter apagado. Recarregue amanhã. Se o número não tiver zerado, avise o time técnico.",
     }
@@ -407,8 +455,8 @@ export function avaliarCoberturaGrade(
 
   if (grade.agendados === 0) {
     // Nenhuma sessão já ocorrida no período. Ou ele está inteiro no futuro, ou
-    // está vazio — nos dois casos não há o que pagar, e é melhor dizer isso do
-    // que deixar a tela mostrar todo mundo com R$ 0,00 sem explicação.
+    // está vazio — nos dois casos não há o que pagar/contar, e é melhor dizer
+    // isso do que deixar a tela mostrar todo mundo zerado sem explicação.
     return {
       ok: true,
       aviso: de > iso(hoje)
@@ -423,7 +471,8 @@ export function avaliarCoberturaGrade(
 
   const pct = (grade.cobertura * 100).toFixed(1).replace(".", ",")
   const avisoTransito = `${grade.semExecucao} de ${grade.agendados} sessões já ocorridas ainda sem execução (${pct}% de cobertura). `
-    + "É esperado num período recente — a evolução costuma chegar em até 3 dias. Confira antes de fechar o pagamento."
+    + "É esperado num período recente — a evolução costuma chegar em até 3 dias. "
+    + (dePagamento ? "Confira antes de fechar o pagamento." : "Confira antes de tirar conclusões sobre quem evoluiu.")
 
   if (grade.cobertura >= COBERTURA_MINIMA) {
     return { ok: true, aviso: grade.semExecucao > 0 && emTransito ? avisoTransito : null }
@@ -437,7 +486,9 @@ export function avaliarCoberturaGrade(
     erro: `${grade.semExecucao} das ${grade.agendados} sessões já ocorridas do período estão sem `
       + `execução registrada (${pct}% de cobertura). O período é antigo demais para ser evolução `
       + "em trânsito, então a captura falhou.",
-    dica: "Avise o time técnico — recarregar não resolve enquanto a captura não rodar. Para fechar "
-      + "o pagamento agora, use o CSV exportado da TiTa.",
+    dica: "Avise o time técnico — recarregar não resolve enquanto a captura não rodar. "
+      + (dePagamento
+        ? "Para fechar o pagamento agora, use o CSV exportado da TiTa."
+        : "Para auditar esse período agora, use o CSV exportado da TiTa."),
   }
 }

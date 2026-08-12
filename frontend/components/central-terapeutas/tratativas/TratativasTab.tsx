@@ -18,19 +18,21 @@ const normKey = (v: unknown): string =>
   String(v ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim()
 
 // Profissionais com pelo menos uma sessão COM tratativa na especialidade alvo
-// (mesmo critério do dashboard).
+// (mesmo critério do dashboard — ver EVOLUIDA_PROPRIA em TratativasDashboard.tsx:
+// "Evolução duplicada" também conta, a autoria é certa, só a captura registrou
+// o salvamento duas vezes).
 function profTemEspecialidade(p: ProfTratativas, esp: string): boolean {
   return p.sessoes.some(s => {
     const comTratativa =
       s.papel === "Substituição realizada" ||
-      (s.papel === "Agenda" && s.classificacao === "Evolução normal")
+      (s.papel === "Agenda" && (s.classificacao === "Evolução normal" || s.classificacao === "Evolução duplicada"))
     return comTratativa && (s.especialidade || "Sem especialidade") === esp
   })
 }
 
 export function TratativasTab() {
   const {
-    resultado, evoRows, csvName, setCsvName, carregarGrade, limparGrade, loading, error,
+    resultado, controlesGrade, loading, error,
   } = useTratativasContext()
 
   const [expandido, setExpandido] = useState<ExpandidoState>({})
@@ -61,19 +63,12 @@ export function TratativasTab() {
 
   useEffect(() => {
     setHeader("Análise de Tratativas", "Terapêutico")
-    setRightContent(
-      <TratativasUploadBadge
-        evoRows={evoRows}
-        carregarGrade={carregarGrade}
-        limparGrade={limparGrade}
-        setCsvName={setCsvName}
-      />
-    )
+    setRightContent(<TratativasUploadBadge c={controlesGrade} />)
     return () => {
       setHeader("", "")
       setRightContent(null)
     }
-  }, [setHeader, setRightContent, evoRows, carregarGrade, limparGrade, setCsvName])
+  }, [setHeader, setRightContent, controlesGrade])
 
   return (
     <div className="space-y-4">
@@ -85,8 +80,8 @@ export function TratativasTab() {
         />
       )}
 
-      {loading && <p className="text-sm text-muted-foreground">Carregando…</p>}
-      {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+      {loading && <p role="status" aria-live="polite" className="text-sm text-muted-foreground">Carregando…</p>}
+      {error && <p role="alert" aria-live="assertive" className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
       {resultado && resultado.length > 0 && (
         <div className="flex items-center gap-3">
@@ -115,9 +110,6 @@ export function TratativasTab() {
               {profissionaisComInconsistencia.length}
             </span>
           </button>
-          {csvName && (
-            <p className="text-xs text-muted-foreground shrink-0">{csvName}</p>
-          )}
         </div>
       )}
 
@@ -154,7 +146,8 @@ export function TratativasTab() {
 
       {!resultado && !loading && (
         <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
-          Faça upload do relatório <code>csv_grade_profissionais</code> (mês completo) para acompanhar as tratativas por profissional.
+          Sem sessões nesta grade — troque o mês no cabeçalho ou, se ele não tiver dado no banco,
+          carregue o CSV exportado da TiTa.
         </div>
       )}
 

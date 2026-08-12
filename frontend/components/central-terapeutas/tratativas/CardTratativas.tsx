@@ -10,13 +10,11 @@ import { ChevronDown, ChevronRight, CheckCircle2, AlertTriangle, XCircle, HelpCi
 import { B } from "@/lib/cronograma/constants"
 import { isSim } from "@/lib/remuneracao/formatacao"
 import { formatDateBR } from "@/lib/remuneracao/datas"
-import { useTheme } from "@/contexts/ThemeContext"
+import { useToneColor, type Tone } from "@/hooks/useToneColor"
 import { InteractivePieChart } from "@/components/cronograma/indicadores/InteractivePieChart"
 import type { ProfTratativas, SessaoTratativa } from "@/lib/remuneracao/tratativas"
 
 export type ExpandidoState = Record<string, boolean | null>
-
-type Tone = "green" | "amber" | "red" | "purple" | "blue" | "gray"
 
 const TONE_CHIP: Record<Tone, { bg: string; text: string }> = {
   green:  { bg: "bg-emerald-100 dark:bg-emerald-900/40", text: "text-emerald-700 dark:text-emerald-300" },
@@ -25,20 +23,6 @@ const TONE_CHIP: Record<Tone, { bg: string; text: string }> = {
   purple: { bg: "bg-purple-100 dark:bg-purple-900/40",   text: "text-purple-700 dark:text-purple-300" },
   blue:   { bg: "bg-sky-100 dark:bg-sky-900/40",         text: "text-sky-700 dark:text-sky-300" },
   gray:   { bg: "bg-slate-100 dark:bg-slate-800/60",     text: "text-slate-600 dark:text-slate-400" },
-}
-
-const TONE_HEX: Record<Tone, { light: string; dark: string }> = {
-  green:  { light: "#15803d", dark: "#34d399" },
-  amber:  { light: "#b45309", dark: "#fbbf24" },
-  red:    { light: "#dc2626", dark: "#fb7185" },
-  purple: { light: "#7c3aed", dark: "#c4b5fd" },
-  blue:   { light: "#2563eb", dark: "#60a5fa" },
-  gray:   { light: "#6b7280", dark: "#9ca3af" },
-}
-
-function useToneColor() {
-  const { theme } = useTheme()
-  return useCallback((tone: Tone) => TONE_HEX[tone][theme], [theme])
 }
 
 const normKey = (v: unknown): string =>
@@ -80,18 +64,18 @@ const SessoesTabela = memo(function SessoesTabela({
       <table className="w-full text-xs">
         <thead className="bg-muted/50">
           <tr className="text-muted-foreground">
-            <th className="text-left p-1.5 whitespace-nowrap">ID Agendamento</th>
-            <th className="text-left p-1.5 whitespace-nowrap">Data</th>
-            <th className="text-left p-1.5">Hora</th>
-            <th className="text-left p-1.5">Paciente</th>
-            <th className="text-left p-1.5">Especialidade</th>
-            {mostrarPapel && <th className="text-left p-1.5">Situação</th>}
-            <th className="text-left p-1.5 whitespace-nowrap">Prof. Agenda</th>
-            <th className="text-left p-1.5 whitespace-nowrap">Evoluído por</th>
-            <th className="text-center p-1.5">Presença Recep.</th>
-            <th className="text-center p-1.5">Presença TiTa</th>
-            <th className="text-center p-1.5">Tratativa</th>
-            <th className="text-left p-1.5">Motivo</th>
+            <th scope="col" className="text-left p-1.5 whitespace-nowrap">ID Agendamento</th>
+            <th scope="col" className="text-left p-1.5 whitespace-nowrap">Data</th>
+            <th scope="col" className="text-left p-1.5">Hora</th>
+            <th scope="col" className="text-left p-1.5">Paciente</th>
+            <th scope="col" className="text-left p-1.5">Especialidade</th>
+            {mostrarPapel && <th scope="col" className="text-left p-1.5">Situação</th>}
+            <th scope="col" className="text-left p-1.5 whitespace-nowrap">Prof. Agenda</th>
+            <th scope="col" className="text-left p-1.5 whitespace-nowrap">Evoluído por</th>
+            <th scope="col" className="text-center p-1.5">Presença Recep.</th>
+            <th scope="col" className="text-center p-1.5">Presença TiTa</th>
+            <th scope="col" className="text-center p-1.5">Tratativa</th>
+            <th scope="col" className="text-left p-1.5">Motivo</th>
           </tr>
         </thead>
         <tbody>
@@ -170,26 +154,26 @@ function KpiStatCard({ group, cor, variant, iconColor, icon, titulo, valor, onHo
   group: string; cor: string; variant: KpiVariant; iconColor: string; icon: React.ReactNode
   titulo: string; valor: string; onHover: (g: string | null) => void; children?: React.ReactNode
 }) {
+  // Sem shadow/borda própria — já vive dentro do card do profissional. O
+  // tint de fundo é o que separa os 4 grupos visualmente (nunca card dentro
+  // de card); ver reference/layout.md do impeccable.
   const bg = KPI_CARD_BG[variant]
   return (
     <div
-      className={`rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow cursor-default ${bg.card}`}
+      className={`rounded-xl p-4 cursor-default ${bg.card}`}
       onMouseEnter={() => onHover(group)}
       onMouseLeave={() => onHover(null)}
       onFocus={() => onHover(group)}
       onBlur={() => onHover(null)}
     >
-      <div className="h-1 w-full" style={{ background: `linear-gradient(90deg, ${cor}cc, ${cor}44)` }} />
-      <div className="p-4">
-        <div className="flex items-center gap-2.5 mb-3">
-          <div className={`w-8 h-8 rounded-xl flex items-center justify-center flex-shrink-0 shadow-sm ${bg.icon}`} style={{ color: iconColor }}>
-            {icon}
-          </div>
-          <span className="text-sm font-semibold truncate" style={{ color: iconColor }}>{titulo}</span>
+      <div className="flex items-center gap-2.5 mb-3">
+        <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${bg.icon}`} style={{ color: iconColor }}>
+          {icon}
         </div>
-        <div className="text-3xl font-black tabular-nums leading-none mb-3" style={{ color: cor }}>{valor}</div>
-        <div className="text-sm text-foreground/85 space-y-1.5 leading-relaxed">{children}</div>
+        <span className="text-sm font-semibold truncate" style={{ color: iconColor }}>{titulo}</span>
       </div>
+      <div className="text-3xl font-black tabular-nums leading-none mb-3" style={{ color: cor }}>{valor}</div>
+      <div className="text-sm text-foreground/85 space-y-1.5 leading-relaxed">{children}</div>
     </div>
   )
 }
@@ -235,12 +219,15 @@ export default function CardTratativas({ p, expandido, setExpandido, remBusca, f
   const baseCalc = p.agendadas - p.canceladas - (p.substituidoPorOutro ?? 0)
   const pctEv = baseCalc > 0 ? (totalRecebeHoje / baseCalc * 100) : 0
 
-  const corBorda = p.inconsistencias > 0 ? B.red
-    : (p.pendentes + p.naoEvoluidas) > 0 ? B.amber
-    : totalRecebeHoje > 0 ? B.green
-    : B.gray
+  // Mesmo sinal que antes ia pro borderLeft do card (banido — side-stripe
+  // border) e pro avatar (que tinha uma versão incompleta, sem o estado
+  // "gray" de nenhuma atividade). Unificado: o avatar tonalizado já é o
+  // sinal de status, sem precisar de uma borda redundante ao lado.
+  const statusTone: Tone = p.inconsistencias > 0 ? "red"
+    : (p.pendentes + p.naoEvoluidas) > 0 ? "amber"
+    : totalRecebeHoje > 0 ? "green"
+    : "gray"
 
-  const avatarTone: Tone = p.inconsistencias > 0 ? "red" : (p.pendentes ?? 0) > 0 ? "amber" : "green"
   const pctEvTone: Tone = pctEv >= 80 ? "green" : pctEv >= 50 ? "amber" : "red"
 
   const aberto = forceOpen || expandido[`trat:${p.prof}`] === true
@@ -290,7 +277,7 @@ export default function CardTratativas({ p, expandido, setExpandido, remBusca, f
   const segmentosCorrigida = segmentosTotal.filter(s => s.label !== "Canceladas" && s.label !== "Cedidas p/ outro")
 
   return (
-    <div className="bg-card rounded-xl shadow-sm overflow-hidden mb-3" style={{ borderLeft: `4px solid ${corBorda}` }}>
+    <div className="bg-card rounded-xl shadow-sm overflow-hidden mb-3">
 
       {/* Header */}
       <div
@@ -302,7 +289,7 @@ export default function CardTratativas({ p, expandido, setExpandido, remBusca, f
         aria-expanded={aberto}
       >
         <div className="flex items-center gap-3">
-          <div className={`w-16 h-16 rounded-xl flex items-center justify-center flex-col text-center flex-shrink-0 ${TONE_CHIP[avatarTone].bg} ${TONE_CHIP[avatarTone].text}`}>
+          <div className={`w-16 h-16 rounded-xl flex items-center justify-center flex-col text-center flex-shrink-0 ${TONE_CHIP[statusTone].bg} ${TONE_CHIP[statusTone].text}`}>
             <div className="text-xl font-bold leading-none">{p.agendadas}</div>
             <div className="text-[9px] mt-0.5 font-medium opacity-70">ag.</div>
           </div>
@@ -334,7 +321,14 @@ export default function CardTratativas({ p, expandido, setExpandido, remBusca, f
           <div className="flex flex-wrap gap-3 items-center min-w-0 w-full">
             <div className="min-w-[140px] flex-1 basis-[140px]">
               <div className="h-2 rounded-full overflow-hidden border border-border bg-muted">
-                <div className="h-full rounded-full transition-all" style={{ width: `${Math.max(0, Math.min(100, pctEv))}%`, background: corBorda }} />
+                <div
+                  className="h-full w-full"
+                  style={{
+                    background: toneColor(statusTone),
+                    clipPath: `inset(0 ${100 - Math.max(0, Math.min(100, pctEv))}% 0 0)`,
+                    transition: "clip-path 500ms cubic-bezier(0.16, 1, 0.3, 1)",
+                  }}
+                />
               </div>
               <div className="mt-1 text-[10px] text-muted-foreground text-right">
                 {totalRecebeHoje} c/ tratativa / {baseCalc} válidas
