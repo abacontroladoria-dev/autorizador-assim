@@ -11,7 +11,8 @@ import { gerarPDF, gerarWord, montarInfoDocumentoPrestador, type PdfOpts } from 
 import { parseDateBR, competenciaDeLinhas } from "@/lib/remuneracao/datas"
 import { getApuracaoMes } from "@/services/pepApuracao.service"
 import type { PepApuracaoMensal } from "@/types/pep"
-import { RemuneracaoUploadBadges } from "./RemuneracaoUploadBadges"
+import { RemuneracaoGradeBadge } from "./RemuneracaoGradeBadge"
+import { EstadoGradeVazia } from "./EstadoGradeVazia"
 
 // ─── Componente principal ─────────────────────────────────────────────────────
 
@@ -31,8 +32,8 @@ export function RemunIndividualTab() {
   const selectRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    setHeader("Rem. Mês - Individual", "Relacionamento Prestador")
-    setRightContent(<RemuneracaoUploadBadges c={controlesGrade} hidePe />)
+    setHeader("Remuneração Individual", "Relacionamento Prestador")
+    setRightContent(<RemuneracaoGradeBadge c={controlesGrade} />)
     return () => {
       setHeader("", "")
       setRightContent(null)
@@ -113,16 +114,19 @@ export function RemunIndividualTab() {
   }
 
   // ── Estado: sem dados ──
+  //
+  // O texto de antes mandava "fazer o upload da Grade no botão no topo da tela",
+  // e esse botão não existe mais: o header agora carrega ao escolher o mês. Além
+  // disso, a mensagem aparecia TAMBÉM durante a carga — escolher um mês dizia
+  // "nenhum dado carregado" enquanto a grade vinha, o que se lê como falha.
+  // EstadoGradeVazia (o mesmo da Remuneração Mensal) separa os três casos.
   if (!resultado || resultado.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center gap-5 py-20 text-center">
-        <p className="font-bold text-base text-foreground mb-1">
-          Nenhum dado carregado
-        </p>
-        <p className="text-sm text-muted-foreground max-w-xs">
-          Faça o upload da Grade no botão no topo da tela para visualizar os dados de remuneração individual.
-        </p>
-      </div>
+      <EstadoGradeVazia
+        carregando={loading || controlesGrade.gradeLoading}
+        periodo={controlesGrade.periodo}
+        erroResumo={controlesGrade.gradeErroResumo}
+      />
     )
   }
 

@@ -66,8 +66,7 @@ export function EstadoGradeVazia({ carregando, periodo, erroResumo }: EstadoGrad
         Nenhuma grade carregada.
       </span>
       <span className="mt-1 block text-xs">
-        Escolha o período no topo e clique em Carregar. O PE continua vindo do upload de{" "}
-        <code>agendamentos_profissionais</code>.
+        Escolha o mês no seletor do topo — a grade carrega na escolha.
       </span>
     </div>
   )

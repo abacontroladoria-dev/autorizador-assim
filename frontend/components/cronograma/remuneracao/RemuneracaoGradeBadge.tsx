@@ -1,6 +1,7 @@
 "use client"
 
-// Controles da fonte de dados da Rem. Mês - Total, injetados no header.
+// Controles da fonte de dados das telas que leem a grade do mês (Remuneração
+// Mensal e Remuneração Individual), injetados no header.
 //
 // Mesma forma do header da Análise de Evolução
 // (central-terapeutas/tratativas/TratativasUploadBadge.tsx): UMA linha, um
