@@ -165,37 +165,3 @@ export async function upsertContrato(record: any): Promise<{ ok: boolean; error:
 
   return { ok: true, error: null }
 }
-
-export async function getHistoricoSnapshots() {
-  const supabase = getSupabaseClient()
-  const { data, error } = await supabase
-    .from('remuneracao_historico')
-    .select('*')
-    .order('mes_ano', { ascending: false }) // Ordem decrescente de tempo
-
-  if (error) console.error('Erro getHistoricoSnapshots:', error)
-  return { data, error }
-}
-
-export async function saveHistoricoSnapshot(record: any) {
-  const supabase = getSupabaseClient()
-  // upsert onConflict: mes_ano (assim a gente sobreescreve o retrato do mesmo mês se salvar de novo)
-  const { data, error } = await supabase
-    .from('remuneracao_historico')
-    .upsert(record, { onConflict: 'mes_ano' })
-    .select()
-    .single()
-
-  if (error) console.error('Erro saveHistoricoSnapshot:', error)
-  return { data, error }
-}
-
-export async function deleteHistoricoSnapshot(id: string) {
-  const supabase = getSupabaseClient()
-  const { error } = await supabase
-    .from('remuneracao_historico')
-    .delete()
-    .eq('id', id)
-
-  return !error
-}

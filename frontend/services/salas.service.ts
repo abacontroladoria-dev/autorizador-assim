@@ -1,7 +1,7 @@
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { buscarGrade, fixMojibake } from "@/lib/grade/fonte"
 import { isFakePatient } from "@/lib/remuneracao/pacientes"
-import type { Sala, SalaInput, AgendaSalaRow, AlocacaoSala, AlocacaoInput, SalaStatus } from "@/lib/cronograma/salasTypes"
+import type { Sala, SalaInput, AgendaSalaRow, AlocacaoSala, AlocacaoInput, SalaStatus, SalaTerapiaExclusiva, SalaTerapiaExclusivaInput } from "@/lib/cronograma/salasTypes"
 import { registrarAuditoriaSala } from "@/services/salasAuditoria.service"
 
 const TABLE = "cronograma_salas"
@@ -260,6 +260,57 @@ export async function excluirAlocacao(id: string): Promise<void> {
     salaNome: alocacaoAntes ? await nomeDaSala(alocacaoAntes.sala_id) : null,
     profissionalNome: alocacaoAntes?.profissional_nome ?? null, terapiaNome: alocacaoAntes?.terapia_nome ?? null,
     diaSemana: alocacaoAntes?.dow ?? null, turno: alocacaoAntes?.turno ?? null, antes: antes ?? null,
+  })
+}
+
+// ─── EXCLUSIVIDADE DE SALAS POR TERAPIA ──────────────────────────────────────
+
+const EXCLUSIVIDADE_TERAPIA_TABLE = "cronograma_salas_terapias_exclusivas"
+
+export async function listarExclusividadesTerapia(): Promise<SalaTerapiaExclusiva[]> {
+  const sb = getSupabaseClient()
+  const { data, error } = await sb.from(EXCLUSIVIDADE_TERAPIA_TABLE).select("*").order("terapia_nome")
+  if (error) throw new Error(error.message)
+  return (data ?? []) as SalaTerapiaExclusiva[]
+}
+
+export async function criarExclusividadeTerapia(input: SalaTerapiaExclusivaInput): Promise<SalaTerapiaExclusiva> {
+  const sb = getSupabaseClient()
+  const { data, error } = await sb.from(EXCLUSIVIDADE_TERAPIA_TABLE).insert(input).select("*").single()
+  if (error) throw new Error(error.message)
+  const exclusividade = data as SalaTerapiaExclusiva
+  await registrarAuditoriaSala({
+    tabela: "exclusividade_terapia", registroId: exclusividade.id, acao: "criar",
+    salaNome: await nomeDaSala(exclusividade.sala_id), terapiaNome: exclusividade.terapia_nome, depois: exclusividade,
+  })
+  return exclusividade
+}
+
+/** Só o `modo` é editável — sala e terapia definem a identidade da linha (trocar exige excluir e criar outra). */
+export async function atualizarModoExclusividadeTerapia(id: string, modo: SalaTerapiaExclusivaInput["modo"]): Promise<SalaTerapiaExclusiva> {
+  const sb = getSupabaseClient()
+  const { data: antes } = await sb.from(EXCLUSIVIDADE_TERAPIA_TABLE).select("*").eq("id", id).maybeSingle()
+  const { data, error } = await sb.from(EXCLUSIVIDADE_TERAPIA_TABLE).update({ modo }).eq("id", id).select("*").single()
+  if (error) throw new Error(error.message)
+  const exclusividade = data as SalaTerapiaExclusiva
+  await registrarAuditoriaSala({
+    tabela: "exclusividade_terapia", registroId: exclusividade.id, acao: "editar",
+    salaNome: await nomeDaSala(exclusividade.sala_id), terapiaNome: exclusividade.terapia_nome,
+    antes: antes ?? null, depois: exclusividade,
+  })
+  return exclusividade
+}
+
+export async function excluirExclusividadeTerapia(id: string): Promise<void> {
+  const sb = getSupabaseClient()
+  const { data: antes } = await sb.from(EXCLUSIVIDADE_TERAPIA_TABLE).select("*").eq("id", id).maybeSingle()
+  const { error } = await sb.from(EXCLUSIVIDADE_TERAPIA_TABLE).delete().eq("id", id)
+  if (error) throw new Error(error.message)
+  const exclusividadeAntes = antes as SalaTerapiaExclusiva | null
+  await registrarAuditoriaSala({
+    tabela: "exclusividade_terapia", registroId: id, acao: "excluir",
+    salaNome: exclusividadeAntes ? await nomeDaSala(exclusividadeAntes.sala_id) : null,
+    terapiaNome: exclusividadeAntes?.terapia_nome ?? null, antes: antes ?? null,
   })
 }
 

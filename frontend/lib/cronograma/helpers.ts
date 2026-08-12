@@ -1,5 +1,7 @@
-import { ADMIN_ONLY, B, EXIB_ID, EXIB_NOME, HORAS_GRID, normTxt } from "./constants"
-import type { Sugestao } from "@/types/cronograma"
+import { ADMIN_ONLY, B, EXIB_ID, EXIB_NOME, HORAS_GRID, PROFISSIONAIS_SEM_CAPACIDADE_LIVRE, normTxt } from "./constants"
+
+const PROFISSIONAIS_SEM_CAPACIDADE_LIVRE_NORM = new Set([...PROFISSIONAIS_SEM_CAPACIDADE_LIVRE].map(normTxt))
+import type { CsvRow, Sugestao } from "@/types/cronograma"
 
 // ─── ESPECIALIDADE REAL (Aplicador ABA AE/HS) ────────────────────────────────
 
@@ -132,6 +134,20 @@ export function turnoFromHora(hora: string | null | undefined): "manha" | "tarde
 export const turnoNome: Record<"manha" | "tarde", string> = {
   manha: "Manhã",
   tarde: "Tarde",
+}
+
+/** Remove os horários "Livre" de PROFISSIONAIS_SEM_CAPACIDADE_LIVRE
+ *  (constants.ts) — usado por TODAS as ferramentas que tratam "Livre" como
+ *  capacidade/oportunidade a oferecer (as duas abas de Ocupar Profissionais
+ *  Disponíveis, Simulação de Novo Prestador). Mantém as sessões "Agendado"
+ *  desses profissionais intactas — o gap dos pacientes que já são atendidos
+ *  por eles não pode ser afetado, só a leitura de "quanto espaço livre eles
+ *  têm pra crescer". Comparação via normTxt (não Set.has direto): "Profissional"
+ *  na grade é o nome COMPLETO, então uma comparação exata sensível a
+ *  acento/caixa nunca batia — este bug fazia o filtro nunca surtir efeito. */
+export function filtrarCapacidadeLivreReservada(cRows: CsvRow[]): CsvRow[] {
+  if (!PROFISSIONAIS_SEM_CAPACIDADE_LIVRE.size) return cRows
+  return cRows.filter(r => !(r["Status do Agendamento"] === "Livre" && PROFISSIONAIS_SEM_CAPACIDADE_LIVRE_NORM.has(normTxt(r["Profissional"]))))
 }
 
 // ─── LAUDO / ALTA ─────────────────────────────────────────────────────────────

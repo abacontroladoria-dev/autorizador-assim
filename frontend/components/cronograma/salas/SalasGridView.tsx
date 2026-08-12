@@ -9,7 +9,7 @@
 // modal de nova alocação. Reproduz o fluxo de edição do calculadora-remuneracao.
 
 import { useEffect, useRef, useState } from "react"
-import { AlertTriangle, Eye, EyeOff, Pencil } from "lucide-react"
+import { AlertTriangle, Eye, EyeOff, Pencil, ShieldCheck } from "lucide-react"
 import { StatusPill } from "@/components/cronograma/ui/StatusPill"
 import { AlocarSessaoModal } from "@/components/cronograma/salas/AlocarSessaoModal"
 import { profissionalBateComBusca } from "@/components/cronograma/salas/SalasFiltros"
@@ -67,9 +67,11 @@ interface SalasGridViewProps {
   onRecarregar: () => void
   /** Texto do filtro de busca por profissional — usado só para destacar/esmaecer cards, nunca para escondê-los. */
   buscaProfissional?: string
+  /** Ids de sala com pelo menos uma regra em "Exclusividade de salas com terapias" — só pra exibir o selo ao lado do nome da sala. */
+  salasComExclusividade: Set<string>
 }
 
-export function SalasGridView({ salas, onEditarSala, onIsolarSala, salaIsoladaId, encontrarAlocacaoDoProfissional, onRecarregar, buscaProfissional = "" }: SalasGridViewProps) {
+export function SalasGridView({ salas, onEditarSala, onIsolarSala, salaIsoladaId, encontrarAlocacaoDoProfissional, onRecarregar, buscaProfissional = "", salasComExclusividade }: SalasGridViewProps) {
   const [modal, setModal] = useState<ModalState | null>(null)
 
   const salaRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map())
@@ -152,7 +154,14 @@ export function SalasGridView({ salas, onEditarSala, onIsolarSala, salaIsoladaId
                         </button>
                       </div>
                       <div className="min-w-0 flex-1">
-                        <div className="truncate font-semibold text-foreground" title={sala.nome_exibicao}>{sala.nome_exibicao}</div>
+                        <div className="flex items-center gap-1">
+                          <span className="truncate font-semibold text-foreground" title={sala.nome_exibicao}>{sala.nome_exibicao}</span>
+                          {salasComExclusividade.has(sala.id) && (
+                            <span title="Sala com exclusividade cadastrada (Exclusividade de salas com terapias)">
+                              <ShieldCheck className="h-3.5 w-3.5 shrink-0 text-blue-600 dark:text-blue-400" strokeWidth={2.5} />
+                            </span>
+                          )}
+                        </div>
                         <div className="truncate text-[11px] text-muted-foreground" title={sala.unidade_nome}>{sala.unidade_nome}</div>
                         <div className="mt-1 flex flex-wrap items-center gap-1">
                           <span className="shrink-0 rounded-full bg-blue-100 px-1.5 py-0.5 text-[10px] font-medium text-blue-700 dark:bg-blue-950/40 dark:text-blue-400">
@@ -237,13 +246,15 @@ function SlotCell({
 
   const buscaAtiva = buscaProfissional.trim().length > 0
 
+  const slotInconsistente = slot.inconsistente || slot.violaExclusividade
+
   return (
-    <td className={`group w-[190px] max-w-[190px] border-l border-border px-1 py-1.5 align-top ${bordaCls} ${slot.inconsistente ? "bg-red-100 ring-2 ring-inset ring-red-500 dark:bg-red-950/40 dark:ring-red-500" : ""}`}>
+    <td className={`group w-[190px] max-w-[190px] border-l border-border px-1 py-1.5 align-top ${bordaCls} ${slotInconsistente ? "bg-red-100 ring-2 ring-inset ring-red-500 dark:bg-red-950/40 dark:ring-red-500" : ""}`}>
       <div className="flex flex-col gap-1">
         {slot.inconsistente && (
           <div className="flex items-center gap-1 rounded-md bg-red-600 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-tight text-white shadow-sm dark:bg-red-500">
             <AlertTriangle className="h-3 w-3 shrink-0" strokeWidth={2.5} />
-            Excede capacidade
+            Excede capacidade de prof. por sala
           </div>
         )}
         {slot.alocacoes.map(card => {
@@ -256,33 +267,46 @@ function SlotCell({
                 ? "text-amber-600 dark:text-amber-400"
                 : "text-muted-foreground"
           const bate = buscaAtiva && profissionalBateComBusca(card.profissionalNome, buscaProfissional)
+          const violacao = card.violacaoExclusividade
+          const violacaoLabel = violacao?.direcao === "sala_para_terapia" ? "Fere exclusividade da sala" : violacao ? "Fere exclusividade da terapia" : null
+          const inconsistenteVisual = slot.inconsistente || !!violacao
           return (
-            <button
-              key={card.alocacaoId}
-              type="button"
-              onClick={() => onAbrirModal({
-                sala, dow: slot.dow, turno: slot.turno, diaLabel,
-                alocacaoId: card.alocacaoId,
-                profissionalInicial: card.profissionalNome,
-                terapiaInicial: card.terapiaNome,
-              })}
-              title={`${card.profissionalNome}${card.terapiaNome ? " · " + card.terapiaNome : ""} · ${card.semCruzamentoCsv ? "sem cruzamento no CSV" : `${card.sessoesReais}/${card.sessoesCapacidadeTurno} com paciente`}${slot.inconsistente ? " · capacidade excedida" : ""}`}
-              className={`flex min-h-[38px] w-full flex-col justify-center gap-0.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-muted/60 ${bate ? "bg-amber-100 ring-1 ring-amber-400 dark:bg-amber-950/40 dark:ring-amber-500" : ""} ${buscaAtiva && !bate ? "opacity-35" : ""}`}
-            >
-              <span className="flex items-center gap-1.5">
-                <span
-                  className="h-2 w-2 shrink-0 rounded-full ring-1 ring-black/10 dark:ring-white/10"
-                  style={{ background: tCor(card.terapiaNome ?? "", true) }}
-                />
-                <span className={`min-w-0 flex-1 truncate text-[11px] font-medium leading-tight ${slot.inconsistente ? "text-red-700 dark:text-red-400" : "text-foreground"}`}>
-                  {card.profissionalNome}
+            <div key={card.alocacaoId} className="flex flex-col gap-0.5">
+              {violacao && (
+                <div
+                  title={violacao.motivo}
+                  className="flex items-center gap-1 rounded-md bg-red-600 px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-tight text-white shadow-sm dark:bg-red-500"
+                >
+                  <AlertTriangle className="h-3 w-3 shrink-0" strokeWidth={2.5} />
+                  {violacaoLabel}
+                </div>
+              )}
+              <button
+                type="button"
+                onClick={() => onAbrirModal({
+                  sala, dow: slot.dow, turno: slot.turno, diaLabel,
+                  alocacaoId: card.alocacaoId,
+                  profissionalInicial: card.profissionalNome,
+                  terapiaInicial: card.terapiaNome,
+                })}
+                title={`${card.profissionalNome}${card.terapiaNome ? " · " + card.terapiaNome : ""} · ${card.semCruzamentoCsv ? "sem cruzamento no CSV" : `${card.sessoesReais}/${card.sessoesCapacidadeTurno} com paciente`}${slot.inconsistente ? " · excede capacidade de prof. por sala" : ""}${violacao ? ` · ${violacao.motivo}` : ""}`}
+                className={`flex min-h-[38px] w-full flex-col justify-center gap-0.5 rounded-md px-1.5 py-1 text-left transition-colors hover:bg-muted/60 ${bate ? "bg-amber-100 ring-1 ring-amber-400 dark:bg-amber-950/40 dark:ring-amber-500" : ""} ${buscaAtiva && !bate ? "opacity-35" : ""}`}
+              >
+                <span className="flex items-center gap-1.5">
+                  <span
+                    className="h-2 w-2 shrink-0 rounded-full ring-1 ring-black/10 dark:ring-white/10"
+                    style={{ background: tCor(card.terapiaNome ?? "", true) }}
+                  />
+                  <span className={`min-w-0 flex-1 truncate text-[11px] font-medium leading-tight ${inconsistenteVisual ? "text-red-700 dark:text-red-400" : "text-foreground"}`}>
+                    {card.profissionalNome}
+                  </span>
                 </span>
-              </span>
-              <span className="flex items-center justify-between gap-1 pl-3.5">
-                <span className="truncate text-[10px] leading-tight text-muted-foreground">{card.terapiaNome || "—"}</span>
-                <span className={`shrink-0 text-[10px] font-semibold leading-tight ${ratioCor}`}>{ratioTexto}</span>
-              </span>
-            </button>
+                <span className="flex items-center justify-between gap-1 pl-3.5">
+                  <span className="truncate text-[10px] leading-tight text-muted-foreground">{card.terapiaNome || "—"}</span>
+                  <span className={`shrink-0 text-[10px] font-semibold leading-tight ${ratioCor}`}>{ratioTexto}</span>
+                </span>
+              </button>
+            </div>
           )
         })}
 

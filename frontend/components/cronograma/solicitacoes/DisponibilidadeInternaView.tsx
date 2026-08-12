@@ -18,7 +18,8 @@
 //      A agenda do profissional selecionado NUNCA perde nada; só ganha.
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Sparkles, Users } from "lucide-react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { Building2, Lock, Sparkles, Users } from "lucide-react"
 import { useHeader } from "@/contexts/HeaderContext"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 import { useGradeAgendamentos } from "@/hooks/useGradeAgendamentos"
@@ -26,11 +27,19 @@ import { calcularGaps, gapsParaMapa } from "@/lib/cronograma/simulacaoNovoPresta
 import { listarProfissionaisComOportunidade, gerarOportunidadesProfissional, type OportunidadeProfissional } from "@/lib/cronograma/ocupacaoProfissional"
 import { listarSlotsLivres } from "@/lib/cronograma/disponibilidadeInterna"
 import { DIAS_UTIL } from "@/lib/cronograma/constants"
-import { diaCurto, fmtName } from "@/lib/cronograma/helpers"
+import { diaCurto, fmtName, filtrarCapacidadeLivreReservada } from "@/lib/cronograma/helpers"
 import { InlineNotice } from "@/components/cronograma/ui/InlineNotice"
 import { RemanejamentoDetalheModal } from "./RemanejamentoDetalheModal"
 import { PacienteAgendaHipoteticaModal } from "./PacienteAgendaHipoteticaModal"
+import { OcupacaoCategoriaView } from "./OcupacaoCategoriaView"
+import { ProjecaoOcupacaoDonut } from "./ProjecaoOcupacaoDonut"
 import type { CsvRow } from "@/types/cronograma"
+
+const TABS = [
+  { key: "nome",      label: "Por Nome do Profissional" },
+  { key: "categoria", label: "Por Unidade, Dia e Especialidade" },
+] as const
+type TabKey = (typeof TABS)[number]["key"]
 
 function hiStr(r: CsvRow): string { return String(r.HI_str || "") }
 
@@ -180,6 +189,9 @@ function AgendaProfissional({
 
   const qtdDireto = oportunidades.filter(o => o.modalidade === "direto").length
   const qtdRemanejamento = oportunidades.length - qtdDireto
+  const celulas = Object.values(mapa)
+  const qtdOcupado = celulas.filter(c => c.tag === "ocupado").length
+  const qtdLivreSemOportunidade = celulas.filter(c => c.tag === "livre").length
 
   return (
     <div className="flex flex-col gap-3">
@@ -201,49 +213,57 @@ function AgendaProfissional({
       {!dias.length ? (
         <InlineNotice tone="slate">Nenhum horário (ocupado ou livre) encontrado pra esse profissional na semana de referência.</InlineNotice>
       ) : (
-        <div className="overflow-x-auto rounded-xl border border-border p-3">
-          <table className="border-collapse text-[11px]" style={{ width: `${56 + dias.length * 140}px` }}>
-            <thead>
-              <tr>
-                <th className="w-14" />
-                {dias.map(d => (
-                  <th key={d} className="pb-1.5 text-center text-[11px] font-bold text-foreground">{diaCurto(d)}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {horas.map(hora => (
-                <tr key={hora} className="border-t border-border">
-                  <td className="py-1 pr-2 text-right font-mono text-[10px] font-semibold text-muted-foreground">{hora}</td>
-                  {dias.map(dia => {
-                    const c = mapa[`${dia}|||${hora}`]
-                    if (!c) return <td key={dia} className="p-0.5" />
-                    const clicavel = c.tag === "direto" || c.tag === "remanejamento"
-                    return (
-                      <td key={dia} className="p-0.5">
-                        <button
-                          type="button"
-                          disabled={!clicavel}
-                          onClick={() => c.oportunidade && onAbrirOportunidade(c.oportunidade)}
-                          className={`w-full min-h-[46px] rounded-lg border px-2 py-1.5 text-left ${ESTILO_CELULA[c.tag]}`}
-                        >
-                          <div className="text-[11px] font-bold leading-tight text-foreground">{c.terapia}</div>
-                          <div className="text-[10px] text-muted-foreground">
-                            {c.tag === "livre" ? "Livre" : fmtName(c.paciente ?? "")}
-                          </div>
-                          {clicavel && (
-                            <div className={`mt-0.5 text-[10px] font-bold ${c.tag === "direto" ? "text-emerald-700 dark:text-emerald-400" : "text-sky-700 dark:text-sky-400"}`}>
-                              {c.tag === "direto" ? "Ver agenda" : "Ver antes/depois"}
-                            </div>
-                          )}
-                        </button>
-                      </td>
-                    )
-                  })}
+        <div className="grid grid-cols-1 xl:grid-cols-[1fr_260px] gap-4 items-start">
+          <div className="overflow-x-auto rounded-xl border border-border p-3">
+            <table className="table-fixed border-collapse text-[11px]" style={{ width: `${56 + dias.length * 140}px` }}>
+              <colgroup>
+                <col style={{ width: 56 }} />
+                {dias.map(d => <col key={d} style={{ width: 140 }} />)}
+              </colgroup>
+              <thead>
+                <tr>
+                  <th className="w-14" />
+                  {dias.map(d => (
+                    <th key={d} className="pb-1.5 text-center text-[11px] font-bold text-foreground">{diaCurto(d)}</th>
+                  ))}
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {horas.map(hora => (
+                  <tr key={hora} className="border-t border-border">
+                    <td className="py-1 pr-2 text-right font-mono text-[10px] font-semibold text-muted-foreground">{hora}</td>
+                    {dias.map(dia => {
+                      const c = mapa[`${dia}|||${hora}`]
+                      if (!c) return <td key={dia} className="p-0.5"><div className="h-[54px]" /></td>
+                      const clicavel = c.tag === "direto" || c.tag === "remanejamento"
+                      return (
+                        <td key={dia} className="p-0.5">
+                          <button
+                            type="button"
+                            disabled={!clicavel}
+                            onClick={() => c.oportunidade && onAbrirOportunidade(c.oportunidade)}
+                            className={`h-[54px] w-full overflow-hidden rounded-lg border px-2 py-1.5 text-left ${ESTILO_CELULA[c.tag]}`}
+                          >
+                            <div className="truncate text-[11px] font-bold leading-tight text-foreground">{c.terapia}</div>
+                            <div className="truncate text-[10px] text-muted-foreground">
+                              {c.tag === "livre" ? "Livre" : fmtName(c.paciente ?? "")}
+                            </div>
+                            {clicavel && (
+                              <div className={`mt-0.5 truncate text-[10px] font-bold ${c.tag === "direto" ? "text-emerald-700 dark:text-emerald-400" : "text-sky-700 dark:text-sky-400"}`}>
+                                {c.tag === "direto" ? "Ver agenda" : "Ver antes/depois"}
+                              </div>
+                            )}
+                          </button>
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <ProjecaoOcupacaoDonut titulo="Ocupação do profissional" ocupado={qtdOcupado} oportunidade={qtdDireto + qtdRemanejamento} livre={qtdLivreSemOportunidade} />
         </div>
       )}
     </div>
@@ -251,16 +271,36 @@ function AgendaProfissional({
 }
 
 export function DisponibilidadeInternaView() {
-  const { cRows, loading, error, refWeek } = useGradeAgendamentos()
+  const { cRows: cRowsBrutos, loading, error, refWeek } = useGradeAgendamentos()
+  // Amanda Ribeiro Campos / Gracielle Rayane Faria Miranda têm muitos horários
+  // "Livre" DE PROPÓSITO (motivo interno) — pedido do usuário (2026-08-11):
+  // não podem receber vaga em NENHUMA aba desta tela (ver PROFISSIONAIS_SEM_CAPACIDADE_LIVRE).
+  const cRows = useMemo(() => filtrarCapacidadeLivreReservada(cRowsBrutos), [cRowsBrutos])
+  const { lRows } = useCronogramaData()
+  // Sem laudo não dá pra calcular sessão pendente (autorizado × ofertado) —
+  // sem isso, "0 oportunidade(s)" apareceria como resultado real em vez de
+  // dado faltante (mesmo bug corrigido em OcupacaoCategoriaView.tsx).
+  const laudosCarregados = lRows.length > 0
   const { setHeader } = useHeader()
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const rawTab = searchParams.get("tab")
+  const activeTab: TabKey = rawTab && TABS.some(t => t.key === rawTab) ? (rawTab as TabKey) : "nome"
   const [profissional, setProfissional] = useState("")
   const [detalheDireto, setDetalheDireto] = useState<OportunidadeProfissional | null>(null)
   const [detalheRemanejamento, setDetalheRemanejamento] = useState<OportunidadeProfissional | null>(null)
 
   useEffect(() => {
-    setHeader("Ocupar Profissionais Disponíveis", `Escolha um profissional já contratado pra ver onde a agenda dele tem espaço pra crescer — semana de referência: ${refWeek.label}`)
+    if (!rawTab) router.replace("/relacionamento-prestador/ocupar-profissionais-disponiveis?tab=nome")
+  }, [rawTab, router])
+
+  useEffect(() => {
+    const subtitle = activeTab === "nome"
+      ? `Escolha um profissional já contratado pra ver onde a agenda dele tem espaço pra crescer — semana de referência: ${refWeek.label}`
+      : `Escolha unidade, dia e especialidade pra ver todas as vagas dessa combinação — semana de referência: ${refWeek.label}`
+    setHeader("Ocupar Profissionais Disponíveis", subtitle)
     return () => setHeader("", "")
-  }, [refWeek.label, setHeader])
+  }, [activeTab, refWeek.label, setHeader])
 
   const profissionais = useMemo(() => listarProfissionaisComOportunidade(cRows), [cRows])
   const contagemLivres = useMemo(() => {
@@ -286,56 +326,84 @@ export function DisponibilidadeInternaView() {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="rounded-2xl border border-border bg-card p-4">
-        <div className="mb-1 flex items-center gap-1.5">
-          <Sparkles size={15} className="text-violet-600 dark:text-violet-400" />
-          <span className="text-[15px] font-extrabold text-foreground">Ocupar profissional já contratado</span>
-        </div>
-        <div className="mb-3 text-xs text-muted-foreground">
-          Escolha um profissional pra ver, dentro dos horários “Livre” reais da agenda dele, quais pacientes com sessão pendente (autorizado &gt; ofertado) poderiam entrar — direto ou remanejando a sessão conflitante de outro paciente com OUTRO profissional, mantido. Sem escrever nada na TiTa por enquanto — é só visualização.
-        </div>
-        <ProfissionalCombobox value={profissional} onChange={setProfissional} opcoes={profissionais} contagemLivres={contagemLivres} />
-        {!profissionais.length && (
-          <div className="mt-3">
-            <InlineNotice tone="slate">Nenhum profissional com horário “Livre” na semana de referência.</InlineNotice>
-          </div>
-        )}
+      <div role="tablist" className="flex flex-wrap gap-1.5">
+        {TABS.map(tab => {
+          const ativo = tab.key === activeTab
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={ativo}
+              onClick={() => router.replace(`/relacionamento-prestador/ocupar-profissionais-disponiveis?tab=${tab.key}`)}
+              className={`rounded-xl px-3.5 py-2 text-sm font-semibold transition-colors ${ativo ? "bg-violet-600 text-white shadow-sm" : "text-muted-foreground hover:bg-muted/60"}`}
+            >
+              {tab.label}
+            </button>
+          )
+        })}
       </div>
 
-      {!profissional ? (
-        <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
-          Selecione um profissional. Só aparecem na lista profissionais com pelo menos 1 horário “Livre” na semana de referência.
-        </div>
+      {activeTab === "categoria" ? (
+        <OcupacaoCategoriaView cRows={cRows} />
+      ) : !laudosCarregados ? (
+        <InlineNotice tone="amber" icon={<Lock size={15} />}>
+          <strong>Relatório de laudos não anexado.</strong> Sem ele não é possível calcular quem tem sessões pendentes (autorizado × ofertado) — os horários "Livre" apareceriam sempre como "sem oportunidade", mesmo quando há demanda real. Anexe o relatório de laudos para liberar esta aba.
+        </InlineNotice>
       ) : (
-        <div className="rounded-2xl border border-border bg-card p-4">
-          <AgendaProfissional
-            profissional={profissional}
-            cRows={cRows}
-            onAbrirOportunidade={o => (o.modalidade === "direto" ? setDetalheDireto(o) : setDetalheRemanejamento(o))}
-          />
-        </div>
-      )}
+        <>
+          <div className="rounded-2xl border border-border bg-card p-4">
+            <div className="mb-1 flex items-center gap-1.5">
+              <Sparkles size={15} className="text-violet-600 dark:text-violet-400" />
+              <span className="text-[15px] font-extrabold text-foreground">Ocupar profissional já contratado</span>
+            </div>
+            <div className="mb-3 text-xs text-muted-foreground">
+              Escolha um profissional pra ver, dentro dos horários “Livre” reais da agenda dele, quais pacientes com sessão pendente (autorizado &gt; ofertado) poderiam entrar — direto ou remanejando a sessão conflitante de outro paciente com OUTRO profissional, mantido. Sem escrever nada na TiTa por enquanto — é só visualização.
+            </div>
+            <ProfissionalCombobox value={profissional} onChange={setProfissional} opcoes={profissionais} contagemLivres={contagemLivres} />
+            {!profissionais.length && (
+              <div className="mt-3">
+                <InlineNotice tone="slate">Nenhum profissional com horário “Livre” na semana de referência.</InlineNotice>
+              </div>
+            )}
+          </div>
 
-      {detalheDireto && (
-        <PacienteAgendaHipoteticaModal
-          paciente={detalheDireto.paciente.pac}
-          slot={{ dia: detalheDireto.dia, turno: detalheDireto.turno, hora: detalheDireto.hora, unidade: detalheDireto.unidade }}
-          especialidade={detalheDireto.especialidade}
-          profissionalHipotetico={profissional}
-          cRows={cRows}
-          onClose={() => setDetalheDireto(null)}
-        />
-      )}
+          {!profissional ? (
+            <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
+              Selecione um profissional. Só aparecem na lista profissionais com pelo menos 1 horário “Livre” na semana de referência.
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <AgendaProfissional
+                profissional={profissional}
+                cRows={cRows}
+                onAbrirOportunidade={o => (o.modalidade === "direto" ? setDetalheDireto(o) : setDetalheRemanejamento(o))}
+              />
+            </div>
+          )}
 
-      {detalheRemanejamento?.remanejamento && (
-        <RemanejamentoDetalheModal
-          paciente={detalheRemanejamento.paciente.pac}
-          terapiaHipotetica={detalheRemanejamento.terapia}
-          profissionalHipotetico={profissional}
-          remanejamento={detalheRemanejamento.remanejamento}
-          cRows={cRows}
-          onClose={() => setDetalheRemanejamento(null)}
-        />
+          {detalheDireto && (
+            <PacienteAgendaHipoteticaModal
+              paciente={detalheDireto.paciente.pac}
+              slot={{ dia: detalheDireto.dia, turno: detalheDireto.turno, hora: detalheDireto.hora, unidade: detalheDireto.unidade }}
+              especialidade={detalheDireto.especialidade}
+              profissionalHipotetico={profissional}
+              cRows={cRows}
+              onClose={() => setDetalheDireto(null)}
+            />
+          )}
+
+          {detalheRemanejamento?.remanejamento && (
+            <RemanejamentoDetalheModal
+              paciente={detalheRemanejamento.paciente.pac}
+              terapiaHipotetica={detalheRemanejamento.terapia}
+              profissionalHipotetico={profissional}
+              remanejamento={detalheRemanejamento.remanejamento}
+              cRows={cRows}
+              onClose={() => setDetalheRemanejamento(null)}
+            />
+          )}
+        </>
       )}
     </div>
   )

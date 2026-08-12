@@ -73,11 +73,24 @@ export function listarOportunidadesDiretas(
     porGrupo.get(chave)!.push(s)
   }
 
+  // avaliarPeriodo já calcula os candidatos de TODAS as horas do turno de uma
+  // vez (retorna `slots`, 1 por hora) — sem este cache, grupos de horas
+  // diferentes dentro do mesmo dia/unidade/especialidade/turno chamavam
+  // avaliarPeriodo de novo cada um, recomputando o turno inteiro repetidas
+  // vezes só pra extrair uma hora diferente do MESMO resultado. Crítico pra
+  // rankearOportunidadesInternas (ocupacaoCategoria.ts), que soma esse custo
+  // por cada combinação unidade×dia×especialidade da varredura.
+  const periodoPorTurno = new Map<string, ReturnType<typeof avaliarPeriodo>>()
   const candidatosPorGrupo = new Map<string, CandidatoSlot[]>()
   for (const chave of porGrupo.keys()) {
     const [dia, hora, unidade, especialidade] = chave.split("|||")
     const turno = turnoFromHora(hora)
-    const periodo = avaliarPeriodo(dia, turno, unidade, especialidade, cRows, gapMap)
+    const chaveTurno = `${dia}|||${unidade}|||${especialidade}|||${turno}`
+    let periodo = periodoPorTurno.get(chaveTurno)
+    if (!periodo) {
+      periodo = avaliarPeriodo(dia, turno, unidade, especialidade, cRows, gapMap)
+      periodoPorTurno.set(chaveTurno, periodo)
+    }
     candidatosPorGrupo.set(chave, periodo.slots.find(sl => sl.hora === hora)?.candidatos ?? [])
   }
 
