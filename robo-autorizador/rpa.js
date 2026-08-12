@@ -246,6 +246,34 @@ async function executarRpa(tarefa, verificarCancelamento, browser) {
     if (!tarefa.nome_medico) throw new Error("Nome do médico não informado");
     await page.fill('input[name="findsolic"]', normalizarTexto(tarefa.nome_medico));
 
+    // UF do CRM solicitante. O portal fica em RJ por padrão; se o médico é de
+    // outro estado (ex.: SP) a guia é rejeitada. Localiza o <select> de UF pelas
+    // próprias opções (contém RJ e SP), sem depender do name exato do campo.
+    const ufMedico = (tarefa.crm_uf || 'RJ').toUpperCase();
+    const ufSelecionada = await page.evaluate((uf) => {
+      const setUf = (sel) => {
+        const opt = Array.from(sel.options).find(o =>
+          (o.value || '').trim().toUpperCase() === uf ||
+          (o.textContent || '').trim().toUpperCase() === uf);
+        if (!opt) return null;
+        sel.value = opt.value;
+        sel.dispatchEvent(new Event('input', { bubbles: true }));
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        return sel.name || '(sem name)';
+      };
+      // 1) campo conhecido do portal ASSIM
+      const ufcrm = document.querySelector('select[name="ufcrm"]');
+      if (ufcrm) { const r = setUf(ufcrm); if (r) return r; }
+      // 2) fallback: qualquer <select> cujas opções contenham RJ e SP
+      for (const sel of Array.from(document.querySelectorAll('select'))) {
+        const up = Array.from(sel.options).map(o => (o.value || o.textContent || '').trim().toUpperCase());
+        if (up.includes('RJ') && up.includes('SP')) { const r = setUf(sel); if (r) return r; }
+      }
+      return null;
+    }, ufMedico);
+    if (ufSelecionada) console.log(`✅ UF do CRM = ${ufMedico} (campo: ${ufSelecionada})`);
+    else console.warn(`⚠️ Campo de UF não localizado; mantido o default (UF alvo: ${ufMedico})`);
+
     if (!tarefa.tuss) throw new Error("TUSS não informado");
     await humanType(page, 'input[name="ttuss1"]', tarefa.tuss);
 
@@ -263,6 +291,40 @@ async function executarRpa(tarefa, verificarCancelamento, browser) {
 		await page.waitForLoadState('networkidle');
 		await delay(2000);
 
+		// Captura o nº da guia e a data/hora da tela de confirmação
+		// ("Documento: AD... / 000437530", "Data: 28/07/26 - 08:44:47").
+		// Guia: grava SEM zeros à esquerda para casar com autorizacoes_assim.guia
+		// (ex.: 437530) — é a âncora da vinculação por guia (item 5): a autorização
+		// fica presa a ESTA fila, evitando que uma guia retroativa case com o
+		// atendimento de hoje.
+		// Data: monta a string direto dos dígitos capturados (sem passar por
+		// `new Date()`) para não sofrer conversão de fuso do processo Node — grava
+		// exatamente o horário que a própria ASSIM registrou para a autorização.
+		const { numeroGuia, dataConfirmacao, trechoConfirmacao } = await page.evaluate(() => {
+		  const txt = (document.body && document.body.innerText) || '';
+		  // Segunda tentativa mais tolerante: a primeira exige o prefixo alfanumérico
+  // colado no "/", e falha quando a ASSIM intercala espaço, hífen ou quebra.
+  const guiaMatch =
+    txt.match(/Documento:\s*[A-Za-z0-9]+\s*\/\s*0*(\d+)/i) ||
+    txt.match(/Documento:[^\n]*?\/\s*0*(\d{3,})/i);
+		  const dataMatch = txt.match(/Data:\s*(\d{2})\/(\d{2})\/(\d{2})\s*-\s*(\d{2}):(\d{2}):(\d{2})/);
+		  let dataConfirmacao = null;
+		  if (dataMatch) {
+			const [, dd, mm, yy, hh, mi, ss] = dataMatch;
+			dataConfirmacao = `20${yy}-${mm}-${dd}T${hh}:${mi}:${ss}`;
+		  }
+		  return {
+	numeroGuia: guiaMatch ? guiaMatch[1] : null,
+	dataConfirmacao,
+	// Guardado só para perícia quando a guia não é capturada.
+	trechoConfirmacao: txt.replace(/\s+/g, ' ').trim().slice(0, 500),
+  };
+		});
+		if (numeroGuia) console.log("🧾 Guia capturada:", numeroGuia);
+		else console.warn("⚠️ Não foi possível capturar o número da guia da tela — registrando como 'concluido_sem_guia'");
+		if (dataConfirmacao) console.log("🕒 Data/hora da confirmação capturada:", dataConfirmacao);
+		else console.warn("⚠️ Não foi possível capturar a data/hora da tela de confirmação");
+
 		const formaValidacao =
 		  await selecionarFormaValidacao(page);
 
@@ -270,14 +332,27 @@ async function executarRpa(tarefa, verificarCancelamento, browser) {
 		  "✅ Forma de validação:",
 		  formaValidacao
 		);
-		
+
+		const updatePayload = {
+		  // Sem guia capturada a autorização até aconteceu na ASSIM, mas o vínculo
+		  // não existe. 'concluido' pintaria o card de verde e esconderia a lacuna;
+		  // 'concluido_sem_guia' a deixa visível e reprocessável no mesmo dia.
+		  status: numeroGuia ? 'concluido' : 'concluido_sem_guia',
+		  forma_autorizacao: formaValidacao,
+		  validacao_finalizada_em: new Date().toISOString()
+		};
+		if (numeroGuia) {
+		  updatePayload.numero_autorizacao = numeroGuia;
+		  updatePayload.error_message = null;
+		} else {
+		  updatePayload.error_message =
+			`Guia não capturada na tela de confirmação. Trecho lido: ${trechoConfirmacao || '(vazio)'}`;
+		}
+		if (dataConfirmacao) updatePayload.horario_autorizacao = dataConfirmacao;
+
 		const { error } = await supabase
 		  .from('fila_autorizacoes')
-		  .update({
-			status: 'concluido',
-			forma_autorizacao: formaValidacao,
-			validacao_finalizada_em: new Date().toISOString()
-		  })
+		  .update(updatePayload)
 		  .eq('id', tarefa.id);
 
 		if (error) {

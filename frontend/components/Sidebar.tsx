@@ -8,6 +8,7 @@ import {
   FileText,
   ShieldCheck,
   ClipboardList,
+  ListChecks,
   CalendarDays,
   UserRound,
   Building2,
@@ -22,7 +23,6 @@ import {
   TrendingUp,
   UserCheck,
   UserPlus,
-  Zap,
   Clock,
   XCircle,
   AlertTriangle,
@@ -30,6 +30,19 @@ import {
   BookOpen,
   Settings,
   CalendarRange,
+  ClipboardCheck,
+  Handshake,
+  Wallet,
+  RotateCcw,
+  DoorOpen,
+  ArrowRightLeft,
+  Tag,
+  Calendar,
+  FileSignature,
+  Percent,
+  History,
+  UserSearch,
+  Zap,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -45,7 +58,7 @@ import { useTheme } from "@/contexts/ThemeContext"
 import { useImpersonation } from "@/contexts/ImpersonationContext"
 import { ImpersonationSelector } from "@/components/admin/ImpersonationSelector"
 import { ROLE_LABELS } from "@/constants/roleLabels"
-import { getRoleDefaultPermissions, codigosToRotas } from "@/lib/permissions/routes"
+import { getRoleDefaultPermissions, codigosToRotas, hasRouteAccess } from "@/lib/permissions/routes"
 import { getUsuarioPermissoes } from "@/services/permissoes.service"
 
 type Favorito = { label: string; path: string }
@@ -60,17 +73,23 @@ const pathIconMap: Record<string, any> = {
   "/agenda/salas": Building2,
   "/guias-digitais": FileText,
   "/auditoria-assim": ClipboardList,
+  "/auditoria-assim?tab=auditoria": ClipboardList,
+  "/auditoria-assim?tab=pendencias": ListChecks,
   "/cco": BarChart3,
   "/admin": ShieldCheck,
   "/admin/permissoes": KeyRound,
   "/connect": Zap,
-  "/cronograma/solicitacoes?tab=simulacao": UserPlus,
-  "/cronograma/solicitacoes?tab=saida": LogOut,
-  "/cronograma/solicitacoes?tab=ocup-prof": TrendingUp,
-  "/cronograma/solicitacoes?tab=ocup-pac": TrendingUp,
-  "/cronograma/solicitacoes?tab=novo-cron": CalendarPlus,
-  "/cronograma/solicitacoes?tab=banco": Database,
-  "/cronograma/ocupacao?tab=vagas": TrendingUp,
+  "/relacionamento-prestador/solicitacoes?tab=simulacao": UserPlus,
+  "/relacionamento-prestador/solicitacoes?tab=novo-cron": CalendarPlus,
+  "/relacionamento-prestador/solicitacoes?tab=banco": Database,
+  "/relacionamento-prestador/ocupacao-salas": DoorOpen,
+  "/cadastros/cadastro-valores": Tag,
+  "/cadastros/feriados": Calendar,
+  "/cadastros/contratos": FileSignature,
+  "/cadastros/taxas-e-parametros": Percent,
+  "/cronograma/saida-profissional": LogOut,
+  "/cronograma/ocupacao-paciente": TrendingUp,
+  "/relacionamento-prestador/ocupar-profissionais-disponiveis": UserSearch,
   "/cronograma/ocupacao?tab=fila": Clock,
   "/cronograma/ocupacao?tab=recusados": XCircle,
   "/cronograma/ocupacao?tab=inviavel": AlertTriangle,
@@ -78,7 +97,18 @@ const pathIconMap: Record<string, any> = {
   "/cronograma/ocupacao?tab=inconsistencias": AlertTriangle,
   "/cronograma/ocupacao?tab=guia": BookOpen,
   "/cronograma/ocupacao?tab=config": Settings,
-  "/cronograma/indicadores": BarChart3,
+  "/analise-tratativas": ClipboardCheck,
+  "/relacionamento-prestador/analise": TrendingUp,
+  "/relacionamento-prestador/rp": Wallet,
+  "/relacionamento-prestador/individual": UserRound,
+  "/relacionamento-prestador/pep": ListChecks,
+  "/relacionamento-prestador/pep-historico": History,
+  "/cronograma/indicadores?tab=profissionais": BarChart3,
+  "/cronograma/indicadores?tab=unidades": Building2,
+  "/cronograma/indicadores?tab=pacientes": UserCheck,
+  "/cronograma/indicadores?tab=previsao-receitas": Wallet,
+  "/cronograma/indicadores?tab=historico-receitas": History,
+  "/cronograma/indicadores?tab=comparativo-sessoes": ArrowRightLeft,
 }
 
 export default function Sidebar() {
@@ -149,8 +179,8 @@ export default function Sidebar() {
 
   function canAccess(path: string) {
     if (!role) return false
-    const barePath = path.split("?")[0]
-    return allowedPaths.includes(barePath)
+    const [barePath, query] = path.split("?")
+    return hasRouteAccess(barePath, query ? `?${query}` : "", allowedPaths)
   }
 
   useEffect(() => {
@@ -441,10 +471,13 @@ export default function Sidebar() {
           )}
 
           {/* Terapêutico */}
-          {(canAccess("/central-terapeutas") || canAccess("/agenda/terapeutas") || canAccess("/agenda/salas")) && (
+          {(canAccess("/central-terapeutas") || canAccess("/analise-tratativas") || canAccess("/agenda/terapeutas") || canAccess("/agenda/salas")) && (
             <SidebarGroup title="Terapêutico" icon={Stethoscope}>
               {canAccess("/central-terapeutas") && (
                 <MenuItem label="Gestão" icon={UserRound} path="/central-terapeutas" />
+              )}
+              {canAccess("/analise-tratativas") && (
+                <MenuItem label="Análise de Evolução" icon={ClipboardCheck} path="/analise-tratativas" />
               )}
               {canAccess("/agenda/terapeutas") && (
                 <MenuItem label="Agenda Terapêutica" icon={CalendarDays} path="/agenda/terapeutas" />
@@ -461,8 +494,14 @@ export default function Sidebar() {
               {canAccess("/cco") && (
                 <MenuItem label="Conciliação ASSIM" icon={BarChart3} path="/cco" />
               )}
-              {canAccess("/auditoria-assim") && (
-                <MenuItem label="Auditoria ASSIM" icon={ClipboardList} path="/auditoria-assim" />
+              {/* Duas visões da mesma rota. canAccess("/auditoria-assim?tab=…")
+                  resolve para o bare path '/auditoria-assim' de CODIGO_PARA_ROTAS,
+                  então nenhum código de permissão novo foi necessário. */}
+              {canAccess("/auditoria-assim?tab=pendencias") && (
+                <MenuItem label="Pendências ASSIM" icon={ListChecks} path="/auditoria-assim?tab=pendencias" />
+              )}
+              {canAccess("/auditoria-assim?tab=auditoria") && (
+                <MenuItem label="Auditoria ASSIM" icon={ClipboardList} path="/auditoria-assim?tab=auditoria" />
               )}
               {canAccess("/guias-digitais") && (
                 <MenuItem label="Guias Digitais" icon={FileText} path="/guias-digitais" />
@@ -471,18 +510,92 @@ export default function Sidebar() {
           )}
 
           {/* Cronograma */}
-          {(canAccess("/cronograma/solicitacoes") || canAccess("/cronograma/ocupacao")) && (
+          {(canAccess("/cronograma/saida-profissional") || canAccess("/cronograma/ocupacao-paciente") ||
+            canAccess("/cronograma/ocupacao?tab=acompanhamento") || canAccess("/cronograma/ocupacao?tab=gaps") ||
+            canAccess("/cronograma/ocupacao?tab=inconsistencias") ||
+            canAccess("/cronograma/reposicao")) && (
             <SidebarGroup title="Cronograma" icon={CalendarRange}>
-              {canAccess("/cronograma/solicitacoes") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/solicitacoes?tab=saida" />}
-              {canAccess("/cronograma/solicitacoes") && <MenuItem label="Ocupação Paciente" icon={UserCheck} path="/cronograma/solicitacoes?tab=ocup-pac" />}
-              {canAccess("/cronograma/ocupacao") && <MenuItem label="Aceites e Recusas" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
+              {canAccess("/cronograma/saida-profissional") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/saida-profissional" />}
+              {canAccess("/cronograma/ocupacao-paciente") && <MenuItem label="Ocupação Paciente" icon={UserCheck} path="/cronograma/ocupacao-paciente" />}
+              {canAccess("/cronograma/reposicao") && <MenuItem label="Reposição de Faltas" icon={RotateCcw} path="/cronograma/reposicao" />}
+              {canAccess("/cronograma/ocupacao?tab=acompanhamento") && <MenuItem label="Aceites e Recusas" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
+              {canAccess("/cronograma/ocupacao?tab=gaps") && <MenuItem label="Diferença: Laudo e Oferta" icon={BarChart3} path="/cronograma/ocupacao?tab=gaps" />}
+              {canAccess("/cronograma/ocupacao?tab=inconsistencias") && <MenuItem label="Inconsistências e Exceções" icon={AlertTriangle} path="/cronograma/ocupacao?tab=inconsistencias" />}
             </SidebarGroup>
           )}
 
-          {/* Indicadores */}
-          {canAccess("/cronograma/indicadores") && (
+          {/* Indicadores — uma permissão por aba, não uma pra rota inteira */}
+          {(canAccess("/cronograma/indicadores?tab=profissionais") ||
+            canAccess("/cronograma/indicadores?tab=unidades") ||
+            canAccess("/cronograma/indicadores?tab=pacientes") ||
+            canAccess("/cronograma/indicadores?tab=previsao-receitas") ||
+            canAccess("/cronograma/indicadores?tab=historico-receitas") ||
+            canAccess("/cronograma/indicadores?tab=comparativo-sessoes")) && (
             <SidebarGroup title="Indicadores" icon={TrendingUp}>
-              <MenuItem label="Ocupação de Profissionais" icon={BarChart3} path="/cronograma/indicadores" />
+              {canAccess("/cronograma/indicadores?tab=profissionais") && (
+                <MenuItem label="Ocupação de Profissionais" icon={BarChart3} path="/cronograma/indicadores?tab=profissionais" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=unidades") && (
+                <MenuItem label="Ocupação Clínica" icon={Building2} path="/cronograma/indicadores?tab=unidades" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=pacientes") && (
+                <MenuItem label="Dashboard de Pacientes" icon={UserCheck} path="/cronograma/indicadores?tab=pacientes" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=previsao-receitas") && (
+                <MenuItem label="Previsão de Receitas" icon={Wallet} path="/cronograma/indicadores?tab=previsao-receitas" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=historico-receitas") && (
+                <MenuItem label="Histórico de Receitas" icon={History} path="/cronograma/indicadores?tab=historico-receitas" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=comparativo-sessoes") && (
+                <MenuItem label="Comparativo de Sessões" icon={ArrowRightLeft} path="/cronograma/indicadores?tab=comparativo-sessoes" />
+              )}
+            </SidebarGroup>
+          )}
+
+          {/* Cadastros */}
+          {(canAccess("/cadastros/cadastro-valores") || canAccess("/cadastros/feriados") ||
+            canAccess("/cadastros/contratos") || canAccess("/cadastros/taxas-e-parametros")) && (
+            <SidebarGroup title="Cadastros" icon={Database}>
+              {canAccess("/cadastros/cadastro-valores") && <MenuItem label="Cadastro de Valores" icon={Tag} path="/cadastros/cadastro-valores" />}
+              {canAccess("/cadastros/feriados") && <MenuItem label="Feriados" icon={Calendar} path="/cadastros/feriados" />}
+              {canAccess("/cadastros/taxas-e-parametros") && <MenuItem label="Variáveis & Taxas" icon={Percent} path="/cadastros/taxas-e-parametros" />}
+              {canAccess("/cadastros/contratos") && <MenuItem label="Contratos" icon={FileSignature} path="/cadastros/contratos" />}
+            </SidebarGroup>
+          )}
+
+          {/* Relacionamento Prestador */}
+          {(canAccess("/relacionamento-prestador/analise") || canAccess("/relacionamento-prestador/rp") ||
+            canAccess("/relacionamento-prestador/individual") || canAccess("/relacionamento-prestador/pep") ||
+            canAccess("/relacionamento-prestador/pep-historico") ||
+            canAccess("/relacionamento-prestador/ocupacao-salas") ||
+            canAccess("/relacionamento-prestador/solicitacoes") ||
+            canAccess("/relacionamento-prestador/ocupar-profissionais-disponiveis")) && (
+            <SidebarGroup title="Relacionamento Prestador" icon={Handshake}>
+              {canAccess("/relacionamento-prestador/ocupacao-salas") && (
+                <MenuItem label="Ocupação de Salas" icon={DoorOpen} path="/relacionamento-prestador/ocupacao-salas" />
+              )}
+              {canAccess("/relacionamento-prestador/solicitacoes") && (
+                <MenuItem label="Simulação de Novo Prestador" icon={UserPlus} path="/relacionamento-prestador/solicitacoes?tab=simulacao" />
+              )}
+              {canAccess("/relacionamento-prestador/ocupar-profissionais-disponiveis") && (
+                <MenuItem label="Ocupar Profissionais Disponíveis" icon={UserSearch} path="/relacionamento-prestador/ocupar-profissionais-disponiveis" />
+              )}
+              {canAccess("/relacionamento-prestador/analise") && (
+                <MenuItem label="Rem. Mês - Previsão" icon={TrendingUp} path="/relacionamento-prestador/analise" />
+              )}
+              {canAccess("/relacionamento-prestador/rp") && (
+                <MenuItem label="Remuneração Total" icon={Wallet} path="/relacionamento-prestador/rp" />
+              )}
+              {canAccess("/relacionamento-prestador/individual") && (
+                <MenuItem label="Remuneração Individual" icon={UserRound} path="/relacionamento-prestador/individual" />
+              )}
+              {canAccess("/relacionamento-prestador/pep") && (
+                <MenuItem label="Entregas PEP" icon={ListChecks} path="/relacionamento-prestador/pep" />
+              )}
+              {canAccess("/relacionamento-prestador/pep-historico") && (
+                <MenuItem label="PEP - Histórico" icon={History} path="/relacionamento-prestador/pep-historico" />
+              )}
             </SidebarGroup>
           )}
 

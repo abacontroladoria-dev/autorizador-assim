@@ -1,59 +1,41 @@
-import { getSupabaseClient } from "@/lib/supabase/client"
 import { pm, exU } from "@/lib/cronograma/helpers"
+import { buscarGrade, fixMojibake } from "@/lib/grade/fonte"
 import type { CsvRow } from "@/types/cronograma"
+import type { GradeComparativoRaw } from "@/lib/cronograma/comparativoSessoes"
 
-const FIELDS = "paciente_nome, dia_semana, hora_inicial, hora_final, profissional_nome, terapia_nome, terapia_exibicao_nome, status_agendamento, convenio_nome, sala_nome, data, unidade_nome"
-const PAGE = 1000
+const FIELDS = "id, paciente_id, paciente_nome, dia_semana, hora_inicial, hora_final, profissional_nome, terapia_nome, terapia_exibicao_nome, status_agendamento, convenio_nome, sala_nome, data, unidade_nome"
 
-// Padrão de dupla codificação UTF-8 (mojibake): byte líder C2/C3 seguido de byte
-// de continuação (80–BF). Ex.: "Araújo" gravado como "AraÃºjo".
-const MOJIBAKE_RE = /[Â-Ã][-¿]/
+const FIELDS_COMPARATIVO = "paciente_id, paciente_nome, sala_nome, convenio_nome, status_agendamento, data, hora_inicial, terapia_id, terapia_nome, dia_semana, profissional_id, profissional_nome"
 
-// A sincronização da grade (Edge Function sync-grade-csv) grava texto com dupla
-// codificação UTF-8. Isto repara na leitura. Só atua quando o padrão está presente,
-// para não corromper texto já correto.
-function fixMojibake(s: string | null | undefined): string {
-  const str = s ?? ""
-  if (!str || !MOJIBAKE_RE.test(str)) return str
-  try {
-    return new TextDecoder("utf-8", { fatal: false }).decode(
-      Uint8Array.from(str, c => c.charCodeAt(0) & 0xff),
-    )
-  } catch {
-    return str
-  }
-}
+// Reexportado porque metade do módulo de cronograma já importa fixMojibake
+// daqui. A implementação (mojibake de UTF-8 + entidades HTML cruas, ex.:
+// "D&#039;avila" — ver decodeEntidadesHtml em constants.ts) vive em
+// lib/grade/fonte.ts, junto da leitura.
+export { fixMojibake }
 
 export async function buscarGradeComoCSVRows(dataInicio: string, dataFim: string): Promise<CsvRow[]> {
-  const sb = getSupabaseClient()
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const all: any[] = []
+  // Fonte "base" com unidade explícita, não "atendimentos": esta consulta
+  // devolve o status_agendamento adiante (vira "Status do Agendamento" no
+  // CsvRow), então precisa enxergar também os slots 'Livre'.
+  const all = await buscarGrade<Record<string, string | null>>({
+    campos: FIELDS,
+    fonte: "base",
+    unidade: 280,
+    de: dataInicio,
+    ate: dataFim,
+    ordem: [
+      { coluna: "data" },
+      { coluna: "hora_inicial" },
+      { coluna: "id" },   // desempate único — paginação estável, sem pular/duplicar linhas
+    ],
+  })
 
-  let from = 0
-  while (true) {
-    const { data, error } = await sb
-      .from("csv_grades_profissionais")
-      .select(FIELDS)
-      .gte("data", dataInicio)
-      .lte("data", dataFim)
-      .eq("unidade_id", 280)
-      .order("data")
-      .order("hora_inicial")
-      .order("id")          // desempate único — paginação estável, sem pular/duplicar linhas
-      .range(from, from + PAGE - 1)
-
-    if (error) throw new Error(error.message)
-    const rows = data ?? []
-    all.push(...rows)
-    if (rows.length < PAGE) break
-    from += PAGE
-  }
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return (all as any[]).map((r: Record<string, string | null>) => {
+  return all.map((r: Record<string, string | null>) => {
     const hi_str   = String(r.hora_inicial ?? "").slice(0, 5)
     const salaNome = fixMojibake(r.sala_nome)
     return {
+      CsvGradeId:               r.id ?? undefined,
+      PacienteId:               r.paciente_id === null || r.paciente_id === undefined ? null : Number(r.paciente_id),
       "Nome Favorecido":        fixMojibake(r.paciente_nome),
       "Dia da Semana":          r.dia_semana            ?? "",
       "Hora Inicial":           hi_str,
@@ -69,4 +51,38 @@ export async function buscarGradeComoCSVRows(dataInicio: string, dataFim: string
       Unidade:                  exU(salaNome),
     } as unknown as CsvRow
   })
+}
+
+/**
+ * Busca sessões de csv_grades_profissionais pra comparativo entre períodos —
+ * sem filtro de unidade (o Comparativo de Sessões precisa de TODAS as
+ * unidades, ao contrário de buscarGradeComoCSVRows que serve o fluxo
+ * operacional restrito à unidade 280) e já trazendo paciente_id, necessário
+ * pra excluir pacientes fictícios/administrativos por ID (ver
+ * PACIENTES_FICTICIOS_IDS em comparativoSessoes.ts).
+ */
+export async function buscarGradeComparativo(dataInicio: string, dataFim: string): Promise<GradeComparativoRaw[]> {
+  // Sem `unidade`: é justamente o que distingue esta consulta da anterior.
+  const all = await buscarGrade<Record<string, string | number | null>>({
+    campos: FIELDS_COMPARATIVO,
+    fonte: "base",
+    de: dataInicio,
+    ate: dataFim,
+    ordem: [{ coluna: "data" }, { coluna: "id" }],
+  })
+
+  return all.map(r => ({
+    paciente_id:        r.paciente_id === null || r.paciente_id === undefined ? null : Number(r.paciente_id),
+    paciente_nome:       fixMojibake(r.paciente_nome as string | null),
+    sala_nome:           fixMojibake(r.sala_nome as string | null),
+    convenio_nome:       fixMojibake(r.convenio_nome as string | null),
+    status_agendamento:  (r.status_agendamento as string | null) ?? "",
+    data:                (r.data as string | null) ?? "",
+    hora_inicial:        (r.hora_inicial as string | null) ?? null,
+    terapia_id:          r.terapia_id === null || r.terapia_id === undefined ? null : Number(r.terapia_id),
+    terapia_nome:        fixMojibake(r.terapia_nome as string | null),
+    dia_semana:          (r.dia_semana as string | null) ?? null,
+    profissional_id:     r.profissional_id === null || r.profissional_id === undefined ? null : Number(r.profissional_id),
+    profissional_nome:   fixMojibake(r.profissional_nome as string | null),
+  }))
 }

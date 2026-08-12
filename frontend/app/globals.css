@@ -107,6 +107,47 @@
     --chart-4: oklch(0.76 0.15 73);
     --chart-5: oklch(0.64 0.20 28);
     --radius: 0.625rem;
+
+    /* ── Escada de superfície do bloco (cadastros) ───────────────────────
+       --background e --card são AMBOS oklch(1 0 0): numa pilha de blocos,
+       cartão e papel têm 1.00:1 de contraste — degrau nenhum. Pior, o
+       contorno do bloco usava a mesma --border dos campos internos
+       (1.26:1), então o cartão se lia como mais um campo em vez de como o
+       que contém os campos.
+       Estas três dão o enclausuramento que faltava, tingidas AGORA no azul do
+       sidebar (matiz ~255) e não mais no matiz de marca 217: o nome do
+       profissional passou a usar --sidebar-accent-foreground, e faixa ciano
+       sob texto azul deixava dois azuis diferentes brigando na mesma linha.
+       O par faixa+nome é literalmente o do item ativo do menu — fundo
+       --sidebar-accent, texto --sidebar-accent-foreground.
+       NOTA: com isso o bloco deixou de seguir --color-brand (217). Foi
+       deliberado, a pedido; se a marca voltar a mandar aqui, é rodar os três
+       matizes de volta para 217 e devolver o nome para --foreground.
+
+       Consumidas por valor arbitrário (bg-[var(--bloco-cap)]), como as
+       --repo-* logo abaixo, e deliberadamente FORA do @theme: registrar no
+       @theme inline faz o compilador tratar a variável como propriedade do
+       tema e DESCARTAR a redefinição em .dark — a faixa ficava clara no tema
+       escuro e engolia o nome do profissional. Verificado no CSS servido.
+
+       Valores (conferidos por conversão oklch→sRGB, todos em gamut):
+         cap        #DBEAFE  1.22:1 vs branco — faixa de identidade; é
+                             exatamente --sidebar-accent (blue-100). O nome
+                             #1D4ED8 sobre ela dá 5,49:1.
+         cap-borda  #CBE0FC  1.35:1 — divisória sob a faixa
+         borda      #BBD5F7  1.50:1 — contorno do bloco, acima do 1.26:1
+                                      dos campos, criando a hierarquia.
+
+       Por que a faixa ESCURECEU de 1.13:1 para 1.22:1: em sRGB o azul estoura
+       o gamut muito cedo no claro — em L=0.958 (o valor antigo) o croma máximo
+       no matiz 255 é só 0.020, e a faixa continuava lendo como cinza. Descer
+       para L=0.932 é o que compra croma suficiente para o azul aparecer. As
+       outras duas mantêm a lightness original, então a escada 1.35/1.50 e a
+       hierarquia contra o campo (1.26:1) estão preservadas. */
+    --bloco-cap: oklch(0.932 0.032 255.585);
+    --bloco-cap-borda: oklch(0.900 0.045 255);
+    --bloco-borda: oklch(0.865 0.055 255);
+
     --sidebar: #F8FAFC;
     --sidebar-foreground: #334155;
     --sidebar-primary: #2563EB;
@@ -116,11 +157,68 @@
     --sidebar-border: #E2E8F0;
     --sidebar-ring: #93C5FD;
     --cron-active-bg: #eaf5fb;
+
+    /* ── Reposição de Faltas: paleta semântica (falta/mesmo-prof/prof-dif/futuro) ── */
+    --repo-red-bg:           #fef2f2;
+    --repo-red-bg-soft:      #fff1f2;
+    --repo-red-border:       #fca5a5;
+    --repo-red-border-soft:  #fecaca;
+    --repo-red-ink:          #b91c1c;
+    --repo-red-ink-soft:     #dc2626;
+    --repo-red-ink-softer:   #ef4444;
+
+    --repo-green-bg:            #f0fdf4;
+    --repo-green-border:        #86efac;
+    --repo-green-border-strong: #bbf7d0;
+    --repo-green-ink:           #166534;
+    --repo-green-ink-soft:      #15803d;
+    /* Sem variante .dark de propósito (cor sólida, funciona nos dois temas — ver
+       comentário no :root deste arquivo). Copiada literalmente em .marcador-hl-p1
+       (VisaoComparativa.tsx) — se ganhar uma variante .dark aqui, atualize lá também. */
+    --repo-green-solid:         #16a34a;
+
+    --repo-yellow-bg:      #fef9c3;
+    --repo-yellow-border:  #fde047;
+    --repo-yellow-ink:     #854d0e;
+    --repo-yellow-ink-soft: #a16207;
+    /* Idem --repo-green-solid — copiada em .marcador-hl-p2. */
+    --repo-yellow-solid:   #ca8a04;
+
+    --repo-orange-bg:          #fff7ed;
+    --repo-orange-border:      #fed7aa;
+    --repo-orange-border-soft: #fdba74;
+    --repo-orange-ink:         #c2410c;
+    --repo-orange-ink-soft:    #ea580c;
+    --repo-orange-ink-softer:  #92400e;
+    --repo-orange-solid:       #f97316;
+
+    --repo-blue-bg:      #eff6ff;
+    --repo-blue-border:  #bfdbfe;
+    --repo-blue-ink:     #1e3a8a;
+    --repo-blue-ink-soft: #3b82f6;
+
+    --repo-panel-bg:     #f8fafc;
+    --repo-disabled-bg:  #cbd5e1;
+    --repo-gradient-start: #4f46e5;
+    --repo-gradient-end:   #7c3aed;
 }
 
 .dark {
     --color-central-topbar:  oklch(0.22 0.015 240);
     --color-central-sidebar: oklch(0.17 0.012 240);
+
+    /* No escuro a elevação vem de superfície MAIS CLARA, não de sombra:
+       a faixa sobe acima do --card (0.205) em vez de descer.
+       Mesma virada de matiz do tema claro (217 → 255), para o bloco não trocar
+       de família de cor ao alternar tema. Aqui não há o teto de gamut do azul
+       claro, então as três mantêm a lightness original e só ganham croma:
+       #192433 / #253447 / #2A3C53. O nome é quase-branco no escuro (lá
+       --sidebar-accent-foreground é oklch(0.985 0 0), sem azul — igual ao
+       próprio menu escuro), e continua com 14,96:1 sobre a faixa. */
+    --bloco-cap: oklch(0.258 0.032 255);
+    --bloco-cap-borda: oklch(0.320 0.040 255);
+    --bloco-borda: oklch(0.352 0.046 255);
+
     --background: oklch(0.145 0 0);
     --foreground: oklch(0.985 0 0);
     --card: oklch(0.205 0 0);
@@ -153,6 +251,41 @@
     --cron-active-bg: oklch(0.27 0.06 240);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+
+    /* ── Reposição de Faltas: mesma paleta, superfícies escurecidas ── */
+    --repo-red-bg:           oklch(0.26 0.05 15);
+    --repo-red-bg-soft:      oklch(0.24 0.04 15);
+    --repo-red-border:       oklch(0.42 0.10 15);
+    --repo-red-border-soft:  oklch(0.36 0.08 15);
+    --repo-red-ink:          oklch(0.82 0.10 15);
+    --repo-red-ink-soft:     oklch(0.76 0.14 15);
+    --repo-red-ink-softer:   oklch(0.70 0.13 15);
+
+    --repo-green-bg:            oklch(0.25 0.05 160);
+    --repo-green-border:        oklch(0.42 0.09 160);
+    --repo-green-border-strong: oklch(0.46 0.10 160);
+    --repo-green-ink:           oklch(0.82 0.12 160);
+    --repo-green-ink-soft:      oklch(0.76 0.14 160);
+
+    --repo-yellow-bg:      oklch(0.27 0.05 85);
+    --repo-yellow-border:  oklch(0.48 0.11 85);
+    --repo-yellow-ink:     oklch(0.85 0.13 85);
+    --repo-yellow-ink-soft: oklch(0.80 0.14 85);
+
+    --repo-orange-bg:          oklch(0.26 0.05 50);
+    --repo-orange-border:      oklch(0.44 0.10 50);
+    --repo-orange-border-soft: oklch(0.50 0.12 50);
+    --repo-orange-ink:         oklch(0.80 0.14 50);
+    --repo-orange-ink-soft:    oklch(0.78 0.14 50);
+    --repo-orange-ink-softer:  oklch(0.75 0.12 50);
+
+    --repo-blue-bg:      oklch(0.26 0.05 245);
+    --repo-blue-border:  oklch(0.44 0.10 245);
+    --repo-blue-ink:     oklch(0.82 0.10 245);
+    --repo-blue-ink-soft: oklch(0.78 0.12 245);
+
+    --repo-panel-bg:    oklch(0.20 0.006 240);
+    --repo-disabled-bg: oklch(0.32 0 0);
 }
 
 @layer base {
@@ -591,3 +724,23 @@ html {
 .dark .agenda-calendar .fc-timegrid-col                     { background: var(--card); }
 .dark .agenda-calendar .fc-day-today:not(.fc-col-header-cell) { background: oklch(0.22 0.03 245 / 0.4) !important; }
 .dark .agenda-calendar .fc-scroller::-webkit-scrollbar-thumb { background-color: oklch(0.45 0 0); }
+
+/* Acompanhamento (Ocupação) — hover de linhas de tabela/lista */
+.acomp-tr { transition: background-color .1s ease; }
+.acomp-tr:hover { background-color: var(--muted); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Acessibilidade — prefers-reduced-motion
+   Nenhuma transição/animação do app respeitava essa preferência (audit
+   2026-08-12). Corta pra praticamente instantâneo em vez de remover o
+   feedback de estado inteiro — quem pediu redução de movimento ainda vê a
+   barra encher, só sem a animação.
+   ══════════════════════════════════════════════════════════════════════════ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

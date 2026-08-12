@@ -11,6 +11,10 @@ export interface CsvRow {
   "Convênio"?: string
   "Sala"?: string
   "Data"?: string
+  /** UUID da linha em csv_grades_profissionais (coluna id) — identifica o registro de origem. */
+  CsvGradeId?: string
+  /** Chave estável do paciente (csv_grades_profissionais.paciente_id) — nome pode mudar/repetir, o ID não. Usado pra casar exceções de valor por paciente (ver resolverValorSessao). */
+  PacienteId?: number | null
   [key: string]: string | number | null | undefined
 }
 

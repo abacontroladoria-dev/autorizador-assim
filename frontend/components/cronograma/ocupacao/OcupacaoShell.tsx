@@ -2,6 +2,7 @@
 
 import { useSearchParams, useRouter } from "next/navigation"
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { AlertTriangle, Ban, Loader2, XCircle } from "lucide-react"
 import { B } from "@/lib/cronograma/constants"
 import { buscarGradeComoCSVRows } from "@/lib/cronograma/gradeService"
 import { getRefWeek, waKey } from "@/lib/cronograma/helpers"
@@ -9,7 +10,6 @@ import { runAlgorithm } from "@/lib/cronograma/runAlgorithm"
 import { exportBase } from "@/lib/cronograma/xlsx"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 import { useHeader } from "@/contexts/HeaderContext"
-import { VagasAgoraTab } from "./tabs/VagasAgoraTab"
 import { GapsTab } from "./tabs/GapsTab"
 import { GuiaTab } from "./tabs/GuiaTab"
 import { AcompanhamentoTab } from "./tabs/AcompanhamentoTab"
@@ -19,7 +19,6 @@ import { detectarInconsistencias } from "@/lib/cronograma/inconsistencias"
 import type { AlgorithmResult, Sugestao, WaStatus } from "@/types/cronograma"
 
 const TABS = [
-  { key: "vagas",            label: "📋 Aumentar Ocupação (Clínica)" },
   { key: "acompanhamento",   label: "📬 Acompanhamento" },
   { key: "gaps",             label: "📊 Diferença: Laudo e Oferta" },
   { key: "inconsistencias",  label: "⚠️ Inconsistências e Exceções" },
@@ -29,7 +28,6 @@ const TABS = [
 type TabKey = (typeof TABS)[number]["key"]
 
 const TAB_HEADERS: Record<TabKey, { title: string; subtitle: string }> = {
-  vagas:           { title: "Aumentar Ocupação (Clínica)",   subtitle: "Sugestões de novos agendamentos para vagas ociosas" },
   acompanhamento:  { title: "Aceites e Recusas",             subtitle: "Acompanhamento de sugestões e redistribuições" },
   gaps:            { title: "Diferença: Laudo e Oferta",     subtitle: "Comparativo entre laudos autorizados e sessões ofertadas" },
   inconsistencias: { title: "Inconsistências e Exceções",    subtitle: "Registros com divergências ou exceções no cronograma" },
@@ -37,20 +35,14 @@ const TAB_HEADERS: Record<TabKey, { title: string; subtitle: string }> = {
 }
 
 export function OcupacaoShell() {
-  const { cRows, lRows, rec, inv, waMap, cfg, conf, savedAt, saveError, clearSaveError, sRec, sInv, sWa, setCRows } = useCronogramaData()
+  const { cRows, lRows, rec, inv, waMap, cfg, conf, pacBundles, savedAt, saveError, clearSaveError, sRec, sInv, sWa, setCRows } = useCronogramaData()
 
   const searchParams = useSearchParams()
   const router = useRouter()
   const rawTab = searchParams.get("tab")
-  const activeTab: TabKey = rawTab && TABS.some(t => t.key === rawTab) ? (rawTab as TabKey) : "vagas"
+  const activeTab: TabKey = rawTab && TABS.some(t => t.key === rawTab) ? (rawTab as TabKey) : "acompanhamento"
 
   const { setHeader } = useHeader()
-
-  useEffect(() => {
-    const h = TAB_HEADERS[activeTab]
-    setHeader(h.title, h.subtitle)
-    return () => setHeader("", "")
-  }, [activeTab, setHeader])
 
   const [res, setRes] = useState<AlgorithmResult | null>(null)
   const [load, setLoad] = useState(false)
@@ -65,7 +57,7 @@ export function OcupacaoShell() {
   const [apiErr, setApiErr] = useState("")
 
   useEffect(() => {
-    if (!rawTab) router.replace("/cronograma/ocupacao?tab=vagas")
+    if (!rawTab) router.replace("/cronograma/ocupacao?tab=acompanhamento")
   }, [rawTab])
 
   useEffect(() => {
@@ -74,7 +66,15 @@ export function OcupacaoShell() {
     setErr(null)
     const t = setTimeout(() => {
       try {
-        const confirmedItems = conf.map(c => ({ prof: c.prof, dia: c.dia, hora: c.hora }))
+        // CRON-008: Grade Final = CSV + Reservas Pendentes. pacBundles (Ocp. Paciente)
+        // é a única fonte de verdade da reserva — não é espelhado em `conf` — então
+        // precisa entrar aqui também para bloquear a vaga para qualquer outro paciente.
+        const confirmedItems = [
+          ...conf.map(c => ({ prof: c.prof, dia: c.dia, hora: c.hora })),
+          ...pacBundles
+            .filter(b => b.status === "confirmado")
+            .flatMap(b => b.sessoes.map(s => ({ prof: s.prof, dia: s.dia, hora: s.hora }))),
+        ]
         setRes(runAlgorithm(cRows, lRows, rec, inv, { ...cfg, waMap, confirmedItems }))
       } catch (e) {
         setErr(`Erro: ${(e as Error).message}`)
@@ -83,7 +83,16 @@ export function OcupacaoShell() {
       }
     }, 50)
     return () => clearTimeout(t)
-  }, [cRows, lRows, rec, inv, cfg, waMap, conf])
+  }, [cRows, lRows, rec, inv, cfg, waMap, conf, pacBundles])
+
+  // Período (semana de referência) entra direto no subtítulo do cabeçalho — nada
+  // de repetir a mesma informação num pill separado abaixo, redundante em toda aba.
+  useEffect(() => {
+    const h = TAB_HEADERS[activeTab]
+    const subtitle = res ? `${h.subtitle} · ${res.semanaRef}` : h.subtitle
+    setHeader(h.title, subtitle)
+    return () => setHeader("", "")
+  }, [activeTab, res, setHeader])
 
   const handleWA = useCallback((s: Sugestao) => {
     sWa({ ...waMap, [waKey(s)]: "aguardando" })
@@ -116,7 +125,6 @@ export function OcupacaoShell() {
     return m
   }, [res])
 
-  const aguardando = useMemo(() => Object.values(waMap).filter(v => v === "aguardando").length, [waMap])
   const incItems = useMemo(() => detectarInconsistencias(cRows, lRows), [cRows, lRows])
 
   // Carrega a grade da tabela csv_grades_profissionais (sincronizada diariamente às 06h).
@@ -138,42 +146,37 @@ export function OcupacaoShell() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column" }}>
-      {/* Status bar */}
-      {(res || load || err) && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", marginBottom: "12px", alignItems: "center" }}>
-          {res && !load && (
-            <>
-              <span style={{ background: B.limeLt, color: "#4a6e20", border: `1px solid ${B.lime}`, borderRadius: "999px", padding: "3px 10px", fontSize: "12px", fontWeight: 700 }}>
-                📅 {res.semanaRef}
-              </span>
-              {aguardando > 0 && (
-                <span style={{ background: B.blueLt, color: B.blue, border: `1px solid ${B.blue}33`, borderRadius: "999px", padding: "3px 10px", fontSize: "12px", fontWeight: 700 }}>
-                  📤 {aguardando} aguardando WA
-                </span>
-              )}
-            </>
+      {/* Status bar — período já está no cabeçalho; "Salvo às" só faz sentido em
+          Acompanhamento (única aba que grava rec/inv/waMap). */}
+      {(load || err || (activeTab === "acompanhamento" && (savedAt || saveError))) && (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "14px", alignItems: "center" }}>
+          {load && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "var(--text-xs)", color: B.blue, fontWeight: "var(--weight-semibold)" }}>
+              <Loader2 size={12} className="animate-spin" /> Processando...
+            </span>
           )}
-          {load && <span style={{ fontSize: "12px", color: B.blue }}>⏳ Processando...</span>}
-          {err && <span style={{ fontSize: "12px", color: "#dc2626" }}>{err}</span>}
-          {savedAt && !saveError && <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>💾 {savedAt}</span>}
-          {saveError && (
+          {err && (
+            <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "var(--text-xs)", color: "#dc2626", fontWeight: "var(--weight-semibold)" }}>
+              <AlertTriangle size={12} /> {err}
+            </span>
+          )}
+          {activeTab === "acompanhamento" && savedAt && !saveError && (
+            <span style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)" }}>Salvo às {savedAt}</span>
+          )}
+          {activeTab === "acompanhamento" && saveError && (
             <button
               type="button"
-              style={{ background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: "999px", padding: "3px 10px", fontSize: "12px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit" }}
+              style={{ display: "inline-flex", alignItems: "center", gap: "5px", background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: "999px", padding: "3px 10px", fontSize: "var(--text-xs)", fontWeight: "var(--weight-bold)", cursor: "pointer", fontFamily: "inherit" }}
               onClick={clearSaveError}
               aria-label={`Erro ao salvar: ${saveError}. Clique para fechar`}
             >
-              ⚠️ {saveError}
+              <AlertTriangle size={12} /> {saveError}
             </button>
           )}
         </div>
       )}
 
       {/* Tab content */}
-      {activeTab === "vagas" && (
-        <VagasAgoraTab res={res} waMap={waMap}
-          onWA={handleWA} onInv={setCInv} onCron={s => setCronPac(s.pac)} />
-      )}
       {activeTab === "acompanhamento" && (
         <AcompanhamentoTab res={res}
           onWA={handleWA} onWAUndo={handleWAUndo} onWAStatus={handleWAStatus}
@@ -187,21 +190,23 @@ export function OcupacaoShell() {
       {cRec && (
         <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.4)", padding: "16px" }}
           onClick={e => { if (e.target === e.currentTarget) setCRec(null) }}>
-          <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "380px", width: "100%", padding: "20px" }}>
-            <div style={{ fontWeight: 900, fontSize: "17px", marginBottom: "4px" }}>❌ Registrar Recusa</div>
-            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "14px" }}>Esta combinação não será sugerida novamente.</div>
-            <div style={{ background: "#fef2f2", borderRadius: "10px", padding: "12px", fontSize: "13px", marginBottom: "14px" }}>
-              <div><span style={{ color: "var(--muted-foreground)", fontSize: "11px" }}>Paciente</span><br /><strong>{cRec.pac}</strong></div>
-              <div style={{ marginTop: "6px" }}><span style={{ color: "var(--muted-foreground)", fontSize: "11px" }}>Sessão</span><br />{cRec.dia} {cRec.hora} · {cRec.unidade}</div>
+          <div style={{ background: "var(--card)", borderRadius: "var(--radius-xl)", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "380px", width: "100%", padding: "20px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: "var(--weight-black)", fontSize: "var(--text-lg)", marginBottom: "4px" }}>
+              <XCircle size={17} style={{ color: B.orange }} /> Registrar Recusa
+            </div>
+            <div style={{ fontSize: "var(--text-sm)", color: "var(--muted-foreground)", marginBottom: "14px" }}>Esta combinação não será sugerida novamente.</div>
+            <div style={{ background: "#fef2f2", borderRadius: "var(--radius-md)", padding: "12px", fontSize: "var(--text-md)", marginBottom: "14px" }}>
+              <div><span style={{ color: "var(--muted-foreground)", fontSize: "var(--text-xs)" }}>Paciente</span><br /><strong>{cRec.pac}</strong></div>
+              <div style={{ marginTop: "6px" }}><span style={{ color: "var(--muted-foreground)", fontSize: "var(--text-xs)" }}>Sessão</span><br />{cRec.dia} {cRec.hora} · {cRec.unidade}</div>
             </div>
             <div style={{ display: "flex", gap: "8px" }}>
               <button onClick={() => {
                 sRec([...rec, { paciente: cRec.pac, profissional: cRec.prof, especialidade: cRec.esp, unidade: cRec.unidade, dia: cRec.dia, hora: cRec.hora, registradoEm: new Date().toLocaleDateString("pt-BR") }])
                 setCRec(null)
-              }} style={{ padding: "8px 16px", borderRadius: "10px", background: B.orange, color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: "13px" }}>
+              }} style={{ padding: "8px 16px", borderRadius: "var(--radius-md)", background: B.orange, color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: "var(--weight-bold)", fontSize: "var(--text-sm)" }}>
                 Confirmar Recusa
               </button>
-              <button onClick={() => setCRec(null)} style={{ flex: 1, padding: "8px 16px", borderRadius: "10px", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+              <button onClick={() => setCRec(null)} style={{ flex: 1, padding: "8px 16px", borderRadius: "var(--radius-md)", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: "var(--weight-semibold)" }}>
                 Cancelar
               </button>
             </div>
@@ -213,22 +218,24 @@ export function OcupacaoShell() {
       {cInv && (
         <div style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.4)", padding: "16px" }}
           onClick={e => { if (e.target === e.currentTarget) { setCInv(null); setMotInv("") } }}>
-          <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "380px", width: "100%", padding: "20px" }}>
-            <div style={{ fontWeight: 900, fontSize: "17px", marginBottom: "4px" }}>⛔ Marcar como Inviável</div>
-            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "14px" }}>Removido de TODAS as sugestões até tirado da lista.</div>
-            <div style={{ background: "var(--muted)", borderRadius: "10px", padding: "12px", fontSize: "13px", fontWeight: 700, marginBottom: "10px" }}>{cInv.pac}</div>
+          <div style={{ background: "var(--card)", borderRadius: "var(--radius-xl)", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "380px", width: "100%", padding: "20px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: "var(--weight-black)", fontSize: "var(--text-lg)", marginBottom: "4px" }}>
+              <Ban size={17} style={{ color: "#b45309" }} /> Marcar como Inviável
+            </div>
+            <div style={{ fontSize: "var(--text-sm)", color: "var(--muted-foreground)", marginBottom: "14px" }}>Removido de TODAS as sugestões até tirado da lista.</div>
+            <div style={{ background: "var(--muted)", borderRadius: "var(--radius-md)", padding: "12px", fontSize: "var(--text-md)", fontWeight: "var(--weight-bold)", marginBottom: "10px" }}>{cInv.pac}</div>
             <textarea value={motInv} onChange={e => setMotInv(e.target.value)} placeholder="Motivo (ex: família faltando muito...)" rows={2}
-              style={{ width: "100%", border: "1px solid var(--border)", borderRadius: "10px", padding: "8px 12px", fontSize: "13px", fontFamily: "inherit", resize: "none", marginBottom: "14px", boxSizing: "border-box" }} />
+              style={{ width: "100%", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", padding: "8px 12px", fontSize: "var(--text-sm)", fontFamily: "inherit", resize: "none", marginBottom: "14px", boxSizing: "border-box" }} />
             <div style={{ display: "flex", gap: "8px" }}>
               <button onClick={() => {
                 const nextWa = Object.fromEntries(Object.entries(waMap).filter(([k]) => !k.startsWith(`${cInv.pac}|||`)))
                 sWa(nextWa)
                 sInv([...inv, { paciente: cInv.pac, motivo: motInv, registradoEm: new Date().toLocaleDateString("pt-BR") }])
                 setCInv(null); setMotInv("")
-              }} style={{ padding: "8px 16px", borderRadius: "10px", background: B.navy, color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: "13px" }}>
+              }} style={{ padding: "8px 16px", borderRadius: "var(--radius-md)", background: B.navy, color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: "var(--weight-bold)", fontSize: "var(--text-sm)" }}>
                 Confirmar
               </button>
-              <button onClick={() => { setCInv(null); setMotInv("") }} style={{ flex: 1, padding: "8px 16px", borderRadius: "10px", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+              <button onClick={() => { setCInv(null); setMotInv("") }} style={{ flex: 1, padding: "8px 16px", borderRadius: "var(--radius-md)", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: "var(--weight-semibold)" }}>
                 Cancelar
               </button>
             </div>

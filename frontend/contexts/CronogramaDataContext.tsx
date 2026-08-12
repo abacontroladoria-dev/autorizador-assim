@@ -121,7 +121,7 @@ export interface CronogramaDataContextValue {
   cfg: CfgState
   /** Aceites da Saída de Profissional — compartilhado entre a equipe via tabela saida_aceites */
   statusMap: StatusMap
-  /** statusMap do OcupProfMode — compartilhado via acomp_prof_map */
+  /** statusMap de acompanhamento por profissional — compartilhado via acomp_prof_map */
   profMap: Record<string, string>
   /** Bundles de aceite do OcupPacMode — compartilhado via acomp_pac_bundles */
   pacBundles: AceitePacBundle[]
@@ -141,7 +141,7 @@ export interface CronogramaDataContextValue {
   sCfg: (cfg: CfgState) => void
   /** Grava os aceites da Saída (diff por linha contra saida_aceites). */
   persistStatus: (map: StatusMap) => void
-  /** Grava o statusMap do OcupProfMode (diff contra acomp_prof_map). */
+  /** Grava o statusMap de acompanhamento por profissional (diff contra acomp_prof_map). */
   persistProfMap: (map: Record<string, string>) => void
   /** Grava os bundles de aceite do OcupPacMode (upsert + delete contra acomp_pac_bundles). */
   persistPacBundles: (bundles: AceitePacBundle[]) => void
@@ -170,8 +170,15 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
   profMapRef.current = profMap
   const confRef = useRef<ConfItem[]>([])
   confRef.current = conf
+  const pacBundlesRef = useRef<AceitePacBundle[]>([])
+  pacBundlesRef.current = pacBundles
 
   const hasRealtimeFiredRef = useRef(false)
+  // Evita que o load inicial de profMap/pacBundles/conf (fase 4, async) sobrescreva
+  // com um snapshot antigo do banco um aceite que o usuário já fez em memória
+  // enquanto esse fetch ainda estava em voo (ex.: aceitar uma sugestão em
+  // OcupPacMode antes do loadAcomp() terminar apagava o aceite ao resolver).
+  const hasAcompActedRef = useRef(false)
   const pendingWriteKeys = useRef(new Set<string>())
   const [savedAt, setSavedAt] = useState<string | null>(null)
   const [saveError, setSaveError] = useState<string | null>(null)
@@ -335,7 +342,7 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
             await sb.from("acomp_prof_map").upsert(rows, { onConflict: "id" })
             for (const k of novasProf) remoteProf[k] = legacyProf[k]
           }
-          setProfMap(remoteProf)
+          if (!hasAcompActedRef.current) setProfMap(remoteProf)
         }
 
         // pacBundles
@@ -351,7 +358,7 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
             await sb.from("acomp_pac_bundles").upsert(rows, { onConflict: "id" })
             remoteBundles.push(...novasBundles)
           }
-          setPacBundles(remoteBundles)
+          if (!hasAcompActedRef.current) setPacBundles(remoteBundles)
         }
 
         // conf
@@ -367,7 +374,7 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
             await sb.from("acomp_conf").upsert(rows, { onConflict: "id" })
             remoteConf.push(...novasConf)
           }
-          setConf(remoteConf)
+          if (!hasAcompActedRef.current) setConf(remoteConf)
         }
       } catch (e) {
         const msg = (e as Error).message || ""
@@ -490,8 +497,9 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
     })()
   }, [])
 
-  // Grava statusMap do OcupProfMode por diff de linhas
+  // Grava statusMap de acompanhamento por profissional, por diff de linhas
   const persistProfMap = useCallback((next: Record<string, string>) => {
+    hasAcompActedRef.current = true
     const prev = profMapRef.current
     setProfMap(next)
     try { localStorage.setItem(SK_PROF_LEGACY, JSON.stringify(next)) } catch {}
@@ -526,6 +534,9 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
 
   // Grava bundles de aceite do OcupPacMode (upsert dos alterados, delete dos removidos)
   const persistPacBundles = useCallback((next: AceitePacBundle[]) => {
+    hasAcompActedRef.current = true
+    // Capturado ANTES do setState — é o estado que estava persistido, base do diff.
+    const prev = pacBundlesRef.current
     setPacBundles(next)
     try { localStorage.setItem(SK_BUNDLES_LEGACY, JSON.stringify(next)) } catch {}
 
@@ -537,16 +548,19 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
         const { data: { user } } = await sb.auth.getUser()
         const nowIso = new Date().toISOString()
 
-        // Busca ids existentes para calcular diff
+        // Busca ids existentes para calcular o que deletar (limpeza de órfãos).
         const { data: existing } = await sb.from("acomp_pac_bundles").select("id")
         const existingIds = new Set((existing ?? []).map((r: { id: string }) => r.id))
         const nextIds = new Set(next.map(b => b.id))
 
-        const toUpsert = next.filter(b => {
-          if (!existingIds.has(b.id)) return true
-          // Always upsert — simpler than deep compare
-          return true
-        })
+        // Só faz upsert dos bundles NOVOS ou de fato ALTERADOS (identidade de
+        // referência: os fluxos atualizam de forma imutável, reusando objetos
+        // inalterados). Sem isso, cada persist reescrevia atualizado_por/atualizado_em
+        // de TODAS as linhas, transformando atualizado_por num carimbo coletivo do
+        // último a sincronizar — inútil para auditoria (a autoria real vive em
+        // dados->>'implantadoPor').
+        const prevById = new Map(prev.map(b => [b.id, b]))
+        const toUpsert = next.filter(b => prevById.get(b.id) !== b)
         const toDelete = [...existingIds].filter(id => !nextIds.has(id))
 
         if (toUpsert.length) {
@@ -565,8 +579,12 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
     })()
   }, [])
 
-  // Grava itens confirmados — apenas insere novos (não deleta)
+  // Grava itens confirmados — upsert de tudo (reflete updates, ex.: reservaPendente
+  // virando implantada) e apaga da tabela os que saíram da lista (ex.: bundle
+  // cancelado/recusado desfazendo uma Reserva Pendente) — mesma estratégia de
+  // persistPacBundles, para não deixar linhas órfãs que ressuscitam no próximo load.
   const persistConf = useCallback((next: ConfItem[]) => {
+    hasAcompActedRef.current = true
     const prev = confRef.current
     setConf(next)
     try { localStorage.setItem(SK_CONF_LEGACY, JSON.stringify(next)) } catch {}
@@ -574,17 +592,26 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
     if (acompTableMissing) return
 
     const prevIds = new Set(prev.map(c => c.id))
-    const novas = next.filter(c => c.id && !prevIds.has(c.id))
-    if (!novas.length) return
+    const nextIds = new Set(next.map(c => c.id))
+    const toUpsert = next.filter(c => c.id)
+    const toDelete = [...prevIds].filter(id => !nextIds.has(id))
+    if (!toUpsert.length && !toDelete.length) return
 
     ;(async () => {
       try {
         const sb = getSupabaseClient()
         const { data: { user } } = await sb.auth.getUser()
         const nowIso = new Date().toISOString()
-        const rows = novas.map(c => ({ id: c.id, dados: c, atualizado_por: user?.id ?? null, atualizado_em: nowIso }))
-        const { error } = await sb.from("acomp_conf").upsert(rows, { onConflict: "id" })
-        if (error) throw error
+
+        if (toUpsert.length) {
+          const rows = toUpsert.map(c => ({ id: c.id, dados: c, atualizado_por: user?.id ?? null, atualizado_em: nowIso }))
+          const { error } = await sb.from("acomp_conf").upsert(rows, { onConflict: "id" })
+          if (error) throw error
+        }
+        if (toDelete.length) {
+          const { error } = await sb.from("acomp_conf").delete().in("id", toDelete)
+          if (error) throw error
+        }
       } catch (e) {
         const msg = (e as Error).message || ""
         if (isAcompTableError(msg)) { acompTableMissing = true; setSaveError(ACOMP_OFFLINE_MSG) }

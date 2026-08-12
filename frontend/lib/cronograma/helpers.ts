@@ -1,5 +1,30 @@
-import { B, HORAS_GRID, normTxt } from "./constants"
-import type { Sugestao } from "@/types/cronograma"
+import { ADMIN_ONLY, B, EXIB_ID, EXIB_NOME, HORAS_GRID, PROFISSIONAIS_SEM_CAPACIDADE_LIVRE, normTxt } from "./constants"
+
+const PROFISSIONAIS_SEM_CAPACIDADE_LIVRE_NORM = new Set([...PROFISSIONAIS_SEM_CAPACIDADE_LIVRE].map(normTxt))
+import type { CsvRow, Sugestao } from "@/types/cronograma"
+
+// ─── ESPECIALIDADE REAL (Aplicador ABA AE/HS) ────────────────────────────────
+
+/**
+ * Aplicador ABA (AE)/(HS): TERAPIA_TO_ESP assume um padrão (AE → "Psicologia
+ * ABA", HS → "Habilidades Sociais"), mas esse padrão só vale quando o paciente
+ * NÃO está autorizado para Arteterapia/Habilidades Sociais — a especialidade
+ * real para contagem de oferta (gap aut × of) é a que está de fato gravada na
+ * "Terapia Exibição" daquela sessão, não a terapia de ação (mesma regra de
+ * detectarInconsistencias em inconsistencias.ts). Sem isso, uma sessão de AE já
+ * implantada como Arteterapia infla "Psicologia ABA" e nunca fecha o gap de
+ * Arteterapia; o espelho também vale: HS implantado como Psicologia ABA (não
+ * autorizado) não deveria inflar "Habilidades Sociais".
+ */
+export function espRealPorExibicao(terapia: string, terapiaExibicao: string, espPadrao: string): string {
+  if (terapia === "Aplicador ABA (AE)") {
+    return terapiaExibicao === EXIB_NOME[EXIB_ID.ARTETERAPIA_ABA] ? "Arteterapia" : "Psicologia ABA"
+  }
+  if (terapia === "Aplicador ABA (HS)") {
+    return terapiaExibicao === EXIB_NOME[EXIB_ID.HS_ABA] ? "Habilidades Sociais" : "Psicologia ABA"
+  }
+  return espPadrao
+}
 
 // ─── TEMPO ────────────────────────────────────────────────────────────────────
 
@@ -53,6 +78,16 @@ export function fmtDate(d: Date): string {
   return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`
 }
 
+/** Número → "R$ 1.234,56" */
+export function fmtReal(v: number): string {
+  return v.toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+}
+
+/** "Segunda-feira" → "Segunda" */
+export function diaCurto(dia: string): string {
+  return dia.replace("-feira", "")
+}
+
 const PARTS = new Set(["de", "da", "do", "dos", "das", "e", "van", "von"])
 
 /** Nome completo → abreviado ("João Carlos de Lima" → "João Carlos") */
@@ -101,10 +136,34 @@ export const turnoNome: Record<"manha" | "tarde", string> = {
   tarde: "Tarde",
 }
 
+/** Remove os horários "Livre" de PROFISSIONAIS_SEM_CAPACIDADE_LIVRE
+ *  (constants.ts) — usado por TODAS as ferramentas que tratam "Livre" como
+ *  capacidade/oportunidade a oferecer (as duas abas de Ocupar Profissionais
+ *  Disponíveis, Simulação de Novo Prestador). Mantém as sessões "Agendado"
+ *  desses profissionais intactas — o gap dos pacientes que já são atendidos
+ *  por eles não pode ser afetado, só a leitura de "quanto espaço livre eles
+ *  têm pra crescer". Comparação via normTxt (não Set.has direto): "Profissional"
+ *  na grade é o nome COMPLETO, então uma comparação exata sensível a
+ *  acento/caixa nunca batia — este bug fazia o filtro nunca surtir efeito. */
+export function filtrarCapacidadeLivreReservada(cRows: CsvRow[]): CsvRow[] {
+  if (!PROFISSIONAIS_SEM_CAPACIDADE_LIVRE.size) return cRows
+  return cRows.filter(r => !(r["Status do Agendamento"] === "Livre" && PROFISSIONAIS_SEM_CAPACIDADE_LIVRE_NORM.has(normTxt(r["Profissional"]))))
+}
+
 // ─── LAUDO / ALTA ─────────────────────────────────────────────────────────────
 
 export function isSupervisaoAba(terapia: string | null | undefined): boolean {
   return normTxt(terapia) === "supervisao aba"
+}
+
+const ADMIN_ONLY_NORM = new Set([...ADMIN_ONLY].map(t => normTxt(t)))
+
+// Qualquer terapia administrativa (ver ADMIN_ONLY em constants.ts) — sessão sem
+// presença do paciente, nunca tem linha própria em fila_autorizacoes. Usado pra
+// saber quando uma dessas deve herdar o status geral do dia em vez de aparecer
+// sempre como "futuro" mesmo em dias já passados.
+export function isTerapiaAdministrativa(terapia: string | null | undefined): boolean {
+  return ADMIN_ONLY_NORM.has(normTxt(terapia))
 }
 
 export function isAltaAtivaValor(v: unknown): boolean {
@@ -185,6 +244,18 @@ export function waKey(s: Sugestao): string {
   return `${s.pac}|||${s.prof}|||${s.dia}|||${s.hora}`
 }
 
+// `slotReservado` (Saída de Profissional) grava 1+ movimentos como
+// "prof|||dia|||hora" separados por ";;" quando há mais de um (ver
+// buildSlotReservado em SaidaCronModal.tsx). Sempre isole o primeiro
+// movimento via ";;" ANTES de separar por "|||" — fazer só ".split(\"|||\")"
+// direto na string inteira faz o campo "hora" vazar o profissional do
+// próximo movimento (ex.: "09:20;;Nome Do Próximo Profissional").
+export function parseSlotReservado(slotReservado: string | null | undefined): { prof: string; dia: string; hora: string } {
+  const primeiro = (slotReservado || "").split(";;")[0] || ""
+  const [prof = "", dia = "", hora = ""] = primeiro.split("|||")
+  return { prof, dia, hora }
+}
+
 // ─── FORMATAÇÃO OCUPAÇÃO ─────────────────────────────────────────────────────
 
 export function fmtH(h: number | string): string {
@@ -226,9 +297,9 @@ export function cleanTxt(v: unknown): string {
 
 // ─── SEMANA DE REFERÊNCIA ─────────────────────────────────────────────────────
 
-export function getRefWeek(): { inicio: string; fim: string; label: string } {
-  const hoje = new Date()
-  const nm = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1)
+/** 1ª segunda-sexta de um mês (1-indexado) específico — base de getRefWeek() e do seletor de mês da Previsão de Receitas (getRefWeekDoMes). */
+export function getRefWeekDoMes(ano: number, mes: number): { inicio: string; fim: string; label: string } {
+  const nm = new Date(ano, mes - 1, 1)
   while (nm.getDay() !== 1) nm.setDate(nm.getDate() + 1)
   const fri = new Date(nm)
   fri.setDate(fri.getDate() + 4)
@@ -237,5 +308,55 @@ export function getRefWeek(): { inicio: string; fim: string; label: string } {
     fim: fri.toISOString().slice(0, 10),
     label: `${fmtDate(nm)} a ${fmtDate(fri)}`,
   }
+}
+
+export function getRefWeek(): { inicio: string; fim: string; label: string } {
+  const hoje = new Date()
+  const proximoMes = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1)
+  return getRefWeekDoMes(proximoMes.getFullYear(), proximoMes.getMonth() + 1)
+}
+
+/**
+ * Janela de carregamento exclusiva da Ocupação de Paciente: dia 1 ao dia 7 do
+ * mês seguinte (7 dias corridos, uma ocorrência de cada dia da semana).
+ *
+ * Ao contrário de getRefWeek() (1ª segunda-sexta INTEIRAMENTE dentro do mês
+ * seguinte — proposital para amostragem estatística "limpa" em Previsão de
+ * Receitas, Comparativo de Sessões etc.), esta janela existe para decidir
+ * quais horários livres existem de fato para IMPLANTAÇÃO em Ocupação de
+ * Paciente. A implantação cria uma série semanal recorrente a partir do slot
+ * escolhido (ver calcularDataInicial em services/tita/payload.ts); se o mês
+ * seguinte não começa numa segunda-feira, getRefWeek() pula a semana "quebrada"
+ * inteira — mesmo os dias dela que já são do mês novo — e a 1ª ocorrência
+ * daquele dia da semana no mês vira inalcançável por este fluxo (achado real:
+ * setembro/2026 começa numa terça, getRefWeek() só carrega 07/09–11/09, e a
+ * quinta-feira 03/09 nunca aparecia como sugestão, apesar de livre no banco).
+ *
+ * 7 dias corridos a partir do dia 1 garante, sem duplicar nenhum dia da
+ * semana, pegar a primeira ocorrência de cada um já dentro do mês novo.
+ */
+export function getJanelaOcupacaoPaciente(): { inicio: string; fim: string; label: string } {
+  const hoje = new Date()
+  const inicio = new Date(hoje.getFullYear(), hoje.getMonth() + 1, 1)
+  const fim = new Date(inicio)
+  fim.setDate(fim.getDate() + 6)
+  return {
+    inicio: inicio.toISOString().slice(0, 10),
+    fim: fim.toISOString().slice(0, 10),
+    label: `${fmtDate(inicio)} a ${fmtDate(fim)}`,
+  }
+}
+
+/** "Julho de 2026" — mesmo formato usado por mesReferenciaDeDatas em faturamentoProjecao.ts, mas a partir de um ano/mês explícito (seletor de mês), não derivado das datas dos dados carregados. */
+export function labelMesAno(ano: number, mes: number): string {
+  const label = new Intl.DateTimeFormat("pt-BR", { month: "long", year: "numeric" }).format(new Date(ano, mes - 1, 1))
+  return label.charAt(0).toUpperCase() + label.slice(1)
+}
+
+/** Dia 1 ao último dia de um mês (1-indexado), formato ISO — usado para buscar as sessões REAIS do mês inteiro (não a amostra de uma semana), ex.: Deduções por falta na Previsão de Receitas. */
+export function mesInteiroRange(ano: number, mes: number): { inicio: string; fim: string } {
+  const inicio = new Date(ano, mes - 1, 1)
+  const fim = new Date(ano, mes, 0)
+  return { inicio: inicio.toISOString().slice(0, 10), fim: fim.toISOString().slice(0, 10) }
 }
 

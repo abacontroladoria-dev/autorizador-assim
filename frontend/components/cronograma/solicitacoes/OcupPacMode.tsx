@@ -1,17 +1,20 @@
 "use client"
 
 import * as XLSX from "xlsx"
+import toast from "react-hot-toast"
 import { type CSSProperties, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import {
-  ABA_EXIB_PSICO_NAMES, B, DIAS_LIST, DIAS_ORD, EXCLUIR_OCUP, EXIB_NOME,
+  ABA_EXIB_PSICO_NAMES, B, DIAS_LIST, DIAS_ORD, EXCLUIR_OCUP, EXIB_ID, EXIB_NOME,
   HORAS_GRID, PACS_ADMIN, TERAPIA_TO_ESP, isProfBloqueadoTemp,
 } from "@/lib/cronograma/constants"
 import {
-  buildCronoUnitMeta, fm, fmtName, isLaudoComAlta, pm,
+  buildCronoUnitMeta, espRealPorExibicao, fm, fmtName, isLaudoComAlta, pm,
   shouldShowSessionUnit, unidadeBadgeText,
 } from "@/lib/cronograma/helpers"
 import { UnitHeaderBadges, CronoGlobalUnitBadge } from "@/components/cronograma/ui/UnitBadges"
+import { ConfirmarImplantacaoModal } from "./ConfirmarImplantacaoModal"
 import type { CsvRow, LaudoRow, CfgState, RecItem, InvItem } from "@/types/cronograma"
+import type { AceiteSessao } from "@/types/acompanhamento"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -19,11 +22,11 @@ import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 type Estrategia = "S1" | "S2" | "S3"
 type Status     = "acompanhamento" | "inviavel"
 
-interface VComp { tP: string; prof: string; hora: string }
-interface ProfAlt { tP: string; prof: string; unidade: string }
+interface VComp { tP: string; prof: string; hora: string; csvGradeId: string }
+interface ProfAlt { tP: string; prof: string; unidade: string; csvGradeId: string }
 
 interface EspAlt {
-  esp: string; tP: string; prof: string; unidade: string
+  esp: string; tP: string; prof: string; unidade: string; csvGradeId: string
   profAlts: ProfAlt[]
   vComp: VComp[]
   vCompAlts: Record<string, VComp[]>
@@ -33,7 +36,7 @@ interface Sugestao {
   id: string
   esp: string
   tP: string
-  dia: string; hora: string; prof: string; unidade: string
+  dia: string; hora: string; prof: string; unidade: string; csvGradeId: string
   tipo: "adjacente" | "dia-novo"
   vComp: VComp[]
   vCompAlts: Record<string, VComp[]>
@@ -43,16 +46,17 @@ interface Sugestao {
 
 interface GapInfo { esp: string; aut: number; of: number; dif: number }
 
-interface AceiteSessao {
-  dia: string; hora: string; tP: string; prof: string; unidade: string
-}
-
 interface AceitePacBundle {
   id: string; pac: string; ts: number; origem: "ocp-paciente"
   sessoes: AceiteSessao[]
-  status: "pendente" | "confirmado" | "recusado" | "inviavel"
+  // "removido_tita": série excluída direto na TiTa e detectada pela reconciliação.
+  // Mantém em sincronia com o tipo canônico em types/acompanhamento.ts.
+  status: "pendente" | "confirmado" | "recusado" | "inviavel" | "removido_tita"
   inviavelSlots: string[]
   motivo?: string
+  // Auditoria da implantação (imutável) — ver types/acompanhamento.ts.
+  implantadoPor?: string
+  implantadoPorEmail?: string
 }
 
 // ─── Metadata ─────────────────────────────────────────────────────────────────
@@ -94,6 +98,22 @@ const EXCLUIR_GAPS  = new Set([
 ])
 // Terapias vedadas para ASSIM Saúde, salvo exceção judicial LIMINAR com gap > 0
 const ASSIM_RESTR_TERAPIAS = new Set(["Fisioterapia Aquática", "Equoterapia"])
+
+// Aplicador ABA (AE)/(HS): a especialidade do laudo que determina se o paciente
+// está autorizado para Arteterapia/Habilidades Sociais (não confundir com a
+// especialidade padrão de TERAPIA_TO_ESP, usada só pra pontuar o déficit da
+// sugestão). Mesma regra de negócio de detectarInconsistencias
+// (inconsistencias.ts) — Gratuidade nunca oferta; ASSIM só com qtd autorizada
+// > 1; demais convênios sempre elegíveis, com exibição condicional (ver
+// terapiaExibicaoOverride em TodasSugestoesModal e regraFixaExibicaoAeHs).
+const AE_HS_LAUDO_ESP: Record<string, string> = {
+  "Aplicador ABA (AE)": "Arteterapia",
+  "Aplicador ABA (HS)": "Habilidades Sociais",
+}
+const AE_HS_EXIB_ID: Record<string, number> = {
+  "Aplicador ABA (AE)": EXIB_ID.ARTETERAPIA_ABA,
+  "Aplicador ABA (HS)": EXIB_ID.HS_ABA,
+}
 const SK         = "aba_ocup_pac_status_v1"
 const SK_ACEITES = "aba_ocup_pac_aceites_v1"
 const DIAS_UTIL  = DIAS_LIST.slice(0, 5)
@@ -106,7 +126,18 @@ const DIA_ABR: Record<string, string> = {
 
 function hiStr(r: CsvRow): string { return String(r.HI_str || "") }
 function hiMin(r: CsvRow): number { return Number(r.HI || 0) }
-function rowUnid(r: CsvRow): string { return String(r.Unidade || "Desconhecida") }
+function rowUnid(r: CsvRow): string {
+  const unidade = String(r.Unidade || "").trim()
+  // "Notificação Prévia" (paciente-teste da homologação TiTa) usa salas que não
+  // resolvem para uma unidade real — "Sala Teste" faz exU() retornar a string
+  // "Desconhecida" (não vazio). Sem forçar Realengo aqui, pacUnidades vira
+  // {"Desconhecida"} e nenhum horário Livre (todos em unidades reais) casa no
+  // filtro de unidade de buildSugestoes → zero sugestões. Cobre vazio E "Desconhecida".
+  if (r["Nome Favorecido"] === "Notificação Prévia" && (!unidade || unidade === "Desconhecida")) {
+    return "Realengo"
+  }
+  return unidade || "Desconhecida"
+}
 
 // Normaliza variações de encoding comuns entre os dois CSVs (apóstrofo curvo vs reto,
 // espaços duplos, NFC vs NFD) para permitir junção tolerante de nomes.
@@ -126,8 +157,21 @@ function adjHs(hora: string): string[] {
   return [hi + 40, hi - 40].filter(v => v >= 0).map(fm)
 }
 
+// Sugestões (ainda não implantadas): não há terapia_exibicao real gravada ainda
+// pra AE/HS (depende de laudo+convênio, resolvido só na implantação — ver
+// terapiaExibicaoIdPorRegraFixa em services/tita/mappings.ts), então só o
+// Grupo 1 (sempre "Psicologia ABA") pode ser adiantado com segurança aqui.
 function tExib(tP: string): string | undefined {
   return ABA_EXIB_PSICO_NAMES.has(tP) ? EXIB_NOME[2271] : undefined
+}
+
+// Sessões já existentes (Agendado): usa a terapia_exibicao_nome real, já
+// sincronizada da TiTa para aquela sessão — mostrada só quando difere da
+// terapia de ação (ex.: "Aplicador ABA (AE)" exibindo "Arteterapia (Psicologia
+// ABA)"); quando são iguais (a maioria das terapias) não repete a informação.
+function tExibReal(tP: string, terapiaExibicaoNome: string | number | null | undefined): string | undefined {
+  const te = String(terapiaExibicaoNome || "").trim()
+  return te && te !== tP ? te : undefined
 }
 
 function countSlots(rows: CsvRow[]): number {
@@ -196,6 +240,13 @@ function buildSugestoes(
     if (!dayHours[d]) dayHours[d] = new Set()
     dayHours[d].add(canonical)
   }
+  // CRON-008: slots já reservados (implantação imediata) por OUTROS pacientes — vagas
+  // ainda "Livre" no CSV mas comprometidas, não podem ser sugeridas para ninguém mais.
+  const slotsReservadosOutros = new Set<string>()
+  for (const bundle of aceites) {
+    if (bundle.pac === pac || bundle.status !== "confirmado") continue
+    for (const s of bundle.sessoes) slotsReservadosOutros.add(`${s.prof}|||${s.dia}|||${s.hora}`)
+  }
   // Vagas comprometidas: sessões aguardando ou confirmadas que ainda não estão no agend
   for (const bundle of aceites) {
     if (bundle.pac !== pac) continue
@@ -248,12 +299,28 @@ function buildSugestoes(
   const effDif = (e: string, extra = 0) => (espDif[e] ?? 0) - (proposedOf[e] ?? 0) - extra
 
   const isAssimSaude = /assim/i.test(conv)
+  const isGratuidade = /gratuidade/i.test(conv)
+  // Aplicador ABA (AE)/(HS): nunca oferta pra Gratuidade; ASSIM só com qtd
+  // autorizada (laudo de Arteterapia/Habilidades Sociais) > 1 — mesmo limiar de
+  // detectarInconsistencias. Demais convênios: sempre elegível (exibição
+  // resolvida depois, na implantação).
+  function aeHsBloqueado(terapia: string): boolean {
+    const laudoEsp = AE_HS_LAUDO_ESP[terapia]
+    if (!laudoEsp) return false
+    if (isGratuidade) return true
+    if (isAssimSaude) return (gapMap[`${pac}|||${laudoEsp}`]?.aut ?? 0) <= 1
+    return false
+  }
   const seenFree = new Set<string>()
   const allFreeRows: Array<CsvRow & { _hMin: number; _hora: string }> = []
   for (const r of cRows) {
     if (r["Status do Agendamento"] !== "Livre") continue
     if (isProfBloqueadoTemp(r.Profissional)) continue
-    if (EXCLUIR_OCUP.has(r.Terapia)) continue
+    // Aplicador ABA (AE) é a única exceção liberada de EXCLUIR_OCUP aqui — as
+    // demais (Coordenador de Caso, Supervisão ABA etc.) continuam fora da oferta
+    // de sugestões. Ver AE_HS_LAUDO_ESP acima para a condição real de elegibilidade.
+    if (EXCLUIR_OCUP.has(r.Terapia) && r.Terapia !== "Aplicador ABA (AE)") continue
+    if (aeHsBloqueado(r.Terapia)) continue
     const esp = TERAPIA_TO_ESP[r.Terapia]
     if (!esp || !espDif[esp]) continue
     // ASSIM Saúde: Fisioterapia Aquática e Equoterapia só se o paciente for LIMINAR (gap > 0 já garantido pelo check acima)
@@ -263,6 +330,7 @@ function buildSugestoes(
     if (!isTurnoOk(h)) continue
     const canonical = fm(h)
     if (!canonical) continue
+    if (slotsReservadosOutros.has(`${r.Profissional}|||${r["Dia da Semana"]}|||${canonical}`)) continue
     const dk = `${r["Dia da Semana"]}|||${h}|||${r.Terapia}|||${r.Profissional}`
     if (seenFree.has(dk)) continue
     seenFree.add(dk)
@@ -323,16 +391,19 @@ function buildSugestoes(
       // causaria duas sessões consecutivas em unidades diferentes (viola R5.4).
       const profAlts = altRows
         .filter(r => !hasDay ? rowUnid(r) === unid : true)
-        .map(r => ({ tP: r.Terapia, prof: r.Profissional, unidade: rowUnid(r) }))
+        // Invariante: toda linha aqui vem de cRows (Status=Livre), sempre com CsvGradeId
+        // preenchido — a grade é sempre carregada via buscarGradeComoCSVRows.
+        .map(r => ({ tP: r.Terapia, prof: r.Profissional, unidade: rowUnid(r), csvGradeId: r.CsvGradeId! }))
       if (!hasDay) {
         const seenComp = new Set<string>()
-        const compRows: Array<{ tP: string; prof: string; hora: string }> = []
+        const compRows: Array<{ tP: string; prof: string; hora: string; csvGradeId: string }> = []
         for (const r of cRows) {
           if (r["Status do Agendamento"] !== "Livre") continue
           if (isProfBloqueadoTemp(r.Profissional)) continue
           if (r["Dia da Semana"] !== dia) continue
           if (rowUnid(r) !== unid) continue
-          if (EXCLUIR_OCUP.has(r.Terapia)) continue
+          if (EXCLUIR_OCUP.has(r.Terapia) && r.Terapia !== "Aplicador ABA (AE)") continue
+          if (aeHsBloqueado(r.Terapia)) continue
           const compEsp = TERAPIA_TO_ESP[r.Terapia]
           // Desconta 1 do esp principal, pois ele já será adicionado neste slot.
           if (!compEsp || effDif(compEsp, compEsp === esp ? 1 : 0) <= 0) continue
@@ -343,7 +414,7 @@ function buildSugestoes(
           const ck = `${r.Terapia}|||${r.Profissional}|||${cHora}`
           if (seenComp.has(ck)) continue
           seenComp.add(ck)
-          compRows.push({ tP: r.Terapia, prof: r.Profissional, hora: cHora })
+          compRows.push({ tP: r.Terapia, prof: r.Profissional, hora: cHora, csvGradeId: r.CsvGradeId! })
         }
         if (compRows.length === 0) return null
         // Ordena por déficit desc + taxa de preenchimento asc para que g[0] seja sempre
@@ -364,7 +435,8 @@ function buildSugestoes(
           byHora[c.hora].push(c)
         }
         return {
-          esp, tP: primaryRow.Terapia, prof: primaryRow.Profissional, unidade: unid, profAlts,
+          esp, tP: primaryRow.Terapia, prof: primaryRow.Profissional, unidade: unid,
+          csvGradeId: primaryRow.CsvGradeId!, profAlts,
           vComp: Object.values(byHora).map(g => g[0]),
           vCompAlts: byHora,
         }
@@ -380,11 +452,15 @@ function buildSugestoes(
         const [vPrimary, ...vAlts] = validRows
         return {
           esp, tP: vPrimary.Terapia, prof: vPrimary.Profissional, unidade: existingUnid,
-          profAlts: vAlts.map(r => ({ tP: r.Terapia, prof: r.Profissional, unidade: rowUnid(r) })),
+          csvGradeId: vPrimary.CsvGradeId!,
+          profAlts: vAlts.map(r => ({ tP: r.Terapia, prof: r.Profissional, unidade: rowUnid(r), csvGradeId: r.CsvGradeId! })),
           vComp: [], vCompAlts: {},
         }
       }
-      return { esp, tP: primaryRow.Terapia, prof: primaryRow.Profissional, unidade: unid, profAlts, vComp: [], vCompAlts: {} }
+      return {
+        esp, tP: primaryRow.Terapia, prof: primaryRow.Profissional, unidade: unid,
+        csvGradeId: primaryRow.CsvGradeId!, profAlts, vComp: [], vCompAlts: {},
+      }
     }
 
     // Encontra a esp default (maior gap com dados válidos) e coleta espAlts.
@@ -407,6 +483,7 @@ function buildSugestoes(
         id: `${dia}|||${hora}|||${defaultEntry.esp}`,
         esp: defaultEntry.esp, tP: defaultEntry.tP,
         dia, hora, prof: defaultEntry.prof, unidade: defaultEntry.unidade,
+        csvGradeId: defaultEntry.csvGradeId,
         tipo: "adjacente", vComp: [], vCompAlts: {},
         profAlts: defaultEntry.profAlts,
         espAlts: altEntries,
@@ -417,6 +494,7 @@ function buildSugestoes(
         id: `${dia}|||${hora}|||${defaultEntry.esp}`,
         esp: defaultEntry.esp, tP: defaultEntry.tP,
         dia, hora, prof: defaultEntry.prof, unidade: defaultEntry.unidade,
+        csvGradeId: defaultEntry.csvGradeId,
         tipo: "dia-novo",
         vComp: defaultEntry.vComp, vCompAlts: defaultEntry.vCompAlts,
         profAlts: defaultEntry.profAlts,
@@ -443,36 +521,36 @@ function buildSugestoes(
     return true
   })
 
-  // R5.1 para dia-novo: um bloco contíguo por dia — mantém apenas o de maior gap.
-  const diaNovoByDay: Record<string, Sugestao> = {}
-  const finalResult: Sugestao[] = []
-  for (const s of slotFiltered) {
-    if (s.tipo !== "dia-novo") { finalResult.push(s); continue }
-    const existing = diaNovoByDay[s.dia]
-    if (!existing || (espDif[s.esp] ?? 0) > (espDif[existing.esp] ?? 0)) {
-      diaNovoByDay[s.dia] = s
-    }
-  }
-  return [...finalResult, ...Object.values(diaNovoByDay)]
+  // Nenhum corte por quantidade: todas as sugestões válidas (adjacente e dia-novo)
+  // são retornadas — o único descarte por slot já ocorreu acima via `slotFinal`,
+  // que evita duas sugestões diferentes disputando o mesmo dia+hora.
+  return slotFiltered
 }
 
 // ─── TodasSugestoesModal ──────────────────────────────────────────────────────
 
 type AcaoDiretaType = "aceitar" | "recusar" | "inviavel"
 interface PendingAcaoInfo {
-  sugestao: Sugestao; hora: string; tP: string; prof: string; unidade: string; acao: AcaoDiretaType
+  sugestao: Sugestao; hora: string; tP: string; prof: string; unidade: string; csvGradeId: string; acao: AcaoDiretaType
 }
+
+// Paciente-teste oficial da homologação TiTa (habilitado como paciente normal
+// só nesta página — ver PACS_ADMIN_OCUP_PAC abaixo).
+const PACIENTE_TESTE_TITA = "Notificação Prévia"
 
 interface TodasSugestoesModalProps {
   pac: string; conv: string; cRows: CsvRow[]; sugestoes: Sugestao[]; pacGaps: GapInfo[]; pacAllEsp: GapInfo[]
   stOf: (s: Sugestao) => Status | null
   setSt: (s: Sugestao, st: Status | null) => void
   estrategia: Estrategia; setEstrategia: (e: Estrategia) => void
-  onAceitar: (bundle: { sessoes: AceiteSessao[] }) => void
+  onAceitar: (bundle: { sessoes: AceiteSessao[]; beforeCount: number }) => void
   onInviavel: (sessoes: AceiteSessao[], motivo: string) => void
   onAcaoDireta: (sessoes: AceiteSessao[], status: "pendente" | "recusado" | "inviavel", motivo?: string) => void
   recusadasSet: Set<string>
   onUndoRecusa: (dia: string, hora: string, tP: string, prof: string) => void
+  /** CRON-008: sessões já reservadas (implantação imediata) deste paciente — exibidas
+   * diretamente na grade como "Reservado", fora do fluxo normal de sugestões. */
+  reservasConfirmadas: AceiteSessao[]
 }
 
 export interface TodasSugestoesModalHandle {
@@ -483,7 +561,7 @@ export interface TodasSugestoesModalHandle {
 const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoesModalProps>(function TodasSugestoesModal({
   pac, conv, cRows, sugestoes, pacGaps, pacAllEsp, stOf, setSt,
   estrategia, setEstrategia, onAceitar, onInviavel, onAcaoDireta,
-  recusadasSet, onUndoRecusa,
+  recusadasSet, onUndoRecusa, reservasConfirmadas,
 }: TodasSugestoesModalProps, ref: React.Ref<TodasSugestoesModalHandle>) {
   const [selIdx, setSelIdx]         = useState<Record<string, Record<string, number>>>({})
   const [profSelIdx, setProfSelIdx] = useState<Record<string, number>>({})
@@ -566,13 +644,16 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
   function getActiveEspData(s: Sugestao): EspAlt {
     const idx = espSelIdx[s.id] ?? 0
     if (idx > 0 && s.espAlts[idx - 1]) return s.espAlts[idx - 1]
-    return { esp: s.esp, tP: s.tP, prof: s.prof, unidade: s.unidade, profAlts: s.profAlts, vComp: s.vComp, vCompAlts: s.vCompAlts }
+    return {
+      esp: s.esp, tP: s.tP, prof: s.prof, unidade: s.unidade, csvGradeId: s.csvGradeId,
+      profAlts: s.profAlts, vComp: s.vComp, vCompAlts: s.vCompAlts,
+    }
   }
 
-  function getActiveEntry(s: Sugestao): { tP: string; prof: string; unidade: string } {
+  function getActiveEntry(s: Sugestao): { tP: string; prof: string; unidade: string; csvGradeId: string } {
     const ed  = getActiveEspData(s)
     const idx = profSelIdx[s.id] ?? 0
-    if (idx === 0 || !ed.profAlts[idx - 1]) return { tP: ed.tP, prof: ed.prof, unidade: ed.unidade }
+    if (idx === 0 || !ed.profAlts[idx - 1]) return { tP: ed.tP, prof: ed.prof, unidade: ed.unidade, csvGradeId: ed.csvGradeId }
     return ed.profAlts[idx - 1]
   }
 
@@ -582,6 +663,21 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
       const alts = ed.vCompAlts[v.hora] || [v]
       return alts[selIdx[s.id]?.[v.hora] ?? 0] ?? v
     })
+  }
+
+  // Aplicador ABA (AE)/(HS): resolve o terapia_exibicao_id aqui (cliente) porque
+  // depende de laudo + convênio, que só existem no navegador — o servidor recebe
+  // o valor já pronto via AceiteSessao.terapiaExibicaoOverride (ver
+  // confirmarImplantacao → /api/tita/confirmar-agendamento → prepararAgendamento).
+  // Mesmo limiar de negócio de detectarInconsistencias (inconsistencias.ts) e do
+  // gate de elegibilidade em buildSugestoes (aeHsBloqueado): ASSIM só com qtd > 1.
+  function terapiaExibicaoOverride(tP: string): number | undefined {
+    const laudoEsp = AE_HS_LAUDO_ESP[tP]
+    if (!laudoEsp) return undefined
+    const isAssim = /assim/i.test(conv)
+    const qtd = pacAllEsp.find(g => g.esp === laudoEsp)?.aut ?? 0
+    const limiar = isAssim ? 1 : 0
+    return qtd > limiar ? AE_HS_EXIB_ID[tP] : EXIB_ID.PSICOLOGIA_ABA
   }
 
   function buildSelectedSessoes(): AceiteSessao[] {
@@ -597,13 +693,13 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
         const vc = getActiveVComps(s).find(v => v.hora === hora)
         if (!vc) continue
         const ae = getActiveEntry(s)
-        sessoes.push({ dia: s.dia, hora, tP: vc.tP, prof: vc.prof, unidade: ae.unidade })
+        sessoes.push({ dia: s.dia, hora, tP: vc.tP, prof: vc.prof, unidade: ae.unidade, csvGradeId: vc.csvGradeId, terapiaExibicaoOverride: terapiaExibicaoOverride(vc.tP) })
       } else {
         const s = sugestoes.find(x => x.id === id)
         if (!s || stOf(s) === "inviavel") continue
         const ae = getActiveEntry(s)
         if (!isVCompExcluded(s.id, s.hora)) {
-          sessoes.push({ dia: s.dia, hora: s.hora, tP: ae.tP, prof: ae.prof, unidade: ae.unidade })
+          sessoes.push({ dia: s.dia, hora: s.hora, tP: ae.tP, prof: ae.prof, unidade: ae.unidade, csvGradeId: ae.csvGradeId, terapiaExibicaoOverride: terapiaExibicaoOverride(ae.tP) })
         }
       }
     }
@@ -613,8 +709,10 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
   function handleAceitar() {
     const sessoes = buildSelectedSessoes()
     if (!sessoes.length) return
-    onAceitar({ sessoes })
-    setSelectedIds(new Set())
+    // CRON-008: não aplica nem limpa a seleção aqui — o pai abre o modal premium de
+    // confirmação; a seleção só é limpa (via ref.clearAll) após a implantação ser
+    // efetivamente confirmada, permitindo cancelar sem perder o que foi selecionado.
+    onAceitar({ sessoes, beforeCount: sessPac.length })
   }
 
   const sessPac = useMemo(() => {
@@ -632,7 +730,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
       else if (ADMIN_WARN.has(r.Terapia))       tipo = "adminWarn"
       res.push({
         dia: r["Dia da Semana"], hora,
-        tP: r.Terapia, tE: tExib(r.Terapia),
+        tP: r.Terapia, tE: tExibReal(r.Terapia, r["Terapia Exibição"] || r["Terapia Exibicao"]),
         prof: r.Profissional, unidade: rowUnid(r),
         tipo,
       })
@@ -642,7 +740,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
 
   type CellInfo = {
     tP: string; tE?: string; prof: string
-    tipo: "proposta" | "aceito" | "exist" | "adminSuperv" | "adminWarn" | "supervDesloc" | "recusada"
+    tipo: "proposta" | "aceito" | "exist" | "adminSuperv" | "adminWarn" | "supervDesloc" | "recusada" | "reservado"
     unidade: string; target?: string
     sugestaoId?: string
     isVComp?: boolean
@@ -657,10 +755,25 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     }
   }
 
+  // CRON-008/Sprint 4: reservas já implantadas na TiTa (definitivas, não mais um
+  // estado provisório) — não são mais sugestões (buildSugestoes já as bloqueia via
+  // dayHours), entram direto na grade como "Reservado": não clicáveis, sem opção
+  // de trocar terapia ou remover.
+  for (const s of reservasConfirmadas) {
+    const k = `${s.dia}|||${s.hora}`
+    if (!cMap[k]) cMap[k] = []
+    if (!cMap[k].some(x => x.tP === s.tP && x.prof === s.prof)) {
+      cMap[k].push({ tP: s.tP, prof: s.prof, tipo: "reservado", unidade: s.unidade })
+    }
+  }
+
   // Todos os cards de proposta sempre visíveis na grade — o estado visual muda, não a presença.
   // mainSlots registra todos os slots principais para impedir que vComps os sobrescrevam.
   const mainSlots = new Set<string>()
   for (const s of sugestoes) {
+    mainSlots.add(`${s.dia}|||${s.hora}`)
+  }
+  for (const s of reservasConfirmadas) {
     mainSlots.add(`${s.dia}|||${s.hora}`)
   }
   for (const s of sugestoes) {
@@ -775,6 +888,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     if (tipo === "aceito")       return { bg: B.blueLt,  bd: B.blue,    label: "Aceito"   }
     if (tipo === "proposta")     return { bg: B.blueLt,  bd: B.blue,    label: null       }
     if (tipo === "recusada")     return { bg: "#fff5f5", bd: "#fca5a5", label: null       }
+    if (tipo === "reservado")    return { bg: "#f0fdf4", bd: "#16a34a", label: "✅ Implantado" }
     return                              { bg: "#f8fafc", bd: "#e2e8f0", label: null       }
   }
 
@@ -881,7 +995,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                     const isSession = sessionStartSet.has(slot)
                     const isFirstAfternoon = slot === firstAfternoonSlot
                     return (
-                      <tr key={slot} style={{ height: "36px", borderTop: isFirstAfternoon ? "2px solid var(--border)" : isSession ? "1px solid var(--border)" : "none" }}>
+                      <tr key={slot} style={{ height: "38px", borderTop: isFirstAfternoon ? "2px solid var(--border)" : isSession ? "1px solid var(--border)" : "none" }}>
                         <td style={{ textAlign: "right", paddingRight: "4px", verticalAlign: "top", paddingTop: "5px", fontFamily: "monospace", fontVariantNumeric: "tabular-nums", fontSize: "12px", fontWeight: 800, color: B.navy, whiteSpace: "nowrap" }}>
                           {isSession ? slot : null}
                         </td>
@@ -933,6 +1047,8 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                     onClick={cardClickable ? () => toggleSelected(c.sugestaoId!) : undefined}
                                     style={{
                                       background: bg,
+                                      // Sprint 4: borda sólida também para "reservado" — a implantação na TiTa é
+                                      // definitiva, não há mais um estado "pendente" a distinguir visualmente.
                                       border: `1px solid ${isDisc ? "#f97316" : bd}`,
                                       borderRadius: "8px", padding: "5px 7px",
                                       flex: (isExpanded || isEspExpanded) ? "none" : "1",
@@ -959,6 +1075,9 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                           <span style={{ fontSize: "10px", fontWeight: 600, color: isDark ? "white" : "#111827", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{c.tP}</span>
                                           <span style={{ fontSize: "8px", color: isDark ? "#d1d5db" : "#9ca3af", flexShrink: 0, whiteSpace: "nowrap", paddingRight: !isExpanded && (isSel || isRecusadaCard) ? "12px" : 0 }}>📍 {c.unidade}</span>
                                         </div>
+                                        {!isExpanded && c.tE && (
+                                          <div style={{ fontSize: "8px", fontStyle: "italic", color: isDark ? "#9ca3af" : "#9ca3af", lineHeight: "1", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>({c.tE})</div>
+                                        )}
                                         {!isExpanded && (
                                           <div style={{ fontSize: "11px", color: isDark ? "#d1d5db" : "#6b7280", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fmtName(c.prof)}</div>
                                         )}
@@ -995,7 +1114,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                               <span style={{ color: c.tipo === "aceito" ? B.blue : "#374151" }}>{cs.label}</span>
                                             ) : null}
                                             {isClickable && c.sugestaoId && (
-                                              <button onClick={e => { e.stopPropagation(); const sid = isVCompCard ? c.sugestaoId!.slice(0, c.sugestaoId!.indexOf("|||vc|||")) : c.sugestaoId!; const sug = sugestoes.find(x => x.id === sid); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, acao: "recusar" }); setAcaoMotivo("") }}
+                                              <button onClick={e => { e.stopPropagation(); const sid = isVCompCard ? c.sugestaoId!.slice(0, c.sugestaoId!.indexOf("|||vc|||")) : c.sugestaoId!; const sug = sugestoes.find(x => x.id === sid); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, csvGradeId: ae.csvGradeId, acao: "recusar" }); setAcaoMotivo("") }}
                                                 style={{ fontSize: "9px", padding: "1px 6px", borderRadius: "3px", border: "1px solid #fca5a5", background: "#fee2e2", color: "#dc2626", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, lineHeight: "1.4", flexShrink: 0, marginLeft: "auto" }}>Recusar</button>
                                             )}
                                             {isRecusadaCard && c.sugestaoId && (
@@ -1023,7 +1142,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                                 ⚠ Escolher terapia
                                               </button>
                                               <button
-                                                onClick={e => { e.stopPropagation(); const sug = sugestoes.find(x => x.id === c.sugestaoId!); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, acao: "recusar" }); setAcaoMotivo("") }}
+                                                onClick={e => { e.stopPropagation(); const sug = sugestoes.find(x => x.id === c.sugestaoId!); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, csvGradeId: ae.csvGradeId, acao: "recusar" }); setAcaoMotivo("") }}
                                                 style={{ fontSize: "9px", padding: "2px 4px", borderRadius: "3px", border: "1px solid #fca5a5", background: "#fee2e2", color: "#dc2626", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, lineHeight: "1.4", textAlign: "center" }}>
                                                 Recusar
                                               </button>
@@ -1077,6 +1196,9 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                               <span style={{ fontSize: "10px", fontWeight: 600, color: "#111827", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{c.tP}</span>
                                               <span style={{ fontSize: "8px", color: "#9ca3af", flexShrink: 0, whiteSpace: "nowrap", paddingRight: isSel ? "12px" : 0 }}>📍 {c.unidade}</span>
                                             </div>
+                                            {c.tE && (
+                                              <div style={{ fontSize: "8px", fontStyle: "italic", color: "#9ca3af", lineHeight: "1", margin: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>({c.tE})</div>
+                                            )}
                                             <div style={{ fontSize: "11px", color: "#6b7280", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fmtName(c.prof)}</div>
                                             {isDisc && <div style={{ fontSize: "11px", fontWeight: 700, color: "#ea580c", marginTop: "2px", display: "flex", alignItems: "center", gap: "3px" }}>⚠ {c.unidade}</div>}
                                             <div style={{ fontSize: "10px", fontWeight: 700, marginTop: "auto", display: "flex", alignItems: "center", gap: "3px" }}>
@@ -1088,7 +1210,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                                 Alterar terapia
                                               </button>
                                               <button
-                                                onClick={e => { e.stopPropagation(); const sug = sugestoes.find(x => x.id === c.sugestaoId!); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, acao: "recusar" }); setAcaoMotivo("") }}
+                                                onClick={e => { e.stopPropagation(); const sug = sugestoes.find(x => x.id === c.sugestaoId!); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, csvGradeId: ae.csvGradeId, acao: "recusar" }); setAcaoMotivo("") }}
                                                 style={{ fontSize: "9px", padding: "1px 6px", borderRadius: "3px", border: "1px solid #fca5a5", background: "#fee2e2", color: "#dc2626", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, lineHeight: "1.4", flexShrink: 0, marginLeft: "auto" }}>
                                                 Recusar
                                               </button>
@@ -1234,7 +1356,10 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                   <div key={`${pac}|||${g.esp}`} className="ocup-esp-row" style={{ "--i": i } as CSSProperties}>
                     <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--card-foreground)", marginBottom: "3px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={g.esp}>{g.esp}</div>
                     <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                      <span key={`${pac}|||${g.esp}|||${total}`} className="ocup-num-tick" style={{ fontSize: "15px", fontWeight: 900, color: cor, transition: "color 180ms ease" }}>{total}/{g.aut}</span>
+                      <span key={`${pac}|||${g.esp}|||${total}`} className="ocup-num-tick" style={{ fontSize: "15px", fontWeight: 900, color: cor, transition: "color 180ms ease", display: "inline-flex", alignItems: "baseline", gap: "3px" }}>
+                        <span>{g.of}</span>
+                        <span>/{g.aut}</span>
+                      </span>
                       {excesso && <span className="ocup-badge-pop" style={{ fontSize: "11px", background: "#fee2e2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 4px", fontWeight: 700 }}>acima</span>}
                       {completo && sel > 0 && <span key={`completo-${sel}`} className="ocup-badge-pop" style={{ fontSize: "11px", background: "#dcfce7", color: "#16a34a", border: "1px solid #86efac", borderRadius: "4px", padding: "0 4px", fontWeight: 700 }}>+{sel}</span>}
                       {completo && sel === 0 && <span className="ocup-badge-pop" style={{ fontSize: "11px", background: "#dcfce7", color: "#16a34a", border: "1px solid #86efac", borderRadius: "4px", padding: "0 4px", fontWeight: 700 }}>✓</span>}
@@ -1268,7 +1393,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
       const motivoFaltando = isInvAcao && !acaoMotivo.trim()
       const handleConfirmar = () => {
         if (motivoFaltando) return
-        const sessao: AceiteSessao = { dia: pendingAcao.sugestao.dia, hora: pendingAcao.hora, tP: pendingAcao.tP, prof: pendingAcao.prof, unidade: pendingAcao.unidade }
+        const sessao: AceiteSessao = { dia: pendingAcao.sugestao.dia, hora: pendingAcao.hora, tP: pendingAcao.tP, prof: pendingAcao.prof, unidade: pendingAcao.unidade, csvGradeId: pendingAcao.csvGradeId }
         const statusFinal = pendingAcao.acao === "aceitar" ? "pendente" : pendingAcao.acao === "recusar" ? "recusado" : "inviavel"
         onAcaoDireta([sessao], statusFinal, acaoMotivo || undefined)
         if (pendingAcao.acao === "inviavel") {
@@ -1337,6 +1462,7 @@ const BUNDLE_STATUS_META = {
   confirmado: { label: "Confirmou", bg: "#dcfce7", c: "#14532d", bd: "#86efac" },
   recusado:   { label: "Recusou",   bg: "#fee2e2", c: "#7f1d1d", bd: "#fca5a5" },
   inviavel:   { label: "⛔ Inviável", bg: "#f3f4f6", c: "#6b7280", bd: "#d1d5db" },
+  removido_tita: { label: "Removido na TiTa", bg: "#fffbeb", c: "#b45309", bd: "#fcd34d" },
 }
 
 function AceitesPanel({
@@ -1605,13 +1731,19 @@ interface Props {
   sInv?: (inv: InvItem[]) => void
 }
 
+// "Notificação Prévia" é o paciente-teste oficial usado na homologação da
+// integração com a TiTa — habilitado como paciente normal só nesta página, para
+// permitir testar o fluxo real de implantação (Sprint 4) sem afetar as demais
+// páginas do Cronograma, que continuam tratando-o como registro administrativo.
+const PACS_ADMIN_OCUP_PAC = new Set(PACS_ADMIN)
+PACS_ADMIN_OCUP_PAC.delete(PACIENTE_TESTE_TITA)
+
 export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGlobal = [], sRec, sInv }: Props) {
   const modalRef = useRef<TodasSugestoesModalHandle>(null)
   const [pac, setPac]           = useState("")
   const [inputVal, setInputVal] = useState("")
   const [dropOpen, setDropOpen] = useState(false)
   const [estrategia, setEstrategia] = useState<Estrategia>("S1")
-  const [maxAdic, setMaxAdic]   = useState<number | "">("")
   const [statusMap, setStatusMap] = useState<Record<string, Status>>(() => {
     try { return JSON.parse(localStorage.getItem(SK) || "{}") } catch { return {} }
   })
@@ -1623,6 +1755,62 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
   const [inputFocused, setInputFocused] = useState(false)
   const [highlightedIdx, setHighlightedIdx] = useState(-1)
   const listboxRef = useRef<HTMLDivElement>(null)
+  // CRON-008: sessões aguardando confirmação no modal premium de implantação
+  const [pendingConfirm, setPendingConfirm] = useState<{ sessoes: AceiteSessao[]; beforeCount: number } | null>(null)
+  // Confirmação agora chama a API da TiTa (fetch assíncrono) — usado para desabilitar
+  // o modal e impedir cancelar/duplo-clique enquanto a chamada está em andamento.
+  const [confirmando, setConfirmando] = useState(false)
+
+  // CRON-008: sessões já reservadas (implantação imediata) deste paciente — exibidas
+  // diretamente na grade do TodasSugestoesModal como "Reservado".
+  const reservasConfirmadas = useMemo(
+    () => aceites.filter(b => b.pac === pac && b.status === "confirmado").flatMap(b => b.sessoes),
+    [aceites, pac],
+  )
+
+  // Reconciliação com a TiTa. A API só grava, não exclui — então uma série pode ser
+  // removida diretamente na TiTa sem que o Pulsar saiba. Como o estado "Implantado"
+  // vive só nos bundles (pacBundles), sem sync de volta ele ficaria preso para
+  // sempre, mostrando "✅ Implantado" e bloqueando o slot para todos. Ao abrir um
+  // paciente, um bundle "confirmado" cujas sessões não aparecem mais na grade oficial
+  // é reclassificado para "removido_tita": some de reservasConfirmadas (grade),
+  // slotsReservadosOutros e do bloqueio de dayHours — tudo porque buildSugestoes
+  // filtra por status === "confirmado". Só libera localmente (não há exclusão via API).
+  //
+  // Guarda anti-corrida (limite fixo de 24h): a grade oficial sincroniza 1x/dia (06h);
+  // uma sessão recém-implantada ainda não aparece nela, e sem essa guarda seria
+  // liberada por engano logo depois de implantada.
+  const RECONCILE_MIN_AGE_MS = 24 * 60 * 60 * 1000
+  useEffect(() => {
+    if (!pac || cRows.length === 0) return
+    // Só reconcilia se a grade cobre este paciente — sem nenhuma linha dele não dá
+    // para distinguir "removido na TiTa" de "grade ainda não carregou este paciente".
+    if (!cRows.some(r => r["Nome Favorecido"] === pac)) return
+
+    const agora = Date.now()
+    const sessaoNaGrade = (s: AceiteSessao) => cRows.some(r =>
+      r["Nome Favorecido"] === pac &&
+      r["Dia da Semana"] === s.dia &&
+      r.Profissional === s.prof &&
+      r.Terapia === s.tP &&
+      fm(pm(hiStr(r)) ?? hiMin(r)) === s.hora,
+    )
+
+    let mudou = false
+    const proximos = aceites.map(b => {
+      if (b.pac !== pac || b.status !== "confirmado") return b
+      if (agora - b.ts < RECONCILE_MIN_AGE_MS) return b
+      // Exclusão é sempre da série inteira — só libera quando NENHUMA sessão do
+      // bundle aparece mais na grade (conservador: presença parcial mantém).
+      if (b.sessoes.some(sessaoNaGrade)) return b
+      mudou = true
+      return { ...b, status: "removido_tita" as const }
+    })
+    if (mudou) {
+      persistAceites(proximos)
+      toast("♻️ Sessões implantadas foram removidas na TiTa — os horários foram liberados.")
+    }
+  }, [pac, cRows, aceites, persistAceites])
 
   const recusadasSet = useMemo(() => {
     const s = new Set<string>()
@@ -1647,17 +1835,109 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     try { localStorage.setItem(SK, JSON.stringify(m)) } catch {}
   }
 
-  function handleAceitar({ sessoes }: { sessoes: AceiteSessao[] }) {
+  // CRON-008: "Aceitar alterações" não aplica mais direto — abre o modal premium de
+  // confirmação. A implantação de fato só ocorre em confirmarImplantacao().
+  function handleAceitar({ sessoes, beforeCount }: { sessoes: AceiteSessao[]; beforeCount: number }) {
     if (!sessoes.length) return
-    const bundle: AceitePacBundle = {
-      id: `${Date.now()}_${pac.slice(0, 8)}`,
-      pac, ts: Date.now(),
-      origem: "ocp-paciente",
-      sessoes,
-      status: "pendente",
-      inviavelSlots: [],
+    setPendingConfirm({ sessoes, beforeCount })
+  }
+
+  function cancelarImplantacao() {
+    if (confirmando) return // chamada à TiTa em andamento — não permite fechar no meio
+    setPendingConfirm(null)
+  }
+
+  // CRON-008: pacBundles é a ÚNICA fonte de verdade da Reserva Pendente — nada é
+  // espelhado em `conf`. Isso evita o estado duplicado (bundle + conf) que ficava
+  // dessincronizado sempre que a reserva era desfeita por um caminho que só
+  // conhecia um dos dois lados. Grade ("Reservado"), bloqueio cross-paciente
+  // (slotsReservadosOutros/aqui e confirmedItems em OcupacaoShell) e a aba
+  // Confirmados (via pacConfDerived em AcompanhamentoTab) leem todos direto daqui.
+  //
+  // A implantação local (persistAceites) só acontece se a TiTa confirmar TODAS as
+  // sessões do bundle (tudo ou nada) — ver app/api/tita/confirmar-agendamento.
+  // Isso evita que a Reserva Pendente exista localmente sem o agendamento real ter
+  // sido criado na TiTa. Se a chamada falhar, o modal permanece aberto com a
+  // seleção intacta para o usuário tentar de novo.
+  async function confirmarImplantacao() {
+    if (!pendingConfirm || confirmando) return
+    const { sessoes } = pendingConfirm
+
+    // Guarda: uma sessão sem csvGradeId faria a rota rejeitar com 400
+    // (sessao_sem_csv_grade_id) — resposta sem `mensagem`, que caía no fallback
+    // genérico "Não foi possível concluir a integração com a TiTa". Barra aqui, antes
+    // de qualquer chamada, com uma mensagem que diz o que realmente aconteceu.
+    const semGradeId = sessoes.filter(s => !s.csvGradeId)
+    if (semGradeId.length) {
+      toast.error(
+        `❌ ${semGradeId.length}/${sessoes.length} ${semGradeId.length === 1 ? "horário ainda não está sincronizado" : "horários ainda não estão sincronizados"} para implantação. Gere uma nova sugestão e tente novamente.`,
+      )
+      return
     }
-    persistAceites([...aceites, bundle])
+
+    setConfirmando(true)
+    try {
+      const resp = await fetch("/api/tita/confirmar-agendamento", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pac, sessoes }),
+      })
+      const body = await resp.json().catch(() => null) as {
+        ok: boolean
+        error?: string
+        mensagem?: string
+        implantadoPor?: string
+        implantadoPorEmail?: string | null
+        resultados?: Array<{ csvGradeId: string; ok: boolean; codigoErro?: string }>
+      } | null
+
+      if (!resp.ok || !body?.ok) {
+        const falhas = body?.resultados?.filter(r => !r.ok) ?? []
+        // Mensagem amigável já vem traduzida do backend (mensagemAmigavel/
+        // mensagemResumoCriacao em services/tita/confirmar.ts) — nunca expõe
+        // código técnico/stack ao usuário. Respostas de guarda da rota (401/400)
+        // trazem só `error` (sem `mensagem`); traduz esses casos aqui em vez de
+        // cair no fallback genérico, que não diz nada ao usuário.
+        const mensagem =
+          body?.mensagem ??
+          (body?.error === "not_authenticated" ? "Sua sessão expirou. Recarregue a página e entre novamente."
+            : body?.error === "sessao_sem_csv_grade_id" ? "Um dos horários ainda não está sincronizado para implantação. Gere uma nova sugestão e tente novamente."
+            : "Não foi possível concluir a integração com a TiTa. Tente novamente.")
+        const contagem = falhas.length || sessoes.length
+        toast.error(`❌ ${mensagem} (${contagem}/${sessoes.length} sessões afetadas)`)
+        return
+      }
+
+      const bundle: AceitePacBundle = {
+        id: `${Date.now()}_${pac.slice(0, 8)}`,
+        pac, ts: Date.now(),
+        origem: "ocp-paciente",
+        sessoes,
+        status: "confirmado",
+        inviavelSlots: [],
+        // Autoria imutável da implantação (do usuário autenticado no servidor).
+        implantadoPor: body?.implantadoPor,
+        implantadoPorEmail: body?.implantadoPorEmail ?? undefined,
+      }
+      persistAceites([...aceites, bundle])
+
+      modalRef.current?.clearAll()
+      setPendingConfirm(null)
+      // Sprint 4/4.1: a implantação na TiTa já aconteceu (é o que "ok" confirma) —
+      // não existe mais estado "aguardando sincronização" depois disso. A grade e o
+      // painel lateral já reagem sozinhos (reservasConfirmadas/sugestoes/pacAllEsp
+      // derivam de `aceites`), então ocupação e indicadores aparecem imediatamente,
+      // sem precisar sair da tela nem atualizar a página. body.mensagem já vem pronta
+      // do backend: "Implantação realizada com sucesso." no total, ou o detalhe de
+      // sucesso parcial ("16 sessões implantadas. 6 não puderam...").
+      toast(`✅ ${body?.mensagem ?? "Implantação realizada com sucesso."}`)
+    } catch (err) {
+      // Detalhe técnico só no console — o usuário vê uma mensagem amigável.
+      console.error("[ocupacao-paciente] falha ao implantar na TiTa", err)
+      toast.error("❌ Não foi possível concluir a implantação agora. Verifique a conexão e tente novamente.")
+    } finally {
+      setConfirmando(false)
+    }
   }
 
   function handleInviavel(sessoes: AceiteSessao[], motivo: string) {
@@ -1697,6 +1977,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
         dia: s.dia,
         hora: s.hora,
         registradoEm,
+        obs: motivo || undefined,
       }))
       sRec([...recGlobal, ...newItems])
     }
@@ -1738,7 +2019,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
 
   const agend = useMemo(() => cRows.filter(r => r["Status do Agendamento"] === "Agendado"), [cRows])
   const agendClin = useMemo(() =>
-    agend.filter(r => r["Nome Favorecido"] && !PACS_ADMIN.has(r["Nome Favorecido"]) && !EXCLUIR_GAPS.has(r.Terapia)),
+    agend.filter(r => r["Nome Favorecido"] && !PACS_ADMIN_OCUP_PAC.has(r["Nome Favorecido"]) && !EXCLUIR_GAPS.has(r.Terapia)),
     [agend])
 
   // Lista de nomes canônicos do agend ordenados por comprimento decrescente.
@@ -1747,7 +2028,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     const s = new Set<string>()
     for (const r of agend) {
       const p = r["Nome Favorecido"]
-      if (p && !PACS_ADMIN.has(p)) s.add(p)
+      if (p && !PACS_ADMIN_OCUP_PAC.has(p)) s.add(p)
     }
     return [...s].sort((a, b) => b.length - a.length)
   }, [agend])
@@ -1781,7 +2062,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     for (const r of agend) {
       const id  = String(r["Id Favorecido"] ?? r["ID Favorecido"] ?? "").trim()
       const rawP = r["Nome Favorecido"]
-      if (id && rawP && !PACS_ADMIN.has(rawP)) {
+      if (id && rawP && !PACS_ADMIN_OCUP_PAC.has(rawP)) {
         const p = agendMergeMap.get(rawP) ?? rawP
         if (!m.has(id)) m.set(id, p)
       }
@@ -1795,15 +2076,35 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     const seenOf = new Set<string>()
     for (const r of agend) {
       const rawP = r["Nome Favorecido"]
-      if (!rawP || PACS_ADMIN.has(rawP) || EXCLUIR_GAPS.has(r.Terapia)) continue
+      if (!rawP || PACS_ADMIN_OCUP_PAC.has(rawP) || EXCLUIR_GAPS.has(r.Terapia)) continue
       const p = agendMergeMap.get(rawP) ?? rawP
-      const esp = TERAPIA_TO_ESP[r.Terapia]
-      if (!esp) continue
+      const espPadrao = TERAPIA_TO_ESP[r.Terapia]
+      if (!espPadrao) continue
+      const terapiaExib = String(r["Terapia Exibição"] || r["Terapia Exibicao"] || "").trim()
+      const esp = espRealPorExibicao(r.Terapia, terapiaExib, espPadrao)
       const hm = pm(hiStr(r)) ?? hiMin(r)
       const dk = `${p}|||${r["Dia da Semana"]}|||${hm}|||${r.Terapia}|||${r.Profissional}`
       if (seenOf.has(dk)) continue
       seenOf.add(dk)
       qtdOf[`${p}|||${esp}`] = (qtdOf[`${p}|||${esp}`] || 0) + 1
+    }
+    // Reservas aguardando resposta/confirmação também ocupam a vaga — sem isso o
+    // motor de sugestões (buildSugestoes) continuaria ofertando sessões além do que
+    // resta de autorização. `seenOf` evita dupla contagem após a sincronização.
+    for (const b of aceites) {
+      if (b.status !== "pendente" && b.status !== "confirmado") continue
+      if (PACS_ADMIN_OCUP_PAC.has(b.pac)) continue
+      for (const s of b.sessoes) {
+        if (EXCLUIR_GAPS.has(s.tP)) continue
+        const esp = TERAPIA_TO_ESP[s.tP]
+        if (!esp) continue
+        const hm = pm(s.hora)
+        if (hm === null) continue
+        const dk = `${b.pac}|||${s.dia}|||${hm}|||${s.tP}|||${s.prof}`
+        if (seenOf.has(dk)) continue
+        seenOf.add(dk)
+        qtdOf[`${b.pac}|||${esp}`] = (qtdOf[`${b.pac}|||${esp}`] || 0) + 1
+      }
     }
     const qtdAut: Record<string, number> = {}
     const altaSet = new Set<string>()
@@ -1811,7 +2112,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       const idFav = String(l["ID Favorecido"] ?? l["Id Favorecido"] ?? "").trim()
       const p     = (idFav ? agendIdMap.get(idFav) : undefined) ?? String(l["Paciente"] || "").trim()
       const esp   = String(l["Especialidade"] || "").trim()
-      if (!p || PACS_ADMIN.has(p) || !esp) continue
+      if (!p || PACS_ADMIN_OCUP_PAC.has(p) || !esp) continue
       if (isLaudoComAlta(l)) { altaSet.add(`${p}|||${esp}`); continue }
       const aut = parseFloat(String(l["Qtd autorizada"] || "0").replace(",", ".")) || 0
       if (aut <= 0) continue
@@ -1826,13 +2127,13 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       result[k] = { dif, aut, of: of_ }
     }
     return result
-  }, [cRows, lRows, agend, agendIdMap, agendMergeMap])
+  }, [cRows, lRows, agend, agendIdMap, agendMergeMap, aceites])
 
   const todosPacs = useMemo(() => {
     const pacs = new Set<string>()
     for (const r of agend) {
       const rawP = r["Nome Favorecido"]
-      if (!rawP || PACS_ADMIN.has(rawP)) continue
+      if (!rawP || PACS_ADMIN_OCUP_PAC.has(rawP)) continue
       pacs.add(agendMergeMap.get(rawP) ?? rawP)
     }
     return [...pacs].sort()
@@ -1844,7 +2145,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     for (const l of lRows) {
       const idFav = String(l["ID Favorecido"] ?? l["Id Favorecido"] ?? "").trim()
       const p     = (idFav ? agendIdMap.get(idFav) : undefined) ?? String(l["Paciente"] || "").trim()
-      if (!p || PACS_ADMIN.has(p)) continue
+      if (!p || PACS_ADMIN_OCUP_PAC.has(p)) continue
       const aut = parseFloat(String(l["Qtd autorizada"] || "0").replace(",", ".")) || 0
       if (aut > 0) temLaudo.add(p)
     }
@@ -1975,13 +2276,33 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       const rawP = r["Nome Favorecido"]
       if (!rawP || EXCLUIR_GAPS.has(r.Terapia)) continue
       if ((agendMergeMap.get(rawP) ?? rawP) !== pac) continue
-      const esp = TERAPIA_TO_ESP[r.Terapia]
-      if (!esp) continue
+      const espPadrao = TERAPIA_TO_ESP[r.Terapia]
+      if (!espPadrao) continue
+      const terapiaExib = String(r["Terapia Exibição"] || r["Terapia Exibicao"] || "").trim()
+      const esp = espRealPorExibicao(r.Terapia, terapiaExib, espPadrao)
       const hm = pm(hiStr(r)) ?? hiMin(r)
       const dk = `${r["Dia da Semana"]}|||${hm}|||${r.Terapia}|||${r.Profissional}`
       if (seenOf.has(dk)) continue
       seenOf.add(dk)
       qtdOf[esp] = (qtdOf[esp] || 0) + 1
+    }
+    // Sprint 4: implantação na TiTa é imediata e definitiva — reservas confirmadas
+    // contam junto com o que já veio de `agend`, num único total (sem "+N" separado
+    // à espera de sincronização). `seenOf` evita dupla contagem quando a mesma sessão
+    // também aparecer em `agend` após o próximo sync do CSV.
+    for (const b of aceites) {
+      if (b.pac !== pac || (b.status !== "pendente" && b.status !== "confirmado")) continue
+      for (const s of b.sessoes) {
+        if (EXCLUIR_GAPS.has(s.tP)) continue
+        const esp = TERAPIA_TO_ESP[s.tP]
+        if (!esp) continue
+        const hm = pm(s.hora)
+        if (hm === null) continue
+        const dk = `${s.dia}|||${hm}|||${s.tP}|||${s.prof}`
+        if (seenOf.has(dk)) continue
+        seenOf.add(dk)
+        qtdOf[esp] = (qtdOf[esp] || 0) + 1
+      }
     }
     const qtdAut: Record<string, number> = {}
     const altaSet = new Set<string>()
@@ -2000,17 +2321,20 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     return Object.entries(qtdAut)
       .map(([esp, aut]) => ({ esp, aut, of: qtdOf[esp] || 0, dif: Math.round((aut - (qtdOf[esp] || 0)) * 10) / 10 }))
       .sort((a, b) => b.dif - a.dif)
-  }, [pac, agend, lRows, agendIdMap, agendMergeMap])
+  }, [pac, agend, lRows, agendIdMap, agendMergeMap, aceites])
 
   const sugestoes = useMemo(() => {
     if (!pac || estrategia !== "S1") return [] as Sugestao[]
     const conv      = pacConvMap[pac] || ""
     const isLiminar = /LIMINAR/i.test(cfg.judicialMap?.[pac] || "")
-    // Passa [] para aceites: proposals não são bloqueadas por bundles já existentes.
-    // O estado visual (proposta/aceita/recusada) é rastreado via selectedIds + stOf,
-    // não via regeneração da lista — isso garante que cards nunca desapareçam da grade.
-    return buildSugestoes(pac, agend, agendClin, cRows, gapMap, [], conv, isLiminar)
-  }, [pac, estrategia, agend, agendClin, cRows, gapMap, pacConvMap, cfg.judicialMap])
+    // CRON-008: bundles "confirmado" (Reserva Pendente) são passados para que a vaga
+    // implantada saia da lista de sugestões — tanto para o próprio paciente (não pode
+    // ser reofertada) quanto para os demais (slot já reservado, ver slotsReservadosOutros).
+    // Bundles "pendente" continuam fora do cálculo — preserva o comportamento anterior
+    // de manter os cards visíveis enquanto aguardam confirmação do responsável.
+    const aceitesConfirmados = aceites.filter(a => a.status === "confirmado")
+    return buildSugestoes(pac, agend, agendClin, cRows, gapMap, aceitesConfirmados, conv, isLiminar)
+  }, [pac, estrategia, agend, agendClin, cRows, gapMap, pacConvMap, cfg.judicialMap, aceites])
 
   useEffect(() => {
     if (!pac) return
@@ -2024,19 +2348,6 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       return pruned
     })
   }, [pac, sugestoes])
-
-  const sugestoesLimitadas = useMemo(() => {
-    if (maxAdic === "") return sugestoes
-    const limit = maxAdic as number
-    const result: Sugestao[] = []
-    let count = 0
-    for (const s of sugestoes) {
-      if (count >= limit) break
-      result.push(s)
-      count += 1 + s.vComp.length
-    }
-    return result
-  }, [sugestoes, maxAdic])
 
   const totalAceitos = aceites.filter(a => a.pac === pac).reduce((acc, b) => acc + b.sessoes.length, 0)
 
@@ -2055,7 +2366,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       <style>{`
         .ocup-workbench-bar {
           display: grid;
-          grid-template-columns: 31fr 21fr 33fr 15fr;
+          grid-template-columns: 35fr 12fr 38fr 15fr;
           background: var(--card);
           border: 1px solid var(--border);
           border-radius: 16px 0 0 16px;
@@ -2073,7 +2384,6 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
           .ocup-workbench-bar > div:last-child { border-bottom: none !important; }
         }
         @media (pointer: coarse) {
-          .ocup-btn-limit  { min-height: 44px !important; }
           .ocup-btn-situacao { min-height: 44px !important; }
         }
         @media (prefers-reduced-motion: reduce) {
@@ -2148,34 +2458,21 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
           )}
         </div>
 
-        {/* Área 3 — Limite */}
-        <div style={{ padding: "14px 18px", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", justifyContent: "flex-start", alignItems: "center", gap: "6px" }}>
-          <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.02em" }}>Sessões adicionais</div>
-          <div role="group" aria-label="Sessões adicionais" style={{ display: "flex", gap: "4px", flexWrap: "wrap" }}>
-            {([1, 2, 3, 4, 5, "sem limite"] as const).map(v => {
-              const val = v === "sem limite" ? "" : v as number
-              const active = maxAdic === val
-              return (
-                <button key={String(v)} type="button" aria-pressed={active} onClick={() => setMaxAdic(val)}
-                  className="ocup-btn-limit"
-                  style={{ padding: "4px 9px", borderRadius: "7px", fontSize: "11px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid", background: active ? B.navy : "var(--muted)", color: active ? "white" : "var(--card-foreground)", borderColor: active ? B.navy : "var(--border)" }}>
-                  {v === "sem limite" ? "Max" : v}
-                </button>
-              )
-            })}
-          </div>
-          <div style={{ display: "flex", gap: "4px", marginTop: "2px" }}>
+        {/* Área 3 — Seleção */}
+        <div style={{ padding: "14px 18px", borderRight: "1px solid var(--border)", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center", gap: "8px" }}>
+          <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.02em" }}>Seleção</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: "6px", width: "100%" }}>
             <button
               type="button"
               onClick={() => modalRef.current?.selectAll()}
-              style={{ padding: "3px 8px", borderRadius: "6px", fontSize: "10px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#16a34a" }}
+              style={{ padding: "5px 10px", borderRadius: "7px", fontSize: "11px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid #bbf7d0", background: "#f0fdf4", color: "#16a34a", whiteSpace: "nowrap" }}
             >
               Selecionar tudo
             </button>
             <button
               type="button"
               onClick={() => modalRef.current?.clearAll()}
-              style={{ padding: "3px 8px", borderRadius: "6px", fontSize: "10px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid #fecaca", background: "#fff1f2", color: "#dc2626" }}
+              style={{ padding: "5px 10px", borderRadius: "7px", fontSize: "11px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: "1px solid #fecaca", background: "#fff1f2", color: "#dc2626", whiteSpace: "nowrap" }}
             >
               Limpar Seleção
             </button>
@@ -2306,7 +2603,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
                 ?? normNameMap[normalizeName(rawPac)]
                 ?? agendMergeMap.get(rawPac)
                 ?? rawPac
-              if (!p || PACS_ADMIN.has(p)) continue
+              if (!p || PACS_ADMIN_OCUP_PAC.has(p)) continue
               // Tenta o campo em variações de capitalização
               const autRaw = l["Autorizado em"] ?? l["Autorizado Em"] ?? l["autorizado em"]
               const raw = normalizeDate(String(autRaw || "").trim())
@@ -2376,7 +2673,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
             pac={pac}
             conv={pacConvMap[pac] || ""}
             cRows={cRows}
-            sugestoes={sugestoesLimitadas}
+            sugestoes={sugestoes}
             pacGaps={pacGaps}
             pacAllEsp={pacAllEsp}
             stOf={stOf}
@@ -2388,9 +2685,21 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
             onAcaoDireta={handleAcaoDireta}
             recusadasSet={recusadasSet}
             onUndoRecusa={onUndoRecusa}
+            reservasConfirmadas={reservasConfirmadas}
           />
           <AceitesPanel pac={pac} aceites={aceites} onUpdate={persistAceites} onVerAll={() => {}} />
         </>
+      )}
+
+      {pendingConfirm && (
+        <ConfirmarImplantacaoModal
+          pac={pac}
+          sessoesAtuais={pendingConfirm.beforeCount}
+          sessoes={pendingConfirm.sessoes}
+          confirming={confirmando}
+          onConfirm={confirmarImplantacao}
+          onCancel={cancelarImplantacao}
+        />
       )}
 
       {invPending && (
@@ -2522,7 +2831,7 @@ function SugestaoCard({
             <button
               onClick={() => {
                 setSt(sugestao, "inviavel")
-                onInviavel?.([{ dia: sugestao.dia, hora: sugestao.hora, tP: sugestao.tP, prof: sugestao.prof, unidade: sugestao.unidade }], invMotivo)
+                onInviavel?.([{ dia: sugestao.dia, hora: sugestao.hora, tP: sugestao.tP, prof: sugestao.prof, unidade: sugestao.unidade, csvGradeId: sugestao.csvGradeId }], invMotivo)
                 setPendingInv(false); setInvMotivo("")
               }}
               style={{ flex: 1, padding: "10px 14px", borderRadius: "10px", background: "#dc2626", color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: "13px" }}>

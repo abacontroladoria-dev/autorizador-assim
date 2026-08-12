@@ -15,6 +15,9 @@ export const B = {
   limeLt: "#f3f8e6",
   pinkLt: "#fdf0f6",
   navyLt: "#e8e9f0",
+  gray: "#6b7280",
+  amber: "#b45309",
+  amberLt: "#fff8e1",
 } as const
 
 // ─── MAPEAMENTOS DE TERAPIA ───────────────────────────────────────────────────
@@ -74,6 +77,30 @@ export const ABA_CLI_EXCL = new Set([
 ])
 
 export const ABA_EXT = new Set(["Aplicador ABA Casa", "Aplicador ABA Escola", "Aplicador ABA Escola/Casa"])
+
+// Profissionais com muitos horários "Livre" DE PROPÓSITO (motivo interno,
+// não é capacidade real disponível pra crescer) — pedido do usuário
+// (2026-08-11): NENHUMA ferramenta de ocupação/oportunidade pode oferecer
+// vaga pra esses IDs, sem exceção — inclui as duas abas de "Ocupar
+// Profissionais Disponíveis" (Por Nome do Profissional e Por Unidade/Dia/
+// Especialidade) e a "Simulação de Novo Prestador". Nomes completos (não os
+// abreviados usados antes, que nunca batiam com "Profissional" da grade —
+// ver comparação normalizada em filtrarCapacidadeLivreReservada/helpers.ts):
+//   8649 — Gracielle Rayane Faria Miranda
+//   8648 — Amanda Ribeiro Campos
+export const PROFISSIONAIS_SEM_CAPACIDADE_LIVRE = new Set([
+  "Gracielle Rayane Faria Miranda",
+  "Amanda Ribeiro Campos",
+])
+
+// Terapias que NÃO são sessões clínicas do paciente (sem presença do paciente —
+// profissional planeja/administra). Usado tanto pra excluir de checagens de
+// buraco/min_sessoes (inconsistencias.ts) quanto pra saber quando uma sessão
+// dessas deve herdar o status do dia em telas de acompanhamento (reposição).
+export const ADMIN_ONLY = new Set([
+  "Supervisão ABA", "Coordenador de Caso", "Visita Guiada", "Triagem",
+  "Avaliação Neuropsicológica", "Avaliação de Repertório",
+])
 
 export const PACS_ADMIN = new Set([
   "Ainda não selecionado", "Notificação Prévia", "Horário Administrativo",
@@ -266,6 +293,26 @@ export function normTxt(s: string | null | undefined): string {
   return String(s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim()
 }
 
+const ENTIDADES_HTML: Record<string, string> = {
+  "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": "\"",
+  "&#39;": "'", "&#039;": "'", "&apos;": "'",
+}
+
+/**
+ * Decodifica entidades HTML (ex.: "D&#039;avila" → "D'avila") que às vezes
+ * chegam cruas em nomes de profissional/paciente vindos do Tita/apptita —
+ * aparentemente o sistema de origem escapa o texto pra HTML em algum ponto e
+ * nunca decodifica de volta antes de exportar/sincronizar. Problema
+ * independente do mojibake de UTF-8 (ver fixMojibake em gradeService.ts) —
+ * um é encoding de caractere, o outro é escape de marcação; um nome pode ter
+ * os dois problemas ao mesmo tempo.
+ */
+export function decodeEntidadesHtml(s: string | null | undefined): string {
+  const str = s ?? ""
+  if (!str.includes("&")) return str
+  return str.replace(/&#0?39;|&apos;|&amp;|&lt;|&gt;|&quot;/g, m => ENTIDADES_HTML[m] ?? m)
+}
+
 export function isProfBloqueadoTemp(prof: string): boolean {
   return PROFISSIONAIS_BLOQUEADOS_TEMPORARIAMENTE.some(p => normTxt(prof) === normTxt(p))
 }
@@ -298,6 +345,7 @@ export const TERAPIA_ID: Record<string, number> = {
   "Fisioterapia":                   2258,
   "Fisioterapia Aquática":          2249,
   "Fonoaudiologia":                 2250,
+  "Psiquiatra/Neurologista":        2695,
   "Musicoterapia":                  2251,
   "OFERECER CONSULTA NUTRIÇÃO":     2579,
   "Operações Clínicas":             2279,
@@ -310,6 +358,13 @@ export const TERAPIA_ID: Record<string, number> = {
   "Triagem":                        2270,
   "Visita Guiada":                  2604,
 }
+
+// Nome normalizado (normTxt) -> ID — usado pra resolver terapia_id a partir do
+// texto livre digitado/selecionado no modal de alocação de sala, sem precisar
+// cruzar com csv_grades_profissionais a cada salvamento.
+export const NOME_PARA_TERAPIA_ID: Record<string, number> = Object.fromEntries(
+  Object.entries(TERAPIA_ID).map(([nome, id]) => [normTxt(nome), id]),
+)
 
 // IDs permanentes das terapias de exibição (o ID nunca muda, o nome pode)
 export const EXIB_ID = {
@@ -332,6 +387,18 @@ export const ABA_EXIB_PSICO_IDS = new Set([2269, 2317, 2262, 2261, 2248, 2353, 2
 export const ABA_EXIB_PSICO_NAMES = new Set(
   (Object.entries(TERAPIA_ID) as [string, number][])
     .filter(([, id]) => ABA_EXIB_PSICO_IDS.has(id))
+    .map(([name]) => name)
+)
+
+// Terapias do "Processo Diagnóstico" (dashboard de indicadores/pacientes) — um
+// paciente cuja agenda contém APENAS terapias deste grupo (nenhuma outra) está
+// em processo de avaliação/diagnóstico, não em tratamento multidisciplinar.
+export const PROCESSO_DIAGNOSTICO_IDS = new Set([2268, 2695, 2270])
+
+// Versão por nome (derivada de TERAPIA_ID — não edite diretamente)
+export const PROCESSO_DIAGNOSTICO_NAMES = new Set(
+  (Object.entries(TERAPIA_ID) as [string, number][])
+    .filter(([, id]) => PROCESSO_DIAGNOSTICO_IDS.has(id))
     .map(([name]) => name)
 )
 

@@ -1,8 +1,10 @@
 "use client"
 
-import { useState } from "react"
+import { useMemo, useState } from "react"
+import { Ban, Inbox, RotateCcw, Search } from "lucide-react"
 import { B } from "@/lib/cronograma/constants"
 import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
+import { ListCard, EmptyState, SearchInput, rowStyle, rowClass } from "@/components/cronograma/ui/DataTable"
 import type { InvItem, RecItem, WaMap } from "@/types/cronograma"
 
 interface Props {
@@ -10,72 +12,71 @@ interface Props {
   rec: RecItem[]
   waMap: WaMap
   onRemove: (i: number) => void
-  onExport: () => void
 }
 
-export function InviavelTab({ inv, onRemove, onExport }: Props) {
+export function InviavelTab({ inv, onRemove }: Props) {
   const [removIdx, setRemovIdx] = useState<number | null>(null)
+  const [filtro, setFiltro] = useState("")
+
+  const filtrados = useMemo(() => {
+    const withIdx = inv.map((iv, i) => ({ iv, i }))
+    const q = filtro.trim().toLowerCase()
+    return q ? withIdx.filter(({ iv }) => iv.paciente.toLowerCase().includes(q)) : withIdx
+  }, [inv, filtro])
+
   return (
     <>
-    <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", boxShadow: "0 1px 4px rgba(0,0,0,.06)", padding: "16px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px", paddingBottom: "12px", borderBottom: "1px solid var(--border)", flexWrap: "wrap", gap: "8px" }}>
-        <span style={{ fontWeight: 800, color: B.navy }}>⛔ Inviáveis</span>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          <span style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>{inv.length} registros · 💾</span>
-          {inv.length > 0 && (
-            <button onClick={onExport} style={{ fontSize: "11px", padding: "4px 10px", borderRadius: "8px", background: "var(--muted)", color: "var(--card-foreground)", border: "1px solid var(--border)", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
-              📥 Exportar base
-            </button>
-          )}
-        </div>
-      </div>
+    <ListCard
+      icon={Ban}
+      title="Inviáveis"
+      count={inv.length}
+      titleColor="#b45309"
+      actions={<SearchInput value={filtro} onChange={setFiltro} />}
+    >
       {!inv.length ? (
-        <Empty icon="✅" text="Nenhum inviável registrado" />
+        <EmptyState icon={Inbox} text="Nenhum inviável registrado" />
+      ) : !filtrados.length ? (
+        <EmptyState icon={Search} text={`Nenhum resultado para "${filtro}"`} />
       ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
-            <thead style={{ background: "var(--muted)" }}>
-              <tr>
-                {["Paciente", "Motivo", "Registrado", ""].map(h => (
-                  <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {inv.map((iv, i) => (
-                <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
-                  <td style={{ padding: "8px 12px", fontWeight: 700, color: B.navy }}>{iv.paciente}</td>
-                  <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontStyle: "italic" }}>{iv.motivo}</td>
-                  <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontSize: "11px" }}>{iv.registradoEm}</td>
-                  <td style={{ padding: "8px 12px" }}>
-                    <button onClick={() => setRemovIdx(i)} style={{ fontSize: "11px", color: "var(--muted-foreground)", background: "none", border: "none", cursor: "pointer" }}>remover</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div>
+          {filtrados.map(({ iv, i }) => (
+            <div key={i} className={rowClass} style={rowStyle}>
+              <div style={{ flexShrink: 0, width: "56px", height: "40px", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--muted)", borderRadius: "var(--radius-md)" }}>
+                <Ban size={16} style={{ color: "#b45309" }} />
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <span style={{ fontWeight: "var(--weight-heavy)", fontSize: "var(--text-base)", color: "var(--foreground)" }}>{iv.paciente}</span>
+                <div style={{ fontSize: "var(--text-sm)", color: "var(--muted-foreground)", fontStyle: "italic", marginTop: "2px" }}>{iv.motivo}</div>
+                {(iv.dia || iv.hora) && (
+                  <div style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)", marginTop: "4px" }}>{iv.dia} {iv.hora}</div>
+                )}
+              </div>
+              <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px" }}>
+                <span style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)", whiteSpace: "nowrap" }}>{iv.registradoEm}</span>
+                <button onClick={() => setRemovIdx(i)} style={{
+                  display: "flex", alignItems: "center", gap: "5px", whiteSpace: "nowrap",
+                  fontSize: "var(--text-xs)", fontWeight: "var(--weight-semibold)",
+                  color: B.blue, background: "var(--cron-active-bg)", border: `1px solid ${B.blue}44`,
+                  borderRadius: "var(--radius-sm)", padding: "5px 10px", cursor: "pointer", fontFamily: "inherit",
+                }}>
+                  <RotateCcw size={11} /> Reativar sugestão
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
-    </div>
+    </ListCard>
     {removIdx !== null && (
       <ConfirmDialog
-        title="Remover registro?"
-        description="O registro será removido da lista de inviáveis."
-        confirmLabel="Remover"
-        confirmColor="#dc2626"
+        title="Reativar esta sugestão?"
+        description="Ela sai da lista de inviáveis e volta a ser oferecida normalmente para este paciente."
+        confirmLabel="Reativar"
+        confirmColor={B.blue}
         onConfirm={() => { onRemove(removIdx); setRemovIdx(null) }}
         onCancel={() => setRemovIdx(null)}
       />
     )}
     </>
-  )
-}
-
-function Empty({ icon, text }: { icon: string; text: string }) {
-  return (
-    <div style={{ borderRadius: "10px", border: "2px dashed var(--border)", padding: "24px", textAlign: "center" }}>
-      <div style={{ fontSize: "32px", marginBottom: "6px" }}>{icon}</div>
-      <div style={{ color: "var(--muted-foreground)", fontSize: "13px" }}>{text}</div>
-    </div>
   )
 }

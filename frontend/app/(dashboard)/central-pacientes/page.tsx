@@ -110,13 +110,17 @@ export default function CentralTerapeuticaPage() {
   // do TiTa em uma única recarga silenciosa (debounce), sem mexer na seleção.
   useEffect(() => {
     const channel = supabase
-      .channel('central-terapeutica')
+      .channel(`central-terapeutica-${data}`)
       .on(
         'postgres_changes',
         {
           event: '*',
           schema: 'public',
           table: 'fila_autorizacoes',
+          // Escopa o gatilho à data visível: o worker sincroniza ~2 semanas à
+          // frente + 10 dias atrás, e sem este filtro qualquer escrita de
+          // qualquer data recarregava a RPC pesada listar_central_pacientes.
+          filter: `data_atendimento=eq.${data}`,
         },
         () => {
           if (debounceRef.current) clearTimeout(debounceRef.current)
@@ -131,7 +135,7 @@ export default function CentralTerapeuticaPage() {
       if (debounceRef.current) clearTimeout(debounceRef.current)
       supabase.removeChannel(channel)
     }
-  }, [supabase, carregar])
+  }, [supabase, carregar, data])
 
   const filtrados = useMemo(() => {
 

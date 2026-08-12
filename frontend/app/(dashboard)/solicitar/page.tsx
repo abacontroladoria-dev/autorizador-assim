@@ -6,13 +6,30 @@ import { useEffect, useState, useMemo } from 'react'
 
 import { getSupabaseClient } from '@/lib/supabase/client'
 
-import { criarAutorizacao } from '@/services/autorizacoes.service'
+import { criarAutorizacao, resolverNomeUsuario } from '@/services/autorizacoes.service'
 
 import toast from 'react-hot-toast'
 
 import { Lock, CheckCircle, Megaphone, XCircle } from 'lucide-react'
 
 import { getMachineId } from '@/lib/machine'
+
+
+// =========================
+// TERAPIAS OCULTAS
+// (não exibidas na Central de Atendimentos)
+// =========================
+const TERAPIAS_OCULTAS = [
+  'equoterapia',
+  'fisioterapia aquática',
+  'fisioterapia aquatica',
+]
+
+function terapiaOculta(p: any) {
+  return (p.terapias || []).some((t: string) =>
+    TERAPIAS_OCULTAS.includes((t || '').toLowerCase().trim())
+  )
+}
 
 
 const CAMPOS_CENTRAL_AUTORIZACOES = `
@@ -105,6 +122,11 @@ export default function SolicitarPage() {
 
   const [listaDia, setListaDia] = useState<any[]>([])
 
+  // Snapshot completo e ESTÁVEL do dia (setado só no carregarLista, nunca mutado
+  // pelos handlers de falta/manual). Usado para a contagem "N de Total" do badge,
+  // que antes encolhia conforme o operador processava sessões.
+  const [listaDiaCompleta, setListaDiaCompleta] = useState<any[]>([])
+
   const [loadingLista, setLoadingLista] = useState(true)
 
   const supabase = getSupabaseClient()
@@ -131,11 +153,16 @@ const unidades = [
   const sessoesHoje = useMemo(() => {
     const grupos: Record<number, { horario: string; terapia: string }[]> = {}
 
-    listaDia.forEach(p => {
-      const id = p.paciente_id
-      if (!grupos[id]) grupos[id] = []
-      grupos[id].push({ horario: p.horario ?? '', terapia: p.terapias?.[0] ?? '' })
-    })
+    // Conta sobre o dia COMPLETO e estável, excluindo terapias ocultas/blacklist.
+    // Assim "N de Total" reflete todas as sessões do dia do paciente e NÃO encolhe
+    // ao concluir/marcar falta (que só removem de listaDia, usado na exibição).
+    listaDiaCompleta
+      .filter(p => !terapiaOculta(p))
+      .forEach(p => {
+        const id = p.paciente_id
+        if (!grupos[id]) grupos[id] = []
+        grupos[id].push({ horario: p.horario ?? '', terapia: p.terapias?.[0] ?? '' })
+      })
 
     const lookup: Record<string, { index: number; total: number }> = {}
     Object.entries(grupos).forEach(([id, sessoes]) => {
@@ -146,7 +173,7 @@ const unidades = [
     })
 
     return lookup
-  }, [listaDia])
+  }, [listaDiaCompleta])
 
   const convenios = [
 
@@ -324,6 +351,7 @@ async function carregarLista() {
   }
 
   setListaDia(data || [])
+  setListaDiaCompleta(data || [])
 
   setLoadingLista(false)
 }
@@ -574,13 +602,17 @@ async function handleFalta(p: any, tipo: 'paciente' | 'terapeuta', justificativa
 
     // 🔁 SE JÁ EXISTE → ATUALIZA
     if (existente) {
+      // Registra a atendente responsável também no fluxo de falta: este UPDATE
+      // não passa por criarAutorizacao, então o criado_por ficava NULL.
+      const criadoPor = await resolverNomeUsuario(supabase)
       const { error } = await supabase
         .from('fila_autorizacoes')
         .update({
           status: 'falta',
           tipo_falta: tipo,
           terapia_falta: p.terapias?.join(' + ') || null,
-          justificativa_falta: justificativa || null
+          justificativa_falta: justificativa || null,
+          criado_por: criadoPor
         })
         .eq('id', existente.id)
 
@@ -700,13 +732,15 @@ const atendimentos = Object.values(
 
     if (existente) {
       // 🔄 ATUALIZA
+      const criadoPor = await resolverNomeUsuario(supabase)
       await supabase
         .from('fila_autorizacoes')
         .update({
           status: 'falta',
           tipo_falta: 'paciente',
           terapia_falta: p.terapias?.join(' + ') || null,
-          justificativa_falta: justificativa || null
+          justificativa_falta: justificativa || null,
+          criado_por: criadoPor
         })
         .eq('id', existente.id)
 
@@ -769,8 +803,10 @@ const atendimentos = Object.values(
   // =========================
   
 async function handleManualLista(p: any) {
-	
+
   try {
+    // Atendente responsável — gravada também no UPDATE (não passa por criarAutorizacao).
+    const criadoPor = await resolverNomeUsuario(supabase)
     // 🔍 VERIFICA SE JÁ EXISTE NA FILA
     const { data: existente } = await supabase
       .from('fila_autorizacoes')
@@ -792,21 +828,22 @@ async function handleManualLista(p: any) {
         .from('fila_autorizacoes')
 		.update({
 		  status: 'concluido',
-		  completion_type: 'manual',
-		  numero_autorizacao: 'MANUAL',
+		  completion_type: 'presenca',
+		  numero_autorizacao: 'N/A',
 		  horario_autorizacao: new Date().toISOString(),
 		  completed_at: new Date().toISOString(),
+		  criado_por: criadoPor,
 		})
         .eq('id', existente.id)
 
       if (error) {
         console.log('ERRO COMPLETO:', JSON.stringify(error, null, 2))
-        toast.error('Erro ao atualizar manual')
+        toast.error('Erro ao atualizar presença')
         return
       }
 
-	
-      toast.success('Atualizado como manual 📝')
+
+      toast.success('Presença atualizada 📝')
 
     } else {
       // 🚀 SE NÃO EXISTE → INSERT PADRONIZADO
@@ -832,22 +869,22 @@ async function handleManualLista(p: any) {
       })
 
       if (!inserted) {
-        toast.error('Erro ao registrar manual')
+        toast.error('Erro ao registrar presença')
         return
       }
 
-      // 🔥 GARANTE QUE FIQUE COMO MANUAL (extra segurança)
+      // 🔥 GARANTE QUE FIQUE COMO PRESENÇA (extra segurança)
       await supabase
         .from('fila_autorizacoes')
 		.update({
-		  completion_type: 'manual',
-		  numero_autorizacao: 'MANUAL',
+		  completion_type: 'presenca',
+		  numero_autorizacao: 'N/A',
 		  horario_autorizacao: new Date().toISOString(),
 		  completed_at: new Date().toISOString(),
 		})
         .eq('id', inserted.id)
 
-      toast.success('Autorização manual registrada 📝')
+      toast.success('Presença registrada 📝')
     }
 
     // 🔥 REMOVE DA LISTA (igual falta)
@@ -1285,6 +1322,20 @@ useEffect(() => {
   </div>
 
 </div>
+
+          {/* A ASSIM carimba a guia com a data em que ela foi emitida, não com a data
+              do atendimento. Autorizando adiantado, as duas divergem e o vínculo
+              automático guia↔sessão deixa de funcionar pelos caminhos que casam por
+              data — a recuperação passa a depender de reconciliar_guias_por_janela. */}
+          {dataSelecionada > hoje && (
+            <div className="mb-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <strong className="font-semibold">Autorização antecipada.</strong>{' '}
+              A ASSIM registrará a guia com a data de hoje, não com a data do
+              atendimento — o número da guia pode demorar a aparecer na Central de
+              Pacientes.
+            </div>
+          )}
+
           {loadingLista ? (
             <p className="text-sm text-slate-400">Carregando...</p>
           ) : (() => {
@@ -1293,6 +1344,9 @@ useEffect(() => {
 				)
 				.filter(
 				  (p) => p.mostrar_na_tela
+				)
+				.filter(
+				  (p) => !terapiaOculta(p)
 				)
 				.filter((p) => {
 				

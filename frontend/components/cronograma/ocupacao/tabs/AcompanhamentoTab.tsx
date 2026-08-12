@@ -1,9 +1,13 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import { B, SK_SAIDA, HORAS_GRID, DIAS_LIST } from "@/lib/cronograma/constants"
-import { waKey, fmtName } from "@/lib/cronograma/helpers"
-import { exportBase } from "@/lib/cronograma/xlsx"
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
+import {
+  Ban, BarChart3, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronUp,
+  ClipboardList, Clock, Download, DoorOpen, Inbox, Search, User, X,
+} from "lucide-react"
+import type { LucideIcon } from "lucide-react"
+import { B, SK_SAIDA, HORAS_GRID, DIAS_LIST, DIAS_ORD } from "@/lib/cronograma/constants"
+import { waKey, fmtName, parseSlotReservado } from "@/lib/cronograma/helpers"
 import { useCronogramaData, genConfId } from "@/contexts/CronogramaDataContext"
 import { RecusadosTab } from "./RecusadosTab"
 import { InviavelTab } from "./InviavelTab"
@@ -11,11 +15,20 @@ import type { AlgorithmResult, Sugestao, WaMap, WaStatus, StatusMap, CsvRow, Opc
 import type { AceitePacBundle, AceiteSessao, ConfItem, SlotStatus } from "@/types/acompanhamento"
 import { SaidaCronModal } from "@/components/cronograma/solicitacoes/SaidaCronModal"
 import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
+import { ListCard, EmptyState, GroupHeader, TimeBadge, SearchInput, rowStyle, rowClass } from "@/components/cronograma/ui/DataTable"
 
 const SLOT_META: Record<SlotStatus, { label: string; bg: string; c: string; bd: string }> = {
   confirmado: { label: "Confirmou",  bg: "#dcfce7", c: "#14532d", bd: "#86efac" },
   recusado:   { label: "Recusou",    bg: "#fee2e2", c: "#7f1d1d", bd: "#fca5a5" },
   inviavel:   { label: "Inviável",   bg: "var(--muted)", c: "var(--muted-foreground)", bd: "var(--border)" },
+}
+
+// CRON-008: itens derivados de uma Reserva Pendente (pacBundles) carregam esse
+// prefixo no id — não existem como linha própria em `conf` (ver pacConfDerived).
+// É o único jeito de distinguir a origem sem precisar de outra flag.
+const RESERVA_PENDENTE_PREFIX = "pacres_"
+function isReservaPendenteItem(c: ConfItem): boolean {
+  return c.id.startsWith(RESERVA_PENDENTE_PREFIX)
 }
 
 interface Props {
@@ -29,13 +42,101 @@ interface Props {
 }
 
 type Sub = "aguardando" | "recusados" | "inviavel" | "confirmados"
-type Origem = "" | "ocupacao" | "ocp-prof" | "ocp-pac" | "saida"
+type Origem = "ocupacao" | "ocp-prof" | "ocp-pac" | "saida"
 
-const ORIGEM_LABELS: Record<string, string> = {
-  ocupacao:   "Aumentar Ocupação (Clínica)",
-  saida:      "Saída de Profissional",
-  "ocp-prof": "Aumentar Ocupação (Profissional)",
-  "ocp-pac":  "Aumentar Ocupação (Paciente)",
+const ORIGEM_ICON: Record<Origem, LucideIcon> = {
+  ocupacao: ClipboardList, "ocp-prof": BarChart3, "ocp-pac": User, saida: DoorOpen,
+}
+
+const ORIGEM_COLOR: Record<Origem, string> = {
+  ocupacao: B.blue, "ocp-prof": B.orange, "ocp-pac": "#4d7c0f", saida: B.purple,
+}
+
+// ConfItem.origem chega como texto livre (gravado nos handlers abaixo) — este
+// mapa liga cada valor gravado ao mesmo ícone/cor usado nas seções de
+// "Aguardando", para que a origem continue identificável nas outras sub-abas.
+const CONF_ORIGEM_META: Record<string, { icon: LucideIcon; color: string }> = {
+  "Ocp. Clínica":       { icon: ORIGEM_ICON.ocupacao, color: ORIGEM_COLOR.ocupacao },
+  "Ocp. Profissional":  { icon: ORIGEM_ICON["ocp-prof"], color: ORIGEM_COLOR["ocp-prof"] },
+  "Ocp. Paciente":      { icon: ORIGEM_ICON["ocp-pac"], color: ORIGEM_COLOR["ocp-pac"] },
+  "Saída Profissional": { icon: ORIGEM_ICON.saida, color: ORIGEM_COLOR.saida },
+}
+const DEFAULT_ORIGEM_META = { icon: CheckCircle2, color: "#15803d" }
+
+// ─── Primitivas visuais compartilhadas por esta aba ────────────────────────
+
+function RailCard({ color, children }: { color: string; children: ReactNode }) {
+  return (
+    <div style={{ position: "relative", background: "var(--card)", border: "1px solid var(--border)", borderRadius: "var(--radius-lg)", padding: "12px 16px 12px 20px", overflow: "hidden" }}>
+      <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: "3px", background: color }} />
+      {children}
+    </div>
+  )
+}
+
+function OriginTag({ icon: Icon, label, color }: { icon: LucideIcon; label: string; color: string }) {
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "var(--text-xs)", fontWeight: "var(--weight-semibold)", color, whiteSpace: "nowrap" }}>
+      <Icon size={11} />
+      {label}
+    </span>
+  )
+}
+
+type BtnKind = "confirm" | "reject" | "neutral" | "cancel"
+
+// Mesma paleta de pílulas suaves usada nos botões de sessão do bloco Ocupação
+// Paciente (ver slotBtn em PacBundleItem) — mantém a cor consistente em todas
+// as origens da aba Aguardando.
+const BTN_VARIANTS: Record<BtnKind, CSSProperties> = {
+  confirm: { background: "#dcfce7", color: "#14532d", border: "1px solid #86efac", fontWeight: "var(--weight-bold)" },
+  reject:  { background: "#fee2e2", color: "#7f1d1d", border: "1px solid #fca5a5", fontWeight: "var(--weight-bold)" },
+  neutral: { background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", fontWeight: "var(--weight-medium)" },
+  cancel:  { background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", fontWeight: "var(--weight-semibold)" },
+}
+
+function ActionBtn({ kind, onClick, children, title, style }: {
+  kind: BtnKind; onClick: () => void; children: ReactNode; title?: string; style?: CSSProperties
+}) {
+  return (
+    <button
+      onClick={onClick}
+      title={title}
+      style={{
+        fontSize: "var(--text-sm)", padding: "10px 14px", minHeight: "40px", borderRadius: "var(--radius-md)",
+        cursor: "pointer", fontFamily: "inherit",
+        display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "6px",
+        ...BTN_VARIANTS[kind], ...style,
+      }}
+    >
+      {children}
+    </button>
+  )
+}
+
+function SectionToggle({ icon: Icon, label, color, count, open, onToggle, controls }: {
+  icon: LucideIcon; label: string; color: string; count: number; open: boolean; onToggle: () => void; controls: string
+}) {
+  return (
+    <button
+      onClick={onToggle}
+      aria-expanded={open}
+      aria-controls={controls}
+      style={{
+        display: "flex", alignItems: "center", gap: "8px", width: "100%",
+        padding: "6px 2px", background: "transparent", border: "none",
+        cursor: "pointer", fontFamily: "inherit", textAlign: "left",
+      }}
+    >
+      <Icon size={14} style={{ color, flexShrink: 0 }} />
+      <span style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-semibold)", color: "var(--foreground)", whiteSpace: "nowrap" }}>{label}</span>
+      <span style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-bold)", color, background: `${color}18`, borderRadius: "999px", padding: "1px 7px", flexShrink: 0 }}>
+        {count}
+      </span>
+      <div style={{ flex: 1, height: "1px", background: "var(--border)" }} />
+      {open ? <ChevronUp size={14} style={{ color: "var(--muted-foreground)", flexShrink: 0 }} /> : <ChevronDown size={14} style={{ color: "var(--muted-foreground)", flexShrink: 0 }} />}
+    </button>
+  )
 }
 
 export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onInv, onCron }: Props) {
@@ -44,7 +145,6 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     profMap, pacBundles, conf, persistProfMap, persistPacBundles, persistConf,
   } = useCronogramaData()
   const [sub, setSub] = useState<Sub>("aguardando")
-  const [fOrigem, setFOrigem] = useState<Origem>("")
   const [ocupOpen, setOcupOpen] = useState(false)
   const [saidaOpen, setSaidaOpen] = useState(false)
   const [ocupProfOpen, setOcupProfOpen] = useState(false)
@@ -73,13 +173,36 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
   const aguardandoPacBundles = pacBundles.filter(b => b.status === "pendente")
   const aguardandoCount = aguardandoOcup.length + aguardandoSaidaCount + aguardandoProfItems.length + aguardandoPacBundles.length
 
+  // Busca por paciente dentro de "Aguardando" — substitui o antigo filtro por
+  // origem (a origem já é identificável pelo ícone/cor de cada seção; buscar
+  // pelo nome é o que o coordenador de fato precisa ao procurar um paciente).
+  const [filtroPac, setFiltroPac] = useState("")
+  const filtroPacNorm = filtroPac.trim().toLowerCase()
+  const aguardandoOcupView = useMemo(
+    () => filtroPacNorm ? aguardandoOcup.filter(o => o.pac.toLowerCase().includes(filtroPacNorm)) : aguardandoOcup,
+    [aguardandoOcup, filtroPacNorm],
+  )
+  const aguardandoProfItemsView = useMemo(
+    () => filtroPacNorm ? aguardandoProfItems.filter(([key]) => key.split("|||")[0].toLowerCase().includes(filtroPacNorm)) : aguardandoProfItems,
+    [aguardandoProfItems, filtroPacNorm],
+  )
+  const aguardandoPacBundlesView = useMemo(
+    () => filtroPacNorm ? aguardandoPacBundles.filter(b => b.pac.toLowerCase().includes(filtroPacNorm)) : aguardandoPacBundles,
+    [aguardandoPacBundles, filtroPacNorm],
+  )
+  const aguardandoSaidaItemsView = useMemo(
+    () => filtroPacNorm ? aguardandoSaidaItems.filter(([key]) => key.split("|||")[0].toLowerCase().includes(filtroPacNorm)) : aguardandoSaidaItems,
+    [aguardandoSaidaItems, filtroPacNorm],
+  )
+  const aguardandoViewCount = aguardandoOcupView.length + aguardandoProfItemsView.length + aguardandoPacBundlesView.length + aguardandoSaidaItemsView.length
+
   // Itens de saida_aceites que não foram propagados para conf/rec/inv (ex: processados por outro usuário)
   const saidaConfDerived = useMemo((): ConfItem[] => (
     Object.entries(statusMap)
       .filter(([, v]) => v.status === "resolvido")
       .map(([key, v]) => {
         const [pac, dia, hora, terapia] = key.split("|||")
-        const [profRes, diaRes, horaRes] = (v.slotReservado || "|||").split("|||")
+        const { prof: profRes, dia: diaRes, hora: horaRes } = parseSlotReservado(v.slotReservado)
         return {
           id: `saida_${key}`,
           pac,
@@ -133,15 +256,74 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
       .filter(item => !inv.some(i => i.paciente === item.paciente && i.dia === item.dia && i.hora === item.hora))
   ), [statusMap, inv])
 
-  const allConf = useMemo(() => [...conf, ...saidaConfDerived], [conf, saidaConfDerived])
+  // CRON-008: Reserva Pendente (Ocp. Paciente) não é gravada em `conf` — pacBundles
+  // é a única fonte de verdade. Aqui só derivamos uma representação de leitura para
+  // a aba Confirmados, no mesmo padrão de saidaConfDerived (sem duplicar estado).
+  const pacConfDerived = useMemo((): ConfItem[] => (
+    pacBundles
+      .filter(b => b.status === "confirmado")
+      .flatMap(b => b.sessoes.map(s => ({
+        id: `${RESERVA_PENDENTE_PREFIX}${b.id}|||${s.dia}|||${s.hora}`,
+        pac: b.pac,
+        prof: s.prof,
+        esp: s.tP,
+        unidade: s.unidade,
+        dia: s.dia,
+        hora: s.hora,
+        origem: "Ocp. Paciente",
+        registradoEm: new Date(b.ts).toLocaleDateString("pt-BR"),
+      })))
+  ), [pacBundles])
+
+  // Bundles cuja série foi excluída na TiTa e detectada pela reconciliação
+  // (ver OcupPacMode.tsx). Não são mais "Implantado" — surfaced à parte, só leitura,
+  // com opção de dispensar o aviso (remove o bundle da fonte de verdade).
+  const pacRemovidoDerived = useMemo((): ConfItem[] => (
+    pacBundles
+      .filter(b => b.status === "removido_tita")
+      .flatMap(b => b.sessoes.map(s => ({
+        id: `${RESERVA_PENDENTE_PREFIX}${b.id}|||${s.dia}|||${s.hora}`,
+        pac: b.pac,
+        prof: s.prof,
+        esp: s.tP,
+        unidade: s.unidade,
+        dia: s.dia,
+        hora: s.hora,
+        origem: "Ocp. Paciente",
+        registradoEm: new Date(b.ts).toLocaleDateString("pt-BR"),
+      })))
+  ), [pacBundles])
+
+  const allConf = useMemo(() => [...conf, ...saidaConfDerived, ...pacConfDerived], [conf, saidaConfDerived, pacConfDerived])
   const allRec  = useMemo(() => [...rec,  ...saidaRecDerived],  [rec,  saidaRecDerived])
   const allInv  = useMemo(() => [...inv,  ...saidaInvDerived],  [inv,  saidaInvDerived])
 
-  const SUBS: { key: Sub; label: string; count: number }[] = [
-    { key: "aguardando",  label: "Aguardando Resposta", count: aguardandoCount },
-    { key: "confirmados", label: "Confirmados",          count: allConf.length },
-    { key: "recusados",   label: "Recusados",            count: allRec.length },
-    { key: "inviavel",    label: "Inviáveis",             count: allInv.length },
+  // CRON-008: remover um Confirmado derivado de Reserva Pendente precisa reverter a
+  // implantação na origem — pacBundles é a única fonte de verdade, então a remoção
+  // acontece ali (removendo a sessão do bundle, ou o bundle inteiro se for a última).
+  // Itens derivados de Saída Profissional seguem read-only aqui, como já era.
+  function handleRemoverConfirmado(item: ConfItem) {
+    if (isReservaPendenteItem(item)) {
+      const sep = item.id.indexOf("|||")
+      const bundleId = item.id.slice(RESERVA_PENDENTE_PREFIX.length, sep)
+      const atualizados = pacBundles
+        .map(b => b.id === bundleId
+          ? { ...b, sessoes: b.sessoes.filter(s => !(s.dia === item.dia && s.hora === item.hora && s.prof === item.prof && s.tP === item.esp)) }
+          : b)
+        .filter(b => b.id !== bundleId || b.sessoes.length > 0)
+      persistPacBundles(atualizados)
+      return
+    }
+    if (item.id.startsWith("saida_")) return
+    const idx = conf.findIndex(c => c.id === item.id)
+    if (idx !== -1) persistConf(conf.filter((_, j) => j !== idx))
+  }
+
+  const SUBS: { key: Sub; label: string; count: number; icon: LucideIcon }[] = [
+    { key: "aguardando",  label: "Aguardando",          count: aguardandoCount,  icon: Clock },
+    { key: "confirmados", label: "Confirmados",          count: allConf.length,   icon: CheckCircle2 },
+    { key: "recusados",   label: "Recusados",            count: allRec.length,    icon: X },
+    { key: "inviavel",    label: "Inviáveis",             count: allInv.length,    icon: Ban },
   ]
 
   function handleOcupAceito(key: string, sug: { pac: string; prof: string; tP?: string; esp?: string; unidade?: string; dia?: string; hora?: string } | null) {
@@ -246,9 +428,11 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     }))
     if (!bundle) return
     const d = hoje()
-    if (status === "confirmado")
-      persistConf([...conf, ...bundle.sessoes.map(s => ({ id: genConfId(), pac: bundle.pac, prof: s.prof, esp: s.tP, unidade: s.unidade, dia: s.dia, hora: s.hora, origem: "Ocp. Paciente", registradoEm: d }))])
-    else if (status === "recusado")
+    // CRON-008: "confirmado" não grava mais em conf — o bundle (agora com
+    // status "confirmado") já é surfaced na aba Confirmados via pacConfDerived.
+    // Gravar aqui também duplicaria a linha (uma real + uma derivada) e reabriria
+    // o mesmo problema de duas fontes de verdade para a mesma reserva.
+    if (status === "recusado")
       sRec([...rec, ...bundle.sessoes.map(s => ({ paciente: bundle.pac, profissional: s.prof, especialidade: s.tP, unidade: s.unidade, dia: s.dia, hora: s.hora, registradoEm: d }))])
     else if (status === "inviavel")
       sInv([...inv, ...bundle.sessoes.map(s => ({ paciente: bundle.pac, motivo: s.tP, dia: s.dia, hora: s.hora, registradoEm: d }))])
@@ -259,7 +443,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     if (!val) return
     persistStatus({ ...statusMap, [key]: { ...val, status: "resolvido" as any, obsAceite, atualizadoEm: Date.now() } })
     const [pac, dia, hora, terapia] = key.split("|||")
-    const [profRes, diaRes, horaRes] = (val.slotReservado || "|||").split("|||")
+    const { prof: profRes, dia: diaRes, hora: horaRes } = parseSlotReservado(val.slotReservado)
     persistConf([...conf, { id: genConfId(), pac, prof: profRes || "", esp: terapia, unidade: "", dia: diaRes || dia, hora: horaRes || hora, origem: "Saída Profissional", registradoEm: hoje(), obs: obsAceite }])
   }
   function handleSaidaRecusar(key: string, obsAceite?: string) {
@@ -267,7 +451,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     if (!val) return
     persistStatus({ ...statusMap, [key]: { ...val, status: "recusado" as any, obsAceite, slotReservado: null, atualizadoEm: Date.now() } })
     const [pac, dia, hora, terapia] = key.split("|||")
-    const [profRes] = (val.slotReservado || "|||").split("|||")
+    const { prof: profRes } = parseSlotReservado(val.slotReservado)
     sRec([...rec, { paciente: pac, profissional: profRes || "", especialidade: terapia, unidade: "", dia, hora, registradoEm: hoje(), obs: obsAceite }])
   }
   function handleSaidaInviavel(key: string, obsAceite: string) {
@@ -302,7 +486,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     }
     for (const [key, val] of Object.entries(statusMap)) {
       const [pac, dia, hora, terapia] = key.split("|||")
-      const [profRes, diaRes, horaRes] = (val.slotReservado || "|||").split("|||")
+      const { prof: profRes, dia: diaRes, hora: horaRes } = parseSlotReservado(val.slotReservado)
       L.push(["Saída Profissional", pac, terapia, profRes || "", diaRes || dia, horaRes || hora, val.status || "pendente"])
     }
     const csv = L.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(",")).join("\n")
@@ -312,199 +496,180 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     a.click()
   }
 
-  const showOcup     = fOrigem === "" || fOrigem === "ocupacao"
-  const showSaida    = fOrigem === "" || fOrigem === "saida"
-  const showOcupProf = fOrigem === "" || fOrigem === "ocp-prof"
-  const showOcupPac  = fOrigem === "" || fOrigem === "ocp-pac"
-
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
+    <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
 
-      {/* Sub-abas + Export */}
-      <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", alignItems: "center" }}>
-        {SUBS.map(s => (
-          <button key={s.key} onClick={() => setSub(s.key)} style={{
-            padding: "7px 14px", borderRadius: "10px",
-            border: `1px solid ${sub === s.key ? B.blue : "var(--border)"}`,
-            background: sub === s.key ? "var(--cron-active-bg)" : "var(--card)",
-            color: sub === s.key ? B.blue : "var(--muted-foreground)",
-            fontWeight: 700, fontSize: "12px", cursor: "pointer",
-            display: "flex", alignItems: "center", gap: "6px",
-          }}>
-            {s.label}
-            {s.count > 0 && (
-              <span style={{
-                background: sub === s.key ? B.blue : "var(--muted)",
-                color: sub === s.key ? "white" : "var(--muted-foreground)",
-                borderRadius: "999px", padding: "0 6px", fontSize: "11px", fontWeight: 800,
+      {/* Sub-abas em formato de planilha + painel — agrupadas num único wrapper para
+          não herdar o "gap" do container pai, já que a aba ativa precisa tocar o painel */}
+      <div>
+      <div style={{ display: "flex", alignItems: "flex-end", gap: "12px" }}>
+        <div style={{ display: "flex", gap: "3px", overflowX: "auto", flex: 1 }}>
+          {SUBS.map(s => {
+            const active = sub === s.key
+            return (
+              <button key={s.key} onClick={() => setSub(s.key)} style={{
+                display: "flex", alignItems: "center", gap: "7px",
+                padding: "9px 16px",
+                borderTopLeftRadius: "var(--radius-lg)", borderTopRightRadius: "var(--radius-lg)",
+                border: "1px solid var(--border)",
+                borderBottom: active ? "1px solid var(--card)" : "1px solid var(--border)",
+                background: active ? "var(--card)" : "var(--muted)",
+                cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+                color: active ? B.blue : "var(--muted-foreground)",
+                fontSize: "var(--text-md)", fontWeight: active ? "var(--weight-bold)" : "var(--weight-medium)",
+                position: "relative", marginBottom: "-1px", zIndex: active ? 2 : 1,
               }}>
-                {s.count}
-              </span>
-            )}
-          </button>
-        ))}
-        <button onClick={handleExportCSV} style={{ marginLeft: "auto", fontSize: "11px", padding: "6px 12px", borderRadius: "9px", background: "var(--card)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600 }}>
-          ↓ Exportar CSV
+                <s.icon size={15} />
+                {s.label}
+                {s.count > 0 && (
+                  <span style={{
+                    fontSize: "var(--text-xs)", fontWeight: "var(--weight-bold)",
+                    background: active ? B.blue : "var(--muted)",
+                    color: active ? "white" : "var(--muted-foreground)",
+                    borderRadius: "999px", padding: "0 6px", minWidth: "18px", textAlign: "center",
+                  }}>
+                    {s.count}
+                  </span>
+                )}
+              </button>
+            )
+          })}
+        </div>
+        <button onClick={handleExportCSV} style={{
+          flexShrink: 0, display: "flex", alignItems: "center", gap: "6px",
+          fontSize: "var(--text-xs)", fontWeight: "var(--weight-semibold)", padding: "6px 12px",
+          borderRadius: "var(--radius-md)", background: "var(--card)", color: "var(--muted-foreground)",
+          border: "1px solid var(--border)", cursor: "pointer", marginBottom: "6px",
+        }}>
+          <Download size={12} /> Exportar CSV
         </button>
       </div>
 
-      {/* Conteúdo */}
+      {/* Painel conectado à aba ativa (mesma cor de fundo, sem costura na borda) */}
+      <div style={{ marginTop: "-1px", position: "relative", zIndex: 1 }}>
       {sub === "aguardando" && (
-        <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-          {/* Filtro por origem */}
-          <div style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-            <span style={{ fontSize: "11px", color: "var(--muted-foreground)", fontWeight: 600 }}>Filtrar por origem:</span>
-            {(["", "ocupacao", "ocp-prof", "ocp-pac", "saida"] as Origem[]).map(o => (
-              <button key={o} onClick={() => setFOrigem(o)} style={{
-                padding: "4px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 600,
-                border: `1px solid ${fOrigem === o ? B.blue : "var(--border)"}`,
-                background: fOrigem === o ? "var(--cron-active-bg)" : "var(--card)",
-                color: fOrigem === o ? B.blue : "var(--muted-foreground)",
-                cursor: "pointer",
-              }}>
-                {o === "" ? "Todas origens" : ORIGEM_LABELS[o]}
-              </button>
-            ))}
-          </div>
+        <ListCard icon={Clock} title="Aguardando confirmação"
+          count={aguardandoCount} titleColor={B.blue}
+          actions={<SearchInput value={filtroPac} onChange={setFiltroPac} />}
+        >
+        <div style={{ padding: "18px", display: "flex", flexDirection: "column", gap: "14px" }}>
+          {aguardandoCount === 0 && <EmptyState icon={Inbox} text="Nenhum item aguardando resposta" />}
+          {aguardandoCount > 0 && aguardandoViewCount === 0 && (
+            <EmptyState icon={Search} text={`Nenhum resultado para "${filtroPac}"`} />
+          )}
 
-          {aguardandoCount === 0 && (
-            <div style={{ background: "var(--card)", borderRadius: "14px", border: "2px dashed var(--border)", padding: "32px 24px", textAlign: "center" }}>
-              <div style={{ fontSize: "32px", marginBottom: "8px" }}>📬</div>
-              <div style={{ color: "var(--muted-foreground)", fontSize: "14px" }}>Nenhum item aguardando resposta</div>
+          {/* Seção Ocupação Clínica */}
+          {aguardandoOcupView.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+              <SectionToggle icon={ORIGEM_ICON.ocupacao} label="Ocupação Clínica" color={ORIGEM_COLOR.ocupacao}
+                count={aguardandoOcupView.length} open={ocupOpen} onToggle={() => setOcupOpen(o => !o)} controls="secao-ocup" />
+              {ocupOpen && (
+                <div id="secao-ocup" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {aguardandoOcupView.map(({ key, pac, prof, dia, hora, sug }) => (
+                    <OcupItem key={key}
+                      pac={pac} prof={prof} dia={dia} hora={hora}
+                      esp={sug?.esp} unidade={sug?.unidade} tP={sug?.tP} conv={sug?.conv}
+                      onAceito={() => handleOcupAceito(key, sug)}
+                      onRecusado={() => handleOcupRecusado(key, sug)}
+                      onInviavel={() => handleOcupInviavel(pac)}
+                      onCancelar={() => handleOcupCancelar(key)}
+                      onVer={() => sug && onCron(sug)}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
-          {/* Seção Aumentar Ocupação (Clínica) */}
-          {showOcup && aguardandoOcup.length > 0 && (
+          {/* Seção Ocupação Profissional */}
+          {aguardandoProfItemsView.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              <button
-                onClick={() => setOcupOpen(o => !o)}
-                aria-expanded={ocupOpen}
-                aria-controls="secao-ocup"
-                style={{ display: "flex", alignItems: "center", gap: "8px", background: "var(--cron-active-bg)", border: `1px solid ${B.blue}44`, borderRadius: "12px", padding: "10px 14px", cursor: "pointer", textAlign: "left", fontFamily: "inherit", width: "100%" }}
-              >
-                <span style={{ fontSize: "12px", color: B.blue, fontWeight: 700, flex: 1 }}>
-                  📋 Aumentar Ocupação (Clínica) · {aguardandoOcup.length}
-                </span>
-                <span style={{ fontSize: "11px", color: B.blue }}>{ocupOpen ? "▲ Recolher" : "▼ Expandir"}</span>
-              </button>
-              <div id="secao-ocup">{ocupOpen && aguardandoOcup.map(({ key, pac, prof, dia, hora, sug }) => (
-                <OcupItem key={key}
-                  pac={pac} prof={prof} dia={dia} hora={hora}
-                  esp={sug?.esp} unidade={sug?.unidade} tP={sug?.tP} conv={sug?.conv}
-                  onAceito={() => handleOcupAceito(key, sug)}
-                  onRecusado={() => handleOcupRecusado(key, sug)}
-                  onInviavel={() => handleOcupInviavel(pac)}
-                  onCancelar={() => handleOcupCancelar(key)}
-                  onVer={() => sug && onCron(sug)}
-                />
-              ))}</div>
+              <SectionToggle icon={ORIGEM_ICON["ocp-prof"]} label="Ocupação Profissional" color={ORIGEM_COLOR["ocp-prof"]}
+                count={aguardandoProfItemsView.length} open={ocupProfOpen} onToggle={() => setOcupProfOpen(o => !o)} controls="secao-ocup-prof" />
+              {ocupProfOpen && (
+                <div id="secao-ocup-prof" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {aguardandoProfItemsView.map(([key]) => {
+                    const [pac, prof, dia, hora] = key.split("|||")
+                    return (
+                      <ProfItem key={key} pac={pac} prof={prof} dia={dia} hora={hora}
+                        onConfirmar={() => handleProfConfirmar(key)}
+                        onRecusar={() => handleProfRecusar(key)}
+                        onInviavel={() => handleProfInviavel(key)}
+                        onCancelar={() => handleProfCancelar(key)}
+                      />
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
 
-          {/* Seção Aumentar Ocupação (Profissional) */}
-          {showOcupProf && aguardandoProfItems.length > 0 && (
+          {/* Seção Ocupação Paciente */}
+          {aguardandoPacBundlesView.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              <button
-                onClick={() => setOcupProfOpen(o => !o)}
-                aria-expanded={ocupProfOpen}
-                aria-controls="secao-ocup-prof"
-                style={{ display: "flex", alignItems: "center", gap: "8px", background: B.orangeLt, border: `1px solid ${B.orange}44`, borderRadius: "12px", padding: "10px 14px", cursor: "pointer", textAlign: "left", fontFamily: "inherit", width: "100%" }}
-              >
-                <span style={{ fontSize: "12px", color: B.orange, fontWeight: 700, flex: 1 }}>
-                  📊 Aumentar Ocupação (Profissional) · {aguardandoProfItems.length}
-                </span>
-                <span style={{ fontSize: "11px", color: B.orange }}>{ocupProfOpen ? "▲ Recolher" : "▼ Expandir"}</span>
-              </button>
-              <div id="secao-ocup-prof">{ocupProfOpen && aguardandoProfItems.map(([key]) => {
-                const [pac, prof, dia, hora] = key.split("|||")
-                return (
-                  <ProfItem key={key} pac={pac} prof={prof} dia={dia} hora={hora}
-                    onConfirmar={() => handleProfConfirmar(key)}
-                    onRecusar={() => handleProfRecusar(key)}
-                    onInviavel={() => handleProfInviavel(key)}
-                    onCancelar={() => handleProfCancelar(key)}
-                  />
-                )
-              })}</div>
-            </div>
-          )}
-
-          {/* Seção Aumentar Ocupação (Paciente) */}
-          {showOcupPac && aguardandoPacBundles.length > 0 && (
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              <button
-                onClick={() => setOcupPacOpen(o => !o)}
-                aria-expanded={ocupPacOpen}
-                aria-controls="secao-ocup-pac"
-                style={{ display: "flex", alignItems: "center", gap: "8px", background: B.limeLt, border: `1px solid ${B.lime}88`, borderRadius: "12px", padding: "10px 14px", cursor: "pointer", textAlign: "left", fontFamily: "inherit", width: "100%" }}
-              >
-                <span style={{ fontSize: "12px", color: "#4d7c0f", fontWeight: 700, flex: 1 }}>
-                  👤 Aumentar Ocupação (Paciente) · {aguardandoPacBundles.length}
-                </span>
-                <span style={{ fontSize: "11px", color: "#4d7c0f" }}>{ocupPacOpen ? "▲ Recolher" : "▼ Expandir"}</span>
-              </button>
-              <div id="secao-ocup-pac">{ocupPacOpen && aguardandoPacBundles.map(bundle => (
-                <PacBundleItem key={bundle.id} bundle={bundle} cRows={cRows}
-                  onCancelar={() => handlePacCancelar(bundle.id)}
-                  onSlotStatus={(slotKey, st) => handlePacSlotStatus(bundle.id, slotKey, st)}
-                  onSlotRemove={(slotKey) => handlePacSlotRemove(bundle.id, slotKey)}
-                  onBulkStatus={(st) => handlePacBulkStatus(bundle.id, st)}
-                />
-              ))}</div>
+              <SectionToggle icon={ORIGEM_ICON["ocp-pac"]} label="Ocupação Paciente" color={ORIGEM_COLOR["ocp-pac"]}
+                count={aguardandoPacBundlesView.length} open={ocupPacOpen} onToggle={() => setOcupPacOpen(o => !o)} controls="secao-ocup-pac" />
+              {ocupPacOpen && (
+                <div id="secao-ocup-pac" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {aguardandoPacBundlesView.map(bundle => (
+                    <PacBundleItem key={bundle.id} bundle={bundle} cRows={cRows}
+                      onCancelar={() => handlePacCancelar(bundle.id)}
+                      onSlotStatus={(slotKey, st) => handlePacSlotStatus(bundle.id, slotKey, st)}
+                      onSlotRemove={(slotKey) => handlePacSlotRemove(bundle.id, slotKey)}
+                      onBulkStatus={(st) => handlePacBulkStatus(bundle.id, st)}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
           {/* Seção Saída de Profissional */}
-          {showSaida && aguardandoSaidaCount > 0 && (
+          {aguardandoSaidaItemsView.length > 0 && (
             <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
-              <button
-                onClick={() => setSaidaOpen(o => !o)}
-                aria-expanded={saidaOpen}
-                aria-controls="secao-saida"
-                style={{ display: "flex", alignItems: "center", gap: "8px", background: "var(--muted)", border: `1px solid ${B.purple}44`, borderRadius: "12px", padding: "10px 14px", cursor: "pointer", textAlign: "left", fontFamily: "inherit", width: "100%" }}
-              >
-                <span style={{ fontSize: "12px", color: B.purple, fontWeight: 700, flex: 1 }}>
-                  🚪 Saída de Profissional · {aguardandoSaidaCount}
-                </span>
-                <span style={{ fontSize: "11px", color: B.purple }}>{saidaOpen ? "▲ Recolher" : "▼ Expandir"}</span>
-              </button>
-              <div id="secao-saida">{saidaOpen && aguardandoSaidaItems.map(([key, val]) => {
-                const [pac, dia, hora, terapia] = key.split("|||")
-                const [profRes, diaRes, horaRes] = (val.slotReservado || "|||").split("|||")
-                return (
-                  <SaidaItem key={key}
-                    pac={pac} dia={dia} hora={hora} terapia={terapia}
-                    profRes={profRes} diaRes={diaRes} horaRes={horaRes} obs={val.obs}
-                    estrategiaSel={val.estrategiaSel}
-                    opcao={val.opcao}
-                    movimentos={val.movimentos}
-                    statusEntry={val}
-                    onConfirmar={(obs) => handleSaidaConfirmar(key, obs)}
-                    onRecusar={(obs) => handleSaidaRecusar(key, obs)}
-                    onInviavel={(obs) => handleSaidaInviavel(key, obs)}
-                    onCancelar={() => handleSaidaCancelar(key)}
-                  />
-                )
-              })}</div>
+              <SectionToggle icon={ORIGEM_ICON.saida} label="Saída de Profissional" color={ORIGEM_COLOR.saida}
+                count={aguardandoSaidaItemsView.length} open={saidaOpen} onToggle={() => setSaidaOpen(o => !o)} controls="secao-saida" />
+              {saidaOpen && (
+                <div id="secao-saida" style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {aguardandoSaidaItemsView.map(([key, val]) => {
+                    const [pac, dia, hora, terapia] = key.split("|||")
+                    const { prof: profRes, dia: diaRes, hora: horaRes } = parseSlotReservado(val.slotReservado)
+                    return (
+                      <SaidaItem key={key}
+                        pac={pac} dia={dia} hora={hora} terapia={terapia}
+                        profRes={profRes} diaRes={diaRes} horaRes={horaRes} obs={val.obs}
+                        estrategiaSel={val.estrategiaSel}
+                        opcao={val.opcao}
+                        movimentos={val.movimentos}
+                        statusEntry={val}
+                        onConfirmar={(obs) => handleSaidaConfirmar(key, obs)}
+                        onRecusar={(obs) => handleSaidaRecusar(key, obs)}
+                        onInviavel={(obs) => handleSaidaInviavel(key, obs)}
+                        onCancelar={() => handleSaidaCancelar(key)}
+                      />
+                    )
+                  })}
+                </div>
+              )}
             </div>
           )}
         </div>
+        </ListCard>
       )}
 
       {sub === "confirmados" && (
-        <ConfirmadosTab conf={allConf} onRemove={i => { if (i < conf.length) persistConf(conf.filter((_, j) => j !== i)) }} />
+        <ConfirmadosTab conf={allConf} removidos={pacRemovidoDerived} onRemove={handleRemoverConfirmado} />
       )}
       {sub === "recusados" && (
         <RecusadosTab rec={allRec} inv={allInv} waMap={waMap}
-          onRemove={i => { if (i < rec.length) sRec(rec.filter((_, j) => j !== i)) }}
-          onExport={() => exportBase(rec, inv, waMap)} />
+          onRemove={i => { if (i < rec.length) sRec(rec.filter((_, j) => j !== i)) }} />
       )}
       {sub === "inviavel" && (
         <InviavelTab inv={allInv} rec={allRec} waMap={waMap}
-          onRemove={i => { if (i < inv.length) sInv(inv.filter((_, j) => j !== i)) }}
-          onExport={() => exportBase(rec, inv, waMap)} />
+          onRemove={i => { if (i < inv.length) sInv(inv.filter((_, j) => j !== i)) }} />
       )}
+      </div>
+      </div>
 
       {/* Modal Inviável (waMap items) */}
       {invModalPac && (
@@ -543,18 +708,20 @@ function InviavelModal({ pac, motivo, onMotivoChange, onConfirmar, onClose }: {
       style={{ position: "fixed", inset: 0, zIndex: 50, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.4)", padding: "16px" }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "380px", width: "100%", padding: "20px" }}>
-        <div id="inv-modal-title" style={{ fontWeight: 900, fontSize: "17px", marginBottom: "4px" }}>⛔ Marcar como Inviável</div>
-        <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "10px" }}>Removido de TODAS as sugestões até tirado da lista.</div>
-        <div style={{ background: "var(--muted)", borderRadius: "10px", padding: "10px 12px", fontSize: "13px", fontWeight: 700, marginBottom: "10px" }}>{pac}</div>
-        <label htmlFor="inv-motivo" style={{ fontSize: "11px", color: "var(--muted-foreground)", display: "block", marginBottom: "4px" }}>Motivo (opcional)</label>
+      <div style={{ background: "var(--card)", borderRadius: "var(--radius-xl)", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "380px", width: "100%", padding: "20px" }}>
+        <div id="inv-modal-title" style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: "var(--weight-heavy)", fontSize: "var(--text-lg)", marginBottom: "4px" }}>
+          <Ban size={17} style={{ color: "#b45309" }} /> Marcar como Inviável
+        </div>
+        <div style={{ fontSize: "var(--text-sm)", color: "var(--muted-foreground)", marginBottom: "10px" }}>Removido de TODAS as sugestões até tirado da lista.</div>
+        <div style={{ background: "var(--muted)", borderRadius: "var(--radius-md)", padding: "10px 12px", fontSize: "var(--text-md)", fontWeight: "var(--weight-bold)", marginBottom: "10px" }}>{pac}</div>
+        <label htmlFor="inv-motivo" style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)", display: "block", marginBottom: "4px" }}>Motivo (opcional)</label>
         <textarea id="inv-motivo" value={motivo} onChange={e => onMotivoChange(e.target.value)} placeholder="ex: família faltando muito..." rows={2}
-          style={{ width: "100%", border: "1px solid var(--border)", borderRadius: "10px", padding: "8px 12px", fontSize: "13px", fontFamily: "inherit", resize: "none", marginBottom: "14px", boxSizing: "border-box" }} />
+          style={{ width: "100%", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", padding: "8px 12px", fontSize: "var(--text-sm)", fontFamily: "inherit", resize: "none", marginBottom: "14px", boxSizing: "border-box" }} />
         <div style={{ display: "flex", gap: "8px" }}>
-          <button ref={firstBtnRef} onClick={onConfirmar} style={{ padding: "8px 16px", borderRadius: "10px", background: B.navy, color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: "13px" }}>
+          <button ref={firstBtnRef} onClick={onConfirmar} style={{ padding: "8px 16px", borderRadius: "var(--radius-md)", background: B.navy, color: "white", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: "var(--weight-bold)", fontSize: "var(--text-sm)" }}>
             Confirmar
           </button>
-          <button onClick={onClose} style={{ flex: 1, padding: "8px 16px", borderRadius: "10px", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: "8px 16px", borderRadius: "var(--radius-md)", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: "var(--weight-semibold)" }}>
             Cancelar
           </button>
         </div>
@@ -563,65 +730,129 @@ function InviavelModal({ pac, motivo, onMotivoChange, onConfirmar, onClose }: {
   )
 }
 
-function ConfirmadosTab({ conf, onRemove }: { conf: ConfItem[]; onRemove: (i: number) => void }) {
-  const [removIdx, setRemovIdx] = useState<number | null>(null)
+function ConfirmadosTab({ conf, removidos, onRemove }: { conf: ConfItem[]; removidos: ConfItem[]; onRemove: (item: ConfItem) => void }) {
+  const [removendo, setRemovendo] = useState<ConfItem | null>(null)
+  const [filtro, setFiltro] = useState("")
+  const [diasFechados, setDiasFechados] = useState<Set<string>>(new Set())
+  const toggleDia = (dia: string) => setDiasFechados(prev => {
+    const next = new Set(prev)
+    if (next.has(dia)) next.delete(dia)
+    else next.add(dia)
+    return next
+  })
+
+  const filtrados = useMemo(() => {
+    const q = filtro.trim().toLowerCase()
+    return q ? conf.filter(c => c.pac.toLowerCase().includes(q)) : conf
+  }, [conf, filtro])
+
+  // Agrupado por dia da semana (ordem útil) — cada linha lê como uma frase
+  // "quando → quem → o quê", em vez de uma grade de colunas soltas.
+  const groups = useMemo(() => {
+    const map = new Map<string, ConfItem[]>()
+    for (const c of filtrados) {
+      const arr = map.get(c.dia) ?? []
+      arr.push(c)
+      map.set(c.dia, arr)
+    }
+    return [...map.entries()]
+      .sort(([a], [b]) => (DIAS_ORD[a] ?? 99) - (DIAS_ORD[b] ?? 99))
+      .map(([dia, items]) => [dia, items.slice().sort((a, b) => a.hora.localeCompare(b.hora))] as const)
+  }, [filtrados])
+
   return (
     <>
-    <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", boxShadow: "0 1px 4px rgba(0,0,0,.06)", padding: "16px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px", paddingBottom: "12px", borderBottom: "1px solid var(--border)", flexWrap: "wrap", gap: "8px" }}>
-        <span style={{ fontWeight: 800, color: B.navy }}>✅ Confirmados</span>
-        <span style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>{conf.length} registros · 💾</span>
-      </div>
-      {!conf.length ? (
-        <div style={{ borderRadius: "10px", border: "2px dashed var(--border)", padding: "24px", textAlign: "center" }}>
-          <div style={{ fontSize: "32px", marginBottom: "6px" }}>📭</div>
-          <div style={{ color: "var(--muted-foreground)", fontSize: "13px" }}>Nenhuma confirmação registrada</div>
+    {removidos.length > 0 && (
+      <ListCard icon={Ban} title="Removidos na TiTa" count={removidos.length} titleColor="#b45309">
+        <div style={{ padding: "8px 12px 4px", fontSize: "var(--text-xs)", color: "var(--muted-foreground)" }}>
+          Estas sessões estavam implantadas, mas a série foi excluída diretamente na TiTa. Os horários já foram liberados — dispense o aviso quando quiser.
         </div>
+        {removidos.map((c, i) => (
+          <div key={c.id || i} className={rowClass} style={rowStyle}>
+            <TimeBadge hora={c.hora} color="#b45309" />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <span style={{ fontWeight: "var(--weight-heavy)", fontSize: "var(--text-base)", color: "var(--foreground)" }}>{c.pac}</span>
+              <div style={{ fontSize: "var(--text-sm)", color: "var(--muted-foreground)", marginTop: "2px" }}>
+                {c.esp || "—"} · {fmtName(c.prof)}
+              </div>
+            </div>
+            <div style={{ flexShrink: 0, width: "190px", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px" }}>
+              <span style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-semibold)", color: "#b45309", background: "#fffbeb", border: "1px solid #fcd34d", borderRadius: "var(--radius-sm)", padding: "2px 8px", whiteSpace: "nowrap" }}>
+                Removido na TiTa
+              </span>
+              <button onClick={() => onRemove(c)} style={{
+                fontSize: "var(--text-xs)", fontWeight: "var(--weight-semibold)", whiteSpace: "nowrap",
+                color: "var(--muted-foreground)", background: "var(--muted)", border: "1px solid var(--border)",
+                borderRadius: "var(--radius-sm)", padding: "5px 10px", cursor: "pointer", fontFamily: "inherit",
+              }}>
+                Dispensar aviso
+              </button>
+            </div>
+          </div>
+        ))}
+      </ListCard>
+    )}
+    <ListCard
+      icon={CheckCircle2}
+      title="Confirmados"
+      count={conf.length}
+      titleColor="#15803d"
+      actions={<SearchInput value={filtro} onChange={setFiltro} />}
+    >
+      {!conf.length ? (
+        <EmptyState icon={Inbox} text="Nenhuma confirmação registrada" />
+      ) : !filtrados.length ? (
+        <EmptyState icon={Search} text={`Nenhum resultado para "${filtro}"`} />
       ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
-            <thead style={{ background: "var(--muted)" }}>
-              <tr>
-                {["Paciente", "Profissional", "Especialidade", "Dia", "Hora", "Origem", "Registrado", "Obs", ""].map(h => (
-                  <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {conf.map((c, i) => (
-                <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
-                  <td style={{ padding: "8px 12px", fontWeight: 700, color: B.navy }}>{c.pac}</td>
-                  <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontSize: "12px" }}>{fmtName(c.prof)}</td>
-                  <td style={{ padding: "8px 12px" }}>
-                    <span style={{ background: "#dcfce7", color: "#14532d", borderRadius: "999px", padding: "2px 8px", fontSize: "11px" }}>{c.esp || "—"}</span>
-                  </td>
-                  <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontSize: "12px" }}>{c.dia}</td>
-                  <td style={{ padding: "8px 12px", fontWeight: 700, fontSize: "12px" }}>{c.hora}</td>
-                  <td style={{ padding: "8px 12px" }}>
-                    <span style={{ background: B.limeLt, color: "#4d7c0f", borderRadius: "999px", padding: "2px 8px", fontSize: "11px", border: `1px solid ${B.lime}88` }}>{c.origem}</span>
-                  </td>
-                  <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontSize: "11px" }}>{c.registradoEm}</td>
-                  <td style={{ padding: "8px 12px", maxWidth: "180px", fontSize: "12px", color: "var(--muted-foreground)", fontStyle: c.obs ? "italic" : "normal" }}>
-                    {c.obs ? `"${c.obs}"` : "—"}
-                  </td>
-                  <td style={{ padding: "8px 12px" }}>
-                    <button onClick={() => setRemovIdx(i)} style={{ fontSize: "11px", color: "#16a34a", background: "none", border: "none", cursor: "pointer" }}>remover</button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div>
+          {groups.map(([dia, items]) => (
+            <div key={dia}>
+              <GroupHeader label={dia} count={items.length} open={!diasFechados.has(dia)} onToggle={() => toggleDia(dia)} />
+              {!diasFechados.has(dia) && items.map((c, i) => {
+                const origemMeta = CONF_ORIGEM_META[c.origem] ?? DEFAULT_ORIGEM_META
+                return (
+                  <div key={c.id || i} className={rowClass} style={rowStyle}>
+                    <TimeBadge hora={c.hora} color={origemMeta.color} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <span style={{ fontWeight: "var(--weight-heavy)", fontSize: "var(--text-base)", color: "var(--foreground)" }}>{c.pac}</span>
+                      <div style={{ fontSize: "var(--text-sm)", color: "var(--muted-foreground)", marginTop: "2px" }}>
+                        {c.esp || "—"} · {fmtName(c.prof)}
+                      </div>
+                      {c.obs && (
+                        <div style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)", fontStyle: "italic", marginTop: "4px" }}>{`"${c.obs}"`}</div>
+                      )}
+                    </div>
+                    <div style={{ flexShrink: 0, width: "190px", display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px" }}>
+                      <OriginTag icon={origemMeta.icon} label={c.origem} color={origemMeta.color} />
+                      <span style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)", whiteSpace: "nowrap" }}>{c.registradoEm}</span>
+                      <button onClick={() => setRemovendo(c)} style={{
+                        fontSize: "var(--text-xs)", fontWeight: "var(--weight-semibold)", whiteSpace: "nowrap",
+                        color: "#dc2626", background: "#fef2f2", border: "1px solid #fca5a5",
+                        borderRadius: "var(--radius-sm)", padding: "5px 10px", cursor: "pointer", fontFamily: "inherit",
+                      }}>
+                        Cancelar agendamento
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ))}
         </div>
       )}
-    </div>
-    {removIdx !== null && (
+    </ListCard>
+    {removendo && (
       <ConfirmDialog
         title="Remover registro?"
-        description="O registro será removido da lista de confirmados."
+        description={
+          isReservaPendenteItem(removendo)
+            ? "Isso reverte a implantação: a sessão deixa de estar reservada, volta a aparecer como sugestão para este paciente e a vaga fica disponível para outros."
+            : "O registro será removido da lista de confirmados."
+        }
         confirmLabel="Remover"
         confirmColor="#dc2626"
-        onConfirm={() => { onRemove(removIdx); setRemovIdx(null) }}
-        onCancel={() => setRemovIdx(null)}
+        onConfirm={() => { onRemove(removendo); setRemovendo(null) }}
+        onCancel={() => setRemovendo(null)}
       />
     )}
     </>
@@ -635,26 +866,24 @@ function ProfItem({
   onConfirmar: () => void; onRecusar: () => void; onInviavel: () => void; onCancelar: () => void
 }) {
   return (
-    <div style={{ background: B.orangeLt, border: `1px solid ${B.orange}33`, borderRadius: "12px", padding: "10px 14px" }}>
-      <div style={{ marginBottom: "6px" }}>
-        <span style={{ background: B.orangeLt, color: B.orange, border: `1px solid ${B.orange}44`, borderRadius: "999px", padding: "2px 8px", fontSize: "10px", fontWeight: 700 }}>
-          📊 Aumentar Ocupação (Profissional)
-        </span>
+    <RailCard color={ORIGEM_COLOR["ocp-prof"]}>
+      <div style={{ marginBottom: "8px" }}>
+        <OriginTag icon={ORIGEM_ICON["ocp-prof"]} label="Ocupação Profissional" color={ORIGEM_COLOR["ocp-prof"]} />
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-start", justifyContent: "space-between" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-start", justifyContent: "space-between" }}>
         <div>
-          <div style={{ fontWeight: 800, fontSize: "13px", color: B.navy }}>{pac}</div>
-          <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginTop: "2px" }}>{prof}</div>
-          <div style={{ fontSize: "12px", fontWeight: 700, color: B.navy, marginTop: "2px" }}>{dia} {hora}</div>
+          <div style={{ fontWeight: "var(--weight-heavy)", fontSize: "var(--text-base)", color: "var(--foreground)" }}>{pac}</div>
+          <div style={{ fontSize: "var(--text-sm)", color: "var(--muted-foreground)", marginTop: "2px" }}>{prof}</div>
+          <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-bold)", color: "var(--foreground)", marginTop: "2px" }}>{dia} {hora}</div>
         </div>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px" }}>
-          <button onClick={onConfirmar} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#16a34a", color: "white", border: "none", cursor: "pointer", fontWeight: 700 }}>✓ Confirmou</button>
-          <button onClick={onInviavel} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600 }}>Inviável</button>
-          <button onClick={onRecusar} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#dc2626", color: "white", border: "none", cursor: "pointer", fontWeight: 700 }}>✗ Recusou</button>
-          <button onClick={onCancelar} style={{ fontSize: "12px", padding: "10px 12px", minHeight: "44px", borderRadius: "8px", background: "transparent", color: "var(--muted-foreground)", border: "none", cursor: "pointer" }} title="Desfaz o aceite — volta como sugestão em Aumentar Ocupação (Profissional)">Cancelar</button>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+          <ActionBtn kind="confirm" onClick={onConfirmar}><Check size={14} /> Confirmou</ActionBtn>
+          <ActionBtn kind="reject" onClick={onRecusar}><X size={14} /> Recusou</ActionBtn>
+          <ActionBtn kind="neutral" onClick={onInviavel}><Ban size={14} /> Inviável</ActionBtn>
+          <ActionBtn kind="cancel" onClick={onCancelar} title="Desfaz o aceite — volta como sugestão em Aumentar Ocupação (Profissional)">Cancelar</ActionBtn>
         </div>
       </div>
-    </div>
+    </RailCard>
   )
 }
 
@@ -672,61 +901,57 @@ function PacBundleItem({
   const dt = new Date(bundle.ts).toLocaleString("pt-BR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
   const slotStatus = bundle.slotStatus ?? {}
 
-  const smBtn = (bg: string, c: string, bd: string, active?: boolean) => ({
-    fontSize: "11px", padding: "6px 10px", minHeight: "36px", borderRadius: "6px", cursor: "pointer",
-    whiteSpace: "nowrap" as const, fontFamily: "inherit",
+  const slotBtn = (bg: string, c: string, bd: string, active?: boolean): CSSProperties => ({
+    fontSize: "var(--text-xs)", padding: "6px 10px", minHeight: "32px", borderRadius: "var(--radius-sm)", cursor: "pointer",
+    whiteSpace: "nowrap", fontFamily: "inherit",
     background: active ? bg : "var(--muted)", color: active ? c : "var(--muted-foreground)",
-    border: `1px solid ${active ? bd : "var(--border)"}`, fontWeight: active ? 700 : 500,
+    border: `1px solid ${active ? bd : "var(--border)"}`, fontWeight: active ? "var(--weight-bold)" : "var(--weight-medium)",
   })
 
   return (
-    <div style={{ background: B.limeLt, border: `1px solid ${B.lime}88`, borderRadius: "12px", padding: "10px 14px" }}>
+    <RailCard color={ORIGEM_COLOR["ocp-pac"]}>
 
       {/* Cabeçalho */}
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "6px", flexWrap: "wrap", gap: "6px" }}>
-        <div style={{ display: "flex", alignItems: "center", gap: "6px", flexWrap: "wrap" }}>
-          <span style={{ background: B.limeLt, color: "#4d7c0f", border: `1px solid ${B.lime}88`, borderRadius: "999px", padding: "2px 8px", fontSize: "10px", fontWeight: 700 }}>
-            👤 Aumentar Ocupação (Paciente)
-          </span>
-          <span style={{ fontSize: "11px", color: "var(--muted-foreground)" }}>{dt}</span>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px", flexWrap: "wrap", gap: "6px" }}>
+        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+          <OriginTag icon={ORIGEM_ICON["ocp-pac"]} label="Ocupação Paciente" color={ORIGEM_COLOR["ocp-pac"]} />
+          <span style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)" }}>{dt}</span>
         </div>
-        <button onClick={() => setShowVer(true)} style={{ fontSize: "12px", padding: "10px 12px", minHeight: "44px", borderRadius: "8px", background: "var(--card)", color: B.blue, border: `1px solid ${B.blue}33`, cursor: "pointer", fontWeight: 600, fontFamily: "inherit" }}>
-          🗓 Ver
+        <button onClick={() => setShowVer(true)} style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "var(--text-sm)", padding: "8px 12px", minHeight: "36px", borderRadius: "var(--radius-md)", background: "transparent", color: B.blue, border: `1px solid ${B.blue}33`, cursor: "pointer", fontWeight: "var(--weight-semibold)", fontFamily: "inherit" }}>
+          <CalendarDays size={13} /> Ver
         </button>
       </div>
 
-      <div style={{ fontWeight: 800, fontSize: "13px", color: B.navy, marginBottom: "8px" }}>{bundle.pac}</div>
+      <div style={{ fontWeight: "var(--weight-heavy)", fontSize: "var(--text-base)", color: "var(--foreground)", marginBottom: "10px" }}>{bundle.pac}</div>
 
       {/* Sessões individuais */}
-      <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginBottom: "10px" }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: "5px", marginBottom: "12px" }}>
         {bundle.sessoes.map(s => {
           const slotKey = `${s.dia}|||${s.hora}`
           const st = slotStatus[slotKey] as SlotStatus | undefined
           const meta = st ? SLOT_META[st] : null
-          const rowBg = st === "confirmado" ? "#f0fdf4" : st === "recusado" ? "#fff1f2" : st === "inviavel" ? "var(--muted)" : "var(--card)"
-          const rowBd = st === "confirmado" ? "#86efac" : st === "recusado" ? "#fca5a5" : st === "inviavel" ? "var(--border)" : "#d1fae5"
           return (
-            <div key={slotKey} style={{ background: rowBg, borderRadius: "8px", padding: "6px 10px", border: `1px solid ${rowBd}`, opacity: st === "inviavel" ? 0.7 : 1 }}>
+            <div key={slotKey} style={{ background: "var(--muted)", borderRadius: "var(--radius-sm)", padding: "7px 10px", opacity: st === "inviavel" ? 0.65 : 1 }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
                 <div style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ fontWeight: 700, fontSize: "12px", color: B.navy }}>{s.dia.replace("-feira", "")} {s.hora}</span>
-                  <span style={{ fontSize: "11px", color: "var(--card-foreground)", marginLeft: "6px" }}>{s.tP}</span>
-                  <span style={{ fontSize: "11px", color: "var(--muted-foreground)", marginLeft: "4px" }}>· {fmtName(s.prof)}</span>
+                  <span style={{ fontWeight: "var(--weight-bold)", fontSize: "var(--text-md)", color: "var(--foreground)" }}>{s.dia.replace("-feira", "")} {s.hora}</span>
+                  <span style={{ fontSize: "var(--text-sm)", color: "var(--card-foreground)", marginLeft: "6px" }}>{s.tP}</span>
+                  <span style={{ fontSize: "var(--text-sm)", color: "var(--muted-foreground)", marginLeft: "4px" }}>· {fmtName(s.prof)}</span>
                   {meta && (
-                    <span style={{ marginLeft: "8px", fontSize: "9px", fontWeight: 800, padding: "1px 5px", borderRadius: "4px", background: meta.bg, color: meta.c, border: `1px solid ${meta.bd}` }}>
+                    <span style={{ marginLeft: "8px", fontSize: "var(--text-xs)", fontWeight: "var(--weight-bold)", padding: "1px 6px", borderRadius: "var(--radius-sm)", background: meta.bg, color: meta.c, border: `1px solid ${meta.bd}` }}>
                       {meta.label}
                     </span>
                   )}
                 </div>
                 <div style={{ display: "flex", gap: "3px", flexWrap: "wrap", flexShrink: 0 }}>
                   <button onClick={() => onSlotStatus(slotKey, st === "confirmado" ? null : "confirmado")}
-                    style={smBtn("#dcfce7", "#14532d", "#86efac", st === "confirmado")}>✓ Confirmou</button>
+                    style={slotBtn("#dcfce7", "#14532d", "#86efac", st === "confirmado")}>✓ Confirmou</button>
                   <button onClick={() => onSlotStatus(slotKey, st === "recusado" ? null : "recusado")}
-                    style={smBtn("#fee2e2", "#7f1d1d", "#fca5a5", st === "recusado")}>✗ Recusou</button>
+                    style={slotBtn("#fee2e2", "#7f1d1d", "#fca5a5", st === "recusado")}>✗ Recusou</button>
                   <button onClick={() => onSlotStatus(slotKey, st === "inviavel" ? null : "inviavel")}
-                    style={smBtn("var(--muted)", "var(--muted-foreground)", "var(--border)", st === "inviavel")}>⛔ Inviável</button>
+                    style={slotBtn("var(--muted)", "var(--muted-foreground)", "var(--border)", st === "inviavel")}>Inviável</button>
                   <button onClick={() => onSlotRemove(slotKey)}
-                    style={{ ...smBtn("#fef2f2", "#dc2626", "#fca5a5"), color: "#dc2626", background: "#fef2f2", border: "1px solid #fca5a5" }}>× Cancelar</button>
+                    style={{ ...slotBtn("#fef2f2", "#dc2626", "#fca5a5", true) }}>× Remover</button>
                 </div>
               </div>
             </div>
@@ -735,20 +960,20 @@ function PacBundleItem({
       </div>
 
       {/* Ações em lote */}
-      <div style={{ borderTop: "1px solid #d1fae5", paddingTop: "8px" }}>
-        <span style={{ fontSize: "10px", color: "var(--muted-foreground)", fontWeight: 600, display: "block", marginBottom: "4px" }}>Tudo:</span>
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px" }}>
-          <button onClick={() => onBulkStatus("confirmado")} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#16a34a", color: "white", border: "none", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>✓ Confirmou tudo</button>
-          <button onClick={() => onBulkStatus("inviavel")}   style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600, fontFamily: "inherit" }}>Inviável</button>
-          <button onClick={() => onBulkStatus("recusado")}   style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#dc2626", color: "white", border: "none", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>✗ Recusou tudo</button>
-          <button onClick={onCancelar} style={{ fontSize: "12px", padding: "10px 12px", minHeight: "44px", borderRadius: "8px", background: "transparent", color: "var(--muted-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit" }} title="Remove este lote da lista">Cancelar tudo</button>
+      <div style={{ borderTop: "1px solid var(--border)", paddingTop: "10px" }}>
+        <span style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)", fontWeight: "var(--weight-semibold)", display: "block", marginBottom: "6px" }}>Aplicar a todas as sessões:</span>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+          <ActionBtn kind="confirm" onClick={() => onBulkStatus("confirmado")}><Check size={14} /> Confirmou tudo</ActionBtn>
+          <ActionBtn kind="reject" onClick={() => onBulkStatus("recusado")}><X size={14} /> Recusou tudo</ActionBtn>
+          <ActionBtn kind="neutral" onClick={() => onBulkStatus("inviavel")}><Ban size={14} /> Inviável</ActionBtn>
+          <ActionBtn kind="cancel" onClick={onCancelar} title="Remove este lote da lista">Cancelar tudo</ActionBtn>
         </div>
       </div>
 
       {showVer && (
         <PacVerModal pac={bundle.pac} cRows={cRows} bundle={bundle} onClose={() => setShowVer(false)} />
       )}
-    </div>
+    </RailCard>
   )
 }
 
@@ -809,23 +1034,27 @@ function PacVerModal({ pac, cRows, bundle, onClose }: {
       style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)", padding: "12px" }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "880px", width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+      <div style={{ background: "var(--card)", borderRadius: "var(--radius-xl)", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "880px", width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
 
         {/* Cabeçalho */}
-        <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "flex-start", background: "var(--muted)", borderRadius: "18px 18px 0 0" }}>
+        <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "flex-start", background: "var(--muted)", borderRadius: "var(--radius-xl) var(--radius-xl) 0 0" }}>
           <div>
-            <div style={{ fontWeight: 800, fontSize: "15px", color: B.navy }}>🗓 {pac}</div>
-            <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "2px" }}>Agenda existente + propostas enviadas para acompanhamento</div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: "var(--weight-heavy)", fontSize: "var(--text-lg)", color: "var(--foreground)" }}>
+              <CalendarDays size={16} /> {pac}
+            </div>
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)", marginTop: "2px" }}>Agenda existente + propostas enviadas para acompanhamento</div>
             <div style={{ display: "flex", gap: "10px", marginTop: "6px", flexWrap: "wrap" }}>
               {([["exist", "Existente"], ["pendente", "Proposta"], ["confirmado", "Confirmou"], ["recusado", "Recusou"], ["inviavel", "Inviável"]] as [string, string][]).map(([k, lbl]) => (
-                <span key={k} style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "10px", color: "var(--muted-foreground)" }}>
+                <span key={k} style={{ display: "flex", alignItems: "center", gap: "4px", fontSize: "var(--text-xs)", color: "var(--muted-foreground)" }}>
                   <span style={{ display: "inline-block", width: "9px", height: "9px", borderRadius: "2px", background: cellBg(k as any), border: `1px solid ${cellBd(k as any)}` }} />
                   {lbl}
                 </span>
               ))}
             </div>
           </div>
-          <button onClick={onClose} aria-label="Fechar" style={{ width: "30px", height: "30px", borderRadius: "50%", border: "none", background: "var(--muted)", cursor: "pointer", fontSize: "18px", color: "var(--muted-foreground)", flexShrink: 0 }}>×</button>
+          <button onClick={onClose} aria-label="Fechar" style={{ width: "30px", height: "30px", borderRadius: "50%", border: "none", background: "var(--muted)", cursor: "pointer", color: "var(--muted-foreground)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <X size={16} />
+          </button>
         </div>
 
         {/* Grid */}
@@ -840,9 +1069,9 @@ function PacVerModal({ pac, cRows, bundle, onClose }: {
               </colgroup>
               <thead>
                 <tr>
-                  <th style={{ paddingBottom: "8px", textAlign: "right", paddingRight: "8px", fontSize: "11px", color: "var(--muted-foreground)", fontWeight: 400 }}>Hora</th>
+                  <th style={{ paddingBottom: "8px", textAlign: "right", paddingRight: "8px", fontSize: "var(--text-xs)", color: "var(--muted-foreground)", fontWeight: "var(--weight-regular)" }}>Hora</th>
                   {DIAS_UTIL.map(d => (
-                    <th key={d} style={{ paddingBottom: "8px", textAlign: "center", fontSize: "13px", color: B.navy, fontWeight: 800 }}>
+                    <th key={d} style={{ paddingBottom: "8px", textAlign: "center", fontSize: "var(--text-md)", color: "var(--foreground)", fontWeight: "var(--weight-heavy)" }}>
                       {DIAS_ABR[d] ?? d}
                     </th>
                   ))}
@@ -851,7 +1080,7 @@ function PacVerModal({ pac, cRows, bundle, onClose }: {
               <tbody>
                 {activeHoras.map(hora => (
                   <tr key={hora} style={{ borderTop: hora === "13:00" ? "2px solid var(--border)" : "1px solid var(--border)" }}>
-                    <td style={{ textAlign: "right", paddingRight: "8px", verticalAlign: "top", paddingTop: "6px", fontFamily: "monospace", fontSize: "13px", fontWeight: 800, color: B.navy }}>{hora}</td>
+                    <td style={{ textAlign: "right", paddingRight: "8px", verticalAlign: "top", paddingTop: "6px", fontFamily: "monospace", fontSize: "var(--text-sm)", fontWeight: "var(--weight-heavy)", color: "var(--foreground)" }}>{hora}</td>
                     {DIAS_UTIL.map(d => {
                       const k = `${d}|||${hora}`
                       const exists = existMap[k] ?? []
@@ -957,38 +1186,36 @@ function SaidaItem({
 
   return (
     <>
-    <div style={{ background: "#f5f3ff", border: `1px solid ${B.purple}33`, borderRadius: "12px", padding: "12px 16px" }}>
+    <RailCard color={ORIGEM_COLOR.saida}>
       <div style={{ display: "flex", flexWrap: "wrap", gap: "12px", alignItems: "center", justifyContent: "space-between" }}>
 
         {/* Coluna de informação — badge + dados */}
-        <div style={{ flex: 1, minWidth: "160px", display: "flex", flexDirection: "column", gap: "2px" }}>
-          <span style={{ background: "#f5f3ff", color: B.purple, border: `1px solid ${B.purple}44`, borderRadius: "999px", padding: "2px 8px", fontSize: "10px", fontWeight: 700, width: "fit-content", marginBottom: "4px" }}>
-            🚪 Saída de Profissional
-          </span>
-          <div style={{ fontWeight: 800, fontSize: "13px", color: B.navy }}>{pac}</div>
-          <div style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>{terapia} · {dia} {hora}</div>
-          {profRes && <div style={{ fontSize: "12px", fontWeight: 700, color: B.navy }}>→ {profRes} · {diaRes} {horaRes}</div>}
-          {obs && <div style={{ fontSize: "11px", color: "var(--muted-foreground)", fontStyle: "italic" }}>"{obs}"</div>}
+        <div style={{ flex: 1, minWidth: "180px", display: "flex", flexDirection: "column", gap: "3px" }}>
+          <div style={{ marginBottom: "3px" }}>
+            <OriginTag icon={ORIGEM_ICON.saida} label="Saída de Profissional" color={ORIGEM_COLOR.saida} />
+          </div>
+          <div style={{ fontWeight: "var(--weight-heavy)", fontSize: "var(--text-base)", color: "var(--foreground)" }}>{pac}</div>
+          <div style={{ fontSize: "var(--text-md)", color: "var(--muted-foreground)" }}>{terapia} · {dia} {hora}</div>
+          {profRes && <div style={{ fontSize: "var(--text-md)", fontWeight: "var(--weight-bold)", color: "var(--foreground)" }}>→ {profRes} · {diaRes} {horaRes}</div>}
+          {obs && <div style={{ fontSize: "var(--text-sm)", color: "var(--muted-foreground)", fontStyle: "italic" }}>"{obs}"</div>}
         </div>
 
-        {/* Grid de ações — 3 colunas: Ver | Confirmou/Recusou | Inviável/Cancelar */}
-        <div style={{ display: "grid", gridTemplateColumns: hasDetails ? "auto auto auto" : "auto auto", gap: "4px", flexShrink: 0 }}>
+        {/* Ações — todas lado a lado, mesmo padrão de Ocupação Paciente */}
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px", flexShrink: 0 }}>
           {hasDetails && (
             <button onClick={() => setShowVer(true)} style={{
-              gridRow: "span 2",
-              display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: "4px",
-              fontSize: "11px", padding: "8px 12px", borderRadius: "8px",
-              background: `${B.purple}12`, color: B.purple, border: `1px solid ${B.purple}44`,
-              cursor: "pointer", fontFamily: "inherit", fontWeight: 700, lineHeight: 1.3, textAlign: "center",
+              display: "flex", alignItems: "center", justifyContent: "center", gap: "6px",
+              fontSize: "var(--text-sm)", padding: "10px 14px", minHeight: "40px", borderRadius: "var(--radius-md)",
+              background: "transparent", color: B.purple, border: `1px solid ${B.purple}44`,
+              cursor: "pointer", fontFamily: "inherit", fontWeight: "var(--weight-semibold)",
             }}>
-              <span style={{ fontSize: "15px" }}>📋</span>
-              <span>Ver<br />detalhes</span>
+              <CalendarDays size={14} /> Ver detalhes
             </button>
           )}
-          <button onClick={() => setDialog("confirmar")} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#16a34a", color: "white", border: "none", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>✓ Confirmou</button>
-          <button onClick={() => setDialog("inviavel")}  style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#fffbeb", color: "#92400e", border: "1px solid #fde68a", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>Inviável</button>
-          <button onClick={() => setDialog("recusar")}   style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#dc2626", color: "white", border: "none", cursor: "pointer", fontWeight: 700, fontFamily: "inherit" }}>✗ Recusou</button>
-          <button onClick={onCancelar}  style={{ fontSize: "12px", padding: "10px 12px", minHeight: "44px", borderRadius: "8px", background: "transparent", color: B.purple, border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 500 }} title="Remove o item do acompanhamento">Cancelar</button>
+          <ActionBtn kind="confirm" onClick={() => setDialog("confirmar")}><Check size={14} /> Confirmou</ActionBtn>
+          <ActionBtn kind="reject" onClick={() => setDialog("recusar")}><X size={14} /> Recusou</ActionBtn>
+          <ActionBtn kind="neutral" onClick={() => setDialog("inviavel")}><Ban size={14} /> Inviável</ActionBtn>
+          <ActionBtn kind="cancel" onClick={onCancelar} title="Remove o item do acompanhamento">Cancelar</ActionBtn>
         </div>
       </div>
       {showVer && statusEntry?.afetada && (
@@ -1007,7 +1234,7 @@ function SaidaItem({
           estrategiaSel={estrategiaSel} opcao={opcao} movimentos={movimentos} obs={obs}
           onClose={() => setShowVer(false)} />
       )}
-    </div>
+    </RailCard>
 
     {dialog === "confirmar" && (
       <ConfirmDialog
@@ -1072,58 +1299,62 @@ function SaidaVerModal({ pac, dia, hora, terapia, estrategiaSel, opcao, moviment
       style={{ position: "fixed", inset: 0, zIndex: 60, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.5)", padding: "16px" }}
       onClick={e => { if (e.target === e.currentTarget) onClose() }}
     >
-      <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "520px", width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
+      <div style={{ background: "var(--card)", borderRadius: "var(--radius-xl)", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "520px", width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column" }}>
 
-        <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "flex-start", background: "var(--muted)", borderRadius: "18px 18px 0 0" }}>
+        <div style={{ padding: "14px 20px", borderBottom: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "flex-start", background: "var(--muted)", borderRadius: "var(--radius-xl) var(--radius-xl) 0 0" }}>
           <div>
-            <div id="saida-ver-title" style={{ fontWeight: 800, fontSize: "15px", color: B.navy }}>📋 {pac}</div>
-            <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "2px" }}>Detalhes da substituição</div>
+            <div id="saida-ver-title" style={{ display: "flex", alignItems: "center", gap: "8px", fontWeight: "var(--weight-heavy)", fontSize: "var(--text-lg)", color: "var(--foreground)" }}>
+              <CalendarDays size={16} /> {pac}
+            </div>
+            <div style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)", marginTop: "2px" }}>Detalhes da substituição</div>
           </div>
           <button ref={closeRef} onClick={onClose} aria-label="Fechar"
-            style={{ width: "30px", height: "30px", borderRadius: "50%", border: "none", background: "var(--muted)", cursor: "pointer", fontSize: "18px", color: "var(--muted-foreground)", flexShrink: 0 }}>×</button>
+            style={{ width: "30px", height: "30px", borderRadius: "50%", border: "none", background: "var(--muted)", cursor: "pointer", color: "var(--muted-foreground)", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center" }}>
+            <X size={16} />
+          </button>
         </div>
 
         <div style={{ overflow: "auto", padding: "16px 20px", display: "flex", flexDirection: "column", gap: "14px" }}>
 
           <div>
-            <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: "6px" }}>Sessão afetada</div>
-            <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: "10px", padding: "10px 14px" }}>
-              <div style={{ fontWeight: 700, fontSize: "13px", color: "#7f1d1d" }}>{terapia}</div>
-              <div style={{ fontSize: "12px", color: "#991b1b", marginTop: "2px" }}>{dia} · {hora}</div>
+            <div style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-bold)", color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: "6px" }}>Sessão afetada</div>
+            <div style={{ background: "#fef2f2", border: "1px solid #fca5a5", borderRadius: "var(--radius-md)", padding: "10px 14px" }}>
+              <div style={{ fontWeight: "var(--weight-bold)", fontSize: "var(--text-md)", color: "#7f1d1d" }}>{terapia}</div>
+              <div style={{ fontSize: "var(--text-sm)", color: "#991b1b", marginTop: "2px" }}>{dia} · {hora}</div>
             </div>
           </div>
 
           {eLabel && (
             <div>
-              <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: "6px" }}>Estratégia selecionada</div>
-              <div style={{ background: "var(--card)", border: `1px solid ${eColor}33`, borderRadius: "10px", padding: "10px 14px" }}>
-                <span style={{ background: `${eColor}22`, color: eColor, borderRadius: "999px", padding: "2px 10px", fontSize: "11px", fontWeight: 800 }}>{eLabel}</span>
-                {eTip && <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginTop: "8px" }}>{eTip}</div>}
+              <div style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-bold)", color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: "6px" }}>Estratégia selecionada</div>
+              <div style={{ background: "var(--card)", border: `1px solid ${eColor}33`, borderRadius: "var(--radius-md)", padding: "10px 14px" }}>
+                <span style={{ background: `${eColor}22`, color: eColor, borderRadius: "999px", padding: "2px 10px", fontSize: "var(--text-xs)", fontWeight: "var(--weight-black)" }}>{eLabel}</span>
+                {eTip && <div style={{ fontSize: "var(--text-sm)", color: "var(--muted-foreground)", marginTop: "8px" }}>{eTip}</div>}
               </div>
             </div>
           )}
 
           {opcao && (
             <div>
-              <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: "6px" }}>Solução adotada</div>
-              <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: "10px", padding: "10px 14px" }}>
-                <div style={{ fontWeight: 700, fontSize: "13px", color: "#14532d" }}>{fmtName(opcao.prof)}</div>
-                <div style={{ fontSize: "12px", color: "#166534", marginTop: "2px" }}>{opcao.terapia} · {opcao.dia} {opcao.hora}</div>
-                {opcao.unidade && <div style={{ fontSize: "11px", color: "#166534", marginTop: "2px" }}>{opcao.unidade}</div>}
+              <div style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-bold)", color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: "6px" }}>Solução adotada</div>
+              <div style={{ background: "#f0fdf4", border: "1px solid #86efac", borderRadius: "var(--radius-md)", padding: "10px 14px" }}>
+                <div style={{ fontWeight: "var(--weight-bold)", fontSize: "var(--text-md)", color: "#14532d" }}>{fmtName(opcao.prof)}</div>
+                <div style={{ fontSize: "var(--text-sm)", color: "#166534", marginTop: "2px" }}>{opcao.terapia} · {opcao.dia} {opcao.hora}</div>
+                {opcao.unidade && <div style={{ fontSize: "var(--text-xs)", color: "#166534", marginTop: "2px" }}>{opcao.unidade}</div>}
               </div>
             </div>
           )}
 
           {movimentos && movimentos.length > 0 && (
             <div>
-              <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: "6px" }}>Movimentos ({movimentos.length})</div>
+              <div style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-bold)", color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: "6px" }}>Movimentos ({movimentos.length})</div>
               <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
                 {movimentos.map((m, i) => (
-                  <div key={i} style={{ background: "var(--muted)", border: "1px solid var(--border)", borderRadius: "8px", padding: "8px 12px", fontSize: "12px" }}>
-                    <div style={{ color: "var(--card-foreground)", fontWeight: 600 }}>{m.deTerapia}</div>
+                  <div key={i} style={{ background: "var(--muted)", border: "1px solid var(--border)", borderRadius: "var(--radius-sm)", padding: "8px 12px", fontSize: "var(--text-sm)" }}>
+                    <div style={{ color: "var(--card-foreground)", fontWeight: "var(--weight-semibold)" }}>{m.deTerapia}</div>
                     <div style={{ color: "var(--muted-foreground)", marginTop: "2px" }}>
                       {m.deDia} {m.deHora} → {m.paraDia} {m.paraHora}
-                      {m.profMudou && <span style={{ color: B.orange, fontWeight: 700, marginLeft: "6px" }}>· trocou prof</span>}
+                      {m.profMudou && <span style={{ color: B.orange, fontWeight: "var(--weight-bold)", marginLeft: "6px" }}>· trocou prof</span>}
                     </div>
                   </div>
                 ))}
@@ -1133,8 +1364,8 @@ function SaidaVerModal({ pac, dia, hora, terapia, estrategiaSel, opcao, moviment
 
           {obs && (
             <div>
-              <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: "6px" }}>Observação</div>
-              <div style={{ background: "var(--muted)", border: "1px solid var(--border)", borderRadius: "10px", padding: "10px 14px", fontSize: "12px", color: "var(--card-foreground)", fontStyle: "italic" }}>
+              <div style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-bold)", color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em", marginBottom: "6px" }}>Observação</div>
+              <div style={{ background: "var(--muted)", border: "1px solid var(--border)", borderRadius: "var(--radius-md)", padding: "10px 14px", fontSize: "var(--text-sm)", color: "var(--card-foreground)", fontStyle: "italic" }}>
                 "{obs}"
               </div>
             </div>
@@ -1155,35 +1386,31 @@ function OcupItem({
   onAceito: () => void; onRecusado: () => void; onInviavel: () => void; onCancelar: () => void; onVer: () => void
 }) {
   return (
-    <div style={{ background: "var(--cron-active-bg)", border: `1px solid ${B.blue}33`, borderRadius: "12px", padding: "10px 14px" }}>
+    <RailCard color={ORIGEM_COLOR.ocupacao}>
       {/* Badge de origem */}
-      <div style={{ marginBottom: "6px" }}>
-        <span style={{ background: "var(--cron-active-bg)", color: B.blue, border: `1px solid ${B.blue}44`, borderRadius: "999px", padding: "2px 8px", fontSize: "10px", fontWeight: 700 }}>
-          📋 Aumentar Ocupação (Clínica)
-        </span>
+      <div style={{ marginBottom: "8px" }}>
+        <OriginTag icon={ORIGEM_ICON.ocupacao} label="Ocupação Clínica" color={ORIGEM_COLOR.ocupacao} />
       </div>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", alignItems: "flex-start", justifyContent: "space-between" }}>
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "10px", alignItems: "flex-start", justifyContent: "space-between" }}>
         <div>
-          <div style={{ fontWeight: 800, fontSize: "13px", color: B.navy }}>{pac}</div>
-          <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginTop: "2px" }}>
+          <div style={{ fontWeight: "var(--weight-heavy)", fontSize: "var(--text-base)", color: "var(--foreground)" }}>{pac}</div>
+          <div style={{ fontSize: "var(--text-sm)", color: "var(--muted-foreground)", marginTop: "2px" }}>
             {tP || esp || "—"} · {prof}
           </div>
-          <div style={{ fontSize: "12px", fontWeight: 700, color: B.navy, marginTop: "2px" }}>
+          <div style={{ fontSize: "var(--text-sm)", fontWeight: "var(--weight-bold)", color: "var(--foreground)", marginTop: "2px" }}>
             {dia} {hora}{unidade ? ` · ${unidade}` : ""}{conv ? ` · ${conv}` : ""}
           </div>
         </div>
-        <div style={{ display: "flex", flexDirection: "column", gap: "6px", alignItems: "flex-end" }}>
-          <button onClick={onVer} style={{ fontSize: "12px", padding: "10px 12px", minHeight: "44px", borderRadius: "8px", background: "var(--card)", color: B.blue, border: `1px solid ${B.blue}33`, cursor: "pointer", alignSelf: "flex-start" }}>
-            🗓 Ver
+        <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+          <button onClick={onVer} style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "6px", fontSize: "var(--text-sm)", padding: "10px 14px", minHeight: "40px", borderRadius: "var(--radius-md)", background: "transparent", color: B.blue, border: `1px solid ${B.blue}33`, cursor: "pointer", fontFamily: "inherit", fontWeight: "var(--weight-semibold)" }}>
+            <CalendarDays size={14} /> Ver
           </button>
-          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "4px" }}>
-            <button onClick={onAceito}   style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#16a34a", color: "white", border: "none", cursor: "pointer", fontWeight: 700 }}>✓ Confirmou</button>
-            <button onClick={onInviavel} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer", fontWeight: 600 }}>Inviável</button>
-            <button onClick={onRecusado} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "8px", background: "#dc2626", color: "white", border: "none", cursor: "pointer", fontWeight: 700 }}>✗ Recusou</button>
-            <button onClick={onCancelar} style={{ fontSize: "12px", padding: "10px 12px", minHeight: "44px", borderRadius: "8px", background: "transparent", color: "var(--muted-foreground)", border: "none", cursor: "pointer" }} title="Desfaz o aceite — volta como sugestão não trabalhada em Aumentar Ocupação (Clínica)">Cancelar</button>
-          </div>
+          <ActionBtn kind="confirm" onClick={onAceito}><Check size={14} /> Confirmou</ActionBtn>
+          <ActionBtn kind="reject" onClick={onRecusado}><X size={14} /> Recusou</ActionBtn>
+          <ActionBtn kind="neutral" onClick={onInviavel}><Ban size={14} /> Inviável</ActionBtn>
+          <ActionBtn kind="cancel" onClick={onCancelar} title="Desfaz o aceite — volta como sugestão não trabalhada em Aumentar Ocupação (Clínica)">Cancelar</ActionBtn>
         </div>
       </div>
-    </div>
+    </RailCard>
   )
 }

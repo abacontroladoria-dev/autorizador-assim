@@ -1,6 +1,7 @@
 'use client'
 
 import Sidebar from "@/components/Sidebar"
+import SinoAlertas from '@/components/alertas/SinoAlertas'
 import { ImpersonationBar } from '@/components/admin/ImpersonationBar'
 import { useEffect, useState, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
@@ -12,6 +13,7 @@ import {
 } from '@/contexts/HeaderContext'
 import { ThemeProvider } from '@/contexts/ThemeContext'
 import { ImpersonationProvider, useImpersonation } from '@/contexts/ImpersonationContext'
+import { UnsavedChangesProvider } from '@/contexts/UnsavedChangesContext'
 
 const supabase = getSupabaseClient()
 
@@ -48,15 +50,17 @@ export default function DashboardLayout({
     <ImpersonationProvider>
       <ThemeProvider>
         <HeaderProvider>
-          <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
-            <ImpersonationBar />
-            <Suspense fallback={null}>
-              <Sidebar />
-            </Suspense>
-            <DashboardShellContent>
-              {children}
-            </DashboardShellContent>
-          </div>
+          <UnsavedChangesProvider>
+            <div className="min-h-screen bg-background text-foreground transition-colors duration-300">
+              <ImpersonationBar />
+              <Suspense fallback={null}>
+                <Sidebar />
+              </Suspense>
+              <DashboardShellContent>
+                {children}
+              </DashboardShellContent>
+            </div>
+          </UnsavedChangesProvider>
         </HeaderProvider>
       </ThemeProvider>
     </ImpersonationProvider>
@@ -79,9 +83,17 @@ function DashboardShellContent({
         isImpersonating ? 'pt-16' : ''
       }`}
     >
+      {/* SINO DA CENTRAL DE ALERTAS — fora do `{title &&}` de propósito.
+          16 das 32 páginas do dashboard nunca chamam setHeader (inclusive
+          /solicitar, a tela da recepção), então o header não é renderizado nelas.
+          Dentro do bloco condicional, o principal destinatário dos alertas nunca
+          veria o sino. Como âncora fixa ele existe em toda página, e o `pr-20` do
+          header abaixo reserva o espaço para não cobrir o rightContent. */}
+      <SinoAlertas />
+
       {/* HEADER — só exibe quando há título */}
       {title && (
-        <header className="h-20 bg-card border-b border-border flex items-center justify-between px-6 shrink-0">
+        <header className="h-20 bg-card border-b border-border flex items-center justify-between pl-6 pr-20 shrink-0">
           <div>
             <h1 className="text-lg font-bold text-foreground leading-tight">{title}</h1>
             {subtitle && <p className="text-xs text-muted-foreground mt-0.5">{subtitle}</p>}

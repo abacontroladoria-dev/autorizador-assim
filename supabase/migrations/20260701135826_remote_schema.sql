@@ -66,6 +66,12 @@ drop view if exists "public"."vw_blocos_autorizaveis_assim";
 
 drop view if exists "public"."vw_central_autorizacoes";
 
+-- [ajuste manual] listar_central_pacientes (RETURNS SETOF vw_central_pacientes)
+-- precisa ser dropada ANTES da view: esta migration dropa e recria vw_central_pacientes
+-- (e agenda_tita_autorizacao, da qual a view depende), e o drop sem cascade quebraria
+-- a reconstrução do shadow no `db pull`. A função é recriada no fim desta migration.
+drop function if exists "public"."listar_central_pacientes"(date);
+
 drop view if exists "public"."vw_central_pacientes";
 
 drop view if exists "public"."vw_kpis_auditoria_assim";
@@ -154,11 +160,10 @@ alter table "public"."csv_reposicao_faltas" add constraint "csv_reposicao_faltas
 
 set check_function_bodies = off;
 
-create type "public"."http_header" as ("field" character varying, "value" character varying);
-
-create type "public"."http_request" as ("method" public.http_method, "uri" character varying, "headers" public.http_header[], "content_type" character varying, "content" character varying);
-
-create type "public"."http_response" as ("status" integer, "content_type" character varying, "headers" public.http_header[], "content" character varying);
+-- [ajuste manual] "create type http_header/http_request/http_response" removidos:
+-- são tipos fornecidos pela extensão "http" (criada na linha 1 desta migration).
+-- O db pull os dumpou como create type explícito, o que conflita ("type already
+-- exists") na reconstrução do shadow.
 
 create or replace view "public"."vw_reposicao_faltas" as  SELECT id,
     tita_agendamento_id,
@@ -599,7 +604,7 @@ CREATE OR REPLACE FUNCTION public.fn_sync_tita_grade()
 AS $function$
 DECLARE
   _url  text := 'https://wmugemamnqxjfpxrlwes.supabase.co/functions/v1/sync_tita_grade';
-  _auth text := 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndtdWdlbWFtbnF4amZweHJsd2VzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjA5ODA0NywiZXhwIjoyMDkxNjc0MDQ3fQ.jNPXyxt6IqhZ-GCJBsmDqQOz9PKHuAXKf30aJfHYfoo';
+  _auth text := 'Bearer SEGREDO_REMOVIDO_2026-07-28_ver_migration_20260728190000_e_memoria_do_projeto';
   seg0  date := date_trunc('week', CURRENT_DATE AT TIME ZONE 'America/Sao_Paulo')::date;
 BEGIN
   -- Semana corrente (Seg–Sex)
@@ -634,7 +639,7 @@ DECLARE
   -- sexta da PRÓXIMA semana = date_trunc('week', hoje) + 11 dias
   fim   date := (date_trunc('week', hoje) + interval '11 days')::date;
   _url  text := 'https://wmugemamnqxjfpxrlwes.supabase.co/functions/v1/sync_tita_agenda';
-  _auth text := 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndtdWdlbWFtbnF4amZweHJsd2VzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjA5ODA0NywiZXhwIjoyMDkxNjc0MDQ3fQ.jNPXyxt6IqhZ-GCJBsmDqQOz9PKHuAXKf30aJfHYfoo';
+  _auth text := 'Bearer SEGREDO_REMOVIDO_2026-07-28_ver_migration_20260728190000_e_memoria_do_projeto';
 BEGIN
   d := hoje;
   WHILE d <= fim LOOP
@@ -661,7 +666,7 @@ CREATE OR REPLACE FUNCTION public.fn_sync_tita_planejamento()
 AS $function$
 DECLARE
   _url  text := 'https://wmugemamnqxjfpxrlwes.supabase.co/functions/v1/sync_tita_agenda';
-  _auth text := 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndtdWdlbWFtbnF4amZweHJsd2VzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjA5ODA0NywiZXhwIjoyMDkxNjc0MDQ3fQ.jNPXyxt6IqhZ-GCJBsmDqQOz9PKHuAXKf30aJfHYfoo';
+  _auth text := 'Bearer SEGREDO_REMOVIDO_2026-07-28_ver_migration_20260728190000_e_memoria_do_projeto';
 BEGIN
   PERFORM net.http_post(
     url     := _url,
@@ -684,7 +689,7 @@ DECLARE
   hoje  date := (CURRENT_DATE AT TIME ZONE 'America/Sao_Paulo')::date;
   ini   date := hoje - 10;
   _url  text := 'https://wmugemamnqxjfpxrlwes.supabase.co/functions/v1/sync_tita_agenda';
-  _auth text := 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndtdWdlbWFtbnF4amZweHJsd2VzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjA5ODA0NywiZXhwIjoyMDkxNjc0MDQ3fQ.jNPXyxt6IqhZ-GCJBsmDqQOz9PKHuAXKf30aJfHYfoo';
+  _auth text := 'Bearer SEGREDO_REMOVIDO_2026-07-28_ver_migration_20260728190000_e_memoria_do_projeto';
 BEGIN
   d := ini;
   WHILE d <= hoje LOOP
@@ -2197,7 +2202,255 @@ grant update on table "public"."csv_reposicao_faltas" to "service_role";
 using (public.is_admin());
 
 
-CREATE TRIGGER "controle-terapeutico-slack" AFTER INSERT OR UPDATE ON public.controle_terapeutico FOR EACH ROW EXECUTE FUNCTION supabase_functions.http_request('https://wmugemamnqxjfpxrlwes.supabase.co/functions/v1/msg-slack', 'POST', '{"Content-type":"application/json","Authorization":"Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6IndtdWdlbWFtbnF4amZweHJsd2VzIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc3NjA5ODA0NywiZXhwIjoyMDkxNjc0MDQ3fQ.jNPXyxt6IqhZ-GCJBsmDqQOz9PKHuAXKf30aJfHYfoo"}', '{}', '5000');
+CREATE TRIGGER "controle-terapeutico-slack" AFTER INSERT OR UPDATE ON public.controle_terapeutico FOR EACH ROW EXECUTE FUNCTION supabase_functions.http_request('https://wmugemamnqxjfpxrlwes.supabase.co/functions/v1/msg-slack', 'POST', '{"Content-type":"application/json","Authorization":"Bearer SEGREDO_REMOVIDO_2026-07-28_ver_migration_20260728190000_e_memoria_do_projeto"}', '{}', '5000');
+
+
+-- [ajuste manual] Recria listar_central_pacientes após a view vw_central_pacientes
+-- (dropada no topo desta migration por depender do tipo da view). Definição idêntica
+-- à vigente em 20260614000000_extend_central_pacientes_substituicao.sql.
+CREATE OR REPLACE FUNCTION public.listar_central_pacientes(p_data date)
+RETURNS SETOF public.vw_central_pacientes
+LANGUAGE sql STABLE SECURITY INVOKER
+AS $$
+
+-- Parte 1: registros que passaram pela fila
+(
+    SELECT DISTINCT ON (fa.id)
+        fa.id,
+        fa.agenda_id,
+        fa.paciente_id,
+        fa.paciente_nome,
+        fa.data_atendimento,
+        fa.horario,
+        ((fa.data_atendimento::text || ' '::text) || fa.horario::text)::timestamp without time zone AS data_horario,
+        fa.status,
+        fa.status_assim,
+        fa.tipo_falta,
+        fa.completion_type,
+        fa.numero_autorizacao,
+        fa.machine_id,
+        fa.error_message,
+        fa.execution_time_ms,
+        fa.created_at,
+        fa.updated_at,
+        fa.assim_updated_at,
+        fa.horario_autorizacao,
+        fa.terapia_exibicao_id,
+        fa.terapia_nome AS classificacao_terapia,
+        fa.forma_autorizacao,
+        ag.hora_inicial,
+        ag.hora_final,
+        ag.profissional_nome,
+        ag.profissional_id,
+        ag.terapia_nome,
+        ag.terapia_exibicao_nome,
+        ag.sala_nome,
+        ag.clinica_nome,
+        ag.convenio_nome,
+        ag.responsavel_nome,
+        ag.responsavel_telefone,
+        ag.numero_carteirinha,
+        ag.sala_nome AS unidade,
+        ag.convenio_nome AS convenio,
+        maq.nome AS usuario_nome,
+        CASE
+            WHEN fa.status      = 'erro'        THEN 'erro'
+            WHEN fa.status      = 'processando' THEN 'processando'
+            WHEN fa.tipo_falta  = 'terapeuta'   THEN 'falta_terapeuta'
+            WHEN fa.tipo_falta  = 'paciente'    THEN 'falta_paciente'
+            WHEN fa.status_assim = 'autorizado' THEN 'autorizado'
+            WHEN fa.status      = 'concluido'   THEN 'autorizado'
+            WHEN fa.status      = 'pendente'    THEN 'pendente'
+            ELSE COALESCE(fa.status, 'pendente')
+        END AS status_operacional,
+        ctrl.profissional_substituto_nome,
+        COALESCE(ctrl.profissional_substituto_nome, ag.profissional_nome) AS profissional_realizou_nome,
+        (ctrl.profissional_substituto_id IS NOT NULL) AS is_substituicao,
+        ctrl.status AS controle_status,
+        ctrl.confirmado_em,
+        fa.criado_por
+    FROM public.fila_autorizacoes fa
+    LEFT JOIN public.maquinas maq
+        ON maq.id = fa.machine_id
+    LEFT JOIN public.agenda_tita_autorizacao ag
+        ON  fa.paciente_id::bigint = ag.paciente_id
+        AND fa.data_atendimento    = ag.data_atendimento
+        AND fa.horario             = ag.hora_inicial
+        AND lower(TRIM(BOTH FROM COALESCE(fa.terapia_nome, ''::text))) =
+            lower(TRIM(BOTH FROM COALESCE(ag.terapia_nome, ''::text)))
+    LEFT JOIN LATERAL (
+        SELECT ct.status, ct.profissional_substituto_id, ct.profissional_substituto_nome, ct.confirmado_em
+        FROM public.controle_terapeutico ct
+        WHERE ct.tita_agendamento_id = ag.tita_agendamento_id
+        ORDER BY ct.updated_at DESC NULLS LAST
+        LIMIT 1
+    ) ctrl ON true
+    WHERE fa.id IS NOT NULL
+      AND fa.data_atendimento = p_data
+      AND (fa.status IS NOT NULL OR fa.status_assim IS NOT NULL
+           OR fa.numero_autorizacao IS NOT NULL OR fa.tipo_falta IS NOT NULL)
+    ORDER BY fa.id,
+             fa.created_at  DESC NULLS LAST,
+             ag.updated_at  DESC NULLS LAST,
+             ag.created_at  DESC NULLS LAST
+)
+
+UNION ALL
+
+-- Parte 2: autorizados diretamente no ASSIM sem registro em fila_autorizacoes
+(
+    SELECT
+        p2.id, p2.agenda_id, p2.paciente_id, p2.paciente_nome,
+        p2.data_atendimento, p2.horario, p2.data_horario,
+        p2.status, p2.status_assim, p2.tipo_falta, p2.completion_type,
+        p2.numero_autorizacao, p2.machine_id, p2.error_message, p2.execution_time_ms,
+        p2.created_at, p2.updated_at, p2.assim_updated_at, p2.horario_autorizacao,
+        p2.terapia_exibicao_id, p2.classificacao_terapia, p2.forma_autorizacao,
+        p2.hora_inicial, p2.hora_final, p2.profissional_nome, p2.profissional_id,
+        p2.terapia_nome, p2.terapia_exibicao_nome, p2.sala_nome, p2.clinica_nome,
+        p2.convenio_nome, p2.responsavel_nome, p2.responsavel_telefone, p2.numero_carteirinha,
+        p2.unidade, p2.convenio, p2.usuario_nome, p2.status_operacional,
+        p2.profissional_substituto_nome, p2.profissional_realizou_nome,
+        p2.is_substituicao, p2.controle_status, p2.confirmado_em,
+        p2.criado_por
+    FROM (
+        WITH
+        agenda_com_tuss AS (
+            SELECT
+                at.id,
+                at.tita_agendamento_id,
+                at.paciente_id,
+                at.paciente_nome,
+                at.data_atendimento,
+                at.hora_inicial,
+                at.hora_final,
+                at.profissional_id,
+                at.profissional_nome,
+                at.terapia_nome,
+                at.terapia_exibicao_id,
+                at.terapia_exibicao_nome,
+                at.sala_nome,
+                at.clinica_nome,
+                at.convenio_nome,
+                at.responsavel_nome,
+                at.responsavel_telefone,
+                at.numero_carteirinha,
+                CASE
+                    WHEN at.terapia_exibicao_nome = ANY (ARRAY['Psicologia'::text,'Psicologia ABA'::text,'Arteterapia'::text,'Arteterapia (Psicologia ABA)'::text,'Avaliação Neuropsicológica'::text,'Habilidades Sociais (Psicologia ABA)'::text]) THEN '22070384'::text
+                    WHEN at.terapia_exibicao_nome = 'Fonoaudiologia'::text           THEN '22070397'::text
+                    WHEN at.terapia_exibicao_nome = 'Psicomotricidade'::text         THEN '22070400'::text
+                    WHEN at.terapia_exibicao_nome = 'Fisioterapia'::text             THEN '22070419'::text
+                    WHEN at.terapia_exibicao_nome = 'Terapia Ocupacional'::text      THEN '22070427'::text
+                    WHEN at.terapia_exibicao_nome = 'Psicopedagogia'::text           THEN '22070435'::text
+                    WHEN at.terapia_exibicao_nome = 'Musicoterapia'::text            THEN '22070451'::text
+                    WHEN at.terapia_exibicao_nome = ANY (ARRAY['Nutrição'::text,'Terapia Alimentar'::text]) THEN '22070460'::text
+                    WHEN at.terapia_exibicao_nome = ANY (ARRAY['Hidroterapia'::text,'Fisioterapia Aquática'::text]) THEN '22070265'::text
+                    WHEN at.terapia_exibicao_nome = 'Equoterapia'::text              THEN '22070257'::text
+                    ELSE NULL::text
+                END AS codigo_tuss
+            FROM public.agenda_tita at
+            WHERE at.data_atendimento = p_data
+              AND at.paciente_nome <> ALL (ARRAY['Horário Administrativo'::text,'Notificação Prévia'::text])
+        ),
+        slots_sem_fila AS (
+            SELECT
+                *,
+                ROW_NUMBER() OVER (
+                    PARTITION BY paciente_id, data_atendimento, codigo_tuss
+                    ORDER BY hora_inicial ASC
+                ) AS ordem
+            FROM agenda_com_tuss
+            WHERE codigo_tuss IS NOT NULL
+              AND NOT EXISTS (
+                  SELECT 1 FROM public.fila_autorizacoes fa
+                  WHERE fa.paciente_id::bigint = agenda_com_tuss.paciente_id
+                    AND fa.data_atendimento    = agenda_com_tuss.data_atendimento
+                    AND fa.horario             = agenda_com_tuss.hora_inicial
+              )
+        ),
+        guias_sem_fila AS (
+            SELECT
+                aa.*,
+                ROW_NUMBER() OVER (
+                    PARTITION BY aa.paciente_id, aa.data_execucao::date, aa.codigo_tuss
+                    ORDER BY aa.guia ASC
+                ) AS ordem
+            FROM public.autorizacoes_assim aa
+            WHERE aa.codigo_tuss IS NOT NULL
+              AND aa.data_execucao::date = p_data
+              AND NOT EXISTS (
+                  SELECT 1 FROM public.fila_autorizacoes fa
+                  WHERE fa.numero_autorizacao = aa.guia
+              )
+        )
+        SELECT
+            (substr(md5(s.paciente_id::text||'|'||s.data_atendimento::text||'|'||s.hora_inicial::text),1,8)||'-'||
+             substr(md5(s.paciente_id::text||'|'||s.data_atendimento::text||'|'||s.hora_inicial::text),9,4)||'-'||
+             substr(md5(s.paciente_id::text||'|'||s.data_atendimento::text||'|'||s.hora_inicial::text),13,4)||'-'||
+             substr(md5(s.paciente_id::text||'|'||s.data_atendimento::text||'|'||s.hora_inicial::text),17,4)||'-'||
+             substr(md5(s.paciente_id::text||'|'||s.data_atendimento::text||'|'||s.hora_inicial::text),21,12))::uuid  AS id,
+            NULL::uuid                AS agenda_id,
+            s.paciente_id::text       AS paciente_id,
+            s.paciente_nome,
+            s.data_atendimento,
+            s.hora_inicial            AS horario,
+            (s.data_atendimento::text||' '::text||s.hora_inicial::text)::timestamp without time zone AS data_horario,
+            'concluido'::text         AS status,
+            'autorizado'::text        AS status_assim,
+            NULL::text                AS tipo_falta,
+            'automated'::text         AS completion_type,
+            g.guia                    AS numero_autorizacao,
+            NULL::text                AS machine_id,
+            NULL::text                AS error_message,
+            NULL::integer             AS execution_time_ms,
+            g.data_autorizacao        AS created_at,
+            g.updated_at,
+            g.updated_at              AS assim_updated_at,
+            g.data_autorizacao        AS horario_autorizacao,
+            s.terapia_exibicao_id,
+            s.terapia_nome            AS classificacao_terapia,
+            'automatico'::text        AS forma_autorizacao,
+            s.hora_inicial,
+            s.hora_final,
+            s.profissional_nome,
+            s.profissional_id,
+            s.terapia_nome,
+            s.terapia_exibicao_nome,
+            s.sala_nome,
+            s.clinica_nome,
+            s.convenio_nome,
+            s.responsavel_nome,
+            s.responsavel_telefone,
+            s.numero_carteirinha,
+            s.sala_nome               AS unidade,
+            s.convenio_nome           AS convenio,
+            NULL::text                AS usuario_nome,
+            'autorizado'::text        AS status_operacional,
+            ctrl.profissional_substituto_nome,
+            COALESCE(ctrl.profissional_substituto_nome, s.profissional_nome) AS profissional_realizou_nome,
+            (ctrl.profissional_substituto_id IS NOT NULL) AS is_substituicao,
+            ctrl.status               AS controle_status,
+            ctrl.confirmado_em,
+            NULL::text                AS criado_por
+        FROM slots_sem_fila s
+        INNER JOIN guias_sem_fila g
+            ON  g.paciente_id       = s.paciente_id
+            AND g.data_execucao::date = s.data_atendimento
+            AND g.codigo_tuss       = s.codigo_tuss
+            AND g.ordem             = s.ordem
+        LEFT JOIN LATERAL (
+            SELECT ct.status, ct.profissional_substituto_id, ct.profissional_substituto_nome, ct.confirmado_em
+            FROM public.controle_terapeutico ct
+            WHERE ct.tita_agendamento_id = s.tita_agendamento_id
+            ORDER BY ct.updated_at DESC NULLS LAST
+            LIMIT 1
+        ) ctrl ON true
+    ) p2
+)
+
+$$;
+
+GRANT EXECUTE ON FUNCTION public.listar_central_pacientes(date) TO anon, authenticated, service_role;
 
 drop trigger if exists "on_auth_user_confirmed" on "auth"."users";
 

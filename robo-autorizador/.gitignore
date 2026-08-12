@@ -1,0 +1,18 @@
+# Artefatos pesados / com segredos — NAO versionar.
+# (O .gitignore raiz ja ignora robo-autorizador/ inteiro; estas regras
+#  documentam a intencao e mantem o ignore mesmo se a regra do raiz mudar.)
+
+# Instaladores gerados (trazem Node.js embutido de ~72MB e .env com a
+# service_role key do Supabase)
+instalador-*/
+instalador-*.zip
+isntalador.zip
+Instalador/
+
+# Build do instalador .exe (Inno Setup): payload de ~300MB + setup.exe de ~230MB
+exe-build/
+*.exe
+
+# Dependencias e segredos
+node_modules/
+.env

@@ -1,6 +1,6 @@
 import { pm, getTurno, isLaudoComAlta } from "./helpers"
 import {
-  EXCLUIR_OCUP, PACS_ADMIN,
+  EXCLUIR_OCUP, PACS_ADMIN, ADMIN_ONLY,
   ABA_EXIB_PSICO_NAMES, EXIB_ID, EXIB_NOME, TERAPIA_ID,
   AE_LAUDO_ESP, HS_LAUDO_ESP,
 } from "./constants"
@@ -32,12 +32,6 @@ export interface IncItem {
 }
 
 // ─── CONSTANTES ───────────────────────────────────────────────────────────────
-
-// Terapias que NÃO são sessões clínicas do paciente (excluir de buraco/min_sessoes)
-const ADMIN_ONLY = new Set([
-  "Supervisão ABA", "Coordenador de Caso", "Visita Guiada", "Triagem",
-  "Avaliação Neuropsicológica", "Avaliação de Repertório",
-])
 
 // Nomes derivados de TERAPIA_ID — ao renomear, atualize apenas TERAPIA_ID em constants.ts
 const ID_SF = 2263

@@ -7,13 +7,15 @@ import AdminSummaryCards from './AdminSummaryCards'
 import AdminUsersTable from './AdminUsersTable'
 import AdminMachinesTable, { isMachineOnline } from './AdminMachinesTable'
 import {
-  changeUserRole,
   deleteUser,
   getAdminMachines,
   getAdminUsers,
+  resetUserPassword,
   toggleUserActive,
   updateMachineStatus,
+  updateUserRoleUnidades,
 } from '@/services/admin.service'
+import ResetPasswordModal from './ResetPasswordModal'
 import { getFunctionHeaders, getFunctionUrl } from '@/lib/supabase/functions'
 
 export type AdminUser = {
@@ -24,6 +26,7 @@ export type AdminUser = {
   ativo?: boolean
   created_at?: string
   username?: string | null
+  unidades?: string[] | null
 }
 
 export type AdminMachine = {
@@ -53,6 +56,12 @@ export default function AdminPageShell({
   const [roleFilter, setRoleFilter] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState('')
+  const [resetPasswordResult, setResetPasswordResult] = useState<{
+    nome: string
+    email: string
+    username: string
+    password: string
+  } | null>(null)
 
   useEffect(() => {
     setHeader(
@@ -142,24 +151,27 @@ export default function AdminPageShell({
     setBusyId(null)
   }
 
-  async function handleRoleChange(userId: string, role: string) {
+  async function handleSaveUser(userId: string, role: string, unidades: string[]) {
     setBusyId(userId)
     setErrorMessage('')
 
-    const updated = await changeUserRole(userId, role)
+    const result = await updateUserRoleUnidades(userId, role, unidades)
 
-    if (!updated) {
-      setErrorMessage('Não foi possível alterar o setor do usuário.')
+    if (!result.ok) {
+      setErrorMessage(result.error ?? 'Não foi possível salvar as alterações do usuário.')
       setBusyId(null)
-      return
+      return false
     }
 
     setUsers((current) =>
       current.map((user) =>
-        user.id === userId ? { ...user, role } : user
+        user.id === userId
+          ? { ...user, role, unidades: unidades.length > 0 ? unidades : null }
+          : user
       )
     )
     setBusyId(null)
+    return true
   }
 
   async function handleResendInvite(userId: string, email: string, nome: string, role: string) {
@@ -200,6 +212,22 @@ export default function AdminPageShell({
     setBusyId(null)
   }
 
+  async function handleResetPassword(userId: string, nome: string, email: string, username: string) {
+    setBusyId(userId)
+    setErrorMessage('')
+
+    const result = await resetUserPassword(userId)
+
+    if (!result.ok || !result.password) {
+      setErrorMessage(result.error ?? 'Não foi possível redefinir a senha do usuário.')
+      setBusyId(null)
+      return
+    }
+
+    setResetPasswordResult({ nome, email, username, password: result.password })
+    setBusyId(null)
+  }
+
   async function handleMachineToggle(machineId: string, currentAtiva: boolean) {
     setBusyId(machineId)
     setErrorMessage('')
@@ -236,9 +264,10 @@ export default function AdminPageShell({
             <AdminUsersTable
               users={filteredUsers}
               onToggleActive={handleToggleActive}
-              onChangeRole={handleRoleChange}
+              onSaveUser={handleSaveUser}
               onResendInvite={handleResendInvite}
               onDeleteUser={handleDeleteUser}
+              onResetPassword={handleResetPassword}
               loadingId={busyId}
               searchUser={searchUser}
               onSearchUserChange={setSearchUser}
@@ -256,6 +285,11 @@ export default function AdminPageShell({
           </div>
         </div>
       </div>
+
+      <ResetPasswordModal
+        result={resetPasswordResult}
+        onClose={() => setResetPasswordResult(null)}
+      />
     </div>
   )
 }

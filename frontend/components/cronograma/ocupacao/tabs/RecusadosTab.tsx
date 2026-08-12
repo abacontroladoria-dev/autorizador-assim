@@ -1,9 +1,11 @@
 "use client"
 
-import { useState } from "react"
-import { B } from "@/lib/cronograma/constants"
+import { useMemo, useState } from "react"
+import { Inbox, MessageSquare, RotateCcw, Search, XCircle } from "lucide-react"
+import { B, DIAS_ORD } from "@/lib/cronograma/constants"
 import { fmtName } from "@/lib/cronograma/helpers"
 import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
+import { ListCard, EmptyState, GroupHeader, TimeBadge, SearchInput, rowStyle, rowClass } from "@/components/cronograma/ui/DataTable"
 import type { InvItem, RecItem, WaMap } from "@/types/cronograma"
 
 interface Props {
@@ -11,81 +13,100 @@ interface Props {
   inv: InvItem[]
   waMap: WaMap
   onRemove: (i: number) => void
-  onExport: () => void
 }
 
-export function RecusadosTab({ rec, onRemove, onExport }: Props) {
+export function RecusadosTab({ rec, onRemove }: Props) {
   const [removIdx, setRemovIdx] = useState<number | null>(null)
+  const [filtro, setFiltro] = useState("")
+  const [diasFechados, setDiasFechados] = useState<Set<string>>(new Set())
+  const toggleDia = (dia: string) => setDiasFechados(prev => {
+    const next = new Set(prev)
+    if (next.has(dia)) next.delete(dia)
+    else next.add(dia)
+    return next
+  })
+
+  const filtrados = useMemo(() => {
+    const q = filtro.trim().toLowerCase()
+    return q ? rec.filter(r => r.paciente.toLowerCase().includes(q)) : rec
+  }, [rec, filtro])
+
+  // Índice original preservado em cada item para que "reativar" continue
+  // apontando para a posição certa em `rec` mesmo depois de agrupar/ordenar.
+  const groups = useMemo(() => {
+    const withIdx = filtrados.map(r => ({ r, i: rec.indexOf(r) }))
+    const map = new Map<string, { r: RecItem; i: number }[]>()
+    for (const item of withIdx) {
+      const arr = map.get(item.r.dia) ?? []
+      arr.push(item)
+      map.set(item.r.dia, arr)
+    }
+    return [...map.entries()]
+      .sort(([a], [b]) => (DIAS_ORD[a] ?? 99) - (DIAS_ORD[b] ?? 99))
+      .map(([dia, items]) => [dia, items.slice().sort((a, b) => a.r.hora.localeCompare(b.r.hora))] as const)
+  }, [filtrados, rec])
+
   return (
     <>
-    <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", boxShadow: "0 1px 4px rgba(0,0,0,.06)", padding: "16px" }}>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "12px", paddingBottom: "12px", borderBottom: "1px solid var(--border)", flexWrap: "wrap", gap: "8px" }}>
-        <span style={{ fontWeight: 800, color: B.navy }}>❌ Recusados pela Família</span>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-          <span style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>{rec.length} registros · 💾</span>
-          {rec.length > 0 && (
-            <button onClick={onExport} style={{ fontSize: "11px", padding: "4px 10px", borderRadius: "8px", background: "var(--muted)", color: "var(--card-foreground)", border: "1px solid var(--border)", cursor: "pointer", fontFamily: "inherit", fontWeight: 600 }}>
-              📥 Exportar base
-            </button>
-          )}
-        </div>
-      </div>
+    <ListCard
+      icon={XCircle}
+      title="Recusados pela Família"
+      count={rec.length}
+      titleColor="#dc2626"
+      actions={<SearchInput value={filtro} onChange={setFiltro} />}
+    >
       {!rec.length ? (
-        <Empty icon="👍" text="Nenhuma recusa registrada" />
+        <EmptyState icon={Inbox} text="Nenhuma recusa registrada" />
+      ) : !filtrados.length ? (
+        <EmptyState icon={Search} text={`Nenhum resultado para "${filtro}"`} />
       ) : (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "13px" }}>
-            <thead style={{ background: "var(--muted)" }}>
-              <tr>
-                {["Paciente", "Profissional", "Especialidade", "Unidade", "Dia", "Hora", "Registrado", "Obs", ""].map(h => (
-                  <th key={h} style={{ textAlign: "left", padding: "8px 12px", fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em" }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {rec.map((r, i) => (
-                <tr key={i} style={{ borderTop: "1px solid var(--border)" }}>
-                  <td style={{ padding: "8px 12px", fontWeight: 700, color: B.navy }}>{r.paciente}</td>
-                  <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontSize: "12px" }}>{fmtName(r.profissional)}</td>
-                  <td style={{ padding: "8px 12px" }}>
-                    <span style={{ background: B.blueLt, color: B.blue, borderRadius: "999px", padding: "2px 8px", fontSize: "11px" }}>{r.especialidade}</span>
-                  </td>
-                  <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontSize: "12px" }}>{r.unidade}</td>
-                  <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontSize: "12px" }}>{r.dia}</td>
-                  <td style={{ padding: "8px 12px", fontWeight: 700, fontSize: "12px" }}>{r.hora}</td>
-                  <td style={{ padding: "8px 12px", color: "var(--muted-foreground)", fontSize: "11px" }}>{r.registradoEm}</td>
-                  <td style={{ padding: "8px 12px", maxWidth: "180px", fontSize: "12px", color: "var(--muted-foreground)", fontStyle: r.obs ? "italic" : "normal" }}>
-                    {r.obs ? `"${r.obs}"` : "—"}
-                  </td>
-                  <td style={{ padding: "8px 12px" }}>
-                    <button onClick={() => setRemovIdx(i)} style={{ fontSize: "11px", color: "#dc2626", background: "none", border: "none", cursor: "pointer" }}>remover</button>
-                  </td>
-                </tr>
+        <div>
+          {groups.map(([dia, items]) => (
+            <div key={dia}>
+              <GroupHeader label={dia} count={items.length} open={!diasFechados.has(dia)} onToggle={() => toggleDia(dia)} />
+              {!diasFechados.has(dia) && items.map(({ r, i }) => (
+                <div key={i} className={rowClass} style={rowStyle}>
+                  <TimeBadge hora={r.hora} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <span style={{ fontWeight: "var(--weight-heavy)", fontSize: "var(--text-base)", color: "var(--foreground)" }}>{r.paciente}</span>
+                    <div style={{ fontSize: "var(--text-sm)", color: "var(--muted-foreground)", marginTop: "2px" }}>
+                      {r.especialidade || "—"} · {fmtName(r.profissional)}{r.unidade ? ` · ${r.unidade}` : ""}
+                    </div>
+                    {r.obs && (
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: "5px", fontSize: "var(--text-xs)", color: "var(--muted-foreground)", marginTop: "4px" }}>
+                        <MessageSquare size={11} style={{ flexShrink: 0, marginTop: "1px" }} />
+                        <span style={{ whiteSpace: "pre-wrap" }}>{r.obs}</span>
+                      </div>
+                    )}
+                  </div>
+                  <div style={{ flexShrink: 0, display: "flex", flexDirection: "column", alignItems: "flex-end", gap: "6px" }}>
+                    <span style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)", whiteSpace: "nowrap" }}>{r.registradoEm}</span>
+                    <button onClick={() => setRemovIdx(i)} style={{
+                      display: "flex", alignItems: "center", gap: "5px", whiteSpace: "nowrap",
+                      fontSize: "var(--text-xs)", fontWeight: "var(--weight-semibold)",
+                      color: B.blue, background: "var(--cron-active-bg)", border: `1px solid ${B.blue}44`,
+                      borderRadius: "var(--radius-sm)", padding: "5px 10px", cursor: "pointer", fontFamily: "inherit",
+                    }}>
+                      <RotateCcw size={11} /> Reativar sugestão
+                    </button>
+                  </div>
+                </div>
               ))}
-            </tbody>
-          </table>
+            </div>
+          ))}
         </div>
       )}
-    </div>
+    </ListCard>
     {removIdx !== null && (
       <ConfirmDialog
-        title="Remover registro?"
-        description="O registro será removido da lista de recusados."
-        confirmLabel="Remover"
-        confirmColor="#dc2626"
+        title="Reativar esta sugestão?"
+        description="Ela sai da lista de recusados e volta a ser oferecida normalmente para este paciente."
+        confirmLabel="Reativar"
+        confirmColor={B.blue}
         onConfirm={() => { onRemove(removIdx); setRemovIdx(null) }}
         onCancel={() => setRemovIdx(null)}
       />
     )}
     </>
-  )
-}
-
-function Empty({ icon, text }: { icon: string; text: string }) {
-  return (
-    <div style={{ borderRadius: "10px", border: "2px dashed var(--border)", padding: "24px", textAlign: "center" }}>
-      <div style={{ fontSize: "32px", marginBottom: "6px" }}>{icon}</div>
-      <div style={{ color: "var(--muted-foreground)", fontSize: "13px" }}>{text}</div>
-    </div>
   )
 }

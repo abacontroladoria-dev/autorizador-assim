@@ -6,6 +6,7 @@ import { Eye, EyeOff, Loader2, ShieldAlert } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { getSupabaseClient } from '@/lib/supabase/client'
 import { getFunctionHeaders, getFunctionUrl } from '@/lib/supabase/functions'
+import { normalizarParaUsername } from '@/lib/username'
 import type { AuthChangeEvent, Session } from '@supabase/supabase-js'
 
 const usernameRegex = /^[a-zA-Z0-9._-]+$/
@@ -28,17 +29,6 @@ function DefinirSenhaContent() {
   const [showPassword, setShowPassword] = useState(false)
   const [showConfirm, setShowConfirm] = useState(false)
   const [loading, setLoading] = useState(false)
-
-  function normalizarParaUsername(nome: string): string {
-    return nome
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/[̀-ͯ]/g, '')
-      .replace(/\s+/g, '.')
-      .replace(/[^a-z0-9._-]/g, '')
-      .replace(/\.{2,}/g, '.')
-      .replace(/^[._-]+|[._-]+$/g, '')
-  }
 
   async function preencherUsername(uid: string) {
     const { data } = await supabase.from('usuarios').select('nome').eq('id', uid).maybeSingle()
