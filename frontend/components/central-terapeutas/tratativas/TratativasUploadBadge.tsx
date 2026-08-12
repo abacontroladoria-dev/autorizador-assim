@@ -30,7 +30,8 @@ const MESES_PT = [
   "Julho", "Agosto", "Setembro", "Outubro", "Novembro", "Dezembro",
 ]
 
-function labelMes(p: PeriodoRP): string {
+/** "Julho de 2026". Exportada para o corpo da aba dizer o que está carregando. */
+export function labelMes(p: PeriodoRP): string {
   const [ano, mes] = p.de.split("-").map(Number)
   return `${MESES_PT[mes - 1]} de ${ano}`
 }
@@ -97,6 +98,20 @@ export function TratativasUploadBadge({ c }: Props) {
   const gradeLoaded = evoRows.length > 0
   const semGradeNoBanco = gradeErroTipo !== null
   const ocupado = gradeLoading || uploadLoading
+
+  // Medido em julho/2026: 14.788 linhas lidas → 8.396 sessões consideradas. A
+  // diferença é 1.469 de especialidade administrativa, 1.643 de horário
+  // fictício e 3.280 canceladas sem evolução. Nada disso é erro, mas sem dizer
+  // de onde vem a diferença os dois números parecem se contradizer.
+  const tituloGrade = [
+    `${evoRows.length.toLocaleString("pt-BR")} linhas lidas da grade do período.`,
+    "A análise considera menos: ficam fora as especialidades administrativas, os horários fictícios"
+      + " (bloqueado, reservado, notificação) e as canceladas sem evolução. O total de sessões"
+      + " consideradas é o do painel “Evolução por especialidade”.",
+    coberturaGrade && coberturaGrade.semExecucao > 0
+      ? (gradeAviso ?? `${coberturaGrade.semExecucao.toLocaleString("pt-BR")} sessões agendadas ainda sem execução registrada.`)
+      : null,
+  ].filter(Boolean).join("\n\n")
 
   async function onGradeChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -186,16 +201,17 @@ export function TratativasUploadBadge({ c }: Props) {
         <div className="flex items-center gap-1">
           <span
             className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 text-xs font-medium text-foreground"
-            title={
-              coberturaGrade && coberturaGrade.semExecucao > 0
-                ? (gradeAviso ?? `${coberturaGrade.semExecucao.toLocaleString("pt-BR")} sessões agendadas ainda sem execução registrada.`)
-                : undefined
-            }
+            title={tituloGrade}
           >
             {coberturaGrade
               ? <AnelCobertura pct={coberturaGrade.cobertura} alerta={coberturaGrade.semExecucao > 0} />
               : <CheckCircle2 size={11} className="text-green-500" />}
-            {evoRows.length.toLocaleString("pt-BR")} registros
+            {/* "linhas da grade", e não "registros": este número é tudo que foi
+                LIDO do banco (toda a agenda da unidade no mês), enquanto o painel
+                abaixo conta as SESSÕES que exigem evolução — bem menos. Chamar os
+                dois de "registros"/"sessões" convidava a comparação e a
+                diferença parecia erro. Ver o title para a composição. */}
+            {evoRows.length.toLocaleString("pt-BR")} linhas da grade
             {fonteGrade === "upload" && csvName && <span className="text-muted-foreground">· {csvName}</span>}
             {fonteGrade === "upload" && (
               <button onClick={limparGrade} className="ml-0.5 text-muted-foreground/60 hover:text-destructive transition-colors" title="Remover CSV">

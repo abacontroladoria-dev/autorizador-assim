@@ -5,13 +5,15 @@
 // dashboard de valores. Só contagens de tratativas por profissional.
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { HelpCircle } from "lucide-react"
+import { HelpCircle, Loader2 } from "lucide-react"
 
 import { useHeader } from "@/contexts/HeaderContext"
 import { useTratativasContext } from "@/contexts/TratativasContext"
-import { TratativasUploadBadge } from "./TratativasUploadBadge"
+import { TratativasUploadBadge, labelMes } from "./TratativasUploadBadge"
 import { TratativasDashboard } from "./TratativasDashboard"
-import CardTratativas, { type ExpandidoState } from "./CardTratativas"
+import { TratativasSkeleton } from "./TratativasSkeleton"
+import CardTratativas from "./CardTratativas"
+import { ModalAnaliseTerapeuta } from "./ModalAnaliseTerapeuta"
 import type { ProfTratativas } from "@/lib/remuneracao/tratativas"
 
 const normKey = (v: unknown): string =>
@@ -35,7 +37,10 @@ export function TratativasTab() {
     resultado, controlesGrade, loading, error,
   } = useTratativasContext()
 
-  const [expandido, setExpandido] = useState<ExpandidoState>({})
+  // Profissional em análise no modal. Guardado por nome (a chave da lista) e não
+  // pelo objeto: assim uma recarga da grade reaproveita o dado novo em vez de
+  // manter o modal preso na versão antiga do profissional.
+  const [profAberto, setProfAberto] = useState<string | null>(null)
   const [remBusca, setRemBusca] = useState("")
   const [apenasInconsistencia, setApenasInconsistencia] = useState(false)
   const [especialidadeFiltro, setEspecialidadeFiltro] = useState<string | null>(null)
@@ -61,8 +66,16 @@ export function TratativasTab() {
     return r
   }, [apenasInconsistencia, profissionaisComInconsistencia, resultado, especialidadeFiltro, buscaQ, profTemBusca])
 
+  // Lido de `resultado` (não de `resultadoExibido`): trocar um filtro com o modal
+  // aberto não deve fechá-lo por baixo de quem está analisando. Vira null quando
+  // o profissional some da grade recarregada — aí o modal se fecha sozinho.
+  const profEmAnalise = useMemo(
+    () => (profAberto ? resultado?.find(p => p.prof === profAberto) ?? null : null),
+    [profAberto, resultado]
+  )
+
   useEffect(() => {
-    setHeader("Análise de Tratativas", "Terapêutico")
+    setHeader("Análise de Evolução", "Terapêutico")
     setRightContent(<TratativasUploadBadge c={controlesGrade} />)
     return () => {
       setHeader("", "")
@@ -70,8 +83,33 @@ export function TratativasTab() {
     }
   }, [setHeader, setRightContent, controlesGrade])
 
+  // A carga da grade é a demorada (mês inteiro paginado + cruzamento de
+  // presença) e é automática ao abrir a aba: sem isto o corpo mostrava o vazio
+  // "Sem sessões nesta grade" enquanto o dado vinha, parecendo tela quebrada.
+  const carregando = controlesGrade.gradeLoading || loading
+  const temDados = !!resultado && resultado.length > 0
+  const periodoLabel = labelMes(controlesGrade.periodoCarregado ?? controlesGrade.periodo)
+
+  if (carregando && !temDados) {
+    return (
+      <div className="space-y-4">
+        {error && <p role="alert" aria-live="assertive" className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+        <TratativasSkeleton periodo={periodoLabel} />
+      </div>
+    )
+  }
+
   return (
     <div className="space-y-4">
+      {/* Recarga com dado na tela: a lista fica onde está (esconder o que a
+          pessoa está lendo é pior que esperar), só avisa que vem coisa nova. */}
+      {carregando && temDados && (
+        <p role="status" aria-live="polite" className="flex items-center gap-2 text-xs font-medium text-muted-foreground">
+          <Loader2 size={13} className="motion-safe:animate-spin" aria-hidden />
+          Atualizando a grade de {periodoLabel}…
+        </p>
+      )}
+
       {resultado && resultado.length > 0 && (
         <TratativasDashboard
           resultado={resultado}
@@ -80,7 +118,6 @@ export function TratativasTab() {
         />
       )}
 
-      {loading && <p role="status" aria-live="polite" className="text-sm text-muted-foreground">Carregando…</p>}
       {error && <p role="alert" aria-live="assertive" className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
       {resultado && resultado.length > 0 && (
@@ -91,7 +128,7 @@ export function TratativasTab() {
             value={remBusca}
             onChange={e => setRemBusca(e.target.value)}
             className="flex-1 rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-            aria-label="Filtrar sessões"
+            aria-label="Buscar paciente, especialidade ou data"
           />
           <button
             type="button"
@@ -144,7 +181,7 @@ export function TratativasTab() {
         </div>
       )}
 
-      {!resultado && !loading && (
+      {!resultado && !carregando && (
         <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
           Sem sessões nesta grade — troque o mês no cabeçalho ou, se ele não tiver dado no banco,
           carregue o CSV exportado da TiTa.
@@ -154,7 +191,7 @@ export function TratativasTab() {
       {resultado && resultado.length > 0 && resultadoExibido && resultadoExibido.length === 0 && (
         <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
           {especialidadeFiltro
-            ? `Nenhum profissional com tratativas em "${especialidadeFiltro}" nesta grade.`
+            ? `Nenhum profissional com evolução em "${especialidadeFiltro}" nesta grade.`
             : buscaQ
               ? `Nenhuma sessão encontrada para "${remBusca}".`
               : "Nenhum profissional com inconsistência nesta grade."}
@@ -164,17 +201,19 @@ export function TratativasTab() {
       {resultadoExibido && resultadoExibido.length > 0 && (
         <div>
           {resultadoExibido.map(p => (
-            <CardTratativas
-              key={p.prof}
-              p={p}
-              expandido={expandido}
-              setExpandido={setExpandido}
-              remBusca={remBusca}
-              forceOpen={!!buscaQ}
-            />
+            <CardTratativas key={p.prof} p={p} onAbrir={setProfAberto} />
           ))}
         </div>
       )}
+
+      {/* Sem passar a busca da página: ela decide QUEM aparece na lista, não o
+          que aparece dentro do modal — o modal tem busca própria. */}
+      <ModalAnaliseTerapeuta
+        key={profAberto ?? "fechado"}
+        p={profEmAnalise}
+        periodo={controlesGrade.periodoCarregado ?? controlesGrade.periodo}
+        onClose={() => setProfAberto(null)}
+      />
     </div>
   )
 }

@@ -10,6 +10,10 @@
 // não existem no objeto entregue à UI, então não há como vazar valores nem via
 // DevTools/rede. Ver hooks/useTratativas.ts (que também só carrega feriados,
 // nunca as taxas).
+//
+// A regra de responsabilidade de evolução (previstos → válidos → esperadas, e o
+// percentual) vive em ./evolucao.ts — pura, sem import de runtime, para ser
+// testável sem arrastar calcularRemuneracaoReal.
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { calcularRemuneracaoReal, type ProfRemunReal } from "./calculo"
@@ -23,6 +27,10 @@ export type SessaoTratativa = Pick<
   | "especialidade" | "presencaOrbita" | "presencaTita" | "profCsv"
   | "possuiTratativa" | "statusCsv" | "statusFinal" | "motivo" | "_idx"
   | "classificacao" | "diaSemana" | "idFavorecido" | "criacaoTratativa"
+  // Quantas evoluções o agendamento tem e de quantas pessoas. Contagem, não
+  // valor — o que a tela precisa para explicar "Evolução em conflito" e
+  // "Evolução duplicada" em vez de só nomeá-las.
+  | "tratativas" | "tratativasDistintas"
 > & { papel: string }
 
 /** Profissional sem QUALQUER campo monetário (sem pe, valores, paBreakdown, diária, ETA). */
@@ -47,6 +55,15 @@ export type ProfTratativas = {
 // valor real. `Object.freeze` deixa explícito que nada aqui deve ser preenchido.
 const TAXAS_VAZIAS = Object.freeze({}) as Record<string, number>
 
+// "Operações Clínicas", "Especialista Técnico de Área" e "Supervisão ABA" são
+// papéis administrativos/operacionais, não terapêuticos — não faz sentido
+// cobrar evolução dessas sessões. Ficam fora do cômputo em toda a tela: card
+// Evolução, cards por profissional e busca (todos leem `resultado`, que vem
+// daqui). Filtrar a linha crua ANTES de calcularRemuneracaoReal remove as duas
+// entradas da mesma sessão de uma vez (a original "Agenda" e a eventual
+// "Substituição realizada" — ambas derivam da mesma linha, ver calculo.ts:1028).
+const ESPECIALIDADES_FORA_DO_COMPUTO = new Set(["Operações Clínicas", "Especialista Técnico de Área", "Supervisão ABA"])
+
 /** Copia SÓ os campos não-monetários de cada sessão. */
 function sanitizarSessao(s: ProfRemunReal["sessoes"][number]): SessaoTratativa {
   return {
@@ -70,6 +87,8 @@ function sanitizarSessao(s: ProfRemunReal["sessoes"][number]): SessaoTratativa {
     diaSemana: s.diaSemana,
     idFavorecido: s.idFavorecido,
     criacaoTratativa: s.criacaoTratativa,
+    tratativas: s.tratativas,
+    tratativasDistintas: s.tratativasDistintas,
     papel: s.papel,
   }
 }
@@ -88,7 +107,9 @@ export function resumirTratativas(
   // deixar claro que esta função é ciente de feriados por construção.
   void _feriados
 
-  const bruto = calcularRemuneracaoReal(evoRows, {
+  const rowsConsideradas = evoRows.filter(r => !ESPECIALIDADES_FORA_DO_COMPUTO.has(r.especialidade))
+
+  const bruto = calcularRemuneracaoReal(rowsConsideradas, {
     taxasPA: TAXAS_VAZIAS,
     diarias: TAXAS_VAZIAS,
     etaBonus: 0,

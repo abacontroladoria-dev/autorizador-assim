@@ -14,9 +14,17 @@
 //     classificacao "Substituição" e não conta como evoluída ali, então somar
 //     as duas fontes não soma a sessão duas vezes.
 //   • "Cancelado" e "Feriado/Ponto Fac." (papel "Agenda") saem do denominador:
-//     não há o que evoluir numa sessão que não aconteceu. Mesmo critério que
-//     CardTratativas já usa como "base corrigida" por profissional — aqui
-//     aplicado ao agregado do período inteiro.
+//     não há o que evoluir numa sessão que não aconteceu.
+//
+// Este agregado NÃO é a soma das "evoluções esperadas" dos cards, e a diferença
+// é de propósito — são duas perguntas diferentes:
+//   • aqui: "quantas SESSÕES do período foram evoluídas?" Cada sessão entra uma
+//     vez no denominador (pela entrada "Agenda", mesmo quando foi substituída) e
+//     uma vez no numerador se alguém a evoluiu.
+//   • no card/modal: "quanto da RESPONSABILIDADE desta pessoa ela cumpriu?" Ali
+//     a sessão cedida sai do denominador dela e entra no de quem assumiu, então
+//     a substituição é contada por pessoa (ver lib/remuneracao/evolucao.ts).
+// Somar os cards e comparar com este número, portanto, não fecha — e não deveria.
 //   • "Evolução normal" e "Evolução duplicada" (mesma pessoa salvando de novo,
 //     a autoria não muda) contam como evoluídas; "Evolução sem presença",
 //     "Cancelado evoluído" e "Evolução em conflito" são inconsistências — não
@@ -33,8 +41,9 @@ import { useMemo, useState } from "react"
 import { ArrowUpDown, ChevronDown, Filter, X } from "lucide-react"
 import { B } from "@/lib/cronograma/constants"
 import { useToneColor, type Tone } from "@/hooks/useToneColor"
+import { dataParaISO, formatDateBR } from "@/lib/remuneracao/datas"
 import {
-  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger,
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import type { ProfTratativas, SessaoTratativa } from "@/lib/remuneracao/tratativas"
 
@@ -53,6 +62,8 @@ type ResumoEvolucao = {
   pctEvolucao: number
   profissionaisComTratativa: number
   porEspecialidade: EspEvolucao[]
+  /** dd/mm/aaaa até onde a contagem vai, só quando o período carregado inclui dias futuros. */
+  cortadoEm: string | null
 }
 
 // Sessões que não deveriam entrar no denominador — não há o que evoluir nelas.
@@ -62,14 +73,23 @@ const FORA_DO_DENOMINADOR = new Set(["Cancelado", "Feriado/Ponto Fac."])
 const EVOLUIDA_PROPRIA = new Set(["Evolução normal", "Evolução duplicada"])
 
 function calcularResumoEvolucao(resultado: ProfTratativas[]): ResumoEvolucao {
+  const hoje = new Date()
+  const hojeISO = `${hoje.getFullYear()}-${String(hoje.getMonth() + 1).padStart(2, "0")}-${String(hoje.getDate()).padStart(2, "0")}`
+
   let totalConsiderado = 0
   let comTratativa = 0
+  let temSessaoFutura = false
   const porEsp: Record<string, { total: number; comTratativa: number }> = {}
 
   const bucket = (esp: string) => (porEsp[esp] ??= { total: 0, comTratativa: 0 })
 
   for (const p of resultado) {
     for (const s of p.sessoes as SessaoTratativa[]) {
+      // Mês em curso: dia futuro ainda não aconteceu, não há o que evoluir —
+      // contar como "pendente" derrubaria o percentual por um motivo errado.
+      const dataIso = dataParaISO(s.data)
+      if (dataIso && dataIso > hojeISO) { temSessaoFutura = true; continue }
+
       const esp = s.especialidade || "Sem especialidade"
       const cls = s.classificacao ?? ""
 
@@ -105,6 +125,7 @@ function calcularResumoEvolucao(resultado: ProfTratativas[]): ResumoEvolucao {
     pctEvolucao: totalConsiderado > 0 ? (comTratativa / totalConsiderado) * 100 : 0,
     profissionaisComTratativa: resultado.filter(p => p.evoluidasProprias + p.substituicoesRealizadas > 0).length,
     porEspecialidade,
+    cortadoEm: temSessaoFutura ? formatDateBR(hojeISO) : null,
   }
 }
 
@@ -120,13 +141,13 @@ function fmtPct(pct: number): string {
   return pct.toFixed(1).replace(".", ",")
 }
 
-function Metric({ label, value, cor }: { label: string; value: number; cor?: string }) {
+function Metric({ label, value, cor, title }: { label: string; value: number; cor?: string; title?: string }) {
   return (
-    <span className="inline-flex items-baseline gap-1.5">
-      <span className="text-base font-bold tabular-nums leading-none" style={cor ? { color: cor } : undefined}>
+    <span className="flex flex-col" title={title}>
+      <span className="text-base font-bold tabular-nums leading-tight" style={cor ? { color: cor } : undefined}>
         {value.toLocaleString("pt-BR")}
       </span>
-      <span className="text-[11px] font-medium text-muted-foreground">{label}</span>
+      <span className="text-[11px] font-medium leading-tight text-muted-foreground">{label}</span>
     </span>
   )
 }
@@ -136,8 +157,8 @@ type SortKey = "pct" | "total" | "comTratativa" | "semTratativa"
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
   { key: "pct", label: "Evolução" },
   { key: "total", label: "Total de sessões" },
-  { key: "comTratativa", label: "Tratativas" },
-  { key: "semTratativa", label: "Sem tratativa" },
+  { key: "comTratativa", label: "Com evolução" },
+  { key: "semTratativa", label: "Pendentes" },
 ]
 
 const LIMITE_INICIAL = 10
@@ -166,37 +187,44 @@ export function TratativasDashboard({ resultado, especialidadeFiltro, onFiltroEs
       <div className="p-5 md:p-6 space-y-4">
         {/* Cabeçalho: título + controle de filtro ativo */}
         <div className="flex items-center justify-between gap-3">
-          <h2 className="text-sm font-bold text-foreground">Evolução das tratativas</h2>
-          {especialidadeFiltro ? (
+          <h2 className="text-sm font-bold text-foreground">
+            Evolução por especialidade{resumo.cortadoEm && ` até ${resumo.cortadoEm}`}
+          </h2>
+          {especialidadeFiltro && (
             <button
               type="button"
               onClick={() => onFiltroEspecialidade(null)}
+              aria-label={`Remover filtro: ${especialidadeFiltro}`}
               className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-[11px] font-semibold text-foreground hover:opacity-70 transition-opacity"
             >
               <Filter size={11} />
               {especialidadeFiltro}
               <X size={11} />
             </button>
-          ) : (
-            <span className="inline-flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
-              <Filter size={11} />
-              Filtrar
-            </span>
           )}
         </div>
 
-        {/* Métricas compactas: percentual em destaque + apoio bem próximo */}
-        <div className="flex flex-wrap items-baseline gap-x-6 gap-y-2">
+        {/* Métricas: percentual em destaque à esquerda + apoio em coluna à direita da linha */}
+        <div className="flex flex-wrap items-center justify-between gap-x-6 gap-y-3">
           <div className="flex items-baseline gap-2">
             <span className="text-4xl sm:text-5xl font-black tabular-nums leading-none" style={{ color: corHero }}>
               {fmtPct(resumo.pctEvolucao)}%
             </span>
-            <span className="text-xs font-semibold text-muted-foreground">Evolução</span>
+            <span className="text-xs font-semibold text-muted-foreground">Evoluído</span>
           </div>
-          <div className="flex flex-wrap gap-x-5 gap-y-1">
-            <Metric label="Total de sessões" value={resumo.totalConsiderado} />
-            <Metric label="Com tratativa" value={resumo.comTratativa} cor={toneColor("green")} />
-            <Metric label="Sem tratativa" value={resumo.semTratativa} cor={toneColor("amber")} />
+          <div className="flex flex-wrap gap-x-6 gap-y-2">
+            <Metric
+              label="Total de sessões"
+              value={resumo.totalConsiderado}
+              title={
+                "Sessões que exigem evolução no período. Menor que o número de linhas da grade no"
+                + " cabeçalho: ficam fora as especialidades administrativas (Operações Clínicas,"
+                + " Especialista Técnico de Área, Supervisão ABA), os horários fictícios (bloqueado,"
+                + " reservado, notificação) e as sessões canceladas ou em feriado."
+              }
+            />
+            <Metric label="Com evolução" value={resumo.comTratativa} cor={toneColor("green")} />
+            <Metric label="Pendentes" value={resumo.semTratativa} cor={toneColor("amber")} />
           </div>
         </div>
 
@@ -223,15 +251,12 @@ export function TratativasDashboard({ resultado, especialidadeFiltro, onFiltroEs
 
         {/* Ranking por especialidade */}
         <div className="pt-1">
-          <div className="flex items-center justify-between gap-2 mb-1.5">
-            <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
-              Evolução por especialidade
-            </span>
-
+          <div className="flex items-center justify-end gap-2 mb-1.5">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <button
                   type="button"
+                  aria-label="Ordenar especialidades por"
                   className="inline-flex min-h-11 items-center gap-1 rounded-full border border-border px-2.5 py-1 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted/60 sm:min-h-0"
                 >
                   <ArrowUpDown size={11} />
@@ -240,6 +265,7 @@ export function TratativasDashboard({ resultado, especialidadeFiltro, onFiltroEs
                 </button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-44">
+                <DropdownMenuLabel>Ordenar por</DropdownMenuLabel>
                 {SORT_OPTIONS.map(o => (
                   <DropdownMenuItem
                     key={o.key}
@@ -257,6 +283,14 @@ export function TratativasDashboard({ resultado, especialidadeFiltro, onFiltroEs
             <p className="text-xs text-muted-foreground py-2">Sem sessões para detalhar por especialidade ainda.</p>
           ) : (
             <div>
+              {/* Cabeçalho de colunas — só desktop, usa o mesmo grid-template das
+                  linhas para que os rótulos fiquem exatamente sobre seus valores. */}
+              <div className="hidden sm:grid sm:grid-cols-[35fr_20fr_30fr_10fr] sm:gap-4 px-2 pb-1">
+                <span className="text-[10px] font-semibold text-muted-foreground/70">Especialidade</span>
+                <span className="text-[10px] font-semibold text-muted-foreground/70">Sessões</span>
+                <span className="col-span-2 text-[10px] font-semibold text-muted-foreground/70">Evolução</span>
+              </div>
+
               {especialidadesVisiveis.map(esp => {
                 const selected = especialidadeFiltro === esp.especialidade
                 const dimmed = !!especialidadeFiltro && !selected
@@ -268,17 +302,21 @@ export function TratativasDashboard({ resultado, especialidadeFiltro, onFiltroEs
                     type="button"
                     onClick={() => onFiltroEspecialidade(selected ? null : esp.especialidade)}
                     aria-pressed={selected}
-                    aria-label={`Filtrar por ${esp.especialidade}, ${fmtPct(esp.pct)}% de evolução`}
+                    aria-label={
+                      selected
+                        ? `Remover filtro de ${esp.especialidade}`
+                        : `Filtrar por ${esp.especialidade}, ${fmtPct(esp.pct)}% de evolução`
+                    }
                     title={esp.especialidade}
-                    className={`flex min-h-11 w-full flex-col justify-center gap-1.5 rounded-lg px-2 py-1.5 text-left transition-[opacity,background-color] duration-150 hover:bg-muted/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0 sm:flex-row sm:items-center sm:justify-start sm:gap-4 sm:py-2 ${
+                    className={`grid min-h-11 w-full grid-cols-1 content-center items-center gap-1.5 rounded-lg px-2 py-1.5 text-left transition-[opacity,background-color] duration-150 hover:bg-muted/60 focus:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-0 sm:grid-cols-[35fr_20fr_30fr_10fr] sm:gap-4 sm:py-2 ${
                       selected ? "bg-muted/60" : ""
                     } ${dimmed ? "opacity-35" : "opacity-100"}`}
                   >
                     {/* Mobile: nome + percentual na primeira linha. Desktop: `contents`
-                        remove esta div do layout e as duas spans viram itens diretos da
-                        linha única (mesma disposição em coluna fixa de antes). */}
+                        remove esta div do layout e as duas spans viram itens diretos do
+                        grid (a primeira ocupa a coluna "Especialidade"). */}
                     <div className="flex items-center gap-3 sm:contents">
-                      <span className={`min-w-0 flex-1 truncate text-sm sm:w-52 sm:shrink-0 sm:flex-none ${selected ? "font-bold text-foreground" : "font-medium text-foreground/90"}`}>
+                      <span className={`min-w-0 flex-1 truncate text-sm ${selected ? "font-bold text-foreground" : "font-medium text-foreground/90"}`}>
                         {esp.especialidade}
                       </span>
                       <span className="shrink-0 text-right text-sm font-bold tabular-nums sm:hidden" style={{ color: cor }}>
@@ -286,16 +324,24 @@ export function TratativasDashboard({ resultado, especialidadeFiltro, onFiltroEs
                       </span>
                     </div>
 
-                    {/* Mobile: números + barra na segunda linha. Desktop: idem, `contents`. */}
+                    {/* Mobile: números + barra na segunda linha. Desktop: idem, `contents`
+                        — números viram a coluna "Sessões", a barra vira a coluna "Evolução"
+                        (30fr, preenche a largura real do card em vez de um pixel fixo). */}
                     <div className="flex items-center gap-3 sm:contents">
-                      <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground tabular-nums sm:w-56 sm:shrink-0 sm:flex-none">
-                        {esp.comTratativa.toLocaleString("pt-BR")} de {esp.total.toLocaleString("pt-BR")} sessões
-                        {esp.semTratativa > 0 && (
-                          <span> · {esp.semTratativa.toLocaleString("pt-BR")} sem</span>
-                        )}
+                      <span className="min-w-0 flex-1 sm:flex-none">
+                        <span className="block truncate text-[11px] text-muted-foreground tabular-nums">
+                          {esp.comTratativa.toLocaleString("pt-BR")} / {esp.total.toLocaleString("pt-BR")}
+                        </span>
+                        {/* Sempre ocupa a linha (mesmo sem pendência, via nbsp) para
+                            todas as linhas terem a mesma altura — só o texto some. */}
+                        <span className="block truncate text-[10px] text-muted-foreground/60">
+                          {esp.semTratativa > 0
+                            ? `${esp.semTratativa.toLocaleString("pt-BR")} pendente${esp.semTratativa > 1 ? "s" : ""}`
+                            : " "}
+                        </span>
                       </span>
 
-                      <span className="h-2 w-16 shrink-0 overflow-hidden rounded-full bg-muted sm:w-52.5">
+                      <span className="h-2 min-w-0 w-16 shrink-0 overflow-hidden rounded-full bg-muted sm:w-full">
                         <span
                           className="block h-full w-full"
                           style={{
@@ -307,7 +353,7 @@ export function TratativasDashboard({ resultado, especialidadeFiltro, onFiltroEs
                       </span>
                     </div>
 
-                    <span className="hidden shrink-0 text-right text-sm font-bold tabular-nums sm:block sm:w-14" style={{ color: cor }}>
+                    <span className="hidden text-right text-sm font-bold tabular-nums sm:block" style={{ color: cor }}>
                       {fmtPct(esp.pct)}%
                     </span>
                   </button>
