@@ -87,7 +87,7 @@ export function RemunRPTab() {
   )
 
   useEffect(() => {
-    setHeader("Rem. Mês - Total", "Relacionamento Prestador")
+    setHeader("Remuneração Mensal", "Relacionamento Prestador")
     setRightContent(<RemuneracaoGradeBadge c={controlesGrade} />)
     return () => {
       setHeader("", "")

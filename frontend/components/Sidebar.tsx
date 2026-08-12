@@ -582,10 +582,10 @@ export default function Sidebar() {
                 <MenuItem label="Rem. Mês - Previsão" icon={TrendingUp} path="/relacionamento-prestador/analise" />
               )}
               {canAccess("/relacionamento-prestador/rp") && (
-                <MenuItem label="Rem. Mês - Total" icon={Wallet} path="/relacionamento-prestador/rp" />
+                <MenuItem label="Remuneração Total" icon={Wallet} path="/relacionamento-prestador/rp" />
               )}
               {canAccess("/relacionamento-prestador/individual") && (
-                <MenuItem label="Rem. Mês - Individual" icon={UserRound} path="/relacionamento-prestador/individual" />
+                <MenuItem label="Remuneração Individual" icon={UserRound} path="/relacionamento-prestador/individual" />
               )}
               {canAccess("/relacionamento-prestador/pep") && (
                 <MenuItem label="Entregas PEP" icon={ListChecks} path="/relacionamento-prestador/pep" />
