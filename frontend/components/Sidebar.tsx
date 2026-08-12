@@ -477,7 +477,7 @@ export default function Sidebar() {
                 <MenuItem label="Gestão" icon={UserRound} path="/central-terapeutas" />
               )}
               {canAccess("/analise-tratativas") && (
-                <MenuItem label="Análise de Tratativas" icon={ClipboardCheck} path="/analise-tratativas" />
+                <MenuItem label="Análise de Evolução" icon={ClipboardCheck} path="/analise-tratativas" />
               )}
               {canAccess("/agenda/terapeutas") && (
                 <MenuItem label="Agenda Terapêutica" icon={CalendarDays} path="/agenda/terapeutas" />
