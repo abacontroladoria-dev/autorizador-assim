@@ -74,12 +74,3 @@ export type ContratoAtual = {
   created_at: string
   updated_at: string
 }
-
-export type HistoricoSnapshot = {
-  id: string
-  mes_ano: string
-  profissional_nome: string | null
-  dados: Record<string, unknown>
-  created_at: string
-  created_by: string | null
-}

@@ -1,12 +1,13 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { listarSalas, listarAlocacoes, buscarLinhasAgendaParaSalas } from "@/services/salas.service"
-import { calcularOcupacaoDaSala, calcularResumoUnidades } from "@/lib/cronograma/salas"
+import { listarSalas, listarAlocacoes, buscarLinhasAgendaParaSalas, listarExclusividadesTerapia } from "@/services/salas.service"
+import { calcularOcupacaoDaSala, calcularResumoUnidades, construirNomeDaSalaPorId } from "@/lib/cronograma/salas"
+import { construirIndiceExclusividadeTerapia } from "@/lib/cronograma/exclusividadeTerapia"
 import { calcularDashboardPacientes } from "@/lib/cronograma/pacientesDashboard"
 import { getRefWeek } from "@/lib/cronograma/helpers"
 import { normTxt } from "@/lib/cronograma/constants"
-import type { Sala, SalaComOcupacao, ResumoUnidadeSalas, AgendaSalaRow, AlocacaoSala, DashboardPacientesGeral } from "@/lib/cronograma/salasTypes"
+import type { Sala, SalaComOcupacao, ResumoUnidadeSalas, AgendaSalaRow, AlocacaoSala, SalaTerapiaExclusiva, DashboardPacientesGeral } from "@/lib/cronograma/salasTypes"
 
 /**
  * Período padrão de análise. `csv_grades_profissionais` é sincronizado pelo TITA
@@ -31,6 +32,7 @@ export interface UseOcupacaoSalasResult {
   salas: Sala[]
   alocacoes: AlocacaoSala[]
   linhas: AgendaSalaRow[]
+  exclusividades: SalaTerapiaExclusiva[]
   salasComOcupacao: SalaComOcupacao[]
   resumoUnidades: ResumoUnidadeSalas[]
   dashboardPacientes: DashboardPacientesGeral
@@ -54,6 +56,7 @@ export function useOcupacaoSalas(inicio?: string, fim?: string): UseOcupacaoSala
   const [salas, setSalas] = useState<Sala[]>([])
   const [alocacoes, setAlocacoes] = useState<AlocacaoSala[]>([])
   const [linhas, setLinhas] = useState<AgendaSalaRow[]>([])
+  const [exclusividades, setExclusividades] = useState<SalaTerapiaExclusiva[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -67,12 +70,14 @@ export function useOcupacaoSalas(inicio?: string, fim?: string): UseOcupacaoSala
       listarSalas(),
       listarAlocacoes(),
       buscarLinhasAgendaParaSalas(periodo.inicio, periodo.fim),
+      listarExclusividadesTerapia(),
     ])
-      .then(([salasData, alocacoesData, linhasData]) => {
+      .then(([salasData, alocacoesData, linhasData, exclusividadesData]) => {
         if (cancelled) return
         setSalas(salasData)
         setAlocacoes(alocacoesData)
         setLinhas(linhasData)
+        setExclusividades(exclusividadesData)
         setLoading(false)
       })
       .catch(err => {
@@ -86,7 +91,9 @@ export function useOcupacaoSalas(inicio?: string, fim?: string): UseOcupacaoSala
 
   async function recarregarSalas() {
     try {
-      setSalas(await listarSalas())
+      const [salasData, exclusividadesData] = await Promise.all([listarSalas(), listarExclusividadesTerapia()])
+      setSalas(salasData)
+      setExclusividades(exclusividadesData)
     } catch (err) {
       setError(String((err as Error)?.message ?? err))
     }
@@ -100,14 +107,17 @@ export function useOcupacaoSalas(inicio?: string, fim?: string): UseOcupacaoSala
     }
   }
 
+  const indiceExclusividade = useMemo(() => construirIndiceExclusividadeTerapia(exclusividades), [exclusividades])
+  const nomeDaSalaPorId = useMemo(() => construirNomeDaSalaPorId(salas), [salas])
+
   const salasComOcupacao = useMemo(
-    () => salas.map(sala => calcularOcupacaoDaSala(sala, alocacoes, linhas)),
-    [salas, alocacoes, linhas],
+    () => salas.map(sala => calcularOcupacaoDaSala(sala, alocacoes, linhas, indiceExclusividade, nomeDaSalaPorId)),
+    [salas, alocacoes, linhas, indiceExclusividade, nomeDaSalaPorId],
   )
 
   const resumoUnidades = useMemo(
-    () => calcularResumoUnidades(salas, alocacoes, linhas),
-    [salas, alocacoes, linhas],
+    () => calcularResumoUnidades(salas, alocacoes, linhas, exclusividades),
+    [salas, alocacoes, linhas, exclusividades],
   )
 
   const dashboardPacientes = useMemo(
@@ -135,6 +145,7 @@ export function useOcupacaoSalas(inicio?: string, fim?: string): UseOcupacaoSala
     salas,
     alocacoes,
     linhas,
+    exclusividades,
     salasComOcupacao,
     resumoUnidades,
     dashboardPacientes,

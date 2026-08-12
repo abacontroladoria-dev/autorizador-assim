@@ -30,6 +30,10 @@ import {
   Database,
   Wallet,
   History,
+  Handshake,
+  DoorOpen,
+  UserSearch,
+  UserPlus,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useHeader } from '@/contexts/HeaderContext'
@@ -82,9 +86,11 @@ const MODULE_ICONS: Record<string, React.ElementType> = {
   guias_digitais: FileText,
   usuarios: Users,
   permissoes: KeyRound,
-  cronograma_solicitacoes: ClipboardList,
+  cronograma_solicitacoes: UserPlus,
   cronograma_saida_profissional: LogOut,
   cronograma_ocupacao_paciente: UserCheck,
+  cronograma_ocupacao_salas: DoorOpen,
+  cronograma_disponibilidade_interna: UserSearch,
   ocupacao_clinica: ClipboardList,
   ocupacao_clinica_gaps: BarChart3,
   ocupacao_clinica_inconsistencias: AlertTriangle,
@@ -105,10 +111,11 @@ const GROUP_ICONS: Record<string, React.ElementType> = {
   Cronograma: CalendarRange,
   Indicadores: TrendingUp,
   Cadastros: Database,
+  'Relacionamento Prestador': Handshake,
   Administração: ShieldCheck,
 }
 
-const GROUP_ORDER = ['Pacientes', 'Terapêutico', 'Operações', 'Cronograma', 'Indicadores', 'Cadastros', 'Administração', 'Sistema', 'Geral']
+const GROUP_ORDER = ['Pacientes', 'Terapêutico', 'Operações', 'Cronograma', 'Indicadores', 'Cadastros', 'Relacionamento Prestador', 'Administração', 'Sistema', 'Geral']
 
 const INITIAL_OPEN = new Set(GROUP_ORDER)
 

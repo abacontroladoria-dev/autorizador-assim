@@ -17,7 +17,7 @@ import {
   type CandidatoSlot, type PeriodoSimulado, type PeriodoAlvo, type SlotSimulado, type Turno,
 } from "@/lib/cronograma/simulacaoNovoPrestador"
 import { DIAS_UTIL } from "@/lib/cronograma/constants"
-import { diaCurto, fmtH, fmtName, fmtReal, turnoNome } from "@/lib/cronograma/helpers"
+import { diaCurto, filtrarCapacidadeLivreReservada, fmtH, fmtName, fmtReal, turnoNome } from "@/lib/cronograma/helpers"
 import { useGradeAgendamentos } from "@/hooks/useGradeAgendamentos"
 import { useOcupacaoSalas } from "@/hooks/useOcupacaoSalas"
 import { useConvenioValores } from "@/hooks/useConvenioValores"
@@ -250,7 +250,12 @@ interface DetalheModalData { pac: string; slot: SlotSimulado; especialidade: str
 
 // ─── Componente principal ────────────────────────────────────────────────────
 export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
-  const { cRows, loading: gradeLoading, error: gradeError, refWeek } = useGradeAgendamentos()
+  const { cRows: cRowsBrutos, loading: gradeLoading, error: gradeError, refWeek } = useGradeAgendamentos()
+  // Amanda Ribeiro/Gracielle Rayane têm muitos horários "Livre" DE PROPÓSITO
+  // (não é capacidade real) — a simulação não pode tratar esses horários
+  // como espaço disponível pra descontar da oportunidade do novo profissional
+  // (ver filtrarCapacidadeLivreReservada em helpers.ts).
+  const cRows = useMemo(() => filtrarCapacidadeLivreReservada(cRowsBrutos), [cRowsBrutos])
   const { salasComOcupacao } = useOcupacaoSalas(refWeek.inicio, refWeek.fim)
   const { regrasGerais, excecoesPaciente } = useConvenioValores()
   const { feriados } = useFeriados()

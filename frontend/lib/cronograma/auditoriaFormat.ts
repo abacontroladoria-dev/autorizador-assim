@@ -52,6 +52,10 @@ const LABEL_POR_TABELA: Record<CronogramaTrilhaTabela, Record<string, string>> =
     label_curto: "Rótulo curto",
     tone: "Cor",
   },
+  exclusividade_terapia: {
+    terapia_nome: "Terapia",
+    modo: "Modo",
+  },
 }
 
 function formatarValor(campo: string, valor: unknown): string {
@@ -60,6 +64,7 @@ function formatarValor(campo: string, valor: unknown): string {
   if (campo === "status") return STATUS_LABEL_CURTO[valor as SalaStatus] ?? String(valor)
   if (campo === "dow") return DOW_NOME[valor as number] ?? String(valor)
   if (campo === "tone") return TONE_NOME[valor as string] ?? String(valor)
+  if (campo === "modo") return valor === "obrigatoria" ? "Obrigatória" : valor === "preferencial" ? "Preferencial" : String(valor)
   return String(valor)
 }
 

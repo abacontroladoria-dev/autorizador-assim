@@ -1,7 +1,7 @@
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { resumoAlteracao } from "@/lib/cronograma/auditoriaFormat"
 
-export type CronogramaTrilhaTabela = "sala" | "alocacao" | "nucleo" | "status_label"
+export type CronogramaTrilhaTabela = "sala" | "alocacao" | "nucleo" | "status_label" | "exclusividade_terapia"
 export type CronogramaTrilhaAcao = "criar" | "editar" | "excluir"
 
 export type CronogramaTrilhaAuditoria = {
@@ -81,16 +81,20 @@ export async function getTrilhaAuditoriaSala(filtros?: {
   tabela?: CronogramaTrilhaTabela
   registroId?: string
   limite?: number
-}): Promise<{ data: CronogramaTrilhaAuditoria[]; error: unknown }> {
+  pagina?: number
+}): Promise<{ data: CronogramaTrilhaAuditoria[]; total: number; error: unknown }> {
   const sb = getSupabaseClient()
-  let query = sb.from(TABLE).select("*").order("criado_em", { ascending: false })
+  let query = sb.from(TABLE).select("*", { count: "exact" }).order("criado_em", { ascending: false })
   if (filtros?.tabela) query = query.eq("tabela", filtros.tabela)
   if (filtros?.registroId) query = query.eq("registro_id", filtros.registroId)
-  query = query.limit(filtros?.limite ?? 200)
-  const { data, error } = await query
+  const limite = filtros?.limite ?? 200
+  const pagina = filtros?.pagina ?? 1
+  const inicio = (pagina - 1) * limite
+  query = query.range(inicio, inicio + limite - 1)
+  const { data, error, count } = await query
   if (error) {
     console.error("Erro getTrilhaAuditoriaSala:", error)
-    return { data: [], error }
+    return { data: [], total: 0, error }
   }
-  return { data: (data ?? []) as CronogramaTrilhaAuditoria[], error: null }
+  return { data: (data ?? []) as CronogramaTrilhaAuditoria[], total: count ?? 0, error: null }
 }

@@ -33,7 +33,6 @@ import {
   ClipboardCheck,
   Handshake,
   Wallet,
-  LineChart,
   RotateCcw,
   DoorOpen,
   ArrowRightLeft,
@@ -78,17 +77,17 @@ const pathIconMap: Record<string, any> = {
   "/cco": BarChart3,
   "/admin": ShieldCheck,
   "/admin/permissoes": KeyRound,
-  "/cronograma/solicitacoes?tab=simulacao": UserPlus,
-  "/cronograma/solicitacoes?tab=novo-cron": CalendarPlus,
-  "/cronograma/solicitacoes?tab=banco": Database,
-  "/cronograma/ocupacao-salas": DoorOpen,
+  "/relacionamento-prestador/solicitacoes?tab=simulacao": UserPlus,
+  "/relacionamento-prestador/solicitacoes?tab=novo-cron": CalendarPlus,
+  "/relacionamento-prestador/solicitacoes?tab=banco": Database,
+  "/relacionamento-prestador/ocupacao-salas": DoorOpen,
   "/cadastros/cadastro-valores": Tag,
   "/cadastros/feriados": Calendar,
   "/cadastros/contratos": FileSignature,
   "/cadastros/taxas-e-parametros": Percent,
   "/cronograma/saida-profissional": LogOut,
   "/cronograma/ocupacao-paciente": TrendingUp,
-  "/cronograma/ocupar-profissionais-disponiveis": UserSearch,
+  "/relacionamento-prestador/ocupar-profissionais-disponiveis": UserSearch,
   "/cronograma/ocupacao?tab=fila": Clock,
   "/cronograma/ocupacao?tab=recusados": XCircle,
   "/cronograma/ocupacao?tab=inviavel": AlertTriangle,
@@ -102,8 +101,6 @@ const pathIconMap: Record<string, any> = {
   "/relacionamento-prestador/individual": UserRound,
   "/relacionamento-prestador/pep": ListChecks,
   "/relacionamento-prestador/pep-historico": History,
-  "/relacionamento-prestador/historico": LineChart,
-  "/relacionamento-prestador/legenda": BookOpen,
   "/cronograma/indicadores?tab=profissionais": BarChart3,
   "/cronograma/indicadores?tab=unidades": Building2,
   "/cronograma/indicadores?tab=pacientes": UserCheck,
@@ -511,17 +508,12 @@ export default function Sidebar() {
 
           {/* Cronograma */}
           {(canAccess("/cronograma/saida-profissional") || canAccess("/cronograma/ocupacao-paciente") ||
-            canAccess("/cronograma/ocupar-profissionais-disponiveis") ||
             canAccess("/cronograma/ocupacao?tab=acompanhamento") || canAccess("/cronograma/ocupacao?tab=gaps") ||
             canAccess("/cronograma/ocupacao?tab=inconsistencias") ||
-            canAccess("/cronograma/reposicao") || canAccess("/cronograma/ocupacao-salas")) && (
+            canAccess("/cronograma/reposicao")) && (
             <SidebarGroup title="Cronograma" icon={CalendarRange}>
-              {canAccess("/cronograma/ocupacao-salas") && <MenuItem label="Ocupação de Salas" icon={DoorOpen} path="/cronograma/ocupacao-salas" />}
               {canAccess("/cronograma/saida-profissional") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/saida-profissional" />}
               {canAccess("/cronograma/ocupacao-paciente") && <MenuItem label="Ocupação Paciente" icon={UserCheck} path="/cronograma/ocupacao-paciente" />}
-              {canAccess("/cronograma/ocupar-profissionais-disponiveis") && <MenuItem label="Ocupar Profissionais Disponíveis" icon={UserSearch} path="/cronograma/ocupar-profissionais-disponiveis" />}
-              {/* "Novo Cronograma" removido do menu — feature ainda não está pronta (ver SolicitacoesShell) */}
-              {canAccess("/cronograma/solicitacoes") && <MenuItem label="Simulação de Novo Prestador" icon={UserPlus} path="/cronograma/solicitacoes?tab=simulacao" />}
               {canAccess("/cronograma/reposicao") && <MenuItem label="Reposição de Faltas" icon={RotateCcw} path="/cronograma/reposicao" />}
               {canAccess("/cronograma/ocupacao?tab=acompanhamento") && <MenuItem label="Aceites e Recusas" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
               {canAccess("/cronograma/ocupacao?tab=gaps") && <MenuItem label="Diferença: Laudo e Oferta" icon={BarChart3} path="/cronograma/ocupacao?tab=gaps" />}
@@ -573,8 +565,19 @@ export default function Sidebar() {
           {(canAccess("/relacionamento-prestador/analise") || canAccess("/relacionamento-prestador/rp") ||
             canAccess("/relacionamento-prestador/individual") || canAccess("/relacionamento-prestador/pep") ||
             canAccess("/relacionamento-prestador/pep-historico") ||
-            canAccess("/relacionamento-prestador/historico") || canAccess("/relacionamento-prestador/legenda")) && (
+            canAccess("/relacionamento-prestador/ocupacao-salas") ||
+            canAccess("/relacionamento-prestador/solicitacoes") ||
+            canAccess("/relacionamento-prestador/ocupar-profissionais-disponiveis")) && (
             <SidebarGroup title="Relacionamento Prestador" icon={Handshake}>
+              {canAccess("/relacionamento-prestador/ocupacao-salas") && (
+                <MenuItem label="Ocupação de Salas" icon={DoorOpen} path="/relacionamento-prestador/ocupacao-salas" />
+              )}
+              {canAccess("/relacionamento-prestador/solicitacoes") && (
+                <MenuItem label="Simulação de Novo Prestador" icon={UserPlus} path="/relacionamento-prestador/solicitacoes?tab=simulacao" />
+              )}
+              {canAccess("/relacionamento-prestador/ocupar-profissionais-disponiveis") && (
+                <MenuItem label="Ocupar Profissionais Disponíveis" icon={UserSearch} path="/relacionamento-prestador/ocupar-profissionais-disponiveis" />
+              )}
               {canAccess("/relacionamento-prestador/analise") && (
                 <MenuItem label="Rem. Mês - Previsão" icon={TrendingUp} path="/relacionamento-prestador/analise" />
               )}
@@ -589,12 +592,6 @@ export default function Sidebar() {
               )}
               {canAccess("/relacionamento-prestador/pep-historico") && (
                 <MenuItem label="PEP - Histórico" icon={History} path="/relacionamento-prestador/pep-historico" />
-              )}
-              {canAccess("/relacionamento-prestador/historico") && (
-                <MenuItem label="Histórico" icon={LineChart} path="/relacionamento-prestador/historico" />
-              )}
-              {canAccess("/relacionamento-prestador/legenda") && (
-                <MenuItem label="Legenda" icon={BookOpen} path="/relacionamento-prestador/legenda" />
               )}
             </SidebarGroup>
           )}

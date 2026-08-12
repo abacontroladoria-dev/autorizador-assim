@@ -22,7 +22,6 @@ export const roleDefaults: Record<string, string[]> = {
     'analise_tratativas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
     'relacionamento_prestador_individual',
-    'relacionamento_prestador_historico', 'relacionamento_prestador_legenda',
   ],
   diretoria: [
     'dashboard', 'atendimentos', 'gestao',
@@ -39,7 +38,6 @@ export const roleDefaults: Record<string, string[]> = {
     'analise_tratativas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
     'relacionamento_prestador_individual',
-    'relacionamento_prestador_historico', 'relacionamento_prestador_legenda',
   ],
   recepcao: [
     'dashboard', 'atendimentos', 'gestao', 'auditoria_assim',
@@ -56,7 +54,6 @@ export const roleDefaults: Record<string, string[]> = {
     'cadastros_feriados', 'cadastros_contratos', 'cadastros_taxas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
     'relacionamento_prestador_individual',
-    'relacionamento_prestador_historico', 'relacionamento_prestador_legenda',
   ],
   // Ocupação de Salas, Cadastro de Valores de Convênio e Reposição de Faltas
   // foram retiradas deste papel em 2026-07-24 a pedido do usuário — ficam
@@ -91,10 +88,10 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   autorizacoes: ['/autorizacoes'],
   preauditoria: ['/preauditoria'],
   outros_convenios: ['/outros-convenios'],
-  cronograma_solicitacoes: ['/cronograma/solicitacoes'],
+  cronograma_solicitacoes: ['/relacionamento-prestador/solicitacoes'],
   cronograma_saida_profissional: ['/cronograma/saida-profissional'],
   cronograma_ocupacao_paciente: ['/cronograma/ocupacao-paciente'],
-  cronograma_disponibilidade_interna: ['/cronograma/ocupar-profissionais-disponiveis'],
+  cronograma_disponibilidade_interna: ['/relacionamento-prestador/ocupar-profissionais-disponiveis'],
   // Mesmo padrão de Indicadores: /cronograma/ocupacao tem 3 abas
   // (Aceites e Recusas, Diferença: Laudo e Oferta, Inconsistências e
   // Exceções), cada uma com seu próprio código de permissão.
@@ -112,7 +109,7 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   indicadores_historico_receitas: ['/cronograma/indicadores?tab=historico-receitas'],
   indicadores_comparativo_sessoes: ['/cronograma/indicadores?tab=comparativo-sessoes'],
   reposicao_faltas: ['/cronograma/reposicao'],
-  cronograma_ocupacao_salas: ['/cronograma/ocupacao-salas'],
+  cronograma_ocupacao_salas: ['/relacionamento-prestador/ocupacao-salas'],
   cronograma_valores_convenio: ['/cadastros/cadastro-valores'],
   cadastros_feriados: ['/cadastros/feriados'],
   cadastros_contratos: ['/cadastros/contratos'],
@@ -123,8 +120,6 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   relacionamento_prestador_individual: ['/relacionamento-prestador/individual'],
   relacionamento_prestador_pep: ['/relacionamento-prestador/pep'],
   relacionamento_prestador_pep_historico: ['/relacionamento-prestador/pep-historico'],
-  relacionamento_prestador_historico: ['/relacionamento-prestador/historico'],
-  relacionamento_prestador_legenda: ['/relacionamento-prestador/legenda'],
 }
 
 // Converte um conjunto de códigos de permissão em rotas permitidas,

@@ -31,11 +31,52 @@ function sequenciaValida(horasPm: number[]): boolean {
   return true
 }
 
+/**
+ * Índice pré-calculado de `cRows`, opcional — troca os `cRows.some/find/
+ * filter` (O(n) cada, o dado inteiro) por lookup O(1) em Map/Set. Sem isso,
+ * `encontrarCandidatosRemanejamento` chamado em varredura (ex.:
+ * rankearOportunidadesInternas em ocupacaoCategoria.ts, que testa toda
+ * combinação unidade×dia×especialidade) refaz esses scans centenas de vezes
+ * sobre as mesmas ~4 mil linhas — o que sozinho já trava a aba. Chamadas
+ * isoladas (ex.: um clique no modal de detalhe) continuam funcionando sem
+ * índice, só um pouco mais lentas (imperceptível numa chamada só).
+ */
+export interface IndiceRemanejamento {
+  /** `profissional|||dia|||hora|||unidade` -> tem linha "Livre" ali. */
+  livre: Set<string>
+  /** `paciente|||dia|||hora` -> linha "Agendado" (o conflito, se existir). */
+  agendadoPorPacDiaHora: Map<string, CsvRow>
+  /** paciente -> linhas "Agendado" movíveis (exclui ABA_EXT/IGNORAR_NO_SEQUENCIAMENTO). */
+  agendadoMovivelPorPac: Map<string, CsvRow[]>
+}
+
+export function construirIndiceRemanejamento(cRows: CsvRow[]): IndiceRemanejamento {
+  const livre = new Set<string>()
+  const agendadoPorPacDiaHora = new Map<string, CsvRow>()
+  const agendadoMovivelPorPac = new Map<string, CsvRow[]>()
+  for (const r of cRows) {
+    const status = r["Status do Agendamento"]
+    if (status === "Livre" && r["Profissional"]) {
+      livre.add(`${r["Profissional"]}|||${r["Dia da Semana"]}|||${hiStr(r)}|||${rowUnidade(r)}`)
+    } else if (status === "Agendado" && r["Nome Favorecido"]) {
+      const pac = r["Nome Favorecido"]
+      agendadoPorPacDiaHora.set(`${pac}|||${r["Dia da Semana"]}|||${hiStr(r)}`, r)
+      if (movivel(r.Terapia)) {
+        const lista = agendadoMovivelPorPac.get(pac)
+        if (lista) lista.push(r)
+        else agendadoMovivelPorPac.set(pac, [r])
+      }
+    }
+  }
+  return { livre, agendadoPorPacDiaHora, agendadoMovivelPorPac }
+}
+
 /** O profissional tem, ele mesmo, um horário "Livre" cadastrado nesse dia/hora/
  *  unidade — não só "sem conflito", mas de fato presente na própria grade dele
  *  (mesmo padrão de profTemLivre em saida.ts). Evita mover a sessão pra um
  *  horário em que o profissional simplesmente não atua. */
-function profissionalLivre(profissional: string, dia: string, hora: string, unidade: string, cRows: CsvRow[]): boolean {
+function profissionalLivre(profissional: string, dia: string, hora: string, unidade: string, cRows: CsvRow[], indice?: IndiceRemanejamento): boolean {
+  if (indice) return indice.livre.has(`${profissional}|||${dia}|||${hora}|||${unidade}`)
   return cRows.some(r =>
     r["Status do Agendamento"] === "Livre" &&
     r["Profissional"] === profissional &&
@@ -49,13 +90,13 @@ function profissionalLivre(profissional: string, dia: string, hora: string, unid
  *  sequência contígua de 40min (R5.1) e (b) tem o profissional livre lá. */
 function encontrarHoraAdjacenteLivre(
   horasBase: number[], horaExcluirPm: number | null,
-  profissional: string, diaDestino: string, unidadeConflito: string, cRows: CsvRow[],
+  profissional: string, diaDestino: string, unidadeConflito: string, cRows: CsvRow[], indice?: IndiceRemanejamento,
 ): string | null {
   for (const hora of HORAS_GRID) {
     const horaPm = pm(hora)
     if (horaPm === null || horaPm === horaExcluirPm || horasBase.includes(horaPm)) continue
     if (!sequenciaValida([...horasBase, horaPm])) continue
-    if (!profissionalLivre(profissional, diaDestino, hora, unidadeConflito, cRows)) continue
+    if (!profissionalLivre(profissional, diaDestino, hora, unidadeConflito, cRows, indice)) continue
     return hora
   }
   return null
@@ -73,28 +114,32 @@ function encontrarHoraAdjacenteLivre(
  *  sempre inclui horaAlvo: o estado final é as outras sessões do dia + horaAlvo
  *  (nova sessão) + a hora de destino (sessão realocada) — nunca um buraco. */
 export function tentarRemanejamento(
-  pac: string, dia: string, horaAlvo: string, unidade: string, cRows: CsvRow[],
+  pac: string, dia: string, horaAlvo: string, unidade: string, cRows: CsvRow[], indice?: IndiceRemanejamento,
 ): RemanejamentoDetalhe | null {
   const horaAlvoPm = pm(horaAlvo)
   if (horaAlvoPm === null) return null
 
-  const conflito = cRows.find(r =>
-    r["Status do Agendamento"] === "Agendado" &&
-    r["Nome Favorecido"] === pac &&
-    r["Dia da Semana"] === dia &&
-    pm(hiStr(r)) === horaAlvoPm,
-  )
+  const conflito = indice
+    ? indice.agendadoPorPacDiaHora.get(`${pac}|||${dia}|||${horaAlvo}`)
+    : cRows.find(r =>
+      r["Status do Agendamento"] === "Agendado" &&
+      r["Nome Favorecido"] === pac &&
+      r["Dia da Semana"] === dia &&
+      pm(hiStr(r)) === horaAlvoPm,
+    )
   if (!conflito || !movivel(conflito.Terapia)) return null
 
   const profissional = conflito.Profissional
   const unidadeConflito = rowUnidade(conflito)
 
-  const outrasSessoesMoviveis = cRows.filter(r =>
-    r !== conflito &&
-    r["Status do Agendamento"] === "Agendado" &&
-    r["Nome Favorecido"] === pac &&
-    movivel(r.Terapia),
-  )
+  const outrasSessoesMoviveis = indice
+    ? (indice.agendadoMovivelPorPac.get(pac) ?? []).filter(r => r !== conflito)
+    : cRows.filter(r =>
+      r !== conflito &&
+      r["Status do Agendamento"] === "Agendado" &&
+      r["Nome Favorecido"] === pac &&
+      movivel(r.Terapia),
+    )
 
   // 1) Mesmo dia, ponta adjacente ao que sobra do dia (+ o próprio horaAlvo,
   //    que continua ocupado — agora pela nova sessão do candidato).
@@ -104,7 +149,7 @@ export function tentarRemanejamento(
     .filter((h): h is number => h !== null)
   horasMesmoDia.push(horaAlvoPm)
 
-  const horaMesmoDia = encontrarHoraAdjacenteLivre(horasMesmoDia, horaAlvoPm, profissional, dia, unidadeConflito, cRows)
+  const horaMesmoDia = encontrarHoraAdjacenteLivre(horasMesmoDia, horaAlvoPm, profissional, dia, unidadeConflito, cRows, indice)
   if (horaMesmoDia) {
     return {
       pacienteRemanejado: pac, terapiaRemanejada: conflito.Terapia, profissionalMantido: profissional, unidade,
@@ -123,7 +168,7 @@ export function tentarRemanejamento(
       .filter((h): h is number => h !== null)
     if (!horasDestino.length) continue
 
-    const horaDestino = encontrarHoraAdjacenteLivre(horasDestino, null, profissional, diaDestino, unidadeConflito, cRows)
+    const horaDestino = encontrarHoraAdjacenteLivre(horasDestino, null, profissional, diaDestino, unidadeConflito, cRows, indice)
     if (horaDestino) {
       return {
         pacienteRemanejado: pac, terapiaRemanejada: conflito.Terapia, profissionalMantido: profissional, unidade,
@@ -145,7 +190,7 @@ export interface CandidatoRemanejamento {
  *  tenta liberar espaço via tentarRemanejamento. */
 export function encontrarCandidatosRemanejamento(
   dia: string, turno: Turno, unidade: string, especialidade: string,
-  cRows: CsvRow[], gapMap: Record<string, GapItem>,
+  cRows: CsvRow[], gapMap: Record<string, GapItem>, indice?: IndiceRemanejamento,
 ): CandidatoRemanejamento[] {
   const frequentam = pacientesDaUnidadeNoDia(dia, unidade, cRows)
   const resultados: CandidatoRemanejamento[] = []
@@ -155,10 +200,12 @@ export function encontrarCandidatosRemanejamento(
       const g = gapMap[`${pac}|||${especialidade}`]
       if (!g) continue
 
-      const temConflito = cRows.some(r =>
-        r["Status do Agendamento"] === "Agendado" && r["Nome Favorecido"] === pac &&
-        r["Dia da Semana"] === dia && hiStr(r) === hora,
-      )
+      const temConflito = indice
+        ? indice.agendadoPorPacDiaHora.has(`${pac}|||${dia}|||${hora}`)
+        : cRows.some(r =>
+          r["Status do Agendamento"] === "Agendado" && r["Nome Favorecido"] === pac &&
+          r["Dia da Semana"] === dia && hiStr(r) === hora,
+        )
       if (!temConflito) continue // sem conflito nesse horário — já seria candidato por adjacência, não remanejamento
 
       // tentarRemanejamento já valida sozinho R2.1/R5.1 pro estado FINAL (sessões
@@ -168,7 +215,7 @@ export function encontrarCandidatosRemanejamento(
       // cuja ÚNICA sessão do dia era a conflitante (R2.1 via essa checagem
       // parcial via zero sessões), mesmo quando o remanejamento resultaria em
       // 2 sessões válidas e contíguas no dia.
-      const detalhe = tentarRemanejamento(pac, dia, hora, unidade, cRows)
+      const detalhe = tentarRemanejamento(pac, dia, hora, unidade, cRows, indice)
       if (!detalhe) continue
 
       resultados.push({

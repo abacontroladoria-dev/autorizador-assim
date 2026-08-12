@@ -6,7 +6,7 @@
 // tinha a função de leitura pronta mas nunca ganhou tela.
 
 import { useEffect, useState } from "react"
-import { ChevronDown, ChevronRight, Loader2 } from "lucide-react"
+import { ChevronDown, ChevronLeft, ChevronRight, Loader2 } from "lucide-react"
 import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
 import { TONE_SOLID } from "@/components/cronograma/ui/tones"
 import { camposAlterados, camposSnapshot } from "@/lib/cronograma/auditoriaFormat"
@@ -18,11 +18,17 @@ interface Props {
 
 const ACAO_LABEL: Record<CronogramaTrilhaAcao, string> = { criar: "Criação", editar: "Edição", excluir: "Exclusão" }
 const ACAO_TONE: Record<CronogramaTrilhaAcao, keyof typeof TONE_SOLID> = { criar: "green", editar: "blue", excluir: "red" }
-const TABELA_LABEL: Record<CronogramaTrilhaTabela, string> = { sala: "Sala", alocacao: "Alocação", nucleo: "Núcleo", status_label: "Status" }
+const TABELA_LABEL: Record<CronogramaTrilhaTabela, string> = {
+  sala: "Sala", alocacao: "Alocação", nucleo: "Núcleo", status_label: "Status", exclusividade_terapia: "Exclusividade de terapia",
+}
 
 function nomeContextual(item: CronogramaTrilhaAuditoria): string {
   if (item.tabela === "alocacao") {
     const partes = [item.sala_nome, item.profissional_nome, item.terapia_nome].filter(Boolean)
+    return partes.length ? partes.join(" · ") : "—"
+  }
+  if (item.tabela === "exclusividade_terapia") {
+    const partes = [item.sala_nome, item.terapia_nome].filter(Boolean)
     return partes.length ? partes.join(" · ") : "—"
   }
   return item.sala_nome ?? item.nucleo_nome ?? item.registro_id
@@ -34,17 +40,29 @@ function formatarDataHora(item: CronogramaTrilhaAuditoria): string {
   return item.criado_em_brasilia ?? new Date(item.criado_em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })
 }
 
+const ITENS_POR_PAGINA = 30
+
 export function HistoricoAuditoriaModal({ onClose }: Props) {
   const [itens, setItens] = useState<CronogramaTrilhaAuditoria[]>([])
+  const [total, setTotal] = useState(0)
+  const [pagina, setPagina] = useState(1)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [expandidoId, setExpandidoId] = useState<string | null>(null)
 
   useEffect(() => {
-    getTrilhaAuditoriaSala({ limite: 200 })
-      .then(({ data, error }) => { if (error) setError("Não foi possível carregar o histórico."); setItens(data) })
+    setLoading(true)
+    setExpandidoId(null)
+    getTrilhaAuditoriaSala({ limite: ITENS_POR_PAGINA, pagina })
+      .then(({ data, total, error }) => {
+        if (error) setError("Não foi possível carregar o histórico.")
+        setItens(data)
+        setTotal(total)
+      })
       .finally(() => setLoading(false))
-  }, [])
+  }, [pagina])
+
+  const totalPaginas = Math.max(1, Math.ceil(total / ITENS_POR_PAGINA))
 
   return (
     <ScheduleModal title="Histórico de alterações" subtitle="Criações, edições e exclusões de salas, alocações, núcleos e status — mais recentes primeiro." maxWidth={720} onClose={onClose}>
@@ -110,6 +128,28 @@ export function HistoricoAuditoriaModal({ onClose }: Props) {
           )
         })}
       </div>
+
+      {!loading && !error && total > ITENS_POR_PAGINA && (
+        <div className="mt-3 flex items-center justify-between border-t border-border pt-3">
+          <button
+            type="button"
+            onClick={() => setPagina(p => Math.max(1, p - 1))}
+            disabled={pagina === 1}
+            className="flex items-center gap-1 rounded-md px-2 py-1 text-sm font-semibold text-foreground disabled:cursor-not-allowed disabled:opacity-40 enabled:hover:bg-muted"
+          >
+            <ChevronLeft size={14} /> Anterior
+          </button>
+          <span className="text-[12px] text-muted-foreground">Página {pagina} de {totalPaginas}</span>
+          <button
+            type="button"
+            onClick={() => setPagina(p => Math.min(totalPaginas, p + 1))}
+            disabled={pagina === totalPaginas}
+            className="flex items-center gap-1 rounded-md px-2 py-1 text-sm font-semibold text-foreground disabled:cursor-not-allowed disabled:opacity-40 enabled:hover:bg-muted"
+          >
+            Próxima <ChevronRight size={14} />
+          </button>
+        </div>
+      )}
     </ScheduleModal>
   )
 }

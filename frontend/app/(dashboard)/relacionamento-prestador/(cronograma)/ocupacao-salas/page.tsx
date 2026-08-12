@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { DoorOpen, Eye, History, Loader2, Plus, Settings2 } from "lucide-react"
+import { DoorOpen, Eye, History, Loader2, Plus, Settings2, ShieldCheck } from "lucide-react"
 import { useHeader } from "@/contexts/HeaderContext"
 import { SegmentedTabs } from "@/components/cronograma/ui/SegmentedTabs"
 import { StatCard } from "@/components/cronograma/ui/StatCard"
@@ -13,6 +13,7 @@ import { SalasHeatmapView } from "@/components/cronograma/salas/SalasHeatmapView
 import { RegularizacoesView } from "@/components/cronograma/salas/RegularizacoesView"
 import { SalaEditModal } from "@/components/cronograma/salas/SalaEditModal"
 import { GerenciarCategoriasModal } from "@/components/cronograma/salas/GerenciarCategoriasModal"
+import { ExclusividadeTerapiaModal } from "@/components/cronograma/salas/ExclusividadeTerapiaModal"
 import { HistoricoAuditoriaModal } from "@/components/cronograma/salas/HistoricoAuditoriaModal"
 import { STATUS_SLOT_EXCLUIDO, type Sala, type SlotOcupacaoSala } from "@/lib/cronograma/salasTypes"
 
@@ -25,18 +26,21 @@ export default function OcupacaoSalasPage() {
     return () => setHeader("", "")
   }, [setHeader])
 
-  const { salas, alocacoes, linhas, salasComOcupacao, loading, error, recarregarSalas, recarregarAlocacoes, encontrarAlocacaoDoProfissional } = useOcupacaoSalas()
+  const { salas, alocacoes, linhas, exclusividades, salasComOcupacao, loading, error, recarregarSalas, recarregarAlocacoes, encontrarAlocacaoDoProfissional } = useOcupacaoSalas()
 
   const [tab, setTab] = useState<ViewTab>("grade")
   const [filtros, setFiltros] = useState<SalasFiltrosState>(SALAS_FILTROS_VAZIO)
   const [editando, setEditando] = useState<Sala | null | "novo">(null)
   const [isolada, setIsolada] = useState<{ id: string; nome: string } | null>(null)
+  const [somenteInconsistentes, setSomenteInconsistentes] = useState(false)
   const [gerenciandoCategorias, setGerenciandoCategorias] = useState(false)
+  const [gerenciandoExclusividade, setGerenciandoExclusividade] = useState(false)
   const [verHistorico, setVerHistorico] = useState(false)
 
   const unidades = useMemo(() => [...new Set(salasComOcupacao.map(s => s.sala.unidade_nome))].sort(), [salasComOcupacao])
   const nucleos = useMemo(() => [...new Set(salasComOcupacao.map(s => s.sala.nucleo).filter((n): n is string => !!n))].sort(), [salasComOcupacao])
   const andares = useMemo(() => [...new Set(salasComOcupacao.map(s => s.sala.andar).filter((n): n is string => !!n))].sort(), [salasComOcupacao])
+  const salasComExclusividade = useMemo(() => new Set(exclusividades.map(e => e.sala_id)), [exclusividades])
 
   function alternarIsolarSala(salaId: string, nome: string) {
     setIsolada(prev => (prev?.id === salaId ? null : { id: salaId, nome }))
@@ -46,6 +50,8 @@ export default function OcupacaoSalasPage() {
     return salasComOcupacao
       .filter(item => (isolada ? item.sala.id === isolada.id : true))
       .filter(item => aplicarFiltrosSala(filtros, item.sala) && salaTemProfissional(item, filtros.profissional))
+      .filter(item => !somenteInconsistentes || item.slots.some((s: SlotOcupacaoSala) => s.inconsistente || s.violaExclusividade))
+      .filter(item => !filtros.comExclusividade || salasComExclusividade.has(item.sala.id))
       .map(item => {
         let slots = item.slots
         if (filtros.turno.length) slots = slots.filter((s: SlotOcupacaoSala) => filtros.turno.includes(s.turno))
@@ -53,7 +59,7 @@ export default function OcupacaoSalasPage() {
         return { ...item, slots }
       })
       .filter(item => !filtros.semSessao || item.slots.length > 0)
-  }, [salasComOcupacao, filtros, isolada])
+  }, [salasComOcupacao, filtros, isolada, somenteInconsistentes, salasComExclusividade])
 
   // Os 4 cards respondem aos filtros atuais (unidade/núcleo/andar/capacidade/
   // turno/status/profissional/isolada) — calculados sobre `filtradas`, a mesma
@@ -95,9 +101,11 @@ export default function OcupacaoSalasPage() {
         <StatCard tone="red" icon={<DoorOpen size={15} />} label="Salas bloqueadas">
           <div className="text-2xl font-black text-foreground">{totalBloqueadas}</div>
         </StatCard>
-        <StatCard tone="amber" icon={<DoorOpen size={15} />} label="Turnos sobreocupados">
-          <div className="text-2xl font-black text-foreground">{totalInconsistencias}</div>
-        </StatCard>
+        <button type="button" onClick={() => setSomenteInconsistentes(v => !v)} className="text-left" aria-pressed={somenteInconsistentes}>
+          <StatCard tone="amber" icon={<DoorOpen size={15} />} label="Alocações inconsistentes" className={somenteInconsistentes ? "ring-2 ring-inset ring-amber-500" : ""}>
+            <div className="text-2xl font-black text-foreground">{totalInconsistencias}</div>
+          </StatCard>
+        </button>
       </div>
 
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -137,6 +145,13 @@ export default function OcupacaoSalasPage() {
           </button>
           <button
             type="button"
+            onClick={() => setGerenciandoExclusividade(true)}
+            className="inline-flex items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-sm font-semibold text-foreground hover:bg-muted/50"
+          >
+            <ShieldCheck size={14} /> Exclusividade de salas com terapias
+          </button>
+          <button
+            type="button"
             onClick={() => setEditando("novo")}
             className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-3 py-1.5 text-sm font-semibold text-white hover:bg-slate-800 dark:bg-white dark:text-slate-900"
           >
@@ -165,10 +180,11 @@ export default function OcupacaoSalasPage() {
           encontrarAlocacaoDoProfissional={encontrarAlocacaoDoProfissional}
           onRecarregar={recarregarAlocacoes}
           buscaProfissional={filtros.profissional}
+          salasComExclusividade={salasComExclusividade}
         />
       )}
       {!loading && !error && tab === "mapa" && (
-        <SalasHeatmapView salas={filtradas} onIsolarSala={alternarIsolarSala} salaIsoladaId={isolada?.id ?? null} />
+        <SalasHeatmapView salas={filtradas} onIsolarSala={alternarIsolarSala} salaIsoladaId={isolada?.id ?? null} salasComExclusividade={salasComExclusividade} />
       )}
       {!loading && !error && tab === "regularizacoes" && (
         <RegularizacoesView
@@ -193,6 +209,13 @@ export default function OcupacaoSalasPage() {
       {gerenciandoCategorias && (
         <GerenciarCategoriasModal
           onClose={() => setGerenciandoCategorias(false)}
+          onChanged={recarregarSalas}
+        />
+      )}
+
+      {gerenciandoExclusividade && (
+        <ExclusividadeTerapiaModal
+          onClose={() => setGerenciandoExclusividade(false)}
           onChanged={recarregarSalas}
         />
       )}

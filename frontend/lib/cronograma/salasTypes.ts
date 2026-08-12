@@ -58,6 +58,29 @@ export function capacidadeProjetadaSala(capacidade: SalaCapacidade, status: Sala
   return 1
 }
 
+/** 'obrigatoria' = a terapia só pode ser agendada nas salas exclusivas listadas. 'preferencial' = prioriza essas salas, mas pode cair em qualquer sala não-reservada por outra terapia. */
+export type ModoExclusividadeTerapia = "obrigatoria" | "preferencial"
+
+/** Linha de `cronograma_salas_terapias_exclusivas` — restringe (ou prioriza) uma sala a uma terapia específica, usado tanto pela grade de Ocupação de Salas quanto pela recomendação de sala em Solicitações › Simulação (ver encontrarSalaLivre em sugestaoContratacao.ts). */
+export interface SalaTerapiaExclusiva {
+  id: string
+  sala_id: string
+  /** Chave estável da terapia (constants.ts TERAPIA_ID) — não há tabela `tipos_terapia` no banco. */
+  terapia_id: number
+  terapia_nome: string
+  modo: ModoExclusividadeTerapia
+  created_at: string
+  updated_at: string
+}
+
+/** Payload de criação/edição de uma exclusividade sala×terapia */
+export interface SalaTerapiaExclusivaInput {
+  sala_id: string
+  terapia_id: number
+  terapia_nome: string
+  modo: ModoExclusividadeTerapia
+}
+
 /** Linha de `cronograma_salas_alocacoes` — quem é o "dono" recorrente de uma sala/dia/turno (planejamento, não agendamento real) */
 export interface AlocacaoSala {
   id: string
@@ -102,6 +125,13 @@ export interface AlocacaoCardSlot {
   pctOcupacao: number | null
   /** true se não há nenhuma sessão real batendo (alocação puramente planejada, sem cruzamento no CSV) */
   semCruzamentoCsv: boolean
+  /**
+   * Preenchido quando esta alocação fere uma regra cadastrada em
+   * "Exclusividade de salas com terapias" (ver exclusividadeTerapia.ts) — só
+   * pra violações "bloqueado" (obrigatória ferida); "aviso" (preferencial)
+   * não conta como inconsistência aqui, é só uma prioridade não seguida.
+   */
+  violacaoExclusividade: { direcao: "sala_para_terapia" | "terapia_para_sala"; motivo: string } | null
 }
 
 /**
@@ -135,6 +165,8 @@ export interface SlotOcupacaoSala {
   status: StatusOcupacaoSlot
   /** nº de alocações simultâneas ultrapassa a capacidadeProjetada da sala (conflito de planejamento) */
   inconsistente: boolean
+  /** true se pelo menos uma alocação deste slot fere "Exclusividade de salas com terapias" (ver AlocacaoCardSlot.violacaoExclusividade) */
+  violaExclusividade: boolean
   /** Detalhe bloco a bloco (capacidadeProjetada × blocos do turno) — vazio se adm/bloqueada. */
   blocos: BlocoOcupacaoSlot[]
 }
