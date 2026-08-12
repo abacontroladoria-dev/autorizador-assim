@@ -1,40 +1,51 @@
 "use client"
 
+// Rem. Mês - Total: lista compacta de profissionais + modal-workspace por
+// pessoa, no padrão de docs/padrao-detalhamento-modal.md.
+//
+// O que mudou em relação ao desenho anterior:
+//  • a linha não expande mais para baixo (nem abria quatro accordions dentro de
+//    si) — o detalhamento vive em ModalRemuneracaoRP;
+//  • a busca desta página escolhe QUEM aparece e para por aí. Antes ela era
+//    repassada ao card e ainda forçava todos a abrirem (§3.11);
+//  • enquanto a grade carrega e não há nada na tela, aparece um esqueleto no
+//    formato do layout real, não a mensagem de "não existe dado" (§3.9).
+
 import { useCallback, useEffect, useMemo, useState } from "react"
-import { HelpCircle, Download } from "lucide-react"
+import { HelpCircle, Download, Loader2 } from "lucide-react"
 
 import { useHeader } from "@/contexts/HeaderContext"
 import { useRemuneracaoRPContext } from "@/contexts/RemuneracaoRPContext"
-import { RemuneracaoUploadBadges } from "./RemuneracaoUploadBadges"
+import { RemuneracaoGradeBadge, labelMes } from "./RemuneracaoGradeBadge"
 import { RemuneracaoRPDashboard } from "./RemuneracaoRPDashboard"
 import { EstadoGradeVazia } from "./EstadoGradeVazia"
-import { useParametrosGerais } from "@/hooks/useParametrosGerais"
-import { useTaxasEspecialidade } from "@/hooks/useTaxasEspecialidade"
+import { RemuneracaoRPSkeleton } from "./RemuneracaoRPSkeleton"
 import { usePepApuracaoResumo } from "@/hooks/usePepApuracaoResumo"
 import { calcularTotalPorEspecialidade } from "@/lib/remuneracao/dashboardRP"
 import { exportarRemuneracaoRPXlsx } from "@/lib/remuneracao/exportRemuneracaoRP"
 import { competenciaDeLinhas } from "@/lib/remuneracao/datas"
 import { B } from "@/lib/cronograma/constants"
-import CardRemun, { type ExpandidoState } from "./CardRemun"
+import CardRemunRP from "./CardRemunRP"
+import { ModalRemuneracaoRP } from "./ModalRemuneracaoRP"
 import type { ProfRemunReal } from "@/lib/remuneracao/calculo"
 
 const normKey = (v: unknown): string =>
   String(v ?? "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim()
 
-
 export function RemunRPTab() {
   const {
     resultado, evoRows, csvName, controlesGrade,
-    peRows, peName,
+    peName,
     loading, error,
   } = useRemuneracaoRPContext()
 
-  const { parametros } = useParametrosGerais()
-  const { taxas_pa } = useTaxasEspecialidade()
   const competenciaPep = useMemo(() => competenciaDeLinhas(evoRows), [evoRows])
   const { resumo: pepResumo } = usePepApuracaoResumo(competenciaPep)
 
-  const [expandido, setExpandido] = useState<ExpandidoState>({})
+  // Uma pessoa aberta por vez, identificada pelo nome. O modal remonta por
+  // `key`, então aba/página/detalhe nascem limpos a cada troca — nada de
+  // useEffect com setState para resetar (§3.12).
+  const [aberto, setAberto] = useState<string | null>(null)
   const [remBusca, setRemBusca] = useState("")
   const [apenasInconsistencia, setApenasInconsistencia] = useState(false)
   const [especialidadeFiltro, setEspecialidadeFiltro] = useState<string | null>(null)
@@ -52,9 +63,9 @@ export function RemunRPTab() {
     return new Set(alvo?.profissionais ?? [])
   }, [resultado, especialidadeFiltro, pepResumo])
 
-  // Mesma lógica de match usada em CardRemun.filtrarSessoes — buscar aqui também
-  // permite recolher da lista os profissionais sem nenhuma sessão correspondente,
-  // em vez de a busca só filtrar dentro de cards já expandidos manualmente.
+  // A busca escolhe QUEM aparece na lista: um profissional entra se alguma
+  // sessão dele casa com o termo. Dentro do modal ela não vale — lá a mesma
+  // string esconderia o resto do período da pessoa, que é outra pergunta.
   const buscaQ = useMemo(() => normKey(remBusca), [remBusca])
   const profTemBusca = useCallback((p: ProfRemunReal) => {
     if (!buscaQ) return true
@@ -70,24 +81,35 @@ export function RemunRPTab() {
     return r
   }, [apenasInconsistencia, profissionaisComInconsistencia, resultado, profissionaisPorEspecialidade, buscaQ, profTemBusca])
 
+  const profAberto = useMemo(
+    () => (aberto ? resultado?.find(p => p.prof === aberto) ?? null : null),
+    [aberto, resultado]
+  )
+
   useEffect(() => {
     setHeader("Rem. Mês - Total", "Relacionamento Prestador")
-    setRightContent(<RemuneracaoUploadBadges c={controlesGrade} hidePe />)
+    setRightContent(<RemuneracaoGradeBadge c={controlesGrade} />)
     return () => {
       setHeader("", "")
       setRightContent(null)
     }
   }, [setHeader, setRightContent, controlesGrade])
 
-  // Dados de configuração para o CardRemun — fallbacks seguros enquanto config carrega
-  const ccPA     = parametros?.cc_pa_default ?? 50
-  const ccPE     = parametros?.cc_pe_default ?? 100
-  const etaBonus = parametros?.eta_bonus_default ?? 100
-  const taxasPA  = taxas_pa
+  const temDado = !!resultado && resultado.length > 0
+  const carregando = loading || controlesGrade.gradeLoading
+  // O mesmo rótulo do seletor no cabeçalho ("Agosto de 2026"): quem está
+  // esperando lê no corpo exatamente o que escolheu lá em cima.
+  const periodoTexto = labelMes(controlesGrade.periodoCarregado ?? controlesGrade.periodo)
+
+  // Sem nada na tela e a grade a caminho → esqueleto no formato do layout real.
+  // A mensagem de vazio (EstadoGradeVazia) só entra depois que a carga termina.
+  if (!temDado && carregando) {
+    return <RemuneracaoRPSkeleton periodo={periodoTexto} />
+  }
 
   return (
     <div className="space-y-4">
-      {resultado && resultado.length > 0 && (
+      {temDado && (
         <RemuneracaoRPDashboard
           resultado={resultado}
           especialidadeFiltro={especialidadeFiltro}
@@ -96,10 +118,18 @@ export function RemunRPTab() {
         />
       )}
 
-      {loading && <p className="text-sm text-muted-foreground">Carregando configuração…</p>}
+      {/* Recarga com dado na tela: a lista fica onde está e o aviso é discreto.
+          Esconder o que a pessoa está lendo é pior que fazê-la esperar. */}
+      {temDado && carregando && (
+        <p className="flex items-center gap-2 text-xs text-muted-foreground" role="status" aria-live="polite">
+          <Loader2 size={13} className="motion-safe:animate-spin" aria-hidden />
+          Atualizando com a grade de {periodoTexto}…
+        </p>
+      )}
+
       {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
 
-      {resultado && resultado.length > 0 && (
+      {temDado && (
         <div className="flex items-center gap-3">
           <input
             type="search"
@@ -107,7 +137,7 @@ export function RemunRPTab() {
             value={remBusca}
             onChange={e => setRemBusca(e.target.value)}
             className="flex-1 rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
-            aria-label="Filtrar sessões"
+            aria-label="Filtrar profissionais por sessão"
           />
           <button
             type="button"
@@ -143,7 +173,7 @@ export function RemunRPTab() {
         </div>
       )}
 
-      {resultado && resultado.length > 0 && (buscaQ || apenasInconsistencia || especialidadeFiltro) && (
+      {temDado && (buscaQ || apenasInconsistencia || especialidadeFiltro) && (
         <div className="flex items-center gap-2 flex-wrap text-xs">
           <span className="font-bold uppercase tracking-wide text-muted-foreground">Filtros ativos:</span>
           {buscaQ && (
@@ -174,15 +204,15 @@ export function RemunRPTab() {
         </div>
       )}
 
-      {!resultado && !loading && (
+      {!temDado && !carregando && (
         <EstadoGradeVazia
-          carregando={controlesGrade.gradeLoading}
+          carregando={false}
           periodo={controlesGrade.periodo}
           erroResumo={controlesGrade.gradeErroResumo}
         />
       )}
 
-      {resultado && resultado.length > 0 && resultadoExibido && resultadoExibido.length === 0 && (
+      {temDado && resultadoExibido && resultadoExibido.length === 0 && (
         <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
           {especialidadeFiltro
             ? `Nenhum profissional com remuneração em "${especialidadeFiltro}" nesta grade.`
@@ -195,23 +225,20 @@ export function RemunRPTab() {
       {resultadoExibido && resultadoExibido.length > 0 && (
         <div>
           {resultadoExibido.map(p => (
-            <CardRemun
-              key={p.prof}
-              p={p}
-              expandido={expandido}
-              setExpandido={setExpandido}
-              remBusca={remBusca}
-              forceOpen={!!buscaQ}
-              ccPA={ccPA}
-              ccPE={ccPE}
-              etaBonus={etaBonus}
-              taxasPA={taxasPA}
-              dadosPorProf={[]}
-              pepResumo={pepResumo.get(p.prof) ?? null}
-            />
+            <CardRemunRP key={p.prof} p={p} onAbrir={setAberto} />
           ))}
         </div>
       )}
+
+      {/* `key` remonta o modal a cada pessoa: aba, página, detalhe e busca local
+          nascem limpos sem nenhum efeito de reset. */}
+      <ModalRemuneracaoRP
+        key={aberto ?? "fechado"}
+        p={profAberto}
+        periodo={controlesGrade.periodo}
+        pepResumo={aberto ? pepResumo.get(aberto) ?? null : null}
+        onClose={() => setAberto(null)}
+      />
     </div>
   )
 }

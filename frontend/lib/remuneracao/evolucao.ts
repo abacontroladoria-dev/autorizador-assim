@@ -54,7 +54,16 @@ export type BucketSessao =
   /** Captura contraditória, precisa conferência → `inconsistencias`. */
   | "inconsistencia"
 
-export function bucketDaSessao(s: SessaoTratativa): BucketSessao {
+/**
+ * Só `classificacao` e `papel` são lidos, então o parâmetro é estrutural em vez
+ * de `SessaoTratativa`: `SessaoComPapel` (lib/remuneracao/calculo.ts), que tem
+ * os campos monetários, também serve. É o que permite ao /rp partir das sessões
+ * pela MESMA função que a Análise de Evolução, em vez de reclassificar (§3.1 do
+ * padrão de detalhamento em modal) — ver ./composicaoRP.ts.
+ */
+export type SessaoClassificavel = { classificacao?: string | null; papel?: string }
+
+export function bucketDaSessao(s: SessaoClassificavel): BucketSessao {
   const cls = s.classificacao ?? ""
   // Vem primeiro pelo mesmo motivo que em calculo.ts: a dúvida sobre a captura
   // vence qualquer outra leitura da linha.

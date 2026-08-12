@@ -1,9 +1,17 @@
 "use client"
 
-// Vocabulário visual compartilhado da Análise de Evolução — o card da lista e o
-// modal de análise precisam falar a mesma língua de cor: um tom = um
-// significado. Estava dentro de CardTratativas.tsx; virou módulo quando o modal
-// passou a usar o mesmo mapa (nunca duas tabelas de cor para o mesmo conceito).
+// Vocabulário visual das telas no padrão de detalhamento em modal
+// (docs/padrao-detalhamento-modal.md §3.5): um tom = um significado, e o tom de
+// um conceito é o mesmo no card, na composição, na aba e na coluna da tabela.
+//
+// Nasceu dentro de CardTratativas.tsx; virou módulo quando o modal da Análise de
+// Evolução passou a usar o mesmo mapa, e subiu para components/ui/ quando a
+// Rem. Mês - Total precisou dele — nunca duas tabelas de cor para o mesmo
+// conceito. Consome `Tone` de @/hooks/useToneColor, a única união de tons deste
+// padrão.
+//
+// Não confundir com components/cronograma/ui/tones.ts, que serve os painéis do
+// Cronograma e tem união própria (`slate` no lugar de `gray`).
 //
 // A cor de TEXTO em destaque continua vindo de useToneColor() — este mapa é só
 // de fundo/tint, onde o contraste já está garantido pelo par bg/text.

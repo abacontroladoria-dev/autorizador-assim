@@ -1,28 +1,34 @@
 "use client"
 
-// Modal de análise por terapeuta da Análise de Evolução. Substitui a expansão
-// inline do card (que empurrava a lista para baixo e escondia quatro tabelas
-// dentro de accordions) por um workspace: composição da responsabilidade em
-// cima, resultado no meio, UMA tabela com filtros embaixo.
+// Modal de detalhamento por profissional da Rem. Mês - Total. Substitui a
+// expansão inline do card (que empurrava a lista para baixo e escondia quatro
+// tabelas dentro de accordions) por um workspace: a conta em cima, o resultado
+// no meio, UMA tabela com abas embaixo.
 //
-// Nenhum número é calculado aqui. Tudo vem de composicaoEvolucao()
-// (lib/remuneracao/evolucao.ts), a mesma função que o card da lista usa — por
-// construção as abas e a composição não podem divergir. Como o resto da tela,
-// não existe NADA monetário: ProfTratativas/SessaoTratativa não têm campo de R$.
+// Nenhum número é calculado aqui. Tudo vem de composicaoRP()
+// (lib/remuneracao/composicaoRP.ts), a mesma função que CardRemunRP usa — por
+// construção as abas e a conta não podem divergir (§3.1 do padrão de
+// detalhamento em modal, docs/padrao-detalhamento-modal.md).
+//
+// Os auxiliares de apresentação (PassoConta, Conector, CampoDetalhe,
+// paginasVisiveis) repetem os de tratativas/ModalAnaliseTerapeuta.tsx de
+// propósito: esta sprint tem escopo em /rp, então nada é extraído para um kit
+// compartilhado ainda. Quando a terceira tela pedir o mesmo, é hora de extrair.
 
 import { Fragment, useMemo, useState } from "react"
 import {
-  CalendarDays, CalendarX2, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight,
-  ClipboardList, Clock, HelpCircle, ListFilter, Repeat2, Search, Target, UserRoundMinus, X,
+  Banknote, CalendarDays, CalendarX2, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight,
+  ClipboardList, Clock, HelpCircle, ListFilter, Repeat2, Search, Sparkles, Sun, UserRoundMinus,
+  Wallet, X,
 } from "lucide-react"
 
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
-import { useToneColor, type Tone } from "@/hooks/useToneColor"
-import { isCancelado, isSim } from "@/lib/remuneracao/formatacao"
-import { formatDateBR } from "@/lib/remuneracao/datas"
-import { composicaoEvolucao, bucketDaSessao, type BucketSessao } from "@/lib/remuneracao/evolucao"
-import type { ProfTratativas, SessaoTratativa } from "@/lib/remuneracao/tratativas"
 import { StatusChip, TONE_CHIP, TONE_PANEL } from "@/components/ui/tones"
+import { useToneColor, type Tone } from "@/hooks/useToneColor"
+import { fmt, isCancelado, isSim } from "@/lib/remuneracao/formatacao"
+import { formatDateBR } from "@/lib/remuneracao/datas"
+import { bucketDaSessao, composicaoRP } from "@/lib/remuneracao/composicaoRP"
+import type { ProfRemunReal, SessaoComPapel } from "@/lib/remuneracao/calculo"
 
 const POR_PAGINA = 15
 
@@ -40,18 +46,19 @@ function iniciaisDe(nome: string): string {
 }
 
 // ─── Leitura de uma linha da tabela ──────────────────────────────────────────
-// Situação e Evolução são dois eixos DIFERENTES e é isso que a tabela precisa
-// mostrar: "Pendente retroativa" é uma sessão que aconteceu (presença Sim) e
-// está sem evolução — Situação "Realizado", Evolução "Pendente". Colapsar os
-// dois numa coluna só é o que fazia a leitura antiga precisar de legenda.
+// Origem, Situação e Remuneração são três eixos DIFERENTES, e é isso que a
+// tabela precisa mostrar (§3.7): "Pendente retroativa" é uma sessão que
+// aconteceu (presença Sim) e não gera pagamento — Situação "Realizado",
+// Remuneração "Não paga". Colapsar os três numa coluna só é o que fazia a
+// leitura antiga precisar de legenda.
 
-function origemDaSessao(s: SessaoTratativa): { texto: string; tone: Tone } {
+function origemDaSessao(s: SessaoComPapel): { texto: string; tone: Tone } {
   return s.papel === "Substituição realizada"
     ? { texto: "Substituição", tone: "purple" }
     : { texto: "Agendamento", tone: "gray" }
 }
 
-function situacaoDaSessao(s: SessaoTratativa): { texto: string; tone: Tone } {
+function situacaoDaSessao(s: SessaoComPapel): { texto: string; tone: Tone } {
   const cls = s.classificacao ?? ""
   if (cls === "Feriado/Ponto Fac.") return { texto: "Feriado/Ponto Fac.", tone: "gray" }
   // Também lido do status, e não só da classificação: em "Cancelado evoluído" a
@@ -64,47 +71,49 @@ function situacaoDaSessao(s: SessaoTratativa): { texto: string; tone: Tone } {
   return { texto: "Sem presença", tone: "amber" }
 }
 
-const EVOLUCAO_POR_BUCKET: Record<BucketSessao, { texto: string; tone: Tone }> = {
-  comEvolucao:    { texto: "Com evolução",      tone: "green" },
-  substituicao:   { texto: "Com evolução",      tone: "green" },
-  pendente:       { texto: "Pendente",          tone: "amber" },
-  cancelada:      { texto: "Não exigida",       tone: "gray" },
-  cedida:         { texto: "Evoluída por outro", tone: "gray" },
-  // Inconsistência mostra a própria classificação: "Cancelado evoluído" e
-  // "Evolução em conflito" pedem ações diferentes, um rótulo genérico esconderia isso.
-  inconsistencia: { texto: "",                  tone: "red" },
-}
-
-function evolucaoDaSessao(s: SessaoTratativa): { texto: string; tone: Tone } {
+/**
+ * O terceiro eixo desta tela — o que a linha faz com o dinheiro. É o que
+ * substitui a coluna "Evolução" da Análise de Evolução: lá a pergunta é "consta
+ * evolução?", aqui é "isso vira pagamento?".
+ */
+function remuneracaoDaSessao(s: SessaoComPapel): { texto: string; tone: Tone } {
   const b = bucketDaSessao(s)
-  const base = EVOLUCAO_POR_BUCKET[b]
-  return b === "inconsistencia" ? { texto: s.classificacao || "Inconsistência", tone: "red" } : base
+  if (b === "inconsistencia") return { texto: s.classificacao || "Inconsistência", tone: "red" }
+  if (b === "pendente") return { texto: "Não paga — sem registro", tone: "amber" }
+  if (b === "cancelada") return { texto: "Não exigida", tone: "gray" }
+  if (b === "cedida") return { texto: "Paga a quem assumiu", tone: "gray" }
+  // comEvolucao | substituicao: as duas únicas em que calculo.ts somou PA.
+  if (s.valorPATexto) return { texto: s.valorPATexto, tone: "green" }
+  const pa = s.valorPA ?? 0
+  return pa > 0 ? { texto: fmt(pa), tone: "green" } : { texto: "Sem PA por sessão", tone: "gray" }
 }
 
-const chaveSessao = (s: SessaoTratativa, i: number) =>
+const chaveSessao = (s: SessaoComPapel, i: number) =>
   `${s.papel}|${s._idx ?? ""}|${s.id ?? ""}|${s.data ?? ""}|${s.hora ?? ""}|${i}`
 
-// ─── Composição da responsabilidade ──────────────────────────────────────────
+// ─── A conta ─────────────────────────────────────────────────────────────────
 
 /**
  * Um passo da fórmula. `destaque` (anel) marca os RESULTADOS — o que vem depois
- * de um "=" — e distingue "Agendamentos válidos" de "Substituídas por outro", que
- * dividem o mesmo cinza mas têm papéis opostos na conta.
+ * de um "=" — e distingue "Base remunerável" de "Canceladas", que dividem o
+ * mesmo cinza mas têm papéis opostos na conta.
  *
- * `alerta` é o que este bloco NÃO está contando. Existe por causa da
- * substituição em conflito de autoria: o número honesto é 0, e sem dizer "1 em
- * conferência" aqui o modal mostrava 0 substituições ao lado de uma linha com
- * Origem = "Substituição" e nada explicando a diferença.
+ * `alerta` é o que este bloco NÃO está contando: existe por causa da
+ * substituição com autoria em conflito, em que o número honesto é 0 e sem dizer
+ * "1 em conferência" o modal mostraria 0 substituições ao lado de uma linha com
+ * Origem "Substituição" (§3.4).
  */
-function PassoComposicao({ tone, icon, valor, titulo, nota, alerta, destaque = false }: {
-  tone: Tone; icon: React.ReactNode; valor: number; titulo: string
-  nota?: string; alerta?: string; destaque?: boolean
+function PassoConta({ tone, icon, valor, titulo, nota, alerta, destaque = false, moeda = false }: {
+  tone: Tone; icon: React.ReactNode; valor: React.ReactNode; titulo: string
+  nota?: string; alerta?: string; destaque?: boolean; moeda?: boolean
 }) {
   const painel = TONE_PANEL[tone]
   return (
     <div className={`flex w-full min-w-30 flex-col items-center gap-1.5 rounded-xl px-3 py-3 text-center sm:flex-1 ${painel.bg} ${destaque ? `ring-1 ring-inset ${painel.ring}` : ""}`}>
       <span className={TONE_CHIP[tone].text}>{icon}</span>
-      <div className={`text-2xl font-black tabular-nums leading-none ${TONE_CHIP[tone].text}`}>{valor}</div>
+      <div className={`font-black tabular-nums leading-none ${moeda ? "text-lg" : "text-2xl"} ${TONE_CHIP[tone].text}`}>
+        {valor}
+      </div>
       <div className="text-[11px] font-semibold leading-snug text-foreground/85">{titulo}</div>
       {nota && <div className="-mt-1 text-[10px] leading-snug text-muted-foreground">{nota}</div>}
       {alerta && (
@@ -114,6 +123,13 @@ function PassoComposicao({ tone, icon, valor, titulo, nota, alerta, destaque = f
   )
 }
 
+/**
+ * Zero não tem cor (§3.5). Um "R$ 0,00" em âmbar no bloco do Bônus ETA grita por
+ * um problema que não existe — a maioria dos profissionais simplesmente não tem
+ * essa parcela. O tom volta assim que há valor.
+ */
+const tomDoValor = (valor: number, tone: Tone): Tone => (valor > 0 ? tone : "gray")
+
 function Conector({ sinal }: { sinal: "−" | "+" | "=" }) {
   return (
     <span aria-hidden className="shrink-0 self-center px-0.5 text-lg font-medium text-muted-foreground/60">
@@ -122,15 +138,11 @@ function Conector({ sinal }: { sinal: "−" | "+" | "=" }) {
   )
 }
 
-// ─── Bloco de resultado ──────────────────────────────────────────────────────
-
 function ResultadoNumero({ icon, label, valor, nota, cor, divisor = false }: {
-  icon: React.ReactNode; label: string; valor: number; nota: string; cor: string; divisor?: boolean
+  icon: React.ReactNode; label: string; valor: React.ReactNode; nota: string; cor: string; divisor?: boolean
 }) {
   // A divisória é responsiva de propósito: empilhado no mobile, uma borda
   // esquerda solta ficaria pendurada no meio do nada.
-  // Os ícones são os MESMOS do card da lista (MetricMini) — um ícone, um
-  // significado nas duas telas.
   return (
     <div className={`min-w-30 ${divisor ? "sm:border-l sm:border-border sm:pl-6" : ""}`}>
       <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
@@ -173,30 +185,35 @@ function paginasVisiveis(atual: number, total: number): (number | "…")[] {
 
 // ─── Modal ───────────────────────────────────────────────────────────────────
 
-type AbaId = "todos" | "comEvolucao" | "pendentes" | "canceladas" | "substituicoes" | "cedidas" | "inconsistencias"
+type AbaId = "todos" | "remuneradas" | "substituicoes" | "pendentes" | "canceladas" | "cedidas" | "inconsistencias"
 
 interface Props {
-  p: ProfTratativas | null
+  p: ProfRemunReal | null
   periodo: { de: string; ate: string } | null
+  /**
+   * PEP apurada em pep_apuracao_mensal (aba Entregas PEP). É uma leitura de
+   * OUTRA apuração: não entra em `valorConfirmado` e não é parcela desta conta —
+   * aparece como nota, nunca como bloco da fórmula.
+   */
+  pepResumo?: { potencial: number; alcancado: number } | null
   onClose: () => void
 }
 
-export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
+export function ModalRemuneracaoRP({ p, periodo, pepResumo, onClose }: Props) {
   const toneColor = useToneColor()
   const [aba, setAba] = useState<AbaId>("todos")
   const [pagina, setPagina] = useState(1)
   const [detalhe, setDetalhe] = useState<string | null>(null)
-  // Busca própria do modal, sempre vazia ao abrir. Antes ela nascia com a busca
-  // da página: quem tinha "dani" digitado para achar a pessoa na lista abria o
-  // modal dela já filtrado, sem ter pedido. São perguntas diferentes — na lista
-  // a busca escolhe QUEM aparece, aqui ela esconderia o resto do mês da pessoa.
+  // Busca própria do modal, sempre vazia ao abrir. A busca da página escolhe
+  // QUEM aparece na lista; aqui a mesma string esconderia o resto do mês desta
+  // pessoa — são perguntas diferentes (§3.11). O card antigo recebia `remBusca`
+  // e ainda abria forçado por causa dela.
   const [buscaLocal, setBuscaLocal] = useState("")
 
-  // Nada de efeito para resetar aba/página ao trocar de profissional: quem
-  // monta remonta por `key={prof}` (ver TratativasTab), então este estado já
-  // nasce limpo a cada pessoa.
+  // Nada de efeito para resetar aba/página ao trocar de profissional: quem monta
+  // remonta por `key={prof}` (ver RemunRPTab), então este estado já nasce limpo.
 
-  const c = useMemo(() => (p ? composicaoEvolucao(p) : null), [p])
+  const c = useMemo(() => (p ? composicaoRP(p) : null), [p])
 
   const especialidades = useMemo(() => {
     if (!p) return []
@@ -208,35 +225,28 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
     return [...contagem.entries()].sort((a, b) => b[1] - a[1]).map(([e]) => e)
   }, [p])
 
-  // As abas são uma PARTIÇÃO: cada registro aparece em exatamente uma, e a soma
-  // das abas fecha com "Todos". Antes "Com evolução" trazia as substituições
-  // junto (elas são evolução dela, afinal) e as mesmas linhas contavam de novo
-  // na aba "Substituições" — a barra mostrava 60+0+10+4+3+0 = 77 com "Todos 73",
-  // e nenhuma das contagens estava errada isoladamente. Por isso "Evolução
-  // própria": é a metade do numerador que veio da própria agenda; a outra metade
-  // é a aba "Substituições", e é a soma das duas que dá o "Com evolução" do
-  // resultado acima.
+  // As abas são uma PARTIÇÃO: cada registro em exatamente uma, e a soma delas
+  // fecha com "Todos". Os quatro blocos do card antigo não eram — "Evolução
+  // duplicada" e "Evolução em conflito" no papel Agenda não caíam em bloco
+  // nenhum e sumiam da tela, sem nenhuma aba "Todos" para alcançá-las.
   //
-  // O tom de cada aba é o MESMO que aquele conceito já tem no card da lista e na
-  // composição — a aba não introduz cor nova, herda a que existe. "Todos" fica
-  // azul (e não verde) para o verde continuar significando só uma coisa nesta
-  // tela: evolução feita.
+  // O tom de cada aba é o MESMO que o conceito já tem no card da lista e na
+  // conta — a aba não introduz cor nova. "Todos" fica azul (e não verde) para o
+  // verde continuar significando só uma coisa nesta tela: sessão remunerada.
   const abas = useMemo(() => {
     if (!c) return []
-    const lista: { id: AbaId; label: string; icon: React.ReactNode; tone: Tone; sessoes: SessaoTratativa[] }[] = [
-      { id: "todos",          label: "Todos",              icon: <ListFilter size={13} />,   tone: "blue",   sessoes: c.todas },
-      { id: "comEvolucao",    label: "Evolução própria",   icon: <CheckCircle2 size={13} />, tone: "green",  sessoes: c.porBucket.comEvolucao },
-      { id: "pendentes",      label: "Pendentes",          icon: <Clock size={13} />,        tone: "amber",  sessoes: c.porBucket.pendente },
-      { id: "canceladas",     label: "Canceladas",         icon: <CalendarX2 size={13} />,   tone: "red",    sessoes: c.porBucket.cancelada },
-      { id: "substituicoes",  label: "Substituições",      icon: <Repeat2 size={13} />,      tone: "purple", sessoes: c.porBucket.substituicao },
+    const lista: { id: AbaId; label: string; icon: React.ReactNode; tone: Tone; sessoes: SessaoComPapel[] }[] = [
+      { id: "todos",         label: "Todos",         icon: <ListFilter size={13} />,   tone: "blue",   sessoes: c.todas },
+      { id: "remuneradas",   label: "Remuneradas",   icon: <CheckCircle2 size={13} />, tone: "green",  sessoes: c.porBucket.comEvolucao },
+      { id: "substituicoes", label: "Substituições", icon: <Repeat2 size={13} />,      tone: "purple", sessoes: c.porBucket.substituicao },
+      { id: "pendentes",     label: "Sem registro",  icon: <Clock size={13} />,        tone: "amber",  sessoes: c.porBucket.pendente },
+      { id: "canceladas",    label: "Canceladas",    icon: <CalendarX2 size={13} />,   tone: "red",    sessoes: c.porBucket.cancelada },
     ]
     // Cedidas ganham aba só quando existem: é um filtro útil quando há o que
     // filtrar, e uma aba permanentemente vazia quando não há. As linhas seguem
     // alcançáveis em "Todos" de qualquer jeito.
     if (c.cedidas > 0) {
-      // Mesmo conceito do bloco "Substituídas por outro terapeuta" da
-      // composição, encurtado só para caber na tira de abas.
-      lista.push({ id: "cedidas", label: "Substituídas por outro", icon: <UserRoundMinus size={13} />, tone: "gray", sessoes: c.porBucket.cedida })
+      lista.push({ id: "cedidas", label: "Cedidas a outro", icon: <UserRoundMinus size={13} />, tone: "gray", sessoes: c.porBucket.cedida })
     }
     lista.push({ id: "inconsistencias", label: "Inconsistências", icon: <HelpCircle size={13} />, tone: "red", sessoes: c.porBucket.inconsistencia })
     return lista
@@ -260,34 +270,34 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
 
   if (!p || !c) return null
 
-  const corPct = toneColor(c.pct >= 80 ? "green" : c.pct >= 50 ? "amber" : "red")
+  const corPct = toneColor(c.baseRemuneravel === 0 ? "gray" : c.pct >= 80 ? "green" : c.pct >= 50 ? "amber" : "red")
   const larguraBarra = Math.max(0, Math.min(100, c.pct))
-  const semEsperadas = c.esperadas === 0
-
+  const semBase = c.baseRemuneravel === 0
   const emConferencia = c.substituicoesEmConferencia
 
   const nota = {
-    todos: "Todos os registros do período, inclusive os que não entram na conta — a coluna Evolução diz, linha por linha, o que conta como evolução e o que não é exigido.",
+    todos: "Todos os registros do período, inclusive os que não geram pagamento — a coluna Remuneração diz, linha por linha, o que vira R$ e o que não.",
     // As duas notas abaixo dizem a mesma soma dos dois lados: é o que liga as
-    // duas abas ao número único "Com evolução" da faixa de resultado.
-    comEvolucao: c.substituicoes > 0
-      ? `Sessões da própria agenda que este profissional evoluiu. Somadas às ${c.substituicoes} substituições assumidas, dão as ${c.comEvolucao} com evolução do resultado acima.`
-      : "Sessões da própria agenda que este profissional evoluiu.",
-    canceladas: "Sessões canceladas (inclui feriado e ponto facultativo). Não entram nas evoluções esperadas — não há atendimento a evoluir.",
-    substituicoes: `Sessões assumidas de outro terapeuta — contam como evolução deste, e é por isso que somam às evoluções esperadas.${
-      c.substituicoes > 0 ? ` Com as ${c.porBucket.comEvolucao.length} da própria agenda, dão as ${c.comEvolucao} com evolução do resultado acima.` : ""
+    // duas abas ao número único "Remuneradas" da faixa de resultado.
+    remuneradas: c.substituicoes > 0
+      ? `Sessões da própria agenda com evolução registrada. Somadas às ${c.substituicoes} substituições assumidas, dão as ${c.remuneradas} remuneradas do resultado acima.`
+      : "Sessões da própria agenda com evolução registrada.",
+    substituicoes: `Sessões assumidas de outro profissional — quem registrou a evolução recebe, e é por isso que somam à base remunerável.${
+      c.substituicoes > 0 ? ` Com as ${c.porBucket.comEvolucao.length} da própria agenda, dão as ${c.remuneradas} remuneradas do resultado acima.` : ""
     }`,
-    cedidas: "Estavam na agenda deste profissional, mas outro terapeuta assumiu e registrou a evolução — saem da responsabilidade dele e entram na de quem assumiu.",
-    inconsistencias: "Presença da recepção e evolução registrada se contradizem, ou a autoria está em dúvida. Encaminhe para conferência antes de cobrar. Linha com Origem “Substituição” aqui não conta como substituição deste profissional até a autoria ser decidida.",
-  }[aba as "todos" | "comEvolucao" | "canceladas" | "substituicoes" | "cedidas" | "inconsistencias"]
+    pendentes: "A sessão aconteceu (ou não foi cancelada) e segue sem registro de evolução: está na base e não gera pagamento. Verifique a Presença Recep. linha a linha.",
+    canceladas: "Sessões canceladas (inclui feriado e ponto facultativo). Não aconteceram, então saem da base — não há atendimento a pagar.",
+    cedidas: "Estavam na agenda deste profissional, mas outro assumiu e registrou a evolução: o pagamento é de quem assumiu, e a sessão sai da base deste.",
+    inconsistencias: "Presença da recepção e evolução registrada se contradizem, ou a autoria está em dúvida. Confirme antes de pagar. Linha com Origem “Substituição” aqui não credita substituição a este profissional até a autoria ser decidida.",
+  }[aba]
 
   const vazio = {
     todos: "Nenhum registro deste profissional no período.",
-    comEvolucao: "Nenhuma evolução da própria agenda no período.",
-    pendentes: "Nenhuma pendência — todas as evoluções esperadas foram registradas.",
-    canceladas: "Nenhuma sessão cancelada no período.",
+    remuneradas: "Nenhuma sessão remunerada da própria agenda no período.",
     substituicoes: "Nenhuma substituição assumida no período.",
-    cedidas: "Nenhuma sessão substituída por outro terapeuta no período.",
+    pendentes: "Nenhum registro pendente — todas as sessões da base foram evoluídas.",
+    canceladas: "Nenhuma sessão cancelada no período.",
+    cedidas: "Nenhuma sessão cedida a outro profissional no período.",
     inconsistencias: "Nenhuma inconsistência encontrada.",
   }[aba]
 
@@ -299,8 +309,8 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
         className="h-[90vh] w-[90vw] max-w-350 gap-0 grid-rows-[auto_minmax(0,1fr)] overflow-hidden rounded-2xl bg-card p-0 sm:max-w-350"
       >
         {/* ── Cabeçalho ─────────────────────────────────────────────────────
-            Empilhado no mobile: em uma única linha o nome disputava largura com
-            o período e quebrava letra a letra ("Agatacr / yst / Moreira"). */}
+            Empilhado no mobile: em uma única linha o nome disputaria largura com
+            o período e quebraria letra a letra. */}
         <header className="flex flex-col gap-3 border-b border-border px-5 py-4 md:px-6 lg:flex-row lg:flex-wrap lg:items-center lg:gap-x-6">
           <div className="flex min-w-0 items-start gap-3 lg:flex-1 lg:items-center">
             <div className={`flex size-11 shrink-0 items-center justify-center rounded-full text-sm font-black ${TONE_CHIP.green.bg} ${TONE_CHIP.green.text}`}>
@@ -309,10 +319,19 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
             <div className="min-w-0">
               <DialogTitle className="text-lg font-bold wrap-break-word text-foreground">{p.prof}</DialogTitle>
               <p className="mt-0.5 text-xs text-muted-foreground wrap-break-word">
-                Terapeuta
-                {especialidades.length > 0 && ` · ${especialidades.slice(0, 2).join(" · ")}`}
+                {especialidades.length > 0 ? especialidades.slice(0, 2).join(" · ") : "Sem especialidade"}
                 {especialidades.length > 2 && ` +${especialidades.length - 2}`}
               </p>
+              {c.emBancoDeHoras && (
+                <div className="mt-1.5">
+                  <StatusChip tone={c.fixoNaoCadastrado ? "red" : "amber"} dense>
+                    <Wallet size={11} aria-hidden />
+                    {c.fixoNaoCadastrado
+                      ? "Banco de horas sem valor cadastrado"
+                      : c.soFixo ? "Banco de horas" : "Banco de horas + PA"}
+                  </StatusChip>
+                </div>
+              )}
             </div>
           </div>
 
@@ -321,7 +340,7 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
               <div className="shrink-0">
                 <div className="flex items-center gap-1.5 text-[11px] font-semibold text-muted-foreground">
                   <CalendarDays size={12} />
-                  Período analisado
+                  Período da grade
                 </div>
                 <div className="mt-0.5 text-sm font-semibold tabular-nums text-foreground">
                   {formatDateBR(periodo.de)} a {formatDateBR(periodo.ate)}
@@ -330,9 +349,9 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
             )}
 
             <div className="shrink-0 border-border sm:border-l sm:pl-6">
-              <div className="text-[11px] font-semibold text-muted-foreground">Evolução</div>
-              <div className="text-3xl font-black tabular-nums leading-none" style={{ color: corPct }}>
-                {semEsperadas ? "—" : `${fmtPct(c.pct)}%`}
+              <div className="text-[11px] font-semibold text-muted-foreground">A pagar</div>
+              <div className="text-3xl font-black tabular-nums leading-none" style={{ color: toneColor(tomDoValor(c.valorTotalAPagar, "green")) }}>
+                {fmt(c.valorTotalAPagar)}
               </div>
             </div>
           </div>
@@ -341,88 +360,169 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
           <button
             type="button"
             onClick={onClose}
-            aria-label="Fechar análise"
+            aria-label="Fechar detalhamento"
             className="absolute top-3 right-3 flex size-9 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none lg:static lg:ml-auto"
           >
             <X size={18} />
           </button>
         </header>
 
-        {/* ── Corpo ─────────────────────────────────────────────────────── */}
+        {/* ── Corpo — rola só aqui ──────────────────────────────────────── */}
         <div className="overflow-y-auto px-5 py-5 md:px-6">
           <div className="space-y-4">
 
-            {/* Composição da responsabilidade */}
+            {/* ── A conta, trilho 1: a base de sessões ──────────────────── */}
             <section className="rounded-2xl border border-border p-4">
               <div className="mb-3">
-                <h3 className="text-sm font-bold text-foreground">Composição da responsabilidade</h3>
+                <h3 className="text-sm font-bold text-foreground">Composição da base remunerável</h3>
                 <p className="mt-0.5 text-xs text-muted-foreground">
-                  Canceladas saem da conta; substituições assumidas entram nela.
+                  Canceladas e cedidas saem da conta; substituições assumidas entram nela.
                 </p>
               </div>
 
               <p className="sr-only">
-                {c.previstos} agendamentos previstos menos {c.canceladas} sessões canceladas
-                {c.cedidas > 0 && ` menos ${c.cedidas} sessões substituídas por outro terapeuta`}
-                {" "}resultam em {c.validos} agendamentos válidos; somados a {c.substituicoes} substituições
-                realizadas, {c.esperadas} evoluções esperadas.
+                {c.agendadas} agendamentos menos {c.canceladas} sessões canceladas
+                {c.cedidas > 0 && ` menos ${c.cedidas} sessões cedidas a outro profissional`}
+                {" "}resultam em {c.validas} sessões válidas; somadas a {c.substituicoes} substituições
+                realizadas, {c.baseRemuneravel} sessões na base remunerável.
                 {emConferencia > 0 && ` Outras ${emConferencia} substituições estão em conferência e ficam fora desta conta.`}
               </p>
 
-              {/* Empilha no mobile (flex-col) para a sequência continuar legível de
-                  cima para baixo: em flex-wrap os conectores caíam soltos no início
-                  de uma linha e a fórmula deixava de se ler. */}
+              {/* Empilha no mobile (flex-col) para a sequência continuar legível
+                  de cima para baixo: em flex-wrap os conectores caem soltos no
+                  início de uma linha e a fórmula deixa de se ler. */}
               <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:flex-wrap" aria-hidden>
-                <PassoComposicao tone="blue" icon={<CalendarDays size={16} />} valor={c.previstos} titulo="Agendamentos previstos" />
+                <PassoConta tone="blue" icon={<CalendarDays size={16} />} valor={c.agendadas} titulo="Agendamentos" />
                 <Conector sinal="−" />
-                <PassoComposicao tone="red" icon={<CalendarX2 size={16} />} valor={c.canceladas} titulo="Canceladas" nota="não exigem evolução" />
+                <PassoConta tone="red" icon={<CalendarX2 size={16} />} valor={c.canceladas} titulo="Canceladas" nota="não aconteceram" />
                 {c.cedidas > 0 && (
                   <>
                     <Conector sinal="−" />
-                    <PassoComposicao tone="gray" icon={<UserRoundMinus size={16} />} valor={c.cedidas} titulo="Substituídas por outro terapeuta" nota="não exigem evolução dele" />
+                    <PassoConta tone="gray" icon={<UserRoundMinus size={16} />} valor={c.cedidas} titulo="Cedidas a outro" nota="paga quem assumiu" />
                   </>
                 )}
                 <Conector sinal="=" />
-                <PassoComposicao tone="gray" icon={<ClipboardList size={16} />} valor={c.validos} titulo="Agendamentos válidos" destaque />
+                <PassoConta tone="gray" icon={<ClipboardList size={16} />} valor={c.validas} titulo="Sessões válidas" destaque />
                 <Conector sinal="+" />
-                <PassoComposicao
+                <PassoConta
                   tone="purple"
                   icon={<Repeat2 size={16} />}
                   valor={c.substituicoes}
                   titulo="Substituições realizadas"
-                  nota="assumidas de outro terapeuta"
+                  nota="assumidas de outro"
                   alerta={emConferencia > 0 ? `${emConferencia} em conferência` : undefined}
                 />
                 <Conector sinal="=" />
-                <PassoComposicao
+                <PassoConta
                   tone="green"
-                  icon={<Target size={16} />}
-                  valor={c.esperadas}
-                  titulo="Evoluções esperadas"
-                  nota={`${c.validos} válidos + ${c.substituicoes} substituições`}
+                  icon={<CheckCircle2 size={16} />}
+                  valor={c.baseRemuneravel}
+                  titulo="Base remunerável"
+                  nota={`${c.validas} válidas + ${c.substituicoes} substituições`}
                   destaque
                 />
               </div>
             </section>
 
-            {/* Resultado da evolução */}
+            {/* ── A conta, trilho 2: o valor ────────────────────────────── */}
+            <section className="rounded-2xl border border-border p-4">
+              <div className="mb-3">
+                <h3 className="text-sm font-bold text-foreground">Composição do valor</h3>
+                <p className="mt-0.5 text-xs text-muted-foreground">
+                  {c.soFixo
+                    ? "Contrato de banco de horas: o valor fixo é a remuneração inteira — PA por sessão, PPD, bônus ETA e PE não se somam por cima."
+                    : "Parcelas apuradas no período, como saem do cálculo da remuneração."}
+                </p>
+              </div>
+
+              <p className="sr-only">
+                {c.soFixo
+                  ? `Valor fixo de banco de horas de ${fmt(c.valorFixoBancoHoras)}, total a pagar ${fmt(c.valorTotalAPagar)}.`
+                  : `PA de ${fmt(c.valorPA)} mais PPD de ${fmt(c.ppd)} mais bônus ETA de ${fmt(c.bonusEta)} mais PE de ${fmt(c.pe)} resultam em ${fmt(c.valorConfirmado)} confirmados${
+                      c.valorFixoBancoHoras > 0 ? `; somados ao valor fixo de ${fmt(c.valorFixoBancoHoras)}` : ""
+                    }, total a pagar ${fmt(c.valorTotalAPagar)}.`}
+              </p>
+
+              <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:flex-wrap" aria-hidden>
+                {!c.soFixo && (
+                  <>
+                    <PassoConta moeda tone={tomDoValor(c.valorPA, "green")} icon={<Banknote size={16} />} valor={fmt(c.valorPA)} titulo="PA por sessão"
+                      nota={`${c.remuneradas} ${c.remuneradas === 1 ? "sessão remunerada" : "sessões remuneradas"}`} />
+                    <Conector sinal="+" />
+                    <PassoConta moeda tone={tomDoValor(c.ppd, "blue")} icon={<Sun size={16} />} valor={fmt(c.ppd)} titulo="PPD" nota="diária por período" />
+                    <Conector sinal="+" />
+                    <PassoConta moeda tone={tomDoValor(c.bonusEta, "amber")} icon={<Sparkles size={16} />} valor={fmt(c.bonusEta)} titulo="Bônus ETA"
+                      nota={p.etaWeeksPeriodo > 0 ? `${p.etaWeeksPeriodo} ${p.etaWeeksPeriodo === 1 ? "semana" : "semanas"}` : undefined} />
+                    <Conector sinal="+" />
+                    <PassoConta moeda tone={tomDoValor(c.pe, "purple")} icon={<ClipboardList size={16} />} valor={fmt(c.pe)} titulo="PE proporcional" />
+                    <Conector sinal="=" />
+                    {/* Sem valor fixo, "Confirmado" e "Total a pagar" são o MESMO
+                        número — então usa-se o nome do cabeçalho, e não dois
+                        rótulos para uma quantidade só (§3.2). */}
+                    <PassoConta
+                      moeda destaque
+                      tone={tomDoValor(c.valorConfirmado, "green")}
+                      icon={<Wallet size={16} />}
+                      valor={fmt(c.valorConfirmado)}
+                      titulo={c.valorFixoBancoHoras > 0 ? "Confirmado" : "Total a pagar"}
+                    />
+                  </>
+                )}
+                {(c.soFixo || c.valorFixoBancoHoras > 0) && (
+                  <>
+                    {!c.soFixo && <Conector sinal="+" />}
+                    <PassoConta
+                      moeda
+                      tone={c.fixoNaoCadastrado ? "red" : tomDoValor(c.valorFixoBancoHoras, "amber")}
+                      icon={<Wallet size={16} />}
+                      valor={fmt(c.valorFixoBancoHoras)}
+                      titulo="Fixo de banco de horas"
+                      nota={p.numerosBancoHoras.length > 0 ? p.numerosBancoHoras.join(" / ") : undefined}
+                      alerta={c.fixoNaoCadastrado ? "sem valor cadastrado" : undefined}
+                    />
+                    <Conector sinal="=" />
+                    <PassoConta moeda destaque tone={tomDoValor(c.valorTotalAPagar, "green")} icon={<Banknote size={16} />} valor={fmt(c.valorTotalAPagar)} titulo="Total a pagar" />
+                  </>
+                )}
+              </div>
+
+              {/* O que a conta NÃO está dizendo, dito (§3.4). */}
+              {c.paDivergente && (
+                <p className={`mt-3 rounded-xl px-3 py-2 text-xs ${TONE_PANEL.amber.bg} ${TONE_CHIP.amber.text}`}>
+                  As parcelas somam {fmt(c.valorPA + c.ppd + c.bonusEta + c.pe)} e o cálculo confirmou{" "}
+                  {fmt(c.valorConfirmado)}. A diferença vem de sessões que somaram valor fora dos dois
+                  grupos remunerados — confira antes de pagar.
+                </p>
+              )}
+              {c.fixoNaoCadastrado && (
+                <p className={`mt-3 rounded-xl px-3 py-2 text-xs ${TONE_PANEL.red.bg} ${TONE_CHIP.red.text}`}>
+                  {`O contrato ${p.numerosBancoHoras.join(" / ") || "vigente"} está marcado como banco de horas, mas sem valor total em Cadastros › Contratos. O PA por sessão foi zerado e não há valor fixo para pagar no lugar — é pendência de cadastro, não R$ 0.`}
+                </p>
+              )}
+              {pepResumo && (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  PEP apurada na aba Entregas PEP: <span className={`font-semibold ${TONE_CHIP.purple.text}`}>{fmt(pepResumo.alcancado)}</span>{" "}
+                  de {fmt(pepResumo.potencial)} de potencial. É uma apuração à parte — não entra nas parcelas acima.
+                </p>
+              )}
+            </section>
+
+            {/* ── Resultado ─────────────────────────────────────────────── */}
             <section className="flex flex-wrap items-center gap-x-6 gap-y-4 rounded-2xl border border-border p-4 sm:flex-nowrap">
               <ResultadoNumero
                 icon={<CheckCircle2 size={14} />}
-                label="Com evolução"
-                valor={c.comEvolucao}
-                nota={`de ${c.esperadas} esperadas`}
-                cor={toneColor("green")}
+                label="Remuneradas"
+                valor={c.remuneradas}
+                nota={`de ${c.baseRemuneravel} da base`}
+                cor={toneColor(c.remuneradas > 0 ? "green" : "gray")}
               />
 
               <div className="min-w-0 flex-1 sm:border-l sm:border-border sm:pl-6">
-                <div className="text-[11px] font-semibold text-muted-foreground">Evolução</div>
+                <div className="text-[11px] font-semibold text-muted-foreground">Cobertura da base</div>
                 <div className="mt-1.5 flex items-center gap-3">
-                  {/* Sem teto de largura: a barra ocupa toda a faixa entre "Com
-                      evolução" e "Pendentes". flex-1 + min-w-0 (e não w-full) porque
-                      o percentual é shrink-0 e precisa ser medido primeiro — com
-                      w-full a barra reservava a faixa inteira e jogava o número
-                      fora da tela em largura apertada. */}
+                  {/* flex-1 + min-w-0 e não w-full: o percentual é shrink-0 e
+                      precisa ser medido primeiro, senão a barra reserva a faixa
+                      toda e joga o número fora da tela em largura apertada. */}
                   <div className="h-2.5 min-w-0 flex-1 overflow-hidden rounded-full border border-border bg-muted">
                     <div
                       className="h-full w-full"
@@ -434,23 +534,23 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
                     />
                   </div>
                   <span className="shrink-0 text-xl font-black tabular-nums leading-none" style={{ color: corPct }}>
-                    {semEsperadas ? "—" : `${fmtPct(c.pct)}%`}
+                    {semBase ? "—" : `${fmtPct(c.pct)}%`}
                   </span>
                 </div>
                 <div className="mt-1.5 text-[11px] text-muted-foreground">
-                  {semEsperadas
-                    ? "Sem evoluções esperadas no período."
-                    : `${c.comEvolucao} com evolução de ${c.esperadas} esperadas`}
+                  {semBase
+                    ? "Sem sessões na base remunerável no período."
+                    : `${c.remuneradas} remuneradas de ${c.baseRemuneravel} da base`}
                 </div>
               </div>
 
               <ResultadoNumero
                 divisor
                 icon={<Clock size={14} />}
-                label="Pendentes"
+                label="Sem registro"
                 valor={c.pendentes}
-                nota={`de ${c.esperadas} esperadas`}
-                cor={c.pendentes > 0 ? toneColor("amber") : toneColor("gray")}
+                nota={`de ${c.baseRemuneravel} da base`}
+                cor={toneColor(c.pendentes > 0 ? "amber" : "gray")}
               />
 
               {c.inconsistencias > 0 && (
@@ -459,13 +559,13 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
                   icon={<HelpCircle size={14} />}
                   label="Inconsistências"
                   valor={c.inconsistencias}
-                  nota="para conferência"
+                  nota="confirme antes de pagar"
                   cor={toneColor("red")}
                 />
               )}
             </section>
 
-            {/* Tabela única com filtros */}
+            {/* ── Tabela única com abas ─────────────────────────────────── */}
             <section className="rounded-2xl border border-border">
               {/* Tira de abas em formato de planilha: a tira é levemente
                   tonalizada e a aba ativa, em bg-card, se emenda ao painel da
@@ -476,10 +576,9 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
                   {abas.map(a => {
                     const ativa = a.id === abaAtiva?.id
                     // Ícone sempre no tom (é a identidade da aba); badge só
-                    // colorido quando há o que contar — mesma regra do card, onde
-                    // "0 inconsistências" em vermelho gritaria por um problema
-                    // que não existe. É também o que distingue as duas abas
-                    // vermelhas (Canceladas e Inconsistências) no caso comum.
+                    // colorido quando há o que contar — é também o que distingue
+                    // as duas abas vermelhas (Canceladas e Inconsistências) no
+                    // caso comum.
                     const badge = a.sessoes.length > 0 ? TONE_CHIP[a.tone] : TONE_CHIP.gray
                     return (
                       <button
@@ -513,9 +612,6 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
                   })}
                 </div>
 
-                {/* Campo, e não só um chip de remover: o filtro do modal existia
-                    mas só podia ser herdado da página — dava para desligar, nunca
-                    para ligar. */}
                 <div className="relative mb-2 shrink-0">
                   <Search size={12} aria-hidden className="pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2 text-muted-foreground" />
                   <input
@@ -523,7 +619,7 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
                     value={buscaLocal}
                     onChange={e => { setBuscaLocal(e.target.value); setPagina(1); setDetalhe(null) }}
                     placeholder="Buscar paciente, data…"
-                    aria-label="Buscar nas sessões deste terapeuta"
+                    aria-label="Buscar nas sessões deste profissional"
                     className="w-48 rounded-full border border-border bg-card py-1 pr-2.5 pl-7 text-[11px] text-foreground placeholder:text-muted-foreground focus:ring-2 focus:ring-ring focus:outline-none"
                   />
                 </div>
@@ -534,9 +630,9 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
               )}
 
               {/* O que esta aba NÃO mostra. A contagem do badge continua igual ao
-                  número da composição — é essa coerência que garante que aba e
-                  conta nunca divirjam —, então a linha em conferência não entra
-                  aqui: o que entra é o caminho até ela. */}
+                  número da conta — é essa coerência que garante que aba e conta
+                  nunca divirjam —, então a linha em conferência não entra aqui:
+                  o que entra é o caminho até ela. */}
               {aba === "substituicoes" && emConferencia > 0 && (
                 <div className={`flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-border px-4 py-2.5 text-xs ${TONE_PANEL.amber.bg}`}>
                   <span className={`shrink-0 ${TONE_CHIP.amber.text}`}><HelpCircle size={14} /></span>
@@ -544,7 +640,7 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
                     {emConferencia === 1
                       ? "1 substituição está em conferência e não entra nesta conta"
                       : `${emConferencia} substituições estão em conferência e não entram nesta conta`}
-                    : duas pessoas evoluíram o mesmo agendamento e a autoria precisa ser decidida.
+                    : duas pessoas evoluíram o mesmo agendamento e a autoria precisa ser decidida antes de pagar.
                   </p>
                   <button
                     type="button"
@@ -563,8 +659,8 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
               ) : (
                 <>
                   <div className="overflow-x-auto">
-                    {/* min-w para o container rolar de lado em tela estreita em vez
-                        de comprimir "Paciente" em três linhas por célula. */}
+                    {/* min-w para o container rolar de lado em tela estreita em
+                        vez de comprimir "Paciente" em três linhas por célula. */}
                     <table className="w-full min-w-215 text-xs">
                       <thead>
                         <tr className="text-muted-foreground">
@@ -574,7 +670,7 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
                           <th scope="col" className="px-3 py-2.5 text-left font-semibold">Especialidade</th>
                           <th scope="col" className="px-3 py-2.5 text-left font-semibold">Origem</th>
                           <th scope="col" className="px-3 py-2.5 text-left font-semibold">Situação</th>
-                          <th scope="col" className="px-3 py-2.5 text-left font-semibold">Evolução</th>
+                          <th scope="col" className="px-3 py-2.5 text-left font-semibold">Remuneração</th>
                           <th scope="col" className="w-10 px-2 py-2.5">
                             <span className="sr-only">Detalhes</span>
                           </th>
@@ -585,9 +681,11 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
                           const chave = chaveSessao(s, inicio + i)
                           const origem = origemDaSessao(s)
                           const situacao = situacaoDaSessao(s)
-                          const evolucao = evolucaoDaSessao(s)
+                          const remuneracao = remuneracaoDaSessao(s)
                           const aberto = detalhe === chave
                           return (
+                            // O par de <tr> precisa de Fragment com key: <> com
+                            // keys nos filhos dispara warning do React.
                             <Fragment key={chave}>
                               <tr className="border-t border-border/70 hover:bg-muted/40">
                                 <td className="whitespace-nowrap px-3 py-2.5 font-medium tabular-nums text-foreground">{formatDateBR(s.data)}</td>
@@ -596,7 +694,7 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
                                 <td className="px-3 py-2.5 text-muted-foreground">{s.especialidade || "—"}</td>
                                 <td className="px-3 py-2.5"><StatusChip tone={origem.tone} dense>{origem.texto}</StatusChip></td>
                                 <td className="px-3 py-2.5"><StatusChip tone={situacao.tone} dense>{situacao.texto}</StatusChip></td>
-                                <td className="px-3 py-2.5"><StatusChip tone={evolucao.tone} dense>{evolucao.texto}</StatusChip></td>
+                                <td className="px-3 py-2.5"><StatusChip tone={remuneracao.tone} dense>{remuneracao.texto}</StatusChip></td>
                                 <td className="px-2 py-2.5">
                                   <button
                                     type="button"
@@ -610,6 +708,7 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
                                 </td>
                               </tr>
                               {aberto && (
+                                // Ruído técnico vive aqui, não na tabela principal (§3.8).
                                 <tr className="border-t border-border/70 bg-muted/40">
                                   <td colSpan={8} className="px-3 py-3">
                                     <dl className="grid grid-cols-2 gap-x-6 gap-y-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -619,23 +718,24 @@ export function ModalAnaliseTerapeuta({ p, periodo, onClose }: Props) {
                                       <CampoDetalhe rotulo="Presença recepção" valor={s.presencaOrbita || "—"} />
                                       <CampoDetalhe rotulo="Presença TiTa" valor={s.presencaTita || "—"} />
                                       <CampoDetalhe rotulo="Possui tratativa" valor={s.possuiTratativa || "—"} />
-                                      <CampoDetalhe rotulo="Criação da tratativa" valor={s.criacaoTratativa || "—"} />
                                       <CampoDetalhe rotulo="Classificação" valor={s.classificacao || "—"} />
-                                      {/* O "por quê" de "Evolução em conflito" e
-                                          "Evolução duplicada": sem estes números a
-                                          tela só nomeava o problema. */}
-                                      {(s.tratativas > 1 || s.tratativasDistintas > 1) && (
+                                      {s.funcaoPA && <CampoDetalhe rotulo="Função do PA" valor={s.funcaoPA} />}
+                                      {s.contratoAtualPA && <CampoDetalhe rotulo="Contrato do PA" valor={s.contratoAtualPA} />}
+                                      {s.explicacaoPA && <CampoDetalhe rotulo="Como o PA foi definido" valor={s.explicacaoPA} />}
+                                      {s.cadastroContratoPendente && (
                                         <CampoDetalhe
-                                          rotulo="Evoluções neste agendamento"
-                                          valor={`${s.tratativas} · de ${s.tratativasDistintas} ${s.tratativasDistintas === 1 ? "pessoa" : "pessoas"}`}
+                                          rotulo="Cadastro"
+                                          valor={<span className={TONE_CHIP.amber.text}>Contrato pendente de cadastro.</span>}
                                         />
                                       )}
+                                      {/* O "por quê" da inconsistência de autoria: sem
+                                          isto a tela só nomeava o problema. */}
                                       {bucketDaSessao(s) === "inconsistencia" && s.papel === "Substituição realizada" && (
                                         <CampoDetalhe
                                           rotulo="Efeito na conta"
                                           valor={
                                             <span className={TONE_CHIP.amber.text}>
-                                              Fora das substituições até a autoria ser decidida.
+                                              Fora das substituições — ninguém recebe até a autoria ser decidida.
                                             </span>
                                           }
                                         />

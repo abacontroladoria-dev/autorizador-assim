@@ -14,7 +14,7 @@ import { CheckCircle2, ChevronRight, Clock, HelpCircle, Repeat2 } from "lucide-r
 import { useToneColor, type Tone } from "@/hooks/useToneColor"
 import { composicaoEvolucao } from "@/lib/remuneracao/evolucao"
 import type { ProfTratativas } from "@/lib/remuneracao/tratativas"
-import { TONE_CHIP } from "./chips"
+import { TONE_CHIP } from "@/components/ui/tones"
 
 const fmtPct = (pct: number) => pct.toFixed(1).replace(".", ",")
 
