@@ -189,7 +189,9 @@ async function aguardarConfirmacaoBeneficiario(page, cfg, api, filaId, alertas =
   console.log('⏸️  Aguardando a ASSIM abrir a identificação do beneficiário...')
 
   const limiteAparecer = Date.now() + tetoAparecer
-  const INTERVALO_INSISTIR = Number(cfg.insistir_blur_ms) || 20000
+  // 10s: tempo de sobra para a cadeia de requisições da ASSIM responder, sem
+  // deixar a recepção esperando à toa quando o Tab não pegou.
+  const INTERVALO_INSISTIR = Number(cfg.insistir_blur_ms) || 10000
   let apareceu = false
   let insistencias = 0
   let proximaInsistencia = Date.now() + INTERVALO_INSISTIR
@@ -634,7 +636,16 @@ async function executarRpa({ page, tarefa, cfg, api, cancelado, alertas = [] }) 
     console.log('🚀 Iniciando RPA...')
     console.log('Paciente:', tarefa.paciente_nome)
 
-    // A página já chegou no formulário (assim.js garantiu sessão e navegação).
+    // A página já chegou no formulário e o assim.js já esperou os scripts do
+    // portal existirem. Esta pausa é o cinto: a ASSIM ainda faz coisas depois
+    // que as funções aparecem, e digitar em cima disso foi o que deixou o
+    // primeiro Tab sem efeito em máquina real. Ajustável pelo servidor.
+    const esperaInicial = Number(cfg.espera_pagina_ms) || 2000
+    if (esperaInicial > 0) {
+      console.log(`⏱️  Deixando o portal assentar (${esperaInicial}ms)`)
+      await delay(esperaInicial)
+    }
+
     await page.selectOption('select[name="operacao"]', { label: cfg.tipo_operacao })
     await page.selectOption('select[name="natureza"]',  { label: cfg.natureza })
     await page.selectOption('select[name="servico"]',   { label: cfg.tipo_servico })

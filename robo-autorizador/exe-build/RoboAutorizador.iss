@@ -22,7 +22,7 @@
 ; ============================================================
 
 #define MyAppName "Robo Autorizador ASSIM"
-#define MyAppVersion "1.1.3"
+#define MyAppVersion "1.1.4"
 #define MyAppPublisher "Universo ABA"
 #define MyTaskName "RoboAutorizadorAssim"
 

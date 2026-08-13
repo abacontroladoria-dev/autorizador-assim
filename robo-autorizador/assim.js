@@ -67,6 +67,48 @@ const SEL_TELA_LOGIN = 'form[name="entrar"]'
 // autenticada — ele não existe na tela de login.
 const SEL_FORMULARIO = 'select[name="operacao"]'
 
+// Funções de que o preenchimento depende. `showDigitado` e `disableBtn` vêm de
+// custom/js/show_hide_via.js; as demais são inline na página. O `onblur` da
+// carteirinha é `showDigitado(); conferirCampos();` — se `showDigitado` ainda
+// não existe, o handler estoura ReferenceError e `conferirCampos` NUNCA roda:
+// o robô digita, dá Tab, e a ASSIM não faz nada.
+const FUNCOES_DO_FORMULARIO = [
+  'conferirCampos', 'showDigitado', 'disableBtn', 'montaCarteira',
+  'verificarIntervaloAtendimento', 'validarPresenca', 'abrirModal', 'callLoader',
+]
+
+/**
+ * Só devolve a página quando o portal está de fato utilizável.
+ *
+ * `domcontentloaded` chega antes dos scripts externos. Medido em 2026-08-13
+ * nesta rede: o formulário e as funções aparecem ~58ms depois do DOM, mas o
+ * `readyState` só vira `complete` 390ms depois — e numa máquina de recepção,
+ * com rede pior, essa distância é maior. Digitar nesse intervalo é o que
+ * produz "preencheu, deu Tab, e o modal de identificação não abriu".
+ *
+ * O critério é positivo (as funções existem, o jquery-confirm existe), não um
+ * tempo fixo: `$.alert` é quem desenha o aviso de identificação, então sem ele
+ * a etapa mais importante do fluxo simplesmente não acontece.
+ */
+async function aguardarPortalPronto(page, timeoutMs = 30000) {
+  try {
+    await page.waitForFunction((nomes) => {
+      if (typeof window.jQuery !== 'function') return false
+      if (typeof window.jQuery.alert !== 'function') return false
+      return nomes.every(n => typeof window[n] === 'function')
+    }, FUNCOES_DO_FORMULARIO, { timeout: timeoutMs })
+
+    // Depois das funções, o resto: imagens e scripts de terceiros. Não é
+    // condição de correção, então falha aqui não impede nada.
+    await page.waitForLoadState('load', { timeout: 10000 }).catch(() => {})
+  } catch (e) {
+    console.warn(
+      '⚠️  O portal da ASSIM não terminou de carregar os scripts do formulário. ' +
+      'Seguindo assim mesmo — se a identificação do beneficiário não abrir, é por isso.'
+    )
+  }
+}
+
 /**
  * Captura os alertas da ASSIM: registra, mostra na tela e dispensa.
  *
@@ -219,6 +261,8 @@ class SessaoAssim {
         )
       }
 
+      await aguardarPortalPronto(page)
+
       // Só o cookie de sessão. Ver item 2 do cabeçalho: o `cookie[sequencial]`
       // é reemitido pelo portal em cada contexto, e reaproveitar o antigo não
       // ajuda em nada.
@@ -294,6 +338,7 @@ class SessaoAssim {
         }
 
         if (await page.locator(SEL_FORMULARIO).count() > 0) {
+          await aguardarPortalPronto(page)
           const registro = { ctx, page, criadoEm: Date.now(), filaId: null, alertas }
           this.abas.push(registro)
           return registro
