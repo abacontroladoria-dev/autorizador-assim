@@ -20,29 +20,158 @@
 const { delay, humanType } = require('./humano')
 
 // =========================
-// Auxiliares
+// Elementos do portal da ASSIM
 // =========================
+//
+// Levantados na própria página em 2026-08-13 (lendo o código das funções, não
+// por tentativa e erro):
+//
+// - `callLoader()` cria um <img> do Load_Assim dentro de `#loadModal` e põe o
+//   div em display:block; `closeLoader()` o esconde.
+// - `#checkBday` (class="modal") é o modal de confirmação do beneficiário, que
+//   pede DATA DE NASCIMENTO + CPF. Quem o abre é `abrirModal()`.
+// - `trocaElement(mostrar, esconder)` alterna a célula `#InformeOsDados` com a
+//   `#EnviarDados`. Enquanto a ASSIM não considera o beneficiário confirmado,
+//   quem está visível é `#InformeOsDados` — e o envio é recusado no servidor.
+//   Este é o sinal mais fiel de "pode enviar" que a página oferece.
+const SEL_LOADER = '#loadModal'
+const SEL_MODAL_BENEFICIARIO = '#checkBday'
+const SEL_ALERTA_JQUERY = '.jconfirm-box'
+const SEL_ENVIO_BLOQUEADO = '#InformeOsDados'
 
-async function aguardarTelaLivre(page) {
-  while (true) {
-    const modal = await page.locator(`
-      .jconfirm-box:visible,
+async function visivel(page, seletor) {
+  return page.locator(seletor).first().isVisible().catch(() => false)
+}
+
+/**
+ * Espera a tela parar de estar ocupada.
+ *
+ * Ganhou teto. Antes era `while (true)` sem prazo: um modal que não fechasse
+ * deixava a tarefa — e portanto o worker inteiro — parada para sempre.
+ */
+async function aguardarTelaLivre(page, timeoutMs = 45000) {
+  const limite = Date.now() + timeoutMs
+
+  while (Date.now() < limite) {
+    const ocupada = await page.locator(`
+      ${SEL_LOADER}:visible,
+      ${SEL_ALERTA_JQUERY}:visible,
       .modal:visible,
-      [role="dialog"]:visible
-    `).count()
-
-    const loader = await page.locator(`
+      [role="dialog"]:visible,
       img[src*="Load_Assim"]:visible,
       .loading:visible,
       .spinner:visible,
-      .overlay:visible,
       [class*="loader"]:visible
-    `).count()
+    `).count().catch(() => 0)
 
-    if (modal === 0 && loader === 0) return
+    if (ocupada === 0) return true
 
-    await page.waitForTimeout(1000)
+    await delay(500)
   }
+
+  return false
+}
+
+// =========================
+// CONFIRMAÇÃO DO BENEFICIÁRIO
+// =========================
+//
+// POR QUE ISTO EXISTE
+// A ASSIM passou a exigir confirmação de presença do beneficiário antes de
+// aceitar o envio — a mesma mudança que trouxe a tela de login. O portal tenta
+// primeiro o reconhecimento biofacial (API `/api/v1/autorizador/validarPresenca`,
+// dispositivos Intelbras) e, quando o credenciado não tem dispositivo ou ele
+// está indisponível, cai em `abrirModal()`: o modal que pede data de nascimento
+// e CPF do beneficiário.
+//
+// O QUE ACONTECIA SEM ISTO (medido em máquina real, 13/08)
+// O robô digitava a carteirinha, dava Tab e seguia preenchendo o resto do
+// formulário sem esperar nada — a verificação de "tela livre" rodava antes de o
+// portal reagir ao blur e passava reto. A recepcionista clicava em Enviar e o
+// servidor recusava com "Beneficiario nao confirmado. Tentar novamente". O robô
+// engolia esse alerta, esperava 120s por uma confirmação que nunca vinha e
+// gravava a tarefa como "Usuário não clicou em enviar" — diagnóstico errado
+// para um envio que de fato aconteceu e foi recusado.
+//
+// O robô NÃO preenche nascimento e CPF. Esse é o controle de presença da
+// operadora: quem confirma é a recepção, com o beneficiário na frente. O robô
+// espera e sai da frente.
+async function aguardarConfirmacaoBeneficiario(page, cfg, api, filaId) {
+  const tetoConsulta = Number(cfg.beneficiario_consulta_ms) || 45000
+  const tetoHumano = Number(cfg.confirmacao_beneficiario_ms) || 300000
+
+  // 1. Espera a ASSIM REAGIR ao blur. `conferirCampos()` chama `callLoader()` de
+  //    forma síncrona, então o loader sobe quase junto com o Tab. Se nada
+  //    aparecer em 3s, o portal não pediu nada e seguimos.
+  const reagiu = await page.waitForFunction(() => {
+    const aberto = (id) => {
+      const el = document.getElementById(id)
+      return !!el && getComputedStyle(el).display !== 'none'
+    }
+    return aberto('loadModal') || aberto('checkBday') ||
+      !!document.querySelector('.jconfirm-box')
+  }, { timeout: 3000 }).then(() => true).catch(() => false)
+
+  if (!reagiu) {
+    console.log('ℹ️  A ASSIM não pediu confirmação do beneficiário')
+    return 'nao_pedida'
+  }
+
+  // 2. A consulta de presença pode demorar: a chamada do portal à API tem teto
+  //    de 30s. Enquanto o loader estiver de pé, é a ASSIM trabalhando.
+  await page.locator(SEL_LOADER)
+    .waitFor({ state: 'hidden', timeout: tetoConsulta })
+    .catch(() => {})
+
+  const pendente = async () =>
+    (await visivel(page, SEL_MODAL_BENEFICIARIO)) ||
+    (await visivel(page, SEL_ALERTA_JQUERY)) ||
+    (await visivel(page, SEL_ENVIO_BLOQUEADO))
+
+  if (!(await pendente())) {
+    console.log('✅ Beneficiário liberado pela ASSIM sem confirmação manual')
+    return 'automatica'
+  }
+
+  // 3. Daqui para frente quem trabalha é a recepção.
+  const minutos = tetoHumano >= 60000
+    ? `${Math.round(tetoHumano / 60000)} min`
+    : `${Math.round(tetoHumano / 1000)} s`
+  console.log(`🧍 A ASSIM está pedindo confirmação do beneficiário (nascimento + CPF) — aguardando a recepção por até ${minutos}...`)
+  await api.registrarLog(filaId, 'Aguardando a recepcao confirmar o beneficiario na tela da ASSIM')
+
+  const limite = Date.now() + tetoHumano
+  while (Date.now() < limite) {
+    if (!(await pendente())) break
+    await delay(1000)
+  }
+
+  if (await pendente()) {
+    throw new Error(
+      `A confirmação do beneficiário não foi concluída na tela da ASSIM em ${minutos} ` +
+      '(nascimento + CPF, ou o reconhecimento biofacial).'
+    )
+  }
+
+  // 4. Fechar o modal no "x" faz o portal rodar `limpa_carteira()` e apagar a
+  //    carteirinha. Seguir em frente nesse estado produz exatamente a recusa
+  //    "Beneficiario nao confirmado" no envio — melhor falhar aqui, dizendo o
+  //    que houve.
+  const cartao = await page.evaluate(() => {
+    const f = document.forms.autorizador
+    if (!f) return null
+    return [f.associado1.value, f.associado2.value, f.associado3.value]
+  }).catch(() => null)
+
+  if (!cartao || cartao.some(v => !String(v || '').trim())) {
+    throw new Error(
+      'A confirmação do beneficiário foi cancelada na tela da ASSIM — o portal ' +
+      'limpou a carteirinha. Reabra a solicitação para tentar de novo.'
+    )
+  }
+
+  console.log('✅ Beneficiário confirmado na tela da ASSIM')
+  return 'manual'
 }
 
 function normalizarTexto(texto) {
@@ -58,22 +187,43 @@ function normalizarTexto(texto) {
 // AGUARDAR ENVIO REAL
 // =========================
 
-async function aguardarResultadoEnvio(page, timeoutMs) {
+/**
+ * Espera o desfecho do envio feito pela recepcionista.
+ *
+ * Passou a olhar os alertas da ASSIM. Antes só esperava o texto de sucesso: um
+ * envio recusado pelo servidor ("Beneficiario nao confirmado. Tentar novamente")
+ * era indistinguível de recepcionista que saiu para o almoço, e as duas coisas
+ * viravam a mesma mensagem errada na fila.
+ *
+ * A espera continua até o fim do prazo mesmo depois de uma recusa, de propósito:
+ * a recepcionista pode corrigir e reenviar na mesma tela.
+ *
+ * @param {string[]} alertas array alimentado pelo handler de dialog da aba
+ * @returns {Promise<{resultado: 'sucesso'|'timeout', recusa: string|null}>}
+ */
+async function aguardarResultadoEnvio(page, timeoutMs, alertas = []) {
   console.log('⏳ Aguardando confirmação real...')
 
-  try {
-    await page.waitForSelector('text=BENEFICIO PROCESSADO', {
-      timeout: timeoutMs,
-      state: 'visible',
-    })
+  const limite = Date.now() + timeoutMs
+  let lidos = alertas.length
+  let recusa = null
 
-    console.log('✅ SUCESSO CONFIRMADO')
-    return 'sucesso'
+  while (Date.now() < limite) {
+    if (await visivel(page, 'text=BENEFICIO PROCESSADO')) {
+      console.log('✅ SUCESSO CONFIRMADO')
+      return { resultado: 'sucesso', recusa: null }
+    }
 
-  } catch (e) {
-    console.log('❌ Não apareceu confirmação')
-    return 'timeout'
+    while (lidos < alertas.length) {
+      recusa = alertas[lidos++]
+      console.log('⚠️  A ASSIM recusou o envio:', recusa)
+    }
+
+    await delay(1000)
   }
+
+  console.log('❌ Não apareceu confirmação')
+  return { resultado: 'timeout', recusa }
 }
 
 // =========================
@@ -341,9 +491,10 @@ function lerConfirmacao() {
  * @param {object}   opcoes.cfg       robo_obter_config_assim
  * @param {object}   opcoes.api       instância de Api
  * @param {Function} opcoes.cancelado () => Promise<boolean>
+ * @param {string[]} opcoes.alertas   alertas que a ASSIM emitiu nesta aba
  * @returns {Promise<'sucesso'|'sem_guia'>}
  */
-async function executarRpa({ page, tarefa, cfg, api, cancelado }) {
+async function executarRpa({ page, tarefa, cfg, api, cancelado, alertas = [] }) {
   if (!cancelado) cancelado = async () => false
 
   let concluiu = false
@@ -367,7 +518,11 @@ async function executarRpa({ page, tarefa, cfg, api, cancelado }) {
     await humanType(page, 'input[name="associado2"]', tarefa.matricula)
     await humanType(page, 'input[name="associado3"]', tarefa.dep)
 
+    // O blur do último campo da carteirinha dispara a busca do beneficiário e,
+    // desde a mudança do portal, a confirmação de presença. Nada pode ser
+    // digitado por cima disso.
     await page.press('input[name="associado3"]', 'Tab')
+    await aguardarConfirmacaoBeneficiario(page, cfg, api, tarefa.id)
     await aguardarTelaLivre(page)
 
     await humanType(page, 'input[name="findexec"]', String(cfg.executor))
@@ -419,13 +574,30 @@ async function executarRpa({ page, tarefa, cfg, api, cancelado }) {
     await page.selectOption('select[name="tipoDeConsulta"]', { label: cfg.tipo_consulta })
     await page.selectOption('select[name="tipoDeSaida"]',    { label: cfg.tipo_saida })
 
+    // Último aviso antes de devolver a tela para a recepção: se a ASSIM ainda
+    // mostra "Informe os Dados", ela não considera o beneficiário confirmado e
+    // vai recusar o envio. Melhor deixar isso no log agora do que descobrir
+    // depois pelo timeout.
+    if (await visivel(page, SEL_ENVIO_BLOQUEADO)) {
+      console.warn('⚠️  A ASSIM ainda não liberou o envio (beneficiário não confirmado)')
+      await api.registrarLog(tarefa.id, 'ASSIM nao liberou o envio: beneficiario nao confirmado')
+    }
+
     // ===== Aqui o robô para. Quem envia é a recepcionista. =====
     console.log('📤 Aguardando envio manual...')
 
-    const resultado = await aguardarResultadoEnvio(page, Number(cfg.envio_timeout_ms) || 120000)
+    const { resultado, recusa } = await aguardarResultadoEnvio(
+      page,
+      Number(cfg.envio_timeout_ms) || 120000,
+      alertas
+    )
 
     if (resultado === 'timeout') {
-      throw new Error('Usuário não clicou em enviar')
+      throw new Error(
+        recusa
+          ? `A ASSIM recusou o envio: "${recusa}"`
+          : 'A recepção não clicou em enviar dentro do prazo'
+      )
     }
 
     console.log('📄 Aguardando tela final...')
@@ -479,3 +651,6 @@ module.exports = executarRpa
 module.exports.OPCOES_VALIDACAO = OPCOES_VALIDACAO
 module.exports.pedirFormaValidacao = pedirFormaValidacao
 module.exports.lerConfirmacao = lerConfirmacao
+module.exports.aguardarTelaLivre = aguardarTelaLivre
+module.exports.aguardarConfirmacaoBeneficiario = aguardarConfirmacaoBeneficiario
+module.exports.aguardarResultadoEnvio = aguardarResultadoEnvio

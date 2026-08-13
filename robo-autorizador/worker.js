@@ -242,6 +242,9 @@ async function iniciarWorker() {
           cfg,
           api,
           cancelado,
+          // Os alertas que a ASSIM emitiu nesta aba. É por eles que uma recusa
+          // do portal deixa de ser confundida com "ninguém clicou em enviar".
+          alertas: aba.alertas || [],
         })
 
         await api.registrarLog(

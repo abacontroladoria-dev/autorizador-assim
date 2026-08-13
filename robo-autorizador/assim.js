@@ -34,19 +34,49 @@
  * De brinde, os contextos passam a ser FECHADOS. Hoje eles vazam: rpa.js deixa
  * página e contexto abertos de propósito (para impressão) e nunca os recolhe,
  * então quarenta autorizações no dia viram quarenta processos de Chrome.
+ *
+ * -------------------------------------------------------------------------
+ * AJUSTES DE 2026-08-13, DEPOIS DO PRIMEIRO DIA EM MÁQUINA REAL
+ * -------------------------------------------------------------------------
+ *
+ * 1. A JANELA DO LOGIN NÃO É MAIS DESCARTADA. Ela abria, logava e fechava, e a
+ *    tarefa abria outra em seguida: duas janelas para uma autorização. É a
+ *    "tela piscando" que apareceu no teste. O login já cai em
+ *    `formularionChoiceCard.php`, então essa janela é adotada como a aba da
+ *    primeira tarefa. Uma janela, um contexto, sem pisca.
+ *
+ * 2. SÓ O `PHPSESSID` É TRANSPLANTADO. Antes iam todos os cookies do domínio,
+ *    e o portal também emite `cookie[sequencial]` — um contador de transação.
+ *    Medido no portal: injetando apenas o PHPSESSID, a ASSIM emite um
+ *    sequencial novo para cada contexto e o formulário abre normalmente.
+ *    Carregar o sequencial velho de um contexto para outro não tem ganho e é
+ *    candidato ao "Sessão da ASSIM caiu" que apareceu na segunda tarefa.
+ *
+ * 3. `input[name="senha"]` NÃO SIGNIFICA "ESTOU NA TELA DE LOGIN". A página do
+ *    formulário carrega a senha do posto num campo hidden com esse mesmo nome
+ *    (verificado). Quem identifica a tela de login é `form[name="entrar"]`.
  */
 
 const { delay, humanType } = require('./humano')
 
-const DOMINIO_ASSIM = 'autorizador.assim.com.br'
+// Identifica a tela de login sem ambiguidade. `input[name="senha"]` não serve:
+// existe também como hidden na página do formulário.
+const SEL_TELA_LOGIN = 'form[name="entrar"]'
+
+// Presença deste <select> é a prova de que a página do formulário abriu
+// autenticada — ele não existe na tela de login.
+const SEL_FORMULARIO = 'select[name="operacao"]'
 
 class SessaoAssim {
   constructor(browser) {
     this.browser = browser
     this.cookies = null
     this.logadoEm = null
-    /** @type {{ctx: any, page: any, criadoEm: number, filaId: string|null}[]} */
+    /** @type {{ctx: any, page: any, criadoEm: number, filaId: string|null, alertas: any[]}[]} */
     this.abas = []
+    // Janela do login, já parada no formulário, esperando ser adotada pela
+    // tarefa que provocou o login. Ver item 1 do cabeçalho.
+    this.reserva = null
   }
 
   trocarBrowser(browser) {
@@ -54,6 +84,7 @@ class SessaoAssim {
     // Browser novo = contextos antigos morreram com ele. A sessão (cookie)
     // continua valendo: ela é do servidor da ASSIM, não do processo local.
     this.abas = []
+    this.reserva = null
   }
 
   // =========================
@@ -69,6 +100,10 @@ class SessaoAssim {
 
     console.log(forcar ? '🔑 Sessão da ASSIM caiu — refazendo login...' : '🔑 Fazendo login na ASSIM...')
 
+    // Reserva anterior não adotada (relogin no meio de uma retentativa): fechar,
+    // senão vaza um contexto por relogin.
+    await this.descartarReserva()
+
     const ctx = await this.browser.newContext()
     const page = await ctx.newPage()
     const alertas = []
@@ -81,12 +116,14 @@ class SessaoAssim {
       await d.dismiss().catch(() => {})
     })
 
+    let deuCerto = false
+
     try {
       await page.goto(cfg.login_url, { waitUntil: 'domcontentloaded', timeout: 45000 })
 
-      if (await page.locator('input[name="senha"]').count() === 0) {
+      if (await page.locator(SEL_TELA_LOGIN).count() === 0) {
         throw new Error(
-          'Tela de login da ASSIM não encontrada (input[name="senha"] ausente). ' +
+          'Tela de login da ASSIM não encontrada (form[name="entrar"] ausente). ' +
           'O portal pode ter mudado outra vez — confira robo_config.assim_login_url.'
         )
       }
@@ -130,11 +167,13 @@ class SessaoAssim {
         )
       }
 
-      // Prova definitiva: a deep link do formulário só abre autenticado.
+      // O login cai em formularionChoiceCard.php, mas SEM os parâmetros da deep
+      // link — e sem eles o <select name="operacao"> não existe (medido). Então
+      // esta navegação não é só prova de sessão: é ela que monta o formulário.
       await page.goto(cfg.url, { waitUntil: 'domcontentloaded', timeout: 45000 })
 
-      if (await page.locator('select[name="operacao"]').count() === 0) {
-        const aindaNoLogin = await page.locator('input[name="senha"]').count() > 0
+      if (await page.locator(SEL_FORMULARIO).count() === 0) {
+        const aindaNoLogin = await page.locator(SEL_TELA_LOGIN).count() > 0
         throw new Error(
           aindaNoLogin
             ? 'Login não foi aceito: o portal voltou para a tela de senha. Confira a senha no Vault.'
@@ -142,22 +181,38 @@ class SessaoAssim {
         )
       }
 
+      // Só o cookie de sessão. Ver item 2 do cabeçalho: o `cookie[sequencial]`
+      // é reemitido pelo portal em cada contexto, e reaproveitar o antigo não
+      // ajuda em nada.
       const todos = await ctx.cookies()
-      this.cookies = todos.filter(c => (c.domain || '').includes(DOMINIO_ASSIM))
+      this.cookies = todos.filter(c => c.name === 'PHPSESSID')
 
-      if (!this.cookies.some(c => c.name === 'PHPSESSID')) {
+      if (this.cookies.length === 0) {
         throw new Error('Login aparentemente OK, mas nenhum PHPSESSID foi emitido.')
       }
 
       this.logadoEm = Date.now()
+      deuCerto = true
+
+      // A janela fica de pé, já no formulário, para a tarefa adotá-la.
+      this.reserva = { ctx, page, criadoEm: Date.now(), filaId: null, alertas }
+
       console.log('✅ Login na ASSIM concluído — sessão guardada em memória')
 
       return this.cookies
 
     } finally {
-      // O contexto de login é descartável: ele existe só para colher o cookie.
-      await ctx.close().catch(() => {})
+      // Fecha só quando o login FALHOU. No caminho bom a janela é aproveitada.
+      if (!deuCerto) await ctx.close().catch(() => {})
     }
+  }
+
+  /** Fecha a janela de login que ninguém adotou. */
+  async descartarReserva() {
+    if (!this.reserva) return
+    const r = this.reserva
+    this.reserva = null
+    await r.ctx.close().catch(() => {})
   }
 
   // =========================
@@ -171,13 +226,29 @@ class SessaoAssim {
   async abrirFormulario(cfg) {
     await this.garantirSessao(cfg)
 
+    // Acabamos de logar: a janela do login já está no formulário. Adotar em vez
+    // de abrir outra economiza um contexto e acaba com a tela piscando.
+    if (this.reserva) {
+      const registro = this.reserva
+      this.reserva = null
+      registro.criadoEm = Date.now()
+      this.abas.push(registro)
+      return registro
+    }
+
     for (let tentativa = 1; tentativa <= 2; tentativa++) {
       const ctx = await this.browser.newContext()
       await ctx.addCookies(this.cookies)
 
       const page = await ctx.newPage()
+
+      // Os alertas da ASSIM viajam com a aba. Antes eles só iam para o console e
+      // o motivo real da recusa se perdia — a tarefa era gravada como
+      // "usuário não clicou em enviar", que era falso.
+      const alertas = []
       page.on('dialog', async (d) => {
         console.log('💬 ASSIM alertou:', d.message())
+        alertas.push(d.message())
         await d.dismiss().catch(() => {})
       })
 
@@ -188,15 +259,24 @@ class SessaoAssim {
           throw Object.assign(new Error('ASSIM respondeu bloqueio.php'), { sessaoRuim: false })
         }
 
-        if (await page.locator('select[name="operacao"]').count() > 0) {
-          const registro = { ctx, page, criadoEm: Date.now(), filaId: null }
+        if (await page.locator(SEL_FORMULARIO).count() > 0) {
+          const registro = { ctx, page, criadoEm: Date.now(), filaId: null, alertas }
           this.abas.push(registro)
           return registro
         }
 
-        // Caiu no login: cookie expirou.
+        // Voltou para a tela de login: o cookie de sessão morreu.
+        if (await page.locator(SEL_TELA_LOGIN).count() > 0) {
+          throw Object.assign(new Error('Sessão da ASSIM expirou'), { sessaoRuim: true })
+        }
+
+        // Nem formulário nem login: dizer QUAL tela veio, senão o diagnóstico
+        // vira adivinhação no dia em que a ASSIM mexer no portal outra vez.
         throw Object.assign(
-          new Error('Sessão da ASSIM expirou'),
+          new Error(
+            `A ASSIM abriu uma tela inesperada (URL: ${page.url().slice(0, 120)}, ` +
+            `título: "${(await page.title().catch(() => '?')).slice(0, 60)}")`
+          ),
           { sessaoRuim: true }
         )
 
@@ -206,6 +286,15 @@ class SessaoAssim {
         if (tentativa === 2 || !erro.sessaoRuim) throw erro
 
         await this.garantirSessao(cfg, { forcar: true })
+
+        // O relogin deixou uma reserva pronta: usa ela na segunda tentativa.
+        if (this.reserva) {
+          const registro = this.reserva
+          this.reserva = null
+          registro.criadoEm = Date.now()
+          this.abas.push(registro)
+          return registro
+        }
       }
     }
   }
@@ -255,6 +344,7 @@ class SessaoAssim {
   }
 
   async fecharTudo() {
+    await this.descartarReserva()
     for (const aba of this.abas) {
       await aba.ctx.close().catch(() => {})
     }
