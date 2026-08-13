@@ -26,7 +26,7 @@ import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
 import type { CandidatoNaSugestao, SugestaoContratacao } from "@/lib/cronograma/sugestaoContratacaoTypes"
 import type { ModoCascataOcupacao, FaixaCascata } from "@/lib/cronograma/sugestaoContratacao"
 import type { CsvRow } from "@/types/cronograma"
-import type { Turno } from "@/lib/cronograma/simulacaoNovoPrestador"
+import { avaliarPeriodo, limitarCandidatosPorGap, type GapItem, type Turno } from "@/lib/cronograma/simulacaoNovoPrestador"
 
 const SUGESTOES_POR_PAGINA = 5
 
@@ -37,8 +37,8 @@ interface Props {
 const FAIXAS_FILTRO: FaixaCascata[] = [70, 60, 50]
 
 function CardSugestao({
-  sugestao, cRows, onAplicar,
-}: { sugestao: SugestaoContratacao; cRows: CsvRow[]; onAplicar: () => void }) {
+  sugestao, cRows, gapMap, onAplicar,
+}: { sugestao: SugestaoContratacao; cRows: CsvRow[]; gapMap: Record<string, GapItem>; onAplicar: () => void }) {
   const [aberto, setAberto] = useState(false)
   const [detalheRemanejamento, setDetalheRemanejamento] = useState<CandidatoNaSugestao | null>(null)
   const [confirmarSemSala, setConfirmarSemSala] = useState(false)
@@ -51,6 +51,22 @@ function CardSugestao({
   // podem competir pela MESMA vaga, então "nº de candidatos" não é "nº de vagas".
   const vagas = new Set(sugestao.candidatos.map(c => `${c.turno}|||${c.hora}`)).size
 
+  // sugestao.candidatos já passou pelo teto de gap GLOBAL entre TODAS as
+  // sugestões (evita contar o mesmo paciente em mais de uma vaga sugerida ao
+  // mesmo tempo — ver limitarCandidatosPorGapNaSugestao). Isso é correto pra
+  // não inflar a soma de receita do painel inteiro, mas faz esta vaga
+  // isolada parecer "menor" do que "Parâmetros da simulação" mostraria pra
+  // essa mesma combinação (que avalia só ela, sem concorrência de outras
+  // sugestões). Pra o Ponto de Equilíbrio bater com "Parâmetros da
+  // simulação" quando o usuário for aplicar exatamente ESTA sugestão,
+  // recalculamos aqui a vaga isolada (mesma fórmula de avaliarCombo, sem o
+  // teto global).
+  const periodosIsoladosBrutos = sugestao.turnos.map(turno =>
+    avaliarPeriodo(sugestao.dia, turno, sugestao.unidade, sugestao.especialidade, cRows, gapMap),
+  )
+  const vagasIsoladas = limitarCandidatosPorGap(periodosIsoladosBrutos, gapMap, sugestao.especialidade)
+    .reduce((soma, p) => soma + p.slots.length, 0)
+
   // Break Even sempre a 20% de perda neste card (o seletor de cenário fica só
   // em "Parâmetros da simulação" — aqui é uma prévia rápida, não uma análise
   // configurável) — mesmos modelos de lib/remuneracao/pontoEquilibrio.ts.
@@ -59,7 +75,10 @@ function CardSugestao({
   const PERDA_PADRAO_CARD = 20
 
   const margemBreakEven = (() => {
-    if (!parametrosGerais || !sugestao.projecaoRemuneracao || vagas <= 0) return null
+    if (!parametrosGerais || !sugestao.projecaoRemuneracao || vagas <= 0 || vagasIsoladas <= 0) return null
+    // Preço médio por vaga fica na base pós-teto-global (a mesma já mostrada
+    // no resto do card) — só o VOLUME usado no Ponto de Equilíbrio passa a
+    // ser o isolado, igual "Parâmetros da simulação" faria pra essa combinação.
     const valorSessaoMedio = sugestao.projecaoRemuneracao.receitaSemanalProjetada / vagas
     if (valorSessaoMedio <= 0) return null
     const periodosManha = sugestao.turnos.includes("manha") ? 1 : 0
@@ -75,7 +94,7 @@ function CardSugestao({
         custoMensalDiaCompleto: custoMensal, capacidadeManha: capManha, capacidadeTarde: capTarde,
         perdaPct: PERDA_PADRAO_CARD, periodosManha, periodosTarde,
       })
-      const projecao = projetarMargemBreakEvenPJ(resultado, PERDA_PADRAO_CARD, vagas)
+      const projecao = projetarMargemBreakEvenPJ(resultado, PERDA_PADRAO_CARD, vagasIsoladas)
       return { receitaLiquidaMes: projecao.receitaLiquidaMes, custoMes: resultado.custoMensalTotal, margemMensal: projecao.margemMensal }
     }
 
@@ -86,12 +105,17 @@ function CardSugestao({
       taxaPA, capacidadeManha: parametrosGerais.pa_capacidade_manha_padrao, capacidadeTarde: parametrosGerais.pa_capacidade_tarde_padrao,
       periodosManha, periodosTarde,
     })
-    const projecao = projetarMargemBreakEvenAtendimento(resultado, taxaPA, PERDA_PADRAO_CARD, vagas)
+    const projecao = projetarMargemBreakEvenAtendimento(resultado, taxaPA, PERDA_PADRAO_CARD, vagasIsoladas)
     return { receitaLiquidaMes: projecao.receitaLiquidaMes, custoMes: projecao.custoVariavelMes, margemMensal: projecao.margemMensal }
   })()
 
-  const impostosEPerdas = margemBreakEven && sugestao.projecaoRemuneracao
-    ? sugestao.projecaoRemuneracao.receitaMensalProjetada - margemBreakEven.receitaLiquidaMes
+  // Bruto mensal também escalado pro volume isolado (mesma razão mensal÷semanal
+  // já calculada pela grade real do mês, só troca o volume de base) — senão
+  // "impostos e perdas" ficaria comparando bases de volume diferentes.
+  const impostosEPerdas = margemBreakEven && sugestao.projecaoRemuneracao && sugestao.projecaoRemuneracao.receitaSemanalProjetada > 0
+    ? (sugestao.projecaoRemuneracao.receitaSemanalProjetada / vagas) * vagasIsoladas
+      * (sugestao.projecaoRemuneracao.receitaMensalProjetada / sugestao.projecaoRemuneracao.receitaSemanalProjetada)
+      - margemBreakEven.receitaLiquidaMes
     : 0
 
   return (
@@ -141,22 +165,29 @@ function CardSugestao({
 
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           {margemBreakEven ? (
-            <div className="text-right text-[11px] leading-tight">
-              <div className="flex items-center justify-end gap-1 font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
-                <span>+ {fmtReal(margemBreakEven.receitaLiquidaMes)}</span>
-                <span className="font-normal text-muted-foreground">receita líquida/mês</span>
+            <div className="w-[196px] rounded-xl bg-muted/50 p-2.5">
+              <div className="grid grid-cols-[1fr_auto] items-baseline gap-x-2 gap-y-1 text-[11px]">
+                <span className="text-muted-foreground">Receita líquida/mês</span>
+                <span className="text-right font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                  +{fmtReal(margemBreakEven.receitaLiquidaMes)}
+                </span>
+
+                <span className="text-muted-foreground">Impostos e perdas (20%)</span>
+                <span className="text-right font-semibold tabular-nums text-rose-500/80 dark:text-rose-400/70">
+                  −{fmtReal(impostosEPerdas)}
+                </span>
+
+                <span className="text-muted-foreground">Custo previsto</span>
+                <span className="text-right font-semibold tabular-nums text-rose-600 dark:text-rose-400">
+                  −{fmtReal(margemBreakEven.custoMes)}
+                </span>
               </div>
-              <div className="flex items-center justify-end gap-1 tabular-nums text-muted-foreground">
-                <span>− {fmtReal(impostosEPerdas)}</span>
-                <span>impostos e faltas/ociosidade (20%)</span>
-              </div>
-              <div className="flex items-center justify-end gap-1 tabular-nums text-rose-600 dark:text-rose-400">
-                <span>− {fmtReal(margemBreakEven.custoMes)}</span>
-                <span>custo previsto</span>
-              </div>
-              <div className={`mt-1 flex items-center justify-end gap-1 border-t border-border pt-1 text-sm font-black tabular-nums ${margemBreakEven.margemMensal >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                <span>= {fmtReal(margemBreakEven.margemMensal)}</span>
-                <span className="text-[11px] font-bold uppercase tracking-wide">margem</span>
+
+              <div className="mt-2 flex items-center justify-between gap-2 border-t border-border pt-2">
+                <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Margem/mês</span>
+                <span className={`text-[15px] font-black tabular-nums ${margemBreakEven.margemMensal >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                  {margemBreakEven.margemMensal >= 0 ? "+" : ""}{fmtReal(margemBreakEven.margemMensal)}
+                </span>
               </div>
             </div>
           ) : (
@@ -246,7 +277,7 @@ export function SugestoesContratacaoPanel({ onAplicarSugestao }: Props) {
   const [modo, setModo] = useState<ModoCascataOcupacao>("diaInteiro")
   const [faixasSelecionadas, setFaixasSelecionadas] = useState<ReadonlySet<FaixaCascata>>(new Set(FAIXAS_FILTRO))
   const [pagina, setPagina] = useState(0)
-  const { sugestoes, loading, error, laudosCarregados, refWeekLabel, cRows } = useSugestoesContratacao(modo, faixasSelecionadas)
+  const { sugestoes, loading, error, laudosCarregados, refWeekLabel, cRows, gapMap } = useSugestoesContratacao(modo, faixasSelecionadas)
 
   if (!laudosCarregados) return null
 
@@ -367,6 +398,7 @@ export function SugestoesContratacaoPanel({ onAplicarSugestao }: Props) {
                 key={s.id}
                 sugestao={s}
                 cRows={cRows}
+                gapMap={gapMap}
                 onAplicar={() => onAplicarSugestao(s.especialidade, s.turnos.map(turno => ({ dia: s.dia, turno })), s.unidade)}
               />
             ))}

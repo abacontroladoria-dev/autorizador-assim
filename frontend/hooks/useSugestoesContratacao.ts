@@ -18,6 +18,7 @@ import {
   anexarSala, anexarRemuneracaoEOrdenar, calcularGapMap, TODAS_FAIXAS_CASCATA,
   type ModoCascataOcupacao, type FaixaCascata,
 } from "@/lib/cronograma/sugestaoContratacao"
+import type { GapItem } from "@/lib/cronograma/simulacaoNovoPrestador"
 import type { SugestaoContratacao } from "@/lib/cronograma/sugestaoContratacaoTypes"
 import type { CsvRow } from "@/types/cronograma"
 
@@ -29,6 +30,9 @@ export interface UseSugestoesContratacaoResult {
   refWeekLabel: string
   /** Linhas cruas da grade — usadas pelo modal de antes/depois do remanejamento. */
   cRows: CsvRow[]
+  /** Mapa de gap por paciente+especialidade — usado pra recalcular uma combinação
+   *  isolada (sem o teto global entre sugestões) no Ponto de Equilíbrio de cada card. */
+  gapMap: Record<string, GapItem>
 }
 
 export function useSugestoesContratacao(
@@ -66,15 +70,19 @@ export function useSugestoesContratacao(
     [lRows, cRows, modo],
   )
 
+  const gapMap = useMemo(
+    () => (cRows.length && lRows.length ? calcularGapMap(lRows, cRows) : {}),
+    [lRows, cRows],
+  )
+
   const sugestoes = useMemo((): SugestaoContratacao[] => {
     if (!cRows.length || !lRows.length) return []
-    const gapMap = calcularGapMap(lRows, cRows)
     const base = filtrarCombosPorFaixa(todosCombos, faixasSelecionadas)
     const comRemanejamento = anexarModalidadeERemanejamento(base, cRows, gapMap)
     const comDisponibilidade = filtrarPorDisponibilidadeInterna(comRemanejamento, cRows, gapMap)
     const comSala = anexarSala(comDisponibilidade, salasComOcupacao, exclusividades)
     return anexarRemuneracaoEOrdenar(comSala, cRows, regrasGerais, excecoesPaciente, mesReferencia, feriados)
-  }, [todosCombos, faixasSelecionadas, cRows, lRows, salasComOcupacao, exclusividades, regrasGerais, excecoesPaciente, mesReferencia, feriados])
+  }, [todosCombos, faixasSelecionadas, cRows, lRows, gapMap, salasComOcupacao, exclusividades, regrasGerais, excecoesPaciente, mesReferencia, feriados])
 
   return {
     sugestoes,
@@ -83,5 +91,6 @@ export function useSugestoesContratacao(
     laudosCarregados: lRows.length > 0,
     refWeekLabel: refWeek.label,
     cRows,
+    gapMap,
   }
 }
