@@ -39,6 +39,30 @@ const SEL_MODAL_BENEFICIARIO = '#checkBday'
 const SEL_ALERTA_JQUERY = '.jconfirm-box'
 const SEL_ENVIO_BLOQUEADO = '#InformeOsDados'
 
+// Tudo que significa "a ASSIM está no meio de alguma coisa, ou esperando a
+// recepção". Sempre por `:visible` do Playwright, que exige caixa de verdade —
+// e NUNCA por `getComputedStyle().display`, porque `#loadModal` nasce com
+// display:block e vazio: pelo display ele parece aberto o tempo todo.
+//
+// #myModal   = leitor de QR Code (aberto pelo botão #myBtn)
+// #checkToken = token enviado ao beneficiário
+// #checkBday  = nascimento + CPF
+// .jconfirm-box = alertas com botão da própria ASSIM ("Confirma novo
+//                 atendimento antes de 30 minutos?", "aceita cadastrar
+//                 biometria facial?", "Tudo certo!...")
+const SEL_ASSIM_OCUPADA = [
+  '#loadModal:visible',
+  '#checkBday:visible',
+  '#myModal:visible',
+  '#checkToken:visible',
+  '.jconfirm-box:visible',
+].join(', ')
+
+// Onde a ASSIM escreve o nome do beneficiário quando o encontra. É o marco
+// positivo de "a consulta terminou" — melhor do que esperar a tela ficar quieta,
+// que é indistinguível de "a tela ainda nem começou".
+const SEL_NOME_BENEFICIARIO = '#indemp'
+
 async function visivel(page, seletor) {
   return page.locator(seletor).first().isVisible().catch(() => false)
 }
@@ -77,86 +101,120 @@ async function aguardarTelaLivre(page, timeoutMs = 45000) {
 // =========================
 //
 // POR QUE ISTO EXISTE
-// A ASSIM passou a exigir confirmação de presença do beneficiário antes de
-// aceitar o envio — a mesma mudança que trouxe a tela de login. O portal tenta
-// primeiro o reconhecimento biofacial (API `/api/v1/autorizador/validarPresenca`,
-// dispositivos Intelbras) e, quando o credenciado não tem dispositivo ou ele
-// está indisponível, cai em `abrirModal()`: o modal que pede data de nascimento
-// e CPF do beneficiário.
+// A ASSIM passou a exigir validação de presença do beneficiário antes de aceitar
+// o envio — a mesma mudança que trouxe a tela de login. Esta etapa é do HUMANO,
+// e é o ponto do processo em que o robô tem que sair da frente e esperar.
 //
-// O QUE ACONTECIA SEM ISTO (medido em máquina real, 13/08)
-// O robô digitava a carteirinha, dava Tab e seguia preenchendo o resto do
-// formulário sem esperar nada — a verificação de "tela livre" rodava antes de o
-// portal reagir ao blur e passava reto. A recepcionista clicava em Enviar e o
-// servidor recusava com "Beneficiario nao confirmado. Tentar novamente". O robô
-// engolia esse alerta, esperava 120s por uma confirmação que nunca vinha e
-// gravava a tarefa como "Usuário não clicou em enviar" — diagnóstico errado
-// para um envio que de fato aconteceu e foi recusado.
+// A CADEIA, lida no código do portal:
+//   blur de associado3 → conferirCampos()
+//     → dadosformChoiceCard.php  (acha o beneficiário; escreve o nome em #indemp)
+//     → verificarIntervaloAtendimento()
+//         → "ja identificado hoje no intervalo de 30 minutos" → alerta com botões
+//         → "Credenciado nao possui dispositivo Intelbras"    → abrirModal()
+//         → senão → validarPresenca()
+//             → "aceita cadastrar biometria facial?" → alerta Sim/Não, e recomeça
+//             → "confirmado presencialmente"         → alerta verde "Tudo certo!"
+//             → dispositivo indisponível / erro 500  → abrirModal()
+//   abrirModal() = #checkBday, que pede NASCIMENTO + CPF.
+//   A recepção ainda pode escolher QR Code (#myModal) ou token (#checkToken).
 //
-// O robô NÃO preenche nascimento e CPF. Esse é o controle de presença da
-// operadora: quem confirma é a recepção, com o beneficiário na frente. O robô
-// espera e sai da frente.
-async function aguardarConfirmacaoBeneficiario(page, cfg, api, filaId) {
-  const tetoConsulta = Number(cfg.beneficiario_consulta_ms) || 45000
-  const tetoHumano = Number(cfg.confirmacao_beneficiario_ms) || 300000
+// Ou seja: são várias rodadas, com pausas curtas entre elas, e mais de um
+// desfecho possível. Por isso a espera exige silêncio SUSTENTADO, não um
+// instante de silêncio.
+//
+// DUAS ARMADILHAS QUE JÁ CUSTARAM CARO AQUI
+// 1. `#loadModal` nasce com display:block e vazio. Quem olhar `display` acha que
+//    há um loader aberto o tempo todo; quem olhar só uma vez logo após o Tab
+//    acha que a tela está livre e passa reto. A primeira versão desta função
+//    caiu na segunda. Por isso tudo aqui usa `:visible` do Playwright (que exige
+//    caixa) e o marco de início é positivo: o nome do beneficiário em #indemp.
+// 2. A geração anterior do RPA esperava aqui SEM PRAZO NENHUM (o commit
+//    966e3ea, "funcionando com parada do modal"). Isso trava o worker inteiro:
+//    a recepção some, e a máquina para de atender todo mundo. Aqui o prazo é
+//    largo — 15 min, como na primeira geração — mas existe.
+//
+// O robô NÃO preenche nascimento e CPF, nem opera o QR. Esse é o controle de
+// presença da operadora, feito com o beneficiário na frente da recepção.
+async function aguardarConfirmacaoBeneficiario(page, cfg, api, filaId, alertas = []) {
+  const tetoConsulta = Number(cfg.beneficiario_consulta_ms) || 60000
+  const tetoHumano = Number(cfg.confirmacao_beneficiario_ms) || 900000
+  const SILENCIO_MS = 2500
 
-  // 1. Espera a ASSIM REAGIR ao blur. `conferirCampos()` chama `callLoader()` de
-  //    forma síncrona, então o loader sobe quase junto com o Tab. Se nada
-  //    aparecer em 3s, o portal não pediu nada e seguimos.
-  const reagiu = await page.waitForFunction(() => {
-    const aberto = (id) => {
-      const el = document.getElementById(id)
-      return !!el && getComputedStyle(el).display !== 'none'
-    }
-    return aberto('loadModal') || aberto('checkBday') ||
-      !!document.querySelector('.jconfirm-box')
-  }, { timeout: 3000 }).then(() => true).catch(() => false)
-
-  if (!reagiu) {
-    console.log('ℹ️  A ASSIM não pediu confirmação do beneficiário')
-    return 'nao_pedida'
-  }
-
-  // 2. A consulta de presença pode demorar: a chamada do portal à API tem teto
-  //    de 30s. Enquanto o loader estiver de pé, é a ASSIM trabalhando.
-  await page.locator(SEL_LOADER)
-    .waitFor({ state: 'hidden', timeout: tetoConsulta })
-    .catch(() => {})
-
-  const pendente = async () =>
-    (await visivel(page, SEL_MODAL_BENEFICIARIO)) ||
-    (await visivel(page, SEL_ALERTA_JQUERY)) ||
-    (await visivel(page, SEL_ENVIO_BLOQUEADO))
-
-  if (!(await pendente())) {
-    console.log('✅ Beneficiário liberado pela ASSIM sem confirmação manual')
-    return 'automatica'
-  }
-
-  // 3. Daqui para frente quem trabalha é a recepção.
-  const minutos = tetoHumano >= 60000
+  const marcaAlerta = alertas.length
+  const prazoLegivel = tetoHumano >= 60000
     ? `${Math.round(tetoHumano / 60000)} min`
     : `${Math.round(tetoHumano / 1000)} s`
-  console.log(`🧍 A ASSIM está pedindo confirmação do beneficiário (nascimento + CPF) — aguardando a recepção por até ${minutos}...`)
-  await api.registrarLog(filaId, 'Aguardando a recepcao confirmar o beneficiario na tela da ASSIM')
 
-  const limite = Date.now() + tetoHumano
-  while (Date.now() < limite) {
-    if (!(await pendente())) break
-    await delay(1000)
-  }
+  // ---- 1. A ASSIM encontrou o beneficiário? ----
+  const achou = await page.waitForFunction(() => {
+    const el = document.getElementById('indemp')
+    return !!el && el.innerHTML.trim().length > 0
+  }, { timeout: tetoConsulta }).then(() => true).catch(() => false)
 
-  if (await pendente()) {
+  if (!achou) {
+    // Os caminhos de erro da ASSIM aqui usam alert() — que o Playwright dispensa
+    // sozinho. Sem repassar o texto, o motivo real (carteirinha errada, campos
+    // anteriores em branco) sumiria.
+    const recusa = alertas.slice(marcaAlerta)[0]
     throw new Error(
-      `A confirmação do beneficiário não foi concluída na tela da ASSIM em ${minutos} ` +
-      '(nascimento + CPF, ou o reconhecimento biofacial).'
+      recusa
+        ? `A ASSIM não aceitou a carteirinha: "${recusa}"`
+        : 'A ASSIM não retornou os dados do beneficiário no prazo. ' +
+          'Confira a carteirinha da solicitação.'
     )
   }
 
-  // 4. Fechar o modal no "x" faz o portal rodar `limpa_carteira()` e apagar a
-  //    carteirinha. Seguir em frente nesse estado produz exatamente a recusa
-  //    "Beneficiario nao confirmado" no envio — melhor falhar aqui, dizendo o
-  //    que houve.
+  console.log('👤 Beneficiário localizado na ASSIM')
+
+  // ---- 2. Validação de presença: o robô para aqui ----
+  const inicio = Date.now()
+  const limite = inicio + tetoHumano
+  let silencioDesde = null
+  let avisou = false
+  let ultimoLog = 0
+
+  while (Date.now() < limite) {
+    const ocupada = await page.locator(SEL_ASSIM_OCUPADA).count().catch(() => -1)
+
+    if (ocupada === -1) {
+      throw new Error('A janela da ASSIM foi fechada durante a validação do beneficiário.')
+    }
+
+    if (ocupada > 0) {
+      silencioDesde = null
+
+      if (!avisou) {
+        avisou = true
+        console.log('🧍 VALIDAÇÃO DE PRESENÇA NA TELA DA ASSIM — o robô está PARADO.')
+        console.log('   Conclua na tela: reconhecimento facial, QR Code, token ou nascimento + CPF.')
+        console.log(`   Prazo: ${prazoLegivel}.`)
+        await api.registrarLog(filaId, 'Aguardando a recepcao validar a presenca do beneficiario na tela da ASSIM')
+      }
+
+      if (Date.now() - ultimoLog >= 15000) {
+        ultimoLog = Date.now()
+        console.log(`⌛ Ainda aguardando a recepção... (${Math.round((Date.now() - inicio) / 1000)}s)`)
+      }
+    } else {
+      // Entre uma rodada e outra a ASSIM fecha e reabre o loader em milissegundos.
+      // Só um silêncio sustentado significa que a etapa acabou de verdade.
+      if (silencioDesde === null) silencioDesde = Date.now()
+      if (Date.now() - silencioDesde >= SILENCIO_MS) break
+    }
+
+    await delay(700)
+  }
+
+  if (await page.locator(SEL_ASSIM_OCUPADA).count().catch(() => 0) > 0) {
+    throw new Error(
+      `A validação de presença do beneficiário não foi concluída na tela da ASSIM em ${prazoLegivel}.`
+    )
+  }
+
+  // ---- 3. Sobrou tela utilizável? ----
+  // Fechar o modal no "x", ou errar o CPF/nascimento, faz o portal rodar
+  // `limpa_carteira()`. Seguir em frente nesse estado produz exatamente a recusa
+  // "Beneficiario nao confirmado" no envio.
   const cartao = await page.evaluate(() => {
     const f = document.forms.autorizador
     if (!f) return null
@@ -165,13 +223,15 @@ async function aguardarConfirmacaoBeneficiario(page, cfg, api, filaId) {
 
   if (!cartao || cartao.some(v => !String(v || '').trim())) {
     throw new Error(
-      'A confirmação do beneficiário foi cancelada na tela da ASSIM — o portal ' +
+      'A validação do beneficiário foi cancelada na tela da ASSIM — o portal ' +
       'limpou a carteirinha. Reabra a solicitação para tentar de novo.'
     )
   }
 
-  console.log('✅ Beneficiário confirmado na tela da ASSIM')
-  return 'manual'
+  if (avisou) console.log('✅ Validação de presença concluída pela recepção')
+  else console.log('✅ Beneficiário liberado pela ASSIM sem validação manual')
+
+  return avisou ? 'manual' : 'automatica'
 }
 
 function normalizarTexto(texto) {
@@ -522,7 +582,7 @@ async function executarRpa({ page, tarefa, cfg, api, cancelado, alertas = [] }) 
     // desde a mudança do portal, a confirmação de presença. Nada pode ser
     // digitado por cima disso.
     await page.press('input[name="associado3"]', 'Tab')
-    await aguardarConfirmacaoBeneficiario(page, cfg, api, tarefa.id)
+    await aguardarConfirmacaoBeneficiario(page, cfg, api, tarefa.id, alertas)
     await aguardarTelaLivre(page)
 
     await humanType(page, 'input[name="findexec"]', String(cfg.executor))

@@ -67,6 +67,47 @@ const SEL_TELA_LOGIN = 'form[name="entrar"]'
 // autenticada — ele não existe na tela de login.
 const SEL_FORMULARIO = 'select[name="operacao"]'
 
+/**
+ * Captura os alertas da ASSIM: registra, mostra na tela e dispensa.
+ *
+ * O Playwright dispensa `alert()` sozinho e em silêncio. Isso era inofensivo
+ * enquanto a recepção não precisava interagir com o portal. Deixou de ser: a
+ * validação de presença do beneficiário é feita por ela, e os avisos dessa
+ * etapa — "CPF ou Data de Nascimento estão incorretos! Tente novamente!" — são
+ * `alert()`. Sem isto, ela erra o CPF e a tela simplesmente não responde.
+ *
+ * O aviso vira uma tarja na própria página: não bloqueia, some sozinho, e o
+ * texto vai junto para o log da fila quando a tarefa termina mal.
+ */
+function ligarCapturaDeAlertas(page, alertas) {
+  page.on('dialog', async (dialogo) => {
+    const texto = dialogo.message()
+    alertas.push(texto)
+    console.log('💬 ASSIM alertou:', texto)
+
+    await dialogo.dismiss().catch(() => {})
+
+    // Só depois de dispensar: com o diálogo aberto a página fica bloqueada.
+    await page.evaluate((msg) => {
+      const ID = 'robo-aviso-assim'
+      document.getElementById(ID)?.remove()
+
+      const tarja = document.createElement('div')
+      tarja.id = ID
+      tarja.textContent = msg
+      Object.assign(tarja.style, {
+        position: 'fixed', top: '0', left: '0', right: '0',
+        zIndex: '2147483646', background: '#b91c1c', color: '#fff',
+        font: '600 15px/1.4 Arial, sans-serif', padding: '14px 18px',
+        textAlign: 'center', boxShadow: '0 4px 16px rgba(0,0,0,.35)',
+      })
+      document.body.appendChild(tarja)
+
+      setTimeout(() => tarja.remove(), 12000)
+    }, texto).catch(() => { /* página navegou ou fechou: o log já tem o texto */ })
+  })
+}
+
 class SessaoAssim {
   constructor(browser) {
     this.browser = browser
@@ -108,13 +149,10 @@ class SessaoAssim {
     const page = await ctx.newPage()
     const alertas = []
 
-    // valida() usa alert() quando falta campo. Playwright dispensa dialog
-    // automaticamente e em silêncio — sem este handler, um login recusado
-    // viraria espera por uma navegação que nunca acontece.
-    page.on('dialog', async (d) => {
-      alertas.push(d.message())
-      await d.dismiss().catch(() => {})
-    })
+    // valida() usa alert() quando falta campo. Sem capturar, um login recusado
+    // viraria espera por uma navegação que nunca acontece. A mesma captura
+    // continua valendo depois, porque esta janela vira a aba da tarefa.
+    ligarCapturaDeAlertas(page, alertas)
 
     let deuCerto = false
 
@@ -246,11 +284,7 @@ class SessaoAssim {
       // o motivo real da recusa se perdia — a tarefa era gravada como
       // "usuário não clicou em enviar", que era falso.
       const alertas = []
-      page.on('dialog', async (d) => {
-        console.log('💬 ASSIM alertou:', d.message())
-        alertas.push(d.message())
-        await d.dismiss().catch(() => {})
-      })
+      ligarCapturaDeAlertas(page, alertas)
 
       try {
         await page.goto(cfg.url, { waitUntil: 'domcontentloaded', timeout: 45000 })
