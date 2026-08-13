@@ -1,0 +1,172 @@
+============================================================
+ ROBO AUTORIZADOR ASSIM - v1.1.0
+ Instalacao no PC da recepcao
+============================================================
+
+O QUE MUDOU NESTA VERSAO (leia antes de instalar)
+------------------------------------------------------------
+
+1. O INSTALADOR NAO CARREGA MAIS SENHA NENHUMA.
+
+   Ate a v1.0.0, o pacote trazia um arquivo .env pronto com a chave de servico
+   do Supabase (acesso total ao banco, validade 2036) e a senha do portal da
+   ASSIM em texto puro. Quem tivesse o pendrive - ou o proprio .exe, que se abre
+   com ferramenta comum - ficava com o banco inteiro.
+
+   Agora o assistente pede um TOKEN especifico daquele computador, cifra com a
+   protecao do Windows e grava o .env na hora. O arquivo resultante nao funciona
+   em nenhuma outra maquina.
+
+2. VOCE PRECISA GERAR UM TOKEN ANTES DE INSTALAR.
+
+   Um por computador. Nunca reaproveite: revogar um derrubaria o outro, e o
+   rastro de quem fez o que se perde.
+
+3. NAO SE PERGUNTA MAIS O MACHINE_ID.
+
+   A identidade da maquina passou a vir do servidor, derivada do token. Antes o
+   PC se auto-declarava ("MACHINE_ID=admin" escrito no arquivo), e nada garantia
+   que aquela maquina era mesmo aquela.
+
+4. A RECEPCIONISTA NAO DIGITA MAIS A SENHA DA ASSIM.
+
+   O robo faz o login uma vez por manha e reaproveita a sessao. Antes, cada
+   autorizacao abria uma sessao limpa e o portal pedia a senha de novo - a cada
+   paciente.
+
+5. O ROBO SE ATUALIZA SOZINHO DE AGORA EM DIANTE.
+
+   Correcoes no codigo passam a chegar pela rede, com assinatura verificada.
+   Esta e a ultima vez que voce precisa ir de pendrive por causa de um ajuste de
+   codigo. Node e Chromium continuam vindo so pelo instalador.
+
+
+ANTES DE SAIR DA SUA MESA
+------------------------------------------------------------
+
+Para CADA computador que vai receber o robo, no SQL Editor do Supabase, rode o
+bloco 2 de supabase/snippets/robo_provisionar.sql trocando 'recepcao-01' pelo
+nome daquele PC.
+
+Ele devolve uma linha com a coluna `token`: 64 caracteres. Anote junto do nome do
+PC - o valor NAO aparece de novo.
+
+Leve tambem:
+  - a URL do projeto Supabase
+  - a chave publica (anon / publishable) do projeto - essa nao e segredo, e a
+    mesma que o site usa no navegador
+
+
+INSTALANDO
+------------------------------------------------------------
+
+1. Copie RoboAutorizadorASSIM-Setup.exe para o PC (pendrive serve).
+
+2. Clique com o botao direito -> "Executar como administrador".
+   Sem isso o auto-start no logon nao e configurado.
+
+3. Na tela "Credencial desta maquina", preencha:
+      Token da maquina .......... cole os 64 caracteres daquele PC
+      URL do Supabase ........... ja vem preenchida, confira
+      Chave publica ............. cole a anon/publishable
+
+   O assistente recusa token com tamanho errado ou caractere invalido. Isso e
+   proposital: e melhor errar aqui do que descobrir depois que o robo nunca
+   subiu porque faltou um caractere na copia.
+
+4. Conclua. Marque "Iniciar o Robo Autorizador agora".
+
+
+CONFERINDO QUE FUNCIONOU
+------------------------------------------------------------
+
+Abra no navegador daquele PC:
+
+    http://127.0.0.1:3010/health
+
+Esperado:
+
+    {"ok":true,"worker":"online","machine_id":"recepcao-01","versao":"1.1.0",...}
+
+O campo machine_id vem DO SERVIDOR. Se ele aparecer com o nome certo, entao o
+token foi aceito, a maquina esta cadastrada e o robo esta atendendo.
+
+Se der 503 com "aguardando identificacao no servidor": o robo subiu mas ainda
+nao conseguiu falar com o servidor. Espere alguns segundos e recarregue.
+
+Se nao abrir nada: veja C:\RoboAutorizadorAssim\log\atual.log
+
+
+PARA E COMECA
+------------------------------------------------------------
+
+Iniciar ....... Menu Iniciar -> "Iniciar Robo Autorizador"
+                (ou reiniciar o Windows: sobe sozinho no logon)
+
+Ver rodando ... Menu Iniciar -> "Iniciar com logs (janela)"
+
+Parar ......... Gerenciador de Tarefas -> encerrar node.exe
+                ATENCAO: o supervisor vai relanca-lo em ~5 segundos. Para
+                desligar de verdade, pause a maquina pelo painel
+                administrativo ou revogue o token.
+
+Log ........... C:\RoboAutorizadorAssim\log\atual.log     (execucao em curso)
+                C:\RoboAutorizadorAssim\log\anterior.log  (a anterior)
+
+
+QUANDO ALGO DA ERRADO
+------------------------------------------------------------
+
+"O robo parou de proposito e NAO sera relancado" no log
+    Token ausente ou revogado. Gere um novo (bloco 2 do snippet) e reinstale.
+
+"Token desta maquina foi recusado pelo servidor"
+    Mesmo caso. Alguem revogou este PC, ou o bloco 2 foi rodado de novo para
+    este machine_id - o que TROCA o token e invalida o antigo.
+
+"Senha da ASSIM nao veio do servidor"
+    A senha nao esta no Vault. Rode o bloco 1 do snippet.
+
+"Login nao foi aceito: o portal voltou para a tela de senha"
+    A senha cadastrada no Vault esta errada, ou a ASSIM a trocou.
+    Atualize com o bloco 1b - uma vez, no servidor, para toda a frota.
+
+"ASSIM respondeu bloqueio.php"
+    O portal considerou que ja existe outra sessao ativa. Feche janelas do
+    autorizador abertas manualmente naquele PC.
+
+"10 falhas consecutivas sem ficar saudavel. Parando."
+    O robo nao consegue nem subir. O motivo esta acima disso no log.
+
+Maquina aparece offline no painel
+    O robo escreve last_seen a cada 30s. Offline por mais que isso = processo
+    caido (veja o log) ou PC desligado.
+
+
+O QUE NAO E MAIS NECESSARIO
+------------------------------------------------------------
+
+- Editar o .env a mao para trocar MACHINE_ID: nao existe mais MACHINE_ID no
+  arquivo.
+- Aplicar o patch-ws: o robo nao usa mais WebSocket.
+- Instalar Node ou Chrome no PC: tudo vem embutido.
+- Internet durante a instalacao: o pacote e offline.
+- Ir de pendrive para corrigir codigo: as proximas correcoes chegam pela rede.
+
+
+SEGURANCA - O QUE ESTE PACOTE RESOLVE E O QUE NAO
+------------------------------------------------------------
+
+RESOLVE
+  Copiar C:\RoboAutorizadorAssim\.env para outro computador: inutil.
+  Ler senha abrindo arquivo no Bloco de Notas: nao ha senha em arquivo.
+  Pendrive ou .exe perdido: nao contem credencial.
+  PC roubado: revogar o token daquele PC corta o acesso, so dele.
+  Comprometer o banco: nao basta para publicar codigo nos PCs (assinatura).
+
+NAO RESOLVE
+  Quem consegue EXECUTAR codigo naquele PC, como aquele usuario, consegue pedir
+  ao Windows a mesma decifragem que o robo pede. A protecao aqui e contra copia
+  de arquivo, nao contra execucao local. Trate o PC da recepcao como maquina
+  confiavel: sem instalar programa de origem duvidosa, sem compartilhar a sessao
+  do Windows.
