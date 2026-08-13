@@ -39,29 +39,35 @@ const SEL_MODAL_BENEFICIARIO = '#checkBday'
 const SEL_ALERTA_JQUERY = '.jconfirm-box'
 const SEL_ENVIO_BLOQUEADO = '#InformeOsDados'
 
-// Tudo que significa "a ASSIM está no meio de alguma coisa, ou esperando a
-// recepção". Sempre por `:visible` do Playwright, que exige caixa de verdade —
-// e NUNCA por `getComputedStyle().display`, porque `#loadModal` nasce com
+// A tela de identificação do beneficiário, em qualquer das formas que a ASSIM
+// usa. Sempre por `:visible` do Playwright, que exige caixa de verdade — e
+// NUNCA por `getComputedStyle().display`, porque `#loadModal` nasce com
 // display:block e vazio: pelo display ele parece aberto o tempo todo.
 //
-// #myModal   = leitor de QR Code (aberto pelo botão #myBtn)
-// #checkToken = token enviado ao beneficiário
-// #checkBday  = nascimento + CPF
-// .jconfirm-box = alertas com botão da própria ASSIM ("Confirma novo
-//                 atendimento antes de 30 minutos?", "aceita cadastrar
-//                 biometria facial?", "Tudo certo!...")
-const SEL_ASSIM_OCUPADA = [
-  '#loadModal:visible',
-  '#checkBday:visible',
+// .jconfirm-box = os avisos com botão da ASSIM. É esta a tela que aparece na
+//                 recepção: "Solicite identificacao do beneficiario por QRCode
+//                 no dispositivo", com CONFIRMAR / CANCELAR IDENTIFICACAO.
+// #myModal      = leitor de QR Code por câmera (botão #myBtn)
+// #checkToken   = token enviado ao beneficiário
+// #checkBday    = nascimento + CPF (usado quando não há dispositivo Intelbras)
+const SEL_IDENTIFICACAO = [
+  '.jconfirm-box:visible',
   '#myModal:visible',
   '#checkToken:visible',
-  '.jconfirm-box:visible',
+  '#checkBday:visible',
 ].join(', ')
+
+// Identificação + o loader: "a ASSIM está no meio de alguma coisa".
+const SEL_ASSIM_OCUPADA = '#loadModal:visible, ' + SEL_IDENTIFICACAO
 
 // Onde a ASSIM escreve o nome do beneficiário quando o encontra. É o marco
 // positivo de "a consulta terminou" — melhor do que esperar a tela ficar quieta,
 // que é indistinguível de "a tela ainda nem começou".
 const SEL_NOME_BENEFICIARIO = '#indemp'
+
+// Prova de que a identificação foi concluída: `aplicarCodigoBiofacialFormulario`
+// grava o código devolvido pela API em `input[name=autBiofacial]`.
+const SEL_CODIGO_IDENTIFICACAO = 'input[name="autBiofacial"]'
 
 async function visivel(page, seletor) {
   return page.locator(seletor).first().isVisible().catch(() => false)
@@ -118,32 +124,43 @@ async function aguardarTelaLivre(page, timeoutMs = 45000) {
 //   abrirModal() = #checkBday, que pede NASCIMENTO + CPF.
 //   A recepção ainda pode escolher QR Code (#myModal) ou token (#checkToken).
 //
-// Ou seja: são várias rodadas, com pausas curtas entre elas, e mais de um
-// desfecho possível. Por isso a espera exige silêncio SUSTENTADO, não um
-// instante de silêncio.
+// Ou seja: são várias rodadas. O botão "Confirmar identificacao" chama
+// `validarPresenca()` DE NOVO, e entre uma rodada e outra há requisições de até
+// 30 segundos com a tela quieta.
 //
-// DUAS ARMADILHAS QUE JÁ CUSTARAM CARO AQUI
+// TRÊS ARMADILHAS QUE JÁ CUSTARAM CARO AQUI
 // 1. `#loadModal` nasce com display:block e vazio. Quem olhar `display` acha que
 //    há um loader aberto o tempo todo; quem olhar só uma vez logo após o Tab
-//    acha que a tela está livre e passa reto. A primeira versão desta função
-//    caiu na segunda. Por isso tudo aqui usa `:visible` do Playwright (que exige
-//    caixa) e o marco de início é positivo: o nome do beneficiário em #indemp.
-// 2. A geração anterior do RPA esperava aqui SEM PRAZO NENHUM (o commit
-//    966e3ea, "funcionando com parada do modal"). Isso trava o worker inteiro:
-//    a recepção some, e a máquina para de atender todo mundo. Aqui o prazo é
-//    largo — 15 min, como na primeira geração — mas existe.
+//    acha que a tela está livre e passa reto. Por isso tudo aqui usa `:visible`
+//    do Playwright, que exige caixa.
+// 2. SILÊNCIO NÃO É CRITÉRIO. A versão anterior desta função concluía a espera
+//    quando a tela ficava 2,5s quieta — e em máquina real ela saiu antes de
+//    QUALQUER modal aparecer, porque o intervalo entre o loader fechar e o
+//    aviso de identificação surgir é maior que isso. O log registrou
+//    "validação concluída pela recepção" sem que ninguém tivesse visto nada.
+//    Agora a identificação é OBRIGATÓRIA: o robô espera ela APARECER, e só
+//    então espera ela ser resolvida.
+// 3. A geração anterior do RPA esperava aqui SEM PRAZO NENHUM (commit 966e3ea,
+//    "funcionando com parada do modal"). Isso trava o worker inteiro quando a
+//    recepção some. Aqui o prazo é largo — 15 min — mas existe.
 //
-// O robô NÃO preenche nascimento e CPF, nem opera o QR. Esse é o controle de
-// presença da operadora, feito com o beneficiário na frente da recepção.
+// O robô NÃO preenche nascimento e CPF, nem opera o QR, nem clica em confirmar.
+// Esse é o controle de presença da operadora, feito com o beneficiário na frente
+// da recepção. O robô dispara a consulta, sai da frente e volta depois.
 async function aguardarConfirmacaoBeneficiario(page, cfg, api, filaId, alertas = []) {
   const tetoConsulta = Number(cfg.beneficiario_consulta_ms) || 60000
+  const tetoAparecer = Number(cfg.identificacao_aparecer_ms) || 90000
   const tetoHumano = Number(cfg.confirmacao_beneficiario_ms) || 900000
-  const SILENCIO_MS = 2500
+  const SILENCIO_MS = 6000
 
   const marcaAlerta = alertas.length
   const prazoLegivel = tetoHumano >= 60000
     ? `${Math.round(tetoHumano / 60000)} min`
     : `${Math.round(tetoHumano / 1000)} s`
+
+  const contar = (seletor) => page.locator(seletor).count().catch(() => -1)
+  const identificado = () => page.locator(SEL_CODIGO_IDENTIFICACAO)
+    .inputValue().then(v => String(v || '').trim().length > 0).catch(() => false)
 
   // ---- 1. A ASSIM encontrou o beneficiário? ----
   const achou = await page.waitForFunction(() => {
@@ -166,52 +183,102 @@ async function aguardarConfirmacaoBeneficiario(page, cfg, api, filaId, alertas =
 
   console.log('👤 Beneficiário localizado na ASSIM')
 
-  // ---- 2. Validação de presença: o robô para aqui ----
+  // ---- 2. Esperar a identificação APARECER ----
+  // Este passo é o coração da correção: enquanto ela não sobe na tela, o robô
+  // não tem o direito de continuar preenchendo.
+  console.log('⏸️  Aguardando a ASSIM abrir a identificação do beneficiário...')
+
+  const limiteAparecer = Date.now() + tetoAparecer
+  const INTERVALO_INSISTIR = Number(cfg.insistir_blur_ms) || 20000
+  let apareceu = false
+  let insistencias = 0
+  let proximaInsistencia = Date.now() + INTERVALO_INSISTIR
+
+  while (Date.now() < limiteAparecer) {
+    const n = await contar(SEL_IDENTIFICACAO)
+    if (n === -1) throw new Error('A janela da ASSIM foi fechada durante a identificação do beneficiário.')
+    if (n > 0) { apareceu = true; break }
+
+    // Se a ASSIM já carimbou o código de identificação sem pedir nada (o
+    // beneficiário se identificou há pouco no dispositivo), não há o que esperar.
+    if (await identificado()) {
+      console.log('✅ A ASSIM já tinha a identificação deste beneficiário')
+      return 'automatica'
+    }
+
+    // Aconteceu em máquina real: a consulta rodou (o nome do beneficiário
+    // apareceu) mas a identificação não subiu. Quem resolveu foi a recepção,
+    // clicando de volta no campo da matrícula e dando outro Tab. É esse gesto
+    // que está aqui — e só quando a ASSIM não está no meio de uma requisição,
+    // para não disparar a consulta duas vezes.
+    if (Date.now() >= proximaInsistencia && insistencias < 2) {
+      proximaInsistencia = Date.now() + INTERVALO_INSISTIR
+      if (await contar('#loadModal:visible') === 0) {
+        insistencias++
+        console.log(`↻ A ASSIM não abriu a identificação — repetindo o Tab da carteirinha (${insistencias}/2)`)
+        await page.evaluate(() => {
+          const campo = document.forms.autorizador?.associado3
+          if (!campo) return
+          campo.focus()
+          campo.blur()
+        }).catch(() => {})
+      }
+    }
+
+    await delay(500)
+  }
+
+  if (!apareceu) {
+    throw new Error(
+      'A ASSIM não abriu a identificação do beneficiário. Sem ela o envio é ' +
+      'recusado ("Beneficiario nao confirmado"). Confira a tela do portal.'
+    )
+  }
+
+  // ---- 3. Esperar a recepção resolver ----
+  console.log('🧍 IDENTIFICAÇÃO DO BENEFICIÁRIO NA TELA DA ASSIM — o robô está PARADO.')
+  console.log('   Conclua na tela: QR Code no dispositivo, biometria facial, token ou nascimento + CPF.')
+  console.log(`   O preenchimento só continua depois disso. Prazo: ${prazoLegivel}.`)
+  await api.registrarLog(filaId, 'Aguardando a recepcao identificar o beneficiario na tela da ASSIM')
+
   const inicio = Date.now()
   const limite = inicio + tetoHumano
   let silencioDesde = null
-  let avisou = false
-  let ultimoLog = 0
+  let ultimoLog = Date.now()
+  let concluiuIdentificacao = false
 
   while (Date.now() < limite) {
-    const ocupada = await page.locator(SEL_ASSIM_OCUPADA).count().catch(() => -1)
-
+    const ocupada = await contar(SEL_ASSIM_OCUPADA)
     if (ocupada === -1) {
-      throw new Error('A janela da ASSIM foi fechada durante a validação do beneficiário.')
+      throw new Error('A janela da ASSIM foi fechada durante a identificação do beneficiário.')
     }
 
     if (ocupada > 0) {
       silencioDesde = null
-
-      if (!avisou) {
-        avisou = true
-        console.log('🧍 VALIDAÇÃO DE PRESENÇA NA TELA DA ASSIM — o robô está PARADO.')
-        console.log('   Conclua na tela: reconhecimento facial, QR Code, token ou nascimento + CPF.')
-        console.log(`   Prazo: ${prazoLegivel}.`)
-        await api.registrarLog(filaId, 'Aguardando a recepcao validar a presenca do beneficiario na tela da ASSIM')
-      }
-
-      if (Date.now() - ultimoLog >= 15000) {
-        ultimoLog = Date.now()
-        console.log(`⌛ Ainda aguardando a recepção... (${Math.round((Date.now() - inicio) / 1000)}s)`)
-      }
     } else {
-      // Entre uma rodada e outra a ASSIM fecha e reabre o loader em milissegundos.
-      // Só um silêncio sustentado significa que a etapa acabou de verdade.
+      // Atalho: a ASSIM já gravou o código da identificação e não há mais nada
+      // aberto. Acabou, sem esperar o silêncio inteiro.
+      if (await identificado()) { concluiuIdentificacao = true; break }
+
       if (silencioDesde === null) silencioDesde = Date.now()
-      if (Date.now() - silencioDesde >= SILENCIO_MS) break
+      if (Date.now() - silencioDesde >= SILENCIO_MS) { concluiuIdentificacao = true; break }
+    }
+
+    if (Date.now() - ultimoLog >= 15000) {
+      ultimoLog = Date.now()
+      console.log(`⌛ Ainda aguardando a recepção... (${Math.round((Date.now() - inicio) / 1000)}s)`)
     }
 
     await delay(700)
   }
 
-  if (await page.locator(SEL_ASSIM_OCUPADA).count().catch(() => 0) > 0) {
+  if (!concluiuIdentificacao) {
     throw new Error(
-      `A validação de presença do beneficiário não foi concluída na tela da ASSIM em ${prazoLegivel}.`
+      `A identificação do beneficiário não foi concluída na tela da ASSIM em ${prazoLegivel}.`
     )
   }
 
-  // ---- 3. Sobrou tela utilizável? ----
+  // ---- 4. Sobrou tela utilizável? ----
   // Fechar o modal no "x", ou errar o CPF/nascimento, faz o portal rodar
   // `limpa_carteira()`. Seguir em frente nesse estado produz exatamente a recusa
   // "Beneficiario nao confirmado" no envio.
@@ -223,15 +290,19 @@ async function aguardarConfirmacaoBeneficiario(page, cfg, api, filaId, alertas =
 
   if (!cartao || cartao.some(v => !String(v || '').trim())) {
     throw new Error(
-      'A validação do beneficiário foi cancelada na tela da ASSIM — o portal ' +
+      'A identificação do beneficiário foi cancelada na tela da ASSIM — o portal ' +
       'limpou a carteirinha. Reabra a solicitação para tentar de novo.'
     )
   }
 
-  if (avisou) console.log('✅ Validação de presença concluída pela recepção')
-  else console.log('✅ Beneficiário liberado pela ASSIM sem validação manual')
+  console.log(
+    (await identificado())
+      ? '✅ Identificação concluída pela recepção'
+      : '✅ Identificação encerrada pela recepção (sem código biofacial — ' +
+        'a ASSIM pode recusar o envio)'
+  )
 
-  return avisou ? 'manual' : 'automatica'
+  return 'manual'
 }
 
 function normalizarTexto(texto) {
