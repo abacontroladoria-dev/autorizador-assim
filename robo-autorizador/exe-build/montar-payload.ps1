@@ -180,14 +180,36 @@ Get-ChildItem -Path $PAYLOAD -Recurse -File -Include '*.pem','*.key','*.pfx' -Er
     Where-Object { $_.FullName -notlike '*\node_modules\*' -and $_.FullName -notlike '*\browsers\*' } |
     ForEach-Object { $suspeitos += "chave privada: $($_.FullName.Substring($PAYLOAD.Length + 1))" }
 
-# JWT do Supabase e chave nova (sb_secret_). Ignora node_modules e browsers, que
-# tem megabytes de fixture e nao sao nossos.
+# Procura VALOR de credencial, nao mencao a ela.
+#
+# A primeira versao disto casava com a palavra 'service_role' e acusava
+# .env.exemplo e worker.js, que citam o termo justamente nos comentarios que
+# explicam por que ele nao esta mais no pacote. Varredura que grita com a propria
+# documentacao e varredura que as pessoas aprendem a ignorar.
+#
+# Ignora node_modules e browsers: megabytes de fixture que nao sao nossos.
+$PADROES = @(
+    @{ nome = 'JWT do Supabase';        regex = 'eyJhbGciOiJIUzI1NiIs[A-Za-z0-9_\-\.]{20,}' },
+    @{ nome = 'chave secreta (sb_)';    regex = 'sb_secret_[A-Za-z0-9_\-]{10,}' },
+    @{ nome = 'chave privada PEM';      regex = '-----BEGIN [A-Z ]*PRIVATE KEY-----' },
+    # Uma variavel de segredo com valor de verdade atribuido. Mencao em prosa nao
+    # casa, porque exige o '=' seguido de 20+ caracteres sem espaco.
+    @{ nome = 'segredo atribuido';      regex = '(SERVICE_ROLE_KEY|ASSIM_SENHA|MACHINE_TOKEN)\s*=\s*\S{20,}' }
+)
+
 $alvos = Get-ChildItem -Path $PAYLOAD -File -ErrorAction SilentlyContinue
 foreach ($arq in $alvos) {
     $texto = Get-Content $arq.FullName -Raw -ErrorAction SilentlyContinue
     if ($null -eq $texto) { continue }
-    if ($texto -match 'eyJhbGciOiJIUzI1NiIs' -or $texto -match 'sb_secret_' -or $texto -match 'service_role') {
-        $suspeitos += "possivel credencial em $($arq.Name)"
+
+    foreach ($p in $PADROES) {
+        $achado = [regex]::Match($texto, $p.regex)
+        if ($achado.Success) {
+            # Diz QUAL padrao e ONDE: falso positivo futuro tem que ser
+            # diagnosticavel, nao misterioso.
+            $linha = ($texto.Substring(0, $achado.Index) -split "`n").Count
+            $suspeitos += "$($p.nome) em $($arq.Name):$linha"
+        }
     }
 }
 
