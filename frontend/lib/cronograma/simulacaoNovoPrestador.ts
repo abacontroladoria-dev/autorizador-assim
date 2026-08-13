@@ -5,7 +5,7 @@
 // (mínimo 1 sessão no dia + blocos consecutivos de 40min) usa a MESMA fonte de
 // verdade que "Vagas Agora" e "Saída de Profissional": slotValidoParaPaciente.
 
-import { pm, turnoFromHora } from "./helpers"
+import { espRealPorExibicao, pm, turnoFromHora } from "./helpers"
 import { DIAS_UTIL, HORAS_GRID, PACS_ADMIN, TERAPIA_TO_ESP } from "./constants"
 import { slotValidoParaPaciente } from "./candidatos"
 import type { CsvRow, LaudoRow } from "@/types/cronograma"
@@ -24,23 +24,28 @@ export const UNIDADES_SIMULACAO = ["Realengo", "Padre Miguel", "Fazendinha"] as 
  *  Padre Miguel com outra unidade dentro do mesmo dia. */
 export const UNIDADE_COM_RESTRICAO_GEOGRAFICA = "Padre Miguel"
 
-const EXCLUIR_GAPS = new Set([
-  "Coordenador de Caso", "Supervisão ABA",
+// "Ofertado" (contagem de sessões já entregues, pra calcular o gap) conta
+// TODAS as variações de Aplicador ABA, Supervisão ABA e Coordenador de Caso —
+// só os ABA externos (casa/escola) ficam de fora, já que não são presença na
+// unidade. Confirmado com o time clínico: Coordenador de Caso e Supervisão
+// ABA PRECISAM contar como ofertado de Psicologia ABA (mesma regra já usada
+// em "Ocupar Profissionais Disponíveis", ver EXCLUIR_GAPS de OcupPacMode.tsx).
+const EXCLUIR_OFERTADO = new Set([
   "Aplicador ABA Casa", "Aplicador ABA Escola", "Aplicador ABA Escola/Casa",
 ])
 
-// Diferente de EXCLUIR_GAPS (que rege só a contagem de "ofertado" no cálculo
-// de gap, em calcularGaps): "Coordenador de Caso" ocupa sala física na
-// unidade, então pra decidir se um paciente já frequenta a unidade naquele
+// Diferente de EXCLUIR_OFERTADO (que rege só a contagem de "ofertado" no
+// cálculo de gap, em calcularGaps): "Coordenador de Caso" ocupa sala física
+// na unidade, então pra decidir se um paciente já frequenta a unidade naquele
 // dia — e pra passar as sessões dele pra slotValidoParaPaciente checar
 // sequenciamento sem buraco — ele TEM que contar, senão a linha nunca chega
 // na checagem de sequenciamento e o paciente fica sem sugestão nenhuma
 // naquele dia (confirmado com o time clínico). "Supervisão ABA" e os ABA
 // externos (casa/escola) continuam de fora: não representam presença física
 // na unidade nesse horário.
-const EXCLUIR_ATENDIMENTO = new Set(
-  [...EXCLUIR_GAPS].filter(t => t !== "Coordenador de Caso"),
-)
+const EXCLUIR_ATENDIMENTO = new Set([
+  "Supervisão ABA", "Aplicador ABA Casa", "Aplicador ABA Escola", "Aplicador ABA Escola/Casa",
+])
 
 /** Especialidades simuláveis — todas as que têm mapeamento terapia → especialidade. */
 export function listarEspecialidades(): string[] {
@@ -129,8 +134,10 @@ export function calcularGaps(lRows: LaudoRow[], cRows: CsvRow[]): GapItem[] {
     if (r["Status do Agendamento"] !== "Agendado") continue
     const pac = r["Nome Favorecido"]
     if (!pac || PACS_ADMIN.has(pac)) continue
-    const esp = TERAPIA_TO_ESP[r.Terapia]
-    if (!esp || EXCLUIR_GAPS.has(r.Terapia)) continue
+    const espPadrao = TERAPIA_TO_ESP[r.Terapia]
+    if (!espPadrao || EXCLUIR_OFERTADO.has(r.Terapia)) continue
+    const terapiaExib = String(r["Terapia Exibição"] || r["Terapia Exibicao"] || "").trim()
+    const esp = espRealPorExibicao(r.Terapia, terapiaExib, espPadrao)
     const k = `${pac}|||${esp}`
     qtdOfertada[k] = (qtdOfertada[k] || 0) + 1
   }

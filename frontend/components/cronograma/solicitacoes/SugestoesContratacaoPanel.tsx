@@ -8,26 +8,30 @@
 import { startTransition, useState } from "react"
 import { ArrowRight, Building2, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Sparkles, Users } from "lucide-react"
 import { useSugestoesContratacao } from "@/hooks/useSugestoesContratacao"
-import { diaCurto, fmtReal, turnoNome } from "@/lib/cronograma/helpers"
+import { useTaxasEspecialidade } from "@/hooks/useTaxasEspecialidade"
+import { useParametrosGerais } from "@/hooks/useParametrosGerais"
+import {
+  calcularBreakEvenPJ, projetarMargemBreakEvenPJ, calcularBreakEvenAtendimento, projetarMargemBreakEvenAtendimento,
+  ESPECIALIDADES_BREAK_EVEN_PJ,
+} from "@/lib/remuneracao/pontoEquilibrio"
+import { diaCurto, fmtReal } from "@/lib/cronograma/helpers"
+import { corTerapiaBadge, escurecerHex, hexParaRgba } from "@/lib/cronograma/constants"
 import { Button } from "@/components/ui/button"
-import { SegmentedTabs } from "@/components/cronograma/ui/SegmentedTabs"
 import { InlineNotice } from "@/components/cronograma/ui/InlineNotice"
+import { InfoTooltip } from "@/components/cronograma/ui/InfoTooltip"
+import { BadgeOcupacao, COR_OCUPACAO } from "@/components/cronograma/ui/BadgeOcupacao"
+import { IndicadorDiaTurno } from "@/components/cronograma/ui/IndicadorDiaTurno"
 import { RemanejamentoDetalheModal } from "./RemanejamentoDetalheModal"
+import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
 import type { CandidatoNaSugestao, SugestaoContratacao } from "@/lib/cronograma/sugestaoContratacaoTypes"
 import type { ModoCascataOcupacao, FaixaCascata } from "@/lib/cronograma/sugestaoContratacao"
 import type { CsvRow } from "@/types/cronograma"
 import type { Turno } from "@/lib/cronograma/simulacaoNovoPrestador"
 
-const SUGESTOES_POR_PAGINA = 20
+const SUGESTOES_POR_PAGINA = 5
 
 interface Props {
   onAplicarSugestao: (especialidade: string, periodos: { dia: string; turno: Turno }[], unidade: string) => void
-}
-
-const FAIXA_LABEL: Record<70 | 60 | 50, string> = {
-  70: "≥ 70% de ocupação prevista",
-  60: "≥ 60% de ocupação prevista",
-  50: "≥ 50% de ocupação prevista",
 }
 
 const FAIXAS_FILTRO: FaixaCascata[] = [70, 60, 50]
@@ -37,7 +41,9 @@ function CardSugestao({
 }: { sugestao: SugestaoContratacao; cRows: CsvRow[]; onAplicar: () => void }) {
   const [aberto, setAberto] = useState(false)
   const [detalheRemanejamento, setDetalheRemanejamento] = useState<CandidatoNaSugestao | null>(null)
+  const [confirmarSemSala, setConfirmarSemSala] = useState(false)
 
+  const semSalaLivre = !sugestao.salaVinculada
   const qtdAdjacente = sugestao.candidatos.filter(c => c.modalidade === "adjacente").length
   const candidatosRemanejamento = sugestao.candidatos.filter(c => c.modalidade === "remanejamento")
   const qtdRemanejamento = candidatosRemanejamento.length
@@ -45,27 +51,87 @@ function CardSugestao({
   // podem competir pela MESMA vaga, então "nº de candidatos" não é "nº de vagas".
   const vagas = new Set(sugestao.candidatos.map(c => `${c.turno}|||${c.hora}`)).size
 
+  // Break Even sempre a 20% de perda neste card (o seletor de cenário fica só
+  // em "Parâmetros da simulação" — aqui é uma prévia rápida, não uma análise
+  // configurável) — mesmos modelos de lib/remuneracao/pontoEquilibrio.ts.
+  const { taxas_pa: taxasPA, be_custo_mensal_pj: beCustoMensalPJ, be_capacidade_manha: beCapacidadeManha, be_capacidade_tarde: beCapacidadeTarde } = useTaxasEspecialidade()
+  const { parametros: parametrosGerais } = useParametrosGerais()
+  const PERDA_PADRAO_CARD = 20
+
+  const margemBreakEven = (() => {
+    if (!parametrosGerais || !sugestao.projecaoRemuneracao || vagas <= 0) return null
+    const valorSessaoMedio = sugestao.projecaoRemuneracao.receitaSemanalProjetada / vagas
+    if (valorSessaoMedio <= 0) return null
+    const periodosManha = sugestao.turnos.includes("manha") ? 1 : 0
+    const periodosTarde = sugestao.turnos.includes("tarde") ? 1 : 0
+
+    if (ESPECIALIDADES_BREAK_EVEN_PJ.has(sugestao.especialidade)) {
+      const custoMensal = beCustoMensalPJ[sugestao.especialidade]
+      const capManha = beCapacidadeManha[sugestao.especialidade]
+      const capTarde = beCapacidadeTarde[sugestao.especialidade]
+      if (custoMensal == null || capManha == null || capTarde == null) return null
+      const resultado = calcularBreakEvenPJ({
+        valorSessaoBruto: valorSessaoMedio, impostoFaturamentoPct: parametrosGerais.imposto_faturamento_pct,
+        custoMensalDiaCompleto: custoMensal, capacidadeManha: capManha, capacidadeTarde: capTarde,
+        perdaPct: PERDA_PADRAO_CARD, periodosManha, periodosTarde,
+      })
+      const projecao = projetarMargemBreakEvenPJ(resultado, PERDA_PADRAO_CARD, vagas)
+      return { receitaLiquidaMes: projecao.receitaLiquidaMes, custoMes: resultado.custoMensalTotal, margemMensal: projecao.margemMensal }
+    }
+
+    const taxaPA = taxasPA[sugestao.especialidade]
+    if (!taxaPA) return null
+    const resultado = calcularBreakEvenAtendimento({
+      valorSessaoBruto: valorSessaoMedio, impostoFaturamentoPct: parametrosGerais.imposto_faturamento_pct,
+      taxaPA, capacidadeManha: parametrosGerais.pa_capacidade_manha_padrao, capacidadeTarde: parametrosGerais.pa_capacidade_tarde_padrao,
+      periodosManha, periodosTarde,
+    })
+    const projecao = projetarMargemBreakEvenAtendimento(resultado, taxaPA, PERDA_PADRAO_CARD, vagas)
+    return { receitaLiquidaMes: projecao.receitaLiquidaMes, custoMes: projecao.custoVariavelMes, margemMensal: projecao.margemMensal }
+  })()
+
+  const impostosEPerdas = margemBreakEven && sugestao.projecaoRemuneracao
+    ? sugestao.projecaoRemuneracao.receitaMensalProjetada - margemBreakEven.receitaLiquidaMes
+    : 0
+
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       <div className="flex flex-wrap items-start gap-3 p-3.5">
+        <BadgeOcupacao pct={sugestao.pctOcupacaoPrevista} faixa={sugestao.faixaCascata} />
+
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
-            <span className="text-[12.5px] font-extrabold text-foreground">{sugestao.especialidade}</span>
+            <span
+              className="rounded-full border px-2 py-0.5 text-[12.5px] font-extrabold"
+              style={{
+                backgroundColor: hexParaRgba(corTerapiaBadge(sugestao.especialidade), 0.16),
+                borderColor: hexParaRgba(corTerapiaBadge(sugestao.especialidade), 0.4),
+                color: escurecerHex(corTerapiaBadge(sugestao.especialidade), 0.35),
+              }}
+            >
+              {sugestao.especialidade}
+            </span>
             <span className="text-muted-foreground">·</span>
             <span className="text-[12.5px] font-bold text-foreground">{sugestao.unidade}</span>
           </div>
-          <div className="mt-1 text-[11px] text-muted-foreground">
-            {diaCurto(sugestao.dia)} · {sugestao.turnos.map(t => turnoNome[t]).join(" + ")} · {FAIXA_LABEL[sugestao.faixaCascata]}
-          </div>
+          <IndicadorDiaTurno dia={sugestao.dia} turnos={sugestao.turnos} corBar={COR_OCUPACAO[sugestao.faixaCascata].bar} />
 
-          <div className="mt-2 flex flex-wrap gap-3 text-[11px]">
-            <span className="flex items-center gap-1 text-foreground">
+          <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
+            <span className="flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-1 font-semibold text-foreground">
               <Users size={12} className="text-muted-foreground" />
-              {vagas} vaga(s) de horário · {sugestao.candidatos.length} paciente(s) elegível(is)
-              {qtdRemanejamento > 0 && ` (${qtdAdjacente} por adjacência, ${qtdRemanejamento} via remanejamento)`}
+              {vagas} vaga(s) · {sugestao.candidatos.length} paciente(s) elegível(is)
             </span>
-            <span className="flex items-center gap-1 text-foreground">
-              <Building2 size={12} className="text-muted-foreground" />
+            {qtdRemanejamento > 0 && (
+              <span className="flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-1 text-muted-foreground">
+                {qtdAdjacente} adjacência · {qtdRemanejamento} remanejamento
+              </span>
+            )}
+            <span className={`flex items-center gap-1 rounded-full border px-2 py-1 ${
+              semSalaLivre
+                ? "animate-pulse border-red-300 bg-red-50 font-bold text-red-600 dark:border-red-800 dark:bg-red-950/30 dark:text-red-400"
+                : "border-border bg-muted/40 text-foreground"
+            }`}>
+              <Building2 size={12} className={semSalaLivre ? "text-red-600 dark:text-red-400" : "text-muted-foreground"} />
               {sugestao.salaVinculada
                 ? `${sugestao.salaVinculada.nomeExibicao} · ${sugestao.salaVinculada.unidade}`
                 : "Sem sala livre encontrada"}
@@ -74,23 +140,44 @@ function CardSugestao({
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-1.5">
-          <div className="text-right">
-            <div className="text-lg font-black tabular-nums text-emerald-700 dark:text-emerald-400">
-              {sugestao.projecaoRemuneracao ? fmtReal(sugestao.projecaoRemuneracao.receitaMensalProjetada) : "—"}
+          {margemBreakEven ? (
+            <div className="text-right text-[11px] leading-tight">
+              <div className="flex items-center justify-end gap-1 font-bold tabular-nums text-emerald-700 dark:text-emerald-400">
+                <span>+ {fmtReal(margemBreakEven.receitaLiquidaMes)}</span>
+                <span className="font-normal text-muted-foreground">receita líquida/mês</span>
+              </div>
+              <div className="flex items-center justify-end gap-1 tabular-nums text-muted-foreground">
+                <span>− {fmtReal(impostosEPerdas)}</span>
+                <span>impostos e faltas/ociosidade (20%)</span>
+              </div>
+              <div className="flex items-center justify-end gap-1 tabular-nums text-rose-600 dark:text-rose-400">
+                <span>− {fmtReal(margemBreakEven.custoMes)}</span>
+                <span>custo previsto</span>
+              </div>
+              <div className={`mt-1 flex items-center justify-end gap-1 border-t border-border pt-1 text-sm font-black tabular-nums ${margemBreakEven.margemMensal >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                <span>= {fmtReal(margemBreakEven.margemMensal)}</span>
+                <span className="text-[11px] font-bold uppercase tracking-wide">margem</span>
+              </div>
             </div>
-            <div className="text-[11px] text-muted-foreground">receita/mês projetada</div>
-            {sugestao.projecaoRemuneracao && (
-              <div className="mt-0.5 text-[11px] font-bold tabular-nums text-foreground">
-                {fmtReal(sugestao.projecaoRemuneracao.receitaSemanalProjetada)} <span className="font-normal text-muted-foreground">/semana</span>
+          ) : (
+            <div className="text-right">
+              <div className="text-lg font-black tabular-nums text-emerald-700 dark:text-emerald-400">
+                {sugestao.projecaoRemuneracao ? fmtReal(sugestao.projecaoRemuneracao.receitaMensalProjetada) : "—"}
               </div>
-            )}
-            {!!sugestao.projecaoRemuneracao?.sessoesSemValor && (
-              <div className="text-[10px] text-amber-600 dark:text-amber-400">
-                {sugestao.projecaoRemuneracao.sessoesSemValor} sessão(ões) sem valor cadastrado
-              </div>
-            )}
-          </div>
-          <Button size="xs" onClick={onAplicar} className="gap-1">
+              <div className="text-[11px] text-muted-foreground">receita/mês projetada</div>
+              {sugestao.projecaoRemuneracao && (
+                <div className="mt-0.5 text-[11px] font-bold tabular-nums text-foreground">
+                  {fmtReal(sugestao.projecaoRemuneracao.receitaSemanalProjetada)} <span className="font-normal text-muted-foreground">/semana</span>
+                </div>
+              )}
+            </div>
+          )}
+          {!!sugestao.projecaoRemuneracao?.sessoesSemValor && (
+            <div className="text-[11px] text-amber-600 dark:text-amber-400">
+              {sugestao.projecaoRemuneracao.sessoesSemValor} sessão(ões) sem valor cadastrado
+            </div>
+          )}
+          <Button size="xs" onClick={() => (semSalaLivre ? setConfirmarSemSala(true) : onAplicar())} className="gap-1">
             Aplicar <ArrowRight size={12} />
           </Button>
         </div>
@@ -140,6 +227,17 @@ function CardSugestao({
           onClose={() => setDetalheRemanejamento(null)}
         />
       )}
+
+      {confirmarSemSala && (
+        <ConfirmDialog
+          title="Simular sem sala livre"
+          description="Esta sugestão não tem sala livre encontrada no momento — você está simulando uma contratação hipotética sem sala garantida. Confirme a alocação de sala antes de contratar de fato."
+          confirmLabel="Continuar"
+          confirmColor="#dc2626"
+          onCancel={() => setConfirmarSemSala(false)}
+          onConfirm={() => { setConfirmarSemSala(false); onAplicar() }}
+        />
+      )}
     </div>
   )
 }
@@ -180,50 +278,75 @@ export function SugestoesContratacaoPanel({ onAplicarSugestao }: Props) {
       <div className="mb-1 flex items-center gap-1.5">
         <Sparkles size={15} className="text-violet-600 dark:text-violet-400" />
         <span className="text-[15px] font-extrabold text-foreground">Sugestões automáticas de contratação</span>
+        {!loading && !error && (
+          <span className="ml-auto rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-bold text-muted-foreground">
+            {sugestoes.length} sugestão(ões)
+          </span>
+        )}
       </div>
       <div className="mb-3 text-xs text-muted-foreground">
         O sistema identifica onde contratar rende mais ocupação prevista, já indicando sala livre e a receita mensal estimada — semana de referência: {refWeekLabel}.
       </div>
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <span className="text-[11px] font-bold text-muted-foreground">Ocupação considerada:</span>
-        <SegmentedTabs
-          value={modo}
-          onChange={mudarModo}
-          ariaLabel="Critério de ocupação prevista"
-          size="lg"
-          tabs={[
-            { value: "diaInteiro", label: "Manhã + tarde juntos" },
-            { value: "porTurno", label: "Melhor turno isolado" },
-          ]}
-        />
-      </div>
-      <div className="mb-3 text-[11px] text-muted-foreground">
-        {modo === "porTurno"
-          ? "Ranqueia pelo turno (ou dia inteiro) que sozinho render mais % — pode aparecer alto mesmo que o profissional só aceite um dos turnos."
-          : "Sempre soma manhã + tarde do mesmo dia antes de calcular a % — simula um profissional que aceita os dois turnos, então a % cai se um dos turnos for bem mais ocioso que o outro."}
-      </div>
+      <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-2.5 rounded-xl bg-muted/40 px-3 py-2.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-bold text-muted-foreground">Ocupação:</span>
+          <div className="flex gap-1">
+            {(
+              [
+                { value: "diaInteiro" as const, label: "Manhã + tarde juntos" },
+                { value: "porTurno" as const, label: "Melhor turno isolado" },
+              ]
+            ).map(tab => {
+              const ativa = modo === tab.value
+              return (
+                <button
+                  key={tab.value}
+                  type="button"
+                  onClick={() => mudarModo(tab.value)}
+                  aria-pressed={ativa}
+                  className={`rounded-full border px-3 py-1 text-xs font-bold transition-colors ${
+                    ativa
+                      ? "border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-400"
+                      : "border-border bg-card text-muted-foreground hover:bg-muted/50"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              )
+            })}
+          </div>
+          <InfoTooltip ariaLabel="O que significa cada critério de ocupação">
+            <p><strong className="text-foreground">Manhã + tarde juntos</strong>: soma os dois turnos do mesmo dia antes de calcular a % — simula um profissional que aceita ambos, então a % cai se um turno for bem mais ocioso que o outro.</p>
+            <p className="mt-2"><strong className="text-foreground">Melhor turno isolado</strong>: ranqueia pelo turno (ou dia inteiro) que sozinho rende mais % — pode aparecer alto mesmo que o profissional só aceite um dos turnos.</p>
+          </InfoTooltip>
+        </div>
 
-      <div className="mb-3 flex flex-wrap items-center gap-2">
-        <span className="text-[11px] font-bold text-muted-foreground">Faixa de ocupação:</span>
-        {FAIXAS_FILTRO.map(faixa => {
-          const ativa = faixasSelecionadas.has(faixa)
-          return (
-            <button
-              key={faixa}
-              type="button"
-              onClick={() => alternarFaixa(faixa)}
-              aria-pressed={ativa}
-              className={`rounded-full border px-4 py-2 text-sm font-bold transition-colors ${
-                ativa
-                  ? "border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-400"
-                  : "border-border bg-card text-muted-foreground hover:bg-muted/50"
-              }`}
-            >
-              ≥ {faixa}%
-            </button>
-          )
-        })}
+        <div className="hidden h-5 w-px bg-border sm:block" />
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-bold text-muted-foreground">Faixa:</span>
+          <div className="flex gap-1">
+            {FAIXAS_FILTRO.map(faixa => {
+              const ativa = faixasSelecionadas.has(faixa)
+              return (
+                <button
+                  key={faixa}
+                  type="button"
+                  onClick={() => alternarFaixa(faixa)}
+                  aria-pressed={ativa}
+                  className={`rounded-full border px-3 py-1 text-xs font-bold transition-colors ${
+                    ativa
+                      ? "border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-400"
+                      : "border-border bg-card text-muted-foreground hover:bg-muted/50"
+                  }`}
+                >
+                  ≥ {faixa}%
+                </button>
+              )
+            })}
+          </div>
+        </div>
       </div>
 
       {loading && <InlineNotice tone="slate">Calculando sugestões…</InlineNotice>}
@@ -238,7 +361,6 @@ export function SugestoesContratacaoPanel({ onAplicarSugestao }: Props) {
 
       {!loading && !error && !!sugestoes.length && (
         <>
-          <div className="mb-2 text-[11px] text-muted-foreground">{sugestoes.length} sugestão(ões) no total</div>
           <div className="flex flex-col gap-2.5">
             {sugestoesDaPagina.map(s => (
               <CardSugestao

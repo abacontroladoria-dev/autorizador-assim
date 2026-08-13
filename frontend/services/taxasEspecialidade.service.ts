@@ -14,7 +14,11 @@ export async function getTaxasEspecialidade(): Promise<{ data: TaxaEspecialidade
 }
 
 export async function upsertTaxaEspecialidade(
-  row: { especialidade: string; taxa_pa: number; diaria: number },
+  row: {
+    especialidade: string; taxa_pa: number; diaria: number
+    be_custo_mensal_pj?: number | null
+    be_capacidade_manha?: number | null; be_capacidade_tarde?: number | null
+  },
   updatedBy?: string
 ): Promise<boolean> {
   const supabase = getSupabaseClient()

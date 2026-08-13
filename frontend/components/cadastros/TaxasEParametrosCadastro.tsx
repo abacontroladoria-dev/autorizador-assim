@@ -9,6 +9,7 @@ import { useTaxasEspecialidade, refetchTaxasEspecialidade } from "@/hooks/useTax
 import { updateParametrosGerais } from "@/services/parametrosGerais.service"
 import { upsertTaxaEspecialidade } from "@/services/taxasEspecialidade.service"
 import { useUnsavedChangesGuard } from "@/contexts/UnsavedChangesContext"
+import { calcularBreakEvenPJ, CENARIOS_PERDA_PCT, ESPECIALIDADES_BREAK_EVEN_PJ } from "@/lib/remuneracao/pontoEquilibrio"
 
 function InfoTooltip({ text }: { text: string }) {
   return (
@@ -39,13 +40,24 @@ type Valor = {
   ccPE: number
   ccLim: number
   etaBonus: number
+  impostoFaturamento: number
+  paCapacidadeManha: number
+  paCapacidadeTarde: number
   taxas: Record<string, number>
   diarias: Record<string, number>
+  beCustoMensalPJ: Record<string, number>
+  beCapacidadeManha: Record<string, number>
+  beCapacidadeTarde: Record<string, number>
 }
 
 export function TaxasEParametrosCadastro() {
   const { parametros, loading: loadingParametros, error: errorParametros } = useParametrosGerais()
-  const { taxas_pa, diarias: diariasEspecialidade, loading: loadingTaxas } = useTaxasEspecialidade()
+  const {
+    taxas_pa, diarias: diariasEspecialidade,
+    be_custo_mensal_pj: beCustoMensalEspecialidade,
+    be_capacidade_manha: beCapacidadeManhaEspecialidade, be_capacidade_tarde: beCapacidadeTardeEspecialidade,
+    loading: loadingTaxas,
+  } = useTaxasEspecialidade()
   const loading = loadingParametros || loadingTaxas
   const error = errorParametros
 
@@ -55,9 +67,15 @@ export function TaxasEParametrosCadastro() {
     ccPE: parametros?.cc_pe_default ?? 0,
     ccLim: parametros?.cc_lim_default ?? 18,
     etaBonus: parametros?.eta_bonus_default ?? 0,
+    impostoFaturamento: parametros?.imposto_faturamento_pct ?? 20,
+    paCapacidadeManha: parametros?.pa_capacidade_manha_padrao ?? 6,
+    paCapacidadeTarde: parametros?.pa_capacidade_tarde_padrao ?? 7,
     taxas: taxas_pa,
     diarias: diariasEspecialidade,
-  }), [parametros, taxas_pa, diariasEspecialidade])
+    beCustoMensalPJ: Object.fromEntries([...ESPECIALIDADES_BREAK_EVEN_PJ].map(esp => [esp, beCustoMensalEspecialidade[esp] ?? 0])),
+    beCapacidadeManha: Object.fromEntries([...ESPECIALIDADES_BREAK_EVEN_PJ].map(esp => [esp, beCapacidadeManhaEspecialidade[esp] ?? 0])),
+    beCapacidadeTarde: Object.fromEntries([...ESPECIALIDADES_BREAK_EVEN_PJ].map(esp => [esp, beCapacidadeTardeEspecialidade[esp] ?? 0])),
+  }), [parametros, taxas_pa, diariasEspecialidade, beCustoMensalEspecialidade, beCapacidadeManhaEspecialidade, beCapacidadeTardeEspecialidade])
 
   const [valor, setValor] = useState<Valor>(buildValor)
   const [savedValor, setSavedValor] = useState<Valor>(buildValor)
@@ -90,6 +108,8 @@ export function TaxasEParametrosCadastro() {
 
     const parametrosMudaram = valor.presenca !== savedValor.presenca || valor.ccPA !== savedValor.ccPA
       || valor.ccPE !== savedValor.ccPE || valor.ccLim !== savedValor.ccLim || valor.etaBonus !== savedValor.etaBonus
+      || valor.impostoFaturamento !== savedValor.impostoFaturamento
+      || valor.paCapacidadeManha !== savedValor.paCapacidadeManha || valor.paCapacidadeTarde !== savedValor.paCapacidadeTarde
     if (parametrosMudaram) {
       ops.push(updateParametrosGerais(parametros.id, {
         presenca_padrao: valor.presenca,
@@ -97,15 +117,28 @@ export function TaxasEParametrosCadastro() {
         cc_pe_default: valor.ccPE,
         cc_lim_default: valor.ccLim,
         eta_bonus_default: valor.etaBonus,
+        imposto_faturamento_pct: valor.impostoFaturamento,
+        pa_capacidade_manha_padrao: valor.paCapacidadeManha,
+        pa_capacidade_tarde_padrao: valor.paCapacidadeTarde,
       }))
     }
 
-    const especialidades = new Set([...Object.keys(valor.taxas), ...Object.keys(valor.diarias)])
+    const especialidades = new Set([...Object.keys(valor.taxas), ...Object.keys(valor.diarias), ...ESPECIALIDADES_BREAK_EVEN_PJ])
     for (const esp of especialidades) {
       const taxaPA = valor.taxas[esp] ?? 0
       const diaria = valor.diarias[esp] ?? 0
-      if (taxaPA !== (savedValor.taxas[esp] ?? 0) || diaria !== (savedValor.diarias[esp] ?? 0)) {
-        ops.push(upsertTaxaEspecialidade({ especialidade: esp, taxa_pa: taxaPA, diaria }))
+      const beCustoMensal = ESPECIALIDADES_BREAK_EVEN_PJ.has(esp) ? (valor.beCustoMensalPJ[esp] ?? 0) : undefined
+      const beManha = ESPECIALIDADES_BREAK_EVEN_PJ.has(esp) ? (valor.beCapacidadeManha[esp] ?? 0) : undefined
+      const beTarde = ESPECIALIDADES_BREAK_EVEN_PJ.has(esp) ? (valor.beCapacidadeTarde[esp] ?? 0) : undefined
+      const beMudou = ESPECIALIDADES_BREAK_EVEN_PJ.has(esp)
+        && (beCustoMensal !== (savedValor.beCustoMensalPJ[esp] ?? 0)
+          || beManha !== (savedValor.beCapacidadeManha[esp] ?? 0)
+          || beTarde !== (savedValor.beCapacidadeTarde[esp] ?? 0))
+      if (taxaPA !== (savedValor.taxas[esp] ?? 0) || diaria !== (savedValor.diarias[esp] ?? 0) || beMudou) {
+        ops.push(upsertTaxaEspecialidade({
+          especialidade: esp, taxa_pa: taxaPA, diaria,
+          be_custo_mensal_pj: beCustoMensal, be_capacidade_manha: beManha, be_capacidade_tarde: beTarde,
+        }))
       }
     }
 
@@ -150,7 +183,10 @@ export function TaxasEParametrosCadastro() {
     )
   }
 
-  const { presenca, ccPA, ccPE, ccLim, etaBonus, taxas, diarias } = valor
+  const {
+    presenca, ccPA, ccPE, ccLim, etaBonus, impostoFaturamento, paCapacidadeManha, paCapacidadeTarde,
+    taxas, diarias, beCustoMensalPJ, beCapacidadeManha, beCapacidadeTarde,
+  } = valor
   const allEspecialidades = Array.from(new Set([...Object.keys(taxas), ...Object.keys(diarias)])).sort()
 
   return (
@@ -261,6 +297,54 @@ export function TaxasEParametrosCadastro() {
               </div>
             </div>
 
+            <div className="h-px bg-slate-100 dark:bg-slate-800" />
+
+            <div>
+              <label htmlFor="config-imposto-faturamento" className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.green }}>
+                Imposto sobre faturamento (%)
+                <InfoTooltip text="Alíquota que incide só sobre sessões efetivamente realizadas — usada no cálculo de Ponto de Equilíbrio de todas as especialidades." />
+              </label>
+              <div className="relative w-full sm:w-32">
+                <input
+                  id="config-imposto-faturamento"
+                  type="number" min="0" max="100" step="0.1"
+                  value={impostoFaturamento}
+                  onChange={e => update({ impostoFaturamento: Number(e.target.value) })}
+                  className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent pr-8 pl-3 py-2 text-sm text-right focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+                />
+                <span className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
+              </div>
+            </div>
+
+            <div className="h-px bg-slate-100 dark:bg-slate-800" />
+
+            <div>
+              <label className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.green }}>
+                Capacidade padrão — especialidades por atendimento
+                <InfoTooltip text="Sessões de manhã/tarde num dia completo, usadas como referência de capacidade no Ponto de Equilíbrio de todas as especialidades que pagam por atendimento (todas exceto Fono/TO/Musicoterapia, que têm capacidade própria)." />
+              </label>
+              <div className="grid grid-cols-2 gap-3 sm:w-64">
+                <div>
+                  <label className="block text-[11px] font-semibold mb-1 text-slate-500 dark:text-slate-400">Manhã</label>
+                  <input
+                    type="number" min="0" step="1"
+                    value={paCapacidadeManha}
+                    onChange={e => update({ paCapacidadeManha: Number(e.target.value) })}
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold mb-1 text-slate-500 dark:text-slate-400">Tarde</label>
+                  <input
+                    type="number" min="0" step="1"
+                    value={paCapacidadeTarde}
+                    onChange={e => update({ paCapacidadeTarde: Number(e.target.value) })}
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+                  />
+                </div>
+              </div>
+            </div>
+
           </div>
         </div>
 
@@ -348,6 +432,83 @@ export function TaxasEParametrosCadastro() {
           </div>
         </div>
 
+      </div>
+
+      {/* Bloco 3: Ponto de Equilíbrio (PJ) — Fono/TO por ora */}
+      <div className="space-y-4">
+        <div>
+          <h3 className="font-bold text-lg text-foreground">Ponto de Equilíbrio - Média Mensal para 4,33 sem/mês e 56,33 sess/mês</h3>
+          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
+            Alimenta o Break Even mostrado em "Simulação de Novo Prestador" (relacionamento-prestador/solicitacoes → aba Simulação). O valor de sessão usado ali vem direto da Projeção financeira daquela tela — aqui você cadastra o custo fixo mensal (pra 1 dia/semana completo) e a capacidade de manhã/tarde separadas, já que um dia pode não valer o mesmo nos dois turnos.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {[...ESPECIALIDADES_BREAK_EVEN_PJ].map(esp => {
+            const hex = especialidadeCor(esp)
+            const custoMensal = beCustoMensalPJ[esp] ?? 0
+            const capacidadeManha = beCapacidadeManha[esp] ?? 0
+            const capacidadeTarde = beCapacidadeTarde[esp] ?? 0
+            return (
+              <div key={esp} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-4 shadow-sm">
+                <div className="text-sm font-bold" style={{ color: hex }}>{esp}</div>
+
+                <div>
+                  <label className="block text-xs font-bold mb-1.5 text-slate-500 dark:text-slate-400">Custo mensal PJ — dia completo (R$)</label>
+                  <input
+                    type="number" min="0" step="0.01"
+                    value={custoMensal}
+                    onChange={e => update({ beCustoMensalPJ: { ...beCustoMensalPJ, [esp]: Number(e.target.value) } })}
+                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold mb-1.5 text-slate-500 dark:text-slate-400">Capacidade manhã (sessões)</label>
+                    <input
+                      type="number" min="0" step="1"
+                      value={capacidadeManha}
+                      onChange={e => update({ beCapacidadeManha: { ...beCapacidadeManha, [esp]: Number(e.target.value) } })}
+                      className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold mb-1.5 text-slate-500 dark:text-slate-400">Capacidade tarde (sessões)</label>
+                    <input
+                      type="number" min="0" step="1"
+                      value={capacidadeTarde}
+                      onChange={e => update({ beCapacidadeTarde: { ...beCapacidadeTarde, [esp]: Number(e.target.value) } })}
+                      className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+                    />
+                  </div>
+                </div>
+                <div className="text-[11px] text-slate-400 dark:text-slate-500">Dia completo: {capacidadeManha + capacidadeTarde} sessões</div>
+
+                <div className="h-px bg-slate-100 dark:bg-slate-800" />
+
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  {CENARIOS_PERDA_PCT.map(perdaPct => {
+                    const r = calcularBreakEvenPJ({
+                      valorSessaoBruto: 120, impostoFaturamentoPct: impostoFaturamento,
+                      custoMensalDiaCompleto: custoMensal, capacidadeManha, capacidadeTarde, perdaPct,
+                      periodosManha: 1, periodosTarde: 1,
+                    })
+                    return (
+                      <div key={perdaPct} className="rounded-lg bg-slate-50 dark:bg-slate-800/50 px-2 py-2">
+                        <div className="text-[11px] font-bold text-slate-400 uppercase">{perdaPct}% perda</div>
+                        <div className="text-lg font-black text-foreground">{r.slotsSemanaMinimo}</div>
+                        <div className="text-[11px] text-slate-500 dark:text-slate-400">slots/sem · {Math.round(r.alocacaoPercentual * 100)}%</div>
+                      </div>
+                    )
+                  })}
+                </div>
+                <p className="text-[11px] text-slate-400 dark:text-slate-500">
+                  Piso de slots/semana pra cada cenário de perda, considerando 1 dia completo/semana (manhã+tarde) e valor de sessão de referência R$120 (a simulação real usa o valor projetado em Projeção financeira e escala custo/capacidade pelos turnos exatos marcados).
+                </p>
+              </div>
+            )
+          })}
+        </div>
       </div>
     </div>
   )

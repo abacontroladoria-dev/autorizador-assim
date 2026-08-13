@@ -12,10 +12,18 @@ import { encontrarCandidatosRemanejamento, construirIndiceRemanejamento, type In
 import { filtrarCapacidadeLivreReservada, turnoFromHora } from "./helpers"
 import { hiStr, type GapItem, type Turno } from "./simulacaoNovoPrestador"
 import { DIAS_UTIL, TERAPIA_TO_ESP, TODAS_ESP, UNID_COR } from "./constants"
+import type { FaixaCascata } from "./sugestaoContratacao"
 import type { RemanejamentoDetalhe } from "./sugestaoContratacaoTypes"
 import type { CsvRow } from "@/types/cronograma"
 
 const TURNOS: Turno[] = ["manha", "tarde"]
+
+// Mesma cascata 70/60/50 das sugestões automáticas de contratação
+// (sugestaoContratacao.ts) — aqui classifica não "quanto renderia contratar",
+// mas "quanto da capacidade Livre já existente nessa categoria já virou
+// oportunidade" (direto + remanejamento) / (direto + remanejamento + livre).
+const FAIXAS_CASCATA: readonly FaixaCascata[] = [70, 60, 50]
+export const TODAS_FAIXAS_OPORTUNIDADE: ReadonlySet<FaixaCascata> = new Set(FAIXAS_CASCATA)
 
 export interface VagaCategoria {
   hora: string
@@ -158,6 +166,11 @@ export interface CategoriaComOportunidade {
   qtdDireto: number
   qtdRemanejamento: number
   qtdLivre: number
+  /** % da capacidade "Livre" já existente nessa categoria+turno que já virou
+   *  oportunidade (direto + remanejamento) / (direto + remanejamento + livre). */
+  pctAproveitamento: number
+  /** Maior faixa da cascata 70/60/50 que pctAproveitamento atinge. */
+  faixa: FaixaCascata
 }
 
 /** Varre TODA combinação Unidade × Dia × Turno × Especialidade (mesmo
@@ -168,10 +181,17 @@ export interface CategoriaComOportunidade {
  *  Simulação de Novo Prestador, só que apontando pra onde já dá pra
  *  aproveitar internamente, sem precisar contratar. Só entram combinações
  *  com pelo menos 1 oportunidade — combinação sem nenhuma não ajuda o
- *  usuário a decidir onde olhar. */
+ *  usuário a decidir onde olhar.
+ *
+ *  `faixasSelecionadas` filtra pela mesma cascata 70/60/50 do painel de
+ *  sugestões automáticas — combinação abaixo da menor faixa marcada não
+ *  entra no resultado (mesmo tendo 1+ oportunidade). */
 export function rankearOportunidadesInternas(
   cRowsBrutos: CsvRow[], gapMap: Record<string, GapItem>,
+  faixasSelecionadas: ReadonlySet<FaixaCascata> = TODAS_FAIXAS_OPORTUNIDADE,
 ): CategoriaComOportunidade[] {
+  if (!faixasSelecionadas.size) return []
+
   // Pré-calculados UMA VEZ pra toda a varredura (3 unidades × 5 dias × 13
   // especialidades = ~195 combinações) — sem isso, gerarVagasCategoria
   // recomputava listarOportunidadesDiretas (o dataset inteiro) e refazia
@@ -193,15 +213,57 @@ export function rankearOportunidadesInternas(
           const qtdDireto = doTurno.filter(v => v.status === "direto").length
           const qtdRemanejamento = doTurno.filter(v => v.status === "remanejamento").length
           if (qtdDireto + qtdRemanejamento === 0) continue
-          resultado.push({
-            unidade, dia, turno, especialidade, qtdDireto, qtdRemanejamento,
-            qtdLivre: doTurno.filter(v => v.status === "livre").length,
-          })
+          const qtdLivre = doTurno.filter(v => v.status === "livre").length
+          const pctAproveitamento = ((qtdDireto + qtdRemanejamento) / doTurno.length) * 100
+          const faixa = FAIXAS_CASCATA.find(f => pctAproveitamento >= f)
+          if (!faixa || !faixasSelecionadas.has(faixa)) continue
+          resultado.push({ unidade, dia, turno, especialidade, qtdDireto, qtdRemanejamento, qtdLivre, pctAproveitamento, faixa })
         }
       }
     }
   }
-  return resultado.sort((a, b) => (b.qtdDireto + b.qtdRemanejamento) - (a.qtdDireto + a.qtdRemanejamento))
+  return resultado.sort((a, b) =>
+    b.pctAproveitamento - a.pctAproveitamento ||
+    (b.qtdDireto + b.qtdRemanejamento) - (a.qtdDireto + a.qtdRemanejamento),
+  )
+}
+
+export interface UnidadeComOportunidade {
+  unidade: string
+  qtdDireto: number
+  qtdRemanejamento: number
+  qtdLivre: number
+}
+
+/** Compara as 3 unidades pra um mesmo recorte de dia(s)/turno(s)/especialidade
+ *  — equivalente a "Ou fixe numa unidade única" da Simulação de Novo
+ *  Prestador (ranquearUnidades em simulacaoNovoPrestador.ts), só que pra
+ *  oportunidade JÁ existente com quem está contratado, não uma contratação
+ *  hipotética. Sempre varre as 3 unidades, independente de qual (se alguma)
+ *  está selecionada no filtro de "Ocupar por unidade, dia e especialidade" —
+ *  o usuário precisa ver o comparativo mesmo já tendo fixado uma unidade. */
+export function compararUnidadesOportunidade(
+  periodos: { dia: string; turno: Turno }[], especialidade: string, cRows: CsvRow[], gapMap: Record<string, GapItem>,
+): UnidadeComOportunidade[] {
+  const diasPresentes = [...new Set(periodos.map(p => p.dia))]
+  if (!diasPresentes.length || !especialidade) return []
+
+  const cRowsFiltradas = filtrarCapacidadeLivreReservada(cRows)
+  const diretasGlobais = listarOportunidadesDiretas(cRowsFiltradas, gapMap)
+  const indiceRemanejamento = construirIndiceRemanejamento(cRowsFiltradas)
+
+  return Object.keys(UNID_COR).map(unidade => {
+    let qtdDireto = 0, qtdRemanejamento = 0, qtdLivre = 0
+    for (const dia of diasPresentes) {
+      const turnosDoDia = new Set(periodos.filter(p => p.dia === dia).map(p => p.turno))
+      const vagas = gerarVagasCategoria(unidade, dia, especialidade, cRowsFiltradas, gapMap, diretasGlobais, indiceRemanejamento)
+        .filter(v => turnosDoDia.has(v.turno))
+      qtdDireto += vagas.filter(v => v.status === "direto").length
+      qtdRemanejamento += vagas.filter(v => v.status === "remanejamento").length
+      qtdLivre += vagas.filter(v => v.status === "livre").length
+    }
+    return { unidade, qtdDireto, qtdRemanejamento, qtdLivre }
+  })
 }
 
 /** Quantas sessões "Agendado" já existem nessa Unidade+Especialidade, dentro

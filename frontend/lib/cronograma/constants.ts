@@ -201,6 +201,31 @@ export function tCor(tP: string, bright = false): string {
   return c
 }
 
+// Psicologia ABA tem cor de terapia quase branca (baixo contraste em badge) —
+// forçada pra cinza-média só nos badges de especialidade (não na grade, que já
+// usa outra convenção visual pra essa terapia).
+export const COR_TERAPIA_FORCADA: Record<string, string> = {
+  "Psicologia ABA": "#9CA3AF",
+}
+
+export function corTerapiaBadge(especialidade: string): string {
+  return COR_TERAPIA_FORCADA[especialidade] ?? tCor(especialidade)
+}
+
+export function hexParaRgba(hex: string, alpha: number): string {
+  const limpo = hex.replace("#", "")
+  const r = parseInt(limpo.slice(0, 2), 16)
+  const g = parseInt(limpo.slice(2, 4), 16)
+  const b = parseInt(limpo.slice(4, 6), 16)
+  return `rgba(${r}, ${g}, ${b}, ${alpha})`
+}
+
+export function escurecerHex(hex: string, fator: number): string {
+  const limpo = hex.replace("#", "")
+  const canal = (i: number) => Math.round(parseInt(limpo.slice(i, i + 2), 16) * (1 - fator))
+  return `#${[canal(0), canal(2), canal(4)].map(v => v.toString(16).padStart(2, "0")).join("")}`
+}
+
 // ─── ESPECIALIDADES ───────────────────────────────────────────────────────────
 export const TODAS_ESP = [
   "Arteterapia", "Equoterapia", "Fisioterapia Aquática", "Fisioterapia Motora",
@@ -248,6 +273,26 @@ export const UNID_COR: Record<string, string> = {
   Realengo: "#2A92C0",
   Fazendinha: "#8F6AA8",
   "Padre Miguel": "#E3734F",
+}
+
+// Identidade visual por unidade (cor de fundo/texto/barra em Tailwind) — não é
+// sobre SIGNIFICADO (sucesso/alerta/erro, ver tones.ts), é sobre ENTIDADE (a
+// unidade física). Sempre acompanhada do nome por extenso, nunca só a cor
+// (Realengo×Fazendinha não passam no teste de daltonismo).
+export const UNIDADE_ESTILO: Record<string, { bg: string; text: string; bar: string }> = {
+  Realengo: { bg: "bg-sky-50 dark:bg-sky-950/30", text: "text-sky-700 dark:text-sky-400", bar: "bg-sky-500" },
+  Fazendinha: { bg: "bg-violet-50 dark:bg-violet-950/30", text: "text-violet-700 dark:text-violet-400", bar: "bg-violet-500" },
+  "Padre Miguel": { bg: "bg-orange-50 dark:bg-orange-950/30", text: "text-orange-700 dark:text-orange-400", bar: "bg-orange-500" },
+}
+export function estiloUnidade(unidade: string) {
+  return UNIDADE_ESTILO[unidade] || { bg: "bg-muted", text: "text-foreground", bar: "bg-slate-500" }
+}
+
+// Sigla de 3 letras pra caber em badges pequenos (célula de grade) sem
+// precisar do nome inteiro — sempre acompanhada da cor da unidade (nunca só
+// a sigla), já que Realengo×Fazendinha não passam no teste de daltonismo.
+export function unidadeAbrev(unidade: string): string {
+  return unidade === "Padre Miguel" ? "PM" : unidade.slice(0, 3).toUpperCase()
 }
 
 export const SK = "aba_v8"
