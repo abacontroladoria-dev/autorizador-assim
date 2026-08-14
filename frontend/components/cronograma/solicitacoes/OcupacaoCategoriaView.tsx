@@ -16,13 +16,14 @@
 // detalhe — só pula esse passo quando há exatamente 1 candidato acionável.
 
 import { useMemo, useState } from "react"
-import { Building2, Lock } from "lucide-react"
+import { Building2, CheckCircle2, Lock } from "lucide-react"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 import { calcularGaps, gapsParaMapa, type GapItem, type Turno } from "@/lib/cronograma/simulacaoNovoPrestador"
-import { gerarVagasCategoria, contarOcupadosCategoria, type VagaCategoria } from "@/lib/cronograma/ocupacaoCategoria"
-import { DIAS_UTIL, HORAS_GRID, TODAS_ESP, UNID_COR } from "@/lib/cronograma/constants"
+import { gerarVagasCategoria, contarOcupadosCategoria, compararUnidadesOportunidade, type VagaCategoria } from "@/lib/cronograma/ocupacaoCategoria"
+import { DIAS_UTIL, HORAS_GRID, TODAS_ESP, UNID_COR, estiloUnidade } from "@/lib/cronograma/constants"
 import { diaCurto, fmtName, turnoFromHora, turnoNome } from "@/lib/cronograma/helpers"
 import { InlineNotice } from "@/components/cronograma/ui/InlineNotice"
+import { InfoTooltip } from "@/components/cronograma/ui/InfoTooltip"
 import { SearchCombobox } from "@/components/cronograma/ui/SearchCombobox"
 import { Button } from "@/components/ui/button"
 import { RemanejamentoDetalheModal } from "./RemanejamentoDetalheModal"
@@ -54,7 +55,9 @@ const LABEL_STATUS: Record<VagaCategoria["status"], string> = {
 }
 
 // ─── Seletor de períodos (Segunda manhã/tarde/dia inteiro, Terça...) ───────
-// Mesmo padrão de SimulacaoNovoPrestadorTab.tsx.
+// Mesmo padrão visual de "Dias e turnos afetados" em SimulacaoNovoPrestadorTab.tsx
+// (tabela com ✓ em vez de botões de texto) — as duas telas fazem a mesma
+// pergunta ("quais dias/turnos?"), então usam o mesmo componente visual.
 function PeriodosSelector({
   periodosSel, onChange,
 }: { periodosSel: PeriodosSel; onChange: (p: PeriodosSel) => void }) {
@@ -70,41 +73,62 @@ function PeriodosSelector({
   const limparTudo = () => onChange({})
 
   return (
-    <div className="w-full sm:w-fit rounded-xl border border-border bg-muted p-3">
+    <div className="w-full lg:w-fit rounded-xl border border-border bg-muted/40 p-3">
       <div className="mb-2 flex items-center gap-2">
-        <span className="whitespace-nowrap text-sm font-extrabold text-foreground">Dias e turnos</span>
+        <span className="whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Dias e turnos</span>
         <div className="ml-auto flex gap-1.5">
           <Button variant="outline" size="xs" onClick={selecionarTudo}>Selecionar tudo</Button>
           <Button variant="outline" size="xs" onClick={limparTudo}>Limpar</Button>
         </div>
       </div>
-      <div className="flex flex-col gap-1.5">
-        {DIAS_UTIL.map(dia => {
-          const diaInteiro = !!periodosSel[dia]?.manha && !!periodosSel[dia]?.tarde
-          return (
-            <div key={dia} className="flex items-center gap-1.5">
-              <span className="w-[64px] shrink-0 text-xs font-extrabold text-foreground">{diaCurto(dia)}</span>
-              {TURNOS.map(turno => (
-                <button
-                  key={turno}
-                  type="button"
-                  onClick={() => alternar(dia, turno)}
-                  className={`h-8 w-16 sm:w-20 shrink-0 rounded-lg border text-xs font-bold transition-colors ${periodosSel[dia]?.[turno] ? "border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-400" : "border-border bg-card text-muted-foreground hover:bg-muted/50"}`}
-                >
-                  {turnoNome[turno]}
-                </button>
-              ))}
-              <button
-                type="button"
-                onClick={() => alternarDiaInteiro(dia)}
-                className={`h-8 shrink-0 rounded-lg border px-2.5 text-[11px] font-semibold transition-colors ${diaInteiro ? "border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-400" : "border-border bg-card text-muted-foreground hover:bg-muted/50"}`}
-              >
-                Dia inteiro
-              </button>
-            </div>
-          )
-        })}
-      </div>
+      <table className="table-fixed border-separate border-spacing-x-1.5 border-spacing-y-1">
+        <colgroup>
+          <col className="w-14" />
+          <col className="w-[92px]" />
+          <col className="w-[92px]" />
+          <col className="w-[92px]" />
+        </colgroup>
+        <thead>
+          <tr>
+            <th className="w-14" />
+            <th className="pb-1 text-[10px] font-bold text-muted-foreground">Manhã</th>
+            <th className="pb-1 text-[10px] font-bold text-muted-foreground">Tarde</th>
+            <th className="pb-1 text-[10px] font-bold text-muted-foreground">Dia inteiro</th>
+          </tr>
+        </thead>
+        <tbody>
+          {DIAS_UTIL.map(dia => {
+            const diaInteiro = !!periodosSel[dia]?.manha && !!periodosSel[dia]?.tarde
+            return (
+              <tr key={dia}>
+                <td className="pr-1 text-xs font-extrabold text-foreground">{diaCurto(dia)}</td>
+                {TURNOS.map(turno => (
+                  <td key={turno} className="p-0">
+                    <button
+                      type="button"
+                      onClick={() => alternar(dia, turno)}
+                      aria-pressed={!!periodosSel[dia]?.[turno]}
+                      className={`h-8 w-full rounded-lg border text-xs font-bold transition-colors ${periodosSel[dia]?.[turno] ? "border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-400" : "border-border bg-card text-muted-foreground hover:bg-muted/50"}`}
+                    >
+                      {periodosSel[dia]?.[turno] ? <CheckCircle2 size={14} className="mx-auto" /> : turnoNome[turno]}
+                    </button>
+                  </td>
+                ))}
+                <td className="p-0">
+                  <button
+                    type="button"
+                    onClick={() => alternarDiaInteiro(dia)}
+                    aria-pressed={diaInteiro}
+                    className={`h-8 w-full rounded-lg border px-2.5 text-[11px] font-semibold transition-colors ${diaInteiro ? "border-violet-300 dark:border-violet-700 bg-violet-50 dark:bg-violet-950/30 text-violet-700 dark:text-violet-400" : "border-border bg-card text-muted-foreground hover:bg-muted/50"}`}
+                  >
+                    {diaInteiro ? <CheckCircle2 size={14} className="mx-auto" /> : "Marcar"}
+                  </button>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -240,6 +264,57 @@ function GradeCategoria({
   )
 }
 
+// ─── Comparativo entre as 3 unidades ────────────────────────────────────────
+// Equivalente a "Ou fixe numa unidade única" da Simulação de Novo Prestador
+// (barras por unidade em SimulacaoNovoPrestadorTab.tsx): mesmo filtrando só
+// "Realengo" acima, o usuário quer ver de relance quanto dá pra aproveitar
+// internamente nas OUTRAS unidades também, pro mesmo dia/turno/especialidade
+// — sem precisar trocar o filtro 3 vezes pra comparar manualmente.
+function ComparativoUnidades({
+  unidadeAtiva, periodos, especialidade, cRows, gapMap, onEscolherUnidade,
+}: { unidadeAtiva: string; periodos: { dia: string; turno: Turno }[]; especialidade: string; cRows: CsvRow[]; gapMap: Record<string, GapItem>; onEscolherUnidade: (u: string) => void }) {
+  const comparativo = useMemo(
+    () => compararUnidadesOportunidade(periodos, especialidade, cRows, gapMap),
+    [periodos, especialidade, cRows, gapMap],
+  )
+  const totais = comparativo.map(u => u.qtdDireto + u.qtdRemanejamento)
+  const escala = Math.max(1, ...totais)
+
+  return (
+    <div className="w-full lg:w-[300px] shrink-0 rounded-xl border border-border bg-muted/40 p-3">
+      <div className="mb-2 flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+        Aproveitamento nas 3 unidades
+        <InfoTooltip ariaLabel="O que este comparativo mostra">
+          <p>Quantas oportunidades (direto + remanejamento) existem em <strong className="text-foreground">cada unidade</strong> pros mesmos dias/turnos e especialidade escolhidos acima — mesmo com uma unidade só selecionada no filtro.</p>
+          <p className="mt-2">Clique numa barra pra ver a grade daquela unidade.</p>
+        </InfoTooltip>
+      </div>
+      <div className="flex flex-col gap-1.5">
+        {comparativo.map((u, i) => {
+          const cor = estiloUnidade(u.unidade)
+          const total = totais[i]
+          const largura = (total / escala) * 100
+          const ativo = u.unidade === unidadeAtiva
+          return (
+            <button
+              key={u.unidade}
+              type="button"
+              onClick={() => onEscolherUnidade(u.unidade)}
+              className={`flex items-center gap-2 rounded-lg border p-1.5 text-left transition-colors ${ativo ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30" : "border-transparent hover:bg-muted/50"}`}
+            >
+              <span className={`w-[80px] shrink-0 truncate text-[11.5px] font-bold ${cor.text}`}>{u.unidade}</span>
+              <span className="relative h-3.5 flex-1 rounded-full bg-muted">
+                <span className={`absolute inset-y-0 left-0 rounded-full transition-[width] ${cor.bar}`} style={{ width: `${largura}%` }} />
+              </span>
+              <span className="w-[64px] shrink-0 text-right text-[11.5px] font-black tabular-nums text-foreground">{total} vaga(s)</span>
+            </button>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
 interface Props {
   cRows: CsvRow[]
 }
@@ -258,6 +333,11 @@ export function OcupacaoCategoriaView({ cRows }: Props) {
 
   const diasSelecionados = useMemo(() => Object.keys(periodosSel).filter(d => periodosSel[d]?.manha || periodosSel[d]?.tarde), [periodosSel])
   const filtrosCompletos = !!unidade && !!especialidade && diasSelecionados.length > 0
+
+  const periodosSelecionados = useMemo(
+    () => diasSelecionados.flatMap(d => TURNOS.filter(t => periodosSel[d]?.[t]).map(turno => ({ dia: d, turno }))),
+    [diasSelecionados, periodosSel],
+  )
 
   const aplicarOportunidade = (u: string, dia: string, turno: Turno, esp: string) => {
     setUnidade(u)
@@ -296,16 +376,27 @@ export function OcupacaoCategoriaView({ cRows }: Props) {
             <div className="mb-3 text-xs text-muted-foreground">
               Escolha uma unidade, um ou mais dias/turnos e uma especialidade pra ver todas as vagas dessa combinação — com qualquer profissional que já tenha horário "Livre" real ali — direto ou via remanejamento. Sem escrever nada na TiTa, é só visualização.
             </div>
-            <div className="flex flex-wrap items-start gap-4">
-              <div className="flex w-full sm:w-56 flex-col gap-1">
-                <span className="text-[11px] font-bold text-muted-foreground">Unidade</span>
+            <div className="flex flex-wrap items-start gap-3">
+              <div className="flex w-full lg:w-56 shrink-0 flex-col gap-2 rounded-xl border border-border bg-muted/40 p-3">
+                <span className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Unidade</span>
                 <SearchCombobox value={unidade} onChange={setUnidade} opcoes={UNIDADES} placeholder="Digite para buscar a unidade..." ariaLabel="Buscar unidade" />
 
-                <span className="mt-2 text-[11px] font-bold text-muted-foreground">Especialidade</span>
+                <span className="mt-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Especialidade</span>
                 <SearchCombobox value={especialidade} onChange={setEspecialidade} opcoes={TODAS_ESP} placeholder="Digite para buscar a especialidade..." ariaLabel="Buscar especialidade" />
               </div>
 
               <PeriodosSelector periodosSel={periodosSel} onChange={setPeriodosSel} />
+
+              {!!especialidade && periodosSelecionados.length > 0 && (
+                <ComparativoUnidades
+                  unidadeAtiva={unidade}
+                  periodos={periodosSelecionados}
+                  especialidade={especialidade}
+                  cRows={cRows}
+                  gapMap={gapMap}
+                  onEscolherUnidade={setUnidade}
+                />
+              )}
             </div>
           </div>
 

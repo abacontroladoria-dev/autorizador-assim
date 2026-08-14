@@ -22,6 +22,8 @@ export const roleDefaults: Record<string, string[]> = {
     'analise_tratativas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
     'relacionamento_prestador_individual',
+    'cadastros_pacientes', 'cadastros_profissionais',
+    'cronograma_por_paciente', 'cronograma_por_profissional',
   ],
   diretoria: [
     'dashboard', 'atendimentos', 'gestao',
@@ -38,6 +40,8 @@ export const roleDefaults: Record<string, string[]> = {
     'analise_tratativas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
     'relacionamento_prestador_individual',
+    'cadastros_pacientes', 'cadastros_profissionais',
+    'cronograma_por_paciente', 'cronograma_por_profissional',
   ],
   recepcao: [
     'dashboard', 'atendimentos', 'gestao', 'auditoria_assim',
@@ -64,6 +68,8 @@ export const roleDefaults: Record<string, string[]> = {
     'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
     'cronograma_disponibilidade_interna',
     'ocupacao_clinica', 'ocupacao_clinica_gaps', 'ocupacao_clinica_inconsistencias',
+    'cadastros_pacientes', 'cadastros_profissionais',
+    'cronograma_por_paciente', 'cronograma_por_profissional',
   ],
 }
 
@@ -120,6 +126,12 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   relacionamento_prestador_individual: ['/relacionamento-prestador/individual'],
   relacionamento_prestador_pep: ['/relacionamento-prestador/pep'],
   relacionamento_prestador_pep_historico: ['/relacionamento-prestador/pep-historico'],
+  // Sistema próprio de agendamentos/grade (nativo, substituindo gradualmente
+  // o TiTa Therapy) — ver supabase/migrations/20260812140000_create_reboot_pacientes.sql.
+  cadastros_pacientes: ['/cadastros/pacientes'],
+  cadastros_profissionais: ['/cadastros/profissionais'],
+  cronograma_por_paciente: ['/cronograma/por-paciente'],
+  cronograma_por_profissional: ['/cronograma/por-profissional'],
 }
 
 // Converte um conjunto de códigos de permissão em rotas permitidas,

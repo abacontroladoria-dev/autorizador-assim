@@ -26,9 +26,10 @@ import { useGradeAgendamentos } from "@/hooks/useGradeAgendamentos"
 import { calcularGaps, gapsParaMapa } from "@/lib/cronograma/simulacaoNovoPrestador"
 import { listarProfissionaisComOportunidade, gerarOportunidadesProfissional, type OportunidadeProfissional } from "@/lib/cronograma/ocupacaoProfissional"
 import { listarSlotsLivres } from "@/lib/cronograma/disponibilidadeInterna"
-import { DIAS_UTIL } from "@/lib/cronograma/constants"
+import { DIAS_UTIL, TODAS_ESP, UNID_COR, normTxt, estiloUnidade, unidadeAbrev } from "@/lib/cronograma/constants"
 import { diaCurto, fmtName, filtrarCapacidadeLivreReservada } from "@/lib/cronograma/helpers"
 import { InlineNotice } from "@/components/cronograma/ui/InlineNotice"
+import { SearchCombobox } from "@/components/cronograma/ui/SearchCombobox"
 import { RemanejamentoDetalheModal } from "./RemanejamentoDetalheModal"
 import { PacienteAgendaHipoteticaModal } from "./PacienteAgendaHipoteticaModal"
 import { OcupacaoCategoriaView } from "./OcupacaoCategoriaView"
@@ -36,8 +37,8 @@ import { ProjecaoOcupacaoDonut } from "./ProjecaoOcupacaoDonut"
 import type { CsvRow } from "@/types/cronograma"
 
 const TABS = [
-  { key: "nome",      label: "Por Nome do Profissional" },
   { key: "categoria", label: "Por Unidade, Dia e Especialidade" },
+  { key: "nome",      label: "Por Nome do Profissional" },
 ] as const
 type TabKey = (typeof TABS)[number]["key"]
 
@@ -46,9 +47,13 @@ function hiStr(r: CsvRow): string { return String(r.HI_str || "") }
 // ─── Combobox de profissional (mesmo padrão ARIA do EspecialidadeCombobox de
 //     SimulacaoNovoPrestadorTab.tsx, por sua vez copiado do autocomplete de
 //     paciente do OcupPacMode) ─────────────────────────────────────────────
+// Nome completo (não abreviado) e a(s) especialidade(s) com horário "Livre"
+// aparecem direto na busca — pedido do usuário (2026-08-12): antes só o
+// primeiro/último nome apareciam, exigindo abrir a agenda pra saber a
+// especialidade de cada profissional.
 function ProfissionalCombobox({
-  value, onChange, opcoes, contagemLivres,
-}: { value: string; onChange: (v: string) => void; opcoes: string[]; contagemLivres: Map<string, number> }) {
+  value, onChange, opcoes, contagemLivres, especialidadesPorProfissional,
+}: { value: string; onChange: (v: string) => void; opcoes: string[]; contagemLivres: Map<string, number>; especialidadesPorProfissional: Map<string, string[]> }) {
   const [texto, setTexto] = useState(value)
   const [aberto, setAberto] = useState(false)
   const [ativoIdx, setAtivoIdx] = useState(-1)
@@ -61,9 +66,9 @@ function ProfissionalCombobox({
   }
 
   const filtradas = useMemo(() => {
-    const q = texto.trim().toLowerCase()
+    const q = normTxt(texto)
     if (!q) return opcoes
-    return opcoes.filter(o => fmtName(o).toLowerCase().includes(q))
+    return opcoes.filter(o => normTxt(o).includes(q))
   }, [texto, opcoes])
 
   const selecionar = (p: string) => { onChange(p); setTexto(p); setUltimoValor(p); setAberto(false); setAtivoIdx(-1) }
@@ -115,6 +120,7 @@ function ProfissionalCombobox({
           {filtradas.map((p, i) => {
             const selecionada = p === value
             const ativa = i === ativoIdx
+            const especialidades = especialidadesPorProfissional.get(p) ?? []
             return (
               <button
                 key={p}
@@ -122,9 +128,16 @@ function ProfissionalCombobox({
                 role="option"
                 aria-selected={selecionada}
                 onMouseDown={() => selecionar(p)}
-                className={`flex w-full items-center justify-between gap-2 px-3 py-1.5 text-left text-[13px] transition-colors ${ativa ? "bg-sky-600 text-white" : selecionada ? "bg-muted font-semibold text-foreground" : "text-foreground hover:bg-muted/60"}`}
+                className={`flex w-full items-start justify-between gap-2 px-3 py-1.5 text-left text-[13px] transition-colors ${ativa ? "bg-sky-600 text-white" : selecionada ? "bg-muted font-semibold text-foreground" : "text-foreground hover:bg-muted/60"}`}
               >
-                <span className="truncate">{fmtName(p)}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate">{p}</span>
+                  {especialidades.length > 0 && (
+                    <span className={`block truncate text-[11px] font-normal ${ativa ? "text-white/80" : "text-muted-foreground"}`}>
+                      {especialidades.join(" · ")}
+                    </span>
+                  )}
+                </span>
                 <span className={`shrink-0 text-[10px] font-bold ${ativa ? "text-white/80" : "text-muted-foreground"}`}>
                   {contagemLivres.get(p) ?? 0} livre(s)
                 </span>
@@ -143,6 +156,7 @@ type TagCelula = "ocupado" | "livre" | "direto" | "remanejamento"
 interface CelulaProf {
   tag: TagCelula
   terapia: string
+  unidade: string
   paciente?: string
   oportunidade?: OportunidadeProfissional
 }
@@ -171,15 +185,16 @@ function AgendaProfissional({
       const status = row["Status do Agendamento"]
       if (status !== "Agendado" && status !== "Livre") continue
       const chave = `${row["Dia da Semana"]}|||${hiStr(row)}`
+      const unidade = String(row.Unidade || "Desconhecida")
       if (status === "Agendado") {
-        m[chave] = { tag: "ocupado", terapia: row.Terapia, paciente: row["Nome Favorecido"] }
+        m[chave] = { tag: "ocupado", terapia: row.Terapia, unidade, paciente: row["Nome Favorecido"] }
       } else if (!m[chave]) {
-        m[chave] = { tag: "livre", terapia: row.Terapia }
+        m[chave] = { tag: "livre", terapia: row.Terapia, unidade }
       }
     }
     for (const o of oportunidades) {
       const chave = `${o.dia}|||${o.hora}`
-      m[chave] = { tag: o.modalidade, terapia: o.terapia, paciente: o.paciente.pac, oportunidade: o }
+      m[chave] = { tag: o.modalidade, terapia: o.terapia, unidade: o.unidade, paciente: o.paciente.pac, oportunidade: o }
     }
     return m
   }, [cRows, profissional, oportunidades])
@@ -208,6 +223,16 @@ function AgendaProfissional({
         <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-dashed border-border" /> Livre, sem oportunidade</span>
         <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30" /> Oportunidade direta</span>
         <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-sky-300 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/30" /> Oportunidade via remanejamento</span>
+      </div>
+
+      <div className="mb-1 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
+        <span className="font-bold">Unidade:</span>
+        {Object.keys(UNID_COR).map(u => (
+          <span key={u} className="flex items-center gap-1">
+            <span className={`rounded px-1 text-[9px] font-black leading-tight ${estiloUnidade(u).bg} ${estiloUnidade(u).text}`}>{unidadeAbrev(u)}</span>
+            {u}
+          </span>
+        ))}
       </div>
 
       {!dias.length ? (
@@ -242,9 +267,15 @@ function AgendaProfissional({
                             type="button"
                             disabled={!clicavel}
                             onClick={() => c.oportunidade && onAbrirOportunidade(c.oportunidade)}
+                            title={`Unidade: ${c.unidade}`}
                             className={`h-[54px] w-full overflow-hidden rounded-lg border px-2 py-1.5 text-left ${ESTILO_CELULA[c.tag]}`}
                           >
-                            <div className="truncate text-[11px] font-bold leading-tight text-foreground">{c.terapia}</div>
+                            <div className="flex min-w-0 items-center justify-between gap-1">
+                              <span className="min-w-0 truncate text-[11px] font-bold leading-tight text-foreground">{c.terapia}</span>
+                              <span className={`shrink-0 rounded px-1 text-[9px] font-black leading-tight ${estiloUnidade(c.unidade).bg} ${estiloUnidade(c.unidade).text}`}>
+                                {unidadeAbrev(c.unidade)}
+                              </span>
+                            </div>
                             <div className="truncate text-[10px] text-muted-foreground">
                               {c.tag === "livre" ? "Livre" : fmtName(c.paciente ?? "")}
                             </div>
@@ -285,13 +316,25 @@ export function DisponibilidadeInternaView() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const rawTab = searchParams.get("tab")
-  const activeTab: TabKey = rawTab && TABS.some(t => t.key === rawTab) ? (rawTab as TabKey) : "nome"
+  const activeTab: TabKey = rawTab && TABS.some(t => t.key === rawTab) ? (rawTab as TabKey) : "categoria"
   const [profissional, setProfissional] = useState("")
+  const [filtroEspecialidade, setFiltroEspecialidade] = useState("")
   const [detalheDireto, setDetalheDireto] = useState<OportunidadeProfissional | null>(null)
   const [detalheRemanejamento, setDetalheRemanejamento] = useState<OportunidadeProfissional | null>(null)
 
+  // "categoria" é o default atual (era "nome" antes) — bookmark/link externo
+  // antigo com ?tab=nome não pode mais abrir direto em "nome", só clique
+  // explícito na aba dentro da tela. abaClicadaRef marca esse clique; a
+  // correção da 1ª carga só roda uma vez (cargaInicialTratadaRef) pra não
+  // sobrescrever o clique do usuário depois.
+  const abaClicadaRef = useRef(false)
+  const cargaInicialTratadaRef = useRef(false)
   useEffect(() => {
-    if (!rawTab) router.replace("/relacionamento-prestador/ocupar-profissionais-disponiveis?tab=nome")
+    if (cargaInicialTratadaRef.current) return
+    cargaInicialTratadaRef.current = true
+    if (!abaClicadaRef.current && (!rawTab || rawTab === "nome")) {
+      router.replace("/relacionamento-prestador/ocupar-profissionais-disponiveis?tab=categoria")
+    }
   }, [rawTab, router])
 
   useEffect(() => {
@@ -311,6 +354,26 @@ export function DisponibilidadeInternaView() {
     }
     return m
   }, [cRows])
+
+  // Especialidade(s) em que cada profissional tem horário "Livre" real —
+  // mostrada direto na busca e usada pelo filtro "Especialidade" abaixo, pra
+  // não depender de abrir a agenda inteira só pra saber o que o profissional atende.
+  const especialidadesPorProfissional = useMemo(() => {
+    const m = new Map<string, Set<string>>()
+    for (const s of listarSlotsLivres(cRows)) {
+      if (!s.especialidade) continue
+      if (!m.has(s.profissional)) m.set(s.profissional, new Set())
+      m.get(s.profissional)!.add(s.especialidade)
+    }
+    const ordenado = new Map<string, string[]>()
+    for (const [p, esps] of m) ordenado.set(p, [...esps].sort())
+    return ordenado
+  }, [cRows])
+
+  const profissionaisFiltrados = useMemo(() => {
+    if (!filtroEspecialidade) return profissionais
+    return profissionais.filter(p => especialidadesPorProfissional.get(p)?.includes(filtroEspecialidade))
+  }, [profissionais, especialidadesPorProfissional, filtroEspecialidade])
 
   if (loading) return (
     <div className="flex items-center justify-center py-24 text-sm text-muted-foreground">
@@ -335,7 +398,7 @@ export function DisponibilidadeInternaView() {
               type="button"
               role="tab"
               aria-selected={ativo}
-              onClick={() => router.replace(`/relacionamento-prestador/ocupar-profissionais-disponiveis?tab=${tab.key}`)}
+              onClick={() => { abaClicadaRef.current = true; router.replace(`/relacionamento-prestador/ocupar-profissionais-disponiveis?tab=${tab.key}`) }}
               className={`rounded-xl px-3.5 py-2 text-sm font-semibold transition-colors ${ativo ? "bg-violet-600 text-white shadow-sm" : "text-muted-foreground hover:bg-muted/60"}`}
             >
               {tab.label}
@@ -360,10 +423,35 @@ export function DisponibilidadeInternaView() {
             <div className="mb-3 text-xs text-muted-foreground">
               Escolha um profissional pra ver, dentro dos horários “Livre” reais da agenda dele, quais pacientes com sessão pendente (autorizado &gt; ofertado) poderiam entrar — direto ou remanejando a sessão conflitante de outro paciente com OUTRO profissional, mantido. Sem escrever nada na TiTa por enquanto — é só visualização.
             </div>
-            <ProfissionalCombobox value={profissional} onChange={setProfissional} opcoes={profissionais} contagemLivres={contagemLivres} />
-            {!profissionais.length && (
+            <div className="flex flex-wrap items-start gap-3">
+              <div className="flex w-full sm:w-56 flex-col gap-1">
+                <span className="text-[11px] font-bold text-muted-foreground">Especialidade (opcional)</span>
+                <SearchCombobox
+                  value={filtroEspecialidade}
+                  onChange={setFiltroEspecialidade}
+                  opcoes={TODAS_ESP}
+                  placeholder="Filtrar por especialidade..."
+                  ariaLabel="Filtrar profissionais por especialidade"
+                />
+              </div>
+              <div className="flex flex-1 flex-col gap-1">
+                <span className="text-[11px] font-bold text-muted-foreground">Profissional</span>
+                <ProfissionalCombobox
+                  value={profissional}
+                  onChange={setProfissional}
+                  opcoes={profissionaisFiltrados}
+                  contagemLivres={contagemLivres}
+                  especialidadesPorProfissional={especialidadesPorProfissional}
+                />
+              </div>
+            </div>
+            {!profissionaisFiltrados.length && (
               <div className="mt-3">
-                <InlineNotice tone="slate">Nenhum profissional com horário “Livre” na semana de referência.</InlineNotice>
+                <InlineNotice tone="slate">
+                  {filtroEspecialidade
+                    ? `Nenhum profissional com horário "Livre" em ${filtroEspecialidade} na semana de referência.`
+                    : "Nenhum profissional com horário “Livre” na semana de referência."}
+                </InlineNotice>
               </div>
             )}
           </div>

@@ -20,6 +20,16 @@ import { turnoFromHora } from "./helpers"
 import { TERAPIA_TO_ESP } from "./constants"
 import type { CsvRow } from "@/types/cronograma"
 
+// Dentro do balde "Psicologia ABA" (que soma Aplicador ABA PS/SF/AV/AE/EF,
+// Supervisão ABA e Coordenador de Caso pra fins de OFERTADO/gap — ver
+// calcularGaps em simulacaoNovoPrestador.ts), só Aplicador ABA (PS) e (EF)
+// são papéis realmente intercambiáveis com um novo aplicador contratado.
+// As demais (SF, AV, AE, Supervisão, Coordenador de Caso) não podem ser
+// tratadas como "vaga já livre internamente": Coordenador de Caso é vínculo
+// de caso 1-para-1, Supervisão não é atendimento direto, e SF/AV/AE são
+// papéis distintos que não cobrem a demanda de um Aplicador ABA comum.
+const PSICOLOGIA_ABA_DISPONIVEL_INTERNAMENTE = new Set(["Aplicador ABA (PS)", "Aplicador ABA (EF)"])
+
 export interface SlotLivre {
   profissional: string
   dia: string
@@ -32,14 +42,18 @@ export interface SlotLivre {
 export function listarSlotsLivres(cRows: CsvRow[]): SlotLivre[] {
   return cRows
     .filter(r => r["Status do Agendamento"] === "Livre" && r["Profissional"])
-    .map(r => ({
-      profissional: r["Profissional"],
-      dia: r["Dia da Semana"],
-      hora: String(r.HI_str || ""),
-      terapia: r.Terapia,
-      especialidade: TERAPIA_TO_ESP[r.Terapia] ?? null,
-      unidade: String(r.Unidade || "Desconhecida"),
-    }))
+    .map(r => {
+      const esp = TERAPIA_TO_ESP[r.Terapia] ?? null
+      const isolado = esp === "Psicologia ABA" && !PSICOLOGIA_ABA_DISPONIVEL_INTERNAMENTE.has(r.Terapia)
+      return {
+        profissional: r["Profissional"],
+        dia: r["Dia da Semana"],
+        hora: String(r.HI_str || ""),
+        terapia: r.Terapia,
+        especialidade: isolado ? null : esp,
+        unidade: String(r.Unidade || "Desconhecida"),
+      }
+    })
 }
 
 export interface OportunidadeDireta {
@@ -136,33 +150,22 @@ export function listarOportunidadesDiretas(
   return oportunidades
 }
 
-/** Capacidade de cobertura direta AINDA disponível por dia/hora/unidade/
- *  especialidade, descontando o que `listarOportunidadesDiretas` já reservou
- *  pra pacientes reais — é essa sobra que a simulação de contratação pode
- *  considerar (ver filtrarPorDisponibilidadeInterna em
- *  sugestaoContratacao.ts). Sem descontar isso, o mesmo profissional livre
- *  contaria como "cobertura" tanto na tela de disponibilidade interna quanto
- *  no desconto da simulação, como se pudesse atender dois pacientes ao mesmo
- *  tempo. */
+/** Quantos pacientes por dia/hora/unidade/especialidade já têm cobertura
+ *  direta via `listarOportunidadesDiretas` — é essa cobertura que a simulação
+ *  de contratação pode descontar da fila de quem precisaria do novo
+ *  profissional (ver filtrarPorDisponibilidadeInterna em
+ *  sugestaoContratacao.ts). Não é "sobra não utilizada": é o próprio número
+ *  de pareamentos profissional-livre↔paciente que `listarOportunidadesDiretas`
+ *  já fez pra esse grupo — a mesma fonte usada pela tela "Ocupar
+ *  Profissionais Disponíveis", garantindo que os dois lugares nunca
+ *  divirjam. */
 export function capacidadeDiretaRestante(
   cRows: CsvRow[], gapMap: Record<string, GapItem>,
 ): Map<string, number> {
-  const slotsLivres = listarSlotsLivres(cRows).filter((s): s is SlotLivre & { especialidade: string } => !!s.especialidade)
-  const totalPorGrupo = new Map<string, number>()
-  for (const s of slotsLivres) {
-    const chave = chaveGrupo(s.dia, s.hora, s.unidade, s.especialidade)
-    totalPorGrupo.set(chave, (totalPorGrupo.get(chave) ?? 0) + 1)
-  }
-
   const usadoPorGrupo = new Map<string, number>()
   for (const o of listarOportunidadesDiretas(cRows, gapMap)) {
     const chave = chaveGrupo(o.dia, o.hora, o.unidade, o.especialidade)
     usadoPorGrupo.set(chave, (usadoPorGrupo.get(chave) ?? 0) + 1)
   }
-
-  const restante = new Map<string, number>()
-  for (const [chave, total] of totalPorGrupo) {
-    restante.set(chave, Math.max(0, total - (usadoPorGrupo.get(chave) ?? 0)))
-  }
-  return restante
+  return usadoPorGrupo
 }

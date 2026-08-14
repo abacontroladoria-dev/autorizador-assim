@@ -10,6 +10,17 @@ export type TaxaEspecialidade = {
   especialidade: string
   taxa_pa: number
   diaria: number
+  /**
+   * Ponto de Equilíbrio (PJ, 1x/semana) — custo mensal fixo do profissional
+   * (pra 1 dia/semana COMPLETO) e capacidade de sessões por turno. null pra
+   * qualquer especialidade que não use esse modelo ainda (só Fonoaudiologia/
+   * Terapia Ocupacional/Musicoterapia por ora — ver lib/remuneracao/pontoEquilibrio.ts).
+   */
+  be_custo_mensal_pj: number | null
+  /** @deprecated não é mais usado pelo cálculo — ver be_capacidade_manha/be_capacidade_tarde. */
+  be_capacidade_diaria: number | null
+  be_capacidade_manha: number | null
+  be_capacidade_tarde: number | null
   created_at: string
   updated_at: string
   updated_by: string | null
@@ -22,6 +33,15 @@ export type ParametrosGerais = {
   cc_lim_default: number
   eta_bonus_default: number
   presenca_padrao: number
+  /** Alíquota de imposto sobre faturamento, em pontos percentuais (20 = 20%) — usada no Ponto de Equilíbrio PJ. */
+  imposto_faturamento_pct: number
+  /**
+   * Capacidade padrão (sessões por turno, num dia completo) usada pelo Ponto
+   * de Equilíbrio das especialidades "por atendimento" — só Fono/TO/
+   * Musicoterapia têm capacidade própria; as demais usam este padrão único.
+   */
+  pa_capacidade_manha_padrao: number
+  pa_capacidade_tarde_padrao: number
   updated_at: string
   updated_by: string | null
 }

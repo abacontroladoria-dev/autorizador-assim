@@ -21,6 +21,11 @@ function horarioLabel(f: FeriadoInfo): string | null {
   return `${f.horario_inicio ?? "—"} - ${f.horario_fim ?? "—"}`
 }
 
+function fmtDataCompleta(iso: string): string {
+  const [ano, mes, dia] = iso.split("-")
+  return `${dia}/${mes}/${ano}`
+}
+
 export function FeriadosCadastro() {
   const { feriados: feriadosSalvos, loading: feriadosLoading } = useFeriados()
 
@@ -212,7 +217,7 @@ export function FeriadosCadastro() {
                       </span>
                     </div>
                     <div className="text-sm text-slate-500 dark:text-slate-400 font-mono mt-0.5">
-                      {date}{horario ? ` · ${horario}` : ""}
+                      {fmtDataCompleta(date)}{horario ? ` · ${horario}` : ""}
                     </div>
                   </div>
                   <button onClick={() => handleRemove(date)} className="p-2 text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors">

@@ -21,9 +21,11 @@ interface Props {
   onToggle: (id: number) => void
   placeholder?: string
   ariaLabel: string
+  /** Plural usado no resumo com 3+ selecionados (ex.: "3 {nomePlural} selecionadas"). */
+  nomePlural?: string
 }
 
-export function MultiSearchCombobox({ opcoes, selecionados, onToggle, placeholder = "Nenhuma opção selecionada", ariaLabel }: Props) {
+export function MultiSearchCombobox({ opcoes, selecionados, onToggle, placeholder = "Nenhuma opção selecionada", ariaLabel, nomePlural = "opções" }: Props) {
   const [aberto, setAberto] = useState(false)
   const [texto, setTexto] = useState("")
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -55,7 +57,7 @@ export function MultiSearchCombobox({ opcoes, selecionados, onToggle, placeholde
     ? placeholder
     : nomesSelecionados.length <= 2
       ? nomesSelecionados.join(", ")
-      : `${nomesSelecionados.length} terapias selecionadas`
+      : `${nomesSelecionados.length} ${nomePlural} selecionadas`
 
   return (
     <div ref={wrapperRef} className="relative">

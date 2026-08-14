@@ -18,7 +18,10 @@ import {
   anexarSala, anexarRemuneracaoEOrdenar, calcularGapMap, TODAS_FAIXAS_CASCATA,
   type ModoCascataOcupacao, type FaixaCascata,
 } from "@/lib/cronograma/sugestaoContratacao"
+import type { GapItem } from "@/lib/cronograma/simulacaoNovoPrestador"
 import type { SugestaoContratacao } from "@/lib/cronograma/sugestaoContratacaoTypes"
+import type { ConvenioValor, ConvenioValorPaciente } from "@/lib/cronograma/convenioValoresTypes"
+import type { FeriadoInfo } from "@/types/feriados"
 import type { CsvRow } from "@/types/cronograma"
 
 export interface UseSugestoesContratacaoResult {
@@ -29,6 +32,15 @@ export interface UseSugestoesContratacaoResult {
   refWeekLabel: string
   /** Linhas cruas da grade — usadas pelo modal de antes/depois do remanejamento. */
   cRows: CsvRow[]
+  /** Mapa de gap por paciente+especialidade, e demais insumos do pipeline de
+   *  remuneração — usados pra recalcular uma combinação isolada (sem o teto
+   *  global entre sugestões) no Ponto de Equilíbrio de cada card, com o MESMO
+   *  valor de sessão que "Parâmetros da simulação" chegaria pra essa combinação. */
+  gapMap: Record<string, GapItem>
+  regrasGerais: ConvenioValor[]
+  excecoesPaciente: ConvenioValorPaciente[]
+  mesReferencia: { ano: number; mes: number } | null
+  feriados: Record<string, FeriadoInfo>
 }
 
 export function useSugestoesContratacao(
@@ -66,15 +78,19 @@ export function useSugestoesContratacao(
     [lRows, cRows, modo],
   )
 
+  const gapMap = useMemo(
+    () => (cRows.length && lRows.length ? calcularGapMap(lRows, cRows) : {}),
+    [lRows, cRows],
+  )
+
   const sugestoes = useMemo((): SugestaoContratacao[] => {
     if (!cRows.length || !lRows.length) return []
-    const gapMap = calcularGapMap(lRows, cRows)
     const base = filtrarCombosPorFaixa(todosCombos, faixasSelecionadas)
     const comRemanejamento = anexarModalidadeERemanejamento(base, cRows, gapMap)
     const comDisponibilidade = filtrarPorDisponibilidadeInterna(comRemanejamento, cRows, gapMap)
     const comSala = anexarSala(comDisponibilidade, salasComOcupacao, exclusividades)
     return anexarRemuneracaoEOrdenar(comSala, cRows, regrasGerais, excecoesPaciente, mesReferencia, feriados)
-  }, [todosCombos, faixasSelecionadas, cRows, lRows, salasComOcupacao, exclusividades, regrasGerais, excecoesPaciente, mesReferencia, feriados])
+  }, [todosCombos, faixasSelecionadas, cRows, lRows, gapMap, salasComOcupacao, exclusividades, regrasGerais, excecoesPaciente, mesReferencia, feriados])
 
   return {
     sugestoes,
@@ -83,5 +99,10 @@ export function useSugestoesContratacao(
     laudosCarregados: lRows.length > 0,
     refWeekLabel: refWeek.label,
     cRows,
+    gapMap,
+    regrasGerais,
+    excecoesPaciente,
+    mesReferencia,
+    feriados,
   }
 }
