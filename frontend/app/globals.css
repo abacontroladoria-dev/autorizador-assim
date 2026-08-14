@@ -121,6 +121,23 @@
     --color-tv-ink-muted: oklch(0.470 0.040 257);
     --color-tv-accent:    #2563EB;
     --color-tv-accent-dark: #1D4ED8;
+
+    /* O accent tem exatamente dois significados nesta tela, e nenhum deles é
+       decoração: ação primária (o botão de ativar som) e "esta chamada é
+       agora". Régua, ícone de histórico e ícone do modal são neutros de
+       propósito — accent gasto em enfeite deixa de sinalizar qualquer coisa.
+
+       accent-fg é separado do accent porque #2563EB como TEXTO dá 4.14:1 no
+       lado escuro do gradiente do card, abaixo de AA. Medidos:
+         accent-fg sobre card-edge .. 5.37:1
+         accent-fg sobre panel ...... 6.28:1
+         accent (borda) vs ground ... 4.08:1  (3:1 exigido pra limite)
+       warn é o estado degradado na barra escura — 6.15:1 sobre tv-bar. O
+       amber-300 cru que estava ali passava, mas era a única cor da tela fora
+       do sistema. O status-partial do DESIGN.md (#b45309) não serve: foi
+       calibrado pra fundo claro e dá 1.9:1 aqui.                            */
+    --color-tv-accent-fg: #1D4ED8;
+    --color-tv-warn:      oklch(0.82 0.125 78);
 }
 
 :root {

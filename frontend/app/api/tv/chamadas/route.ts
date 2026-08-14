@@ -78,9 +78,21 @@ async function listar(request: NextRequest) {
     }
   }
 
+  // idade_segundos vem daqui e não do navegador: a TV pode estar num PC com o
+  // relógio errado, e aí "chamada agora" viraria mentira na tela. Como o poll é
+  // de 3s, a idade se atualiza sozinha sem timer nenhum no cliente.
+  const agora = Date.now()
+
   const visiveis = chamadas
     .filter((c) => !c.agenda_id || !concluidos.has(c.agenda_id))
     .slice(0, LIMITE)
+    .map((c) => ({
+      ...c,
+      idade_segundos: Math.max(
+        0,
+        Math.round((agora - new Date(c.chamado_em as string).getTime()) / 1000)
+      ),
+    }))
 
   return NextResponse.json(
     { chamadas: visiveis },

@@ -12,6 +12,7 @@ import {
   Snowflake,
   Sun,
   Volume2,
+  WifiOff,
 } from 'lucide-react'
 
 // Sem `sala`: a clínica tem uma recepção só, então identificar qual seria ruído
@@ -22,7 +23,14 @@ type Chamada = {
   nome: string
   agenda_id: string | null
   chamado_em: string
+  /** calculado no servidor — ver comentário na rota */
+  idade_segundos: number
 }
+
+// Abaixo disso a chamada é "agora" e o accent aparece; acima, a tela mostra
+// quanto tempo passou. Sem isso quem entra na sala vê um nome de 40 minutos
+// atrás com a mesma cara de uma chamada que acabou de sair.
+const SEGUNDOS_AGORA = 120
 
 // A tela não usa o client do Supabase de propósito: /tv roda sem conta logada e a
 // RLS de chamada_paciente só responde a `authenticated` — o realtime como anon
@@ -124,10 +132,25 @@ const LinhaChamada = memo(function LinhaChamada({
   )
 })
 
+// "há 14 min" em vez de um horário: o que interessa a quem está sentado na sala
+// é se a chamada é dele agora, não que horas eram.
+const tempoDecorrido = (segundos: number) => {
+  if (segundos < 60) return 'agora'
+  const min = Math.floor(segundos / 60)
+  if (min < 60) return `há ${min} min`
+  const h = Math.floor(min / 60)
+  return `há ${h} h`
+}
+
 // O poll devolve a mesma lista o tempo todo; sem isto cada ciclo de 3s trocava a
 // identidade do array e re-renderizava a árvore inteira sem nada ter mudado.
+// A idade entra na comparação em granularidade de minuto — é o que a tela
+// mostra —, então o re-render acontece 1x por minuto em vez de 1x a cada 3s.
 const mesmaLista = (a: Chamada[], b: Chamada[]) =>
-  a.length === b.length && a.every((c, i) => c.id === b[i].id)
+  a.length === b.length &&
+  a.every((c, i) => c.id === b[i].id) &&
+  Math.floor((a[0]?.idade_segundos ?? 0) / 60) ===
+    Math.floor((b[0]?.idade_segundos ?? 0) / 60)
 
 export default function TVPage() {
   const [chamadas, setChamadas] = useState<Chamada[]>([])
@@ -139,6 +162,11 @@ export default function TVPage() {
 
   const atual = useMemo(() => chamadas[0] ?? null, [chamadas])
   const historico = useMemo(() => chamadas.slice(1), [chamadas])
+  // Se a idade não vier (resposta antiga em cache, rota fora do ar), a tela não
+  // inventa: fica sem o selo de tempo em vez de escrever "há NaN min".
+  const idade =
+    typeof atual?.idade_segundos === 'number' ? atual.idade_segundos : null
+  const agora = idade !== null && idade < SEGUNDOS_AGORA
 
   const filaAudio = useRef<Chamada[]>([])
   const falando = useRef(false)
@@ -364,7 +392,9 @@ export default function TVPage() {
           className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50"
         >
           <div className="bg-tv-card rounded-2xl shadow-2xl p-8 flex flex-col items-center gap-4">
-            <Volume2 className="w-10 h-10 text-tv-accent" strokeWidth={1.75} />
+            {/* neutro: quem carrega o accent neste modal é o botão, que é a
+                ação primária */}
+            <Volume2 className="w-10 h-10 text-tv-ink-muted" strokeWidth={1.75} />
 
             <h2 id="tv-audio-titulo" className="text-2xl font-semibold text-tv-ink">
               Ativar áudio do sistema
@@ -423,9 +453,11 @@ export default function TVPage() {
 			  bg-[linear-gradient(135deg,var(--color-tv-card),var(--color-tv-card-edge))]
 			  flex flex-col items-center justify-center text-center
 			  px-10
-			  border border-tv-border
 			  shadow-[0_25px_70px_rgba(16,27,43,0.15)]
-			  transition-[transform,box-shadow] duration-500 ease-out
+			  transition-[transform,box-shadow,border-color] duration-500 ease-out
+			  ${/* largura fixa em 2px: só a cor muda, senão a troca de estado
+			       empurraria o layout 1px */ ''}
+			  border-2 ${agora ? 'border-tv-accent' : 'border-tv-border'}
 			  ${animando ? 'scale-[1.03] shadow-[0_0_80px_rgba(37,99,235,0.35)]' : ''}
 			`}
           >
@@ -450,14 +482,36 @@ export default function TVPage() {
                     pra se ler a 4 m, a distância das cadeiras. A 17px de antes
                     só se lia a 1,7 m — o nome dava pra ler do fundo da sala e
                     a instrução, não. */}
-                <div className="mt-12 flex items-center gap-6 text-tv-ink-muted">
-                  <div className="h-[2px] w-32 bg-tv-accent/60" />
+                <div className="mt-12 flex flex-col items-center gap-3">
+                  <div
+                    className={`flex items-center gap-6 transition-colors duration-500 ${
+                      agora ? 'text-tv-accent-fg' : 'text-tv-ink-muted'
+                    }`}
+                  >
+                    {/* réguas neutras: eram accent, ou seja accent gasto em
+                        enfeite justamente na tela onde ele precisa significar
+                        "é agora" */}
+                    <div className="h-[2px] w-32 bg-tv-border" />
 
-                  <span className="text-[clamp(24px,2.2vw,40px)] font-medium">
-                    Dirija-se à recepção
-                  </span>
+                    <span className="text-[clamp(24px,2.2vw,40px)] font-medium">
+                      Dirija-se à recepção
+                    </span>
 
-                  <div className="h-[2px] w-32 bg-tv-accent/60" />
+                    <div className="h-[2px] w-32 bg-tv-border" />
+                  </div>
+
+                  {/* a cor nunca carrega o estado sozinha — o texto diz */}
+                  {idade !== null && (
+                    <span
+                      className={`text-[clamp(17px,1.5vw,28px)] tabular-nums transition-colors duration-500 ${
+                        agora
+                          ? 'text-tv-accent-fg font-medium'
+                          : 'text-tv-ink-muted'
+                      }`}
+                    >
+                      chamada {tempoDecorrido(idade)}
+                    </span>
+                  )}
                 </div>
               </>
             ) : (
@@ -484,7 +538,7 @@ export default function TVPage() {
       "
         >
           <h2 className="text-[clamp(16px,1.3vw,24px)] text-tv-ink font-semibold mb-6 flex items-center gap-2.5">
-            <History className="w-[1.1em] h-[1.1em] text-tv-accent" strokeWidth={2} />
+            <History className="w-[1.1em] h-[1.1em] text-tv-ink-muted" strokeWidth={2} />
             Últimas chamadas
           </h2>
 
@@ -515,10 +569,12 @@ export default function TVPage() {
         />
 
         <div className="flex items-center gap-6 text-[clamp(16px,1.2vw,22px)] text-tv-bar-muted">
-          {/* sinal discreto: ninguém fica olhando o console de uma TV */}
+          {/* sinal discreto: ninguém fica olhando o console de uma TV. Ícone +
+              texto + cor: o ponto pulsante saiu, era movimento decorativo numa
+              tela pública e a informação já estava nos outros dois canais */}
           {!online && (
-            <span className="flex items-center gap-2 text-amber-300">
-              <span className="w-2.5 h-2.5 rounded-full bg-amber-300 animate-pulse" />
+            <span className="flex items-center gap-2 text-tv-warn">
+              <WifiOff className="w-[1.15em] h-[1.15em]" strokeWidth={2} />
               Sem conexão
             </span>
           )}
