@@ -1008,7 +1008,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
           <div className="w-full lg:w-fit rounded-xl border border-border bg-muted/40 p-3">
             <div className="mb-2 flex items-center gap-2">
               <span className="whitespace-nowrap text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
-                Dias e turnos afetados
+                Dias e turnos
                 <InfoTip ariaLabel="Como marcar dias e turnos">
                   <p>Marque <strong className="text-foreground">manhã</strong>, <strong className="text-foreground">tarde</strong> ou <strong className="text-foreground">dia inteiro</strong>.</p>
                   <p className="mt-2">A recomendação avalia cada período separadamente — pode indicar <strong className="text-foreground">unidades diferentes</strong> por turno.</p>

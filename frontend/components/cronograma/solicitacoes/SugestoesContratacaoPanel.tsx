@@ -420,6 +420,15 @@ export function SugestoesContratacaoPanel({ onAplicarSugestao }: Props) {
               ariaLabel="Especialidades"
             />
           </div>
+          {especialidadesIds.size > 0 && (
+            <button
+              type="button"
+              onClick={() => { setEspecialidadesIds(new Set()); setPagina(0) }}
+              className="text-[11px] font-bold text-muted-foreground underline decoration-dotted hover:text-foreground"
+            >
+              Limpar filtro
+            </button>
+          )}
         </div>
       </div>
 
