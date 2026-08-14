@@ -2,7 +2,7 @@
 
 'use client'
 
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Cloud,
   CloudLightning,
@@ -66,17 +66,79 @@ const horaDaChamada = (iso: string) => {
   }
 }
 
+// O relógio mora numa folha própria: com o setState de 1s na raiz, a TV
+// re-renderizava a página inteira 3.600x por hora (~43 mil por dia numa jornada
+// de 12h) só pra mexer dois dígitos no rodapé. Fuso explícito pelo mesmo motivo
+// de horaDaChamada — TV com relógio configurado em outro lugar não pode mostrar
+// horário de chamada e horário de parede em fusos diferentes.
+function Relogio() {
+  const [hora, setHora] = useState('')
+
+  useEffect(() => {
+    const atualizar = () => {
+      setHora(
+        new Date().toLocaleTimeString('pt-BR', {
+          hour: '2-digit',
+          minute: '2-digit',
+          timeZone: 'America/Sao_Paulo',
+        })
+      )
+    }
+
+    atualizar()
+
+    const interval = setInterval(atualizar, 1000)
+
+    return () => clearInterval(interval)
+  }, [])
+
+  return <span className="tabular-nums">{hora}</span>
+}
+
+// memo: quando só o clima ou o estado de conexão mudam, as linhas do histórico
+// não têm por que re-renderizar.
+const LinhaChamada = memo(function LinhaChamada({
+  chamada,
+  posicao,
+}: {
+  chamada: Chamada
+  posicao: number
+}) {
+  return (
+    <div className="flex items-start gap-3 py-3 border-b border-tv-border last:border-0">
+      <div className="w-9 h-9 shrink-0 rounded-full bg-tv-ground flex items-center justify-center text-[clamp(13px,0.9vw,16px)] font-semibold text-tv-ink-muted">
+        {posicao}
+      </div>
+
+      {/* sem truncate: cortar o nome de quem está sendo chamado é justamente o
+          que a lista não pode fazer — o max-w-[160px] recortava 2 de 2 nomes
+          até em 1920px */}
+      <span className="flex-1 min-w-0 text-[clamp(18px,1.5vw,28px)] font-medium text-tv-ink leading-tight">
+        {chamada.nome}
+      </span>
+
+      <span className="shrink-0 pt-1 text-[clamp(13px,1vw,18px)] tabular-nums text-tv-ink-muted">
+        {horaDaChamada(chamada.chamado_em)}
+      </span>
+    </div>
+  )
+})
+
+// O poll devolve a mesma lista o tempo todo; sem isto cada ciclo de 3s trocava a
+// identidade do array e re-renderizava a árvore inteira sem nada ter mudado.
+const mesmaLista = (a: Chamada[], b: Chamada[]) =>
+  a.length === b.length && a.every((c, i) => c.id === b[i].id)
+
 export default function TVPage() {
   const [chamadas, setChamadas] = useState<Chamada[]>([])
-  const [hora, setHora] = useState('')
   const [temperatura, setTemperatura] = useState<number | null>(null)
   const [codigoClima, setCodigoClima] = useState<number | null>(null)
   const [animando, setAnimando] = useState(false)
   const [audioLiberado, setAudioLiberado] = useState(false)
   const [online, setOnline] = useState(true)
 
-  const atual = chamadas[0] ?? null
-  const historico = chamadas.slice(1)
+  const atual = useMemo(() => chamadas[0] ?? null, [chamadas])
+  const historico = useMemo(() => chamadas.slice(1), [chamadas])
 
   const filaAudio = useRef<Chamada[]>([])
   const falando = useRef(false)
@@ -162,24 +224,6 @@ export default function TVPage() {
     }
   }, [])
 
-  // ⏰ relógio
-  useEffect(() => {
-    const atualizar = () => {
-      setHora(
-        new Date().toLocaleTimeString('pt-BR', {
-          hour: '2-digit',
-          minute: '2-digit',
-        })
-      )
-    }
-
-    atualizar()
-
-    const interval = setInterval(atualizar, 1000)
-
-    return () => clearInterval(interval)
-  }, [])
-
   // 📣 chamadas
   useEffect(() => {
     let vivo = true
@@ -196,7 +240,7 @@ export default function TVPage() {
         if (!vivo) return
 
         setOnline(true)
-        setChamadas(lista)
+        setChamadas((prev) => (mesmaLista(prev, lista) ? prev : lista))
 
         const novas = lista.filter((c) => !anunciados.current.has(c.id))
         for (const c of lista) anunciados.current.add(c.id)
@@ -381,7 +425,7 @@ export default function TVPage() {
 			  px-10
 			  border border-tv-border
 			  shadow-[0_25px_70px_rgba(16,27,43,0.15)]
-			  transition-all duration-500
+			  transition-[transform,box-shadow] duration-500 ease-out
 			  ${animando ? 'scale-[1.03] shadow-[0_0_80px_rgba(37,99,235,0.35)]' : ''}
 			`}
           >
@@ -453,25 +497,7 @@ export default function TVPage() {
 
             {/* lista dividida, sem card dentro de card */}
             {historico.map((h, index) => (
-              <div
-                key={h.id}
-                className="flex items-start gap-3 py-3 border-b border-tv-border last:border-0"
-              >
-                <div className="w-9 h-9 shrink-0 rounded-full bg-tv-ground flex items-center justify-center text-[clamp(13px,0.9vw,16px)] font-semibold text-tv-ink-muted">
-                  {index + 1}
-                </div>
-
-                {/* sem truncate: cortar o nome de quem está sendo chamado é
-                    justamente o que a lista não pode fazer — o max-w-[160px]
-                    recortava 2 de 2 nomes até em 1920px */}
-                <span className="flex-1 min-w-0 text-[clamp(18px,1.5vw,28px)] font-medium text-tv-ink leading-tight">
-                  {h.nome}
-                </span>
-
-                <span className="shrink-0 pt-1 text-[clamp(13px,1vw,18px)] tabular-nums text-tv-ink-muted">
-                  {horaDaChamada(h.chamado_em)}
-                </span>
-              </div>
+              <LinhaChamada key={h.id} chamada={h} posicao={index + 1} />
             ))}
           </div>
         </aside>
@@ -497,7 +523,7 @@ export default function TVPage() {
             </span>
           )}
 
-          <span className="tabular-nums">{hora}</span>
+          <Relogio />
 
           <span className="flex items-center gap-2 tabular-nums">
             {temperatura !== null ? `${temperatura}°C` : '--'}
