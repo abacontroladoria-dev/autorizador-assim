@@ -184,7 +184,7 @@ function CardSugestao({
 
         <div className="flex shrink-0 flex-col items-end gap-1.5">
           {margemBreakEven ? (
-            <div className="w-64 rounded-xl bg-muted/50 p-3">
+            <div className="w-72 rounded-xl bg-muted/50 p-3">
               <div className="flex flex-col gap-1 text-[11px]">
                 <div className="flex items-center justify-between gap-3">
                   <span className="whitespace-nowrap text-muted-foreground">Receita líquida/mês</span>
@@ -193,7 +193,7 @@ function CardSugestao({
                   </span>
                 </div>
                 <div className="flex items-center justify-between gap-3 text-rose-500/80 dark:text-rose-400/70">
-                  <span className="whitespace-nowrap text-muted-foreground">Impostos e perdas (20%)</span>
+                  <span className="whitespace-nowrap text-muted-foreground">Impostos ({parametrosGerais?.imposto_faturamento_pct}%) e perdas ({PERDA_PADRAO_CARD}%)</span>
                   <span className="whitespace-nowrap text-right font-semibold tabular-nums">− {fmtReal(impostosEPerdas)}</span>
                 </div>
                 <div className="flex items-center justify-between gap-3 text-rose-600 dark:text-rose-400">

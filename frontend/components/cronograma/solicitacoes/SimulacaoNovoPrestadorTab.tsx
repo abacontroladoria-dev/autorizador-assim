@@ -835,11 +835,14 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
       custo = resultadoBreakEven.custoMensalTotal
     } else if (breakEvenAtendimentoDisponivel) {
       // Custo variável: sessões REAIS deste mês (soma exata da coluna
-      // "Sessões" de "Ver detalhe", via contarSessoesReaisMes — não uma
-      // aproximação por bruto÷valor médio) × (1 − perda) × taxa PA.
+      // "Sessões" de "Ver detalhe", via contarSessoesReaisMes) × taxa PA —
+      // sem desconto de perda nem imposto aqui. Sessão não é fracionária: o
+      // profissional recebe pela quantidade exata de sessões que de fato
+      // aconteceram no calendário real, não por uma média estatística
+      // (diferente da Frente 2, que projeta um valor esperado sobre a média
+      // de 4,33 semanas/mês, onde uma fração de sessão faz sentido).
       const sessoesReais = contarSessoesReaisMes(periodosEnriquecidos, mesReferencia, feriados)
-      const sessoesComPerda = sessoesReais * (1 - perda)
-      custo = sessoesComPerda * taxaPAEspecialidade
+      custo = sessoesReais * taxaPAEspecialidade
     }
     const margem = custo !== null ? liquido - custo : null
 
