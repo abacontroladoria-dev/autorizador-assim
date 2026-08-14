@@ -1,361 +1,386 @@
-/*
-* =========================
-* WORKER RPA
-* =========================
-*/
+/**
+ * =========================
+ * WORKER RPA
+ * =========================
+ *
+ * O que mudou nesta versão:
+ *
+ * - NENHUMA credencial de banco no PC. Antes o .env trazia duas cópias da
+ *   SUPABASE_SERVICE_ROLE_KEY (as variáveis SUPABASE_KEY e
+ *   SUPABASE_SERVICE_ROLE_KEY decodificavam ambas para role:service_role) e todo
+ *   acesso era direto às tabelas, sem RLS. Agora só existe a anon key (pública)
+ *   e o token desta máquina, protegido por DPAPI.
+ * - A identidade vem do SERVIDOR. Antes era `MACHINE_ID=admin` auto-declarado no
+ *   .env; agora o servidor devolve o machine_id a partir do token, e é esse
+ *   valor que o endpoint /machine-id publica para o frontend rotear a tarefa.
+ * - Poll adaptativo. Antes eram 2 requisições a cada 500ms (a fila e o estado da
+ *   máquina), 24h por dia, mesmo com a clínica fechada — 4 req/s por PC, o que
+ *   alimentava o aperto de Disk IO. Agora é uma chamada, no ritmo que o servidor
+ *   determinar, mais lenta quando ocioso.
+ * - Existe supervisor. Antes `restart_solicitado` fazia process.exit(0) e nada
+ *   relançava o processo: "reiniciar" pelo painel na verdade matava o robô até o
+ *   próximo logon do Windows. Agora start.bat tem laço e os códigos de saída
+ *   significam algo (0 = relançar, 99 = parar de vez).
+ */
 
 require('dotenv').config({ path: __dirname + '/.env' })
 
-const executarRpa = require('./rpa')
-
+const fs = require('fs')
 const os = require('os')
-
+const path = require('path')
+const express = require('express')
+const cors = require('cors')
 const { chromium } = require('playwright')
 
-const { createClient } = require('@supabase/supabase-js')
+const { Api } = require('./api')
+const { obterToken } = require('./segredo')
+const { SessaoAssim } = require('./assim')
+const executarRpa = require('./rpa')
+const { verificarEAplicar, versaoAtual } = require('./updater')
 
-const express = require('express')
+// Vem de versao.json quando o robô já se auto-atualizou; de package.json na
+// instalação de fábrica.
+const VERSAO = versaoAtual()
 
-const cors = require('cors')
+// Códigos de saída lidos pelo supervisor em start.bat.
+const SAIDA_RELANCAR = 0
+const SAIDA_PARAR = 99
 
-const supabase = createClient(
-  process.env.SUPABASE_URL,
-  process.env.SUPABASE_KEY
-)
+const HEARTBEAT_MS = 30000
+const CONFIG_TTL_MS = 10 * 60000
 
-const MACHINE_ID = process.env.MACHINE_ID
+// Preenchido no primeiro heartbeat. Antes do servidor responder, o robô
+// deliberadamente não afirma identidade nenhuma.
+let MACHINE_ID = null
+let ultimoEstado = null
 
-if (!MACHINE_ID) {
-  console.error('❌ MACHINE_ID não definido no .env — encerrando.')
-  process.exit(1)
-}
+// =========================
+// API LOCAL (127.0.0.1)
+// =========================
 
 const app = express()
 
 app.use(cors({
-
   origin(origin, callback) {
-
-    const allowed = [
-
+    const permitidos = [
       'http://localhost:3000',
-
-      'https://orbitaautomacao.com.br'
+      'http://127.0.0.1:3000',
+      'https://orbitaautomacao.com.br',
     ]
-
-    // requests locais sem origin
-    if (!origin) {
-      return callback(null, true)
-    }
-
-    if (allowed.includes(origin)) {
-      return callback(null, true)
-    }
-
-    return callback(
-      new Error('Not allowed by CORS')
-    )
-  }
+    // Requisição local sem Origin (curl, o próprio Windows) é aceita: o
+    // servidor só escuta em 127.0.0.1 e não expõe nada sensível.
+    if (!origin) return callback(null, true)
+    if (permitidos.includes(origin)) return callback(null, true)
+    return callback(new Error('Not allowed by CORS'))
+  },
 }))
 
-const INTERVALO = 3000
-
-console.log('Worker iniciado na máquina:', MACHINE_ID)
-
-
-// =========================
-// 🔎 BUSCAR TAREFA (PENDENTE)
-// =========================
-async function buscarTarefa() {
-  const { data, error } = await supabase
-    .from('fila_autorizacoes')
-    .select('*')
-    .eq('status', 'pendente')
-	.eq('machine_id', MACHINE_ID)
-    .order('id', { ascending: true }) // ✅ seguro
-    .limit(1)
-
-  if (error) {
-    console.error("Erro ao buscar tarefa:", error.message)
-    return null
-  }
-
-  return data.length > 0 ? data[0] : null
-}
-
-// =========================
-// 🔄 ATUALIZAR STATUS
-// =========================
-async function atualizarStatus(id, status) {
-  const { error } = await supabase
-    .from('fila_autorizacoes') // ✅ CORRIGIDO
-    .update({
-      status,
-      updated_at: new Date().toISOString(),
-    })
-    .eq('id', id)
-
-  if (error) {
-    console.error("Erro ao atualizar status:", error.message)
-  }
-}
-
-// =========================
-// ⛔ CANCELAMENTO
-// =========================
-async function verificarCancelamento(id) {
-		  const { data, error } = await supabase
-			.from('fila_autorizacoes')
-			.select('status')
-			.eq('id', id)
-			.single()
-
-		  if (error) {
-			console.error("Erro ao verificar cancelamento:", error.message)
-			return false
-		  }
-
-		  // só continua se ainda estiver ativa
-		  return !['processando', 'executando'].includes(data?.status)
-		}
-
-
-// =========================
-// 📝 LOG
-// =========================
-async function registrarLog(fila_id, mensagem) {
-  const { error } = await supabase
-    .from('logs')
-    .insert([
-      {
-        fila_id,
-        mensagem
-      }
-    ])
-
-  if (error) {
-    console.error("Erro ao registrar log:", error.message)
-  }
-}
-
-// =========================
-// 🖥️ AUTO-REGISTRO DA MÁQUINA
-// =========================
-async function registrarMaquina() {
-  const agora = new Date().toISOString()
-
-  const { error } = await supabase
-    .from('maquinas')
-    .upsert({
-      id: MACHINE_ID,
-      nome: MACHINE_ID,
-      hostname: os.hostname(),
-      sistema_operacional: `${os.type()} ${os.release()}`,
-      ativa: true,
-      last_seen: agora,
-      updated_at: agora,
-    }, { onConflict: 'id', ignoreDuplicates: false })
-
-  if (error) {
-    console.error('⚠️ Erro ao registrar máquina:', error.message)
-  } else {
-    console.log('✅ Máquina registrada/atualizada:', MACHINE_ID)
-  }
-}
-
-// =========================
-// 💓 HEARTBEAT
-// =========================
-function iniciarHeartbeat(intervaloMs = 30000) {
-  setInterval(async () => {
-    const agora = new Date().toISOString()
-    await supabase
-      .from('maquinas')
-      .update({ last_seen: agora, updated_at: agora })
-      .eq('id', MACHINE_ID)
-  }, intervaloMs)
-}
-
-// =========================
-// 🚀 LOOP PRINCIPAL
-// =========================
-async function iniciarWorker() {
-
-  console.log("=================================")
-  console.log("🤖 WORKER RPA INICIADO")
-  console.log("💻 Máquina:", MACHINE_ID)
-  console.log("=================================")
-
-  await registrarMaquina()
-  iniciarHeartbeat(30000)
-
-  let browser = await chromium.launch({ headless: false })
-  console.log("🌐 Browser iniciado")
-
-  browser.on('disconnected', () => {
-    console.log("⚠️ Browser fechado pela recepcionista — será relançado na próxima tarefa")
-    browser = null
-  })
-
-	while (true) {
-	  try {
-
-      // Verifica status da máquina (ativa e restart_solicitado)
-      const { data: maquinaStatus } = await supabase
-        .from('maquinas')
-        .select('ativa, restart_solicitado')
-        .eq('id', MACHINE_ID)
-        .maybeSingle()
-
-      if (maquinaStatus?.restart_solicitado) {
-        console.log('🔄 Reinício solicitado — encerrando processo...')
-        await supabase.from('maquinas').update({ restart_solicitado: false }).eq('id', MACHINE_ID)
-        setTimeout(() => process.exit(0), 500)
-        return
-      }
-
-      if (maquinaStatus && maquinaStatus.ativa === false) {
-        await new Promise(r => setTimeout(r, 5000))
-        continue
-      }
-
-		console.log("🔎 Buscando tarefas...")
-
-		const tarefa = await buscarTarefa()
-
-		if (!tarefa) {
-		  await new Promise(r => setTimeout(r, 500))
-		  continue
-		}
-
-		console.log("📌 Tarefa encontrada:", tarefa.id)
-
-      // =========================
-      // 🔒 LOCK (CRÍTICO)
-      // =========================
-      const { data: lockData, error: lockError } = await supabase
-        .from('fila_autorizacoes')
-        .update({
-          status: 'processando',
-          updated_at: new Date().toISOString(),
-        })
-        .match({
-          id: tarefa.id,
-          status: 'pendente'
-        })
-        .select()
-
-      if (lockError) {
-        console.error("❌ Erro ao travar tarefa:", lockError.message)
-        continue
-      }
-
-      if (!lockData || lockData.length === 0) {
-        console.log("⚠️ Já foi pego por outro worker")
-        continue
-      }
-
-      console.log("🔐 LOCK OK:", tarefa.id)
-
-      await registrarLog(tarefa.id, 'Iniciando execução')
-
-      try {
-
-        // ⛔ cancelamento
-        if (await verificarCancelamento(tarefa.id)) {
-          console.log("⛔ Cancelado antes de iniciar")
-          continue
-        }
-
-        // 🚀 EXECUTANDO
-        if (!browser || !browser.isConnected()) {
-          browser = await chromium.launch({ headless: false })
-          console.log("🌐 Browser relançado")
-          browser.on('disconnected', () => {
-            console.log("⚠️ Browser fechado pela recepcionista — será relançado na próxima tarefa")
-            browser = null
-          })
-        }
-
-        const resultado = await executarRpa(tarefa, verificarCancelamento, browser);
-
-		// O rpa.js gerencia o status internamente ('concluido' ou 'erro').
-		// O worker só registra o log com base no retorno.
-		if (resultado === 'sucesso') {
-		  await registrarLog(tarefa.id, 'Execução concluída');
-		  console.log("✅ Concluído:", tarefa.id);
-		} else {
-		  await registrarLog(tarefa.id, 'Falha na execução');
-		  console.log("❌ Falha:", tarefa.id);
-		}
-        
-		await new Promise(r => setTimeout(r, 200))
-
-      } catch (erroExecucao) {
-
-        console.error("❌ Erro:", erroExecucao.message)
-
-        // O rpa.js já atualizou para 'erro' antes de relançar a exceção.
-        // O worker só registra o log para não sobrescrever o status.
-        await registrarLog(tarefa.id, erroExecucao.message)
-
-        await new Promise(r => setTimeout(r, 1000))
-
-      }
-
-    } catch (erroGeral) {
-
-      console.error("❌ Erro geral:", erroGeral.message)
-
-      await new Promise(r => setTimeout(r, 1000))
-    }
-  }
-}
-
-
 app.get('/health', (req, res) => {
-
   res.json({
-
-  ok: true,
-
-  worker: 'online',
-
-  machine_id: MACHINE_ID,
-
-  uptime: process.uptime(),
-
-  timestamp: new Date().toISOString()
-})
+    ok: true,
+    worker: 'online',
+    machine_id: MACHINE_ID,
+    versao: VERSAO,
+    ativa: ultimoEstado?.ativa ?? null,
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  })
 })
 
 app.get('/machine-id', (req, res) => {
-
-  res.json({
-    machine_id: MACHINE_ID
-  })
+  // Antes do primeiro heartbeat não há identidade confirmada. Responder 503 é
+  // melhor que responder um palpite: frontend/lib/machine.ts já trata resposta
+  // não-ok caindo em 'WEB'.
+  if (!MACHINE_ID) {
+    return res.status(503).json({ error: 'aguardando identificacao no servidor' })
+  }
+  res.json({ machine_id: MACHINE_ID })
 })
 
-const LOCAL_API_PORT =
-  process.env.LOCAL_API_PORT || 3010
+// =========================
+// LOOP PRINCIPAL
+// =========================
 
-app.listen(
-  LOCAL_API_PORT,
-  '127.0.0.1',
-  () => {
+const esperar = ms => new Promise(r => setTimeout(r, ms))
 
-    console.log(
-      `🌐 API local ativa em http://127.0.0.1:${LOCAL_API_PORT}`
-    )
+async function iniciarWorker() {
+  console.log('=================================')
+  console.log('🤖 WORKER RPA INICIADO — v' + VERSAO)
+  console.log('=================================')
+
+  const token = obterToken()
+  const api = new Api(
+    process.env.SUPABASE_URL,
+    process.env.SUPABASE_ANON_KEY,
+    token
+  )
+
+  const dadosMaquina = {
+    hostname: os.hostname(),
+    so: `${os.type()} ${os.release()}`,
+    versao: VERSAO,
   }
-)
 
+  // Primeiro contato: identidade + estado + config.
+  ultimoEstado = await api.heartbeat(dadosMaquina)
+  MACHINE_ID = ultimoEstado.machine_id
+  console.log('💻 Máquina identificada pelo servidor:', MACHINE_ID)
+
+  // O heartbeat consome restart_solicitado de forma atômica. Se a marca estava
+  // ligada agora, no arranque, o pedido já está atendido — acabamos de subir.
+  // Sair aqui só provocaria um segundo reinício sem motivo. Mas isso precisa
+  // aparecer no log: antes era consumido em silêncio, e quem clicou em
+  // "reiniciar" no painel não teria como saber o que aconteceu com o pedido.
+  if (ultimoEstado.restart_solicitado) {
+    console.log('ℹ️  Havia um pedido de reinício pendente; o processo já é novo, pedido atendido.')
+  }
+
+  // Marcador para o supervisor: chegamos a falar com o servidor, então um
+  // encerramento daqui para frente é reinício legítimo, não falha de partida.
+  // Sem isso, o backoff trataria "reiniciar pelo painel" como crash.
+  try {
+    fs.writeFileSync(path.join(__dirname, '.saudavel'), new Date().toISOString())
+  } catch (e) { /* disco cheio/somente leitura: o robô funciona, só perde o backoff fino */ }
+
+  // Atualiza ANTES de abrir navegador: mais barato reiniciar agora.
+  if (await verificarEAplicar(api, VERSAO, ultimoEstado.versao_disponivel)) {
+    console.log('🔄 Atualização aplicada — encerrando para o supervisor relançar')
+    return SAIDA_RELANCAR
+  }
+
+  let cfg = await api.obterConfigAssim()
+  let cfgEm = Date.now()
+  console.log('⚙️  Configuração da ASSIM carregada do servidor')
+
+  let browser = await chromium.launch({ headless: false })
+  console.log('🌐 Browser iniciado')
+
+  const sessao = new SessaoAssim(browser)
+
+  browser.on('disconnected', () => {
+    console.log('⚠️ Browser fechado pela recepcionista — será relançado na próxima tarefa')
+    browser = null
+  })
+
+  // ---- batida de vida, fora do laço ----
+  // A batida precisa ser independente do laço porque o laço PARA. `executarRpa`
+  // é aguardado nu lá embaixo, e a espera pela identificação do beneficiário
+  // (rpa.js, tetoHumano) segura a tarefa por até 15 min — mais de 30 min somando
+  // os outros prazos. Com a batida dentro do laço, o `last_seen` congelava todo
+  // esse tempo: o painel marcava a máquina como offline (90s de tolerância) e o
+  // pedido de reinício não era consumido. O robô parecia travado exatamente
+  // quando estava mais ocupado, e foi assim que a recepção o descreveu.
+  //
+  // O que continua no topo do laço são as DECISÕES (reiniciar, atualizar).
+  // Trocar de versão ou fechar o navegador no meio de uma autorização seria
+  // trocar um problema por outro pior.
+  let restartPedido = false
+  let versaoDisponivel = ultimoEstado.versao_disponivel ?? null
+  let batendo = false
+  // A checagem de atualização morava dentro do `if` da batida, ou seja, rodava
+  // no máximo a cada 30s. Solta no topo do laço ela cairia a cada volta do poll
+  // — e um pacote que falha o download viraria rajada de `obterPacote` contra o
+  // servidor. Esta marca devolve a cadência original.
+  let proximaChecagemVersao = 0
+
+  const bater = async () => {
+    // Rede ruim + os 4 retries com backoff do api.js podem fazer uma batida
+    // durar mais que o intervalo. Empilhar requisição não ressuscita ninguém.
+    if (batendo) return
+    batendo = true
+    try {
+      const estado = await api.heartbeat(dadosMaquina)
+      ultimoEstado = estado
+
+      // `robo_heartbeat` consome `restart_solicitado` de forma ATÔMICA: o
+      // servidor desliga a marca ao responder. Se ela chegar no meio de uma
+      // tarefa, descartar aqui seria perder o clique de quem apertou
+      // "reiniciar" no painel. Guarda, e o topo do laço obedece quando a tarefa
+      // terminar.
+      if (estado.restart_solicitado) restartPedido = true
+      if (estado.versao_disponivel) versaoDisponivel = estado.versao_disponivel
+    } catch (e) {
+      // Batida é sinal de vida, não trabalho: falhar aqui não derruba o robô.
+      // A próxima tentativa vem em HEARTBEAT_MS.
+      console.warn('⚠️  Heartbeat falhou:', e.message)
+    } finally {
+      batendo = false
+    }
+  }
+
+  const batida = setInterval(bater, HEARTBEAT_MS)
+  // Nunca é a batida que mantém o processo vivo — quem faz isso é a API local.
+  // Assim, um caminho de saída que esqueça o clearInterval não pendura o robô.
+  batida.unref()
+
+  let ultimaAtividade = Date.now()
+
+  while (true) {
+    try {
+      // ---- decisões que a batida guardou ----
+      if (restartPedido) {
+        console.log('🔄 Reinício solicitado pelo painel — encerrando...')
+        clearInterval(batida)
+        await sessao.fecharTudo()
+        return SAIDA_RELANCAR
+      }
+
+      if (versaoDisponivel && Date.now() >= proximaChecagemVersao) {
+        proximaChecagemVersao = Date.now() + HEARTBEAT_MS
+        if (await verificarEAplicar(api, VERSAO, versaoDisponivel)) {
+          console.log('🔄 Atualização aplicada — encerrando para o supervisor relançar')
+          clearInterval(batida)
+          await sessao.fecharTudo()
+          return SAIDA_RELANCAR
+        }
+      }
+
+      // ---- config viva ----
+      if (Date.now() - cfgEm >= CONFIG_TTL_MS) {
+        cfg = await api.obterConfigAssim()
+        cfgEm = Date.now()
+      }
+
+      // ---- pausada pelo painel ----
+      if (ultimoEstado.ativa === false) {
+        await esperar(5000)
+        continue
+      }
+
+      // ---- housekeeping das abas ----
+      await sessao.podar(cfg)
+
+      // ---- tarefa ----
+      const tarefa = await api.buscarTarefa()
+
+      if (!tarefa) {
+        const ocioso = Date.now() - ultimaAtividade > (Number(cfg.ocioso_apos_ms) || 120000)
+        await esperar(Number(ocioso ? cfg.poll_ms_ocioso : cfg.poll_ms_ativo) || 1000)
+        continue
+      }
+
+      ultimaAtividade = Date.now()
+      console.log('📌 Tarefa recebida (já travada pelo servidor):', tarefa.id)
+      await api.registrarLog(tarefa.id, 'Iniciando execução')
+
+      if (!browser || !browser.isConnected()) {
+        browser = await chromium.launch({ headless: false })
+        console.log('🌐 Browser relançado')
+        sessao.trocarBrowser(browser)
+        browser.on('disconnected', () => {
+          console.log('⚠️ Browser fechado pela recepcionista — será relançado na próxima tarefa')
+          browser = null
+        })
+      }
+
+      const cancelado = async () => {
+        const status = await api.statusTarefa(tarefa.id).catch(() => null)
+        // Status ausente (cancelada e removida da máquina) ou fora dos estados
+        // de execução significa: pare.
+        return !['processando', 'executando'].includes(status)
+      }
+
+      let aba = null
+
+      try {
+        aba = await sessao.abrirFormulario(cfg)
+        aba.filaId = tarefa.id
+
+        const resultado = await executarRpa({
+          page: aba.page,
+          tarefa,
+          cfg,
+          api,
+          cancelado,
+          // Os alertas que a ASSIM emitiu nesta aba. É por eles que uma recusa
+          // do portal deixa de ser confundida com "ninguém clicou em enviar".
+          alertas: aba.alertas || [],
+        })
+
+        const DESCRICAO_DESFECHO = {
+          sucesso:  'Execução concluída',
+          sem_guia: 'Concluída sem guia capturada',
+          glosa:    'ASSIM recusou (glosa)',
+        }
+
+        await api.registrarLog(
+          tarefa.id,
+          DESCRICAO_DESFECHO[resultado] || `Execução encerrada (${resultado})`
+        )
+        console.log(
+          resultado === 'glosa' ? '🚫 Finalizado:' : '✅ Finalizado:',
+          tarefa.id, `(${resultado})`
+        )
+
+        // A aba fica de propósito, para impressão/conferência — inclusive na
+        // glosa, porque é dessa tela que a recepção tira o print da recusa.
+        // sessao.podar() cuida de não deixar acumular.
+
+      } catch (erroExecucao) {
+        console.error('❌ Erro na tarefa:', erroExecucao.message)
+        await api.registrarLog(tarefa.id, erroExecucao.message)
+
+        // Execução que falhou não tem nada para imprimir: fecha a aba em vez de
+        // deixar lixo na tela da recepcionista.
+        await sessao.descartar(aba)
+
+        if (erroExecucao.fatal) throw erroExecucao
+
+        await esperar(1000)
+      }
+
+    } catch (erroGeral) {
+      if (erroGeral.fatal) {
+        console.error('\n⛔ ERRO QUE O ROBÔ NÃO RESOLVE SOZINHO:')
+        console.error('   ' + erroGeral.message)
+        console.error('   O supervisor NÃO vai relançar. Resolva e inicie manualmente.\n')
+        clearInterval(batida)
+        await sessao.fecharTudo().catch(() => {})
+        return SAIDA_PARAR
+      }
+
+      console.error('❌ Erro geral:', erroGeral.message)
+      await esperar(2000)
+    }
+  }
+}
 
 // =========================
-// ▶ EXECUÇÃO
+// EXECUÇÃO
 // =========================
+
+/**
+ * Ponto de entrada real. Traduz o desfecho em código de saída, que é o contrato
+ * com o supervisor do start.bat: 0 = relance, 99 = pare e chame alguém.
+ *
+ * index.js também chama esta função — antes ele chamava iniciarWorker() e jogava
+ * o retorno no lixo, o que fazia o supervisor relançar até em caso de token
+ * revogado.
+ */
+function main() {
+  const porta = process.env.LOCAL_API_PORT || 3010
+
+  app.listen(porta, '127.0.0.1', () => {
+    console.log(`🌐 API local ativa em http://127.0.0.1:${porta}`)
+  })
+
+  return iniciarWorker()
+    .then((codigo) => process.exit(codigo ?? SAIDA_RELANCAR))
+    .catch((erro) => {
+      console.error('\n⛔ Falha ao iniciar o worker:')
+      console.error('   ' + erro.message)
+      // Erro fatal (token ausente, recusado, revogado) é problema de
+      // instalação/provisionamento: relançar em laço só esconderia o aviso.
+      // Erro comum (a internet caiu no boot) merece nova tentativa.
+      process.exit(erro.fatal ? SAIDA_PARAR : SAIDA_RELANCAR)
+    })
+}
+
 module.exports = iniciarWorker
+module.exports.main = main
+module.exports.SAIDA_RELANCAR = SAIDA_RELANCAR
+module.exports.SAIDA_PARAR = SAIDA_PARAR
 
 if (require.main === module) {
-  iniciarWorker()
+  main()
 }

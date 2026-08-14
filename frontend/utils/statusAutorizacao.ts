@@ -11,10 +11,14 @@ export function getStatusConfig(a: any) {
   }
 
   // 🔴 GLOSA (NEGADO)
-  if (a.status_assim === 'pendencia_adm') {
+  // Dois caminhos para a mesma coisa: 'pendencia_adm' vem do relatório da ASSIM;
+  // status='glosa' é o robô lendo "BENEFICIO REJEITADO" no recibo do aceite, no
+  // mesmo dia. Sem o segundo, a linha caía em "Status desconhecido".
+  if (a.status_assim === 'pendencia_adm' || a.status === 'glosa') {
     return {
       key: 'glosa',
       label: 'Negado pelo convênio',
+      sublabel: null,
       className: 'bg-red-100 text-red-700'
     }
   }

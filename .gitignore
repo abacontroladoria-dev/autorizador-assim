@@ -8,7 +8,10 @@ README.md
 LICENSE
 instalador/
 node/
-robo-autorizador/
+# robo-autorizador/ NAO e mais ignorado por inteiro: o toolchain do instalador
+# (.iss, start.bat, start.vbs) existia so na maquina do autor. O que precisa
+# ficar de fora esta em robo-autorizador/.gitignore — segredos, node_modules,
+# Chromium e o payload/Output do Inno Setup.
 package-lock.json
 .vscode/
 backup_12MAI2026/
