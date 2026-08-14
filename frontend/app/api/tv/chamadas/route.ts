@@ -30,9 +30,11 @@ async function listar(request: NextRequest) {
   const unidade = request.nextUrl.searchParams.get('unidade')
   const desde = new Date(Date.now() - JANELA_HORAS * 60 * 60 * 1000).toISOString()
 
+  // `sala` fica fora: a clínica tem uma recepção só, a TV não exibe qual, e o
+  // endpoint é público — não faz sentido publicar campo que ninguém usa.
   let query = supabaseService
     .from('chamada_paciente')
-    .select('id, nome, sala, agenda_id, unidade, chamado_em')
+    .select('id, nome, agenda_id, unidade, chamado_em')
     .eq('status', 'ativo')
     .gte('chamado_em', desde)
     .order('chamado_em', { ascending: false })

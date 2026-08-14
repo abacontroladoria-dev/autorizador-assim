@@ -80,6 +80,47 @@
     --color-central-topbar:  oklch(0.97 0.007 240);
     --color-central-sidebar: oklch(0.94 0.010 240);
     --color-central-panel:   oklch(0.975 0.005 240);
+
+    /* ── TV de chamada (/tv) — matiz 257 ──────────────────────────────────
+       A tela do saguão nascera com hex cravado (#334155 / #e2e8f0 / #cbd5e1
+       / #0f172a + slate-* + blue-600) e três textos abaixo de AA (audit
+       2026-08-14): 2.13:1 no rótulo do card, 3.09:1 no eyebrow do header,
+       3.86:1 na linha da recepção. Estes tokens são os mesmos valores de
+       antes, corrigidos e nomeados.
+
+       Matiz 257 e não os 217 de --color-brand: o azul de fato praticado no
+       app é este (--sidebar-primary #2563EB, --bloco-* em 255) e o próprio
+       comentário da escada de blocos registra a saída deliberada do 217 pra
+       não ter dois azuis brigando. Trocar a TV pelo teal da marca mudaria a
+       cara da tela mais pública da clínica sem ninguém pedir.
+
+       Só tema claro, de propósito: é sinalização numa sala de espera com luz
+       do dia — por isso pode viver no @theme sem o cuidado que as --bloco-*
+       precisam ter com a redefinição em .dark.
+
+       Contrastes conferidos por conversão oklch→sRGB:
+         ink sobre card ......... 16.70:1   (nome, 3:1 exigido)
+         ink sobre panel ........ 16.22:1   (nomes da lista)
+         ink-muted sobre card .... 6.57:1   (4.5 exigido)
+         ink-muted sobre edge ..... 5.88:1
+         ink-muted sobre ground ... 5.37:1
+         bar-muted sobre bar ...... 5.84:1
+         branco sobre bar ........ 10.86:1
+         branco sobre accent ...... 5.17:1
+         accent sobre card ........ 4.99:1  (régua/ícone, não-texto)
+       O accent é o #2563EB do sidebar-primary, para a TV não inventar um
+       terceiro azul de ação.                                              */
+    --color-tv-bar:       oklch(0.360 0.038 257);
+    --color-tv-bar-muted: oklch(0.800 0.022 257);
+    --color-tv-ground:    oklch(0.920 0.016 257);
+    --color-tv-card:      oklch(0.988 0.005 257);
+    --color-tv-card-edge: oklch(0.950 0.012 257);
+    --color-tv-panel:     oklch(0.978 0.008 257);
+    --color-tv-border:    oklch(0.885 0.020 257);
+    --color-tv-ink:       oklch(0.220 0.035 257);
+    --color-tv-ink-muted: oklch(0.470 0.040 257);
+    --color-tv-accent:    #2563EB;
+    --color-tv-accent-dark: #1D4ED8;
 }
 
 :root {

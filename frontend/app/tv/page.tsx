@@ -4,10 +4,12 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+// Sem `sala`: a clínica tem uma recepção só, então identificar qual seria ruído
+// (e a linha "Dirija-se à recepção Recepção 1" duplicava a palavra). Quando
+// existir uma segunda, volta o campo aqui e na rota.
 type Chamada = {
   id: string
   nome: string
-  sala: string | null
   agenda_id: string | null
   chamado_em: string
 }
@@ -83,9 +85,8 @@ export default function TVPage() {
     falando.current = true
 
     const nome = c.nome || 'Paciente'
-    const sala = c.sala || 'recepção'
     const msg = new SpeechSynthesisUtterance(
-      `Responsável pelo paciente ${nome}. Dirija-se à ${sala}`
+      `Responsável pelo paciente ${nome}. Dirija-se à recepção`
     )
 
     msg.lang = 'pt-BR'
@@ -279,23 +280,23 @@ export default function TVPage() {
   }
 
   return (
-    <div className="w-screen h-screen flex flex-col bg-[#e2e8f0] text-[#0f172a] overflow-hidden">
+    <div className="w-screen h-screen flex flex-col bg-tv-ground text-tv-ink overflow-hidden">
       {!audioLiberado && (
         <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
-          <div className="bg-white rounded-2xl shadow-2xl p-8 flex flex-col items-center gap-4">
+          <div className="bg-tv-card rounded-2xl shadow-2xl p-8 flex flex-col items-center gap-4">
             <div className="text-4xl">🔊</div>
 
-            <h2 className="text-xl font-semibold text-slate-800">
+            <h2 className="text-xl font-semibold text-tv-ink">
               Ativar áudio do sistema
             </h2>
 
-            <p className="text-sm text-slate-500 text-center">
+            <p className="text-sm text-tv-ink-muted text-center">
               Toque na tela para ativar as chamadas sonoras
             </p>
 
             <button
               onClick={liberarAudio}
-              className="mt-2 px-6 py-2 rounded-lg bg-blue-600 text-white font-medium hover:bg-blue-700 transition"
+              className="mt-2 px-6 py-2 rounded-lg bg-tv-accent text-white font-medium hover:bg-tv-accent-dark transition"
             >
               Ativar som
             </button>
@@ -304,7 +305,7 @@ export default function TVPage() {
       )}
 
       {/* 🔷 HEADER */}
-      <div className="h-[90px] flex items-center justify-between px-10 bg-[#334155]">
+      <div className="h-[90px] flex items-center justify-between px-10 bg-tv-bar">
         <div className="flex items-center gap-4">
           <img
             src="/logo-universo-aba.png"
@@ -313,7 +314,7 @@ export default function TVPage() {
           />
 
           <div className="flex flex-col leading-tight">
-            <span className="text-xs tracking-widest text-white/40">
+            <span className="text-xs tracking-widest text-tv-bar-muted">
               SISTEMA DE CHAMADA
             </span>
 
@@ -335,33 +336,31 @@ export default function TVPage() {
           <div
             className={`
 			  w-full h-full rounded-[36px]
-			  bg-[linear-gradient(135deg,#f8fafc,#e2e8f0)]
+			  bg-[linear-gradient(135deg,var(--color-tv-card),var(--color-tv-card-edge))]
 			  flex flex-col items-center justify-center text-center
 			  px-10
-			  border border-slate-200
-			  shadow-[0_25px_70px_rgba(15,23,42,0.15)]
+			  border border-tv-border
+			  shadow-[0_25px_70px_rgba(16,27,43,0.15)]
 			  transition-all duration-500
-			  ${animando ? 'scale-[1.03] shadow-[0_0_80px_rgba(59,130,246,0.35)]' : ''}
+			  ${animando ? 'scale-[1.03] shadow-[0_0_80px_rgba(37,99,235,0.35)]' : ''}
 			`}
           >
-            <p className="text-bold uppercase tracking-widest text-slate-400 mb-6">
+            <p className="text-bold uppercase tracking-widest text-tv-ink-muted mb-6">
               RESPONSÁVEL PELO PACIENTE
             </p>
 
             {/* clamp: nome comprido não pode estourar a tela da recepção */}
-            <h1 className="text-[clamp(44px,6.5vw,96px)] font-extrabold leading-[0.95] text-[#0f172a] text-balance break-words max-w-full">
+            <h1 className="text-[clamp(44px,6.5vw,96px)] font-extrabold leading-[0.95] text-tv-ink text-balance break-words max-w-full">
               {atual?.nome || 'Aguardando chamada...'}
             </h1>
 
             {atual && (
-              <div className="mt-12 flex items-center gap-6 text-slate-500">
-                <div className="h-[2px] w-32 bg-blue-500/50" />
+              <div className="mt-12 flex items-center gap-6 text-tv-ink-muted">
+                <div className="h-[2px] w-32 bg-tv-accent/60" />
 
-                <span className="text-lg font-medium">
-                  Dirija-se à {atual.sala || 'recepção'}
-                </span>
+                <span className="text-lg font-medium">Dirija-se à recepção</span>
 
-                <div className="h-[2px] w-32 bg-blue-500/50" />
+                <div className="h-[2px] w-32 bg-tv-accent/60" />
               </div>
             )}
           </div>
@@ -372,39 +371,34 @@ export default function TVPage() {
           className="
         h-full
         rounded-[28px]
-        bg-[#cbd5e1]
+        bg-tv-panel
+        border border-tv-border
         p-6
-        shadow-inner
         flex flex-col
         min-h-0
       "
         >
-          <h2 className="text-slate-700 font-semibold mb-6 flex items-center gap-2">
+          <h2 className="text-tv-ink font-semibold mb-6 flex items-center gap-2">
             ⏱ Últimas chamadas
           </h2>
 
-          <div className="space-y-3 overflow-y-auto">
+          <div className="overflow-y-auto">
             {historico.length === 0 && (
-              <p className="text-slate-600 text-sm">Nenhuma chamada recente</p>
+              <p className="text-tv-ink-muted text-sm">Nenhuma chamada recente</p>
             )}
 
+            {/* lista dividida, sem card dentro de card */}
             {historico.map((h, index) => (
               <div
                 key={h.id}
-                className="flex items-center justify-between bg-white p-3 rounded-lg shadow-sm"
+                className="flex items-center gap-3 py-3 border-b border-tv-border last:border-0"
               >
-                <div className="flex items-center gap-3">
-                  <div className="w-8 h-8 rounded-full bg-slate-200 flex items-center justify-center text-xs font-semibold text-slate-700">
-                    {index + 1}
-                  </div>
-
-                  <span className="font-medium text-slate-700 truncate max-w-[160px]">
-                    {h.nome}
-                  </span>
+                <div className="w-8 h-8 rounded-full bg-tv-ground flex items-center justify-center text-xs font-semibold text-tv-ink-muted">
+                  {index + 1}
                 </div>
 
-                <span className="bg-blue-600 text-white px-2 py-1 rounded text-xs font-semibold">
-                  {h.sala}
+                <span className="font-medium text-tv-ink truncate max-w-[160px]">
+                  {h.nome}
                 </span>
               </div>
             ))}
@@ -413,10 +407,10 @@ export default function TVPage() {
       </div>
 
       {/* 🔻 RODAPÉ */}
-      <div className="h-[70px] flex items-center justify-between px-10 bg-[#334155] text-white">
+      <div className="h-[70px] flex items-center justify-between px-10 bg-tv-bar text-white">
         {/* 🔻 icone */}
         <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center shadow-inner">
+          <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center">
             <img
               src="/autism.png"
               alt="Símbolo do autismo"
@@ -425,12 +419,12 @@ export default function TVPage() {
           </div>
 
           {/* 🔻 frase */}
-          <span className="text-sm text-white/70">
+          <span className="text-sm text-tv-bar-muted">
             Cuidar de você é a nossa missão.
           </span>
         </div>
 
-        <div className="flex items-center gap-6 text-sm text-white/80">
+        <div className="flex items-center gap-6 text-sm text-tv-bar-muted">
           {/* sinal discreto: ninguém fica olhando o console de uma TV */}
           {!online && (
             <span className="flex items-center gap-2 text-amber-300">
