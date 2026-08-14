@@ -3,6 +3,16 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
+import {
+  Cloud,
+  CloudLightning,
+  CloudRain,
+  CloudSun,
+  History,
+  Snowflake,
+  Sun,
+  Volume2,
+} from 'lucide-react'
 
 // Sem `sala`: a clínica tem uma recepção só, então identificar qual seria ruído
 // (e a linha "Dirija-se à recepção Recepção 1" duplicava a palavra). Quando
@@ -25,11 +35,42 @@ const POLL_CLIMA_MS = 600000
 // fila travaria em `falando = true` e a TV ficaria muda pelo resto do dia.
 const WATCHDOG_FALA_MS = 15000
 
+// Emoji era a única "família de ícones" desta tela — e o resto do app usa
+// lucide em 162 arquivos. Além da inconsistência, emoji troca de desenho por
+// sistema operacional: num box de sinalização Linux o ⛈️ vira outra coisa.
+function IconeClima({ codigo }: { codigo: number | null }) {
+  const props = { className: 'w-[1.15em] h-[1.15em]', strokeWidth: 1.75 }
+
+  if (codigo === null) return <CloudSun {...props} />
+  if (codigo === 0) return <Sun {...props} /> // céu limpo
+  if (codigo <= 3) return <CloudSun {...props} /> // parcialmente nublado
+  if (codigo <= 48) return <Cloud {...props} /> // nublado
+  if (codigo <= 67) return <CloudRain {...props} /> // chuva
+  if (codigo <= 77) return <Snowflake {...props} /> // neve
+  if (codigo <= 99) return <CloudLightning {...props} /> // tempestade
+
+  return <CloudSun {...props} />
+}
+
+// O horário da chamada vem de chamado_em (timestamptz). Fuso explícito porque a
+// TV pode estar num PC com relógio configurado em outro lugar.
+const horaDaChamada = (iso: string) => {
+  try {
+    return new Date(iso).toLocaleTimeString('pt-BR', {
+      hour: '2-digit',
+      minute: '2-digit',
+      timeZone: 'America/Sao_Paulo',
+    })
+  } catch {
+    return ''
+  }
+}
+
 export default function TVPage() {
   const [chamadas, setChamadas] = useState<Chamada[]>([])
   const [hora, setHora] = useState('')
   const [temperatura, setTemperatura] = useState<number | null>(null)
-  const [iconeClima, setIconeClima] = useState('🌤️')
+  const [codigoClima, setCodigoClima] = useState<number | null>(null)
   const [animando, setAnimando] = useState(false)
   const [audioLiberado, setAudioLiberado] = useState(false)
   const [online, setOnline] = useState(true)
@@ -42,18 +83,6 @@ export default function TVPage() {
   const anunciados = useRef<Set<string>>(new Set())
   const primeiraCarga = useRef(true)
   const audioLiberadoRef = useRef(false)
-
-  const getIcone = (code: number | null): string => {
-    if (code === null) return '🌤️'
-    if (code === 0) return '☀️' // céu limpo
-    if (code <= 3) return '⛅' // parcialmente nublado
-    if (code <= 48) return '☁️' // nublado
-    if (code <= 67) return '🌧️' // chuva
-    if (code <= 77) return '❄️' // neve
-    if (code <= 99) return '⛈️' // tempestade
-
-    return '🌤️'
-  }
 
   // VOZ FEMININA
   const getVozFeminina = () => {
@@ -215,7 +244,7 @@ export default function TVPage() {
         if (!vivo) return
 
         setTemperatura(typeof data?.temperatura === 'number' ? data.temperatura : null)
-        setIconeClima(getIcone(typeof data?.codigo === 'number' ? data.codigo : null))
+        setCodigoClima(typeof data?.codigo === 'number' ? data.codigo : null)
       } catch {
         if (vivo) setTemperatura(null)
       }
@@ -284,19 +313,21 @@ export default function TVPage() {
       {!audioLiberado && (
         <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
           <div className="bg-tv-card rounded-2xl shadow-2xl p-8 flex flex-col items-center gap-4">
-            <div className="text-4xl">🔊</div>
+            <Volume2 className="w-10 h-10 text-tv-accent" strokeWidth={1.75} />
 
-            <h2 className="text-xl font-semibold text-tv-ink">
+            <h2 className="text-2xl font-semibold text-tv-ink">
               Ativar áudio do sistema
             </h2>
 
-            <p className="text-sm text-tv-ink-muted text-center">
+            <p className="text-base text-tv-ink-muted text-center">
               Toque na tela para ativar as chamadas sonoras
             </p>
 
+            {/* 56px de altura: a TV da recepção é touch e o mínimo do projeto é
+                44px (PRODUCT.md) — antes tinha 40px medidos */}
             <button
               onClick={liberarAudio}
-              className="mt-2 px-6 py-2 rounded-lg bg-tv-accent text-white font-medium hover:bg-tv-accent-dark transition"
+              className="mt-2 min-h-[56px] px-8 rounded-xl bg-tv-accent text-white text-lg font-medium hover:bg-tv-accent-dark focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tv-accent/40 transition"
             >
               Ativar som
             </button>
@@ -319,14 +350,14 @@ export default function TVPage() {
             CLÍNICA UNIVERSO ABA
           </h1>
         </div>
-
-        <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-white">
-          N
-        </div>
+        {/* o avatar "N" saiu: era um avatar de usuário numa tela sem usuário */}
       </div>
 
-      {/* 🧠 CONTEÚDO */}
-      <div className="grid grid-cols-[1fr_380px] gap-6 p-6 flex-1 min-h-0">
+      {/* 🧠 CONTEÚDO
+          Painel fluido em vez dos 380px fixos, e coluna única abaixo de lg:
+          com 380px cravados o card central caía pra 316px em 768px de largura e
+          o nome era recortado pelo overflow-hidden, calado. */}
+      <div className="grid grid-cols-1 grid-rows-[1fr_auto] lg:grid-cols-[1fr_clamp(300px,26%,520px)] lg:grid-rows-1 gap-6 p-6 flex-1 min-h-0">
         {/* 🟢 CENTRO */}
         <div className="h-full flex items-center justify-center min-w-0">
           <div
@@ -341,33 +372,42 @@ export default function TVPage() {
 			  ${animando ? 'scale-[1.03] shadow-[0_0_80px_rgba(37,99,235,0.35)]' : ''}
 			`}
           >
-            {/* caixa alta + tracking-widest saíram: era eyebrow, e a linha
-                importa — é ela que diz que o nome é do paciente, não de quem
-                está sendo chamado. `text-bold` não existe no Tailwind (era
-                font-bold), então isto nunca foi negrito. */}
-            <p className="text-[clamp(20px,1.6vw,30px)] font-medium text-tv-ink-muted mb-6">
-              Responsável pelo paciente
-            </p>
+            {atual ? (
+              <>
+                {/* caixa alta + tracking-widest saíram: era eyebrow, e a linha
+                    importa — é ela que diz que o nome é do paciente, não de
+                    quem está sendo chamado. `text-bold` não existe no Tailwind
+                    (era font-bold), então isto nunca foi negrito. */}
+                <p className="text-[clamp(20px,1.6vw,30px)] font-medium text-tv-ink-muted mb-6">
+                  Responsável pelo paciente
+                </p>
 
-            {/* clamp: nome comprido não pode estourar a tela da recepção */}
-            <h1 className="text-[clamp(44px,6.5vw,96px)] font-extrabold leading-[0.95] text-tv-ink text-balance break-words max-w-full">
-              {atual?.nome || 'Aguardando chamada...'}
-            </h1>
+                {/* clamp: nome comprido não pode estourar a tela da recepção */}
+                <h1 className="text-[clamp(44px,6.5vw,96px)] font-extrabold leading-[0.95] text-tv-ink text-balance break-words max-w-full">
+                  {atual.nome}
+                </h1>
 
-            {atual && (
-              // 40px = ~16 mm de altura de caixa numa TV 50" 1080p: é o piso
-              // pra se ler a 4 m, a distância das cadeiras. A 17px de antes
-              // só se lia a 1,7 m — o nome dava pra ler do fundo da sala e a
-              // instrução, não.
-              <div className="mt-12 flex items-center gap-6 text-tv-ink-muted">
-                <div className="h-[2px] w-32 bg-tv-accent/60" />
+                {/* 40px = ~16 mm de altura de caixa numa TV 50" 1080p: é o piso
+                    pra se ler a 4 m, a distância das cadeiras. A 17px de antes
+                    só se lia a 1,7 m — o nome dava pra ler do fundo da sala e
+                    a instrução, não. */}
+                <div className="mt-12 flex items-center gap-6 text-tv-ink-muted">
+                  <div className="h-[2px] w-32 bg-tv-accent/60" />
 
-                <span className="text-[clamp(24px,2.2vw,40px)] font-medium">
-                  Dirija-se à recepção
-                </span>
+                  <span className="text-[clamp(24px,2.2vw,40px)] font-medium">
+                    Dirija-se à recepção
+                  </span>
 
-                <div className="h-[2px] w-32 bg-tv-accent/60" />
-              </div>
+                  <div className="h-[2px] w-32 bg-tv-accent/60" />
+                </div>
+              </>
+            ) : (
+              // Espera não pode gritar como chamada: antes "Aguardando
+              // chamada..." ocupava o slot do nome em 96px extrabold, do mesmo
+              // tamanho de um evento real.
+              <p className="text-[clamp(28px,3vw,52px)] font-medium text-tv-ink-muted">
+                Aguardando chamada
+              </p>
             )}
           </div>
         </div>
@@ -384,8 +424,9 @@ export default function TVPage() {
         min-h-0
       "
         >
-          <h2 className="text-[clamp(16px,1.3vw,24px)] text-tv-ink font-semibold mb-6 flex items-center gap-2">
-            ⏱ Últimas chamadas
+          <h2 className="text-[clamp(16px,1.3vw,24px)] text-tv-ink font-semibold mb-6 flex items-center gap-2.5">
+            <History className="w-[1.1em] h-[1.1em] text-tv-accent" strokeWidth={2} />
+            Últimas chamadas
           </h2>
 
           <div className="overflow-y-auto">
@@ -399,14 +440,21 @@ export default function TVPage() {
             {historico.map((h, index) => (
               <div
                 key={h.id}
-                className="flex items-center gap-3 py-3 border-b border-tv-border last:border-0"
+                className="flex items-start gap-3 py-3 border-b border-tv-border last:border-0"
               >
                 <div className="w-9 h-9 shrink-0 rounded-full bg-tv-ground flex items-center justify-center text-[clamp(13px,0.9vw,16px)] font-semibold text-tv-ink-muted">
                   {index + 1}
                 </div>
 
-                <span className="text-[clamp(18px,1.5vw,28px)] font-medium text-tv-ink truncate max-w-[160px]">
+                {/* sem truncate: cortar o nome de quem está sendo chamado é
+                    justamente o que a lista não pode fazer — o max-w-[160px]
+                    recortava 2 de 2 nomes até em 1920px */}
+                <span className="flex-1 min-w-0 text-[clamp(18px,1.5vw,28px)] font-medium text-tv-ink leading-tight">
                   {h.nome}
+                </span>
+
+                <span className="shrink-0 pt-1 text-[clamp(13px,1vw,18px)] tabular-nums text-tv-ink-muted">
+                  {horaDaChamada(h.chamado_em)}
                 </span>
               </div>
             ))}
@@ -416,21 +464,14 @@ export default function TVPage() {
 
       {/* 🔻 RODAPÉ */}
       <div className="h-[70px] flex items-center justify-between px-10 bg-tv-bar text-white">
-        {/* 🔻 icone */}
-        <div className="flex items-center gap-3">
-          <div className="w-9 h-9 rounded-full bg-white/10 flex items-center justify-center">
-            <img
-              src="/autism.png"
-              alt="Símbolo do autismo"
-              className="w-5 h-5 object-contain"
-            />
-          </div>
-
-          {/* 🔻 frase */}
-          <span className="text-sm text-tv-bar-muted">
-            Cuidar de você é a nossa missão.
-          </span>
-        </div>
+        {/* 🔻 lockup — variante clara gerada a partir de pulsar-lockup-tv.png:
+            o original é navy sobre transparente e desapareceria nesta barra
+            escura. O recorte é justo (1134x462), então a altura manda. */}
+        <img
+          src="/pulsar-lockup-tv-light.png"
+          alt="Pulsar — sinais que importam"
+          className="h-[clamp(30px,4vh,46px)] w-auto object-contain"
+        />
 
         <div className="flex items-center gap-6 text-[clamp(16px,1.2vw,22px)] text-tv-bar-muted">
           {/* sinal discreto: ninguém fica olhando o console de uma TV */}
@@ -443,8 +484,9 @@ export default function TVPage() {
 
           <span className="tabular-nums">{hora}</span>
 
-          <span className="tabular-nums">
-            {temperatura !== null ? `${temperatura}°C` : '--'} {iconeClima}
+          <span className="flex items-center gap-2 tabular-nums">
+            {temperatura !== null ? `${temperatura}°C` : '--'}
+            <IconeClima codigo={codigoClima} />
           </span>
         </div>
       </div>
