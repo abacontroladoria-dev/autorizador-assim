@@ -141,7 +141,13 @@ class Api {
     }
   }
 
-  /** Desfecho. Só 'concluido', 'concluido_sem_guia' ou 'erro' são aceitos. */
+  /**
+   * Desfecho. Só 'concluido', 'concluido_sem_guia', 'erro' ou 'glosa'.
+   *
+   * `statusAssim` carrega o motivo lido no recibo de rejeição
+   * ("1013-CADASTRO DO BENEFICIARIO COM PROBLEMAS"), no mesmo formato e na
+   * mesma coluna que o robô do relatório preenche mais tarde.
+   */
   concluirTarefa(filaId, status, extras = {}) {
     return this.chamar('robo_concluir_tarefa', {
       p_fila_id: filaId,
@@ -150,6 +156,7 @@ class Api {
       p_forma_autorizacao: extras.formaAutorizacao ?? null,
       p_horario_autorizacao: extras.horarioAutorizacao ?? null,
       p_error_message: extras.erro ?? null,
+      p_status_assim: extras.statusAssim ?? null,
     })
   }
 

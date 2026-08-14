@@ -162,24 +162,74 @@ async function iniciarWorker() {
     browser = null
   })
 
-  let ultimoHeartbeat = Date.now()
+  // ---- batida de vida, fora do laço ----
+  // A batida precisa ser independente do laço porque o laço PARA. `executarRpa`
+  // é aguardado nu lá embaixo, e a espera pela identificação do beneficiário
+  // (rpa.js, tetoHumano) segura a tarefa por até 15 min — mais de 30 min somando
+  // os outros prazos. Com a batida dentro do laço, o `last_seen` congelava todo
+  // esse tempo: o painel marcava a máquina como offline (90s de tolerância) e o
+  // pedido de reinício não era consumido. O robô parecia travado exatamente
+  // quando estava mais ocupado, e foi assim que a recepção o descreveu.
+  //
+  // O que continua no topo do laço são as DECISÕES (reiniciar, atualizar).
+  // Trocar de versão ou fechar o navegador no meio de uma autorização seria
+  // trocar um problema por outro pior.
+  let restartPedido = false
+  let versaoDisponivel = ultimoEstado.versao_disponivel ?? null
+  let batendo = false
+  // A checagem de atualização morava dentro do `if` da batida, ou seja, rodava
+  // no máximo a cada 30s. Solta no topo do laço ela cairia a cada volta do poll
+  // — e um pacote que falha o download viraria rajada de `obterPacote` contra o
+  // servidor. Esta marca devolve a cadência original.
+  let proximaChecagemVersao = 0
+
+  const bater = async () => {
+    // Rede ruim + os 4 retries com backoff do api.js podem fazer uma batida
+    // durar mais que o intervalo. Empilhar requisição não ressuscita ninguém.
+    if (batendo) return
+    batendo = true
+    try {
+      const estado = await api.heartbeat(dadosMaquina)
+      ultimoEstado = estado
+
+      // `robo_heartbeat` consome `restart_solicitado` de forma ATÔMICA: o
+      // servidor desliga a marca ao responder. Se ela chegar no meio de uma
+      // tarefa, descartar aqui seria perder o clique de quem apertou
+      // "reiniciar" no painel. Guarda, e o topo do laço obedece quando a tarefa
+      // terminar.
+      if (estado.restart_solicitado) restartPedido = true
+      if (estado.versao_disponivel) versaoDisponivel = estado.versao_disponivel
+    } catch (e) {
+      // Batida é sinal de vida, não trabalho: falhar aqui não derruba o robô.
+      // A próxima tentativa vem em HEARTBEAT_MS.
+      console.warn('⚠️  Heartbeat falhou:', e.message)
+    } finally {
+      batendo = false
+    }
+  }
+
+  const batida = setInterval(bater, HEARTBEAT_MS)
+  // Nunca é a batida que mantém o processo vivo — quem faz isso é a API local.
+  // Assim, um caminho de saída que esqueça o clearInterval não pendura o robô.
+  batida.unref()
+
   let ultimaAtividade = Date.now()
 
   while (true) {
     try {
-      // ---- heartbeat ----
-      if (Date.now() - ultimoHeartbeat >= HEARTBEAT_MS) {
-        ultimoEstado = await api.heartbeat(dadosMaquina)
-        ultimoHeartbeat = Date.now()
+      // ---- decisões que a batida guardou ----
+      if (restartPedido) {
+        console.log('🔄 Reinício solicitado pelo painel — encerrando...')
+        clearInterval(batida)
+        await sessao.fecharTudo()
+        return SAIDA_RELANCAR
+      }
 
-        if (ultimoEstado.restart_solicitado) {
-          console.log('🔄 Reinício solicitado pelo painel — encerrando...')
-          await sessao.fecharTudo()
-          return SAIDA_RELANCAR
-        }
-
-        if (await verificarEAplicar(api, VERSAO, ultimoEstado.versao_disponivel)) {
+      if (versaoDisponivel && Date.now() >= proximaChecagemVersao) {
+        proximaChecagemVersao = Date.now() + HEARTBEAT_MS
+        if (await verificarEAplicar(api, VERSAO, versaoDisponivel)) {
           console.log('🔄 Atualização aplicada — encerrando para o supervisor relançar')
+          clearInterval(batida)
           await sessao.fecharTudo()
           return SAIDA_RELANCAR
         }
@@ -247,14 +297,24 @@ async function iniciarWorker() {
           alertas: aba.alertas || [],
         })
 
+        const DESCRICAO_DESFECHO = {
+          sucesso:  'Execução concluída',
+          sem_guia: 'Concluída sem guia capturada',
+          glosa:    'ASSIM recusou (glosa)',
+        }
+
         await api.registrarLog(
           tarefa.id,
-          resultado === 'sucesso' ? 'Execução concluída' : 'Concluída sem guia capturada'
+          DESCRICAO_DESFECHO[resultado] || `Execução encerrada (${resultado})`
         )
-        console.log('✅ Finalizado:', tarefa.id, `(${resultado})`)
+        console.log(
+          resultado === 'glosa' ? '🚫 Finalizado:' : '✅ Finalizado:',
+          tarefa.id, `(${resultado})`
+        )
 
-        // A aba fica de propósito, para impressão/conferência. sessao.podar()
-        // cuida de não deixar acumular.
+        // A aba fica de propósito, para impressão/conferência — inclusive na
+        // glosa, porque é dessa tela que a recepção tira o print da recusa.
+        // sessao.podar() cuida de não deixar acumular.
 
       } catch (erroExecucao) {
         console.error('❌ Erro na tarefa:', erroExecucao.message)
@@ -274,6 +334,7 @@ async function iniciarWorker() {
         console.error('\n⛔ ERRO QUE O ROBÔ NÃO RESOLVE SOZINHO:')
         console.error('   ' + erroGeral.message)
         console.error('   O supervisor NÃO vai relançar. Resolva e inicie manualmente.\n')
+        clearInterval(batida)
         await sessao.fecharTudo().catch(() => {})
         return SAIDA_PARAR
       }

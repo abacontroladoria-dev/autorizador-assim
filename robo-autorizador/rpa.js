@@ -12,6 +12,9 @@
  *   Quando a ASSIM mexer numa opção, é um UPDATE — não um pendrive.
  * - O modal de forma de validação virou obrigatório, indispensável e com prazo.
  *   Ver pedirFormaValidacao().
+ * - A REJEIÇÃO da ASSIM deixou de ser tratada como erro. O recibo de recusa traz
+ *   guia, data/hora e o motivo ("1013-CADASTRO DO BENEFICIARIO COM PROBLEMAS"):
+ *   tudo isso é lido e gravado, e a tarefa termina em 'glosa'.
  *
  * O que NÃO mudou, de propósito: o robô preenche e PARA. Quem clica em "enviar"
  * é a recepcionista. A decisão de autorizar continua humana.
@@ -320,6 +323,17 @@ function normalizarTexto(texto) {
 // AGUARDAR ENVIO REAL
 // =========================
 
+// Os dois desfechos que a ASSIM imprime no recibo. A tela é a MESMA nos dois
+// casos — muda só esta linha e, na rejeição, o motivo ao lado do TUSS.
+//
+// Os marcadores são ASCII puro de propósito: a página vem sem charset declarado
+// e todo acento chega quebrado ("STATUS DA AUTORIZAï¿½ï¿½O"). Casar por texto
+// acentuado aqui seria casar por sorte.
+const MARCAS_DESFECHO = [
+  { marca: 'BENEFICIO PROCESSADO', resultado: 'sucesso'   },
+  { marca: 'BENEFICIO REJEITADO',  resultado: 'rejeitado' },
+]
+
 /**
  * Espera o desfecho do envio feito pela recepcionista.
  *
@@ -328,11 +342,18 @@ function normalizarTexto(texto) {
  * era indistinguível de recepcionista que saiu para o almoço, e as duas coisas
  * viravam a mesma mensagem errada na fila.
  *
- * A espera continua até o fim do prazo mesmo depois de uma recusa, de propósito:
- * a recepcionista pode corrigir e reenviar na mesma tela.
+ * Passou também a reconhecer a REJEIÇÃO. Antes só existia "BENEFICIO
+ * PROCESSADO": quando a ASSIM recusava, o robô não achava nada, queimava os
+ * 120s inteiros e o timeout virava "a recepção não clicou em enviar" — mentira
+ * que jogava fora a guia e o horário que estavam na tela.
+ *
+ * A espera continua até o fim do prazo depois de um ALERTA de recusa, de
+ * propósito: aquilo acontece sem sair da tela e a recepcionista pode corrigir e
+ * reenviar. Já a rejeição é outra página, com recibo — não há o que reenviar,
+ * então retorna na hora.
  *
  * @param {string[]} alertas array alimentado pelo handler de dialog da aba
- * @returns {Promise<{resultado: 'sucesso'|'timeout', recusa: string|null}>}
+ * @returns {Promise<{resultado: 'sucesso'|'rejeitado'|'timeout', recusa: string|null}>}
  */
 async function aguardarResultadoEnvio(page, timeoutMs, alertas = []) {
   console.log('⏳ Aguardando confirmação real...')
@@ -342,9 +363,13 @@ async function aguardarResultadoEnvio(page, timeoutMs, alertas = []) {
   let recusa = null
 
   while (Date.now() < limite) {
-    if (await visivel(page, 'text=BENEFICIO PROCESSADO')) {
-      console.log('✅ SUCESSO CONFIRMADO')
-      return { resultado: 'sucesso', recusa: null }
+    for (const { marca, resultado } of MARCAS_DESFECHO) {
+      if (await visivel(page, `text=${marca}`)) {
+        console.log(resultado === 'sucesso'
+          ? '✅ SUCESSO CONFIRMADO'
+          : '🚫 A ASSIM REJEITOU o benefício — lendo o motivo do recibo')
+        return { resultado, recusa: null }
+      }
     }
 
     while (lidos < alertas.length) {
@@ -577,11 +602,19 @@ async function pedirFormaValidacao(page, timeoutMs) {
 // =========================
 
 /**
- * Lê o número da guia e a data/hora que a própria ASSIM registrou.
+ * Lê o recibo que a ASSIM devolve depois do envio.
+ *
+ * A tela é a mesma no aceite e na recusa — guia, data/hora, associado e
+ * matrícula estão lá nos dois casos. O que muda é a linha do desfecho
+ * ("BENEFICIO PROCESSADO" / "BENEFICIO REJEITADO") e, na recusa, o motivo
+ * colado no TUSS: "TUSS 1 22070384 - (1013) CADASTRO DO BENEFICIARIO COM
+ * PROBLEMAS".
  *
  * Guia sem zeros à esquerda, para casar com autorizacoes_assim.guia.
  * Data montada direto dos dígitos, sem passar por `new Date()`, para não sofrer
  * conversão de fuso do processo Node — grava exatamente o horário da ASSIM.
+ *
+ * Roda dentro de page.evaluate: nada aqui pode referenciar constante de fora.
  */
 function lerConfirmacao() {
   const txt = (document.body && document.body.innerText) || ''
@@ -598,6 +631,33 @@ function lerConfirmacao() {
     dataConfirmacao = `20${yy}-${mm}-${dd}T${hh}:${mi}:${ss}`
   }
 
+  // Marcadores ASCII: a página vem sem charset e os acentos chegam quebrados.
+  const situacao =
+    /BENEFICIO\s+REJEITADO/i.test(txt)  ? 'rejeitado'  :
+    /BENEFICIO\s+PROCESSADO/i.test(txt) ? 'processado' : null
+
+  // Só na recusa. No aceite a linha do TUSS não carrega motivo nenhum, e um
+  // valor aqui só serviria para poluir status_assim.
+  let motivoGlosa = null
+  if (situacao === 'rejeitado') {
+    const linhas = txt.split('\n').map(l => l.trim())
+
+    // Formato observado: "(1013) CADASTRO DO BENEFICIARIO COM PROBLEMAS".
+    // Vira "1013-CADASTRO ...", que é o formato que o robô do relatório já usa
+    // em status_assim ("1601-REINCIDENCIA NO ATEN") — uma coluna, um
+    // vocabulário, venha de onde vier.
+    const comCodigo = linhas.find(l => /TUSS/i.test(l) && /\(\s*\d{3,5}\s*\)/.test(l))
+    const m = comCodigo && comCodigo.match(/\(\s*(\d{3,5})\s*\)\s*(.+)$/)
+    if (m) motivoGlosa = (m[1] + '-' + m[2].trim()).slice(0, 120)
+
+    // Recusa cujo motivo venha sem o código entre parênteses: fica o texto.
+    if (!motivoGlosa) {
+      const alt = linhas.find(l => /^TUSS\b/i.test(l) && /\s-\s/.test(l))
+      const m2 = alt && alt.match(/^TUSS\b.*?\s-\s(.+)$/i)
+      if (m2) motivoGlosa = m2[1].trim().slice(0, 120)
+    }
+  }
+
   // Perícia para quando a guia não é capturada. A versão anterior gravava 500
   // caracteres crus do innerText em error_message — o que arrasta nome e
   // identificadores do beneficiário para uma coluna lida por muita gente.
@@ -610,7 +670,13 @@ function lerConfirmacao() {
     .join(' | ')
     .slice(0, 300)
 
-  return { numeroGuia: guiaMatch ? guiaMatch[1] : null, dataConfirmacao, linhasUteis }
+  return {
+    numeroGuia: guiaMatch ? guiaMatch[1] : null,
+    dataConfirmacao,
+    linhasUteis,
+    situacao,
+    motivoGlosa,
+  }
 }
 
 // =========================
@@ -625,7 +691,7 @@ function lerConfirmacao() {
  * @param {object}   opcoes.api       instância de Api
  * @param {Function} opcoes.cancelado () => Promise<boolean>
  * @param {string[]} opcoes.alertas   alertas que a ASSIM emitiu nesta aba
- * @returns {Promise<'sucesso'|'sem_guia'>}
+ * @returns {Promise<'sucesso'|'sem_guia'|'glosa'>}
  */
 async function executarRpa({ page, tarefa, cfg, api, cancelado, alertas = [] }) {
   if (!cancelado) cancelado = async () => false
@@ -746,36 +812,65 @@ async function executarRpa({ page, tarefa, cfg, api, cancelado, alertas = [] }) 
     await page.waitForLoadState('networkidle').catch(() => {})
     await delay(2000)
 
-    const { numeroGuia, dataConfirmacao, linhasUteis } = await page.evaluate(lerConfirmacao)
+    const {
+      numeroGuia, dataConfirmacao, linhasUteis, situacao, motivoGlosa,
+    } = await page.evaluate(lerConfirmacao)
+
+    // A rejeição é um DESFECHO, não uma falha: a solicitação foi processada e o
+    // convênio recusou. Tratá-la como erro (o que acontecia até aqui) jogava
+    // fora a guia e o horário que estão na tela, não abria o modal de forma de
+    // validação e deixava o paciente marcado como 'erro' na /solicitar.
+    const rejeitado = resultado === 'rejeitado' || situacao === 'rejeitado'
 
     if (numeroGuia) console.log('🧾 Guia capturada:', numeroGuia)
-    else console.warn("⚠️ Guia não capturada da tela — registrando como 'concluido_sem_guia'")
+    else if (!rejeitado) console.warn("⚠️ Guia não capturada da tela — registrando como 'concluido_sem_guia'")
+    else console.warn('⚠️ Guia não capturada do recibo de rejeição')
 
     if (dataConfirmacao) console.log('🕒 Data/hora da confirmação:', dataConfirmacao)
     else console.warn('⚠️ Data/hora da confirmação não capturada')
+
+    if (rejeitado) {
+      console.log('🚫 Motivo da glosa:', motivoGlosa || '(não identificado no recibo)')
+      await api.registrarLog(
+        tarefa.id,
+        'ASSIM rejeitou: ' + (motivoGlosa || 'motivo nao identificado no recibo')
+      )
+    }
 
     const forma = await pedirFormaValidacao(page, Number(cfg.modal_timeout_ms) || 600000)
 
     // Sem guia capturada a autorização até aconteceu na ASSIM, mas o vínculo não
     // existe. 'concluido' pintaria o card de verde e esconderia a lacuna;
     // 'concluido_sem_guia' a deixa visível e reprocessável no mesmo dia.
-    const status = numeroGuia ? 'concluido' : 'concluido_sem_guia'
+    const status = rejeitado
+      ? 'glosa'
+      : (numeroGuia ? 'concluido' : 'concluido_sem_guia')
 
     const problemas = []
-    if (!numeroGuia) problemas.push(`Guia não capturada. Trecho lido: ${linhasUteis || '(vazio)'}`)
+    if (!numeroGuia) {
+      problemas.push(
+        (rejeitado ? 'Guia da rejeição não capturada.' : 'Guia não capturada.') +
+        ` Trecho lido: ${linhasUteis || '(vazio)'}`
+      )
+    }
     if (!forma) problemas.push('Forma de validação não informada (modal expirou sem resposta).')
 
     await api.concluirTarefa(tarefa.id, status, {
       numeroAutorizacao: numeroGuia,
       formaAutorizacao: forma,
       horarioAutorizacao: dataConfirmacao,
+      // O motivo vai para status_assim, a mesma coluna que o robô do relatório
+      // preenche mais tarde — e no mesmo formato. Aqui ele chega horas antes.
+      statusAssim: rejeitado ? motivoGlosa : null,
       erro: problemas.length ? problemas.join(' ') : null,
     })
 
     concluiu = true
 
-    console.log('✅ RPA finalizado')
-    return numeroGuia ? 'sucesso' : 'sem_guia'
+    // Nada é lançado aqui: erro faria o worker fechar a aba (sessao.descartar),
+    // e é dessa tela que a recepção tira o print para abrir a contestação.
+    console.log(rejeitado ? '🚫 RPA finalizado — glosa registrada' : '✅ RPA finalizado')
+    return rejeitado ? 'glosa' : (numeroGuia ? 'sucesso' : 'sem_guia')
 
   } catch (erro) {
     console.error('❌ Erro no RPA:', erro.message)

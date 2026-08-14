@@ -13,6 +13,7 @@ import {
   Clock3,
   Loader2,
   AlertTriangle,
+  Ban,
   UserMinus,
   UserX,
   type LucideIcon,
@@ -157,6 +158,16 @@ const TOKENS: Record<string, StatusToken> = {
     label: 'Sem autorização',
     severidade: 'critico',
     icon: AlertTriangle,
+  },
+  // Ícone próprio, e não o triângulo do 'erro', porque as duas coisas pedem
+  // ações opostas: 'erro' é o robô que não terminou (refazer); 'glosa' é a ASSIM
+  // que respondeu recusando (contestar). Sem este token a sessão caía no
+  // FALLBACK e aparecia como a palavra crua "glosa" pintada de pendente.
+  glosa: {
+    key: 'glosa',
+    label: 'Glosa',
+    severidade: 'critico',
+    icon: Ban,
   },
 }
 

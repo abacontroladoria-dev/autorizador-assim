@@ -24,6 +24,8 @@ const ItemAutorizacao = React.memo(
 		? "border-l-green-500"
 		: a.status_assim === 'pendencia_adm'
 		? "border-l-red-500"
+		: a.status === "glosa"
+		? "border-l-red-500"
 		: a.status === "erro"
 		? "border-l-red-500"
 		: a.status === "executando"

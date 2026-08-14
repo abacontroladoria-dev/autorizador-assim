@@ -208,7 +208,20 @@ const unidades = [
   const [MACHINE_ID, setMachineId] = useState<string | null>(null)
   
   const [workerOnline, setWorkerOnline] = useState(false)
-  
+
+  // Nome de quem está na estação, resolvido uma vez. Serve só para o selo do card
+  // aparecer com autor no mesmo instante do clique — quem grava de fato é
+  // criarAutorizacao(), que chama resolverNomeUsuario() por conta própria.
+  const [nomeUsuario, setNomeUsuario] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelado = false
+    resolverNomeUsuario(supabase)
+      .then((nome) => { if (!cancelado) setNomeUsuario(nome) })
+      .catch(() => { /* sem nome o selo só não mostra autor */ })
+    return () => { cancelado = true }
+  }, [])
+
   const chamarResponsavel = async (paciente: any) => {
     try {
       const { error } = await supabase
@@ -439,7 +452,11 @@ async function handleSolicitarLista(
 			buildCardKey(item) === buildCardKey(p)
 			  ? {
 				  ...item,
-				  status_final: 'pendente'
+				  status_final: 'pendente',
+				  // Reprocessar não passa por criarAutorizacao, então o criado_por
+				  // da linha continua o de quem solicitou originalmente. Mantém o
+				  // que veio do banco e só preenche se estava vazio.
+				  criado_por: item.criado_por ?? nomeUsuario
 				}
 			  : item
 		  )
@@ -563,7 +580,10 @@ async function handleSolicitarLista(
 		buildCardKey(item) === buildCardKey(p)
 		  ? {
 			  ...item,
-			  status_final: 'pendente'
+			  status_final: 'pendente',
+			  // Mesmo nome que criarAutorizacao acabou de gravar, para o selo já
+			  // sair com autor sem esperar o realtime ou um F5.
+			  criado_por: nomeUsuario
 			}
 		  : item
 	  )
@@ -1099,7 +1119,15 @@ useEffect(() => {
               }
 
               // REMOVE DA TELA
-              if (novo.status === 'concluido' || novo.status === 'concluido_sem_guia') {
+              // 'glosa' entra aqui porque também é desfecho: a ASSIM respondeu,
+              // recusando. A guia, o horário e o motivo já foram gravados pelo
+              // robô a partir do recibo — não sobra ação para a recepção nesta
+              // tela. Refazer, depois de corrigir o cadastro, é pela /autorizacoes.
+              if (
+                novo.status === 'concluido' ||
+                novo.status === 'concluido_sem_guia' ||
+                novo.status === 'glosa'
+              ) {
                 return null
               }
 
@@ -1107,7 +1135,11 @@ useEffect(() => {
               return {
                 ...item,
                 status_final: novo.status,
-                cancelado_por_nome: novo.cancelado_por_nome ?? item.cancelado_por_nome
+                cancelado_por_nome: novo.cancelado_por_nome ?? item.cancelado_por_nome,
+                // Sem isto, a passagem de 'pendente' para 'processando' feita pelo
+                // robô apagaria o nome de quem solicitou: o payload do realtime
+                // substitui o item inteiro e o card voltaria a dizer só "Processando".
+                criado_por: novo.criado_por ?? item.criado_por
               }
             })
 
@@ -1482,16 +1514,27 @@ useEffect(() => {
       {/* STATUS */}
       {(p.status_final === 'processando') &&
 	  (
-        <span className="flex items-center gap-1 text-xs font-semibold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-md">
-          <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></span>
-          Processando
+        <span className="flex items-center gap-1 text-xs font-semibold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-md max-w-[260px]">
+          <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse shrink-0"></span>
+          <span className="shrink-0">Processando</span>
+          {/* Quem pediu. Numa recepção com várias estações, "Processando" sozinho
+              vira pergunta em voz alta. truncate porque criado_por cai no e-mail
+              quando o usuário não tem nome preenchido em `usuarios`. */}
+          {p.criado_por && (
+            <span className="font-normal text-blue-700 truncate">· {p.criado_por}</span>
+          )}
         </span>
       )}
 
 		{p.status_final === 'pendente' && (
-		  <span className="flex items-center gap-1 text-xs font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-md">
-			<span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse"></span>
-			Na fila
+		  <span className="flex items-center gap-1 text-xs font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-md max-w-[260px]">
+			<span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse shrink-0"></span>
+			<span className="shrink-0">Na fila</span>
+			{/* Mesmo motivo do selo acima: logo depois do clique o card fica aqui,
+			    e é justamente quando a recepção precisa saber de quem é. */}
+			{p.criado_por && (
+			  <span className="font-normal text-amber-700 truncate">· {p.criado_por}</span>
+			)}
 		  </span>
 		)}
 

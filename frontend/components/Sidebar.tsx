@@ -359,7 +359,14 @@ export default function Sidebar() {
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error)
-      toast.success(`${json.liberados} processo${json.liberados !== 1 ? "s" : ""} liberado${json.liberados !== 1 ? "s" : ""}`)
+      const plural = json.liberados !== 1 ? "s" : ""
+      // `retidas` são as travadas que a função deliberadamente NÃO devolveu para a
+      // fila: de outro dia, ou já com guia emitida. Sem dizer isso, um resultado
+      // "0 liberados" com 30 travadas na tela parece defeito do botão.
+      toast.success(
+        `${json.liberados} processo${plural} liberado${plural}` +
+        (json.retidas ? ` · ${json.retidas} retido${json.retidas !== 1 ? "s" : ""} (outro dia ou já autorizado)` : "")
+      )
     } catch (err: any) { toast.error(err.message) }
     setLoadingLiberar(false)
   }
