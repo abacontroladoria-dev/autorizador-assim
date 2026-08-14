@@ -311,11 +311,18 @@ export default function TVPage() {
   return (
     <div className="w-screen h-screen flex flex-col bg-tv-ground text-tv-ink overflow-hidden">
       {!audioLiberado && (
-        <div className="absolute inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50">
+        // fixed, não absolute: com `absolute` só cobria a tela por acidente,
+        // porque a raiz é w-screen/h-screen. E é um dialog de verdade agora.
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="tv-audio-titulo"
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50"
+        >
           <div className="bg-tv-card rounded-2xl shadow-2xl p-8 flex flex-col items-center gap-4">
             <Volume2 className="w-10 h-10 text-tv-accent" strokeWidth={1.75} />
 
-            <h2 className="text-2xl font-semibold text-tv-ink">
+            <h2 id="tv-audio-titulo" className="text-2xl font-semibold text-tv-ink">
               Ativar áudio do sistema
             </h2>
 
@@ -327,6 +334,7 @@ export default function TVPage() {
                 44px (PRODUCT.md) — antes tinha 40px medidos */}
             <button
               onClick={liberarAudio}
+              autoFocus
               className="mt-2 min-h-[56px] px-8 rounded-xl bg-tv-accent text-white text-lg font-medium hover:bg-tv-accent-dark focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tv-accent/40 transition"
             >
               Ativar som
@@ -336,7 +344,7 @@ export default function TVPage() {
       )}
 
       {/* 🔷 HEADER */}
-      <div className="h-[90px] flex items-center justify-between px-10 bg-tv-bar">
+      <header className="h-[90px] flex items-center justify-between px-10 bg-tv-bar">
         <div className="flex items-center gap-4">
           <img
             src="/logo-universo-aba.png"
@@ -351,15 +359,20 @@ export default function TVPage() {
           </h1>
         </div>
         {/* o avatar "N" saiu: era um avatar de usuário numa tela sem usuário */}
-      </div>
+      </header>
 
       {/* 🧠 CONTEÚDO
           Painel fluido em vez dos 380px fixos, e coluna única abaixo de lg:
           com 380px cravados o card central caía pra 316px em 768px de largura e
           o nome era recortado pelo overflow-hidden, calado. */}
       <div className="grid grid-cols-1 grid-rows-[1fr_auto] lg:grid-cols-[1fr_clamp(300px,26%,520px)] lg:grid-rows-1 gap-6 p-6 flex-1 min-h-0">
-        {/* 🟢 CENTRO */}
-        <div className="h-full flex items-center justify-center min-w-0">
+        {/* 🟢 CENTRO — região viva: é o conteúdo que muda, e sem aria-live um
+            leitor de tela via a tela como estática */}
+        <main
+          aria-live="polite"
+          aria-atomic="true"
+          className="h-full flex items-center justify-center min-w-0"
+        >
           <div
             className={`
 			  w-full h-full rounded-[36px]
@@ -382,10 +395,12 @@ export default function TVPage() {
                   Responsável pelo paciente
                 </p>
 
-                {/* clamp: nome comprido não pode estourar a tela da recepção */}
-                <h1 className="text-[clamp(44px,6.5vw,96px)] font-extrabold leading-[0.95] text-tv-ink text-balance break-words max-w-full">
+                {/* <p> e não <h1>: o h1 da página é o nome da clínica, que é
+                    fixo. Antes havia dois h1 na mesma tela. Hierarquia de
+                    heading não é tamanho de fonte. */}
+                <p className="text-[clamp(44px,6.5vw,96px)] font-extrabold leading-[0.95] text-tv-ink text-balance break-words max-w-full">
                   {atual.nome}
-                </h1>
+                </p>
 
                 {/* 40px = ~16 mm de altura de caixa numa TV 50" 1080p: é o piso
                     pra se ler a 4 m, a distância das cadeiras. A 17px de antes
@@ -410,10 +425,10 @@ export default function TVPage() {
               </p>
             )}
           </div>
-        </div>
+        </main>
 
         {/* 🟡 HISTÓRICO */}
-        <div
+        <aside
           className="
         h-full
         rounded-[28px]
@@ -459,11 +474,11 @@ export default function TVPage() {
               </div>
             ))}
           </div>
-        </div>
+        </aside>
       </div>
 
       {/* 🔻 RODAPÉ */}
-      <div className="h-[70px] flex items-center justify-between px-10 bg-tv-bar text-white">
+      <footer className="h-[70px] flex items-center justify-between px-10 bg-tv-bar text-white">
         {/* 🔻 lockup — variante clara gerada a partir de pulsar-lockup-tv.png:
             o original é navy sobre transparente e desapareceria nesta barra
             escura. O recorte é justo (1134x462), então a altura manda. */}
@@ -489,7 +504,7 @@ export default function TVPage() {
             <IconeClima codigo={codigoClima} />
           </span>
         </div>
-      </div>
+      </footer>
     </div>
   )
 }
