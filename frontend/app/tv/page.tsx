@@ -313,15 +313,11 @@ export default function TVPage() {
             className="h-12 object-contain"
           />
 
-          <div className="flex flex-col leading-tight">
-            <span className="text-xs tracking-widest text-tv-bar-muted">
-              SISTEMA DE CHAMADA
-            </span>
-
-            <h1 className="text-xl font-semibold tracking-wide text-white">
-              CLÍNICA UNIVERSO ABA
-            </h1>
-          </div>
+          {/* o eyebrow "SISTEMA DE CHAMADA" saiu: 11px é ilegível a 3 m e ele só
+              repetia o que a tela evidentemente é */}
+          <h1 className="text-[clamp(20px,1.5vw,28px)] font-semibold tracking-wide text-white">
+            CLÍNICA UNIVERSO ABA
+          </h1>
         </div>
 
         <div className="w-10 h-10 rounded-full bg-white/10 flex items-center justify-center text-white">
@@ -345,8 +341,12 @@ export default function TVPage() {
 			  ${animando ? 'scale-[1.03] shadow-[0_0_80px_rgba(37,99,235,0.35)]' : ''}
 			`}
           >
-            <p className="text-bold uppercase tracking-widest text-tv-ink-muted mb-6">
-              RESPONSÁVEL PELO PACIENTE
+            {/* caixa alta + tracking-widest saíram: era eyebrow, e a linha
+                importa — é ela que diz que o nome é do paciente, não de quem
+                está sendo chamado. `text-bold` não existe no Tailwind (era
+                font-bold), então isto nunca foi negrito. */}
+            <p className="text-[clamp(20px,1.6vw,30px)] font-medium text-tv-ink-muted mb-6">
+              Responsável pelo paciente
             </p>
 
             {/* clamp: nome comprido não pode estourar a tela da recepção */}
@@ -355,10 +355,16 @@ export default function TVPage() {
             </h1>
 
             {atual && (
+              // 40px = ~16 mm de altura de caixa numa TV 50" 1080p: é o piso
+              // pra se ler a 4 m, a distância das cadeiras. A 17px de antes
+              // só se lia a 1,7 m — o nome dava pra ler do fundo da sala e a
+              // instrução, não.
               <div className="mt-12 flex items-center gap-6 text-tv-ink-muted">
                 <div className="h-[2px] w-32 bg-tv-accent/60" />
 
-                <span className="text-lg font-medium">Dirija-se à recepção</span>
+                <span className="text-[clamp(24px,2.2vw,40px)] font-medium">
+                  Dirija-se à recepção
+                </span>
 
                 <div className="h-[2px] w-32 bg-tv-accent/60" />
               </div>
@@ -378,13 +384,15 @@ export default function TVPage() {
         min-h-0
       "
         >
-          <h2 className="text-tv-ink font-semibold mb-6 flex items-center gap-2">
+          <h2 className="text-[clamp(16px,1.3vw,24px)] text-tv-ink font-semibold mb-6 flex items-center gap-2">
             ⏱ Últimas chamadas
           </h2>
 
           <div className="overflow-y-auto">
             {historico.length === 0 && (
-              <p className="text-tv-ink-muted text-sm">Nenhuma chamada recente</p>
+              <p className="text-[clamp(15px,1.1vw,20px)] text-tv-ink-muted">
+                Nenhuma chamada recente
+              </p>
             )}
 
             {/* lista dividida, sem card dentro de card */}
@@ -393,11 +401,11 @@ export default function TVPage() {
                 key={h.id}
                 className="flex items-center gap-3 py-3 border-b border-tv-border last:border-0"
               >
-                <div className="w-8 h-8 rounded-full bg-tv-ground flex items-center justify-center text-xs font-semibold text-tv-ink-muted">
+                <div className="w-9 h-9 shrink-0 rounded-full bg-tv-ground flex items-center justify-center text-[clamp(13px,0.9vw,16px)] font-semibold text-tv-ink-muted">
                   {index + 1}
                 </div>
 
-                <span className="font-medium text-tv-ink truncate max-w-[160px]">
+                <span className="text-[clamp(18px,1.5vw,28px)] font-medium text-tv-ink truncate max-w-[160px]">
                   {h.nome}
                 </span>
               </div>
@@ -424,18 +432,18 @@ export default function TVPage() {
           </span>
         </div>
 
-        <div className="flex items-center gap-6 text-sm text-tv-bar-muted">
+        <div className="flex items-center gap-6 text-[clamp(16px,1.2vw,22px)] text-tv-bar-muted">
           {/* sinal discreto: ninguém fica olhando o console de uma TV */}
           {!online && (
             <span className="flex items-center gap-2 text-amber-300">
-              <span className="w-2 h-2 rounded-full bg-amber-300 animate-pulse" />
+              <span className="w-2.5 h-2.5 rounded-full bg-amber-300 animate-pulse" />
               Sem conexão
             </span>
           )}
 
-          <span>{hora}</span>
+          <span className="tabular-nums">{hora}</span>
 
-          <span>
+          <span className="tabular-nums">
             {temperatura !== null ? `${temperatura}°C` : '--'} {iconeClima}
           </span>
         </div>
