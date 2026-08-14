@@ -208,6 +208,7 @@ function PorSalasTab({ salas, linhas, onChanged }: TabProps) {
               selecionados={selecionadas}
               onToggle={alternar}
               placeholder="Nenhuma terapia selecionada"
+              nomePlural="terapias"
               ariaLabel="Terapias que esta sala comporta"
             />
             <button

@@ -20,6 +20,8 @@ import {
 } from "@/lib/cronograma/sugestaoContratacao"
 import type { GapItem } from "@/lib/cronograma/simulacaoNovoPrestador"
 import type { SugestaoContratacao } from "@/lib/cronograma/sugestaoContratacaoTypes"
+import type { ConvenioValor, ConvenioValorPaciente } from "@/lib/cronograma/convenioValoresTypes"
+import type { FeriadoInfo } from "@/types/feriados"
 import type { CsvRow } from "@/types/cronograma"
 
 export interface UseSugestoesContratacaoResult {
@@ -30,9 +32,15 @@ export interface UseSugestoesContratacaoResult {
   refWeekLabel: string
   /** Linhas cruas da grade — usadas pelo modal de antes/depois do remanejamento. */
   cRows: CsvRow[]
-  /** Mapa de gap por paciente+especialidade — usado pra recalcular uma combinação
-   *  isolada (sem o teto global entre sugestões) no Ponto de Equilíbrio de cada card. */
+  /** Mapa de gap por paciente+especialidade, e demais insumos do pipeline de
+   *  remuneração — usados pra recalcular uma combinação isolada (sem o teto
+   *  global entre sugestões) no Ponto de Equilíbrio de cada card, com o MESMO
+   *  valor de sessão que "Parâmetros da simulação" chegaria pra essa combinação. */
   gapMap: Record<string, GapItem>
+  regrasGerais: ConvenioValor[]
+  excecoesPaciente: ConvenioValorPaciente[]
+  mesReferencia: { ano: number; mes: number } | null
+  feriados: Record<string, FeriadoInfo>
 }
 
 export function useSugestoesContratacao(
@@ -92,5 +100,9 @@ export function useSugestoesContratacao(
     refWeekLabel: refWeek.label,
     cRows,
     gapMap,
+    regrasGerais,
+    excecoesPaciente,
+    mesReferencia,
+    feriados,
   }
 }

@@ -9,7 +9,7 @@ import {
   avaliarPeriodo, calcularGaps, construirAgendaNovoProfissional, gapsParaMapa, limitarCandidatosPorGap, listarEspecialidades, UNIDADES_SIMULACAO,
   type GapItem, type Turno,
 } from "./simulacaoNovoPrestador"
-import { DIAS_UTIL, ESP_CLINICO, EXCLUIR_OCUP, NOME_PARA_TERAPIA_ID, normTxt } from "./constants"
+import { DIAS_UTIL, ESP_CLINICO, EXCLUIR_OCUP, NOME_PARA_TERAPIA_ID, TERAPIA_TO_ESP, normTxt } from "./constants"
 import { capacidadeDiretaRestante } from "./disponibilidadeInterna"
 import { dowDeDiaSemana } from "./salas"
 import { normalizarUnidadeOcupacao } from "./ocupacaoProf"
@@ -400,6 +400,28 @@ export function terapiaDaEspecialidade(especialidade: string): string {
   return (ESP_CLINICO[especialidade] || [especialidade]).filter(t => !EXCLUIR_OCUP.has(t))[0] || especialidade
 }
 
+/** Soma real de sessões no mês de referência — mesma lógica de
+ *  ProjecaoFinanceiraDetalheModal (soma da coluna "Sessões" de "Receita por
+ *  dia do mês"), só que sem precisar enumerar as datas uma a uma: por
+ *  periodo, conta as vagas com melhor candidato e multiplica pela ocorrência
+ *  real daquele dia da semana no mês (getCalendario já desconta feriado). */
+export function contarSessoesReaisMes(
+  periodosEnriquecidos: SugestaoContratacao[],
+  mesReferencia: { ano: number; mes: number } | null,
+  feriados: Record<string, FeriadoInfo>,
+): number {
+  if (!mesReferencia) return 0
+  const cal = getCalendario(mesReferencia.ano, mesReferencia.mes, feriados)
+  let total = 0
+  for (const s of periodosEnriquecidos) {
+    const dow = dowDeDiaSemana(s.dia)
+    if (dow === null) continue
+    const vagas = new Set(s.candidatos.filter(c => c.ordemNaVaga === 1).map(c => `${c.turno}|||${c.hora}`)).size
+    total += vagas * cal.counts[dow as 1 | 2 | 3 | 4 | 5]
+  }
+  return total
+}
+
 export function primeiroConvenioDoPaciente(paciente: string, cRows: CsvRow[]): string {
   const row = cRows.find(r => r["Nome Favorecido"] === paciente && r["Convênio"])
   return row?.["Convênio"] || "Não informado"
@@ -415,8 +437,12 @@ function pacienteIdDoPaciente(paciente: string, cRows: CsvRow[]): number | null 
   return row?.PacienteId ?? null
 }
 
+// r.Terapia guarda o nome GRANULAR da terapia (ex.: "Aplicador ABA (PS)",
+// "Supervisão ABA"), nunca a especialidade agregada "Psicologia ABA" — por
+// isso precisa passar por TERAPIA_TO_ESP. Critério = cronograma inteiro do
+// paciente nesse convênio, na semana de referência (cRows já é essa janela).
 function pacienteTemPsicologiaAba(paciente: string, cRows: CsvRow[]): boolean {
-  return cRows.some(r => r["Nome Favorecido"] === paciente && r.Terapia === "Psicologia ABA")
+  return cRows.some(r => r["Nome Favorecido"] === paciente && TERAPIA_TO_ESP[r.Terapia] === "Psicologia ABA")
 }
 
 function projetarReceitaCandidato(

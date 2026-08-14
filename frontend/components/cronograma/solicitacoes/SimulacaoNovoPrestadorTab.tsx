@@ -26,10 +26,10 @@ import { useParametrosGerais } from "@/hooks/useParametrosGerais"
 import { useTaxasEspecialidade } from "@/hooks/useTaxasEspecialidade"
 import {
   calcularBreakEvenPJ, projetarMargemBreakEvenPJ, calcularBreakEvenAtendimento, projetarMargemBreakEvenAtendimento,
-  CENARIOS_PERDA_PCT, ESPECIALIDADES_BREAK_EVEN_PJ,
+  CENARIOS_PERDA_PCT, ESPECIALIDADES_BREAK_EVEN_PJ, SEMANAS_POR_MES,
   type CenarioPerdaPct,
 } from "@/lib/remuneracao/pontoEquilibrio"
-import { anexarModalidadeERemanejamento, filtrarPorDisponibilidadeInterna, separarCobertosPorDisponibilidadeInterna, anexarSala, anexarRemuneracaoEOrdenar, primeiroConvenioDoPaciente } from "@/lib/cronograma/sugestaoContratacao"
+import { anexarModalidadeERemanejamento, filtrarPorDisponibilidadeInterna, separarCobertosPorDisponibilidadeInterna, anexarSala, anexarRemuneracaoEOrdenar, primeiroConvenioDoPaciente, contarSessoesReaisMes, terapiaDaEspecialidade } from "@/lib/cronograma/sugestaoContratacao"
 import { listarSlotsLivres, type SlotLivre } from "@/lib/cronograma/disponibilidadeInterna"
 import { listarExclusividadesTerapia } from "@/services/salas.service"
 import type { SalaTerapiaExclusiva } from "@/lib/cronograma/salasTypes"
@@ -83,6 +83,32 @@ function periodosEnriquecidosParaSimulado(periodos: SugestaoContratacao[]): Peri
 // conteúdo (negrito, parágrafos) em vez de jogar tudo num texto corrido.
 function InfoTip({ ariaLabel, children }: { ariaLabel: string; children: ReactNode }) {
   return <InfoTooltip ariaLabel={ariaLabel}>{children}</InfoTooltip>
+}
+
+// ─── LinhaEquilibrio ────────────────────────────────────────────────────────
+// Linha do extrato vertical (DRE) do Ponto de Equilíbrio: rótulo (+ tooltip
+// opcional) à esquerda, valor à direita — "forte" marca subtotal/total (borda
+// em cima, negrito maior). O tooltip explica a FÓRMULA, nunca um número de
+// exemplo — o valor de sessão vem da média real dos pacientes elegíveis desta
+// simulação (ver "Sessão a sessão" em "Ver detalhe"), então varia conforme
+// convênio/imposto/perda escolhidos, nunca é fixo.
+function LinhaEquilibrio({
+  label, valor, tone = "neutro", tooltip, forte = false,
+}: { label: string; valor: string; tone?: "pos" | "neg" | "neutro"; tooltip?: ReactNode; forte?: boolean }) {
+  // Linha inteira (rótulo + valor) fica colorida quando tone é pos/neg — igual
+  // à Frente 1 (só o valor mudar de cor faria a dedução passar despercebida).
+  const corTom = tone === "pos" ? "text-emerald-700 dark:text-emerald-400" : tone === "neg" ? "text-rose-600 dark:text-rose-400" : null
+  const corLabel = corTom ?? (forte ? "text-foreground" : "text-muted-foreground")
+  const corValor = corTom ?? "text-foreground"
+  return (
+    <div className={`flex items-center justify-between gap-3 ${forte ? "mt-0.5 border-t border-border pt-1.5" : ""}`}>
+      <span className={`flex items-center gap-1 ${forte ? "font-bold" : ""} ${corLabel}`}>
+        {label}
+        {tooltip && <InfoTip ariaLabel={label}>{tooltip}</InfoTip>}
+      </span>
+      <span className={`tabular-nums ${forte ? "font-black" : "font-semibold"} ${corValor}`}>{valor}</span>
+    </div>
+  )
 }
 
 // ─── Ícone "casa bloqueada" ───────────────────────────────────────────────────
@@ -505,7 +531,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
     taxas_pa: taxasPA,
     be_custo_mensal_pj: beCustoMensalPJ, be_capacidade_manha: beCapacidadeManha, be_capacidade_tarde: beCapacidadeTarde,
   } = useTaxasEspecialidade()
-  const [cenarioPerdaPct, setCenarioPerdaPct] = useState<CenarioPerdaPct>(25)
+  const [cenarioPerdaPct, setCenarioPerdaPct] = useState<CenarioPerdaPct>(20)
   // Mesma lista usada pelo painel de sugestões automáticas (useSugestoesContratacao.ts)
   // — sem isso, anexarSala aqui ignorava exclusividade obrigatória/preferencial e
   // podia mostrar uma sala "livre" que a sugestão automática já descartou por regra.
@@ -734,8 +760,12 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
 
   // Todas as demais especialidades pagam por atendimento (taxa PA já
   // cadastrada em Taxas por Especialidade) — custo variável, não fixo.
+  // taxas_pa é cadastrado por TERAPIA granular (ex.: "Aplicador ABA (PS)"),
+  // não pela especialidade agregada ("Psicologia ABA") — terapiaDaEspecialidade
+  // resolve a terapia representativa, mesma lógica já usada pro Break Even PJ.
+  const taxaPAEspecialidade = taxasPA[terapiaDaEspecialidade(especialidade)] ?? 0
   const breakEvenAtendimentoDisponivel = !ESPECIALIDADES_BREAK_EVEN_PJ.has(especialidade)
-    && (taxasPA[especialidade] ?? 0) > 0 && !!parametrosGerais
+    && taxaPAEspecialidade > 0 && !!parametrosGerais
 
   const valorSessaoMedioSimulado = agendaNovoProf && agendaNovoProf.slotsComCandidato > 0
     ? resumoFinanceiro.semanal / agendaNovoProf.slotsComCandidato
@@ -770,25 +800,51 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
     return calcularBreakEvenAtendimento({
       valorSessaoBruto: valorSessaoMedioSimulado,
       impostoFaturamentoPct: parametrosGerais.imposto_faturamento_pct,
-      taxaPA: taxasPA[especialidade]!,
+      taxaPA: taxaPAEspecialidade,
       capacidadeManha: parametrosGerais.pa_capacidade_manha_padrao,
       capacidadeTarde: parametrosGerais.pa_capacidade_tarde_padrao,
       periodosManha, periodosTarde,
     })
-  }, [breakEvenAtendimentoDisponivel, parametrosGerais, valorSessaoMedioSimulado, taxasPA, especialidade, periodosManha, periodosTarde])
+  }, [breakEvenAtendimentoDisponivel, parametrosGerais, valorSessaoMedioSimulado, taxaPAEspecialidade, periodosManha, periodosTarde])
 
   const projecaoBreakEvenAtendimento = useMemo(() => {
     if (!resultadoBreakEvenAtendimento || !agendaNovoProf) return null
-    return projetarMargemBreakEvenAtendimento(resultadoBreakEvenAtendimento, taxasPA[especialidade]!, cenarioPerdaPct, agendaNovoProf.slotsComCandidato)
-  }, [resultadoBreakEvenAtendimento, agendaNovoProf, taxasPA, especialidade, cenarioPerdaPct])
+    return projetarMargemBreakEvenAtendimento(resultadoBreakEvenAtendimento, taxaPAEspecialidade, cenarioPerdaPct, agendaNovoProf.slotsComCandidato)
+  }, [resultadoBreakEvenAtendimento, agendaNovoProf, taxaPAEspecialidade, cenarioPerdaPct])
 
-  // Mesmo "Projetado/mês" (bruto, calendário real do mês), mas líquido de
-  // imposto e da perda (falta+ociosidade) escolhida no seletor do Ponto de
-  // Equilíbrio — diferente da "Receita líquida" do card abaixo, que reparte a
-  // partir de slots/semana × 4,33 fixo em vez do calendário real do mês.
-  const projetadoMesLiquido = (breakEvenFixoDisponivel || breakEvenAtendimentoDisponivel) && parametrosGerais
-    ? resumoFinanceiro.mensal * (1 - parametrosGerais.imposto_faturamento_pct / 100) * (1 - cenarioPerdaPct / 100)
-    : null
+  // Detalhamento didático do "Projetado/mês" (bruto, calendário real do mês):
+  // desconta perda e imposto passo a passo, e a remuneração do prestador
+  // pra chegar na margem — tudo na MESMA base (calendário real), nunca
+  // misturando com a média de 4,33 semanas/mês da frente 2 abaixo (evita o
+  // mesmo bug de mistura de bases já corrigido no card de Sugestões).
+  const detalheMesEspecifico = useMemo(() => {
+    if (!(breakEvenFixoDisponivel || breakEvenAtendimentoDisponivel) || !parametrosGerais) return null
+    const bruto = resumoFinanceiro.mensal
+    const perda = cenarioPerdaPct / 100
+    const imposto = parametrosGerais.imposto_faturamento_pct / 100
+    // Perda primeiro (sessão que falta simplesmente não acontece, não fatura),
+    // imposto depois (incide só sobre o que de fato foi faturado).
+    const aposPerda = bruto * (1 - perda)
+    const valorPerda = bruto - aposPerda
+    const liquido = aposPerda * (1 - imposto)
+    const valorImposto = aposPerda - liquido
+
+    let custo: number | null = null
+    if (breakEvenFixoDisponivel && resultadoBreakEven) {
+      // Custo fixo (PJ) por turnos marcados — não depende de quantos dias o mês real tem.
+      custo = resultadoBreakEven.custoMensalTotal
+    } else if (breakEvenAtendimentoDisponivel) {
+      // Custo variável: sessões REAIS deste mês (soma exata da coluna
+      // "Sessões" de "Ver detalhe", via contarSessoesReaisMes — não uma
+      // aproximação por bruto÷valor médio) × (1 − perda) × taxa PA.
+      const sessoesReais = contarSessoesReaisMes(periodosEnriquecidos, mesReferencia, feriados)
+      const sessoesComPerda = sessoesReais * (1 - perda)
+      custo = sessoesComPerda * taxaPAEspecialidade
+    }
+    const margem = custo !== null ? liquido - custo : null
+
+    return { bruto, valorPerda, valorImposto, liquido, custo, margem }
+  }, [breakEvenFixoDisponivel, breakEvenAtendimentoDisponivel, parametrosGerais, resumoFinanceiro.mensal, cenarioPerdaPct, resultadoBreakEven, periodosEnriquecidos, mesReferencia, feriados, taxaPAEspecialidade])
 
   const linhasExibidas = useMemo((): Omit<LinhaCandidato, "concorrentesNaVaga" | "priorizadoPorFrequencia" | "vagasInternasDisponiveis" | "vagasInternasSlots">[] =>
     periodosEnriquecidos.flatMap(s => s.candidatos.map(candidato => ({ dia: s.dia, unidade: s.unidade, sugestao: s, candidato }))),
@@ -1036,154 +1092,6 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
               </div>
             )}
           </div>
-
-          {podeSimular && (
-            <div className="w-full lg:w-fit rounded-xl border border-border bg-muted/40 p-3">
-              <div className="mb-2 flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
-                Projeção financeira
-                <InfoTooltip ariaLabel="Como a projeção financeira é calculada">
-                  <p>Soma, por vaga de horário, só a receita do <strong className="text-foreground">paciente mais rentável</strong> entre os que disputam aquele horário — priorizando sempre quem paga mais.</p>
-                  <p className="mt-2">Projeção mensal usa a mesma lógica de <strong className="text-foreground">dias úteis × feriados</strong> da Previsão de Receitas.</p>
-                </InfoTooltip>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <StatCard tone="green" icon={<Wallet size={14} />} label="Por semana">
-                  <div className="text-lg font-black tabular-nums text-emerald-700 dark:text-emerald-400">{fmtReal(resumoFinanceiro.semanal)}</div>
-                  <div className="text-[11px] text-muted-foreground">100% de presença · sem imposto</div>
-                </StatCard>
-                <StatCard tone="green" icon={<Wallet size={14} />} label={`Projetado/mês (${labelMesReferencia})`}>
-                  <div className="text-lg font-black tabular-nums text-emerald-700 dark:text-emerald-400">{fmtReal(resumoFinanceiro.mensal)}</div>
-                  <div className="text-[11px] text-muted-foreground">100% de presença · sem imposto</div>
-                  {projetadoMesLiquido !== null && (
-                    <div className="mt-1.5 border-t border-emerald-900/10 dark:border-emerald-100/10 pt-1.5 text-[11px] text-muted-foreground">
-                      Líquido ({cenarioPerdaPct}% perda, {parametrosGerais?.imposto_faturamento_pct}% imposto):{" "}
-                      <strong className={projetadoMesLiquido < (resultadoBreakEven?.custoMensalTotal ?? projecaoBreakEvenAtendimento?.custoVariavelMes ?? 0) ? "text-rose-600 dark:text-rose-400" : "text-foreground"}>
-                        {fmtReal(projetadoMesLiquido)}
-                      </strong>
-                    </div>
-                  )}
-                </StatCard>
-              </div>
-              <Button variant="outline" size="xs" className="mt-2" onClick={() => setDetalheFinanceiroAberto(true)}>
-                Ver detalhe
-              </Button>
-
-              {(breakEvenFixoDisponivel || breakEvenAtendimentoDisponivel) && (
-                <div className="mt-3 border-t border-border pt-3">
-                  <div className="mb-1.5 flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
-                    Ponto de Equilíbrio - Média Mensal para 4,33 sem/mês e 56,33 sess/mês
-                    <InfoTooltip ariaLabel="Como o Ponto de Equilíbrio é calculado">
-                      {breakEvenFixoDisponivel ? (
-                        <>
-                          <p>Margem de <strong className="text-foreground">contribuição</strong>: cobre só o custo fixo mensal do profissional (PJ), sem rateio de sala, recepção, supervisão ou sistema.</p>
-                          <p className="mt-2">Usa o <strong className="text-foreground">valor de sessão médio</strong> desta simulação (receita semanal ÷ vagas com candidato) e a <strong className="text-foreground">perda</strong> escolhida abaixo (falta + ociosidade) — ajuste em "Variáveis &amp; Taxas" o custo mensal e a capacidade diária de cada especialidade.</p>
-                        </>
-                      ) : (
-                        <>
-                          <p>Essa especialidade paga o profissional <strong className="text-foreground">por atendimento</strong> (taxa PA), não um valor fixo — o custo cresce junto com o volume, então o Break Even é decidido pela <strong className="text-foreground">margem de uma sessão isolada</strong>, não por um piso de slots/semana.</p>
-                          <p className="mt-2">A <strong className="text-foreground">perda</strong> muda a margem mensal projetada, mas não muda se a especialidade atinge o Break Even — ajuste a taxa PA em "Taxas por Especialidade" e a capacidade padrão em "Valores Padrão".</p>
-                        </>
-                      )}
-                    </InfoTooltip>
-                  </div>
-                  <div className="mb-2 flex items-center gap-1.5">
-                    <span className="text-[10.5px] font-bold text-muted-foreground">Perda (falta+ociosidade):</span>
-                    <div className="flex gap-1">
-                      {CENARIOS_PERDA_PCT.map(pct => (
-                        <button
-                          key={pct}
-                          type="button"
-                          onClick={() => setCenarioPerdaPct(pct)}
-                          className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors ${
-                            cenarioPerdaPct === pct
-                              ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-400"
-                              : "border-border bg-card text-muted-foreground hover:bg-muted/50"
-                          }`}
-                        >
-                          {pct}%
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {breakEvenFixoDisponivel ? (
-                    !resultadoBreakEven || !projecaoBreakEven ? (
-                      <div className="text-[11px] text-muted-foreground">Simule pelo menos 1 vaga com candidato pra calcular o Ponto de Equilíbrio.</div>
-                    ) : (
-                      <div className="flex flex-col gap-2">
-                        <StatusPill tone={projecaoBreakEven.atingiuBreakEven ? "green" : "red"} variant="solid" dense className="w-fit">
-                          {projecaoBreakEven.atingiuBreakEven ? "Break Even atingido" : "Break Even não atingido"}
-                        </StatusPill>
-
-                        <div className="grid grid-cols-3 gap-2">
-                          <div className="rounded-lg bg-card px-2.5 py-1.5">
-                            <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Receita líquida</div>
-                            <div className={`text-[13px] font-black tabular-nums ${projecaoBreakEven.receitaLiquidaMes < resultadoBreakEven.custoMensalTotal ? "text-rose-600 dark:text-rose-400" : "text-foreground"}`}>
-                              {fmtReal(projecaoBreakEven.receitaLiquidaMes)}
-                            </div>
-                          </div>
-                          <div className="rounded-lg bg-card px-2.5 py-1.5">
-                            <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Custo previsto (PJ)</div>
-                            <div className="text-[13px] font-black tabular-nums text-rose-600 dark:text-rose-400">{fmtReal(resultadoBreakEven.custoMensalTotal)}</div>
-                          </div>
-                          <div className="rounded-lg bg-card px-2.5 py-1.5">
-                            <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Margem</div>
-                            <div className={`text-[13px] font-black tabular-nums ${projecaoBreakEven.margemMensal >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                              {projecaoBreakEven.margemMensal >= 0 ? "+" : ""}{fmtReal(projecaoBreakEven.margemMensal)}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="text-[11px] text-muted-foreground">
-                          Piso mínimo: <strong className="text-foreground">{resultadoBreakEven.slotsSemanaMinimo} slot(s)/semana</strong> ({Math.round(resultadoBreakEven.alocacaoPercentual * 100)}% da capacidade)
-                          {" · "}simulado: <strong className="text-foreground">{agendaNovoProf?.slotsComCandidato ?? 0} slot(s)/semana</strong>
-                        </div>
-                      </div>
-                    )
-                  ) : (
-                    !resultadoBreakEvenAtendimento || !projecaoBreakEvenAtendimento ? (
-                      <div className="text-[11px] text-muted-foreground">Simule pelo menos 1 vaga com candidato pra calcular o Ponto de Equilíbrio.</div>
-                    ) : (
-                      <div className="flex flex-col gap-2">
-                        <div className="flex flex-wrap items-center gap-2">
-                          <StatusPill tone={resultadoBreakEvenAtendimento.atingiuBreakEven ? "green" : "red"} variant="solid" dense className="w-fit">
-                            {resultadoBreakEvenAtendimento.atingiuBreakEven ? "Break Even atingido" : "Break Even não atingido"}
-                          </StatusPill>
-                          <span className="text-[11px] text-muted-foreground">(não muda com o cenário de perda)</span>
-                        </div>
-
-                        <div className={`text-sm font-black tabular-nums ${resultadoBreakEvenAtendimento.margemPorSessao >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                          Margem por sessão: {resultadoBreakEvenAtendimento.margemPorSessao >= 0 ? "+" : ""}{fmtReal(resultadoBreakEvenAtendimento.margemPorSessao)}
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-2">
-                          <div className="rounded-lg bg-card px-2.5 py-1.5">
-                            <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Receita líquida</div>
-                            <div className="text-[13px] font-black tabular-nums text-foreground">{fmtReal(projecaoBreakEvenAtendimento.receitaLiquidaMes)}</div>
-                          </div>
-                          <div className="rounded-lg bg-card px-2.5 py-1.5">
-                            <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Custo variável previsto</div>
-                            <div className="text-[13px] font-black tabular-nums text-rose-600 dark:text-rose-400">{fmtReal(projecaoBreakEvenAtendimento.custoVariavelMes)}</div>
-                          </div>
-                          <div className="rounded-lg bg-card px-2.5 py-1.5">
-                            <div className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Margem</div>
-                            <div className={`text-[13px] font-black tabular-nums ${projecaoBreakEvenAtendimento.margemMensal >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                              {projecaoBreakEvenAtendimento.margemMensal >= 0 ? "+" : ""}{fmtReal(projecaoBreakEvenAtendimento.margemMensal)}
-                            </div>
-                          </div>
-                        </div>
-
-                        <div className="text-[11px] text-muted-foreground">
-                          {Math.round((resultadoBreakEvenAtendimento.capacidadeMensal > 0 ? (agendaNovoProf!.slotsComCandidato * 4.33 / resultadoBreakEvenAtendimento.capacidadeMensal) * 100 : 0))}% da capacidade de referência (56,33 sessões/mês)
-                          {" · "}simulado: <strong className="text-foreground">{agendaNovoProf?.slotsComCandidato ?? 0} slot(s)/semana</strong>
-                        </div>
-                      </div>
-                    )
-                  )}
-                </div>
-              )}
-            </div>
-          )}
         </div>
         )}
       </div>
@@ -1292,6 +1200,255 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
               </div>
             </div>
           </div>
+
+          {/* Projeção financeira e Ponto de Equilíbrio — card separado dos parâmetros de entrada */}
+          {laudosCarregados && podeSimular && (
+            <div className="rounded-2xl border border-border bg-card p-4">
+              <div className="mb-3 text-[15px] font-extrabold text-foreground">
+                Projeção financeira - Ponto de Equilíbrio (Break Even)
+              </div>
+
+              {/* Frente 1 — mês real, com os dias úteis e feriados específicos desse calendário */}
+              <div className="mb-1.5 flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                <span className="flex h-4 w-4 items-center justify-center rounded-full bg-muted text-[10px] font-black text-foreground">1</span>
+                Projeção específica de {labelMesReferencia}
+                <InfoTooltip ariaLabel="Como a projeção específica do mês é calculada">
+                  <p>Soma, por vaga de horário, só a receita do <strong className="text-foreground">paciente mais rentável</strong> entre os que disputam aquele horário — priorizando sempre quem paga mais.</p>
+                  <p className="mt-2">Projeção mensal usa os <strong className="text-foreground">dias úteis e feriados reais</strong> de {labelMesReferencia} — mesma lógica da Previsão de Receitas. Por isso não bate exatamente com a frente 2 abaixo, que usa uma média fixa de 4,33 semanas/mês.</p>
+                </InfoTooltip>
+              </div>
+              <div className="sm:max-w-xs">
+                <StatCard tone={!detalheMesEspecifico || detalheMesEspecifico.margem === null || detalheMesEspecifico.margem >= 0 ? "green" : "red"} icon={<Wallet size={14} />} label={`Margem de ${labelMesReferencia}`}>
+                  {detalheMesEspecifico && detalheMesEspecifico.margem !== null ? (
+                    <>
+                      <div className={`text-lg font-black tabular-nums ${detalheMesEspecifico.margem >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                        {detalheMesEspecifico.margem >= 0 ? "+" : ""}{fmtReal(detalheMesEspecifico.margem)}
+                      </div>
+                      <div className="text-[11px] text-muted-foreground">Valores brutos {fmtReal(resumoFinanceiro.mensal)} · {fmtReal(resumoFinanceiro.semanal)}/semana</div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="text-lg font-black tabular-nums text-emerald-700 dark:text-emerald-400">{fmtReal(resumoFinanceiro.mensal)}</div>
+                      <div className="text-[11px] text-muted-foreground">100% de presença · sem imposto · {fmtReal(resumoFinanceiro.semanal)}/semana</div>
+                    </>
+                  )}
+                </StatCard>
+
+                {detalheMesEspecifico && (
+                  <div className="mt-2 space-y-1 rounded-lg bg-muted/40 px-2.5 py-2 text-[11.5px]">
+                    <div className="flex items-center justify-between text-muted-foreground">
+                      <span>Projetado (100% de presença)</span>
+                      <span className="font-semibold tabular-nums text-foreground">{fmtReal(detalheMesEspecifico.bruto)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-rose-600 dark:text-rose-400">
+                      <span>− Perda ({cenarioPerdaPct}% falta/ociosidade)</span>
+                      <span className="font-semibold tabular-nums">− {fmtReal(detalheMesEspecifico.valorPerda)}</span>
+                    </div>
+                    <div className="flex items-center justify-between text-rose-600 dark:text-rose-400">
+                      <span>− Imposto ({parametrosGerais?.imposto_faturamento_pct}% faturamento)</span>
+                      <span className="font-semibold tabular-nums">− {fmtReal(detalheMesEspecifico.valorImposto)}</span>
+                    </div>
+                    <div className="flex items-center justify-between border-t border-border pt-1 font-bold text-foreground">
+                      <span>= Líquido</span>
+                      <span className="tabular-nums">{fmtReal(detalheMesEspecifico.liquido)}</span>
+                    </div>
+                    {detalheMesEspecifico.custo !== null && detalheMesEspecifico.margem !== null && (
+                      <>
+                        <div className="flex items-center justify-between text-rose-600 dark:text-rose-400">
+                          <span>− Remuneração do prestador</span>
+                          <span className="font-semibold tabular-nums">− {fmtReal(detalheMesEspecifico.custo)}</span>
+                        </div>
+                        <div className={`flex items-center justify-between border-t border-border pt-1 font-black ${detalheMesEspecifico.margem >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                          <span>= Margem</span>
+                          <span className="tabular-nums">{detalheMesEspecifico.margem >= 0 ? "+" : ""}{fmtReal(detalheMesEspecifico.margem)}</span>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                )}
+
+                <Button
+                  variant="outline"
+                  size="xs"
+                  className={`mt-2 w-full px-6 ${
+                    detalheMesEspecifico && detalheMesEspecifico.margem !== null && detalheMesEspecifico.margem < 0
+                      ? "border-rose-300 text-rose-700 hover:bg-rose-50 dark:border-rose-700 dark:text-rose-400 dark:hover:bg-rose-950/30"
+                      : "border-emerald-300 text-emerald-700 hover:bg-emerald-50 dark:border-emerald-700 dark:text-emerald-400 dark:hover:bg-emerald-950/30"
+                  }`}
+                  onClick={() => setDetalheFinanceiroAberto(true)}
+                >
+                  Ver detalhe
+                </Button>
+              </div>
+
+              {(breakEvenFixoDisponivel || breakEvenAtendimentoDisponivel) && (
+                <div className="mt-3 border-t border-border pt-3">
+                  {/* Frente 2 — média mensal padronizada, mesma base usada pelo Ponto de Equilíbrio */}
+                  <div className="mb-1.5 flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+                    <span className="flex h-4 w-4 items-center justify-center rounded-full bg-muted text-[10px] font-black text-foreground">2</span>
+                    Projeção média mensal — 4,33 sem/mês e 56,33 sess/mês
+                    <InfoTooltip ariaLabel="Como o Ponto de Equilíbrio é calculado">
+                      {breakEvenFixoDisponivel ? (
+                        <>
+                          <p>Margem de <strong className="text-foreground">contribuição</strong>: cobre só o custo fixo mensal do profissional (PJ), sem rateio de sala, recepção, supervisão ou sistema.</p>
+                          <p className="mt-2">Usa o <strong className="text-foreground">valor de sessão médio</strong> desta simulação (receita semanal ÷ vagas com candidato) e a <strong className="text-foreground">perda</strong> escolhida abaixo (falta + ociosidade) — ajuste em "Variáveis &amp; Taxas" o custo mensal e a capacidade diária de cada especialidade.</p>
+                          {resultadoBreakEven && projecaoBreakEven && (
+                            <>
+                              <p className="mt-2 font-bold text-foreground">Como chega no extrato abaixo:</p>
+                              <ul className="mt-1 list-disc space-y-1 pl-4">
+                                <li>{fmtReal(resumoFinanceiro.semanal)} ÷ {agendaNovoProf?.slotsComCandidato ?? 0} slot(s)/semana = <strong className="text-foreground">{fmtReal(valorSessaoMedioSimulado)}</strong>/sessão (bruto)</li>
+                                <li>× (1 − {parametrosGerais?.imposto_faturamento_pct}% imposto) = <strong className="text-foreground">{fmtReal(resultadoBreakEven.receitaLiquidaSessao)}</strong>/sessão líquido</li>
+                                <li>{agendaNovoProf?.slotsComCandidato ?? 0} × 4,33 semanas × (1 − {cenarioPerdaPct}% perda) = <strong className="text-foreground">{projecaoBreakEven.sessoesEfetivasMes.toFixed(2)}</strong> sessões/mês</li>
+                                <li>× receita líquida/sessão = <strong className="text-foreground">{fmtReal(projecaoBreakEven.receitaLiquidaMes)}</strong> receita líquida/mês</li>
+                                <li>− {fmtReal(resultadoBreakEven.custoMensalTotal)} (custo fixo PJ, dos turnos marcados) = <strong className={projecaoBreakEven.margemMensal >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}>{projecaoBreakEven.margemMensal >= 0 ? "+" : ""}{fmtReal(projecaoBreakEven.margemMensal)}</strong> margem</li>
+                              </ul>
+                            </>
+                          )}
+                        </>
+                      ) : (
+                        <>
+                          <p>Essa especialidade paga o profissional <strong className="text-foreground">por atendimento</strong> (taxa PA), não um valor fixo — o custo cresce junto com o volume, então o Break Even é decidido pela <strong className="text-foreground">margem de uma sessão isolada</strong>, não por um piso de slots/semana.</p>
+                          <p className="mt-2">A <strong className="text-foreground">perda</strong> muda a margem mensal projetada, mas não muda se a especialidade atinge o Break Even — ajuste a taxa PA em "Taxas por Especialidade" e a capacidade padrão em "Valores Padrão".</p>
+                          {resultadoBreakEvenAtendimento && projecaoBreakEvenAtendimento && (
+                            <>
+                              <p className="mt-2 font-bold text-foreground">Como chega no extrato abaixo:</p>
+                              <ul className="mt-1 list-disc space-y-1 pl-4">
+                                <li>{fmtReal(resumoFinanceiro.semanal)} ÷ {agendaNovoProf?.slotsComCandidato ?? 0} slot(s)/semana = <strong className="text-foreground">{fmtReal(valorSessaoMedioSimulado)}</strong>/sessão (bruto)</li>
+                                <li>× (1 − {parametrosGerais?.imposto_faturamento_pct}% imposto) = <strong className="text-foreground">{fmtReal(resultadoBreakEvenAtendimento.receitaLiquidaSessao)}</strong>/sessão líquido</li>
+                                <li>{agendaNovoProf?.slotsComCandidato ?? 0} × 4,33 semanas × (1 − {cenarioPerdaPct}% perda) = <strong className="text-foreground">{projecaoBreakEvenAtendimento.sessoesEfetivasMes.toFixed(2)}</strong> sessões/mês</li>
+                                <li>× receita líquida/sessão = <strong className="text-foreground">{fmtReal(projecaoBreakEvenAtendimento.receitaLiquidaMes)}</strong> receita líquida/mês</li>
+                                <li>− {projecaoBreakEvenAtendimento.sessoesEfetivasMes.toFixed(2)} × {fmtReal(taxaPAEspecialidade)} (taxa PA) = <strong className={projecaoBreakEvenAtendimento.margemMensal >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}>{projecaoBreakEvenAtendimento.margemMensal >= 0 ? "+" : ""}{fmtReal(projecaoBreakEvenAtendimento.margemMensal)}</strong> margem</li>
+                              </ul>
+                            </>
+                          )}
+                        </>
+                      )}
+                    </InfoTooltip>
+                  </div>
+                  <div className="mb-2 flex items-center gap-1.5">
+                    <span className="text-[10.5px] font-bold text-muted-foreground">Perda (falta + ociosidade):</span>
+                    <div className="flex gap-1">
+                      {CENARIOS_PERDA_PCT.map(pct => (
+                        <button
+                          key={pct}
+                          type="button"
+                          onClick={() => setCenarioPerdaPct(pct)}
+                          className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                            cenarioPerdaPct === pct
+                              ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-400"
+                              : "border-border bg-card text-muted-foreground hover:bg-muted/50"
+                          }`}
+                        >
+                          {pct}%
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {breakEvenFixoDisponivel ? (
+                    !resultadoBreakEven || !projecaoBreakEven ? (
+                      <div className="text-[11px] text-muted-foreground">Simule pelo menos 1 vaga com candidato pra calcular o Ponto de Equilíbrio.</div>
+                    ) : (
+                      <div className="flex flex-col gap-2 sm:max-w-xs">
+                        <StatusPill tone={projecaoBreakEven.atingiuBreakEven ? "green" : "red"} variant="solid" dense className="w-full justify-center">
+                          {projecaoBreakEven.atingiuBreakEven ? "Break Even atingido" : "Break Even não atingido"}
+                        </StatusPill>
+
+                        <StatCard tone={projecaoBreakEven.margemMensal >= 0 ? "green" : "red"} icon={<Wallet size={14} />} label="Margem — Projeção média mensal">
+                          <div className={`text-lg font-black tabular-nums ${projecaoBreakEven.margemMensal >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                            {projecaoBreakEven.margemMensal >= 0 ? "+" : ""}{fmtReal(projecaoBreakEven.margemMensal)}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground">Valores brutos {fmtReal(resumoFinanceiro.semanal * SEMANAS_POR_MES)} · {fmtReal(resumoFinanceiro.semanal)}/semana</div>
+                        </StatCard>
+
+                        <div className="space-y-1 rounded-lg bg-muted/40 px-2.5 py-2 text-[11.5px]">
+                          <LinhaEquilibrio label="Valor médio da sessão (bruto)" valor={fmtReal(valorSessaoMedioSimulado)} />
+                          <LinhaEquilibrio
+                            label={`− Imposto (${parametrosGerais?.imposto_faturamento_pct}% faturamento)`}
+                            valor={`− ${fmtReal(valorSessaoMedioSimulado - resultadoBreakEven.receitaLiquidaSessao)}`}
+                            tone="neg"
+                          />
+                          <LinhaEquilibrio label="= Receita líquida por sessão" valor={fmtReal(resultadoBreakEven.receitaLiquidaSessao)} forte />
+                          <LinhaEquilibrio label="× Sessões efetivas do mês" valor={projecaoBreakEven.sessoesEfetivasMes.toFixed(2)} />
+                          <LinhaEquilibrio label="= Receita líquida do mês" valor={fmtReal(projecaoBreakEven.receitaLiquidaMes)} forte />
+                          <LinhaEquilibrio
+                            label="− Remuneração do prestador"
+                            valor={`− ${fmtReal(resultadoBreakEven.custoMensalTotal)}`}
+                            tone="neg"
+                          />
+                          <LinhaEquilibrio
+                            label="= Margem"
+                            valor={`${projecaoBreakEven.margemMensal >= 0 ? "+" : ""}${fmtReal(projecaoBreakEven.margemMensal)}`}
+                            tone={projecaoBreakEven.margemMensal >= 0 ? "pos" : "neg"}
+                            forte
+                          />
+                        </div>
+
+                        <div className="text-[11px] text-muted-foreground">
+                          Piso mínimo: <strong className="text-foreground">{resultadoBreakEven.slotsSemanaMinimo} slot(s)/semana</strong> ({Math.round(resultadoBreakEven.alocacaoPercentual * 100)}% da capacidade)
+                          {" · "}simulado: <strong className="text-foreground">{agendaNovoProf?.slotsComCandidato ?? 0} slot(s)/semana</strong>
+                        </div>
+                      </div>
+                    )
+                  ) : (
+                    !resultadoBreakEvenAtendimento || !projecaoBreakEvenAtendimento ? (
+                      <div className="text-[11px] text-muted-foreground">Simule pelo menos 1 vaga com candidato pra calcular o Ponto de Equilíbrio.</div>
+                    ) : (
+                      <div className="flex flex-col gap-2 sm:max-w-xs">
+                        <StatusPill tone={resultadoBreakEvenAtendimento.atingiuBreakEven ? "green" : "red"} variant="solid" dense className="w-full justify-center">
+                          {resultadoBreakEvenAtendimento.atingiuBreakEven ? "Break Even atingido" : "Break Even não atingido"}
+                        </StatusPill>
+
+                        <div className={`flex items-center justify-center gap-1 text-center text-sm font-black tabular-nums ${resultadoBreakEvenAtendimento.margemPorSessao >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                          Margem por sessão: {resultadoBreakEvenAtendimento.margemPorSessao >= 0 ? "+" : ""}{fmtReal(resultadoBreakEvenAtendimento.margemPorSessao)}
+                          <InfoTip ariaLabel="Por que o Break Even não muda com o cenário de perda">
+                            <p>Esse aviso aparece só no modelo "por atendimento" (especialidades que não são Fono/TO/Musicoterapia) e explica por que o selo "Break Even atingido/não atingido" fica igual não importa qual % de perda (20/25/30%) você escolher ali em cima.</p>
+                            <p className="mt-2">O motivo: nesse modelo, tanto a receita quanto o custo são <strong className="text-foreground">por sessão realizada</strong> — se uma sessão não acontece (falta/ociosidade), a clínica não fatura aquela sessão, mas também não paga o profissional por ela (paga a taxa PA só pelo que foi atendido). Então perda reduz receita e custo na <strong className="text-foreground">mesma proporção</strong>, e o veredito "dá lucro ou não" já fica decidido numa única sessão isolada.</p>
+                          </InfoTip>
+                        </div>
+
+                        <StatCard tone={projecaoBreakEvenAtendimento.margemMensal >= 0 ? "green" : "red"} icon={<Wallet size={14} />} label="Margem — Projeção média mensal">
+                          <div className={`text-lg font-black tabular-nums ${projecaoBreakEvenAtendimento.margemMensal >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                            {projecaoBreakEvenAtendimento.margemMensal >= 0 ? "+" : ""}{fmtReal(projecaoBreakEvenAtendimento.margemMensal)}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground">Valores brutos {fmtReal(resumoFinanceiro.semanal * SEMANAS_POR_MES)} · {fmtReal(resumoFinanceiro.semanal)}/semana</div>
+                          <div className="text-[11px] text-muted-foreground">Líquido {fmtReal(projecaoBreakEvenAtendimento.receitaLiquidaMes)} · {projecaoBreakEvenAtendimento.sessoesEfetivasMes.toFixed(2)} sessões/mês</div>
+                        </StatCard>
+
+                        <div className="space-y-1 rounded-lg bg-muted/40 px-2.5 py-2 text-[11.5px]">
+                          <LinhaEquilibrio label="Valor médio da sessão (bruto)" valor={fmtReal(valorSessaoMedioSimulado)} />
+                          <LinhaEquilibrio
+                            label={`− Imposto (${parametrosGerais?.imposto_faturamento_pct}% faturamento)`}
+                            valor={`− ${fmtReal(valorSessaoMedioSimulado - resultadoBreakEvenAtendimento.receitaLiquidaSessao)}`}
+                            tone="neg"
+                          />
+                          <LinhaEquilibrio label="= Receita líquida por sessão" valor={fmtReal(resultadoBreakEvenAtendimento.receitaLiquidaSessao)} forte />
+                          <LinhaEquilibrio label="× Sessões efetivas do mês" valor={projecaoBreakEvenAtendimento.sessoesEfetivasMes.toFixed(2)} />
+                          <LinhaEquilibrio label="= Receita líquida do mês" valor={fmtReal(projecaoBreakEvenAtendimento.receitaLiquidaMes)} forte />
+                          <LinhaEquilibrio
+                            label="− Remuneração do prestador"
+                            valor={`− ${fmtReal(projecaoBreakEvenAtendimento.custoVariavelMes)}`}
+                            tone="neg"
+                          />
+                          <LinhaEquilibrio
+                            label="= Margem"
+                            valor={`${projecaoBreakEvenAtendimento.margemMensal >= 0 ? "+" : ""}${fmtReal(projecaoBreakEvenAtendimento.margemMensal)}`}
+                            tone={projecaoBreakEvenAtendimento.margemMensal >= 0 ? "pos" : "neg"}
+                            forte
+                          />
+                        </div>
+
+                        <div className="text-[11px] text-muted-foreground">
+                          {Math.round((resultadoBreakEvenAtendimento.capacidadeMensal > 0 ? (agendaNovoProf!.slotsComCandidato * 4.33 / resultadoBreakEvenAtendimento.capacidadeMensal) * 100 : 0))}% da capacidade de referência (56,33 sessões/mês)
+                          {" · "}simulado: <strong className="text-foreground">{agendaNovoProf?.slotsComCandidato ?? 0} slot(s)/semana</strong>
+                        </div>
+                      </div>
+                    )
+                  )}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* SEÇÃO 2 — detalhamento da opção selecionada acima */}
           {agendaNovoProf && agendaNovoProf.totalSlots > 0 && (
