@@ -19,7 +19,7 @@ export const metadata: Metadata = {
   // este ícone valha, mesmo que sobre um app/icon.svg antigo na árvore de build.
   icons: {
     icon: [
-      { url: "/icon.png", type: "image/png", sizes: "256x256" },
+      { url: "/icon.png", type: "image/png", sizes: "512x512" },
     ],
     apple: "/icon-192.png",
   },
