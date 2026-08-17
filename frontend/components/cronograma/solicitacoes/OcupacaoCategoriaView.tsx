@@ -15,7 +15,7 @@
 // remanejamento em seções separadas) em vez de ir direto pro modal de
 // detalhe — só pula esse passo quando há exatamente 1 candidato acionável.
 
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import { Building2, CheckCircle2, Lock } from "lucide-react"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 import { calcularGaps, gapsParaMapa, type GapItem, type Turno } from "@/lib/cronograma/simulacaoNovoPrestador"
@@ -28,8 +28,9 @@ import { SearchCombobox } from "@/components/cronograma/ui/SearchCombobox"
 import { Button } from "@/components/ui/button"
 import { RemanejamentoDetalheModal } from "./RemanejamentoDetalheModal"
 import { PacienteAgendaHipoteticaModal } from "./PacienteAgendaHipoteticaModal"
+import { NovoDiaDetalheModal } from "./NovoDiaDetalheModal"
 import { VagaHorarioSelector } from "./VagaHorarioSelector"
-import { ProjecaoOcupacaoDonut } from "./ProjecaoOcupacaoDonut"
+import { ProjecaoOcupacaoDonut, type SegmentoOcupacao } from "./ProjecaoOcupacaoDonut"
 import { OportunidadesInternasPanel } from "./OportunidadesInternasPanel"
 import type { CsvRow } from "@/types/cronograma"
 
@@ -40,18 +41,20 @@ type PeriodosSel = Record<string, { manha?: boolean; tarde?: boolean }>
 
 // Prioridade de exibição quando há mais de 1 vaga na mesma hora: mostra
 // primeiro a mais "acionável" (direto > remanejamento > livre).
-const PRIORIDADE: Record<VagaCategoria["status"], number> = { direto: 0, remanejamento: 1, livre: 2 }
+const PRIORIDADE: Record<VagaCategoria["status"], number> = { direto: 0, remanejamento: 1, "novo-dia": 2, livre: 3 }
 
 const ESTILO_STATUS: Record<VagaCategoria["status"], string> = {
-  livre: "border-dashed border-border bg-transparent",
+  livre: "border-dashed border-rose-300 dark:border-rose-800 bg-rose-50/70 dark:bg-rose-950/20",
   direto: "border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 cursor-pointer hover:brightness-95",
   remanejamento: "border-sky-300 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/30 cursor-pointer hover:brightness-95",
+  "novo-dia": "border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 cursor-pointer hover:brightness-95",
 }
 
 const LABEL_STATUS: Record<VagaCategoria["status"], string> = {
   livre: "Livre",
   direto: "Ver agenda",
   remanejamento: "Ver antes/depois",
+  "novo-dia": "Ver novo dia",
 }
 
 // ─── Seletor de períodos (Segunda manhã/tarde/dia inteiro, Terça...) ───────
@@ -136,15 +139,29 @@ function PeriodosSelector({
 // Altura fixa (não só mínima) de todo bloco de 40min, ocupado, livre ou vazio
 // — sem isso, cartões com mais texto (ex.: "Ver quem está livre") esticavam
 // a linha inteira e desalinhavam as outras colunas do mesmo horário.
-const ALTURA_CELULA = "h-[54px]"
+const ALTURA_CELULA = "h-[64px]"
+
+// Casa o status da vaga com o segmento do donut (ProjecaoOcupacaoDonut) — as
+// 3 modalidades de oportunidade contam como um único segmento "oportunidade"
+// lá. Não existe "ocupado" aqui: esta grade só lista horários "Livre" (ver
+// gerarVagasCategoria) — sessões já agendadas nunca viram uma vaga, então o
+// segmento "ocupado" do donut nunca casa com nenhuma célula desta grade.
+function segmentoDoStatus(status: VagaCategoria["status"]): SegmentoOcupacao {
+  return status === "livre" ? "livre" : "oportunidade"
+}
 
 function CelulaGrade({
-  vagas, focada, onAbrirCelula,
-}: { vagas: VagaCategoria[]; focada: boolean; onAbrirCelula: (vagas: VagaCategoria[]) => void }) {
+  vagas, focada, destaque, onAbrirCelula,
+}: { vagas: VagaCategoria[]; focada: boolean; destaque: SegmentoOcupacao | null; onAbrirCelula: (vagas: VagaCategoria[]) => void }) {
   if (!focada) {
     return <div className={`${ALTURA_CELULA} rounded-lg border border-transparent bg-sky-50/50 dark:bg-sky-950/10`} />
   }
-  if (!vagas.length) return <div className={ALTURA_CELULA} />
+  // Sem borda/fundo nenhum aqui parecia um "buraco" na grade ao lado de
+  // cartões coloridos — pedido do usuário: nunca deixar espaço em branco puro,
+  // mesmo pra um horário sem nenhuma vaga registrada. Mesma borda tracejada
+  // do estado "livre" (ESTILO_STATUS.livre), só mais discreta (opacidade
+  // menor), pra não competir visualmente com uma vaga "livre" de verdade.
+  if (!vagas.length) return <div className={`${ALTURA_CELULA} rounded-lg border border-dashed border-border/40 transition-opacity ${destaque ? "opacity-30" : ""}`} />
 
   const ordenadas = [...vagas].sort((a, b) => PRIORIDADE[a.status] - PRIORIDADE[b.status])
   const principal = ordenadas[0]
@@ -153,13 +170,14 @@ function CelulaGrade({
   // profissional na célula — mesmo só "livre", vale poder ver quem são todos
   // (sem isso, o "+N" escondia profissionais sem nenhuma forma de revelar).
   const clicavel = principal.status !== "livre" || resto > 0
+  const emDestaque = !destaque || segmentoDoStatus(principal.status) === destaque
 
   return (
     <button
       type="button"
       disabled={!clicavel}
       onClick={() => clicavel && onAbrirCelula(vagas)}
-      className={`${ALTURA_CELULA} w-full overflow-hidden rounded-lg border px-2 py-1.5 text-left ${ESTILO_STATUS[principal.status]}`}
+      className={`${ALTURA_CELULA} w-full overflow-hidden rounded-lg border px-2 py-1.5 text-left transition-opacity ${ESTILO_STATUS[principal.status]} ${emDestaque ? "" : "opacity-30"}`}
     >
       <div className="flex min-w-0 items-center justify-between gap-1">
         <span className="min-w-0 truncate text-[11px] font-bold leading-tight text-foreground">{fmtName(principal.profissional)}</span>
@@ -169,7 +187,12 @@ function CelulaGrade({
         {principal.status === "livre" ? "Livre" : fmtName(principal.paciente?.pac ?? "")}
       </div>
       {clicavel && (
-        <div className={`mt-0.5 truncate text-[10px] font-bold ${principal.status === "livre" ? "text-muted-foreground" : principal.status === "direto" ? "text-emerald-700 dark:text-emerald-400" : "text-sky-700 dark:text-sky-400"}`}>
+        <div className={`mt-0.5 truncate text-[10px] font-bold ${
+          principal.status === "livre" ? "text-rose-700 dark:text-rose-400"
+          : principal.status === "direto" ? "text-emerald-700 dark:text-emerald-400"
+          : principal.status === "remanejamento" ? "text-sky-700 dark:text-sky-400"
+          : "text-amber-700 dark:text-amber-400"
+        }`}>
           {resto > 0 ? "Ver quem está livre" : LABEL_STATUS[principal.status]}
         </div>
       )}
@@ -191,9 +214,18 @@ function GradeCategoria({
     return m
   }, [diasAtivos, unidade, especialidade, cRows, gapMap])
 
-  const todasVagas = useMemo(() => [...vagasPorDia.values()].flat(), [vagasPorDia])
+  // Filtra pelo(s) turno(s) MARCADO(S) de cada dia — gerarVagasCategoria
+  // sempre devolve o dia inteiro (manhã+tarde), então sem esse filtro um dia
+  // com só "manhã" marcada inflava o resumo/donut com vagas da tarde que a
+  // grade já mostra cinza/desativada (mesmo padrão do cálculo de `ocupado`
+  // abaixo, que já respeita o turno certo).
+  const todasVagas = useMemo(
+    () => diasAtivos.flatMap(d => (vagasPorDia.get(d) ?? []).filter(v => !!periodosSel[d]?.[v.turno])),
+    [diasAtivos, vagasPorDia, periodosSel],
+  )
   const qtdDireto = todasVagas.filter(v => v.status === "direto").length
   const qtdRemanejamento = todasVagas.filter(v => v.status === "remanejamento").length
+  const qtdNovoDia = todasVagas.filter(v => v.status === "novo-dia").length
   const qtdLivre = todasVagas.filter(v => v.status === "livre").length
 
   const ocupado = useMemo(() => {
@@ -203,22 +235,32 @@ function GradeCategoria({
 
   const celulaAtiva = (dia: string, hora: string) => !!periodosSel[dia]?.[turnoFromHora(hora)]
 
+  const [destaque, setDestaque] = useState<SegmentoOcupacao | null>(null)
+  useEffect(() => setDestaque(null), [unidade, especialidade])
+
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
         <Building2 size={14} className="text-muted-foreground" />
         <span className="text-sm font-extrabold text-foreground">{unidade} · {especialidade}</span>
         <span className="text-[11px] text-muted-foreground">
-          {qtdDireto + qtdRemanejamento} oportunidade(s) — {qtdDireto} direta(s), {qtdRemanejamento} via remanejamento · {qtdLivre} livre(s) sem oportunidade
+          {qtdDireto + qtdRemanejamento + qtdNovoDia} oportunidade(s) — {qtdDireto} direta(s), {qtdRemanejamento} via remanejamento, {qtdNovoDia} via novo dia · {qtdLivre} livre(s) sem oportunidade
         </span>
       </div>
 
       <div className="mb-1 flex flex-wrap gap-3 text-[10px] text-muted-foreground">
-        <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-dashed border-border" /> Livre, sem oportunidade</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-dashed border-rose-300 dark:border-rose-800 bg-rose-50/70 dark:bg-rose-950/20" /> Livre, sem oportunidade</span>
         <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30" /> Oportunidade direta</span>
         <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-sky-300 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/30" /> Oportunidade via remanejamento</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30" /> Oportunidade via novo dia</span>
         <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-sky-50/50 dark:bg-sky-950/10" /> Fora do filtro de dias/turnos</span>
       </div>
+
+      {destaque === "ocupado" && (
+        <InlineNotice tone="slate">
+          "Ocupado" não tem célula própria nesta grade — ela só lista horários "Livre" da unidade. Esmaecendo tudo porque nada aqui corresponde a esse segmento.
+        </InlineNotice>
+      )}
 
       <div className="grid grid-cols-1 xl:grid-cols-[1fr_260px] gap-4 items-start">
         {!diasAtivos.length ? (
@@ -246,8 +288,8 @@ function GradeCategoria({
                       const ativa = celulaAtiva(d, hora)
                       const vagasCelula = ativa ? (vagasPorDia.get(d) ?? []).filter(v => v.hora === hora) : []
                       return (
-                        <td key={d} className="p-0.5">
-                          <CelulaGrade vagas={vagasCelula} focada={ativa} onAbrirCelula={vagas => onAbrirCelula(d, hora, vagas)} />
+                        <td key={d} className="px-0.5 py-0">
+                          <CelulaGrade vagas={vagasCelula} focada={ativa} destaque={destaque} onAbrirCelula={vagas => onAbrirCelula(d, hora, vagas)} />
                         </td>
                       )
                     })}
@@ -258,7 +300,10 @@ function GradeCategoria({
           </div>
         )}
 
-        <ProjecaoOcupacaoDonut titulo="Ocupação da categoria" ocupado={ocupado} oportunidade={qtdDireto + qtdRemanejamento} livre={qtdLivre} />
+        <ProjecaoOcupacaoDonut
+          titulo="Ocupação da categoria" ocupado={ocupado} oportunidade={qtdDireto + qtdRemanejamento + qtdNovoDia} livre={qtdLivre}
+          segmentoSelecionado={destaque} onSelecionarSegmento={setDestaque}
+        />
       </div>
     </div>
   )
@@ -277,7 +322,7 @@ function ComparativoUnidades({
     () => compararUnidadesOportunidade(periodos, especialidade, cRows, gapMap),
     [periodos, especialidade, cRows, gapMap],
   )
-  const totais = comparativo.map(u => u.qtdDireto + u.qtdRemanejamento)
+  const totais = comparativo.map(u => u.qtdDireto + u.qtdRemanejamento + u.qtdNovoDia)
   const escala = Math.max(1, ...totais)
 
   return (
@@ -330,6 +375,7 @@ export function OcupacaoCategoriaView({ cRows }: Props) {
   const [celulaSelecionada, setCelulaSelecionada] = useState<{ dia: string; hora: string; vagas: VagaCategoria[] } | null>(null)
   const [detalheDireto, setDetalheDireto] = useState<{ dia: string; vaga: VagaCategoria } | null>(null)
   const [detalheRemanejamento, setDetalheRemanejamento] = useState<VagaCategoria | null>(null)
+  const [detalheNovoDia, setDetalheNovoDia] = useState<VagaCategoria | null>(null)
 
   const diasSelecionados = useMemo(() => Object.keys(periodosSel).filter(d => periodosSel[d]?.manha || periodosSel[d]?.tarde), [periodosSel])
   const filtrosCompletos = !!unidade && !!especialidade && diasSelecionados.length > 0
@@ -353,6 +399,7 @@ export function OcupacaoCategoriaView({ cRows }: Props) {
       const v = vagas[0]
       if (v.status === "direto") setDetalheDireto({ dia, vaga: v })
       else if (v.status === "remanejamento") setDetalheRemanejamento(v)
+      else if (v.status === "novo-dia") setDetalheNovoDia(v)
       return
     }
     setCelulaSelecionada({ dia, hora, vagas })
@@ -426,6 +473,7 @@ export function OcupacaoCategoriaView({ cRows }: Props) {
           vagas={celulaSelecionada.vagas}
           onEscolherDireto={v => { setDetalheDireto({ dia: celulaSelecionada.dia, vaga: v }); setCelulaSelecionada(null) }}
           onEscolherRemanejamento={v => { setDetalheRemanejamento(v); setCelulaSelecionada(null) }}
+          onEscolherNovoDia={v => { setDetalheNovoDia(v); setCelulaSelecionada(null) }}
           onClose={() => setCelulaSelecionada(null)}
         />
       )}
@@ -449,6 +497,14 @@ export function OcupacaoCategoriaView({ cRows }: Props) {
           remanejamento={detalheRemanejamento.remanejamento}
           cRows={cRows}
           onClose={() => setDetalheRemanejamento(null)}
+        />
+      )}
+
+      {detalheNovoDia?.novoDia && (
+        <NovoDiaDetalheModal
+          oportunidade={detalheNovoDia.novoDia}
+          cRows={cRows}
+          onClose={() => setDetalheNovoDia(null)}
         />
       )}
     </div>

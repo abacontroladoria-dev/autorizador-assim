@@ -116,6 +116,15 @@ function CardSugestao({
   )
   const vagasIsoladas = isolada ? new Set(isolada.candidatos.map(c => `${c.turno}|||${c.hora}`)).size : 0
 
+  // Badge de ocupação usa a % da combinação ISOLADA (sem o teto global de gap
+  // entre sugestões), pra bater com o que "Parâmetros da simulação" mostraria
+  // pra essa mesma combinação — sugestao.pctOcupacaoPrevista reflete o combo
+  // com o teto global já aplicado, que normalmente é menor (outros dias/
+  // especialidades competindo pelo mesmo paciente), então usá-lo aqui inflava
+  // o badge em relação ao que "Detalhamento" acaba mostrando quando aplicado.
+  const pctExibido = isolada?.pctOcupacaoPrevista ?? sugestao.pctOcupacaoPrevista
+  const faixaExibida = isolada?.faixaCascata ?? sugestao.faixaCascata
+
   const margemBreakEven = (() => {
     if (!parametrosGerais || !isolada?.projecaoRemuneracao || vagasIsoladas <= 0) return null
     const valorSessaoMedio = isolada.projecaoRemuneracao.receitaSemanalProjetada / vagasIsoladas
@@ -162,7 +171,7 @@ function CardSugestao({
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card">
       <div className="flex flex-wrap items-start gap-3 p-3.5">
-        <BadgeOcupacao pct={sugestao.pctOcupacaoPrevista} faixa={sugestao.faixaCascata} />
+        <BadgeOcupacao pct={pctExibido} faixa={faixaExibida} />
 
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
@@ -179,7 +188,7 @@ function CardSugestao({
             <span className="text-muted-foreground">·</span>
             <span className="text-[12.5px] font-bold text-foreground">{sugestao.unidade}</span>
           </div>
-          <IndicadorDiaTurno dia={sugestao.dia} turnos={sugestao.turnos} corBar={COR_OCUPACAO[sugestao.faixaCascata].bar} />
+          <IndicadorDiaTurno dia={sugestao.dia} turnos={sugestao.turnos} corBar={COR_OCUPACAO[faixaExibida].bar} />
         </div>
 
         <div className="flex shrink-0 flex-col items-end gap-1.5">

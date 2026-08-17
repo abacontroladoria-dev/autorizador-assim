@@ -8,8 +8,9 @@
 // liberando o horário pra P). Nunca mexe na agenda de P nem na de Q além de
 // mover a sessão conflitante — P só ganha, nunca perde.
 
-import { listarOportunidadesDiretas, listarSlotsLivres } from "./disponibilidadeInterna"
+import { listarOportunidadesDiretas, listarSlotsLivres, unidadeDominanteDoDia } from "./disponibilidadeInterna"
 import { encontrarCandidatosRemanejamento } from "./remanejamento"
+import { listarOportunidadesNovoDia, type OportunidadeNovoDia } from "./novoDia"
 import { turnoFromHora } from "./helpers"
 import type { GapItem, Turno } from "./simulacaoNovoPrestador"
 import type { RemanejamentoDetalhe } from "./sugestaoContratacaoTypes"
@@ -22,10 +23,12 @@ export interface OportunidadeProfissional {
   unidade: string
   terapia: string
   especialidade: string
-  modalidade: "direto" | "remanejamento"
+  modalidade: "direto" | "remanejamento" | "novo-dia"
   paciente: { pac: string; gap: number; aut: number; of: number }
   /** Só presente quando modalidade === "remanejamento" — antes/depois da agenda do PACIENTE candidato. */
   remanejamento?: RemanejamentoDetalhe
+  /** Só presente quando modalidade === "novo-dia". */
+  novoDia?: OportunidadeNovoDia
 }
 
 /** Profissionais com pelo menos 1 horário "Livre" na semana de referência —
@@ -45,8 +48,15 @@ export function listarProfissionaisComOportunidade(cRows: CsvRow[]): string[] {
 export function gerarOportunidadesProfissional(
   profissional: string, cRows: CsvRow[], gapMap: Record<string, GapItem>,
 ): OportunidadeProfissional[] {
+  // R5.4: a unidade da vaga precisa ser a que já concentra a maioria das
+  // sessões do paciente nesse dia — ver unidadeDominanteDoDia
+  // (disponibilidadeInterna.ts) e o mesmo filtro em ocupacaoCategoria.ts.
   const diretas: OportunidadeProfissional[] = listarOportunidadesDiretas(cRows, gapMap)
     .filter(o => o.profissional === profissional)
+    .filter(o => {
+      const dominante = unidadeDominanteDoDia(o.paciente.pac, o.dia, cRows)
+      return !dominante || dominante === o.unidade
+    })
     .map(o => ({
       dia: o.dia, turno: o.turno, hora: o.hora, unidade: o.unidade, terapia: o.terapia, especialidade: o.especialidade,
       modalidade: "direto" as const,
@@ -78,6 +88,8 @@ export function gerarOportunidadesProfissional(
       if (!g.horas.has(hora)) continue // profissional não está livre exatamente aí
       if (horasComDireta.has(`${g.dia}|||${hora}`)) continue // já resolvido direto, remanejar seria redundante
       if (!candidato.remanejamento) continue
+      const dominante = unidadeDominanteDoDia(candidato.paciente, g.dia, cRows)
+      if (dominante && dominante !== g.unidade) continue
       remanejamentoBruto.push({
         dia: g.dia, turno: g.turno, hora, unidade: g.unidade,
         terapia: terapiaPorHora.get(`${g.dia}|||${hora}`) ?? candidato.remanejamento.terapiaRemanejada,
@@ -89,7 +101,23 @@ export function gerarOportunidadesProfissional(
     }
   }
 
-  return limitarPorGap([...diretas, ...remanejamentoBruto], gapMap)
+  // Novo Dia: só tentada nas horas que sobraram sem Direto nem Remanejamento —
+  // mesma ordem de prioridade de gerarVagasCategoria (ocupacaoCategoria.ts).
+  const horasResolvidas = new Set([...diretas, ...remanejamentoBruto].map(o => `${o.dia}|||${o.hora}`))
+  const novoDiaBruto: OportunidadeProfissional[] = listarOportunidadesNovoDia(cRows, gapMap)
+    .filter(o => o.ancora.profissional === profissional && !horasResolvidas.has(`${o.dia}|||${o.ancora.hora}`))
+    .map(o => {
+      const g = o.gapPorEspecialidade[o.ancora.especialidade]
+      return {
+        dia: o.dia, turno: o.turno, hora: o.ancora.hora, unidade: o.unidade,
+        terapia: o.ancora.terapia, especialidade: o.ancora.especialidade,
+        modalidade: "novo-dia" as const,
+        paciente: { pac: o.paciente, gap: (g?.aut ?? 0) - (g?.of ?? 0), aut: g?.aut ?? 0, of: g?.of ?? 0 },
+        novoDia: o,
+      }
+    })
+
+  return limitarPorGap([...diretas, ...remanejamentoBruto, ...novoDiaBruto], gapMap)
     .sort((a, b) => a.dia.localeCompare(b.dia) || a.hora.localeCompare(b.hora))
 }
 

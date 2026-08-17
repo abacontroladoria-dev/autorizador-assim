@@ -283,6 +283,9 @@ export const UNIDADE_ESTILO: Record<string, { bg: string; text: string; bar: str
   Realengo: { bg: "bg-sky-50 dark:bg-sky-950/30", text: "text-sky-700 dark:text-sky-400", bar: "bg-sky-500" },
   Fazendinha: { bg: "bg-violet-50 dark:bg-violet-950/30", text: "text-violet-700 dark:text-violet-400", bar: "bg-violet-500" },
   "Padre Miguel": { bg: "bg-orange-50 dark:bg-orange-950/30", text: "text-orange-700 dark:text-orange-400", bar: "bg-orange-500" },
+  // Vermelho de propósito — não é uma unidade real, é sinal de dado faltante
+  // (linha da grade sem "Unidade" preenchida) que merece chamar atenção.
+  Desconhecida: { bg: "bg-red-50 dark:bg-red-950/30", text: "text-red-700 dark:text-red-400", bar: "bg-red-600" },
 }
 export function estiloUnidade(unidade: string) {
   return UNIDADE_ESTILO[unidade] || { bg: "bg-muted", text: "text-foreground", bar: "bg-slate-500" }

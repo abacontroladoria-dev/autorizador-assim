@@ -12,12 +12,7 @@ import { textoFaixaOcupacaoSala } from "@/lib/cronograma/salas"
 import { CAPACIDADE_LABEL_CURTO } from "@/lib/cronograma/salasTypes"
 import { useStatusLabels } from "@/hooks/useStatusLabels"
 import { TONE_SOLID } from "@/components/cronograma/ui/tones"
-import type { SalaComOcupacao, SlotOcupacaoSala, SalaStatus } from "@/lib/cronograma/salasTypes"
-
-/** Slot statuses "fora de operação" espelham 1:1 um status de sala — ver mesmo mapa em SalasGridView.tsx. */
-const SLOT_STATUS_PARA_SALA_STATUS: Partial<Record<SlotOcupacaoSala["status"], SalaStatus>> = {
-  adm: "adm", bloqueado: "bloqueada", nti: "nti",
-}
+import type { SalaComOcupacao, SlotOcupacaoSala } from "@/lib/cronograma/salasTypes"
 
 /** Paleta pastel só do mapa de calor — mesmas 4 faixas de corFaixaOcupacao, tons mais suaves. */
 function corFaixaOcupacaoPastel(pct: number | null | undefined): string {
@@ -158,6 +153,7 @@ export function SalasHeatmapView({ salas, onIsolarSala, salaIsoladaId, salasComE
                     <HeatCell
                       key={`${sala.id}-${d.dow}-${turno}`}
                       slot={slots.find(s => s.dow === d.dow && s.turno === turno)}
+                      salaStatus={sala.status}
                       bordaTopo={turnoIdx === 0}
                     />
                   ))}
@@ -181,16 +177,15 @@ export function SalasHeatmapView({ salas, onIsolarSala, salaIsoladaId, salasComE
   )
 }
 
-function HeatCell({ slot, bordaTopo }: { slot: SlotOcupacaoSala | undefined; bordaTopo: boolean }) {
+function HeatCell({ slot, salaStatus, bordaTopo }: { slot: SlotOcupacaoSala | undefined; salaStatus: string; bordaTopo: boolean }) {
   const { labels: statusLabels } = useStatusLabels()
   const bordaCls = bordaTopo ? "border-t" : ""
 
   if (!slot) {
     return <td className={`border-l border-border bg-muted/30 px-1 py-2 text-center text-[10px] text-muted-foreground ${bordaCls}`}>ADM</td>
   }
-  const salaStatus = SLOT_STATUS_PARA_SALA_STATUS[slot.status]
-  if (salaStatus) {
-    const l = statusLabels[salaStatus]
+  if (slot.status === "bloqueado" || slot.status === "inativo") {
+    const l = statusLabels[salaStatus] ?? { label_curto: salaStatus, tone: "slate" as const }
     const tone = TONE_SOLID[l.tone]
     return <td className={`border-l border-border px-1 py-2 text-center text-[10px] font-semibold ${tone.bg} ${tone.text} ${bordaCls}`}>{l.label_curto}</td>
   }

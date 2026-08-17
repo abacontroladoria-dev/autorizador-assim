@@ -150,16 +150,32 @@ export async function renomearNucleo(id: string, nome: string): Promise<NucleoCa
   return nucleo
 }
 
-/** Falha (FK ON DELETE RESTRICT) se alguma sala ainda usa esse núcleo. */
+/** Falha (FK ON DELETE RESTRICT) se alguma sala ainda usa esse núcleo — relança "EM_USO" pra UI oferecer mover as salas antes. */
 export async function excluirNucleo(id: string): Promise<void> {
   const sb = getSupabaseClient()
   const { data: antes } = await sb.from(NUCLEOS_TABLE).select("id, nome").eq("id", id).maybeSingle()
   const { error } = await sb.from(NUCLEOS_TABLE).delete().eq("id", id)
-  if (error) throw new Error(error.message)
+  if (error) {
+    if (error.code === "23503") throw new Error("EM_USO")
+    throw new Error(error.message)
+  }
   await registrarAuditoriaSala({
     tabela: "nucleo", registroId: id, acao: "excluir",
     nucleoNome: (antes as NucleoCadastrado | null)?.nome ?? null, antes: antes ?? null,
   })
+}
+
+/** Move todas as salas de um núcleo para outro (usado antes de excluir um núcleo em uso) — registra 1 entrada de auditoria com a contagem movida. */
+export async function moverSalasParaNucleo(deId: string, deNome: string, paraNome: string): Promise<number> {
+  const sb = getSupabaseClient()
+  const { data, error } = await sb.from(TABLE).update({ nucleo: paraNome }).eq("nucleo", deNome).select("id")
+  if (error) throw new Error(error.message)
+  const qtd = (data ?? []).length
+  await registrarAuditoriaSala({
+    tabela: "nucleo", registroId: deId, acao: "editar", nucleoNome: deNome,
+    motivo: `${qtd} sala(s) movida(s) do núcleo "${deNome}" para "${paraNome}".`,
+  })
+  return qtd
 }
 
 /** Paleta fixa de cores do módulo Cronograma (ver components/cronograma/ui/tones.ts) — status usa só essas 6, nunca cor livre. */
@@ -175,18 +191,74 @@ export interface StatusLabel {
 const STATUS_LABELS_TABLE = "cronograma_status_labels"
 
 /**
- * Rótulos + cor editáveis dos status fixos de sala (operacional/bloqueada/
- * adm/nti). A lista de CÓDIGOS possíveis continua fixa (check constraint em
- * cronograma_salas.status) — o cálculo de ocupação (capacidadeProjetadaSala,
- * statusDoSlot) trata "qualquer status != operacional" de forma genérica,
- * então adicionar um novo código fixo (ex.: nti) exige migration, não é uma
- * opção livre criável aqui.
+ * Rótulos + cor dos status de sala — tabela própria com CRUD livre (mesmo
+ * padrão de cronograma_nucleos). "operacional" é o único código especial: o
+ * cálculo de ocupação (capacidadeProjetadaSala, statusDoSlot) trata "qualquer
+ * status != operacional" genericamente como fora de operação, então
+ * "operacional" nunca pode ser excluído (ver excluirStatusLabel).
  */
 export async function listarStatusLabels(): Promise<StatusLabel[]> {
   const sb = getSupabaseClient()
   const { data, error } = await sb.from(STATUS_LABELS_TABLE).select("codigo, label, label_curto, tone")
   if (error) throw new Error(error.message)
   return (data ?? []) as StatusLabel[]
+}
+
+/** Gera um código estável a partir do rótulo (minúsculo, sem acento, espaços viram "_") pra usar como chave primária/valor de cronograma_salas.status. */
+function slugificarCodigoStatus(label: string): string {
+  return label
+    .normalize("NFD").replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+}
+
+export async function criarStatusLabel(input: { label: string; label_curto: string; tone: StatusTone }): Promise<StatusLabel> {
+  const sb = getSupabaseClient()
+  const base = slugificarCodigoStatus(input.label) || "status"
+  let codigo = base
+  for (let sufixo = 2; ; sufixo++) {
+    const { data: existente } = await sb.from(STATUS_LABELS_TABLE).select("codigo").eq("codigo", codigo).maybeSingle()
+    if (!existente) break
+    codigo = `${base}_${sufixo}`
+  }
+  const { data, error } = await sb
+    .from(STATUS_LABELS_TABLE)
+    .insert({ codigo, label: input.label.trim(), label_curto: input.label_curto.trim(), tone: input.tone })
+    .select("codigo, label, label_curto, tone")
+    .single()
+  if (error) throw new Error(error.message)
+  const statusLabel = data as StatusLabel
+  await registrarAuditoriaSala({ tabela: "status_label", registroId: codigo, acao: "criar", depois: statusLabel })
+  return statusLabel
+}
+
+/** "operacional" nunca pode ser excluído (motor de ocupação inteiro depende dele existir). Os demais falham (FK ON DELETE RESTRICT) se alguma sala ainda usa esse status — relança "EM_USO" pra UI oferecer mover as salas antes. */
+export async function excluirStatusLabel(codigo: SalaStatus): Promise<void> {
+  if (codigo === "operacional") {
+    throw new Error("O status Operacional não pode ser excluído — o cálculo de ocupação depende dele.")
+  }
+  const sb = getSupabaseClient()
+  const { data: antes } = await sb.from(STATUS_LABELS_TABLE).select("codigo, label, label_curto, tone").eq("codigo", codigo).maybeSingle()
+  const { error } = await sb.from(STATUS_LABELS_TABLE).delete().eq("codigo", codigo)
+  if (error) {
+    if (error.code === "23503") throw new Error("EM_USO")
+    throw new Error(error.message)
+  }
+  await registrarAuditoriaSala({ tabela: "status_label", registroId: codigo, acao: "excluir", antes: antes ?? null })
+}
+
+/** Move todas as salas de um status para outro (usado antes de excluir um status em uso) — registra 1 entrada de auditoria com a contagem movida. */
+export async function moverSalasParaStatus(deCodigo: SalaStatus, paraCodigo: SalaStatus): Promise<number> {
+  const sb = getSupabaseClient()
+  const { data, error } = await sb.from(TABLE).update({ status: paraCodigo }).eq("status", deCodigo).select("id")
+  if (error) throw new Error(error.message)
+  const qtd = (data ?? []).length
+  await registrarAuditoriaSala({
+    tabela: "status_label", registroId: deCodigo, acao: "editar",
+    motivo: `${qtd} sala(s) movida(s) do status "${deCodigo}" para "${paraCodigo}".`,
+  })
+  return qtd
 }
 
 export async function atualizarStatusLabel(codigo: SalaStatus, input: { label: string; label_curto: string; tone: StatusTone }): Promise<StatusLabel> {

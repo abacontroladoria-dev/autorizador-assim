@@ -11,7 +11,8 @@ import { useHeader } from "@/contexts/HeaderContext"
 import { StatCard } from "@/components/cronograma/ui/StatCard"
 import { StatusPill } from "@/components/cronograma/ui/StatusPill"
 import { useOcupacaoSalas } from "@/hooks/useOcupacaoSalas"
-import { CAPACIDADE_LABEL_CURTO, STATUS_LABEL_CURTO, STATUS_SLOT_EXCLUIDO, capacidadeProjetadaSala } from "@/lib/cronograma/salasTypes"
+import { useStatusLabels } from "@/hooks/useStatusLabels"
+import { CAPACIDADE_LABEL_CURTO, STATUS_SLOT_EXCLUIDO, capacidadeProjetadaSala } from "@/lib/cronograma/salasTypes"
 import { listarSlotsDetalhados, listarBlocosDetalhados, resumoOcupacaoDeItens } from "@/lib/cronograma/salas"
 import { getRefWeek } from "@/lib/cronograma/helpers"
 import { OcupacaoDetalheModal, type DetalheOcupacao } from "./OcupacaoDetalheModal"
@@ -93,7 +94,13 @@ function pctTone(pct: number | null): Tone {
 
 export function UnidadeDashboardShell() {
   const { resumoUnidades, salasComOcupacao, loading, error } = useOcupacaoSalas()
+  const { labels: statusLabels } = useStatusLabels()
   const { setRightContent } = useHeader()
+
+  // Status não-operacionais cadastrados (bloqueada/adm/nti do seed + qualquer
+  // status novo criado em "Gerenciar categorias") — os StatCards por unidade e
+  // o export XLSX abaixo iteram sobre essa lista em vez de 3 colunas fixas.
+  const statusNaoOperacional = Object.keys(statusLabels).filter(c => c !== "operacional")
 
   // Pedido de drill-down (StatCard "Manhã/Tarde X/Y" clicado) — as linhas só
   // são calculadas (listarSlotsDetalhados/listarBlocosDetalhados) quando o
@@ -111,15 +118,15 @@ export function UnidadeDashboardShell() {
   const exportarXLSX = useCallback(() => {
     const r2 = (v: number) => Math.round(v * 100) / 100
     const pctVal = (v: number | null) => v !== null ? r2(v * 100) : 0
+    /** Nome de coluna XLSX a partir do rótulo curto do status (ex.: "NTI" → "Salas_NTI") — cai pro código bruto se o rótulo ainda não carregou. */
+    const colunaStatus = (codigo: string) => `Salas_${(statusLabels[codigo]?.label_curto ?? codigo).replace(/[^A-Za-z0-9]+/g, "_")}`
 
     // ── Folha 1: por unidade ──────────────────────────────────────────────────
     const unidRows = resumoUnidades.map(r => ({
       Unidade: r.unidade,
       Salas_Total: r.salasTotal,
       Salas_Operacionais: r.salasAtivas,
-      Salas_Administrativas: r.salasAdm,
-      Salas_Bloqueadas: r.salasBloqueadas,
-      Salas_NTI: r.salasNti,
+      ...Object.fromEntries(statusNaoOperacional.map(codigo => [colunaStatus(codigo), r.porStatus[codigo] ?? 0])),
       Salas_Unico: r.salasPorCapacidade.unico,
       Salas_Duplo: r.salasPorCapacidade.duplo,
       Salas_Multiplo: r.salasPorCapacidade.multiplo,
@@ -166,7 +173,7 @@ export function UnidadeDashboardShell() {
         Sala: sala.nome_exibicao,
         Numero_Sala: sala.numero_sala,
         Capacidade: CAPACIDADE_LABEL_CURTO[sala.capacidade],
-        Status: STATUS_LABEL_CURTO[sala.status],
+        Status: statusLabels[sala.status]?.label_curto ?? sala.status,
         Capacidade_Projetada: capacidadeProjetadaSala(sala.capacidade, sala.status),
         Slots_Ocupados: resumo.slotsOcupados,
         Slots_Livres: resumo.slotsTotal - resumo.slotsOcupados,
@@ -194,7 +201,7 @@ export function UnidadeDashboardShell() {
 
     const nome = `Ocupacao_Salas_${getRefWeek().label.replace(/\s+/g, '_').replace(/[^A-Za-z0-9_]/g, '')}.xlsx`
     XLSX.writeFile(wb, nome)
-  }, [resumoUnidades, salasComOcupacao])
+  }, [resumoUnidades, salasComOcupacao, statusLabels, statusNaoOperacional])
 
   useEffect(() => {
     setRightContent(
@@ -271,13 +278,16 @@ export function UnidadeDashboardShell() {
               </div>
               <StatusPill tone={pctTone(r.pct)}>{r.pct !== null ? `${Math.round(r.pct * 100)}%` : "Sem base"}</StatusPill>
             </div>
-            <div className="grid grid-cols-3 gap-2 text-xs text-muted-foreground sm:grid-cols-6">
-              <div><span className="block text-sm font-bold text-foreground">{r.salasTotal}</span>Salas</div>
-              <div><span className="block text-sm font-bold text-foreground">{r.salasAtivas}</span>Operacionais</div>
-              <div><span className="block text-sm font-bold text-foreground">{r.salasAdm}</span>Administrativas</div>
-              <div><span className="block text-sm font-bold text-foreground">{r.salasBloqueadas}</span>Bloqueadas</div>
-              <div><span className="block text-sm font-bold text-foreground">{r.salasNti}</span>NTI</div>
-              <div className="inline-flex items-start gap-0.5">
+            <div className="flex flex-wrap gap-x-4 gap-y-2 text-xs text-muted-foreground">
+              <div className="min-w-[64px]"><span className="block text-sm font-bold text-foreground">{r.salasTotal}</span>Salas</div>
+              <div className="min-w-[64px]"><span className="block text-sm font-bold text-foreground">{r.salasAtivas}</span>Operacionais</div>
+              {statusNaoOperacional.map(codigo => (
+                <div key={codigo} className="min-w-[64px]">
+                  <span className="block text-sm font-bold text-foreground">{r.porStatus[codigo] ?? 0}</span>
+                  {statusLabels[codigo]?.label_curto ?? codigo}
+                </div>
+              ))}
+              <div className="inline-flex min-w-[64px] items-start gap-0.5">
                 <div><span className="block text-sm font-bold text-foreground">{r.inconsistencias}</span>Inconsistências</div>
                 <InfoTooltip text={`${r.inconsistencias} slot(s) com mais profissionais alocados do que a capacidade da sala (1, 2 ou 3, conforme Único/Duplo/Múltiplo).`} />
               </div>

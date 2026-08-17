@@ -104,11 +104,11 @@ interface SalasFiltrosProps {
 }
 
 const CAPACIDADE_OPCOES: SalaCapacidade[] = ["unico", "duplo", "multiplo"]
-const STATUS_OPCOES: SalaStatus[] = ["operacional", "bloqueada", "adm", "nti"]
 const TURNO_OPCOES = ["Manhã", "Tarde"] as const
 
 export function SalasFiltros({ value, onChange, unidades, nucleos, andares }: SalasFiltrosProps) {
   const { labels: statusLabels } = useStatusLabels()
+  const statusOpcoes = Object.keys(statusLabels)
 
   function set<K extends keyof SalasFiltrosState>(key: K, v: SalasFiltrosState[K]) {
     onChange({ ...value, [key]: v })
@@ -149,9 +149,9 @@ export function SalasFiltros({ value, onChange, unidades, nucleos, andares }: Sa
       <MultiSelectFiltro
         label="Status"
         values={value.status}
-        options={STATUS_OPCOES}
+        options={statusOpcoes}
         onChange={v => set("status", v as SalaStatus[])}
-        labelFor={o => statusLabels[o as SalaStatus].label_curto}
+        labelFor={o => statusLabels[o]?.label_curto ?? o}
       />
       <label className="flex flex-col gap-1 text-xs">
         <span className="font-semibold text-muted-foreground uppercase tracking-wide">&nbsp;</span>

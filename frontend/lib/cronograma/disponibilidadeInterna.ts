@@ -15,10 +15,86 @@
 // profissional livre com no máximo 1 paciente, respeitando o gap de cada um
 // GLOBALMENTE (mesmo paciente não conta em mais vagas do que pode aceitar).
 
-import { avaliarPeriodo, type CandidatoSlot, type GapItem } from "./simulacaoNovoPrestador"
+import { agendaClinica, avaliarPeriodo, type CandidatoSlot, type GapItem, type Turno } from "./simulacaoNovoPrestador"
 import { turnoFromHora } from "./helpers"
 import { TERAPIA_TO_ESP } from "./constants"
 import type { CsvRow } from "@/types/cronograma"
+
+/**
+ * Unidade que domina o dia do paciente, contando as sessões "Agendado" dele
+ * naquele dia — usada só pela tela "Ocupar Profissionais Disponíveis"
+ * (ocupacaoCategoria.ts/ocupacaoProfissional.ts), NUNCA pela Simulação de
+ * Novo Prestador nem por sugestaoContratacao.ts (que chamam avaliarPeriodo/
+ * encontrarCandidatosRemanejamento diretamente, sem passar por aqui).
+ *
+ * Corrige um caso real: um paciente pode ter, por uma troca de agenda pontual,
+ * 1 sessão isolada numa unidade e o resto do dia inteiro noutra (ex.: só a
+ * Psicologia de terça virou Fazendinha, o resto do dia continua Realengo). A
+ * checagem "o paciente já tem ALGUMA sessão nessa unidade nesse dia" (usada
+ * em pacientesQueFrequentamUnidade/pacientesDaUnidadeNoDia) sozinha deixa
+ * esse paciente virar candidato pra QUALQUER vaga da unidade minoritária —
+ * exatamente o que essa função evita, exigindo que a unidade da vaga seja a
+ * mesma que já concentra a maioria das sessões do paciente naquele dia.
+ * Sem maioria clara (empate), retorna null e o candidato não é filtrado aqui
+ * (a decisão fica pra outra regra, ex.: sequenciamento por horário).
+ */
+function dominanteEm<T>(linhas: CsvRow[], chave: (r: CsvRow) => T): T | null {
+  const contagem = new Map<T, number>()
+  for (const r of linhas) {
+    const k = chave(r)
+    contagem.set(k, (contagem.get(k) ?? 0) + 1)
+  }
+  let melhor: T | null = null
+  let max = 0
+  let empatado = false
+  for (const [k, n] of contagem) {
+    if (n > max) { max = n; melhor = k; empatado = false }
+    else if (n === max) { empatado = true }
+  }
+  return empatado ? null : melhor
+}
+
+// "AT Externo" (Técnico Terapêutico Particular em casa/escola) não é uma
+// unidade física — é atendimento domiciliar, tipicamente com várias sessões
+// recorrentes por dia. Contar essas linhas aqui inflava artificialmente a
+// "unidade dominante" pra "AT Externo" em pacientes com essa rotina, mesmo
+// quando toda a agenda clínica real deles num dia é 100% Realengo/Fazendinha/
+// Padre Miguel — rejeitando candidatos válidos que a Simulação de Novo
+// Prestador (que não passa por essas funções) continuava encontrando
+// corretamente. Bug real encontrado 2026-08-17 (caso Lucas Teixeira Vieira).
+function agendaClinicaComUnidadeFisica(cRows: CsvRow[]): CsvRow[] {
+  return agendaClinica(cRows).filter(r => String(r.Unidade || "Desconhecida") !== "AT Externo")
+}
+
+export function unidadeDominanteDoDia(pac: string, dia: string, cRows: CsvRow[]): string | null {
+  return dominanteEm(agendaClinicaComUnidadeFisica(cRows).filter(r => r["Nome Favorecido"] === pac && r["Dia da Semana"] === dia), r => String(r.Unidade || "Desconhecida"))
+}
+
+/**
+ * Variante de unidadeDominanteDoDia pra semana INTEIRA — usada pela
+ * modalidade "Novo Dia" (novoDia.ts): o paciente só pode ganhar um dia
+ * totalmente novo na mesma unidade que já concentra a maioria dos OUTROS
+ * dias da semana dele, já que ele ainda não frequenta o dia em questão (não
+ * haveria "maioria do dia" a calcular ali). Sem sessão nenhuma na semana
+ * (paciente novo/sem agenda ainda) = sem restrição (retorna null). Mesmo
+ * critério de empate de unidadeDominanteDoDia: empate -> null.
+ */
+export function unidadeDominantePaciente(pac: string, cRows: CsvRow[]): string | null {
+  return dominanteEm(agendaClinicaComUnidadeFisica(cRows).filter(r => r["Nome Favorecido"] === pac), r => String(r.Unidade || "Desconhecida"))
+}
+
+/**
+ * Turno (manhã/tarde) que domina a semana do paciente — mesmo princípio de
+ * unidadeDominantePaciente, mas por turno em vez de unidade: usada pela
+ * modalidade "Novo Dia" pra nunca oferecer um dia novo num turno que o
+ * paciente não costuma frequentar (ex.: paciente só vem de manhã a semana
+ * toda, não faz sentido oferecer um dia novo à tarde só porque a vaga do
+ * profissional caiu nesse turno). Sem sessão nenhuma na semana ou empate
+ * exato manhã×tarde = sem restrição (retorna null).
+ */
+export function turnoDominantePaciente(pac: string, cRows: CsvRow[]): Turno | null {
+  return dominanteEm(agendaClinicaComUnidadeFisica(cRows).filter(r => r["Nome Favorecido"] === pac), r => turnoFromHora(String(r.HI_str || "")))
+}
 
 // Dentro do balde "Psicologia ABA" (que soma Aplicador ABA PS/SF/AV/AE/EF,
 // Supervisão ABA e Coordenador de Caso pra fins de OFERTADO/gap — ver
@@ -168,4 +244,25 @@ export function capacidadeDiretaRestante(
     usadoPorGrupo.set(chave, (usadoPorGrupo.get(chave) ?? 0) + 1)
   }
   return usadoPorGrupo
+}
+
+/** Quantos profissionais "Livre" existem, de fato, por dia+hora+unidade+
+ *  especialidade — um fato físico, independente de listarOportunidadesDiretas
+ *  ter conseguido formar par com algum paciente ali. capacidadeDiretaRestante
+ *  só conta PARES já formados pelo motor Direto, que às vezes rejeita o único
+ *  paciente elegível daquele grupo por critério próprio (ex.: sequenciamento
+ *  de horário) mesmo com um profissional de verdade livre ali — nesse caso o
+ *  Remanejamento pode resolver o MESMO paciente reorganizando a agenda dele,
+ *  e o profissional livre "sobra" sem nenhum par Direto, mas continua sendo
+ *  cobertura real (sugestaoContratacao.ts usa a diferença entre esta função e
+ *  capacidadeDiretaRestante pra reconhecer essa cobertura extra pros
+ *  candidatos de remanejamento — bug real 2026-08-17, caso "Davi Dantas"). */
+export function capacidadeLivrePorGrupo(cRows: CsvRow[]): Map<string, number> {
+  const mapa = new Map<string, number>()
+  for (const s of listarSlotsLivres(cRows)) {
+    if (!s.especialidade) continue
+    const chave = chaveGrupo(s.dia, s.hora, s.unidade, s.especialidade)
+    mapa.set(chave, (mapa.get(chave) ?? 0) + 1)
+  }
+  return mapa
 }

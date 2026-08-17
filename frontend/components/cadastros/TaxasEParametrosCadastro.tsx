@@ -10,21 +10,26 @@ import { updateParametrosGerais } from "@/services/parametrosGerais.service"
 import { upsertTaxaEspecialidade } from "@/services/taxasEspecialidade.service"
 import { useUnsavedChangesGuard } from "@/contexts/UnsavedChangesContext"
 import { calcularBreakEvenPJ, CENARIOS_PERDA_PCT, ESPECIALIDADES_BREAK_EVEN_PJ } from "@/lib/remuneracao/pontoEquilibrio"
+import { InfoTooltip } from "@/components/cronograma/ui/InfoTooltip"
 
-function InfoTooltip({ text }: { text: string }) {
+type ConsumerTag = "Folha" | "Análise Futura" | "PEP Entregas" | "Simulação"
+
+const CONSUMER_TAG_STYLE: Record<ConsumerTag, string> = {
+  "Folha": "bg-slate-200 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
+  "Análise Futura": "bg-indigo-100 text-indigo-600 dark:bg-indigo-900/30 dark:text-indigo-300",
+  "PEP Entregas": "bg-fuchsia-100 text-fuchsia-600 dark:bg-fuchsia-900/30 dark:text-fuchsia-300",
+  "Simulação": "bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300",
+}
+
+function ConsumerBadge({ tags }: { tags: ConsumerTag[] }) {
   return (
-    <div tabIndex={0} aria-label={text}
-         className="group relative inline-flex items-center justify-center cursor-help ml-1 focus:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/50 rounded-full">
-      <div className="w-4 h-4 rounded-full bg-slate-200 dark:bg-slate-800 flex items-center justify-center text-[10px] font-bold text-slate-500 dark:text-slate-400">
-        ?
-      </div>
-      <div className="pointer-events-none absolute bottom-full left-1/2 -translate-x-1/2 mb-2 w-64 opacity-0 transition-opacity group-hover:opacity-100 group-focus:opacity-100 z-50">
-        <div className="rounded-lg bg-slate-900 border border-slate-700 p-2 text-xs text-white shadow-xl text-center">
-          {text}
-        </div>
-        <div className="absolute top-full left-1/2 -translate-x-1/2 -mt-1 border-4 border-transparent border-t-slate-900" />
-      </div>
-    </div>
+    <span className="inline-flex items-center gap-1 ml-2">
+      {tags.map(tag => (
+        <span key={tag} className={`text-[11px] font-bold uppercase tracking-wide px-1.5 py-0.5 rounded ${CONSUMER_TAG_STYLE[tag]}`}>
+          {tag}
+        </span>
+      ))}
+    </span>
   )
 }
 
@@ -221,18 +226,21 @@ export function TaxasEParametrosCadastro() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="space-y-6">
 
-        {/* Bloco 1: Globais */}
-        <div className="space-y-4">
-          <h3 className="font-bold text-lg text-foreground">Valores Padrão</h3>
+        {/* Seção 1: Parâmetros Gerais — um card só, dois campos por linha em telas largas */}
+        <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 md:p-6 shadow-sm">
+          <h3 className="font-bold text-lg text-foreground mb-5">Parâmetros Gerais</h3>
 
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-5 shadow-sm">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-5">
 
             <div>
               <label htmlFor="config-presenca" className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.navy }}>
                 Taxa de Presença Projetada (%)
-                <InfoTooltip text="Usado na Análise Futura para estimar o ganho real descontando faltas. Padrão 80%." />
+                <ConsumerBadge tags={["Análise Futura"]} />
+                <InfoTooltip ariaLabel="Como a Taxa de Presença é usada">
+                  <p>Usado na Análise Futura para estimar o ganho real descontando faltas. Padrão 80%.</p>
+                </InfoTooltip>
               </label>
               <input
                 id="config-presenca"
@@ -243,47 +251,13 @@ export function TaxasEParametrosCadastro() {
               />
             </div>
 
-            <div className="h-px bg-slate-100 dark:bg-slate-800" />
-
-            <div>
-              <label htmlFor="config-cc-pe" className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.purple }}>
-                Coordenador de Caso — PE base
-                <InfoTooltip text="Valor por Paciente Único no mês, para a função de Coordenador." />
-              </label>
-              <div className="relative w-full sm:w-40">
-                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">R$</span>
-                <input
-                  id="config-cc-pe"
-                  type="number" min="0" step="0.01"
-                  value={ccPE}
-                  onChange={e => update({ ccPE: Number(e.target.value) })}
-                  className="w-full rounded-lg border border-purple-200 dark:border-purple-900 bg-purple-50/50 dark:bg-purple-900/10 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-shadow"
-                />
-              </div>
-            </div>
-
-            <div className="h-px bg-slate-100 dark:bg-slate-800" />
-
-            <div>
-              <label htmlFor="config-cc-lim" className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.purple }}>
-                Coordenador de Caso — Limite padrão de pacientes
-                <InfoTooltip text="Limite geral de pacientes por Coordenador de Caso/Analista do Comportamento, usado no alerta de excesso em Rem. Mês - Previsão." />
-              </label>
-              <input
-                id="config-cc-lim"
-                type="number" min="0"
-                value={ccLim}
-                onChange={e => update({ ccLim: Number(e.target.value) })}
-                className="w-full sm:w-32 rounded-lg border border-purple-200 dark:border-purple-900 bg-purple-50/50 dark:bg-purple-900/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-shadow"
-              />
-            </div>
-
-            <div className="h-px bg-slate-100 dark:bg-slate-800" />
-
             <div>
               <label htmlFor="config-eta-bonus" className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.orange }}>
                 Especialista Técnico de Área — Bônus
-                <InfoTooltip text="Valor fixo por semana trabalhada." />
+                <ConsumerBadge tags={["Folha"]} />
+                <InfoTooltip ariaLabel="Como o bônus do Especialista Técnico de Área é usado">
+                  <p>Valor fixo por semana trabalhada.</p>
+                </InfoTooltip>
               </label>
               <div className="relative w-full sm:w-40">
                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">R$</span>
@@ -297,12 +271,50 @@ export function TaxasEParametrosCadastro() {
               </div>
             </div>
 
-            <div className="h-px bg-slate-100 dark:bg-slate-800" />
+            <div>
+              <label htmlFor="config-cc-pe" className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.purple }}>
+                Coordenador de Caso — PE base
+                <ConsumerBadge tags={["Folha", "PEP Entregas"]} />
+                <InfoTooltip ariaLabel="Como o PE base do Coordenador de Caso é usado">
+                  <p>Valor por Paciente Único no mês, para a função de Coordenador.</p>
+                </InfoTooltip>
+              </label>
+              <div className="relative w-full sm:w-40">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">R$</span>
+                <input
+                  id="config-cc-pe"
+                  type="number" min="0" step="0.01"
+                  value={ccPE}
+                  onChange={e => update({ ccPE: Number(e.target.value) })}
+                  className="w-full rounded-lg border border-purple-200 dark:border-purple-900 bg-purple-50/50 dark:bg-purple-900/10 pl-9 pr-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-shadow"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label htmlFor="config-cc-lim" className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.purple }}>
+                Coordenador de Caso — Limite de pacientes
+                <ConsumerBadge tags={["Análise Futura"]} />
+                <InfoTooltip ariaLabel="Como o limite de pacientes do Coordenador de Caso é usado">
+                  <p>Limite geral de pacientes por Coordenador de Caso/Analista do Comportamento, usado no alerta de excesso em Rem. Mês - Previsão.</p>
+                </InfoTooltip>
+              </label>
+              <input
+                id="config-cc-lim"
+                type="number" min="0"
+                value={ccLim}
+                onChange={e => update({ ccLim: Number(e.target.value) })}
+                className="w-full sm:w-32 rounded-lg border border-purple-200 dark:border-purple-900 bg-purple-50/50 dark:bg-purple-900/10 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-purple-500/50 transition-shadow"
+              />
+            </div>
 
             <div>
               <label htmlFor="config-imposto-faturamento" className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.green }}>
                 Imposto sobre faturamento (%)
-                <InfoTooltip text="Alíquota que incide só sobre sessões efetivamente realizadas — usada no cálculo de Ponto de Equilíbrio de todas as especialidades." />
+                <ConsumerBadge tags={["Simulação"]} />
+                <InfoTooltip ariaLabel="Como o imposto sobre faturamento é usado">
+                  <p>Alíquota que incide só sobre sessões efetivamente realizadas — usada no cálculo de Ponto de Equilíbrio de todas as especialidades.</p>
+                </InfoTooltip>
               </label>
               <div className="relative w-full sm:w-32">
                 <input
@@ -316,12 +328,13 @@ export function TaxasEParametrosCadastro() {
               </div>
             </div>
 
-            <div className="h-px bg-slate-100 dark:bg-slate-800" />
-
             <div>
               <label className="flex items-center text-sm font-bold mb-1.5" style={{ color: B.green }}>
-                Capacidade padrão — especialidades por atendimento
-                <InfoTooltip text="Sessões de manhã/tarde num dia completo, usadas como referência de capacidade no Ponto de Equilíbrio de todas as especialidades que pagam por atendimento (todas exceto Fono/TO/Musicoterapia, que têm capacidade própria)." />
+                Capacidade padrão por atendimento
+                <ConsumerBadge tags={["Simulação"]} />
+                <InfoTooltip ariaLabel="Como a capacidade padrão por atendimento é usada">
+                  <p>Sessões de manhã/tarde num dia completo, usadas como referência de capacidade no Ponto de Equilíbrio de todas as especialidades que pagam por atendimento (todas exceto Fono/TO/Musicoterapia, que têm capacidade própria).</p>
+                </InfoTooltip>
               </label>
               <div className="grid grid-cols-2 gap-3 sm:w-64">
                 <div>
@@ -348,61 +361,70 @@ export function TaxasEParametrosCadastro() {
           </div>
         </div>
 
-        {/* Bloco 2: Especialidades */}
+        {/* Seção 2: Taxas por Especialidade — tabela única; Fono/TO/Musicoterapia têm o
+            Ponto de Equilíbrio (PJ) encaixado na própria linha, em vez de virar outra tabela */}
         <div className="space-y-4">
           <h3 className="font-bold text-lg text-foreground">Taxas por Especialidade</h3>
 
-          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden flex flex-col max-h-[600px]">
+          <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 shadow-sm overflow-hidden">
 
             <div className="grid grid-cols-12 gap-2 p-3 bg-slate-50 dark:bg-slate-800/50 border-b border-slate-200 dark:border-slate-800 text-xs font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider">
               <div className="col-span-6">Especialidade</div>
-              <div className="col-span-3 text-right">PA (R$)</div>
-              <div className="col-span-3 text-right">Diária (R$)</div>
+              <div className="col-span-3 flex items-center justify-end gap-1 normal-case">
+                <span className="uppercase">PA (R$)</span>
+                <ConsumerBadge tags={["Folha", "Simulação"]} />
+                <InfoTooltip ariaLabel="Onde o valor de PA é usado">
+                  <p>Sempre usado na <strong className="text-foreground">Folha</strong> (Análise Futura, Rem. Mês).</p>
+                  <p className="mt-2">Também usado na <strong className="text-foreground">Simulação</strong> (Break Even &ldquo;por atendimento&rdquo;) — <strong className="text-foreground">exceto</strong> Fonoaudiologia, Terapia Ocupacional e Musicoterapia, que usam o modelo de custo fixo mensal (PJ) logo abaixo do nome delas nesta tabela.</p>
+                </InfoTooltip>
+              </div>
+              <div className="col-span-3 flex items-center justify-end gap-1 normal-case">
+                <span className="uppercase">Diária (R$)</span>
+                <ConsumerBadge tags={["Folha"]} />
+                <InfoTooltip ariaLabel="Onde o valor de Diária é usado">
+                  <p>Usado só na <strong className="text-foreground">Folha</strong> (linha &ldquo;PPD&rdquo; em Análise Futura/Rem. Mês). Não entra no Break Even da Simulação.</p>
+                </InfoTooltip>
+              </div>
             </div>
 
-            <div className="overflow-y-auto p-2 space-y-1">
+            <div className="p-2 space-y-1">
               {(() => {
                 const ccHex = especialidadeCor("Coordenador de Caso")
                 return (
-                  <div
-                    className="grid grid-cols-12 gap-2 items-center p-2 rounded-lg border"
-                    style={{ background: ccHex + "14", borderColor: ccHex + "55" }}
-                  >
-                    <div className="col-span-6 flex items-center text-sm font-bold truncate pr-2" style={{ color: ccHex }} title="Coordenador de Caso">
-                      Coordenador de Caso
-                    </div>
-                    <div className="col-span-3">
-                      <input
-                        id="config-cc-pa"
-                        type="number" min="0" step="0.01"
-                        value={ccPA}
-                        onChange={e => update({ ccPA: Number(e.target.value) })}
-                        className="w-full text-right rounded-md border bg-white dark:bg-transparent px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                        style={{ borderColor: ccHex + "55" }}
-                      />
-                    </div>
-                    <div className="col-span-3">
-                      <input
-                        id="config-cc-diaria"
-                        type="number" min="0" step="0.01"
-                        value={diarias["Coordenador de Caso"] || 0}
-                        onChange={e => update({ diarias: { ...diarias, "Coordenador de Caso": Number(e.target.value) } })}
-                        className="w-full text-right rounded-md border bg-white dark:bg-transparent px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
-                        style={{ borderColor: ccHex + "55" }}
-                      />
+                  <div className="rounded-lg" style={{ background: ccHex + "14" }}>
+                    <div className="grid grid-cols-12 gap-2 items-center p-2">
+                      <div className="col-span-6 flex items-center text-sm font-bold truncate pr-2" style={{ color: ccHex }} title="Coordenador de Caso">
+                        Coordenador de Caso
+                      </div>
+                      <div className="col-span-3">
+                        <input
+                          id="config-cc-pa"
+                          type="number" min="0" step="0.01"
+                          value={ccPA}
+                          onChange={e => update({ ccPA: Number(e.target.value) })}
+                          className="w-full text-right rounded-md border bg-white dark:bg-transparent px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                          style={{ borderColor: ccHex + "55" }}
+                        />
+                      </div>
+                      <div className="col-span-3">
+                        <input
+                          id="config-cc-diaria"
+                          type="number" min="0" step="0.01"
+                          value={diarias["Coordenador de Caso"] || 0}
+                          onChange={e => update({ diarias: { ...diarias, "Coordenador de Caso": Number(e.target.value) } })}
+                          className="w-full text-right rounded-md border bg-white dark:bg-transparent px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/50"
+                          style={{ borderColor: ccHex + "55" }}
+                        />
+                      </div>
                     </div>
                   </div>
                 )
               })()}
               {allEspecialidades.map(esp => {
-                if (esp === "Coordenador de Caso") return null // Tem bloco próprio
+                if (esp === "Coordenador de Caso") return null // Tem linha própria acima
                 const hex = especialidadeCor(esp)
                 return (
-                  <div
-                    key={esp}
-                    className="grid grid-cols-12 gap-2 items-center p-2 rounded-lg border border-transparent transition-colors"
-                    style={{ background: hex + "0d" }}
-                  >
+                  <div key={esp} className="grid grid-cols-12 gap-2 items-center p-2 rounded-lg transition-colors" style={{ background: hex + "0d" }}>
                     <div className="col-span-6 text-sm font-bold truncate pr-2" style={{ color: hex }} title={esp}>
                       {esp}
                     </div>
@@ -432,83 +454,91 @@ export function TaxasEParametrosCadastro() {
           </div>
         </div>
 
-      </div>
+        {/* Seção 3: Ponto de Equilíbrio (PJ) — seção própria, cards empilhados um abaixo do outro */}
+        <div className="space-y-4">
+          <div className="flex items-center gap-1">
+            <h3 className="font-bold text-lg text-foreground">Ponto de Equilíbrio — custo fixo mensal (PJ)</h3>
+            <ConsumerBadge tags={["Simulação"]} />
+            <InfoTooltip ariaLabel="Como o Ponto de Equilíbrio (PJ) é calculado">
+              <p>Média mensal para 4,33 sem/mês e 56,33 sess/mês. Alimenta o Break Even mostrado em &ldquo;Simulação de Novo Prestador&rdquo; (relacionamento-prestador/solicitacoes → aba Simulação).</p>
+              <p className="mt-2">O valor de sessão usado ali vem direto da Projeção financeira daquela tela — aqui você cadastra o custo fixo mensal (pra 1 dia/semana completo) e a capacidade de manhã/tarde separadas, já que um dia pode não valer o mesmo nos dois turnos. Só se aplica a Fonoaudiologia, Terapia Ocupacional e Musicoterapia — as demais especialidades usam o &ldquo;PA (R$)&rdquo; da tabela acima.</p>
+            </InfoTooltip>
+          </div>
 
-      {/* Bloco 3: Ponto de Equilíbrio (PJ) — Fono/TO por ora */}
-      <div className="space-y-4">
-        <div>
-          <h3 className="font-bold text-lg text-foreground">Ponto de Equilíbrio - Média Mensal para 4,33 sem/mês e 56,33 sess/mês</h3>
-          <p className="text-sm text-slate-500 dark:text-slate-400 mt-1">
-            Alimenta o Break Even mostrado em "Simulação de Novo Prestador" (relacionamento-prestador/solicitacoes → aba Simulação). O valor de sessão usado ali vem direto da Projeção financeira daquela tela — aqui você cadastra o custo fixo mensal (pra 1 dia/semana completo) e a capacidade de manhã/tarde separadas, já que um dia pode não valer o mesmo nos dois turnos.
-          </p>
+          <div className="space-y-3">
+            {[...ESPECIALIDADES_BREAK_EVEN_PJ].map(esp => {
+              const hex = especialidadeCor(esp)
+              const custoMensal = beCustoMensalPJ[esp] ?? 0
+              const capacidadeManha = beCapacidadeManha[esp] ?? 0
+              const capacidadeTarde = beCapacidadeTarde[esp] ?? 0
+              return (
+                <div key={esp} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 shadow-sm">
+                  <div className="text-sm font-bold mb-4" style={{ color: hex }}>{esp}</div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold mb-1.5 text-slate-500 dark:text-slate-400">Custo mensal — dia completo (R$)</label>
+                      <input
+                        type="number" min="0" step="0.01"
+                        value={custoMensal}
+                        onChange={e => update({ beCustoMensalPJ: { ...beCustoMensalPJ, [esp]: Number(e.target.value) } })}
+                        className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold mb-1.5 text-slate-500 dark:text-slate-400">Capacidade manhã (sessões)</label>
+                      <input
+                        type="number" min="0" step="1"
+                        value={capacidadeManha}
+                        onChange={e => update({ beCapacidadeManha: { ...beCapacidadeManha, [esp]: Number(e.target.value) } })}
+                        className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-bold mb-1.5 text-slate-500 dark:text-slate-400">Capacidade tarde (sessões)</label>
+                      <input
+                        type="number" min="0" step="1"
+                        value={capacidadeTarde}
+                        onChange={e => update({ beCapacidadeTarde: { ...beCapacidadeTarde, [esp]: Number(e.target.value) } })}
+                        className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="h-px bg-slate-100 dark:bg-slate-800 my-4" />
+
+                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                    Dia completo: <strong className="text-foreground">{capacidadeManha + capacidadeTarde}</strong> sessões
+                  </div>
+
+                  <div className="mt-3">
+                    <div className="text-[11px] font-bold uppercase tracking-wide text-slate-500 dark:text-slate-400 mb-1.5">
+                      Mínimo de sessões/semana para bater o Break Even
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {CENARIOS_PERDA_PCT.map(perdaPct => {
+                        const r = calcularBreakEvenPJ({
+                          valorSessaoBruto: 120, impostoFaturamentoPct: impostoFaturamento,
+                          custoMensalDiaCompleto: custoMensal, capacidadeManha, capacidadeTarde, perdaPct,
+                          periodosManha: 1, periodosTarde: 1,
+                        })
+                        return (
+                          <span key={perdaPct} className="rounded-md bg-slate-50 dark:bg-slate-800/50 px-2.5 py-1 text-[11px] text-slate-500 dark:text-slate-400">
+                            Com {perdaPct}% de perdas: <strong className="text-foreground">{r.slotsSemanaMinimo}</strong> sessões/sem
+                          </span>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  <p className="text-[11px] text-slate-400 dark:text-slate-500 mt-2">
+                    Considera 1 dia completo/semana (manhã+tarde) e valor de sessão de referência R$120 (a simulação real usa o valor projetado em Projeção financeira).
+                  </p>
+                </div>
+              )
+            })}
+          </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {[...ESPECIALIDADES_BREAK_EVEN_PJ].map(esp => {
-            const hex = especialidadeCor(esp)
-            const custoMensal = beCustoMensalPJ[esp] ?? 0
-            const capacidadeManha = beCapacidadeManha[esp] ?? 0
-            const capacidadeTarde = beCapacidadeTarde[esp] ?? 0
-            return (
-              <div key={esp} className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-5 space-y-4 shadow-sm">
-                <div className="text-sm font-bold" style={{ color: hex }}>{esp}</div>
-
-                <div>
-                  <label className="block text-xs font-bold mb-1.5 text-slate-500 dark:text-slate-400">Custo mensal PJ — dia completo (R$)</label>
-                  <input
-                    type="number" min="0" step="0.01"
-                    value={custoMensal}
-                    onChange={e => update({ beCustoMensalPJ: { ...beCustoMensalPJ, [esp]: Number(e.target.value) } })}
-                    className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
-                  />
-                </div>
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold mb-1.5 text-slate-500 dark:text-slate-400">Capacidade manhã (sessões)</label>
-                    <input
-                      type="number" min="0" step="1"
-                      value={capacidadeManha}
-                      onChange={e => update({ beCapacidadeManha: { ...beCapacidadeManha, [esp]: Number(e.target.value) } })}
-                      className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-xs font-bold mb-1.5 text-slate-500 dark:text-slate-400">Capacidade tarde (sessões)</label>
-                    <input
-                      type="number" min="0" step="1"
-                      value={capacidadeTarde}
-                      onChange={e => update({ beCapacidadeTarde: { ...beCapacidadeTarde, [esp]: Number(e.target.value) } })}
-                      className="w-full rounded-lg border border-slate-300 dark:border-slate-700 bg-transparent px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring transition-shadow"
-                    />
-                  </div>
-                </div>
-                <div className="text-[11px] text-slate-400 dark:text-slate-500">Dia completo: {capacidadeManha + capacidadeTarde} sessões</div>
-
-                <div className="h-px bg-slate-100 dark:bg-slate-800" />
-
-                <div className="grid grid-cols-3 gap-2 text-center">
-                  {CENARIOS_PERDA_PCT.map(perdaPct => {
-                    const r = calcularBreakEvenPJ({
-                      valorSessaoBruto: 120, impostoFaturamentoPct: impostoFaturamento,
-                      custoMensalDiaCompleto: custoMensal, capacidadeManha, capacidadeTarde, perdaPct,
-                      periodosManha: 1, periodosTarde: 1,
-                    })
-                    return (
-                      <div key={perdaPct} className="rounded-lg bg-slate-50 dark:bg-slate-800/50 px-2 py-2">
-                        <div className="text-[11px] font-bold text-slate-400 uppercase">{perdaPct}% perda</div>
-                        <div className="text-lg font-black text-foreground">{r.slotsSemanaMinimo}</div>
-                        <div className="text-[11px] text-slate-500 dark:text-slate-400">slots/sem · {Math.round(r.alocacaoPercentual * 100)}%</div>
-                      </div>
-                    )
-                  })}
-                </div>
-                <p className="text-[11px] text-slate-400 dark:text-slate-500">
-                  Piso de slots/semana pra cada cenário de perda, considerando 1 dia completo/semana (manhã+tarde) e valor de sessão de referência R$120 (a simulação real usa o valor projetado em Projeção financeira e escala custo/capacidade pelos turnos exatos marcados).
-                </p>
-              </div>
-            )
-          })}
-        </div>
       </div>
     </div>
   )

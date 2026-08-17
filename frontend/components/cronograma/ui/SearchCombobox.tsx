@@ -44,6 +44,7 @@ export function SearchCombobox({ value, onChange, opcoes, placeholder = "Digite 
       <input
         id={id}
         type="text"
+        autoComplete="off"
         aria-label={ariaLabel}
         aria-autocomplete="list"
         aria-expanded={aberto}
@@ -91,7 +92,7 @@ export function SearchCombobox({ value, onChange, opcoes, placeholder = "Digite 
                 type="button"
                 role="option"
                 aria-selected={selecionada}
-                onMouseDown={() => selecionar(opcao)}
+                onMouseDown={e => { e.preventDefault(); selecionar(opcao) }}
                 className={`block w-full px-3 py-1.5 text-left text-[13px] transition-colors ${ativa ? "bg-sky-600 text-white" : selecionada ? "bg-muted font-semibold text-foreground" : "text-foreground hover:bg-muted/60"}`}
               >
                 {opcao}

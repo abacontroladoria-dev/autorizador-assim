@@ -84,6 +84,7 @@ export function MultiSearchCombobox({ opcoes, selecionados, onToggle, placeholde
           <input
             ref={inputRef}
             type="text"
+            autoComplete="off"
             aria-label={`Buscar em ${ariaLabel}`}
             value={texto}
             onChange={e => setTexto(e.target.value)}

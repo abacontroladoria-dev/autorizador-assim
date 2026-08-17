@@ -16,14 +16,9 @@ import { profissionalBateComBusca } from "@/components/cronograma/salas/SalasFil
 import { tCor } from "@/lib/cronograma/constants"
 import { CAPACIDADE_LABEL_CURTO } from "@/lib/cronograma/salasTypes"
 import { useStatusLabels } from "@/hooks/useStatusLabels"
-import type { SalaComOcupacao, SlotOcupacaoSala, Sala, SalaStatus } from "@/lib/cronograma/salasTypes"
+import type { SalaComOcupacao, SlotOcupacaoSala, Sala } from "@/lib/cronograma/salasTypes"
 import type { AlocacaoAtual } from "@/hooks/useOcupacaoSalas"
 import type { Tone } from "@/components/cronograma/ui/tones"
-
-/** Slot statuses "fora de operação" espelham 1:1 um status de sala — usado pra buscar tone/rótulo dinâmicos em cronograma_status_labels em vez de hardcoded. */
-const SLOT_STATUS_PARA_SALA_STATUS: Partial<Record<SlotOcupacaoSala["status"], SalaStatus>> = {
-  adm: "adm", bloqueado: "bloqueada", nti: "nti",
-}
 
 const DIAS = [
   { dow: 1, label: "Seg" },
@@ -235,11 +230,11 @@ function SlotCell({
 
   if (!slot) return <td className={`border-l border-border px-1 py-2 text-center text-muted-foreground ${bordaCls}`}>—</td>
 
-  const salaStatus = SLOT_STATUS_PARA_SALA_STATUS[slot.status]
-  if (salaStatus) {
+  if (slot.status === "bloqueado" || slot.status === "inativo") {
+    const l = statusLabels[sala.status] ?? { label_curto: sala.status, tone: "slate" as const }
     return (
       <td className={`border-l border-border px-1 py-2 text-center ${bordaCls}`}>
-        <StatusPill tone={statusLabels[salaStatus].tone} dense>{statusLabels[salaStatus].label_curto}</StatusPill>
+        <StatusPill tone={l.tone} dense>{l.label_curto}</StatusPill>
       </td>
     )
   }
