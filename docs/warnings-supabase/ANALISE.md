@@ -284,3 +284,75 @@ Conferência pós-aplicação: **de 55 funções abertas a `anon`, restaram 8** 
 - [`20260817_diagnostico_warnings.sql`](../../supabase/snippets/20260817_diagnostico_warnings.sql) — somente leitura, já rodado
 - [`20260817_warnings_fase2_3_revokes.sql`](../../supabase/snippets/20260817_warnings_fase2_3_revokes.sql) — Fases 2 e 3, com grants na ordem certa, rollback e conferência final
 - [`20260817_rls_fila_autorizacoes.sql`](../../supabase/snippets/20260817_rls_fila_autorizacoes.sql) — Fase 7 parcial: cria a policy do `rp` e derruba as 3 amplas da fila, com os 6 testes de app obrigatórios
+- [`20260817_diagnostico_info_rls_sem_policy.sql`](../../supabase/snippets/20260817_diagnostico_info_rls_sem_policy.sql) — §9, somente leitura, já rodado
+- [`20260817_info_rls_limpeza.sql`](../../supabase/snippets/20260817_info_rls_limpeza.sql) — §9, aplicação: trava de segurança, DROP das 9 mortas, `COMMENT` nas 5 que ficam
+
+---
+
+## 9. Os 18 INFO `rls_enabled_no_policy` — o problema é o oposto
+
+RLS ligada **sem policy nenhuma** nega tudo para `anon` e `authenticated`; `service_role` e `SECURITY DEFINER` passam por cima. Não há exposição neste grupo — é o inverso dos warnings. O advisor marca INFO porque o estado é ambíguo: pode ser "fechado de propósito" ou "esqueci a policy".
+
+O risco é o de sempre: **RLS não grita, ela some com a linha.** Uma tela que leia uma dessas tabelas pelo cliente do navegador mostra "nenhum resultado" e ninguém percebe.
+
+### Por que as 18 estão assim
+
+Não foi esquecimento. Existe um **event trigger** `rls_auto_enable()` ([`remote_schema.sql:1322-1339`](../../supabase/migrations/20260518131652_remote_schema.sql#L1322-L1339)) que liga RLS em todo `CREATE TABLE` do schema `public` — inclusive `CREATE TABLE AS`, que é como os cinco backups nasceram. O banco fecha sozinho; a *policy* é que é o ato deliberado. O INFO 0008 é o efeito colateral desse default, e o default é bom.
+
+### Classificação, com o medido em 2026-08-17
+
+| Grupo | Tabelas | Medição | Veredito |
+|---|---|---|---|
+| 1 — backups | `agenda_tita_autorizacao_backup_20260508`, `backup_fila_null_terapia`, `fila_autorizacoes_backup_titaid`, `fila_bkp_titaid_faltas_jun`, `vw_central_pacientes_backup_20260508` | 6.910 linhas, ~2,4 MB, escrita entre 07/05 e 03/07, **zero dependentes** | **DROP** |
+| 2 — fechado certo | `robo_config`, `robo_pacotes`, `edge_rate_limits`, `sync_status`, `dashboard_kpis_cache` | Todas vivas — `dashboard_kpis_cache` com 4.784 updates, o último às 17:01 de hoje | **Manter.** `COMMENT` só |
+| 3 — guias-digitais | `guia_terapias`, `terapeutas`, `guias_processadas` | Origens com **0 linhas e 0 inserts na vida inteira**; `guias_processadas` parada em 13/05 | Decisão de produto |
+| 4 — entulho | `controle_disponibilidade_terapeutas`, `terapeuta_eventos`, `tita_grade_profissionais`, `pre_auditoria_snapshot` | 0 linhas, 0 inserts, nenhum consumidor | **DROP** |
+| 4 — exceção | `crm_inconsistencias` | 79 linhas, todas de 20/05 00:18, nada desde; **nenhum job em `cron.job`** | **Manter.** Relatório manual |
+
+Os contadores de `pg_stat_user_tables` valem para a vida inteira das tabelas: as criadas em 08/05 ainda exibem seus inserts (775, 1.611, …), logo não houve `pg_stat_reset` desde então.
+
+`vw_central_pacientes_backup_20260508` é **tabela**, apesar do prefixo `vw_` — é um snapshot congelado da view, não a view.
+
+### Grupo 2: a ausência de policy É a proteção
+
+Medido no repositório: `robo_config`/`robo_pacotes` só são lidos de dentro das `robo_*` `SECURITY DEFINER` ([`20260813100200_robo_rpcs.sql:114`](../../supabase/migrations/20260813100200_robo_rpcs.sql#L114), `:320`, `:367`); `edge_rate_limits` só pela `auth-lookup-username` com `supabaseAdmin`; `sync_status` só pelas Edge Functions de sync; `dashboard_kpis_cache` via `get_dashboard_kpis()`. Criar policy aqui seria abrir acesso que hoje não existe. O `COMMENT` é para o próximo que olhar o advisor não "consertar" isso. **O INFO continua aberto de propósito — este grupo nunca deve fechar.**
+
+### Grupo 3: a feature nunca funcionou, e não é culpa da RLS
+
+Minha hipótese inicial era que a RLS estava bloqueando uma tela viva. **A medição desmentiu isso**, e de um jeito mais útil: `guia_terapias` e `terapeutas` têm **0 linhas e 0 inserts na vida inteira da tabela**. `guias_processadas` tem 14 linhas para 24 inserts e parou em **13/05**.
+
+Logo, `/guias-digitais` rodou em maio já com as tabelas de origem vazias. **O carimbo do terapeuta nunca existiu** — todo PDF que passou por ali saiu com o verso em branco, e isso independe de RLS. A tela continua no menu (`canAccess("/guias-digitais")`), oferecendo uma função que não tem como funcionar.
+
+Existe, ainda assim, um **bug latente** no caminho. `/guias-digitais` chama a Edge Function `processar-guias` ([`page.tsx:53`](../../frontend/app/(dashboard)/guias-digitais/page.tsx#L53)), e ela monta o cliente com a service_role key **mas injeta o JWT do usuário no header `Authorization`** ([`index.ts:55-57`](../../supabase/functions/processar-guias/index.ts#L55-L57)):
+
+```ts
+const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+  global: { headers: { Authorization: `Bearer ${token}` } },
+  auth: { persistSession: false },
+})
+```
+
+O PostgREST resolve o papel pelo **JWT**, não pela apikey. Então as três queries de `processar-guias` correm como `authenticated`, e a RLS vale para elas — o `INSERT` em `guias_processadas` sequer confere o retorno ([`index.ts:353`](../../supabase/functions/processar-guias/index.ts#L353)). Hoje isso não quebra nada, porque não há o que ler. Passa a quebrar **no instante em que alguém popular `terapeutas`**.
+
+Existe uma rota Next equivalente, [`/api/guias-digitais/processar`](../../frontend/app/api/guias-digitais/processar/route.ts), que faz o mesmo com `supabaseService` e não teria o problema — mas está morta, ninguém chama. `MIGRATION_STATUS.md:151` a marca como "safe to remove": quem sobreviveu foi a versão com o defeito.
+
+Duas saídas, e **nenhuma é criar policy**:
+
+- **(a) matar a feature** — tirar `/guias-digitais` do menu e dropar as 3 tabelas;
+- **(b) fazer funcionar** — popular `terapeutas`/`guia_terapias` **e** corrigir a Edge Function para usar um cliente service_role de verdade (sem o `Authorization` do usuário), mantendo o `verifyAuthenticatedUser` que ela já faz.
+
+Criar policy em `terapeutas` abriria `carimbo_digital` — assinatura de profissional — para qualquer usuário logado.
+
+### `crm_inconsistencias`: relatório manual, fica
+
+Não existe job em `cron.job` para ela — a função `executar_relatorio_crm_inconsistente` está exposta como RPC ([`types/supabase.ts:5346`](../../types/supabase.ts#L5346)) mas ninguém a chama, nem cron nem frontend. É um relatório manual de qualidade de dado sobre o número de CRM do médico, e o pipeline de canonização de CRM (`fn_set_crm_uf`, `trg_canonizar_crm_agenda_orbita`, `ajustar_crm_fila`) segue vivo. Dropar o último artefato de auditoria desse pipeline para fechar um INFO é mau negócio: 32 kB, 79 linhas, nenhum risco. Tratada como o Grupo 2 — documentar e deixar.
+
+### O que não fazer
+
+Fechar os 18 criando policy em cada tabela seria trocar 18 INFO por 18 superfícies novas de acesso. O Grupo 1 e as 4 vazias do Grupo 4 fecharam **por remoção**; o Grupo 2 e `crm_inconsistencias` ficam abertos de propósito; só o Grupo 3 ainda depende de decisão, e é decisão de produto, não de RLS.
+
+### Placar dos INFO: 18 → 9
+
+**Aplicado em produção 2026-08-17**, migration [`20260817180000_limpeza_info_rls_sem_policy.sql`](../../supabase/migrations/20260817180000_limpeza_info_rls_sem_policy.sql). Estado conferido **fora da transação** — o `select` de conferência que vive dentro do `begin/commit` devolve o mesmo resultado com `rollback`, então não prova nada sozinho.
+
+Dos 9 que restam, 6 são deliberados e devem continuar abertos (as 5 do Grupo 2 + `crm_inconsistencias`). Os 3 do Grupo 3 são o único trabalho real que sobra, e é decidir o destino de `/guias-digitais`.
