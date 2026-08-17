@@ -21,18 +21,20 @@ export default function Login() {
       let emailParaLogin = login
 
       if (!login.includes("@")) {
-        const { data: usuario } = await supabase
-          .from("usuarios")
-          .select("email")
-          .eq("username", login)
-          .maybeSingle()
+        // RPC, e não SELECT direto em `usuarios`: este passo roda antes de
+        // autenticar, ou seja como `anon`. Com RLS ligada na tabela não existe
+        // policy pra anon e a leitura voltaria vazia — todo login por username
+        // passaria a dizer "Usuário não encontrado" com a senha certa.
+        // email_por_username é SECURITY DEFINER e responde só o email.
+        const { data: emailDoUsuario, error: erroBusca } = await supabase
+          .rpc("email_por_username", { p_username: login })
 
-        if (!usuario?.email) {
+        if (erroBusca || !emailDoUsuario) {
           setErro("Usuário não encontrado. Verifique e tente novamente.");
           setLoading(false);
           return;
         }
-        emailParaLogin = usuario.email
+        emailParaLogin = emailDoUsuario
       }
 
       const { data, error } = await supabase.auth.signInWithPassword({
