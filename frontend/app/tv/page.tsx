@@ -4,11 +4,13 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Check,
   Cloud,
   CloudLightning,
   CloudRain,
   CloudSun,
   History,
+  Play,
   Snowflake,
   Sun,
   Volume2,
@@ -42,6 +44,102 @@ const POLL_CLIMA_MS = 600000
 // Chrome às vezes engole o `onend` da fala numa aba aberta há horas; sem isso a
 // fila travaria em `falando = true` e a TV ficaria muda pelo resto do dia.
 const WATCHDOG_FALA_MS = 15000
+
+// Timbre da chamada. Ficam aqui porque a amostra do seletor precisa usar os
+// mesmos valores — amostra com rate diferente da chamada real é propaganda
+// enganosa: você escolhe uma voz e ouve outra na hora do aperto.
+const FALA_RATE = 0.95
+const FALA_PITCH = 1.1
+
+// Qual voz usar é escolha da máquina, não do build: cada PC de recepção tem um
+// conjunto diferente instalado. Guardado por voiceURI (mais estável que o nome)
+// no localStorage do próprio navegador da TV.
+const CHAVE_VOZ = 'tv:voz'
+
+// "Teste de som" na frente não é enfeite: sem isso a amostra é indistinguível de
+// uma chamada real, e auditar 6 vozes dispara 6 chamadas falsas num saguão
+// ocupado — gente levanta e vai até a recepção. O nome continua ali porque é
+// justamente ele que revela a pronúncia da voz; fictício, porque a tela fica num
+// lugar público.
+const FRASE_AMOSTRA =
+  'Teste de som. Responsável pelo paciente Ana Paula, dirija-se à recepção'
+
+// `SpeechSynthesisVoice` não expõe gênero — só nome e lang. Então a única forma
+// de não cair numa voz masculina é reconhecer os nomes que os sistemas usam.
+// A lista não precisa ser exaustiva: nome desconhecido fica no meio da
+// classificação, entre a feminina reconhecida e a masculina reconhecida.
+const VOZES_PT_FEMININAS = [
+  'maria',
+  'francisca',
+  'thalita',
+  'luciana',
+  'fernanda',
+  'helena',
+  'joana',
+  'catarina',
+]
+
+const VOZES_PT_MASCULINAS = ['daniel', 'antonio', 'antônio', 'felipe', 'ricardo']
+
+// Parte dos motores (Android, algumas builds SAPI) reporta `pt_BR` em vez de
+// `pt-BR`. Escrever isso cru no `utterance.lang` monta uma tag malformada, e aí
+// há motor que ignora o `voice` e resolve pelo lang — caindo justamente na voz
+// default que o resto deste código existe pra evitar. Uma função só, usada
+// tanto pra filtrar quanto pra atribuir, pra não divergirem de novo.
+function normalizarLang(lang: string) {
+  return lang.replace(/_/g, '-')
+}
+
+function ehPortugues(v: SpeechSynthesisVoice) {
+  return normalizarLang(v.lang).toLowerCase().startsWith('pt')
+}
+
+// A nota só ORDENA e escolhe o default — não esconde ninguém do seletor. Se a
+// máquina só tiver Daniel, é o Daniel que fala: voz masculina em português é
+// melhor que voz feminina lendo "Responsável" em inglês.
+function notaVoz(v: SpeechSynthesisVoice) {
+  const nome = v.name.toLowerCase()
+  const lang = normalizarLang(v.lang).toLowerCase()
+
+  let nota = 0
+
+  if (lang.startsWith('pt-br')) nota += 100
+  else if (lang.startsWith('pt')) nota += 40 // pt-PT: sotaque errado, mas português
+
+  if (VOZES_PT_FEMININAS.some((f) => nome.includes(f))) nota += 20
+  if (VOZES_PT_MASCULINAS.some((m) => nome.includes(m))) nota -= 25
+
+  // A voz do Google tem dicção bem melhor que as SAPI da Microsoft. Ela depende
+  // de rede, mas isso não é risco aqui: sem rede o poll não traz chamada
+  // nenhuma, então não há o que anunciar.
+  if (nome.includes('google')) nota += 8
+
+  return nota
+}
+
+function vozesEmPortugues(todas: SpeechSynthesisVoice[]) {
+  // Chrome no Windows às vezes lista a mesma voz duas vezes, e lá o `voiceURI` é
+  // o próprio nome — o que daria key repetida no React e duas linhas marcadas
+  // como ativas ao mesmo tempo. Fora que voz repetida no seletor é ruim de ler.
+  const unicas = [
+    ...new Map(todas.filter(ehPortugues).map((v) => [v.voiceURI, v])).values(),
+  ]
+
+  return unicas.sort((a, b) => notaVoz(b) - notaVoz(a))
+}
+
+// "Microsoft Maria Desktop - Portuguese(Brazil)" não é rótulo pra ninguém ler a
+// 3 m de distância.
+function rotuloVoz(v: SpeechSynthesisVoice) {
+  const limpo = v.name
+    .replace(/^(microsoft|google)\s+/i, '')
+    .replace(/\s+(desktop|online|mobile)\b/gi, '')
+    .replace(/\s*[-–(]\s*portugu.*$/i, '')
+    .replace(/\s*\(natural\)/gi, '')
+    .trim()
+
+  return limpo || v.name
+}
 
 // Emoji era a única "família de ícones" desta tela — e o resto do app usa
 // lucide em 162 arquivos. Além da inconsistência, emoji troca de desenho por
@@ -174,21 +272,83 @@ export default function TVPage() {
   const primeiraCarga = useRef(true)
   const audioLiberadoRef = useRef(false)
 
-  // VOZ FEMININA
-  const getVozFeminina = () => {
-    const voices = window.speechSynthesis.getVoices()
+  // Já filtrada pra português e ordenada por `notaVoz` — é o que o seletor
+  // mostra. O ref espelha a escolha porque `processarFila` é um callback
+  // estável e leria um valor congelado se dependesse do state.
+  const [vozes, setVozes] = useState<SpeechSynthesisVoice[]>([])
+  const [vozEscolhida, setVozEscolhida] = useState<string | null>(null)
+  const vozEscolhidaRef = useRef<string | null>(null)
 
-    const feminina = voices.find(
-      (v) =>
-        v.lang === 'pt-BR' &&
-        (v.name.includes('Maria') ||
-          v.name.includes('Helena') ||
-          v.name.includes('Google') ||
-          v.name.includes('Microsoft'))
+  // Contar as vozes não-português não servia pra saber se a enumeração acabou:
+  // o Chrome entrega as locais (em inglês) primeiro e as de rede depois, então
+  // numa máquina cuja única voz pt é a do Google a lista fica "não-vazia mas sem
+  // português" por um instante — e o aviso de instalação piscava. Só o tempo
+  // separa os dois casos.
+  const [enumeracaoConcluida, setEnumeracaoConcluida] = useState(false)
+
+  // Precisa repetir a cadeia de fallback de `resolverVoz`: se destacasse
+  // `vozEscolhida` cru, uma voz desinstalada apareceria marcada na tela
+  // enquanto outra falava de verdade.
+  const vozAtiva =
+    vozes.find((v) => v.voiceURI === vozEscolhida)?.voiceURI ??
+    vozes[0]?.voiceURI ??
+    null
+
+  // Resolvido na hora de falar, não na render: `getVoices()` costuma vir vazio
+  // no primeiro paint e só popula depois do evento `voiceschanged`.
+  const resolverVoz = useCallback(() => {
+    const disponiveis = vozesEmPortugues(window.speechSynthesis.getVoices())
+    const salva = vozEscolhidaRef.current
+
+    // Se a voz salva não existe mais (desinstalada, perfil copiado pra outra
+    // máquina), cai na melhor disponível em vez de devolver undefined — que
+    // deixaria o navegador escolher sozinho, e o default costuma ser inglês.
+    return (
+      (salva && disponiveis.find((v) => v.voiceURI === salva)) ||
+      disponiveis[0] ||
+      null
     )
+  }, [])
 
-    return feminina || voices.find((v) => v.lang === 'pt-BR') || voices[0]
-  }
+  const ouvirAmostra = useCallback(
+    (voz: SpeechSynthesisVoice) => {
+      if (!('speechSynthesis' in window)) return
+
+      // O clique no próprio botão é o gesto que destrava o áudio, então a
+      // amostra toca mesmo antes de "Ativar som".
+      window.speechSynthesis.cancel()
+
+      const u = new SpeechSynthesisUtterance(FRASE_AMOSTRA)
+      u.voice = voz
+      u.lang = normalizarLang(voz.lang)
+      u.rate = FALA_RATE
+      u.pitch = FALA_PITCH
+
+      // `cancel()` é assíncrono por dentro no Chrome: chamar `speak()` no mesmo
+      // tick faz a fala ser engolida calada. Trocar de voz em sequência rápida —
+      // exatamente o que se faz auditando — cairia nisso, e a pessoa concluiria
+      // que a voz está quebrada. O atraso ainda está dentro da janela de
+      // ativação do clique, então não custa o gesto que destrava o áudio.
+      setTimeout(() => window.speechSynthesis.speak(u), 120)
+    },
+    []
+  )
+
+  const escolherVoz = useCallback(
+    (voz: SpeechSynthesisVoice) => {
+      setVozEscolhida(voz.voiceURI)
+      vozEscolhidaRef.current = voz.voiceURI
+
+      // Perfil de quiosque pode ter storage bloqueado; a escolha então vale só
+      // pela sessão em vez de derrubar a tela.
+      try {
+        localStorage.setItem(CHAVE_VOZ, voz.voiceURI)
+      } catch {}
+
+      ouvirAmostra(voz)
+    },
+    [ouvirAmostra]
+  )
 
   // 🔊 fila de voz
   const processarFila = useCallback(() => {
@@ -209,11 +369,16 @@ export default function TVPage() {
     )
 
     msg.lang = 'pt-BR'
-    msg.rate = 0.95
-    msg.pitch = 1.1
+    msg.rate = FALA_RATE
+    msg.pitch = FALA_PITCH
 
-    const voz = getVozFeminina()
-    if (voz) msg.voice = voz
+    // `lang` acompanha a voz: quando os dois discordam, parte dos motores
+    // ignora `voice` e resolve pelo lang, trocando a voz sem avisar.
+    const voz = resolverVoz()
+    if (voz) {
+      msg.voice = voz
+      msg.lang = normalizarLang(voz.lang)
+    }
 
     let encerrada = false
     const liberar = () => {
@@ -236,18 +401,35 @@ export default function TVPage() {
     setTimeout(() => {
       window.speechSynthesis.speak(msg)
     }, 400)
-  }, [])
+  }, [resolverVoz])
 
   // carregar voz — no Chrome getVoices() só popula depois deste evento
   useEffect(() => {
     if (!('speechSynthesis' in window)) return
 
-    const carregarVozes = () => window.speechSynthesis.getVoices()
+    try {
+      const salva = localStorage.getItem(CHAVE_VOZ)
+      if (salva) {
+        setVozEscolhida(salva)
+        vozEscolhidaRef.current = salva
+      }
+    } catch {}
+
+    // Antes o retorno era jogado fora: chamar `getVoices()` só pra provocar o
+    // populamento não deixava a lista em lugar nenhum, então não havia como
+    // montar o seletor.
+    const carregarVozes = () =>
+      setVozes(vozesEmPortugues(window.speechSynthesis.getVoices()))
 
     carregarVozes()
     window.speechSynthesis.addEventListener('voiceschanged', carregarVozes)
 
+    // 2s cobre com folga a chegada das vozes de rede; e este prazo só atrasa o
+    // aviso de "nenhuma voz em português", nunca a fala em si.
+    const prazoEnumeracao = setTimeout(() => setEnumeracaoConcluida(true), 2000)
+
     return () => {
+      clearTimeout(prazoEnumeracao)
       window.speechSynthesis.removeEventListener('voiceschanged', carregarVozes)
     }
   }, [])
@@ -373,6 +555,16 @@ export default function TVPage() {
       const utter = new SpeechSynthesisUtterance('Sistema de chamadas ativado')
       utter.lang = 'pt-BR'
 
+      // Sem isto a confirmação saía na voz default do sistema — que num Windows
+      // em inglês lê "Sistema de chamadas ativado" com voz americana, enquanto
+      // as chamadas de verdade saem noutra voz. Também serve de teste: é a
+      // primeira prova de que a voz escolhida realmente fala.
+      const voz = resolverVoz()
+      if (voz) {
+        utter.voice = voz
+        utter.lang = normalizarLang(voz.lang)
+      }
+
       window.speechSynthesis.cancel()
       window.speechSynthesis.speak(utter)
     }
@@ -403,6 +595,77 @@ export default function TVPage() {
             <p className="text-base text-tv-ink-muted text-center">
               Toque na tela para ativar as chamadas sonoras
             </p>
+
+            {/* O seletor mora aqui porque este diálogo já é o momento de setup:
+                alguém encosta na tela toda vez que a TV liga. Um seletor
+                permanente no painel seria ruído numa tela que ninguém opera.
+                Só aparece havendo escolha real — com uma voz só não há decisão
+                a tomar. */}
+            {vozes.length > 1 && (
+              <div className="w-full max-w-[560px] flex flex-col gap-2">
+                <p className="text-sm font-medium uppercase tracking-wide text-tv-ink-muted">
+                  Voz das chamadas
+                </p>
+
+                {/* rolável: há máquina com 6+ vozes em português e o modal não
+                    pode passar da altura da tela */}
+                <ul className="flex flex-col gap-2 max-h-[38vh] overflow-y-auto">
+                  {vozes.map((v) => {
+                    const ativa = v.voiceURI === vozAtiva
+
+                    return (
+                      <li key={v.voiceURI} className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => escolherVoz(v)}
+                          aria-pressed={ativa}
+                          className={`flex-1 min-h-[48px] px-4 rounded-xl flex items-center gap-3 text-left text-base transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tv-accent/40 ${
+                            ativa
+                              ? 'bg-tv-accent text-white'
+                              : 'bg-tv-ground text-tv-ink hover:brightness-110'
+                          }`}
+                        >
+                          {/* o check some por opacidade, não por condicional:
+                              assim o texto não dança de posição ao trocar */}
+                          <Check
+                            className={`w-5 h-5 shrink-0 ${ativa ? 'opacity-100' : 'opacity-0'}`}
+                            strokeWidth={2.5}
+                          />
+                          <span className="truncate">{rotuloVoz(v)}</span>
+                          <span
+                            className={`ml-auto shrink-0 text-xs tabular-nums ${
+                              ativa ? 'text-white/70' : 'text-tv-ink-muted'
+                            }`}
+                          >
+                            {normalizarLang(v.lang)}
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => ouvirAmostra(v)}
+                          aria-label={`Ouvir amostra da voz ${rotuloVoz(v)}`}
+                          className="min-h-[48px] w-[48px] shrink-0 rounded-xl bg-tv-ground text-tv-ink-muted flex items-center justify-center transition hover:text-tv-ink hover:brightness-110 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tv-accent/40"
+                        >
+                          <Play className="w-5 h-5" strokeWidth={2} />
+                        </button>
+                      </li>
+                    )
+                  })}
+                </ul>
+              </div>
+            )}
+
+            {/* Espera a enumeração terminar pra não piscar em toda carga. Vale
+                mostrar porque transforma um problema silencioso de pronúncia em
+                algo que quem monta a TV consegue resolver. */}
+            {enumeracaoConcluida && vozes.length === 0 && (
+              <p className="max-w-[460px] text-center text-sm text-tv-ink-muted">
+                Nenhuma voz em português instalada nesta máquina — as chamadas
+                vão sair com pronúncia de outro idioma. Instale uma voz pt-BR em
+                Configurações do Windows → Hora e idioma → Fala.
+              </p>
+            )}
 
             {/* 56px de altura: a TV da recepção é touch e o mínimo do projeto é
                 44px (PRODUCT.md) — antes tinha 40px medidos */}
