@@ -36,7 +36,7 @@ interface Props {
 }
 
 function CardOportunidade({ item, onAplicar }: { item: CategoriaComOportunidade; onAplicar: () => void }) {
-  const total = item.qtdDireto + item.qtdRemanejamento
+  const total = item.qtdDireto + item.qtdRemanejamento + item.qtdNovoDia
   return (
     <div className="flex flex-wrap items-start gap-3 rounded-xl border border-border bg-card p-3.5">
       <BadgeOcupacao pct={item.pctAproveitamento} faixa={item.faixa} label="aproveitado" />
@@ -60,7 +60,7 @@ function CardOportunidade({ item, onAplicar }: { item: CategoriaComOportunidade;
 
         <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
           <span className="flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-1 font-semibold text-foreground">
-            {total} oportunidade(s) — {item.qtdDireto} direta(s), {item.qtdRemanejamento} via remanejamento
+            {total} oportunidade(s) — {item.qtdDireto} direta(s), {item.qtdRemanejamento} via remanejamento, {item.qtdNovoDia} via novo dia
           </span>
           {item.qtdLivre > 0 && (
             <span className="flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-1 text-muted-foreground">

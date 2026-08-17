@@ -124,9 +124,8 @@ function statusDoSlot(
   capacidadeProjetada: number,
   numAlocacoes: number,
 ): StatusOcupacaoSlot {
-  if (status === "adm") return "adm"
   if (status === "bloqueada") return "bloqueado"
-  if (status === "nti") return "nti"
+  if (status !== "operacional") return "inativo"
   if (numAlocacoes === 0) return "livre"
   if (numAlocacoes >= capacidadeProjetada) return "ocupado"
   return "parcial"
@@ -345,7 +344,8 @@ export function calcularResumoUnidades(salas: Sala[], alocacoes: AlocacaoSala[],
     let slotsTotal = 0, slotsOcupados = 0, slotsLivres = 0, slotsBloqueados = 0
     let blocosTotal = 0, blocosPreenchidos = 0
     let capacidadeSimultanea = 0
-    let salasAtivas = 0, salasBloqueadas = 0, salasAdm = 0, salasNti = 0
+    let salasAtivas = 0
+    const porStatus: Record<string, number> = {}
     let inconsistencias = 0
     const salasPorCapacidade: Record<SalaCapacidade, number> = { unico: 0, duplo: 0, multiplo: 0 }
     const porTurnoAcc: Record<"Manhã" | "Tarde", ResumoTurnoUnidadeSalas> = {
@@ -356,15 +356,13 @@ export function calcularResumoUnidades(salas: Sala[], alocacoes: AlocacaoSala[],
 
     salasUnidade.forEach(sala => {
       if (sala.status === "operacional") salasAtivas++
-      else if (sala.status === "bloqueada") salasBloqueadas++
-      else if (sala.status === "adm") salasAdm++
-      else if (sala.status === "nti") salasNti++
+      else porStatus[sala.status] = (porStatus[sala.status] ?? 0) + 1
       capacidadeSimultanea += capacidadeProjetadaSala(sala.capacidade, sala.status)
       salasPorCapacidade[sala.capacidade]++
 
       const { slots } = calcularOcupacaoDaSala(sala, alocacoes, linhas, indiceExclusividade, nomeDaSalaPorId)
       slots.forEach(slot => {
-        if (slot.status === "adm" || slot.status === "nti") return
+        if (slot.status === "inativo") return
         const turnoBucket = porTurnoAcc[slot.turno]
         if (slot.status === "bloqueado") {
           slotsBloqueados++
@@ -408,9 +406,7 @@ export function calcularResumoUnidades(salas: Sala[], alocacoes: AlocacaoSala[],
       unidade,
       salasTotal: salasUnidade.length,
       salasAtivas,
-      salasBloqueadas,
-      salasAdm,
-      salasNti,
+      porStatus,
       salasPorCapacidade,
       capacidadeSimultanea,
       slotsTotal,
@@ -518,7 +514,7 @@ export function resumoOcupacaoDeItens(itens: SalaComOcupacao[]): ResumoOcupacaoI
 
   itens.forEach(item => {
     item.slots.forEach(slot => {
-      if (slot.status === "adm" || slot.status === "nti") return
+      if (slot.status === "inativo") return
       if (slot.status === "bloqueado") {
         slotsBloqueados++
         return

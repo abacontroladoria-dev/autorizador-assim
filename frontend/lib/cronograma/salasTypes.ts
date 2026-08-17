@@ -4,7 +4,18 @@
 // docs internos: "Portar Ocupação de Salas + Dashboards".
 
 export type SalaCapacidade = "unico" | "duplo" | "multiplo"
-export type SalaStatus = "operacional" | "bloqueada" | "adm" | "nti"
+
+/**
+ * Código de status de sala — CRUD livre em `cronograma_status_labels`
+ * (tabela própria, FK de `cronograma_salas.status`), não é mais um union
+ * fixo. "operacional" é o único código especial (ver capacidadeProjetadaSala
+ * abaixo) — qualquer outro código, seja "bloqueada"/"adm"/"nti" (seed
+ * original) ou um status novo criado pelo usuário, é tratado genericamente
+ * como "fora de operação" pelo motor de ocupação (ver statusDoSlot em
+ * salas.ts). Rótulo/rótulo curto/cor exibidos vêm de `listarStatusLabels()` —
+ * ver hook `useStatusLabels`.
+ */
+export type SalaStatus = string
 
 /** Rótulo curto de capacidade — usado em badges/filtros (formulário de cadastro usa uma versão mais descritiva). */
 export const CAPACIDADE_LABEL_CURTO: Record<SalaCapacidade, string> = {
@@ -13,8 +24,8 @@ export const CAPACIDADE_LABEL_CURTO: Record<SalaCapacidade, string> = {
   multiplo: "Múltiplo",
 }
 
-/** Rótulo curto de status — usado em filtros (formulário de cadastro usa uma versão mais descritiva). */
-export const STATUS_LABEL_CURTO: Record<SalaStatus, string> = {
+/** Fallback estático pros 4 códigos originais (seed) — usado só onde não há como buscar `listarStatusLabels()` (ex.: formatação síncrona de auditoria). Status criados depois disso não têm entrada aqui; quem usa deve cair pro código bruto. */
+export const STATUS_LABEL_CURTO: Record<string, string> = {
   operacional: "Operacional",
   bloqueada: "Bloqueada",
   adm: "Adm",
@@ -108,10 +119,18 @@ export interface AlocacaoInput {
   terapia_id?: number | null
 }
 
-export type StatusOcupacaoSlot = "livre" | "ocupado" | "parcial" | "bloqueado" | "adm" | "nti"
+/**
+ * "bloqueado" continua com contador próprio (slotsBloqueados) porque
+ * `sala.status === "bloqueada"` é um dos códigos originais do seed e o
+ * dashboard já distingue esse caso das demais salas fora de operação.
+ * "inativo" é o bucket genérico pra QUALQUER outro status não-operacional
+ * (adm/nti do seed, ou um status novo criado pelo usuário) — ver
+ * statusDoSlot em salas.ts.
+ */
+export type StatusOcupacaoSlot = "livre" | "ocupado" | "parcial" | "bloqueado" | "inativo"
 
 /** Slot statuses que representam sala fora de operação (sem agendamento possível) — excluídos de todo cálculo/contagem de % ocupação. */
-export const STATUS_SLOT_EXCLUIDO: readonly StatusOcupacaoSlot[] = ["adm", "bloqueado", "nti"]
+export const STATUS_SLOT_EXCLUIDO: readonly StatusOcupacaoSlot[] = ["bloqueado", "inativo"]
 
 /** Uma alocação (profissional/terapia) dentro de um slot, cruzada com sessões reais para exibição informativa */
 export interface AlocacaoCardSlot {
@@ -218,10 +237,10 @@ export interface ResumoTurnoUnidadeSalas {
 export interface ResumoUnidadeSalas {
   unidade: string
   salasTotal: number
+  /** nº de salas com status "operacional" — único código com contador dedicado (é o "ativo" do motor de ocupação). */
   salasAtivas: number
-  salasBloqueadas: number
-  salasAdm: number
-  salasNti: number
+  /** nº de salas por status NÃO-operacional, chaveado pelo código (`StatusLabel.codigo`) — cobre tanto os 3 códigos do seed (bloqueada/adm/nti) quanto qualquer status novo criado pelo usuário. */
+  porStatus: Record<string, number>
   salasPorCapacidade: Record<SalaCapacidade, number>
   capacidadeSimultanea: number
   slotsTotal: number

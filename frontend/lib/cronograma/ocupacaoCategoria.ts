@@ -7,8 +7,9 @@
 // só trocando o agrupamento de "por profissional" pra "por categoria" — nunca
 // mexe na agenda de ninguém, é só visualização.
 
-import { listarOportunidadesDiretas, listarSlotsLivres, type OportunidadeDireta } from "./disponibilidadeInterna"
+import { listarOportunidadesDiretas, listarSlotsLivres, unidadeDominanteDoDia, type OportunidadeDireta } from "./disponibilidadeInterna"
 import { encontrarCandidatosRemanejamento, construirIndiceRemanejamento, type IndiceRemanejamento } from "./remanejamento"
+import { listarOportunidadesNovoDia, construirIndiceNovoDia, type OportunidadeNovoDia } from "./novoDia"
 import { filtrarCapacidadeLivreReservada, turnoFromHora } from "./helpers"
 import { hiStr, type GapItem, type Turno } from "./simulacaoNovoPrestador"
 import { DIAS_UTIL, TERAPIA_TO_ESP, TODAS_ESP, UNID_COR } from "./constants"
@@ -32,10 +33,12 @@ export interface VagaCategoria {
    *  um profissional livre na mesma hora dentro da mesma categoria. */
   profissional: string
   terapia: string
-  status: "livre" | "direto" | "remanejamento"
+  status: "livre" | "direto" | "remanejamento" | "novo-dia"
   paciente?: { pac: string; gap: number; aut: number; of: number }
   /** Só presente quando status === "remanejamento". */
   remanejamento?: RemanejamentoDetalhe
+  /** Só presente quando status === "novo-dia". */
+  novoDia?: OportunidadeNovoDia
 }
 
 /** Gera as vagas de uma categoria (Unidade+Dia+Especialidade), direto +
@@ -58,6 +61,7 @@ export function gerarVagasCategoria(
    * segue funcionando igual sem informar nada.
    */
   diretasPrecalculadas?: OportunidadeDireta[], indiceRemanejamento?: IndiceRemanejamento,
+  novoDiaPrecalculadas?: OportunidadeNovoDia[],
 ): VagaCategoria[] {
   const cRows = filtrarCapacidadeLivreReservada(cRowsBrutos)
   const slots = listarSlotsLivres(cRows).filter(
@@ -79,7 +83,13 @@ export function gerarVagasCategoria(
   const slotsSemDireta: typeof slots = []
   for (const s of slots) {
     const direta = diretaPorSlot.get(`${s.profissional}|||${s.hora}`)
-    if (direta) {
+    // R5.4: a unidade da vaga precisa ser a que já concentra a maioria das
+    // sessões do paciente nesse dia — sem isso, um paciente com 1 sessão
+    // isolada numa unidade (ex.: troca pontual de agenda) vira candidato pra
+    // qualquer vaga dessa unidade minoritária, mesmo o resto do dia dele
+    // sendo noutra unidade. Ver unidadeDominanteDoDia (disponibilidadeInterna.ts).
+    const dominante = direta ? unidadeDominanteDoDia(direta.paciente.pac, dia, cRows) : null
+    if (direta && (!dominante || dominante === unidade)) {
       vagas.push({
         hora: s.hora, turno: turnoFromHora(s.hora), profissional: s.profissional, terapia: s.terapia,
         status: "direto",
@@ -98,12 +108,17 @@ export function gerarVagasCategoria(
   for (const turno of turnosPresentes) {
     for (const { hora, candidato } of encontrarCandidatosRemanejamento(dia, turno, unidade, especialidade, cRows, gapMap, indiceRemanejamento)) {
       if (!candidato.remanejamento) continue
+      // Mesma regra R5.4 aplicada à modalidade "direto" acima — remanejamento
+      // não pode empurrar o paciente pra uma unidade minoritária do dia dele.
+      const dominante = unidadeDominanteDoDia(candidato.paciente, dia, cRows)
+      if (dominante && dominante !== unidade) continue
       const lista = candidatosPorHora.get(hora) ?? []
       lista.push({ pac: candidato.paciente, gap: candidato.gap, aut: candidato.aut, of: candidato.of, remanejamento: candidato.remanejamento })
       candidatosPorHora.set(hora, lista)
     }
   }
 
+  const slotsSemNada: typeof slots = []
   for (const s of slotsSemDireta) {
     const disponiveis = candidatosPorHora.get(s.hora)
     const candidato = disponiveis?.shift()
@@ -113,6 +128,28 @@ export function gerarVagasCategoria(
         status: "remanejamento",
         paciente: { pac: candidato.pac, gap: candidato.gap, aut: candidato.aut, of: candidato.of },
         remanejamento: candidato.remanejamento,
+      })
+    } else {
+      slotsSemNada.push(s)
+    }
+  }
+
+  // Modalidade "Novo Dia": só tentada nos slots que sobraram sem Direto nem
+  // Remanejamento — as duas primeiras resolvem a MESMA terapia sem exigir
+  // mudança de rotina do paciente, sempre preferíveis quando existem.
+  const todasNovoDia = (novoDiaPrecalculadas ?? listarOportunidadesNovoDia(cRows, gapMap))
+    .filter(o => o.dia === dia && o.unidade === unidade && o.ancora.especialidade === especialidade)
+  const novoDiaPorSlot = new Map(todasNovoDia.map(o => [`${o.ancora.profissional}|||${o.ancora.hora}`, o]))
+
+  for (const s of slotsSemNada) {
+    const oportunidade = novoDiaPorSlot.get(`${s.profissional}|||${s.hora}`)
+    if (oportunidade) {
+      const g = oportunidade.gapPorEspecialidade[especialidade]
+      vagas.push({
+        hora: s.hora, turno: turnoFromHora(s.hora), profissional: s.profissional, terapia: s.terapia,
+        status: "novo-dia",
+        paciente: { pac: oportunidade.paciente, gap: (g?.aut ?? 0) - (g?.of ?? 0), aut: g?.aut ?? 0, of: g?.of ?? 0 },
+        novoDia: oportunidade,
       })
     } else {
       vagas.push({ hora: s.hora, turno: turnoFromHora(s.hora), profissional: s.profissional, terapia: s.terapia, status: "livre" })
@@ -165,9 +202,10 @@ export interface CategoriaComOportunidade {
   especialidade: string
   qtdDireto: number
   qtdRemanejamento: number
+  qtdNovoDia: number
   qtdLivre: number
   /** % da capacidade "Livre" já existente nessa categoria+turno que já virou
-   *  oportunidade (direto + remanejamento) / (direto + remanejamento + livre). */
+   *  oportunidade (direto + remanejamento + novo-dia) / (... + livre). */
   pctAproveitamento: number
   /** Maior faixa da cascata 70/60/50 que pctAproveitamento atinge. */
   faixa: FaixaCascata
@@ -200,31 +238,34 @@ export function rankearOportunidadesInternas(
   const cRows = filtrarCapacidadeLivreReservada(cRowsBrutos)
   const diretasGlobais = listarOportunidadesDiretas(cRows, gapMap)
   const indiceRemanejamento = construirIndiceRemanejamento(cRows)
+  const indiceNovoDia = construirIndiceNovoDia(cRows, gapMap)
+  const novoDiaGlobais = listarOportunidadesNovoDia(cRows, gapMap, indiceNovoDia)
 
   const resultado: CategoriaComOportunidade[] = []
   for (const unidade of Object.keys(UNID_COR)) {
     for (const dia of DIAS_UTIL) {
       for (const especialidade of TODAS_ESP) {
-        const vagas = gerarVagasCategoria(unidade, dia, especialidade, cRows, gapMap, diretasGlobais, indiceRemanejamento)
+        const vagas = gerarVagasCategoria(unidade, dia, especialidade, cRows, gapMap, diretasGlobais, indiceRemanejamento, novoDiaGlobais)
         if (!vagas.length) continue
         for (const turno of TURNOS) {
           const doTurno = vagas.filter(v => v.turno === turno)
           if (!doTurno.length) continue
           const qtdDireto = doTurno.filter(v => v.status === "direto").length
           const qtdRemanejamento = doTurno.filter(v => v.status === "remanejamento").length
-          if (qtdDireto + qtdRemanejamento === 0) continue
+          const qtdNovoDia = doTurno.filter(v => v.status === "novo-dia").length
+          if (qtdDireto + qtdRemanejamento + qtdNovoDia === 0) continue
           const qtdLivre = doTurno.filter(v => v.status === "livre").length
-          const pctAproveitamento = ((qtdDireto + qtdRemanejamento) / doTurno.length) * 100
+          const pctAproveitamento = ((qtdDireto + qtdRemanejamento + qtdNovoDia) / doTurno.length) * 100
           const faixa = FAIXAS_CASCATA.find(f => pctAproveitamento >= f)
           if (!faixa || !faixasSelecionadas.has(faixa)) continue
-          resultado.push({ unidade, dia, turno, especialidade, qtdDireto, qtdRemanejamento, qtdLivre, pctAproveitamento, faixa })
+          resultado.push({ unidade, dia, turno, especialidade, qtdDireto, qtdRemanejamento, qtdNovoDia, qtdLivre, pctAproveitamento, faixa })
         }
       }
     }
   }
   return resultado.sort((a, b) =>
     b.pctAproveitamento - a.pctAproveitamento ||
-    (b.qtdDireto + b.qtdRemanejamento) - (a.qtdDireto + a.qtdRemanejamento),
+    (b.qtdDireto + b.qtdRemanejamento + b.qtdNovoDia) - (a.qtdDireto + a.qtdRemanejamento + a.qtdNovoDia),
   )
 }
 
@@ -232,6 +273,7 @@ export interface UnidadeComOportunidade {
   unidade: string
   qtdDireto: number
   qtdRemanejamento: number
+  qtdNovoDia: number
   qtdLivre: number
 }
 
@@ -251,18 +293,20 @@ export function compararUnidadesOportunidade(
   const cRowsFiltradas = filtrarCapacidadeLivreReservada(cRows)
   const diretasGlobais = listarOportunidadesDiretas(cRowsFiltradas, gapMap)
   const indiceRemanejamento = construirIndiceRemanejamento(cRowsFiltradas)
+  const novoDiaGlobais = listarOportunidadesNovoDia(cRowsFiltradas, gapMap, construirIndiceNovoDia(cRowsFiltradas, gapMap))
 
   return Object.keys(UNID_COR).map(unidade => {
-    let qtdDireto = 0, qtdRemanejamento = 0, qtdLivre = 0
+    let qtdDireto = 0, qtdRemanejamento = 0, qtdNovoDia = 0, qtdLivre = 0
     for (const dia of diasPresentes) {
       const turnosDoDia = new Set(periodos.filter(p => p.dia === dia).map(p => p.turno))
-      const vagas = gerarVagasCategoria(unidade, dia, especialidade, cRowsFiltradas, gapMap, diretasGlobais, indiceRemanejamento)
+      const vagas = gerarVagasCategoria(unidade, dia, especialidade, cRowsFiltradas, gapMap, diretasGlobais, indiceRemanejamento, novoDiaGlobais)
         .filter(v => turnosDoDia.has(v.turno))
       qtdDireto += vagas.filter(v => v.status === "direto").length
       qtdRemanejamento += vagas.filter(v => v.status === "remanejamento").length
+      qtdNovoDia += vagas.filter(v => v.status === "novo-dia").length
       qtdLivre += vagas.filter(v => v.status === "livre").length
     }
-    return { unidade, qtdDireto, qtdRemanejamento, qtdLivre }
+    return { unidade, qtdDireto, qtdRemanejamento, qtdNovoDia, qtdLivre }
   })
 }
 

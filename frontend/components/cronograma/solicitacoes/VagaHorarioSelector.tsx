@@ -9,7 +9,7 @@
 // do dropdown "N profs." de OcupPacMode.tsx, adaptado pra uma grade densa
 // (célula pequena) em vez de expandir a própria célula da tabela.
 
-import { CheckCircle2, CircleDashed, Repeat2 } from "lucide-react"
+import { CalendarPlus, CheckCircle2, CircleDashed, Repeat2 } from "lucide-react"
 import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
 import { fmtName } from "@/lib/cronograma/helpers"
 import type { VagaCategoria } from "@/lib/cronograma/ocupacaoCategoria"
@@ -21,12 +21,14 @@ interface Props {
   vagas: VagaCategoria[]
   onEscolherDireto: (v: VagaCategoria) => void
   onEscolherRemanejamento: (v: VagaCategoria) => void
+  onEscolherNovoDia: (v: VagaCategoria) => void
   onClose: () => void
 }
 
-export function VagaHorarioSelector({ dia, hora, vagas, onEscolherDireto, onEscolherRemanejamento, onClose }: Props) {
+export function VagaHorarioSelector({ dia, hora, vagas, onEscolherDireto, onEscolherRemanejamento, onEscolherNovoDia, onClose }: Props) {
   const diretas = vagas.filter(v => v.status === "direto")
   const remanejamentos = vagas.filter(v => v.status === "remanejamento")
+  const novoDias = vagas.filter(v => v.status === "novo-dia")
   const livres = vagas.filter(v => v.status === "livre")
 
   return (
@@ -80,22 +82,46 @@ export function VagaHorarioSelector({ dia, hora, vagas, onEscolherDireto, onEsco
           </div>
         )}
 
+        {novoDias.length > 0 && (
+          <div>
+            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-amber-700 dark:text-amber-400">
+              <CalendarPlus size={13} /> Oportunidade via novo dia
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {novoDias.map((v, i) => (
+                <button
+                  key={`novo-dia-${i}`}
+                  type="button"
+                  onClick={() => onEscolherNovoDia(v)}
+                  className="flex items-center justify-between gap-2 rounded-lg border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 px-3 py-2 text-left hover:brightness-95"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-[12.5px] font-bold text-foreground">{fmtName(v.profissional)}</span>
+                    <span className="block truncate text-[10.5px] text-muted-foreground">{fmtName(v.paciente?.pac ?? "")} · {v.terapia}</span>
+                  </span>
+                  <span className="shrink-0 text-[10.5px] font-bold text-amber-700 dark:text-amber-400">Ver novo dia</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {livres.length > 0 && (
           <div>
-            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-muted-foreground">
+            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-rose-700 dark:text-rose-400">
               <CircleDashed size={13} /> Livre, sem oportunidade
             </div>
             <div className="flex flex-col gap-1.5">
               {livres.map((v, i) => (
                 <div
                   key={`livre-${i}`}
-                  className="flex items-center justify-between gap-2 rounded-lg border border-dashed border-border px-3 py-2"
+                  className="flex items-center justify-between gap-2 rounded-lg border border-dashed border-rose-300 dark:border-rose-800 bg-rose-50/70 dark:bg-rose-950/20 px-3 py-2"
                 >
                   <span className="min-w-0">
                     <span className="block truncate text-[12.5px] font-bold text-foreground">{fmtName(v.profissional)}</span>
                     <span className="block truncate text-[10.5px] text-muted-foreground">{v.terapia}</span>
                   </span>
-                  <span className="shrink-0 text-[10.5px] font-bold text-muted-foreground">Sem candidato agora</span>
+                  <span className="shrink-0 text-[10.5px] font-bold text-rose-700 dark:text-rose-400">Sem candidato agora</span>
                 </div>
               ))}
             </div>

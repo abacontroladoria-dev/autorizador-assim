@@ -9,15 +9,15 @@
 // cálculo vive em lib/cronograma/simulacaoNovoPrestador.ts; este arquivo é só
 // a UI. Não há mais fluxo de WhatsApp/oferta aqui — é puramente informativo.
 
-import { startTransition, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { Fragment, startTransition, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip as RechartsTooltip } from "recharts"
-import { Ban, CheckCircle2, ChevronDown, ChevronUp, House, Lock, Sparkles, Star, Wallet } from "lucide-react"
+import { Ban, CheckCircle2, ChevronDown, ChevronRight, ChevronUp, House, Lock, Repeat2, Sparkles, Star, Wallet } from "lucide-react"
 import {
   avaliarPeriodo, calcularGaps, construirAgendaNovoProfissional, gapsParaMapa, limitarCandidatosPorGap, listarEspecialidades, montarPlanoRecomendado, ranquearUnidades,
   type CandidatoSlot, type PeriodoSimulado, type PeriodoAlvo, type SlotSimulado, type Turno,
 } from "@/lib/cronograma/simulacaoNovoPrestador"
-import { DIAS_UTIL, estiloUnidade } from "@/lib/cronograma/constants"
-import { diaCurto, filtrarCapacidadeLivreReservada, fmtH, fmtName, fmtReal, pm, turnoNome } from "@/lib/cronograma/helpers"
+import { DIAS_UTIL, estiloUnidade, unidadeAbrev } from "@/lib/cronograma/constants"
+import { diaCurto, filtrarCapacidadeLivreReservada, fmtH, fmtName, fmtReal, pm, turnoFromHora, turnoNome } from "@/lib/cronograma/helpers"
 import { useGradeAgendamentos } from "@/hooks/useGradeAgendamentos"
 import { useOcupacaoSalas } from "@/hooks/useOcupacaoSalas"
 import { useConvenioValores } from "@/hooks/useConvenioValores"
@@ -30,7 +30,7 @@ import {
   type CenarioPerdaPct,
 } from "@/lib/remuneracao/pontoEquilibrio"
 import { anexarModalidadeERemanejamento, filtrarPorDisponibilidadeInterna, separarCobertosPorDisponibilidadeInterna, anexarSala, anexarRemuneracaoEOrdenar, primeiroConvenioDoPaciente, contarSessoesReaisMes, terapiaDaEspecialidade } from "@/lib/cronograma/sugestaoContratacao"
-import { listarSlotsLivres, type SlotLivre } from "@/lib/cronograma/disponibilidadeInterna"
+import { capacidadeDiretaRestante, listarSlotsLivres, type SlotLivre } from "@/lib/cronograma/disponibilidadeInterna"
 import { listarExclusividadesTerapia } from "@/services/salas.service"
 import type { SalaTerapiaExclusiva } from "@/lib/cronograma/salasTypes"
 import { SugestoesContratacaoPanel } from "./SugestoesContratacaoPanel"
@@ -41,7 +41,8 @@ import { StatusPill } from "@/components/cronograma/ui/StatusPill"
 import { StatCard } from "@/components/cronograma/ui/StatCard"
 import { InlineNotice } from "@/components/cronograma/ui/InlineNotice"
 import { InfoTooltip } from "@/components/cronograma/ui/InfoTooltip"
-import { TONE_ACCENT } from "@/components/cronograma/ui/tones"
+import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
+import { TONE_ACCENT, TONE_SOFT } from "@/components/cronograma/ui/tones"
 import { Button } from "@/components/ui/button"
 import type { CsvRow, LaudoRow } from "@/types/cronograma"
 import type { CandidatoNaSugestao, SugestaoContratacao } from "@/lib/cronograma/sugestaoContratacaoTypes"
@@ -164,6 +165,7 @@ function EspecialidadeCombobox({
       <input
         id="sim-esp-input"
         type="text"
+        autoComplete="off"
         aria-label="Buscar especialidade"
         aria-autocomplete="list"
         aria-expanded={aberto}
@@ -211,7 +213,7 @@ function EspecialidadeCombobox({
                 type="button"
                 role="option"
                 aria-selected={selecionada}
-                onMouseDown={() => selecionar(esp)}
+                onMouseDown={e => { e.preventDefault(); selecionar(esp) }}
                 className={`block w-full px-3 py-1.5 text-left text-[13px] transition-colors ${ativa ? "bg-sky-600 text-white" : selecionada ? "bg-muted font-semibold text-foreground" : "text-foreground hover:bg-muted/60"}`}
               >
                 {esp}
@@ -231,11 +233,44 @@ function EspecialidadeCombobox({
 function PlanoGradeSemanal({ periodos }: { periodos: PeriodoSimulado[] }) {
   const dias = DIAS_UTIL.filter(d => periodos.some(p => p.dia === d))
   if (!dias.length) return null
+
+  const unidadesNoPlano = new Set(periodos.map(p => p.unidade))
+  if (unidadesNoPlano.size === 1) {
+    // Caso homogêneo: a grade dia×turno vira ruído puro (repete o mesmo nome
+    // em toda célula) — substituída por um resumo de cobertura compacto.
+    const unidade = periodos[0].unidade
+    const cor = estiloUnidade(unidade)
+    const diasManha = dias.filter(d => periodos.some(p => p.dia === d && p.turno === "manha"))
+    const diasTarde = dias.filter(d => periodos.some(p => p.dia === d && p.turno === "tarde"))
+    const coberturaTotal = diasManha.length === dias.length && diasTarde.length === dias.length
+    const cobertura = coberturaTotal
+      ? `${dias.map(diaCurto).join(", ")} · Manhã e Tarde`
+      : [
+          diasManha.length && `Manhã: ${diasManha.map(diaCurto).join(", ")}`,
+          diasTarde.length && `Tarde: ${diasTarde.map(diaCurto).join(", ")}`,
+        ].filter(Boolean).join(" · ")
+    return (
+      <div className={`flex items-center gap-2 rounded-lg px-3 py-2.5 ${cor.bg}`}>
+        <span className={`shrink-0 text-[13px] font-black ${cor.text}`}>{unidade}</span>
+        <span className="text-[11px] font-semibold text-muted-foreground">{cobertura}</span>
+      </div>
+    )
+  }
+
+  // Caso misto: a variedade é informação real, mas o valor está em ver ONDE o
+  // plano foge do padrão — não em reler a unidade dominante em toda célula.
+  // Conta ocorrências pra achar a unidade dominante; células dela ficam
+  // discretas (só a sigla, sem preenchimento), células diferentes (as
+  // exceções) ganham cor cheia + contorno pra puxar o olho direto pra elas.
+  const contagem = new Map<string, number>()
+  periodos.forEach(p => contagem.set(p.unidade, (contagem.get(p.unidade) ?? 0) + 1))
+  const dominante = [...contagem.entries()].sort((a, b) => b[1] - a[1])[0][0]
+
   return (
     <div className="grid w-full gap-1" style={{ gridTemplateColumns: `44px repeat(${dias.length}, minmax(0, 1fr))` }}>
       <div />
       {dias.map(dia => (
-        <div key={`h-${dia}`} className="truncate text-center text-[11px] font-bold text-muted-foreground">{diaCurto(dia)}</div>
+        <div key={`h-${dia}`} className="truncate text-center text-[11px] font-bold uppercase text-muted-foreground">{diaCurto(dia)}</div>
       ))}
       {(["manha", "tarde"] as Turno[]).flatMap(turno => [
         <div key={`t-${turno}`} className="flex items-center text-[11px] font-bold text-muted-foreground">{turnoNome[turno]}</div>,
@@ -243,9 +278,16 @@ function PlanoGradeSemanal({ periodos }: { periodos: PeriodoSimulado[] }) {
           const periodo = periodos.find(p => p.dia === dia && p.turno === turno)
           if (!periodo) return <div key={`${turno}-${dia}`} />
           const cor = estiloUnidade(periodo.unidade)
+          const excecao = periodo.unidade !== dominante
           return (
-            <div key={`${turno}-${dia}`} className={`truncate rounded-md px-1 py-2 text-center text-[10.5px] font-bold ${cor.bg} ${cor.text}`} title={periodo.unidade}>
-              {periodo.unidade}
+            <div
+              key={`${turno}-${dia}`}
+              className={`truncate rounded-md px-1 py-2 text-center text-[10.5px] font-bold ${
+                excecao ? `border-2 border-foreground/20 ${cor.bg} ${cor.text}` : `${cor.text} opacity-70`
+              }`}
+              title={periodo.unidade}
+            >
+              {unidadeAbrev(periodo.unidade)}
             </div>
           )
         }),
@@ -272,25 +314,114 @@ interface GrupoVaga { turno: Turno; hora: string; linhas: LinhaCandidato[] }
 
 const COLGROUP_VAGA = (
   <colgroup>
+    <col className="w-[52px]" />
     <col className="w-8" />
     <col />
-    <col className="w-[150px]" />
-    <col className="w-[180px]" />
+    <col className="w-[190px]" />
+    <col className="w-[165px]" />
     <col className="w-[150px]" />
   </colgroup>
 )
 
 
-// ─── Card de uma vaga (turno+hora) ───────────────────────────────────────────
-// Quando há disputa, só o candidato #1 ("Ofereça primeiro") vem expandido com
-// todo o contexto (motivo da prioridade, sessões já no dia, convênio…) — os
-// demais ("2ª opção", "3ª opção"...) ficam recolhidos atrás de 1 toggle, numa
-// linha bem mais compacta e sem repetir a mesma frase de aviso ("só se o(s)
-// anterior(es) recusar(em)") em cada um. Antes, uma vaga com 4 candidatos
-// repetia esse bloco inteiro (nome + badges + frase) 4x seguidas — a maior
-// fonte de poluição visual da tabela "Sessões e candidatos".
-function CardVaga({
-  vaga, cRows, especialidade, cobertosPorVaga, onVerDetalhe, onVerRemanejamento,
+interface GrupoSalaTurno { unidade: string; sala: string | null; turnos: { turno: Turno; vagas: GrupoVaga[] }[] }
+
+// Agrupa vagas consecutivas do mesmo dia que compartilham unidade+sala — na
+// prática, um dia inteiro de simulação quase sempre roda na mesma sala/
+// unidade, então repetir esse cabeçalho em cada horário (como fazia antes) era
+// a maior fonte de "monte de letras" repetido na tela. Só quebra o grupo
+// quando sala OU unidade muda de fato; dentro do grupo, sub-agrupa por turno.
+function agruparPorSalaTurno(vagas: GrupoVaga[]): GrupoSalaTurno[] {
+  const grupos: GrupoSalaTurno[] = []
+  for (const vaga of vagas) {
+    const unidade = vaga.linhas[0].unidade
+    const sala = vaga.linhas[0].sugestao.salaVinculada?.numeroSala ?? null
+    const atual = grupos[grupos.length - 1]
+    if (atual && atual.unidade === unidade && atual.sala === sala) {
+      const turnoAtual = atual.turnos[atual.turnos.length - 1]
+      if (turnoAtual.turno === vaga.turno) turnoAtual.vagas.push(vaga)
+      else atual.turnos.push({ turno: vaga.turno, vagas: [vaga] })
+    } else {
+      grupos.push({ unidade, sala, turnos: [{ turno: vaga.turno, vagas: [vaga] }] })
+    }
+  }
+  return grupos
+}
+
+// ─── Card de um grupo sala+turno (pode conter vários horários) ───────────────
+// Unidade e sala aparecem 1x aqui (são as mesmas pra todo horário do grupo);
+// turno aparece 1x por sub-bloco; só o horário e os candidatos variam linha
+// a linha dentro de cada VagaBloco.
+function GrupoSalaCard({
+  grupoSala, cRows, especialidade, cobertosPorVaga, onVerDetalhe, onVerRemanejamento,
+}: {
+  grupoSala: GrupoSalaTurno
+  cRows: CsvRow[]
+  especialidade: string
+  cobertosPorVaga: Map<string, string[]>
+  onVerDetalhe: (d: DetalheModalData) => void
+  onVerRemanejamento: (d: { sugestao: SugestaoContratacao; candidato: CandidatoNaSugestao; profissionalHipotetico?: string }) => void
+}) {
+  const cor = estiloUnidade(grupoSala.unidade)
+  return (
+    <div className="overflow-hidden rounded-xl border border-border">
+      <div className="flex flex-wrap items-center gap-2.5 border-b border-border bg-muted/40 px-3 py-2.5">
+        <span className={`rounded-full px-2.5 py-1 text-[12.5px] font-extrabold ${cor.bg} ${cor.text}`}>{grupoSala.unidade}</span>
+        <span className={grupoSala.sala
+          ? "text-[12px] font-extrabold uppercase tracking-wide text-foreground"
+          : "animate-pulse text-[12px] font-extrabold uppercase tracking-wide text-red-600 dark:text-red-400"}
+        >
+          {grupoSala.sala ? `Sala ${grupoSala.sala}` : "Sem sala livre encontrada"}
+        </span>
+      </div>
+      <div className="flex flex-col divide-y divide-border">
+        {grupoSala.turnos.map(({ turno, vagas }) => (
+          <div key={turno} className="flex flex-col gap-1 py-2">
+            <span className="px-3 text-[12px] font-extrabold uppercase tracking-wide text-sky-700 dark:text-sky-400">{turnoNome[turno]}</span>
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[680px] table-fixed border-collapse text-[12.5px]">
+                {COLGROUP_VAGA}
+                {/* Cabeçalho das colunas numéricas vive na mesma tabela dos dados
+                    (não numa tabela separada acima de tudo) — assim a largura e o
+                    alinhamento horizontal vêm de graça do colgroup compartilhado,
+                    em vez de precisar bater manualmente com o padding de cada card. */}
+                <thead>
+                  <tr className="border-b border-border/60">
+                    <th />
+                    <th />
+                    <th />
+                    <th className="whitespace-nowrap pb-1 pr-3 text-right text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Autorizado → ofertado</th>
+                    <th className="whitespace-nowrap pb-1 pr-3 text-right text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Valor/sessão</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {vagas.map((vaga, i) => (
+                    <VagaLinhas
+                      key={vaga.hora} vaga={vaga} cRows={cRows} especialidade={especialidade}
+                      cobertosPorVaga={cobertosPorVaga} onVerDetalhe={onVerDetalhe} onVerRemanejamento={onVerRemanejamento}
+                      separador={i > 0}
+                    />
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// ─── Linhas de uma vaga (horário) — só o que varia horário a horário ────────
+// Uma linha por candidato principal, fluindo direto no mesmo <table> do turno
+// (sem card/borda por horário) — "09:20 · Fulano ... próxima linha, 10:00 ·
+// Beltrano ...". Quando há disputa, só o candidato #1 ("Ofereça primeiro") vem
+// expandido com todo o contexto — os demais ("2ª opção", "3ª opção"...) ficam
+// recolhidos atrás de 1 toggle, numa linha bem mais compacta e sem repetir a
+// mesma frase de aviso ("só se o(s) anterior(es) recusar(em)") em cada um.
+function VagaLinhas({
+  vaga, cRows, especialidade, cobertosPorVaga, onVerDetalhe, onVerRemanejamento, separador,
 }: {
   vaga: GrupoVaga
   cRows: CsvRow[]
@@ -298,12 +429,12 @@ function CardVaga({
   cobertosPorVaga: Map<string, string[]>
   onVerDetalhe: (d: DetalheModalData) => void
   onVerRemanejamento: (d: { sugestao: SugestaoContratacao; candidato: CandidatoNaSugestao; profissionalHipotetico?: string }) => void
+  separador: boolean
 }) {
   const [reservasAbertas, setReservasAbertas] = useState(false)
   const principal = vaga.linhas[0]
   const reservas = vaga.linhas.slice(1)
   const { sugestao, unidade } = principal
-  const cor = estiloUnidade(unidade)
   const disputada = principal.concorrentesNaVaga > 1
   const vagaJaLivreNaClinica = principal.vagasInternasDisponiveis > 0
 
@@ -335,98 +466,58 @@ function CardVaga({
   }
 
   return (
-    <div className="overflow-hidden rounded-xl border border-border">
-      {/* Cabeçalho da vaga — horário/unidade/sala/status são os mesmos pra
-          todo candidato dela, então aparecem 1x aqui em vez de repetidos por linha. */}
-      <div className="flex flex-wrap items-center gap-2 border-b border-border bg-muted/40 px-3 py-2">
-        {/* Mesma escala tipográfica nos 4 rótulos (10px/bold) + só o horário em
-            destaque (sm) — antes misturava font-mono no horário, pill maior na
-            unidade e peso normal na sala, parecendo 4 fontes diferentes. */}
-        <span className="text-[10px] font-bold uppercase tracking-wide text-sky-700 dark:text-sky-400">{turnoNome[vaga.turno]}</span>
-        <span className="text-sm font-bold tabular-nums text-foreground">{vaga.hora}</span>
-        <span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${cor.bg} ${cor.text}`}>{unidade}</span>
-        <span className={sugestao.salaVinculada
-          ? "text-[10px] font-bold uppercase tracking-wide text-muted-foreground"
-          : "animate-pulse text-[10px] font-bold uppercase tracking-wide text-red-600 dark:text-red-400"}
-        >
-          {sugestao.salaVinculada ? `Sala ${sugestao.salaVinculada.numeroSala}` : "Sem sala livre encontrada"}
-        </span>
-        {disputada && (
-          <StatusPill tone="slate" dense>{vaga.linhas.length} candidatos disputando</StatusPill>
-        )}
-        {vagaJaLivreNaClinica && (
-          <div className="ml-auto flex flex-wrap items-center gap-1 text-[10px] font-bold text-muted-foreground">
-            <StatusPill tone="amber" variant="solid" dense>Já disponível na clínica</StatusPill>
-            <span>
-              apenas {principal.vagasInternasDisponiveis} vaga(s) interna(s)
-              {disputada && ` para ${principal.concorrentesNaVaga} candidatos`}
-              {principal.vagasInternasSlots.length > 0 && (
-                <> — <strong className="text-foreground">{fmtName(principal.vagasInternasSlots[0].profissional)}</strong></>
-              )}
-            </span>
-            <InfoTip ariaLabel="Por que esta vaga está destacada">
-              <p>Existe(m) <strong className="text-foreground">profissional(is) já contratado(s) livre(s)</strong> neste mesmo dia, horário, unidade e especialidade — veja "Ocupar Profissionais Disponíveis".</p>
-              <p className="mt-2">Todos os candidatos desta vaga estão destacados porque disputam essa(s) mesma(s) vaga(s) já existente(s).</p>
-            </InfoTip>
-          </div>
-        )}
-      </div>
-
-      {/* Candidato #1 — sempre expandido, com todo o contexto. */}
-      <div className="overflow-x-auto">
-        <table className="w-full min-w-[680px] table-fixed border-collapse text-[12.5px]">
-          {COLGROUP_VAGA}
-          <tbody>
-            <CandidatoLinha
-              linha={principal} cRows={cRows} disputada={disputada}
-              cobertosPorVaga={cobertosPorVaga} acao={acaoParaCandidato(principal)}
-            />
-          </tbody>
-        </table>
-      </div>
-
+    <>
+      <CandidatoLinha
+        hora={vaga.hora} linha={principal} cRows={cRows} disputada={disputada}
+        cobertosPorVaga={cobertosPorVaga} acao={acaoParaCandidato(principal)} separador={separador}
+      />
       {reservas.length > 0 && (
-        <div className="border-t border-border">
-          <button
-            type="button"
-            onClick={() => setReservasAbertas(v => !v)}
-            className="flex w-full items-center gap-1.5 px-3 py-2 text-left text-[11px] font-bold text-muted-foreground transition-colors hover:bg-muted/40"
-          >
-            {reservasAbertas ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-            {reservasAbertas ? "Ocultar" : "Ver"} {reservas.length} candidato(s) reserva
-            <span className="font-normal">— só entram se o(s) anterior(es) recusar(em), na ordem abaixo</span>
-          </button>
-          {reservasAbertas && (
-            <div className="overflow-x-auto border-t border-border">
-              <table className="w-full min-w-[680px] table-fixed border-collapse text-[12px]">
-                {COLGROUP_VAGA}
-                <tbody>
-                  {reservas.map((linha, i) => (
-                    <CandidatoLinhaReserva
-                      key={`${linha.dia}-${linha.candidato.turno}-${linha.candidato.hora}-${linha.candidato.paciente}-${i}`}
-                      linha={linha} cRows={cRows} cobertosPorVaga={cobertosPorVaga}
-                      acao={acaoParaCandidato(linha)}
-                    />
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </div>
+        <>
+          <tr>
+            <td colSpan={6} className="pb-1.5 pl-3">
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => setReservasAbertas(v => !v)}
+                  className="flex items-center gap-1.5 text-left text-[11px] font-bold text-muted-foreground transition-colors hover:text-foreground"
+                >
+                  {reservasAbertas ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                  {reservasAbertas ? "Ocultar" : "Ver"} outro(s) candidato(s) para essa vaga
+                </button>
+                <InfoTip ariaLabel="Como funciona a fila de candidatos desta vaga">
+                  <p>Só entram <strong className="text-foreground">se o(s) anterior(es) recusar(em)</strong>, na ordem em que aparecem ao expandir.</p>
+                </InfoTip>
+              </div>
+            </td>
+          </tr>
+          {reservasAbertas && reservas.map((linha, i) => (
+            <CandidatoLinhaReserva
+              key={`${linha.dia}-${linha.candidato.turno}-${linha.candidato.hora}-${linha.candidato.paciente}-${i}`}
+              linha={linha} cRows={cRows} cobertosPorVaga={cobertosPorVaga}
+              acao={acaoParaCandidato(linha)}
+            />
+          ))}
+        </>
       )}
-    </div>
+    </>
   )
 }
 
-// Linha completa (candidato #1) — motivo da prioridade e convênio visíveis.
+// Linha completa (candidato #1) — hora, motivo da prioridade e convênio
+// visíveis, tudo numa linha só: "09:20 · Fulano [Adjacência] ASSIM Saúde ...".
 function CandidatoLinha({
-  linha, cRows, disputada, cobertosPorVaga, acao,
-}: { linha: LinhaCandidato; cRows: CsvRow[]; disputada: boolean; cobertosPorVaga: Map<string, string[]>; acao: ReactNode }) {
+  linha, cRows, disputada, cobertosPorVaga, acao, hora, separador,
+}: {
+  linha: LinhaCandidato; cRows: CsvRow[]; disputada: boolean; cobertosPorVaga: Map<string, string[]>
+  acao: ReactNode; hora: string; separador?: boolean
+}) {
   const { candidato: c } = linha
   const adjacente = c.modalidade === "adjacente"
+  const vagaJaLivreNaClinica = linha.vagasInternasDisponiveis > 0
   return (
-    <tr className="hover:bg-muted/30">
-      <td className="w-8 py-2 pl-3">
+    <tr className={`hover:bg-muted/30 ${separador ? "border-t border-border/40" : ""}`}>
+      <td className="whitespace-nowrap py-2 pl-3 text-[12px] font-black tabular-nums text-foreground">{hora}</td>
+      <td className="py-2">
         <CheckCircle2 size={15} className="text-emerald-600 dark:text-emerald-400" aria-label="Pode oferecer agora" />
       </td>
       <td className="px-3 py-2">
@@ -436,15 +527,21 @@ function CandidatoLinha({
             {adjacente ? "Adjacência" : "Remanejamento"}
           </StatusPill>
           <span className="text-[11px] text-muted-foreground">{primeiroConvenioDoPaciente(c.paciente, cRows)}</span>
+          {vagaJaLivreNaClinica && (
+            <>
+              <StatusPill tone="amber" variant="solid" dense>Já disponível</StatusPill>
+              <InfoTip ariaLabel="Por que esta vaga está destacada">
+                <p>Existe(m) <strong className="text-foreground">profissional(is) já contratado(s) livre(s)</strong> neste mesmo dia, horário, unidade e especialidade — veja "Ocupar Profissionais Disponíveis".</p>
+                <p className="mt-2">
+                  Apenas {linha.vagasInternasDisponiveis} vaga(s) interna(s){disputada && ` para ${linha.concorrentesNaVaga} candidatos`}
+                  {linha.vagasInternasSlots.length > 0 && (
+                    <> — <strong className="text-foreground">{fmtName(linha.vagasInternasSlots[0].profissional)}</strong></>
+                  )}.
+                </p>
+              </InfoTip>
+            </>
+          )}
         </div>
-        {disputada && (
-          <div className="mt-1 flex flex-wrap items-center gap-1 text-[10px] font-bold text-muted-foreground">
-            <StatusPill tone="green" dense>Ofereça primeiro</StatusPill>
-            <span>
-              {linha.priorizadoPorFrequencia ? "mesmo valor, mas frequenta mais a clínica" : "mais rentável"} entre {linha.concorrentesNaVaga} candidatos nesta vaga
-            </span>
-          </div>
-        )}
         {!!c.cobertosInternamente && c.ordemNaVaga === linha.concorrentesNaVaga && (() => {
           const nomesCobertos = cobertosPorVaga.get(`${linha.dia}|||${c.turno}|||${c.hora}|||${linha.unidade}`) ?? []
           return (
@@ -483,7 +580,8 @@ function CandidatoLinhaReserva({
   const ultimaOpcao = c.ordemNaVaga === linha.concorrentesNaVaga
   return (
     <tr className="border-b border-border bg-muted/20 last:border-b-0 hover:bg-muted/40">
-      <td className="w-8 py-1.5 pl-3 text-center text-[10px] font-bold text-muted-foreground" title={`${c.ordemNaVaga}ª opção`}>
+      <td className="py-1.5 pl-3" />
+      <td className="py-1.5 text-center text-[10px] font-bold text-muted-foreground" title={`${c.ordemNaVaga}ª opção`}>
         {c.ordemNaVaga}ª
       </td>
       <td className="px-3 py-1.5">
@@ -547,6 +645,8 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
   const [detalhe, setDetalhe] = useState<DetalheModalData | null>(null)
   const [detalheRemanejamento, setDetalheRemanejamento] = useState<{ sugestao: SugestaoContratacao; candidato: CandidatoNaSugestao; profissionalHipotetico?: string } | null>(null)
   const [detalheFinanceiroAberto, setDetalheFinanceiroAberto] = useState(false)
+  const [vagaGradeAberta, setVagaGradeAberta] = useState<{ dia: string; vaga: GrupoVaga; cobertos?: { unidade: string; candidatos: CandidatoSlot[] } } | null>(null)
+  const [vagaCobertaAberta, setVagaCobertaAberta] = useState<{ dia: string; hora: string; unidade: string; candidatos: CandidatoSlot[] } | null>(null)
   const [destaqueAplicado, setDestaqueAplicado] = useState(false)
   const parametrosRef = useRef<HTMLDivElement>(null)
 
@@ -580,14 +680,22 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
 
   const podeSimular = laudosCarregados && especialidadeValida && cRows.length > 0 && periodosAlvo.length > 0
 
+  // Capacidade interna já usada por Direto (mesma fonte de "Ocupar
+  // Profissionais Disponíveis") — sem descontar isso na hora de ESCOLHER a
+  // unidade, o ranking/plano recomendado podia preferir uma unidade cuja
+  // "demanda" era só candidato(s) que a capacidade interna já cobre sozinha
+  // (nenhuma contratação resolveria nada ali), perdendo pra unidade com
+  // demanda real. Ver sessoesLiquidas em simulacaoNovoPrestador.ts.
+  const capacidadePorGrupo = useMemo(() => capacidadeDiretaRestante(cRows, gapMap), [cRows, gapMap])
+
   const unitRank = useMemo(() =>
-    podeSimular ? ranquearUnidades(periodosAlvo, especialidade, cRows, gapMap) : [],
-    [podeSimular, periodosAlvo, especialidade, cRows, gapMap],
+    podeSimular ? ranquearUnidades(periodosAlvo, especialidade, cRows, gapMap, capacidadePorGrupo) : [],
+    [podeSimular, periodosAlvo, especialidade, cRows, gapMap, capacidadePorGrupo],
   )
 
   const planoRecomendado = useMemo(() =>
-    podeSimular ? montarPlanoRecomendado(periodosAlvo, especialidade, cRows, gapMap) : [],
-    [podeSimular, periodosAlvo, especialidade, cRows, gapMap],
+    podeSimular ? montarPlanoRecomendado(periodosAlvo, especialidade, cRows, gapMap, capacidadePorGrupo) : [],
+    [podeSimular, periodosAlvo, especialidade, cRows, gapMap, capacidadePorGrupo],
   )
 
   // totalVagas conta horários distintos (slots), não candidatos — um mesmo
@@ -603,6 +711,16 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
     return { nPacientes: pacientes.size, totalVagas }
   }, [planoRecomendado])
 
+  // Quando todos os períodos do plano recomendado caem na mesma unidade, o
+  // plano não é de fato "misto" — é uma recomendação de unidade única. Evita
+  // repetir o nome da unidade em cada célula da grade e permite liderar com o
+  // número/unidade em vez de forçar a leitura de 10 células idênticas.
+  const planoHomogeneo = useMemo(() => {
+    if (!planoRecomendado.length) return null
+    const unidades = new Set(planoRecomendado.map(p => p.unidade))
+    return unidades.size === 1 ? planoRecomendado[0].unidade : null
+  }, [planoRecomendado])
+
   const vagasDaUnidade = (u: { periodos: PeriodoSimulado[] }) => u.periodos.reduce((soma, p) => soma + p.slots.length, 0)
 
   const periodosExibidos = useMemo((): PeriodoSimulado[] => {
@@ -613,8 +731,8 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
     // planoRecomendado já sai limitado por limitarCandidatosPorGap (dentro de
     // montarPlanoRecomendado) — chamar de novo aqui é inofensivo (idempotente)
     // e cobre o caminho de unidade fixada, que não passa por lá.
-    return limitarCandidatosPorGap(bruto, gapMap, especialidade)
-  }, [podeSimular, unidadeFixada, periodosAlvo, especialidade, cRows, gapMap, planoRecomendado])
+    return limitarCandidatosPorGap(bruto, gapMap, especialidade, capacidadePorGrupo)
+  }, [podeSimular, unidadeFixada, periodosAlvo, especialidade, cRows, gapMap, planoRecomendado, capacidadePorGrupo])
 
   const escalaComparativo = Math.max(1, planoStats.totalVagas, ...unitRank.map(vagasDaUnidade))
 
@@ -922,6 +1040,50 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
       })
   }, [linhasExibidas, vagasInternasPorChave])
 
+  // Índice dia+hora → vaga (mesmo dado de "Sessões e candidatos", só que
+  // indexado pra lookup O(1) ao clicar numa célula de "Agenda do novo
+  // profissional") — evita duplicar a lógica de agrupamento/prioridade de
+  // candidatos, que já vive em gruposPorDia.
+  const vagaPorDiaHora = useMemo(() => {
+    const m = new Map<string, GrupoVaga>()
+    for (const grupo of gruposPorDia) {
+      for (const vaga of grupo.vagas) m.set(`${grupo.dia}|||${vaga.hora}`, vaga)
+    }
+    return m
+  }, [gruposPorDia])
+
+  // Mesma ação dos botões "Ver detalhe"/"Ver antes/depois" de CardVaga
+  // (Sessões e candidatos), reaproveitada aqui pra abrir direto da grade de
+  // "Agenda do novo profissional" — sem repetir a lógica de profissionalHipotetico.
+  const abrirDetalheCandidato = (linha: LinhaCandidato) => {
+    const c = linha.candidato
+    const profissionalHipotetico = linha.vagasInternasDisponiveis > 0 ? linha.vagasInternasSlots[0]?.profissional : undefined
+    if (c.modalidade === "adjacente") {
+      setDetalhe({
+        pac: c.paciente,
+        slot: { dia: linha.dia, turno: c.turno, unidade: linha.unidade, hora: c.hora, candidatos: [] },
+        especialidade,
+        profissionalHipotetico,
+      })
+    } else {
+      setDetalheRemanejamento({ sugestao: linha.sugestao, candidato: c, profissionalHipotetico })
+    }
+  }
+
+  // Clique numa célula da grade: com só 1 candidato na vaga (e nenhum já
+  // coberto internamente) pula o seletor e já abre a agenda proposta direto
+  // (pedido do usuário 2026-08-17) — o seletor só aparece quando há mais de 1
+  // opção no total, incluindo o caso "parcialmente coberto" (pedido do
+  // usuário 2026-08-17: célula ambígua mostra as 3 opções — direto,
+  // remanejamento e já coberto — juntas no mesmo modal).
+  const abrirVagaGrade = (dia: string, vaga: GrupoVaga, cobertos?: { unidade: string; candidatos: CandidatoSlot[] }) => {
+    if (vaga.linhas.length === 1 && !cobertos?.candidatos.length) {
+      abrirDetalheCandidato(vaga.linhas[0])
+      return
+    }
+    setVagaGradeAberta({ dia, vaga, cobertos })
+  }
+
   // startTransition mantém o clique responsivo: o recálculo do plano (cadeia
   // de useMemo em ranquearUnidades/montarPlanoRecomendado/periodosEnriquecidos,
   // que varre a grade inteira) é pesado e síncrono — sem isso, o navegador
@@ -1042,7 +1204,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                   const diaInteiro = !!periodosSel[dia]?.manha && !!periodosSel[dia]?.tarde
                   return (
                     <tr key={dia}>
-                      <td className="pr-1 text-xs font-extrabold text-foreground">{diaCurto(dia)}</td>
+                      <td className="pr-1 text-xs font-extrabold uppercase text-foreground">{diaCurto(dia)}</td>
                       {(["manha", "tarde"] as Turno[]).map(turno => {
                         const marcado = !!periodosSel[dia]?.[turno]
                         const semSala = marcado && semSalaPorDiaTurno.has(`${dia}|||${turno}`)
@@ -1141,23 +1303,38 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
               >
                 <div className="mb-2 flex items-center gap-1.5">
                   <Star size={13} className="text-sky-600 dark:text-sky-400" />
-                  <span className="text-sm font-extrabold text-foreground">Plano recomendado (misto)</span>
+                  <span className="text-sm font-extrabold text-foreground">
+                    Plano recomendado{planoHomogeneo ? "" : " (misto)"}
+                  </span>
                   <InfoTip ariaLabel="Como o plano recomendado escolhe a unidade">
                     <p>Escolhe a <strong className="text-foreground">melhor unidade</strong> para cada dia/turno separadamente.</p>
                     <p className="mt-2">Se uma unidade for escolhida num turno (ex.: Padre Miguel de manhã), o sistema não mistura com outra unidade no outro turno do mesmo dia — <strong className="text-foreground">restrição geográfica</strong>.</p>
                   </InfoTip>
                 </div>
-                <div className="mb-2 flex items-center gap-1 text-[11px] text-muted-foreground">
-                  <strong className="text-foreground">{planoStats.nPacientes} paciente(s)</strong> disputando {planoStats.totalVagas} vaga(s) de horário
-                  <InfoTip ariaLabel="O que essa estimativa considera">
-                    <p>Estimativa do plano antes de resolver <strong className="text-foreground">remanejamento</strong>, <strong className="text-foreground">disponibilidade interna</strong> e <strong className="text-foreground">sala</strong>.</p>
-                    <p className="mt-2">O número final de vagas confirmadas aparece em <strong className="text-foreground">"Detalhamento"</strong> logo abaixo.</p>
-                  </InfoTip>
-                </div>
+                {planoHomogeneo ? (
+                  <div className="mb-2 flex items-baseline gap-1.5">
+                    <span className={`text-2xl font-black tabular-nums ${estiloUnidade(planoHomogeneo).text}`}>{planoStats.totalVagas}</span>
+                    <span className="text-[12px] font-semibold text-muted-foreground">
+                      vaga(s) em <strong className={estiloUnidade(planoHomogeneo).text}>{planoHomogeneo}</strong> · {planoStats.nPacientes} paciente(s) disputando
+                    </span>
+                    <InfoTip ariaLabel="O que essa estimativa considera">
+                      <p>Estimativa do plano antes de resolver <strong className="text-foreground">remanejamento</strong>, <strong className="text-foreground">disponibilidade interna</strong> e <strong className="text-foreground">sala</strong>.</p>
+                      <p className="mt-2">O número final de vagas confirmadas aparece em <strong className="text-foreground">"Detalhamento"</strong> logo abaixo.</p>
+                    </InfoTip>
+                  </div>
+                ) : (
+                  <div className="mb-2 flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <strong className="text-foreground">{planoStats.nPacientes} paciente(s)</strong> disputando {planoStats.totalVagas} vaga(s) de horário
+                    <InfoTip ariaLabel="O que essa estimativa considera">
+                      <p>Estimativa do plano antes de resolver <strong className="text-foreground">remanejamento</strong>, <strong className="text-foreground">disponibilidade interna</strong> e <strong className="text-foreground">sala</strong>.</p>
+                      <p className="mt-2">O número final de vagas confirmadas aparece em <strong className="text-foreground">"Detalhamento"</strong> logo abaixo.</p>
+                    </InfoTip>
+                  </div>
+                )}
                 <PlanoGradeSemanal periodos={planoRecomendado} />
               </button>
 
-              <div className="w-full min-w-0 flex-1 lg:border-l lg:border-border lg:pl-6">
+              <div className="w-full min-w-0 lg:max-w-[420px] lg:border-l lg:border-border lg:pl-6">
                 <div className="mb-2 flex items-center justify-between gap-2">
                   <div className="text-sm font-extrabold text-foreground">
                     Ou fixe numa unidade única
@@ -1178,23 +1355,43 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                     const referencia = (planoStats.totalVagas / escalaComparativo) * 100
                     const delta = vagasUnidade - planoStats.totalVagas
                     const ativo = unidadeFixada === u.unidade
+                    const semVagas = vagasUnidade === 0
+                    const ehRecomendada = !unidadeFixada && planoHomogeneo === u.unidade
                     return (
                       <button
                         key={u.unidade}
                         type="button"
                         onClick={() => startTransition(() => setUnidadeFixada(ativo ? "" : u.unidade))}
-                        className={`flex items-center gap-3 rounded-lg border p-2 text-left transition-colors ${ativo ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30" : "border-transparent hover:bg-muted/50"}`}
+                        className={`flex items-center gap-3 rounded-lg border p-2 text-left transition-colors ${
+                          ativo
+                            ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30"
+                            : semVagas
+                              ? "border-transparent opacity-70 hover:opacity-100 hover:bg-muted/40"
+                              : "border-transparent hover:bg-muted/50"
+                        }`}
                       >
-                        <span className={`w-[92px] shrink-0 truncate text-[12px] font-bold ${cor.text}`}>{u.unidade}</span>
-                        <span className="relative h-4 flex-1 rounded-full bg-muted">
-                          <span className={`absolute inset-y-0 left-0 rounded-full transition-[width] ${cor.bar}`} style={{ width: `${largura}%` }} />
+                        <span className={`flex w-[104px] shrink-0 items-center gap-1 truncate text-[12px] font-bold ${semVagas ? "text-muted-foreground" : cor.text}`}>
+                          {ehRecomendada && <Star size={10} className="shrink-0 text-sky-600 dark:text-sky-400" />}
+                          {u.unidade}
+                        </span>
+                        <span className="relative h-3 w-24 shrink-0 rounded-full bg-muted">
+                          {!semVagas && <span className={`absolute inset-y-0 left-0 rounded-full transition-[width] ${cor.bar}`} style={{ width: `${largura}%` }} />}
                           <span className="absolute -top-1 -bottom-1 w-[2px] bg-foreground/60" style={{ left: `${referencia}%` }} />
                         </span>
-                        <span className="w-[92px] shrink-0 text-right">
-                          <span className="block text-[12px] font-black tabular-nums text-foreground">{vagasUnidade} vaga(s)</span>
-                          <span className={`block text-[9.5px] font-bold ${delta < 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>
-                            {delta === 0 ? "igual ao plano" : `${delta} vs. plano`}
-                          </span>
+                        <span className="flex-1" />
+                        <span className="w-[100px] shrink-0 text-right">
+                          {semVagas ? (
+                            <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9.5px] font-bold ${TONE_SOFT.slate.bg} ${TONE_SOFT.slate.text}`}>
+                              Sem vagas
+                            </span>
+                          ) : (
+                            <>
+                              <span className="block text-[12px] font-black tabular-nums text-foreground">{vagasUnidade} vaga(s)</span>
+                              <span className={`block text-[9.5px] font-bold ${delta < 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>
+                                {delta === 0 ? "igual ao plano" : `${delta} vs. plano`}
+                              </span>
+                            </>
+                          )}
                         </span>
                       </button>
                     )
@@ -1211,6 +1408,8 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                 Projeção financeira - Ponto de Equilíbrio (Break Even)
               </div>
 
+              <div className="flex flex-col lg:flex-row lg:items-start lg:gap-6">
+              <div>
               {/* Frente 1 — mês real, com os dias úteis e feriados específicos desse calendário */}
               <div className="mb-1.5 flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
                 <span className="flex h-4 w-4 items-center justify-center rounded-full bg-muted text-[10px] font-black text-foreground">1</span>
@@ -1283,9 +1482,10 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                   Ver detalhe
                 </Button>
               </div>
+              </div>
 
               {(breakEvenFixoDisponivel || breakEvenAtendimentoDisponivel) && (
-                <div className="mt-3 border-t border-border pt-3">
+                <div className="mt-3 border-t border-border pt-3 lg:mt-0 lg:border-t-0 lg:border-l lg:pt-0 lg:pl-6">
                   {/* Frente 2 — média mensal padronizada, mesma base usada pelo Ponto de Equilíbrio */}
                   <div className="mb-1.5 flex items-center gap-1 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
                     <span className="flex h-4 w-4 items-center justify-center rounded-full bg-muted text-[10px] font-black text-foreground">2</span>
@@ -1328,41 +1528,41 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                       )}
                     </InfoTooltip>
                   </div>
-                  <div className="mb-2 flex items-center gap-1.5">
-                    <span className="text-[10.5px] font-bold text-muted-foreground">Perda (falta + ociosidade):</span>
-                    <div className="flex gap-1">
-                      {CENARIOS_PERDA_PCT.map(pct => (
-                        <button
-                          key={pct}
-                          type="button"
-                          onClick={() => setCenarioPerdaPct(pct)}
-                          className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors ${
-                            cenarioPerdaPct === pct
-                              ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-400"
-                              : "border-border bg-card text-muted-foreground hover:bg-muted/50"
-                          }`}
-                        >
-                          {pct}%
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
                   {breakEvenFixoDisponivel ? (
                     !resultadoBreakEven || !projecaoBreakEven ? (
                       <div className="text-[11px] text-muted-foreground">Simule pelo menos 1 vaga com candidato pra calcular o Ponto de Equilíbrio.</div>
                     ) : (
                       <div className="flex flex-col gap-2 sm:max-w-xs">
-                        <StatusPill tone={projecaoBreakEven.atingiuBreakEven ? "green" : "red"} variant="solid" dense className="w-full justify-center">
-                          {projecaoBreakEven.atingiuBreakEven ? "Break Even atingido" : "Break Even não atingido"}
-                        </StatusPill>
-
                         <StatCard tone={projecaoBreakEven.margemMensal >= 0 ? "green" : "red"} icon={<Wallet size={14} />} label="Margem — Projeção média mensal">
                           <div className={`text-lg font-black tabular-nums ${projecaoBreakEven.margemMensal >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
                             {projecaoBreakEven.margemMensal >= 0 ? "+" : ""}{fmtReal(projecaoBreakEven.margemMensal)}
                           </div>
                           <div className="text-[11px] text-muted-foreground">Valores brutos {fmtReal(resumoFinanceiro.semanal * SEMANAS_POR_MES)} · {fmtReal(resumoFinanceiro.semanal)}/semana</div>
                         </StatCard>
+
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10.5px] font-bold text-muted-foreground">Perda (falta + ociosidade):</span>
+                          <div className="flex gap-1">
+                            {CENARIOS_PERDA_PCT.map(pct => (
+                              <button
+                                key={pct}
+                                type="button"
+                                onClick={() => setCenarioPerdaPct(pct)}
+                                className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                                  cenarioPerdaPct === pct
+                                    ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-400"
+                                    : "border-border bg-card text-muted-foreground hover:bg-muted/50"
+                                }`}
+                              >
+                                {pct}%
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <StatusPill tone={projecaoBreakEven.atingiuBreakEven ? "green" : "red"} variant="solid" dense className="w-full justify-center">
+                          {projecaoBreakEven.atingiuBreakEven ? "Break Even atingido" : "Break Even não atingido"}
+                        </StatusPill>
 
                         <div className="space-y-1 rounded-lg bg-muted/40 px-2.5 py-2 text-[11.5px]">
                           <LinhaEquilibrio label="Valor médio da sessão (bruto)" valor={fmtReal(valorSessaoMedioSimulado)} />
@@ -1398,6 +1598,34 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                       <div className="text-[11px] text-muted-foreground">Simule pelo menos 1 vaga com candidato pra calcular o Ponto de Equilíbrio.</div>
                     ) : (
                       <div className="flex flex-col gap-2 sm:max-w-xs">
+                        <StatCard tone={projecaoBreakEvenAtendimento.margemMensal >= 0 ? "green" : "red"} icon={<Wallet size={14} />} label="Margem — Projeção média mensal">
+                          <div className={`text-lg font-black tabular-nums ${projecaoBreakEvenAtendimento.margemMensal >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
+                            {projecaoBreakEvenAtendimento.margemMensal >= 0 ? "+" : ""}{fmtReal(projecaoBreakEvenAtendimento.margemMensal)}
+                          </div>
+                          <div className="text-[11px] text-muted-foreground">Valores brutos {fmtReal(resumoFinanceiro.semanal * SEMANAS_POR_MES)} · {fmtReal(resumoFinanceiro.semanal)}/semana</div>
+                          <div className="text-[11px] text-muted-foreground">Líquido {fmtReal(projecaoBreakEvenAtendimento.receitaLiquidaMes)} · {projecaoBreakEvenAtendimento.sessoesEfetivasMes.toFixed(2)} sessões/mês</div>
+                        </StatCard>
+
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-[10.5px] font-bold text-muted-foreground">Perda (falta + ociosidade):</span>
+                          <div className="flex gap-1">
+                            {CENARIOS_PERDA_PCT.map(pct => (
+                              <button
+                                key={pct}
+                                type="button"
+                                onClick={() => setCenarioPerdaPct(pct)}
+                                className={`rounded-full border px-2.5 py-1 text-[11px] font-bold transition-colors ${
+                                  cenarioPerdaPct === pct
+                                    ? "border-sky-400 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-400"
+                                    : "border-border bg-card text-muted-foreground hover:bg-muted/50"
+                                }`}
+                              >
+                                {pct}%
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
                         <StatusPill tone={resultadoBreakEvenAtendimento.atingiuBreakEven ? "green" : "red"} variant="solid" dense className="w-full justify-center">
                           {resultadoBreakEvenAtendimento.atingiuBreakEven ? "Break Even atingido" : "Break Even não atingido"}
                         </StatusPill>
@@ -1409,14 +1637,6 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                             <p className="mt-2">O motivo: nesse modelo, tanto a receita quanto o custo são <strong className="text-foreground">por sessão realizada</strong> — se uma sessão não acontece (falta/ociosidade), a clínica não fatura aquela sessão, mas também não paga o profissional por ela (paga a taxa PA só pelo que foi atendido). Então perda reduz receita e custo na <strong className="text-foreground">mesma proporção</strong>, e o veredito "dá lucro ou não" já fica decidido numa única sessão isolada.</p>
                           </InfoTip>
                         </div>
-
-                        <StatCard tone={projecaoBreakEvenAtendimento.margemMensal >= 0 ? "green" : "red"} icon={<Wallet size={14} />} label="Margem — Projeção média mensal">
-                          <div className={`text-lg font-black tabular-nums ${projecaoBreakEvenAtendimento.margemMensal >= 0 ? "text-emerald-700 dark:text-emerald-400" : "text-rose-600 dark:text-rose-400"}`}>
-                            {projecaoBreakEvenAtendimento.margemMensal >= 0 ? "+" : ""}{fmtReal(projecaoBreakEvenAtendimento.margemMensal)}
-                          </div>
-                          <div className="text-[11px] text-muted-foreground">Valores brutos {fmtReal(resumoFinanceiro.semanal * SEMANAS_POR_MES)} · {fmtReal(resumoFinanceiro.semanal)}/semana</div>
-                          <div className="text-[11px] text-muted-foreground">Líquido {fmtReal(projecaoBreakEvenAtendimento.receitaLiquidaMes)} · {projecaoBreakEvenAtendimento.sessoesEfetivasMes.toFixed(2)} sessões/mês</div>
-                        </StatCard>
 
                         <div className="space-y-1 rounded-lg bg-muted/40 px-2.5 py-2 text-[11.5px]">
                           <LinhaEquilibrio label="Valor médio da sessão (bruto)" valor={fmtReal(valorSessaoMedioSimulado)} />
@@ -1450,6 +1670,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                   )}
                 </div>
               )}
+              </div>
             </div>
           )}
 
@@ -1468,8 +1689,9 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
               </div>
 
               <div className="flex flex-col gap-4 p-4">
+                <div className="flex flex-col xl:flex-row gap-4 items-start">
                 {/* Agenda do novo profissional */}
-                <div className="w-fit max-w-full min-w-0 rounded-xl bg-muted/40 p-3">
+                <div className="w-fit max-w-full min-w-0 rounded-xl bg-muted/40 p-4">
                   <div className="mb-2 flex items-center justify-between gap-2">
                     <span className="text-sm font-extrabold text-foreground">Agenda do novo profissional</span>
                     <div className="flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
@@ -1501,19 +1723,52 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                   </div>
                   <div className="mb-1 text-[10px] font-bold text-muted-foreground sm:hidden">deslize para o lado →</div>
                   <div className="overflow-x-auto">
-                    <table className="border-separate border-spacing-1.5" style={{ width: `${64 + diasAgendas.length * 112}px` }}>
+                    {/* border-spacing-y sutil (0.5 = 2px) — um respiro mínimo
+                        entre sessões e entre a barra de unidade e a 1ª sessão
+                        do turno, sem reabrir o vão grande que existia antes
+                        (pedido do usuário 2026-08-17; ajuste só visual, nenhum
+                        cálculo muda). */}
+                    <table className="border-separate border-spacing-x-1.5 border-spacing-y-0.5" style={{ width: `${64 + diasAgendas.length * 128}px` }}>
                       <thead>
                         <tr>
                           <th className="w-14" />
                           {diasAgendas.map(dia => (
-                            <th key={dia} className="min-w-[112px] pb-1 text-center text-[12px] font-extrabold text-foreground">{diaCurto(dia)}</th>
+                            <th key={dia} className="min-w-[128px] pb-1 text-center text-[12px] font-extrabold uppercase text-foreground">{diaCurto(dia)}</th>
                           ))}
                         </tr>
                       </thead>
                       <tbody>
-                        {horasAgendas.map(hora => (
+                        {(["manha", "tarde"] as Turno[]).map(turno => {
+                          const horasTurno = horasAgendas.filter(h => turnoFromHora(h) === turno)
+                          if (!horasTurno.length) return null
+                          return (
+                          <Fragment key={turno}>
+                          {/* Barra de unidade por dia+turno — no plano "misto" cada
+                              dia/turno pode vir de uma unidade diferente (ver
+                              montarPlanoRecomendado), e sem isso não dava pra saber
+                              qual unidade cada bloco de sessões representa sem abrir
+                              o modal "Ver agenda" de cada paciente. Mesmo padrão
+                              visual da barra de unidade dominante nos modais
+                              (RemanejamentoDetalheModal/PacienteAgendaHipoteticaModal). */}
+                          <tr>
+                            <td className="pr-2 text-right text-[9px] font-black uppercase tracking-widest text-muted-foreground/70">{turnoNome[turno]}</td>
+                            {diasAgendas.map(dia => {
+                              const unidade = agendaNovoProf?.grade[`${dia}|||${horasTurno[0]}`]?.unidade
+                                ?? agendaJaCoberta?.grade[`${dia}|||${horasTurno[0]}`]?.unidade
+                              return (
+                                <td key={dia} className="px-0.5 pb-0.5">
+                                  {unidade && (
+                                    <div className={`rounded-md py-0.5 text-center text-[9px] font-black uppercase tracking-wide text-white ${estiloUnidade(unidade).bar}`}>
+                                      {unidade}
+                                    </div>
+                                  )}
+                                </td>
+                              )
+                            })}
+                          </tr>
+                          {horasTurno.map(hora => (
                           <tr key={hora}>
-                            <td className="rounded-md bg-card px-2 py-1 text-right font-mono text-[13px] font-bold text-foreground">{hora}</td>
+                            <td className="rounded-md bg-card px-2 py-1 text-right text-[13px] font-bold tabular-nums text-foreground">{hora}</td>
                             {diasAgendas.map(dia => {
                               const chave = `${dia}|||${hora}`
                               const celula = agendaNovoProf?.grade[chave]
@@ -1523,14 +1778,20 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                               const ambiguo = qtdRestante > 0 && qtdCoberta > 0
 
                               if (qtdRestante === 0 && qtdCoberta === 0) {
-                                return <td key={dia}><div className="h-9 rounded-md border border-border bg-card" /></td>
+                                // Fundo igual ao card ao redor (bg-card) fazia a célula
+                                // "sumir" — parecia espaço em branco puro ao lado dos
+                                // cartões coloridos. Borda tracejada discreta em vez de
+                                // sólida invisível (só visual, sem mudar nenhum cálculo).
+                                return <td key={dia}><div className="h-9 rounded-md border border-dashed border-border/40" /></td>
                               }
                               if (qtdRestante === 0) {
                                 return (
                                   <td key={dia}>
-                                    <div
+                                    <button
+                                      type="button"
+                                      onClick={() => setVagaCobertaAberta({ dia, hora, unidade: cobertura!.unidade, candidatos: cobertura!.candidatos })}
                                       title="Vaga já coberta pela capacidade interna — contratar aqui não mudaria a ocupação"
-                                      className="flex h-9 flex-col items-center justify-center gap-0.5 rounded-md border border-rose-300 bg-rose-50 px-1.5 text-center dark:border-rose-800 dark:bg-rose-950/40"
+                                      className="flex h-9 w-full cursor-pointer flex-col items-center justify-center gap-0.5 rounded-md border border-rose-300 bg-rose-50 px-1.5 text-center hover:brightness-95 dark:border-rose-800 dark:bg-rose-950/40"
                                     >
                                       {qtdCoberta === 1 ? (
                                         <div className="text-[10.5px] font-bold leading-tight text-rose-800 dark:text-rose-300">{fmtName(cobertura!.candidatos[0].pac)}</div>
@@ -1538,7 +1799,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                                         <div className="text-sm font-black leading-none text-rose-800 dark:text-rose-300">{qtdCoberta}</div>
                                       )}
                                       <div className="text-[8.5px] font-semibold uppercase tracking-wide text-rose-700 dark:text-rose-400 opacity-90">sem contratar</div>
-                                    </div>
+                                    </button>
                                   </td>
                                 )
                               }
@@ -1547,11 +1808,15 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                                 ? { border: "border-amber-300 dark:border-amber-800", bg: "bg-amber-50 dark:bg-amber-900/30", text: "text-amber-900 dark:text-amber-200" }
                                 : { border: "border-sky-200 dark:border-sky-800", bg: cor.bg, text: cor.text }
                               const totalNaVaga = qtdRestante + qtdCoberta
+                              const vagaDaCelula = vagaPorDiaHora.get(`${dia}|||${hora}`)
                               return (
                                 <td key={dia}>
-                                  <div
+                                  <button
+                                    type="button"
+                                    disabled={!vagaDaCelula}
+                                    onClick={() => vagaDaCelula && abrirVagaGrade(dia, vagaDaCelula, ambiguo ? { unidade: cobertura!.unidade, candidatos: cobertura!.candidatos } : undefined)}
                                     title={ambiguo ? `${totalNaVaga} candidato(s) disputam esta vaga: ${qtdCoberta} já está(ão) coberto(s) pela capacidade interna, ${qtdRestante} precisaria(m) da contratação` : undefined}
-                                    className={`flex flex-col items-center justify-center gap-0.5 rounded-md border px-1.5 text-center ${ambiguo ? "h-14" : "h-9"} ${corCelula.border} ${corCelula.bg}`}
+                                    className={`flex w-full flex-col items-center justify-center gap-0.5 rounded-md border px-1.5 text-center ${ambiguo ? "h-14" : "h-9"} ${corCelula.border} ${corCelula.bg} ${vagaDaCelula ? "cursor-pointer hover:brightness-95" : "cursor-default"}`}
                                   >
                                     {!ambiguo && qtdRestante === 1 ? (
                                       <div className={`text-[10.5px] font-bold leading-tight ${corCelula.text}`}>{fmtName(celula!.candidatos[0].pac)}</div>
@@ -1573,23 +1838,25 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                                         <div className={`text-[8.5px] font-semibold uppercase tracking-wide ${corCelula.text} opacity-80`}>candidato(s)</div>
                                       </>
                                     )}
-                                  </div>
+                                  </button>
                                 </td>
                               )
                             })}
                           </tr>
-                        ))}
+                          ))}
+                          </Fragment>
+                          )
+                        })}
                       </tbody>
                     </table>
                   </div>
                 </div>
 
-                <div className="flex flex-col xl:flex-row gap-4 items-start">
                   {/* Carga semanal */}
-                  <div className="w-full xl:w-[260px] shrink-0 rounded-xl bg-muted/40 p-4">
+                  <div className="w-full xl:w-[300px] shrink-0 rounded-xl bg-muted/40 p-4">
                     <div className="text-sm font-extrabold text-foreground">Carga semanal</div>
                     <div className="mb-3 text-[11px] text-muted-foreground">Novo profissional hipotético</div>
-                    <div className="relative mx-auto aspect-square w-[150px] sm:w-[190px]">
+                    <div className="relative mx-auto aspect-square w-[170px] sm:w-[210px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
@@ -1644,27 +1911,34 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                   )}
                 </div>
 
-                  {/* Ocupação por dia */}
-                  <div className="w-full min-w-0 xl:w-auto xl:max-w-[480px] rounded-xl bg-muted/40 p-4">
+                  {/* Ocupação por dia — só 4 colunas compactas, não precisa da
+                      largura generosa das outras duas seções ao lado. */}
+                  <div className="w-full min-w-0 xl:w-[320px] xl:shrink-0 rounded-xl bg-muted/40 p-4">
                     <div className="text-sm font-extrabold text-foreground">Ocupação por dia</div>
                     <div className="mb-3 text-[11px] text-muted-foreground">Novo profissional hipotético</div>
                     <table className="w-full table-fixed text-[13px]">
+                    <colgroup>
+                      <col className="w-[68px]" />
+                      <col />
+                      <col className="w-[54px]" />
+                      <col className="w-[60px]" />
+                    </colgroup>
                     <thead>
                       <tr className="border-b border-border">
-                        <th className="w-[18%] pb-2 pr-2 text-left text-[11px] font-bold text-muted-foreground">Dia</th>
+                        <th className="whitespace-nowrap pb-2 pr-2 text-left text-[11px] font-bold text-muted-foreground">Dia</th>
                         <th className="pb-2 pr-2 text-left text-[11px] font-bold text-muted-foreground">Unidade</th>
-                        <th className="w-[22%] pb-2 pr-2 text-center text-[11px] font-bold whitespace-nowrap text-muted-foreground">Sessões</th>
-                        <th className="w-[22%] pb-2 text-right text-[11px] font-bold whitespace-nowrap text-muted-foreground">% ocup.</th>
+                        <th className="pb-2 pr-2 text-center text-[11px] font-bold whitespace-nowrap text-muted-foreground">Sessões</th>
+                        <th className="pb-2 text-right text-[11px] font-bold whitespace-nowrap text-muted-foreground">% ocup.</th>
                       </tr>
                     </thead>
                     <tbody>
                       {agendaNovoProf.porDia.map(row => (
                         <tr key={row.dia} className="border-b border-border last:border-b-0">
-                          <td className="py-2 pr-2 font-bold text-foreground">{diaCurto(row.dia)}</td>
+                          <td className="whitespace-nowrap py-2 pr-2 font-bold text-foreground">{diaCurto(row.dia)}</td>
                           <td className="truncate py-2 pr-2 text-foreground">{row.unidades}</td>
-                          <td className="py-2 pr-2 text-center tabular-nums text-foreground">{row.sessoes}/{row.totalSlots}</td>
+                          <td className="whitespace-nowrap py-2 pr-2 text-center tabular-nums text-foreground">{row.sessoes}/{row.totalSlots}</td>
                           <td className="py-2 text-right">
-                            <StatusPill tone={row.pct >= 70 ? "green" : row.pct >= 30 ? "amber" : "red"} variant="solid" dense>
+                            <StatusPill tone={row.pct >= 70 ? "green" : row.pct > 50 ? "amber" : "red"} variant="solid" dense>
                               {row.pct.toFixed(0)}%
                             </StatusPill>
                           </td>
@@ -1677,7 +1951,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
 
                 <div className="border-t border-border pt-4">
                   <div className="mb-2 flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-extrabold text-foreground">Sessões e candidatos</span>
+                    <span className="text-base font-extrabold text-foreground">Sessões e candidatos em formato lista</span>
                     <span className="ml-auto text-[11px] text-muted-foreground">{linhasExibidas.length} candidatura(s) elegível(is) em {vagasExibidas} vaga(s) de horário</span>
                   </div>
                   {algumPeriodoSemSala && (
@@ -1690,33 +1964,16 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                   ) : (
                     <div className="flex flex-col gap-5">
                       <div className="text-[10px] font-bold text-muted-foreground sm:hidden">deslize para o lado →</div>
-                      {/* Cabeçalho único das colunas numéricas — 1x pra tela toda em vez de
-                          repetir em cada card de vaga (o mesmo COLGROUP_VAGA garante que as
-                          colunas alinham com as tabelas abaixo). */}
-                      <div className="overflow-x-auto">
-                        <table className="w-full min-w-[680px] table-fixed border-collapse">
-                          {COLGROUP_VAGA}
-                          <thead>
-                            <tr>
-                              <th className="w-8" />
-                              <th />
-                              <th className="w-[150px] pb-1 pr-3 text-right text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Autorizado → ofertado</th>
-                              <th className="w-[180px] pb-1 pr-3 text-right text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Valor/sessão</th>
-                              <th className="w-[150px]" />
-                            </tr>
-                          </thead>
-                        </table>
-                      </div>
                       {gruposPorDia.map(grupo => (
                         <div key={grupo.dia}>
-                          <div className="mb-1.5 text-[11px] font-extrabold uppercase tracking-wide text-muted-foreground">
+                          <div className="mb-2 text-[13.5px] font-extrabold uppercase tracking-wide text-foreground">
                             {grupo.dia}
                           </div>
                           <div className="flex flex-col gap-2">
-                            {grupo.vagas.map(vaga => (
-                              <CardVaga
-                                key={`${grupo.dia}-${vaga.turno}-${vaga.hora}`}
-                                vaga={vaga}
+                            {agruparPorSalaTurno(grupo.vagas).map((grupoSala, i) => (
+                              <GrupoSalaCard
+                                key={`${grupo.dia}-${grupoSala.unidade}-${grupoSala.sala ?? "sem-sala"}-${i}`}
+                                grupoSala={grupoSala}
                                 cRows={cRows}
                                 especialidade={especialidade}
                                 cobertosPorVaga={cobertosPorVaga}
@@ -1766,6 +2023,147 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
           onClose={() => setDetalheFinanceiroAberto(false)}
         />
       )}
+      {vagaGradeAberta && (() => {
+        const diretos = vagaGradeAberta.vaga.linhas.filter(l => l.candidato.modalidade === "adjacente")
+        const remanejamentos = vagaGradeAberta.vaga.linhas.filter(l => l.candidato.modalidade === "remanejamento")
+        const cobertos = vagaGradeAberta.cobertos?.candidatos ?? []
+        const profissionaisLivres = cobertos.length
+          ? vagasInternasPorChave.get(`${vagaGradeAberta.dia}|||${vagaGradeAberta.vaga.hora}|||${vagaGradeAberta.cobertos!.unidade}`) ?? []
+          : []
+        return (
+          <ScheduleModal
+            title={`${vagaGradeAberta.dia} · ${vagaGradeAberta.vaga.hora}`}
+            subtitle={cobertos.length
+              ? "Vaga parcialmente coberta — parte já é atendida internamente, veja as 3 opções dessa vaga."
+              : "Mais de um paciente candidato a essa vaga — veja quem é cada um."}
+            maxWidth={480}
+            onClose={() => setVagaGradeAberta(null)}
+          >
+            <div className="flex flex-col gap-4">
+              {diretos.length > 0 && (
+                <div>
+                  <div className="mb-2 flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-emerald-700 dark:text-emerald-400">
+                    <CheckCircle2 size={13} /> Oportunidade direta
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    {diretos.map((linha, i) => (
+                      <button
+                        key={`direto-${i}`}
+                        type="button"
+                        onClick={() => abrirDetalheCandidato(linha)}
+                        className="flex items-center justify-between gap-2 rounded-lg border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 px-3 py-2 text-left hover:brightness-95"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-[12.5px] font-bold text-foreground">{fmtName(linha.candidato.paciente)}</span>
+                          <span className="block truncate text-[10.5px] text-muted-foreground">{linha.unidade} · {linha.sugestao.especialidade}</span>
+                        </span>
+                        <span className="shrink-0 text-[10.5px] font-bold text-emerald-700 dark:text-emerald-400">Ver agenda</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {remanejamentos.length > 0 && (
+                <div>
+                  <div className="mb-2 flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-sky-700 dark:text-sky-400">
+                    <Repeat2 size={13} /> Oportunidade via remanejamento
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    {remanejamentos.map((linha, i) => (
+                      <button
+                        key={`remanejamento-${i}`}
+                        type="button"
+                        onClick={() => abrirDetalheCandidato(linha)}
+                        className="flex items-center justify-between gap-2 rounded-lg border border-sky-300 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/30 px-3 py-2 text-left hover:brightness-95"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-[12.5px] font-bold text-foreground">{fmtName(linha.candidato.paciente)}</span>
+                          <span className="block truncate text-[10.5px] text-muted-foreground">{linha.unidade} · {linha.sugestao.especialidade}</span>
+                        </span>
+                        <span className="shrink-0 text-[10.5px] font-bold text-sky-700 dark:text-sky-400">Ver antes/depois</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {cobertos.length > 0 && (
+                <div>
+                  <div className="mb-2 flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-rose-700 dark:text-rose-400">
+                    <House size={13} /> Já coberto pela capacidade interna
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    {cobertos.map((c, i) => (
+                      <button
+                        key={`coberto-${i}`}
+                        type="button"
+                        onClick={() => setDetalhe({
+                          pac: c.pac,
+                          slot: { dia: vagaGradeAberta.dia, turno: turnoFromHora(vagaGradeAberta.vaga.hora), hora: vagaGradeAberta.vaga.hora, unidade: vagaGradeAberta.cobertos!.unidade, candidatos: [] },
+                          especialidade,
+                          profissionalHipotetico: profissionaisLivres[i]?.profissional,
+                        })}
+                        className="flex items-center justify-between gap-2 rounded-lg border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/30 px-3 py-2 text-left hover:brightness-95"
+                      >
+                        <span className="min-w-0">
+                          <span className="block truncate text-[12.5px] font-bold text-foreground">{fmtName(c.pac)}</span>
+                          <span className="block truncate text-[10.5px] text-muted-foreground">{vagaGradeAberta.cobertos!.unidade}</span>
+                        </span>
+                        <span className="flex shrink-0 items-center gap-1 text-right text-[10.5px] font-bold text-rose-700 dark:text-rose-400">
+                          {profissionaisLivres[i] ? fmtName(profissionaisLivres[i].profissional) : "Profissional já disponível"}
+                          <ChevronRight size={13} className="shrink-0" />
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </ScheduleModal>
+        )
+      })()}
+      {vagaCobertaAberta && (() => {
+        const profissionaisLivres = vagasInternasPorChave.get(`${vagaCobertaAberta.dia}|||${vagaCobertaAberta.hora}|||${vagaCobertaAberta.unidade}`) ?? []
+        return (
+          <ScheduleModal
+            title={`${vagaCobertaAberta.dia} · ${vagaCobertaAberta.hora}`}
+            subtitle="Capacidade interna já cobre essa vaga — contratando ou não, quem já está na clínica vai atender."
+            maxWidth={480}
+            onClose={() => setVagaCobertaAberta(null)}
+          >
+            <div>
+              <div className="mb-2 flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-rose-700 dark:text-rose-400">
+                <House size={13} /> Já coberto pela capacidade interna
+              </div>
+              <div className="flex flex-col gap-1.5">
+                {vagaCobertaAberta.candidatos.map((c, i) => (
+                  <button
+                    key={`coberto-${i}`}
+                    type="button"
+                    onClick={() => setDetalhe({
+                      pac: c.pac,
+                      slot: { dia: vagaCobertaAberta.dia, turno: turnoFromHora(vagaCobertaAberta.hora), hora: vagaCobertaAberta.hora, unidade: vagaCobertaAberta.unidade, candidatos: [] },
+                      especialidade,
+                      profissionalHipotetico: profissionaisLivres[i]?.profissional,
+                    })}
+                    className="flex items-center justify-between gap-2 rounded-lg border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/30 px-3 py-2 text-left hover:brightness-95"
+                  >
+                    <span className="min-w-0">
+                      <span className="block truncate text-[12.5px] font-bold text-foreground">{fmtName(c.pac)}</span>
+                      <span className="block truncate text-[10.5px] text-muted-foreground">{vagaCobertaAberta.unidade}</span>
+                    </span>
+                    <span className="flex shrink-0 items-center gap-1 text-right text-[10.5px] font-bold text-rose-700 dark:text-rose-400">
+                      {profissionaisLivres[i] ? fmtName(profissionaisLivres[i].profissional) : "Profissional já disponível"}
+                      <ChevronRight size={13} className="shrink-0" />
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </ScheduleModal>
+        )
+      })()}
     </div>
   )
 }
