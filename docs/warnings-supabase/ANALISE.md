@@ -265,11 +265,13 @@ Este bloco inteiro não é mecânico: cada policy exige decisão de "quem pode".
 | 6 | Investigar policies sobrepostas (§5) | 0 | ✅ feito — virou achado maior que o advisor |
 | 7a | RLS da `fila_autorizacoes` | 2 | ✅ **em produção 2026-08-17** |
 | 2+3 | Grupos A/B/C/D + hook + retarget de policies | ~103 | ✅ **em produção 2026-08-17** (ver ressalva abaixo) |
+| 4 | `search_path` nas 77 | 77 | ✅ **em produção 2026-08-17** |
 | 1 | Toggle leaked password | 1 | pendente — 1 clique |
-| 4 | `search_path` nas 77 (sem mover extensão) | 77 | pendente |
 | 5 | Duplicatas de policy em `logs` | 2 | pendente — limpeza pura |
-| 7b | RLS `always_true`, outras 11 tabelas | 20 | pendente — decisão de produto, uma a uma |
+| 7b | RLS `always_true`, outras 11 tabelas | 22 | pendente — decisão de produto, uma a uma |
 | 8 | Mover `pg_net` (opcional) | 3 | não recomendado — quebra 9 syncs |
+
+**Placar: 208 → 52.** Dos 52 que restam, **24 são exposição deliberada** e vão ficar: 16 funções que `authenticated` precisa executar (`remuneracao_has_role` sozinha é citada por policies de 24 tabelas) e as 8 do Grupo E abertas a `anon` de propósito. O teto realista é ~24, não zero.
 
 ### Fase 2+3 — o que foi medido depois de aplicar
 
