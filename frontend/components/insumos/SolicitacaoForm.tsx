@@ -16,6 +16,7 @@ import {
   ORDEM_PRIORIDADE_EXIBICAO,
   PRIORIDADE_LABEL,
   SETORES_COMPRA,
+  UNIDADES_MEDIDA,
   sugerirCategoria,
 } from "@/lib/insumos/rotulos"
 import { CATEGORIAS_COMPRA, type CategoriaCompra, type Prioridade } from "@/lib/insumos/tipos"
@@ -26,6 +27,7 @@ import { listarEmpresas, type EmpresaVinculada } from "@/services/insumos.servic
 // Porta components/compras/SolicitacaoForm.tsx do AXIUM.
 
 const OUTRO_SETOR = "Outro"
+const OUTRO_UNIDADE = "Outra"
 
 // Descrição e marca são digitadas como chips e concatenadas com "; " antes de ir
 // ao servidor, que só vê uma string. Não é cosmético: `descricao_detalhada`
@@ -64,14 +66,16 @@ export type SolicitacaoFormValues = {
 type Estado = Omit<SolicitacaoFormValues, "categoria"> & { categoria: CategoriaCompra | "" }
 
 const PADROES: Estado = {
-  setor: SETORES_COMPRA[0],
+  // Vazio de propósito: a tela deve abrir sem setor pré-marcado, para não
+  // deixar passar uma escolha que ninguém fez.
+  setor: "",
   categoria: "",
   prioridade: "NORMAL",
   justificativaCompra: "",
   nomeItem: "",
   descricaoDetalhada: "",
   quantidade: 1,
-  unidadeMedida: "un",
+  unidadeMedida: UNIDADES_MEDIDA[0],
   linkReferencia: "",
   marketplacePermitido: "Mercado Livre",
   prazoMaximoEntregaDias: 7,
@@ -95,6 +99,10 @@ export function SolicitacaoForm({
   const [setorLivre, setSetorLivre] = useState(
     Boolean(valoresIniciais?.setor) &&
       !SETORES_COMPRA.includes((valoresIniciais?.setor ?? "") as (typeof SETORES_COMPRA)[number])
+  )
+  const [unidadeLivre, setUnidadeLivre] = useState(
+    Boolean(valoresIniciais?.unidadeMedida) &&
+      !UNIDADES_MEDIDA.includes((valoresIniciais?.unidadeMedida ?? "") as (typeof UNIDADES_MEDIDA)[number])
   )
   // Trava a sugestão automática de categoria: depois que a pessoa escolheu à mão,
   // continuar sugerindo sobrescreveria a decisão dela a cada tecla.
@@ -225,6 +233,9 @@ export function SolicitacaoForm({
               }}
               obrigatorio
             >
+              <option value="" disabled>
+                Selecione um setor
+              </option>
               {SETORES_COMPRA.map((setor) => (
                 <option key={setor} value={setor}>
                   {setor}
@@ -330,13 +341,37 @@ export function SolicitacaoForm({
             onChange={(v) => set("quantidade", Number(v))}
             obrigatorio
           />
-          <CampoTexto
+          <CampoSelecao
             label="Unidade de medida"
+            valor={unidadeLivre ? OUTRO_UNIDADE : valores.unidadeMedida}
+            onChange={(v) => {
+              if (v === OUTRO_UNIDADE) {
+                setUnidadeLivre(true)
+                set("unidadeMedida", "")
+              } else {
+                setUnidadeLivre(false)
+                set("unidadeMedida", v)
+              }
+            }}
+            obrigatorio
+          >
+            {UNIDADES_MEDIDA.map((unidade) => (
+              <option key={unidade} value={unidade}>
+                {unidade}
+              </option>
+            ))}
+            <option value={OUTRO_UNIDADE}>{OUTRO_UNIDADE}</option>
+          </CampoSelecao>
+        </Linha>
+
+        {unidadeLivre && (
+          <CampoTexto
+            label="Qual unidade?"
             valor={valores.unidadeMedida}
             onChange={(v) => set("unidadeMedida", v)}
             obrigatorio
           />
-        </Linha>
+        )}
 
         <Linha>
           <CampoTexto

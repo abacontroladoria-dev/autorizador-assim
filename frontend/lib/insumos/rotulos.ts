@@ -120,6 +120,30 @@ export const SETORES_COMPRA = [
   "Manutenção",
 ] as const
 
+/**
+ * Unidades de medida por extenso, para o dropdown do formulário. A coluna no
+ * banco (`unidade_medida`) é `text` livre, sem CHECK — igual ao AXIUM — então
+ * esta lista é só curadoria de UI, com o mesmo escape hatch "Outro" do setor.
+ */
+export const UNIDADES_MEDIDA = [
+  "Unidade",
+  "Caixa",
+  "Pacote",
+  "Par",
+  "Kit",
+  "Rolo",
+  "Frasco",
+  "Litro",
+  "Mililitro",
+  "Quilograma",
+  "Grama",
+  "Metro",
+  "Resma",
+  "Dúzia",
+  "Conjunto",
+  "Serviço",
+] as const
+
 const REGRAS_CATEGORIA: { categoria: CategoriaCompra; termos: string[] }[] = [
   { categoria: "TECNOLOGIA_E_ELETRONICOS", termos: ["notebook", "computador", "monitor", "teclado", "mouse", "impressora", "celular", "tablet", "roteador", "cabo hdmi"] },
   { categoria: "HIGIENE_E_LIMPEZA", termos: ["detergente", "desinfetante", "sabonete", "papel higiênico", "limpeza", "vassoura", "rodo", "lixeira"] },
