@@ -7,9 +7,9 @@
 // `disponibilidade_terapeuta` não entra aqui: tem fluxo dedicado e rota pública.
 export const roleDefaults: Record<string, string[]> = {
   admin: [
-    'dashboard', 'atendimentos', 'gestao', 'cronograma',
-    'escala_terapeutica', 'agenda_terapeutica', 'salas',
-    'guias_digitais', 'auditoria_assim', 'usuarios', 'permissoes', 'cco',
+    'dashboard', 'atendimentos', 'gestao',
+    'escala_terapeutica',
+    'auditoria_assim', 'usuarios', 'permissoes', 'cco',
     'autorizacoes', 'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
     'cronograma_disponibilidade_interna',
@@ -82,11 +82,7 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   dashboard: ['/'],
   atendimentos: ['/solicitar'],
   gestao: ['/central-pacientes'],
-  cronograma: ['/agenda/pacientes'],
   escala_terapeutica: ['/central-terapeutas'],
-  agenda_terapeutica: ['/agenda/terapeutas'],
-  salas: ['/agenda/salas'],
-  guias_digitais: ['/guias-digitais'],
   auditoria_assim: ['/auditoria-assim'],
   usuarios: ['/admin'],
   permissoes: ['/admin/permissoes'],
