@@ -86,7 +86,7 @@ Duas regras que o histórico do projeto já pagou para aprender e que valem aqui
 | `src/compras/*.service.ts` (Nest, Prisma) | route handlers em `frontend/app/api/compras/` | **reescreve** (Prisma → supabase-js) |
 | `src/compras/worker/**` (Playwright + Mercado Livre) | processo separado, molde do `robo-autorizador` | **porta**, fora do Next |
 | `frontend/src/lib/**` (statusFlow, analytics, comprasCatalogos, format) | `frontend/lib/insumos/` | **porta como está** |
-| `frontend/src/pages/**` + `components/compras/**` (20 arquivos) | `frontend/app/(dashboard)/insumos/` | **JSX sobrevive, `.module.css` morre** (Tailwind 4 + shadcn) |
+| `frontend/src/pages/**` (8) + `components/compras/**` (12) | `frontend/app/(dashboard)/insumos/` | **JSX sobrevive, `.module.css` morre** (Tailwind 4 + shadcn) |
 | `components/ui/**` (Button, Badge, KpiCard, BarList, ChipsInput…) | shadcn/radix já instalado | **descarta**, usa o do Pulsar |
 | `src/conta-azul/**`, `src/integracoes/mercado-livre*` | route handlers + segredos no Vault | **porta**, por último |
 | `EstoquePage` | — | é stub ("chega depois de Cotações e Compras") |
@@ -227,9 +227,41 @@ erro). 10 arquivos de rota cobrindo 14 endpoints.
 > service **e** na RPC: no service para dar erro claro antes de tocar o banco,
 > na RPC porque é a que vale contra chamada direta à API.
 
-**5. Compras — telas.** 6 páginas + 13 componentes reescritos em
-Tailwind/shadcn sob `frontend/app/(dashboard)/insumos/`. Inclui o link público
-de solicitação sem login — precedente existe no `/tv`, gate no `proxy.ts`.
+**5. Compras — telas.** NADA portado ainda: não existe nenhum `.tsx` de insumos
+no Pulsar, e `app/(dashboard)/insumos/` não existe — é por isso que o Sidebar
+segue sem item. Inventário real do AXIUM (contagem conferida em 2026-08-18):
+
+São 8 páginas, mas só **5 portam**:
+
+- `SolicitacaoDetalhePage` (270 linhas) — a tela central: cotações, histórico,
+  aprovação e compra;
+- `SolicitacoesListPage` (217) — lista com chips de status;
+- `NovaSolicitacaoPage` (21) — só a casca do `SolicitacaoForm`;
+- `LogisticaOverviewPage` (85) — **bloqueada**: depende do `visao-geral` (4f);
+- `SolicitacaoPublicaPage` (46) — **bloqueada**: depende do link público (4e).
+
+Mais 12 componentes em `components/compras/` (~1.260 linhas), os maiores sendo
+`SolicitacaoForm` (300), `SolicitacaoExternaForm` (245), `RegistrarCompraForm`
+(175) e `CotacaoManualForm` (166) — todos já casam com os DTOs de
+`modules/insumos/dto/`.
+
+Morrem no caminho: `LoginPage` (68) e `SelecionarUnidadePage` (49), porque o
+Pulsar já tem Supabase Auth e a empresa ativa vira o header `x-empresa-id` que o
+`extrairAtor` lê; `AppLayout`, porque o shell e o Sidebar são do Pulsar; os ~13
+`components/ui/**`, porque shadcn/radix já está instalado; e os 17
+`.module.css`, porque aqui é Tailwind 4. `EstoquePage` são 10 linhas de aviso
+("chega depois de Cotações e Compras") — não existe controle de estoque no
+AXIUM, o que existe é o fluxo de compras.
+
+**Trabalho mecânico que toca todos os arquivos:** o AXIUM usa React Router
+(`BrowserRouter`, rotas `/logistica/*`); aqui é App Router. Cada página vira um
+`page.tsx` em pasta, e `useNavigate`/`useParams` viram `useRouter`/`params`.
+O `/logistica` de lá corresponde ao `/insumos` já registrado na permissão.
+
+Ordem sugerida, a que dá algo navegável mais rápido: `SolicitacoesListPage` →
+`NovaSolicitacaoPage` + `SolicitacaoForm` → `SolicitacaoDetalhePage` com os
+componentes de cotação/aprovação/compra. O dashboard e o link público ficam para
+depois, junto com as partes de API que faltam.
 
 **6. Worker de cotação.** Playwright + Mercado Livre como processo próprio,
 consumindo `cotacao_jobs` por RPC com token por máquina (padrão `robo_*` que
