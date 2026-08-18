@@ -176,9 +176,41 @@ Resolver a questão do `Escopo`.
 > `schema.prisma`): quem depende de `public.pacientes` é o financeiro
 > (`Contrato`/`Mensalidade`), da fase 7.
 
-**4. Compras — API.** Os 18 endpoints do `ComprasController` viram route
-handlers sob `frontend/app/api/compras/`, com `RequirePermission` trocado pela
-checagem de permissão do Pulsar.
+**4. Compras — API.** Route handlers sob `frontend/app/api/insumos/`, no padrão
+do módulo `central` (extrair contexto → parse do DTO → service → mapeamento de
+erro). 10 arquivos de rota cobrindo 14 endpoints.
+
+- [x] **4a. Operações atômicas.** `20260818090000_insumos_rpcs.sql`: 7 funções
+  no Postgres + `log_auditoria_insumos` (append-only). **Esta é a parte que não
+  dava para portar direto:** o AXIUM escrevia em várias tabelas dentro de
+  `prisma.forTenant(async tx => …)`, e o PostgREST não tem transação por
+  request. Sem isso, falha no meio deixa solicitação sem job de cotação (nunca
+  cotada, e ninguém vê), aprovação sem troca de status, ou status sem histórico
+  — e o `retomar` depende do histórico para saber para onde voltar.
+  `SECURITY INVOKER` de propósito: a RLS continua valendo dentro da função.
+- [x] **4b. Camada TS.** `lib/insumos/{auth,erros}.ts`,
+  `modules/insumos/{dto,services}/`, e as rotas. `tsc`, `eslint` e os 13 testes
+  limpos.
+- [ ] **4c. Validar a migration.** As de 17/08 foram validadas no Postgres
+  local em transação revertida; a `20260818090000` **não** — o engine do Docker
+  estava em erro na hora. Rodar antes de aplicar.
+- [ ] **4d. Gate de permissão por rota.** Depende da fase 2. Enquanto não
+  entrar, **qualquer usuário com vínculo na empresa alcança
+  `POST /[id]/status`**, que é o escape hatch que troca status sem validar
+  transição (no AXIUM exigia escopo CONSOLIDADO). Não publicar sem fechar isso.
+- [ ] **4e. Link público de solicitação** (`GET`/`POST /compras/link-publico` e
+  a criação sem login). Rota pública precisa de gate no `proxy.ts` e de revisão
+  própria — precedente é o `/tv`. Deixado de fora por ser superfície de
+  segurança distinta.
+- [ ] **4f. `GET /compras/visao-geral`** (o `DashboardService`, 16 KB de
+  agregação). Não portado.
+
+> **Duas simplificações que o porte permitiu — não são omissões.** Sumiu o loop
+> por `unidadesVisiveis` em `listar`/`buscarPorId`: a RLS de `20260817200000` já
+> filtra por `insumos_empresas_do_usuario()`, então um SELECT direto devolve só
+> o permitido, de todas as empresas de uma vez. E a validação de status vive no
+> service **e** na RPC: no service para dar erro claro antes de tocar o banco,
+> na RPC porque é a que vale contra chamada direta à API.
 
 **5. Compras — telas.** 6 páginas + 13 componentes reescritos em
 Tailwind/shadcn sob `frontend/app/(dashboard)/insumos/`. Inclui o link público
