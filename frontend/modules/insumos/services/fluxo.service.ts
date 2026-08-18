@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import { TransicaoInvalidaError, traduzirErroDoBanco } from "@/lib/insumos/erros"
 import { SCORE_MINIMO_COMPATIBILIDADE, calcularScoreCompatibilidade } from "@/lib/insumos/compatibilidade"
 import { arredondarMetadeParaCima, calcularValorDecisao } from "@/lib/insumos/precificacao"
+import { STATUS_ANTES_DA_APROVACAO } from "@/lib/insumos/fluxo"
 import type { StatusSolicitacaoCompra } from "@/lib/insumos/tipos"
 import type { CriarCotacaoManualInput, DecidirAprovacaoInput, RegistrarCompraInput } from "../dto/fluxo.dto"
 import { buscarSolicitacao } from "./solicitacoes.service"
@@ -13,10 +14,7 @@ import { buscarSolicitacao } from "./solicitacoes.service"
 // erro claro antes de tocar o banco; lá ela é a que vale, porque uma chamada
 // direta à API não passa por este arquivo.
 
-// Status em que uma cotação manual boa ainda destrava a aprovação sozinha.
-const STATUS_ANTES_DA_APROVACAO: StatusSolicitacaoCompra[] = [
-  "SOLICITACAO_CRIADA", "COTACAO_EM_ANDAMENTO", "COTACAO_FINALIZADA", "REVISAO_MANUAL",
-]
+// STATUS_ANTES_DA_APROVACAO vem de lib/insumos/fluxo.ts (mapa único).
 
 export async function decidirAprovacao(
   supabase: SupabaseClient,

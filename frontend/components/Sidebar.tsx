@@ -42,6 +42,7 @@ import {
   Percent,
   History,
   UserSearch,
+  Package,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -57,7 +58,8 @@ import { useTheme } from "@/contexts/ThemeContext"
 import { useImpersonation } from "@/contexts/ImpersonationContext"
 import { ImpersonationSelector } from "@/components/admin/ImpersonationSelector"
 import { ROLE_LABELS } from "@/constants/roleLabels"
-import { getRoleDefaultPermissions, codigosToRotas, hasRouteAccess } from "@/lib/permissions/routes"
+import { codigosToRotas, hasRouteAccess } from "@/lib/permissions/routes"
+import { resolverPermissoes } from "@/lib/permissions/resolver"
 import { getUsuarioPermissoes } from "@/services/permissoes.service"
 
 type Favorito = { label: string; path: string }
@@ -215,23 +217,19 @@ export default function Sidebar() {
         return
       }
 
-      const codigosPorRole = getRoleDefaultPermissions(targetRole)
-      let codigos = new Set(codigosPorRole)
-
+      // resolverPermissoes é a mesma função usada pelo proxy.ts (gate real das
+      // páginas) e pelas rotas de API. Esta era a terceira cópia da regra
+      // "defaults do papel + concessões − revogações, revogação vencendo": se o
+      // Sidebar divergir do proxy, o menu mostra item que a navegação recusa.
+      let overrides: { permissao_codigo: string; permitido: boolean }[] = []
       if (targetId) {
         try {
-          const overrides = await getUsuarioPermissoes(targetId)
-          for (const o of overrides) {
-            if (o.permitido) {
-              codigos.add(o.permissao_codigo)
-            } else {
-              codigos.delete(o.permissao_codigo)
-            }
-          }
+          overrides = await getUsuarioPermissoes(targetId)
         } catch (error) {
           console.error("Erro ao carregar permissões do usuário:", error)
         }
       }
+      const codigos = resolverPermissoes(targetRole, overrides)
 
       const rotas = codigosToRotas(codigos)
 
@@ -510,6 +508,15 @@ export default function Sidebar() {
               {canAccess("/guias-digitais") && (
                 <MenuItem label="Guias Digitais" icon={FileText} path="/guias-digitais" />
               )}
+            </SidebarGroup>
+          )}
+
+          {/* Insumos — controle de compras (porte do AXIUM). Grupo próprio, e não
+              dentro de Faturamento: aquele grupo é faturamento de convênio
+              (ASSIM), este é compra de insumo. Vai crescer com Estoque. */}
+          {canAccess("/insumos") && (
+            <SidebarGroup title="Insumos" icon={Package}>
+              <MenuItem label="Solicitações" icon={Package} path="/insumos" />
             </SidebarGroup>
           )}
 

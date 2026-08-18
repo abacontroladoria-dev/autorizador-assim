@@ -2,6 +2,7 @@ import type { SupabaseClient } from "@supabase/supabase-js"
 import type { Ator } from "@/lib/insumos/auth"
 import { SolicitacaoNaoEncontradaError, TransicaoInvalidaError, traduzirErroDoBanco } from "@/lib/insumos/erros"
 import { resolvedorDeterministico } from "@/lib/insumos/item-padrao"
+import { STATUS_NAO_EDITAVEIS, STATUS_PAUSAVEIS } from "@/lib/insumos/fluxo"
 import type { StatusSolicitacaoCompra } from "@/lib/insumos/tipos"
 import type {
   AtualizarSolicitacaoInput,
@@ -26,15 +27,9 @@ import type {
 //    ela pertence a uma RPC, não a duas chamadas seguidas daqui.
 // ----------------------------------------------------------------------------
 
-// Só não dá para editar depois que a decisão foi tomada ou a compra começou.
-const STATUS_NAO_EDITAVEIS: StatusSolicitacaoCompra[] = [
-  "APROVADA", "REPROVADA", "COMPRA_REALIZADA", "AGUARDANDO_ENTREGA", "ENTREGUE", "CANCELADA",
-]
-
-// Pausa é operacional — estado final não pausa, só se retoma.
-const STATUS_PAUSAVEIS: StatusSolicitacaoCompra[] = [
-  "SOLICITACAO_CRIADA", "COTACAO_EM_ANDAMENTO", "COTACAO_FINALIZADA", "REVISAO_MANUAL", "AGUARDANDO_APROVACAO",
-]
+// STATUS_NAO_EDITAVEIS e STATUS_PAUSAVEIS vêm de lib/insumos/fluxo.ts — mapa
+// único, compartilhado com as telas. No AXIUM essas listas estavam duplicadas
+// entre service e UI, com um comentário admitindo o espelhamento.
 
 const SELECT_LISTA = `
   id, empresa_id, setor, categoria, categoria_outro, prioridade, status,
