@@ -1,7 +1,7 @@
 "use client"
 
 import { useId, useState, type KeyboardEvent, type ReactNode } from "react"
-import { X } from "lucide-react"
+import { X, type LucideIcon } from "lucide-react"
 
 // Primitivas de campo do módulo de insumos.
 //
@@ -235,10 +235,63 @@ export function CampoChips({
   )
 }
 
-export function Secao({ titulo, children }: { titulo: string; children: ReactNode }) {
+/**
+ * `icone` é o mesmo vocabulário de lib/insumos/icones.ts — a seção de entrega do
+ * formulário usa o mesmo Truck que marca AGUARDANDO_ENTREGA na lista, então quem
+ * já leu a fila reconhece a seção antes de ler o título.
+ */
+export function CampoCheckbox({
+  label,
+  marcado,
+  onChange,
+  ajuda,
+}: {
+  label: string
+  marcado: boolean
+  onChange: (v: boolean) => void
+  ajuda?: ReactNode
+}) {
+  const id = useId()
   return (
-    <section className="flex flex-col gap-4 rounded-2xl border border-border bg-card p-5 shadow-sm">
-      <h2 className="text-base font-semibold text-foreground">{titulo}</h2>
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={id} className="inline-flex items-center gap-2 text-sm font-medium text-foreground">
+        <input
+          id={id}
+          type="checkbox"
+          checked={marcado}
+          onChange={(e) => onChange(e.target.checked)}
+          className="size-4 rounded border-border accent-foreground"
+        />
+        {label}
+      </label>
+      {ajuda && <p className="text-xs text-muted-foreground">{ajuda}</p>}
+    </div>
+  )
+}
+
+export function Secao({
+  titulo,
+  icone: Icone,
+  children,
+}: {
+  titulo: string
+  icone?: LucideIcon
+  children: ReactNode
+}) {
+  return (
+    // gap-3, não gap-4: é o tier "grupos de campo dentro de UM cartão" — mais
+    // apertado que o gap-6 entre cartões (SolicitacaoForm, detalhe), para os
+    // campos lerem como pertencentes uns aos outros, e o cartão como unidade
+    // separada do próximo (/impeccable layout 2026-08-18).
+    <section className="flex h-full flex-col gap-3 rounded-2xl border border-border bg-card p-5 shadow-sm">
+      <h2 className="flex items-center gap-2 text-lg font-semibold tracking-tight text-foreground">
+        {Icone && (
+          <span className="inline-flex size-7 items-center justify-center rounded-lg bg-muted text-muted-foreground ring-1 ring-border/60">
+            <Icone className="size-3.5" strokeWidth={2.25} />
+          </span>
+        )}
+        {titulo}
+      </h2>
       {children}
     </section>
   )

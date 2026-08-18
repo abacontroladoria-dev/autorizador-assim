@@ -1,4 +1,11 @@
-import type { StatusSolicitacaoCompra } from "@/lib/insumos/tipos"
+import type {
+  FormaPagamentoDecisao,
+  OrigemHistoricoCompra,
+  OrigemProduto,
+  StatusCotacaoItem,
+  StatusCotacaoJob,
+  StatusSolicitacaoCompra,
+} from "@/lib/insumos/tipos"
 
 // Acesso do cliente à API de insumos.
 //
@@ -99,8 +106,69 @@ export async function listarSolicitacoes(params?: {
   return pedir<SolicitacaoLista[]>(`${BASE}/solicitacoes${sufixo}`)
 }
 
-export async function buscarSolicitacao(id: string): Promise<Record<string, unknown>> {
-  return pedir<Record<string, unknown>>(`${BASE}/solicitacoes/${id}`)
+export type CotacaoCompra = {
+  id: string
+  fornecedor: string
+  produto_encontrado: string
+  valor_unitario: string | number
+  quantidade: string | number
+  valor_total_produtos: string | number
+  frete: string | number | null
+  valor_total_com_frete: string | number
+  parcelamento_descricao: string | null
+  condicao_sem_juros: boolean
+  valor_total_parcelas_sem_juros: string | number | null
+  valor_total_parcelas_com_juros: string | number | null
+  valor_decisao: string | number
+  forma_pagamento_decisao: FormaPagamentoDecisao
+  prazo_entrega_descricao: string | null
+  prazo_entrega_ordem_dias: number | null
+  prazo_excedido: boolean
+  link_produto: string
+  origem: OrigemProduto
+  score_compatibilidade: string | number | null
+  status_cotacao: StatusCotacaoItem
+  criada_manualmente: boolean
+  selecionada: boolean
+  criado_em: string
+}
+
+export type HistoricoStatusCompra = {
+  id: string
+  status_anterior: StatusSolicitacaoCompra | null
+  status_novo: StatusSolicitacaoCompra
+  origem: OrigemHistoricoCompra
+  observacao: string | null
+  criado_em: string
+}
+
+export type CotacaoJob = {
+  id: string
+  status: StatusCotacaoJob
+  erro: string | null
+  tentativas: number
+  criado_em: string
+  iniciado_em: string | null
+  concluido_em: string | null
+}
+
+export type SolicitacaoDetalhe = SolicitacaoLista & {
+  justificativa_compra: string
+  marca_desejada: string | null
+  modelo_desejado: string | null
+  cor: string | null
+  tamanho_medida_capacidade: string | null
+  material: string | null
+  link_referencia: string | null
+  marketplace_permitido: string | null
+  solicitante_externo_email: string | null
+  cotacoes: CotacaoCompra[]
+  historico: HistoricoStatusCompra[]
+  jobs: CotacaoJob[]
+}
+
+export async function buscarSolicitacao(id: string): Promise<SolicitacaoDetalhe> {
+  return pedir<SolicitacaoDetalhe>(`${BASE}/solicitacoes/${id}`)
 }
 
 export async function criarSolicitacao(
@@ -114,7 +182,7 @@ export async function criarSolicitacao(
   })
 }
 
-export async function atualizarSolicitacao(id: string, corpo: unknown): Promise<unknown> {
+export async function atualizarSolicitacao(id: string, corpo: unknown): Promise<SolicitacaoDetalhe> {
   return pedir(`${BASE}/solicitacoes/${id}`, { method: "PATCH", body: JSON.stringify(corpo) })
 }
 

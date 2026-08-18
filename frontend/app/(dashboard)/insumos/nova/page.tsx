@@ -4,6 +4,7 @@ import { useEffect } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowLeft } from "lucide-react"
+import toast from "react-hot-toast"
 import { useHeader } from "@/contexts/HeaderContext"
 import { SolicitacaoForm, type SolicitacaoFormValues } from "@/components/insumos/SolicitacaoForm"
 import { criarSolicitacao } from "@/services/insumos.service"
@@ -38,10 +39,12 @@ export default function NovaSolicitacaoPage() {
   }, [setHeader, setRightContent])
 
   async function enviar(valores: SolicitacaoFormValues, empresaId?: string) {
-    const criada = await criarSolicitacao(valores, empresaId)
-    // replace, não push: voltar para um formulário já enviado convida a criar
-    // a solicitação duas vezes.
-    router.replace(`/insumos/${criada.id}`)
+    await criarSolicitacao(valores, empresaId)
+    // Vai para a lista, não para /insumos/[id]: essa tela de detalhe ainda não
+    // existe (só a lista e este formulário foram portados). replace, não push:
+    // voltar para um formulário já enviado convida a criar a solicitação duas vezes.
+    toast.success("Solicitação criada.")
+    router.replace("/insumos")
   }
 
   return <SolicitacaoForm rotuloEnviar="Criar solicitação" onEnviar={enviar} />

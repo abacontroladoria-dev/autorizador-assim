@@ -787,6 +787,38 @@ html {
 .acomp-tr { transition: background-color .1s ease; }
 .acomp-tr:hover { background-color: var(--muted); }
 
+/* ─── Sombra de rolagem horizontal (tabelas dentro de overflow-x-auto) ─────
+   /impeccable audit 2026-08-18 (insumos/): tabela de 8-9 colunas dentro de
+   overflow-x-auto não dava nenhuma pista de que havia mais coluna fora da
+   tela — em 375px sumia a ação de abrir a linha, calado.
+
+   Truque clássico (sem JS): duas camadas com attachment:local, da cor do
+   card, que ANDAM com o conteúdo e cobrem a borda quando a rolagem chega no
+   limite daquele lado; por baixo, duas camadas com attachment:scroll (sombra
+   fixa, sempre na borda real do viewport). Onde ainda há conteúdo para
+   revelar, a camada local já rolou embora e a sombra aparece; no limite, a
+   camada local tampa a sombra. Aparece/some sozinho conforme a posição do
+   scroll, nos dois lados. */
+.scroll-fade-x {
+  background:
+    linear-gradient(to right, var(--card) 30%, transparent) left,
+    linear-gradient(to left, var(--card) 30%, transparent) right,
+    linear-gradient(to right, rgba(15, 23, 42, 0.16), transparent) left,
+    linear-gradient(to left, rgba(15, 23, 42, 0.16), transparent) right;
+  background-color: var(--card);
+  background-repeat: no-repeat;
+  background-size: 24px 100%, 24px 100%, 8px 100%, 8px 100%;
+  background-position: 0 0, 100% 0, 0 0, 100% 0;
+  background-attachment: local, local, scroll, scroll;
+}
+.dark .scroll-fade-x {
+  background-image:
+    linear-gradient(to right, var(--card) 30%, transparent),
+    linear-gradient(to left, var(--card) 30%, transparent),
+    linear-gradient(to right, rgba(255, 255, 255, 0.14), transparent),
+    linear-gradient(to left, rgba(255, 255, 255, 0.14), transparent);
+}
+
 /* ══════════════════════════════════════════════════════════════════════════
    Acessibilidade — prefers-reduced-motion
    Nenhuma transição/animação do app respeitava essa preferência (audit

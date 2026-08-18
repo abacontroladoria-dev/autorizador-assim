@@ -1,6 +1,7 @@
 "use client"
 
 import { StatusChip, TONE_CHIP } from "@/components/ui/tones"
+import { ICONE_POR_PRIORIDADE, ICONE_POR_STATUS } from "@/lib/insumos/icones"
 import {
   PRIORIDADE_LABEL,
   STATUS_LABEL,
@@ -11,7 +12,7 @@ import type { Prioridade, StatusSolicitacaoCompra } from "@/lib/insumos/tipos"
 
 // Vocabulário visual do módulo de insumos. Camada 2 do padrão de detalhamento
 // (docs/padrao-detalhamento-modal.md §2): só apresenta, não decide nada — o mapa
-// status→tom vive em lib/insumos/rotulos.ts.
+// status→tom vive em lib/insumos/rotulos.ts, e status→ícone em lib/insumos/icones.ts.
 //
 // Reusa o StatusChip de components/ui/tones.tsx em vez de inventar chip próprio.
 // No AXIUM cada badge trazia `style={{ color, background }}` com hex cravado, o
@@ -24,8 +25,10 @@ export function StatusInsumoChip({
   status: StatusSolicitacaoCompra
   dense?: boolean
 }) {
+  const Icone = ICONE_POR_STATUS[status]
   return (
     <StatusChip tone={TONE_POR_STATUS[status]} dense={dense}>
+      <Icone className={dense ? "size-2.5" : "size-3"} strokeWidth={2.25} />
       {STATUS_LABEL[status]}
     </StatusChip>
   )
@@ -40,8 +43,10 @@ export function PrioridadeChip({ prioridade }: { prioridade: Prioridade }) {
   if (prioridade === "NORMAL") {
     return <span className="text-muted-foreground text-xs">Normal</span>
   }
+  const Icone = ICONE_POR_PRIORIDADE[prioridade]
   return (
     <StatusChip tone={TONE_POR_PRIORIDADE[prioridade]} dense>
+      {Icone && <Icone className="size-2.5" strokeWidth={2.25} />}
       {PRIORIDADE_LABEL[prioridade]}
     </StatusChip>
   )
@@ -87,6 +92,7 @@ export function StatusFilterChips({
           contagem={contagens[status] ?? 0}
           ativo={ativo === status}
           tone={TONE_POR_STATUS[status]}
+          icone={ICONE_POR_STATUS[status]}
           onClick={() => onSelecionar(status)}
         />
       ))}
@@ -99,12 +105,14 @@ function ChipFiltro({
   contagem,
   ativo,
   tone,
+  icone: Icone,
   onClick,
 }: {
   rotulo: string
   contagem: number
   ativo: boolean
   tone: keyof typeof TONE_CHIP
+  icone?: (typeof ICONE_POR_STATUS)[StatusSolicitacaoCompra]
   onClick: () => void
 }) {
   const c = TONE_CHIP[tone]
@@ -117,8 +125,9 @@ function ChipFiltro({
       type="button"
       onClick={onClick}
       aria-pressed={ativo}
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold transition ${c.bg} ${c.text} ${anel}`}
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${c.bg} ${c.text} ${anel}`}
     >
+      {Icone && <Icone className="size-3" strokeWidth={2.25} />}
       {rotulo}
       <span className="tabular-nums opacity-70">{contagem}</span>
     </button>
