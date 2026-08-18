@@ -13,6 +13,7 @@ import {
 } from "@/lib/cronograma/helpers"
 import { UnitHeaderBadges, CronoGlobalUnitBadge } from "@/components/cronograma/ui/UnitBadges"
 import { ConfirmarImplantacaoModal } from "./ConfirmarImplantacaoModal"
+import { ObservacaoPacienteBox } from "./ObservacaoPacienteBox"
 import type { CsvRow, LaudoRow, CfgState, RecItem, InvItem } from "@/types/cronograma"
 import type { AceiteSessao } from "@/types/acompanhamento"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
@@ -2451,9 +2452,12 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
               </div>
             )}
           </div>
-          {pac && pacConvMap[pac] && (
-            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginTop: "2px", paddingLeft: "2px" }}>
-              {pacConvMap[pac]}
+          {pac && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginTop: "2px", paddingLeft: "2px" }}>
+              <div style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>
+                {pacConvMap[pac] ?? ""}
+              </div>
+              <ObservacaoPacienteBox pac={pac} />
             </div>
           )}
         </div>

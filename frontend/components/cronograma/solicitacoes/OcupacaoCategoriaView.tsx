@@ -40,20 +40,28 @@ const TURNOS: Turno[] = ["manha", "tarde"]
 type PeriodosSel = Record<string, { manha?: boolean; tarde?: boolean }>
 
 // Prioridade de exibição quando há mais de 1 vaga na mesma hora: mostra
-// primeiro a mais "acionável" (direto > remanejamento > livre).
-const PRIORIDADE: Record<VagaCategoria["status"], number> = { direto: 0, remanejamento: 1, "novo-dia": 2, livre: 3 }
+// primeiro a mais "acionável" — direto > remanejamento (mesmo dia) >
+// remanejamento (outro dia) > novo dia > livre. Pedido do usuário: as 4
+// modalidades de oportunidade têm ordem fixa, direto sempre primeiro, novo
+// dia sempre por último (livre continua depois de tudo, por não ser uma
+// oportunidade de verdade).
+const PRIORIDADE: Record<VagaCategoria["status"], number> = {
+  direto: 0, "remanejamento-mesmo-dia": 1, "remanejamento-outro-dia": 2, "novo-dia": 3, livre: 4,
+}
 
 const ESTILO_STATUS: Record<VagaCategoria["status"], string> = {
   livre: "border-dashed border-rose-300 dark:border-rose-800 bg-rose-50/70 dark:bg-rose-950/20",
   direto: "border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30 cursor-pointer hover:brightness-95",
-  remanejamento: "border-sky-300 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/30 cursor-pointer hover:brightness-95",
+  "remanejamento-mesmo-dia": "border-sky-300 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/30 cursor-pointer hover:brightness-95",
+  "remanejamento-outro-dia": "border-indigo-300 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/30 cursor-pointer hover:brightness-95",
   "novo-dia": "border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30 cursor-pointer hover:brightness-95",
 }
 
 const LABEL_STATUS: Record<VagaCategoria["status"], string> = {
   livre: "Livre",
   direto: "Ver agenda",
-  remanejamento: "Ver antes/depois",
+  "remanejamento-mesmo-dia": "Ver antes/depois",
+  "remanejamento-outro-dia": "Ver antes/depois (outro dia)",
   "novo-dia": "Ver novo dia",
 }
 
@@ -190,7 +198,8 @@ function CelulaGrade({
         <div className={`mt-0.5 truncate text-[10px] font-bold ${
           principal.status === "livre" ? "text-rose-700 dark:text-rose-400"
           : principal.status === "direto" ? "text-emerald-700 dark:text-emerald-400"
-          : principal.status === "remanejamento" ? "text-sky-700 dark:text-sky-400"
+          : principal.status === "remanejamento-mesmo-dia" ? "text-sky-700 dark:text-sky-400"
+          : principal.status === "remanejamento-outro-dia" ? "text-indigo-700 dark:text-indigo-400"
           : "text-amber-700 dark:text-amber-400"
         }`}>
           {resto > 0 ? "Ver quem está livre" : LABEL_STATUS[principal.status]}
@@ -224,7 +233,8 @@ function GradeCategoria({
     [diasAtivos, vagasPorDia, periodosSel],
   )
   const qtdDireto = todasVagas.filter(v => v.status === "direto").length
-  const qtdRemanejamento = todasVagas.filter(v => v.status === "remanejamento").length
+  const qtdRemanejamentoMesmoDia = todasVagas.filter(v => v.status === "remanejamento-mesmo-dia").length
+  const qtdRemanejamentoOutroDia = todasVagas.filter(v => v.status === "remanejamento-outro-dia").length
   const qtdNovoDia = todasVagas.filter(v => v.status === "novo-dia").length
   const qtdLivre = todasVagas.filter(v => v.status === "livre").length
 
@@ -244,14 +254,15 @@ function GradeCategoria({
         <Building2 size={14} className="text-muted-foreground" />
         <span className="text-sm font-extrabold text-foreground">{unidade} · {especialidade}</span>
         <span className="text-[11px] text-muted-foreground">
-          {qtdDireto + qtdRemanejamento + qtdNovoDia} oportunidade(s) — {qtdDireto} direta(s), {qtdRemanejamento} via remanejamento, {qtdNovoDia} via novo dia · {qtdLivre} livre(s) sem oportunidade
+          {qtdDireto + qtdRemanejamentoMesmoDia + qtdRemanejamentoOutroDia + qtdNovoDia} oportunidade(s) — {qtdDireto} direta(s), {qtdRemanejamentoMesmoDia} via remanejamento (mesmo dia), {qtdRemanejamentoOutroDia} via remanejamento (outro dia), {qtdNovoDia} via novo dia · {qtdLivre} livre(s) sem oportunidade
         </span>
       </div>
 
       <div className="mb-1 flex flex-wrap gap-3 text-[10px] text-muted-foreground">
         <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-dashed border-rose-300 dark:border-rose-800 bg-rose-50/70 dark:bg-rose-950/20" /> Livre, sem oportunidade</span>
         <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-emerald-300 dark:border-emerald-800 bg-emerald-50 dark:bg-emerald-950/30" /> Oportunidade direta</span>
-        <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-sky-300 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/30" /> Oportunidade via remanejamento</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-sky-300 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/30" /> Oportunidade via remanejamento (mesmo dia)</span>
+        <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-indigo-300 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/30" /> Oportunidade via remanejamento (outro dia)</span>
         <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm border border-amber-300 dark:border-amber-800 bg-amber-50 dark:bg-amber-950/30" /> Oportunidade via novo dia</span>
         <span className="flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-sky-50/50 dark:bg-sky-950/10" /> Fora do filtro de dias/turnos</span>
       </div>
@@ -301,7 +312,7 @@ function GradeCategoria({
         )}
 
         <ProjecaoOcupacaoDonut
-          titulo="Ocupação da categoria" ocupado={ocupado} oportunidade={qtdDireto + qtdRemanejamento + qtdNovoDia} livre={qtdLivre}
+          titulo="Ocupação da categoria" ocupado={ocupado} oportunidade={qtdDireto + qtdRemanejamentoMesmoDia + qtdRemanejamentoOutroDia + qtdNovoDia} livre={qtdLivre}
           segmentoSelecionado={destaque} onSelecionarSegmento={setDestaque}
         />
       </div>
@@ -322,7 +333,7 @@ function ComparativoUnidades({
     () => compararUnidadesOportunidade(periodos, especialidade, cRows, gapMap),
     [periodos, especialidade, cRows, gapMap],
   )
-  const totais = comparativo.map(u => u.qtdDireto + u.qtdRemanejamento + u.qtdNovoDia)
+  const totais = comparativo.map(u => u.qtdDireto + u.qtdRemanejamentoMesmoDia + u.qtdRemanejamentoOutroDia + u.qtdNovoDia)
   const escala = Math.max(1, ...totais)
 
   return (
@@ -385,10 +396,12 @@ export function OcupacaoCategoriaView({ cRows }: Props) {
     [diasSelecionados, periodosSel],
   )
 
-  const aplicarOportunidade = (u: string, dia: string, turno: Turno, esp: string) => {
+  const aplicarOportunidade = (u: string, periodos: { dia: string; turno: Turno }[], esp: string) => {
     setUnidade(u)
     setEspecialidade(esp)
-    setPeriodosSel({ [dia]: { [turno]: true } })
+    const novoPeriodosSel: PeriodosSel = {}
+    for (const { dia, turno } of periodos) novoPeriodosSel[dia] = { ...novoPeriodosSel[dia], [turno]: true }
+    setPeriodosSel(novoPeriodosSel)
   }
 
   // Só pula o seletor quando a célula tem exatamente 1 vaga no total (nenhuma
@@ -398,7 +411,7 @@ export function OcupacaoCategoriaView({ cRows }: Props) {
     if (vagas.length === 1) {
       const v = vagas[0]
       if (v.status === "direto") setDetalheDireto({ dia, vaga: v })
-      else if (v.status === "remanejamento") setDetalheRemanejamento(v)
+      else if (v.status === "remanejamento-mesmo-dia" || v.status === "remanejamento-outro-dia") setDetalheRemanejamento(v)
       else if (v.status === "novo-dia") setDetalheNovoDia(v)
       return
     }
@@ -413,7 +426,7 @@ export function OcupacaoCategoriaView({ cRows }: Props) {
         </InlineNotice>
       ) : (
         <>
-          <OportunidadesInternasPanel cRows={cRows} gapMap={gapMap} onAplicar={aplicarOportunidade} />
+          <OportunidadesInternasPanel cRows={cRows} gapMap={gapMap} unidade={unidade} onAplicar={aplicarOportunidade} />
 
           <div className="rounded-2xl border border-border bg-card p-4">
             <div className="mb-1 flex items-center gap-1.5">

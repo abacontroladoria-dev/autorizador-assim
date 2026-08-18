@@ -276,6 +276,7 @@ interface Linha {
   profissional_nome:     string | null
   profissional_cpf:      string | null
   terapia_id:            number | null
+  "Id Terapia":          string | null
   terapia_nome:          string | null
   terapia_exibicao_id:   number | null
   terapia_exibicao_nome: string | null
@@ -362,7 +363,7 @@ const SEM_AGENDAMENTO = "Sem Agendamento"
 const CAMPOS_CONTEUDO: (keyof Linha)[] = [
   "paciente_id", "paciente_nome", "data", "dia_semana", "hora_inicial", "hora_final",
   "profissional_id", "profissional_nome", "profissional_cpf",
-  "terapia_id", "terapia_nome", "terapia_exibicao_id", "terapia_exibicao_nome",
+  "terapia_id", "Id Terapia", "terapia_nome", "terapia_exibicao_id", "terapia_exibicao_nome",
   "sala_id", "sala_nome", "sala_observacoes",
   "unidade_id", "unidade_nome", "convenio_nome", "status_agendamento",
 ]
@@ -435,7 +436,10 @@ async function comRetentativa<T>(rotulo: string, fn: () => Promise<T>, tentativa
   throw ultimo instanceof Error ? ultimo : new Error(String(ultimo))
 }
 
-const CAMPOS_SELECT = ["id", ...CAMPOS_CONTEUDO, "tita_agendamento_id"].join(", ")
+// PostgREST exige aspas no select para identificador com espaço ("Id Terapia").
+const qcol = (nome: string) => (nome.includes(" ") ? `"${nome}"` : nome)
+
+const CAMPOS_SELECT = ["id", ...CAMPOS_CONTEUDO.map(qcol), "tita_agendamento_id"].join(", ")
 const CAMPOS_SELECT_EXECUCAO = [
   "id", "tita_agendamento_id", "visto_em",
   // Agregados por agendamento, não campos do Registro — ver a contagem em
@@ -644,6 +648,7 @@ async function buscarRegistros(dataInicio: string, dataFim: string): Promise<Reg
       profissional_nome:     v(vals, iProfNom) || null,
       profissional_cpf:      v(vals, iProfCpf) || null,
       terapia_id:            toInt(v(vals, iTerID)),
+      "Id Terapia":          v(vals, iTerID)   || null,
       terapia_nome:          v(vals, iTerNom)  || null,
       terapia_exibicao_id:   toInt(v(vals, iTerExId)),
       terapia_exibicao_nome: v(vals, iTerExNm) || null,

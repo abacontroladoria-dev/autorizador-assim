@@ -25,7 +25,7 @@ import {
 } from "lucide-react"
 import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
 import { Button } from "@/components/ui/button"
-import { DIAS_UTIL, TERAPIA_CORES, estiloUnidade, hexParaRgba, tCor } from "@/lib/cronograma/constants"
+import { DIAS_UTIL, TERAPIA_CORES, estiloUnidade, hexParaRgba, tCor, unidadeExibicao } from "@/lib/cronograma/constants"
 import { diaCurto, fmtName } from "@/lib/cronograma/helpers"
 import { horasEmBlocoInvalido, type OportunidadeNovoDia, type SessaoCandidataNovoDia } from "@/lib/cronograma/novoDia"
 import type { CsvRow } from "@/types/cronograma"
@@ -359,7 +359,7 @@ export function NovoDiaDetalheModal({ oportunidade, cRows, onClose }: Props) {
                         <td key={d} className="px-0.5 py-0">
                           {u && (
                             <div className={`rounded-md py-1 text-center text-[10px] font-black uppercase tracking-wide text-white ${estiloUnidade(u).bar}`}>
-                              {u}
+                              {unidadeExibicao(u)}
                             </div>
                           )}
                         </td>
@@ -384,7 +384,7 @@ export function NovoDiaDetalheModal({ oportunidade, cRows, onClose }: Props) {
                                     <div className="flex min-w-0 items-center justify-between gap-1">
                                       <span className="min-w-0 truncate text-[11px] font-bold leading-tight text-foreground">{c.terapia}</span>
                                       {!combinaComDominante && c.unidade !== "Desconhecida" && (
-                                        <span className={`shrink-0 rounded px-1 text-[9px] font-black leading-tight ${estiloUnidade(c.unidade).bg} ${estiloUnidade(c.unidade).text}`}>{c.unidade}</span>
+                                        <span className={`shrink-0 rounded px-1 text-[9px] font-black leading-tight ${estiloUnidade(c.unidade).bg} ${estiloUnidade(c.unidade).text}`}>{unidadeExibicao(c.unidade)}</span>
                                       )}
                                     </div>
                                     <div className="text-[10px] text-muted-foreground">{fmtName(c.prof)}</div>

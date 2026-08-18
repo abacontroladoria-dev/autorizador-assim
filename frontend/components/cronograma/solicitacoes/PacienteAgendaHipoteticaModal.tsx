@@ -9,7 +9,7 @@
 import { Fragment, useMemo } from "react"
 import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
 import { Button } from "@/components/ui/button"
-import { DIAS_UTIL, ESP_CLINICO, EXCLUIR_OCUP, estiloUnidade } from "@/lib/cronograma/constants"
+import { DIAS_UTIL, ESP_CLINICO, EXCLUIR_OCUP, estiloUnidade, unidadeExibicao } from "@/lib/cronograma/constants"
 import { diaCurto, fmtName } from "@/lib/cronograma/helpers"
 import type { Turno } from "@/lib/cronograma/simulacaoNovoPrestador"
 import type { CsvRow } from "@/types/cronograma"
@@ -138,7 +138,7 @@ export function PacienteAgendaHipoteticaModal({
                       <td key={d} className="px-0.5 py-0">
                         {u && (
                           <div className={`rounded-md py-1 text-center text-[10px] font-black uppercase tracking-wide text-white ${estiloUnidade(u).bar}`}>
-                            {u}
+                            {unidadeExibicao(u)}
                           </div>
                         )}
                       </td>
@@ -163,7 +163,7 @@ export function PacienteAgendaHipoteticaModal({
                                   <span className="min-w-0 truncate text-[11px] font-bold leading-tight text-foreground">{c.terapia}</span>
                                   {!combinaComDominante && c.unidade && c.unidade !== "Desconhecida" && (
                                     <span className={`shrink-0 rounded px-1 text-[9px] font-black leading-tight ${estiloUnidade(c.unidade).bg} ${estiloUnidade(c.unidade).text}`}>
-                                      {c.unidade}
+                                      {unidadeExibicao(c.unidade)}
                                     </span>
                                   )}
                                 </div>

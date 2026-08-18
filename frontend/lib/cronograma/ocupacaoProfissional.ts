@@ -23,9 +23,13 @@ export interface OportunidadeProfissional {
   unidade: string
   terapia: string
   especialidade: string
-  modalidade: "direto" | "remanejamento" | "novo-dia"
+  /** Mesma distinção de VagaCategoria.status (ocupacaoCategoria.ts) — só
+   *  exibição: "remanejamento-mesmo-dia" quando RemanejamentoDetalhe.de.dia
+   *  === .para.dia, "remanejamento-outro-dia" quando o paciente candidato é
+   *  realocado pra outro dia que ele já frequenta. */
+  modalidade: "direto" | "remanejamento-mesmo-dia" | "remanejamento-outro-dia" | "novo-dia"
   paciente: { pac: string; gap: number; aut: number; of: number }
-  /** Só presente quando modalidade === "remanejamento" — antes/depois da agenda do PACIENTE candidato. */
+  /** Só presente quando modalidade começa com "remanejamento" — antes/depois da agenda do PACIENTE candidato. */
   remanejamento?: RemanejamentoDetalhe
   /** Só presente quando modalidade === "novo-dia". */
   novoDia?: OportunidadeNovoDia
@@ -90,11 +94,12 @@ export function gerarOportunidadesProfissional(
       if (!candidato.remanejamento) continue
       const dominante = unidadeDominanteDoDia(candidato.paciente, g.dia, cRows)
       if (dominante && dominante !== g.unidade) continue
+      const mesmoDia = candidato.remanejamento.de.dia === candidato.remanejamento.para.dia
       remanejamentoBruto.push({
         dia: g.dia, turno: g.turno, hora, unidade: g.unidade,
         terapia: terapiaPorHora.get(`${g.dia}|||${hora}`) ?? candidato.remanejamento.terapiaRemanejada,
         especialidade: g.especialidade,
-        modalidade: "remanejamento",
+        modalidade: mesmoDia ? "remanejamento-mesmo-dia" : "remanejamento-outro-dia",
         paciente: { pac: candidato.paciente, gap: candidato.gap, aut: candidato.aut, of: candidato.of },
         remanejamento: candidato.remanejamento,
       })
