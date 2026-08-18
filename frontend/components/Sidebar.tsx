@@ -492,9 +492,9 @@ export default function Sidebar() {
             </SidebarGroup>
           )}
 
-          {/* Operações */}
+          {/* Faturamento */}
           {(canAccess("/auditoria-assim") || canAccess("/guias-digitais") || canAccess("/cco")) && (
-            <SidebarGroup title="Operações" icon={BriefcaseBusiness}>
+            <SidebarGroup title="Faturamento" icon={BriefcaseBusiness}>
               {canAccess("/cco") && (
                 <MenuItem label="Conciliação ASSIM" icon={BarChart3} path="/cco" />
               )}
