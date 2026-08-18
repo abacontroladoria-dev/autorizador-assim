@@ -800,6 +800,42 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
     [podeSimular, comRemanejamento, cRows, gapMap],
   )
 
+  // periodosEnriquecidosParaSimulado (usado pra montar agendaJaCoberta, a
+  // grade "Agenda atual disponível já cobre") achata cada candidato pro
+  // formato CandidatoSlot, que não carrega `modalidade`/`remanejamento` — só
+  // serve pra desenhar a grade. Esse índice preserva o CandidatoNaSugestao
+  // ORIGINAL (com modalidade intacta) pra quando o usuário clica numa vaga
+  // coberta: sem ele, todo candidato "já coberto" abria o modal simples
+  // (PacienteAgendaHipoteticaModal), mesmo quando só é válido via
+  // remanejamento — mostrando a sessão hipotética sobreposta à sessão que
+  // ocupa o horário, sem nunca exibir/aplicar o remanejamento que o tornou
+  // válido (bug real 2026-08-18, casos Davi Dantas/Enzo Gabriel).
+  const cobertoPorChave = useMemo(() => {
+    const m = new Map<string, CandidatoNaSugestao>()
+    for (const s of periodosCobertos) {
+      for (const c of s.candidatos) m.set(`${s.dia}|||${c.hora}|||${s.unidade}|||${c.paciente}`, c)
+    }
+    return m
+  }, [periodosCobertos])
+
+  // Mesmo critério de abrirDetalheCandidato (modalidade decide o modal), só
+  // que pra um candidato "já coberto" (originado de vagaGradeAberta.cobertos/
+  // vagaCobertaAberta, sem o objeto LinhaCandidato completo) — recupera a
+  // modalidade real via cobertoPorChave antes de decidir.
+  const abrirDetalheCoberto = (dia: string, hora: string, unidade: string, pac: string, profissionalHipotetico?: string) => {
+    const c = cobertoPorChave.get(`${dia}|||${hora}|||${unidade}|||${pac}`)
+    if (c?.modalidade === "remanejamento" && c.remanejamento) {
+      setDetalheRemanejamento({ sugestao: { especialidade } as SugestaoContratacao, candidato: c, profissionalHipotetico })
+      return
+    }
+    setDetalhe({
+      pac,
+      slot: { dia, turno: turnoFromHora(hora), unidade, hora, candidatos: [] },
+      especialidade,
+      profissionalHipotetico,
+    })
+  }
+
   // Nomes de quem já está coberto internamente, por vaga (dia+turno+hora+
   // unidade) — usado em "Sessões e candidatos" pra mostrar QUEM já é atendido
   // em vez de só a contagem genérica "+N paciente(s)".
@@ -2098,12 +2134,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                       <button
                         key={`coberto-${i}`}
                         type="button"
-                        onClick={() => setDetalhe({
-                          pac: c.pac,
-                          slot: { dia: vagaGradeAberta.dia, turno: turnoFromHora(vagaGradeAberta.vaga.hora), hora: vagaGradeAberta.vaga.hora, unidade: vagaGradeAberta.cobertos!.unidade, candidatos: [] },
-                          especialidade,
-                          profissionalHipotetico: profissionaisLivres[i]?.profissional,
-                        })}
+                        onClick={() => abrirDetalheCoberto(vagaGradeAberta.dia, vagaGradeAberta.vaga.hora, vagaGradeAberta.cobertos!.unidade, c.pac, profissionaisLivres[i]?.profissional)}
                         className="flex items-center justify-between gap-2 rounded-lg border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/30 px-3 py-2 text-left hover:brightness-95"
                       >
                         <span className="min-w-0">
@@ -2141,12 +2172,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                   <button
                     key={`coberto-${i}`}
                     type="button"
-                    onClick={() => setDetalhe({
-                      pac: c.pac,
-                      slot: { dia: vagaCobertaAberta.dia, turno: turnoFromHora(vagaCobertaAberta.hora), hora: vagaCobertaAberta.hora, unidade: vagaCobertaAberta.unidade, candidatos: [] },
-                      especialidade,
-                      profissionalHipotetico: profissionaisLivres[i]?.profissional,
-                    })}
+                    onClick={() => abrirDetalheCoberto(vagaCobertaAberta.dia, vagaCobertaAberta.hora, vagaCobertaAberta.unidade, c.pac, profissionaisLivres[i]?.profissional)}
                     className="flex items-center justify-between gap-2 rounded-lg border border-rose-300 dark:border-rose-800 bg-rose-50 dark:bg-rose-950/30 px-3 py-2 text-left hover:brightness-95"
                   >
                     <span className="min-w-0">

@@ -70,15 +70,20 @@ export function slotValidoParaPaciente(
   // R2.1 — o paciente precisa de ao menos 1 sessão no dia para não criar dia isolado
   if (sessoesDia.length === 0) return false
 
+  const horasExistentes = sessoesDia
+    .map(r => pm(String(r.HI_str || "")))
+    .filter((h): h is number => h !== null)
+
+  // O paciente já tem sessão real nesse exato horário — nunca um slot válido
+  // pra uma NOVA sessão ali. Bug real 2026-08-18 (caso Davi Dantas): antes
+  // dessa checagem, o horário candidato (idêntico a um já existente) entrava
+  // junto num Set pra deduplicar antes do cálculo de intervalo de R5.1 — a
+  // duplicata desaparecia da lista silenciosamente e o conflito nunca era
+  // detectado, oferecendo o mesmo horário duas vezes pro mesmo paciente.
+  if (horasExistentes.includes(slotPm)) return false
+
   // R5.1 — todas as sessões do dia (incluindo a nova) devem ser consecutivas de 40 em 40 min
-  const horas = [
-    ...new Set([
-      ...sessoesDia
-        .map(r => pm(String(r.HI_str || "")))
-        .filter((h): h is number => h !== null),
-      slotPm,
-    ]),
-  ].sort((a, b) => a - b)
+  const horas = [...horasExistentes, slotPm].sort((a, b) => a - b)
 
   for (let i = 1; i < horas.length; i++) {
     if (horas[i] - horas[i - 1] !== 40) return false
