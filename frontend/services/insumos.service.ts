@@ -12,6 +12,27 @@ import type { StatusSolicitacaoCompra } from "@/lib/insumos/tipos"
 
 const BASE = "/api/insumos"
 
+/**
+ * Header que diz em qual empresa a escrita acontece. O servidor (extrairAtor)
+ * só aceita empresa em que o usuário tem vínculo ativo, então isto é escolha,
+ * não autorização — a fronteira é a RLS.
+ */
+export const HEADER_EMPRESA = "x-empresa-id"
+
+function cabecalhoEmpresa(empresaId?: string): Record<string, string> {
+  return empresaId ? { [HEADER_EMPRESA]: empresaId } : {}
+}
+
+export type EmpresaVinculada = {
+  id: string
+  nomeFantasia: string
+  padrao: boolean
+}
+
+export async function listarEmpresas(): Promise<EmpresaVinculada[]> {
+  return pedir<EmpresaVinculada[]>(`${BASE}/empresas`)
+}
+
 export type ErroApi = { code: string; message: string }
 
 /**
@@ -82,10 +103,14 @@ export async function buscarSolicitacao(id: string): Promise<Record<string, unkn
   return pedir<Record<string, unknown>>(`${BASE}/solicitacoes/${id}`)
 }
 
-export async function criarSolicitacao(corpo: unknown): Promise<{ id: string }> {
+export async function criarSolicitacao(
+  corpo: unknown,
+  empresaId?: string
+): Promise<{ id: string }> {
   return pedir<{ id: string }>(`${BASE}/solicitacoes`, {
     method: "POST",
     body: JSON.stringify(corpo),
+    headers: cabecalhoEmpresa(empresaId),
   })
 }
 
