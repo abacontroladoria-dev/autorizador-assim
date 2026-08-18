@@ -1,7 +1,18 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import type { NextRequest } from "next/server"
 import { createClient } from "@/lib/supabase/server"
-import { NaoAutenticadoError, SemEmpresaError } from "./erros"
+import { resolverPermissoes, temPermissao } from "@/lib/permissions/resolver"
+import { NaoAutenticadoError, SemEmpresaError, SemPermissaoError } from "./erros"
+
+/**
+ * Código de permissão do módulo. Acesso definido pelo usuário em 2026-08-18:
+ * setor `faturamento`, mais `admin` e `diretoria` (ver roleDefaults em
+ * lib/permissions/routes.ts).
+ *
+ * Atenção ao nome: o `role` no banco é **`faturamento`**, não "financeiro" — o
+ * CHECK de `usuarios.role` não tem esse valor.
+ */
+export const PERMISSAO_INSUMOS = "insumos"
 
 // ----------------------------------------------------------------------------
 // Ator — quem está agindo e em nome de qual empresa.
@@ -24,6 +35,7 @@ import { NaoAutenticadoError, SemEmpresaError } from "./erros"
 export type Ator = {
   usuarioId: string
   empresaId: string
+  role: string
   ip: string | null
 }
 
@@ -43,12 +55,19 @@ function ipDe(request?: NextRequest): string | null {
 }
 
 /**
- * Resolve o usuário autenticado e a empresa em que ele está agindo.
+ * Resolve o usuário autenticado, checa a permissão do módulo e devolve a empresa
+ * em que ele está agindo.
+ *
+ * A CHECAGEM DE PERMISSÃO VIVE AQUI DE PROPÓSITO. O `proxy.ts` protege página,
+ * não API — o matcher dele exclui `/api` explicitamente. Se cada route handler
+ * tivesse de lembrar de chamar a checagem, bastaria um esquecimento para abrir um
+ * endpoint. Como toda rota do módulo precisa do contexto, e o contexto só sai
+ * daqui, a rota que esquecer a permissão não compila: não tem `supabase`.
  *
  * A empresa sai, nesta ordem: o header `x-empresa-id` (quando o usuário tem
  * vínculo com ela), depois a marcada como `empresa_padrao`, depois a única que
- * ele tiver. Sem nenhum vínculo, `SemEmpresaError` — é 403, não 500: o usuário
- * existe, só não foi vinculado a nenhuma empresa ainda.
+ * ele tiver. Sem nenhum vínculo, `SemEmpresaError` — vale inclusive para admin:
+ * a RLS exige o vínculo para escrever, então não haveria como agir mesmo.
  */
 export async function extrairAtor(request?: NextRequest): Promise<ContextoInsumos> {
   const supabase = await createClient()
@@ -58,6 +77,27 @@ export async function extrairAtor(request?: NextRequest): Promise<ContextoInsumo
     error,
   } = await supabase.auth.getUser()
   if (error || !user) throw new NaoAutenticadoError()
+
+  const { data: perfil, error: erroPerfil } = await supabase
+    .from("usuarios")
+    .select("role, ativo")
+    .eq("id", user.id)
+    .maybeSingle()
+
+  if (erroPerfil || !perfil) throw new NaoAutenticadoError("Usuário não encontrado")
+  if (!perfil.ativo) throw new NaoAutenticadoError("Usuário inativo")
+
+  const role = (perfil.role as string | null) ?? ""
+
+  // Mesma resolução do proxy.ts: defaults do papel + concessões/revogações
+  // individuais, revogação vencendo.
+  const { data: overrides } = await supabase
+    .from("usuarios_permissoes")
+    .select("permissao_codigo, permitido")
+    .eq("usuario_id", user.id)
+
+  const codigos = resolverPermissoes(role, overrides ?? [])
+  if (!temPermissao(role, codigos, PERMISSAO_INSUMOS)) throw new SemPermissaoError()
 
   // Sob RLS este SELECT já devolve só os vínculos do próprio usuário.
   const { data: vinculos, error: erroVinculos } = await supabase
@@ -79,7 +119,7 @@ export async function extrairAtor(request?: NextRequest): Promise<ContextoInsumo
   }
 
   return {
-    ator: { usuarioId: user.id, empresaId: escolhida.empresa_id, ip: ipDe(request) },
+    ator: { usuarioId: user.id, empresaId: escolhida.empresa_id, role, ip: ipDe(request) },
     supabase,
   }
 }

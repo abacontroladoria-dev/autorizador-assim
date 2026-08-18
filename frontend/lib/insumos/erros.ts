@@ -47,6 +47,16 @@ export class SemEmpresaError extends InsumosError {
   }
 }
 
+/**
+ * Autenticado e com empresa, mas o papel nao da acesso ao modulo. Separado de
+ * SemEmpresaError porque a causa e outra: aqui falta PERMISSAO, la falta VINCULO.
+ */
+export class SemPermissaoError extends InsumosError {
+  constructor(message = "Sem permissao para acessar o controle de insumos") {
+    super("SEM_PERMISSAO", message)
+  }
+}
+
 export class SolicitacaoNaoEncontradaError extends InsumosError {
   constructor(message = "Solicitação não encontrada.") {
     super("SOLICITACAO_NAO_ENCONTRADA", message)
@@ -104,6 +114,7 @@ export function traduzirErroDoBanco(err: PostgrestLikeError): InsumosError {
 export function mapInsumosError(err: unknown): NextResponse {
   if (err instanceof NaoAutenticadoError) return unauthorized(err.message)
   if (err instanceof SemEmpresaError) return forbidden(err.message)
+  if (err instanceof SemPermissaoError) return forbidden(err.message)
   if (err instanceof SolicitacaoNaoEncontradaError) return notFound(err.code, err.message)
   if (err instanceof TransicaoInvalidaError) return conflict(err.code, err.message)
   if (err instanceof ValidacaoError) return badRequest(err.message, err.campo)

@@ -10,10 +10,14 @@ type Ctx = { params: Promise<{ id: string }> }
 // POST /api/insumos/solicitacoes/[id]/status
 //
 // Escape hatch: NAO valida a transicao, de proposito — serve para destravar uma
-// solicitacao presa. No AXIUM exigia permissao em escopo CONSOLIDADO; aqui a
-// rota precisa ficar gated pela permissao do Pulsar quando a fase 2 entrar
-// (ver docs/AXIUM_MIGRACAO.md). Ate la, qualquer usuario com vinculo na empresa
-// alcanca este endpoint — nao publicar sem fechar isso.
+// solicitacao presa.
+//
+// O acesso ao modulo e checado em extrairAtor (permissao `insumos`: faturamento,
+// admin e diretoria). O que NAO existe ainda e a distincao mais fina que o AXIUM
+// tinha: la esta acao exigia escopo CONSOLIDADO, ou seja, nao era para qualquer
+// operador do modulo. Hoje quem enxerga insumos alcanca este endpoint. Se isso
+// incomodar, o caminho e um codigo de permissao proprio (ex.: insumos_status),
+// nao um `if` de papel aqui dentro.
 export async function POST(request: NextRequest, ctx: Ctx) {
   try {
     const { ator, supabase } = await extrairAtor(request)
