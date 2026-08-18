@@ -1,19 +1,41 @@
 "use client"
 
 import { useEffect } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { ArrowLeft } from "lucide-react"
 import { useHeader } from "@/contexts/HeaderContext"
 import { SolicitacaoForm, type SolicitacaoFormValues } from "@/components/insumos/SolicitacaoForm"
 import { criarSolicitacao } from "@/services/insumos.service"
 
+// Link ArrowLeft + rótulo no rightContent do header, mesmo padrão do botão
+// "voltar" do CentralTopbar (components/central/workspace/CentralTopbar.tsx) —
+// o layout compartilhado (app/(dashboard)/layout.tsx) só expõe title/subtitle/
+// rightContent, sem slot dedicado à esquerda.
+function VoltarParaLista() {
+  return (
+    <Link
+      href="/insumos"
+      className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-foreground"
+    >
+      <ArrowLeft className="size-4" />
+      Voltar
+    </Link>
+  )
+}
+
 export default function NovaSolicitacaoPage() {
-  const { setHeader } = useHeader()
+  const { setHeader, setRightContent } = useHeader()
   const router = useRouter()
 
   useEffect(() => {
     setHeader("Nova solicitação", "O item entra na fila de cotação automática")
-    return () => setHeader("", "")
-  }, [setHeader])
+    setRightContent(<VoltarParaLista />)
+    return () => {
+      setHeader("", "")
+      setRightContent(null)
+    }
+  }, [setHeader, setRightContent])
 
   async function enviar(valores: SolicitacaoFormValues, empresaId?: string) {
     const criada = await criarSolicitacao(valores, empresaId)
