@@ -379,7 +379,19 @@ $$;
 -- GRANT EXECUTE a PUBLIC é implícito em toda função criada e foi a causa-raiz
 -- de 47 dos 55 warnings do Advisor (ver project_advisors_warnings_2026_08_17).
 -- O padrão certo já usado no projeto é revogar e conceder explicitamente.
-REVOKE EXECUTE ON FUNCTION public.insumos_empresas_do_usuario() FROM PUBLIC;
+--
+-- REVOGAR TAMBÉM DE `anon`, e não só de PUBLIC: o Supabase aplica
+-- `ALTER DEFAULT PRIVILEGES` no schema `public` concedendo EXECUTE a
+-- anon/authenticated/service_role já na criação da função — um grant
+-- explícito para o role `anon`, distinto do pseudo-role PUBLIC. `REVOKE ...
+-- FROM PUBLIC` não o atinge; sem o REVOKE explícito de `anon`, toda função
+-- nova aqui nasce chamável sem login (confirmado via `\df+` neste módulo:
+-- `anon=X/postgres` presente em todas as 9 funções antes desta correção).
+-- Não é vazamento de dado — a RLS ainda barra a escrita, pois `auth.uid()` é
+-- NULL para `anon` — mas expõe superfície e mensagem de erro a quem não
+-- devia nem discar a função. Mesma regra vale para toda função nova do
+-- módulo: revogar de PUBLIC **e** de anon, conceder só ao role pretendido.
+REVOKE EXECUTE ON FUNCTION public.insumos_empresas_do_usuario() FROM PUBLIC, anon;
 GRANT  EXECUTE ON FUNCTION public.insumos_empresas_do_usuario() TO authenticated;
 
 COMMENT ON FUNCTION public.insumos_empresas_do_usuario() IS

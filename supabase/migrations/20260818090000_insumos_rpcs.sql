@@ -462,6 +462,16 @@ $fn$;
 -- GRANT EXECUTE a PUBLIC é implícito em toda função criada e foi a causa-raiz de
 -- 47 dos 55 warnings do Advisor. Revogar e conceder explicitamente é o padrão já
 -- adotado no projeto.
+--
+-- REVOGAR TAMBÉM DE `anon`, não só de PUBLIC — mesma pegadinha corrigida em
+-- 20260817200000 para insumos_empresas_do_usuario(): o Supabase aplica
+-- `ALTER DEFAULT PRIVILEGES` no schema `public` concedendo EXECUTE a
+-- anon/authenticated/service_role já na criação da função, um grant explícito
+-- para o role `anon` que `REVOKE ... FROM PUBLIC` sozinho não alcança. Sem
+-- isto, as 7 RPCs nasciam chamáveis sem login (a RLS ainda barrava a escrita,
+-- já que `auth.uid()` é NULL para `anon` — não houve vazamento de dado, mas a
+-- superfície e a mensagem de erro ficavam expostas a quem não devia nem
+-- discar a função).
 DO $grants$
 DECLARE f text;
 BEGIN
@@ -474,7 +484,7 @@ BEGIN
     'insumos_registrar_compra(uuid,jsonb)',
     'insumos_excluir_solicitacao(uuid)'
   ] LOOP
-    EXECUTE format('REVOKE EXECUTE ON FUNCTION public.%s FROM PUBLIC', f);
+    EXECUTE format('REVOKE EXECUTE ON FUNCTION public.%s FROM PUBLIC, anon', f);
     EXECUTE format('GRANT  EXECUTE ON FUNCTION public.%s TO authenticated', f);
   END LOOP;
 END
