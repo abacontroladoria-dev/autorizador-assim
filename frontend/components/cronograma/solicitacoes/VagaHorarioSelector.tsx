@@ -27,7 +27,8 @@ interface Props {
 
 export function VagaHorarioSelector({ dia, hora, vagas, onEscolherDireto, onEscolherRemanejamento, onEscolherNovoDia, onClose }: Props) {
   const diretas = vagas.filter(v => v.status === "direto")
-  const remanejamentos = vagas.filter(v => v.status === "remanejamento")
+  const remanejamentosMesmoDia = vagas.filter(v => v.status === "remanejamento-mesmo-dia")
+  const remanejamentosOutroDia = vagas.filter(v => v.status === "remanejamento-outro-dia")
   const novoDias = vagas.filter(v => v.status === "novo-dia")
   const livres = vagas.filter(v => v.status === "livre")
 
@@ -58,15 +59,15 @@ export function VagaHorarioSelector({ dia, hora, vagas, onEscolherDireto, onEsco
           </div>
         )}
 
-        {remanejamentos.length > 0 && (
+        {remanejamentosMesmoDia.length > 0 && (
           <div>
             <div className="mb-2 flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-sky-700 dark:text-sky-400">
-              <Repeat2 size={13} /> Oportunidade via remanejamento
+              <Repeat2 size={13} /> Oportunidade via remanejamento (mesmo dia)
             </div>
             <div className="flex flex-col gap-1.5">
-              {remanejamentos.map((v, i) => (
+              {remanejamentosMesmoDia.map((v, i) => (
                 <button
-                  key={`remanejamento-${i}`}
+                  key={`remanejamento-mesmo-dia-${i}`}
                   type="button"
                   onClick={() => onEscolherRemanejamento(v)}
                   className="flex items-center justify-between gap-2 rounded-lg border border-sky-300 dark:border-sky-800 bg-sky-50 dark:bg-sky-950/30 px-3 py-2 text-left hover:brightness-95"
@@ -76,6 +77,30 @@ export function VagaHorarioSelector({ dia, hora, vagas, onEscolherDireto, onEsco
                     <span className="block truncate text-[10.5px] text-muted-foreground">{fmtName(v.paciente?.pac ?? "")} · {v.terapia}</span>
                   </span>
                   <span className="shrink-0 text-[10.5px] font-bold text-sky-700 dark:text-sky-400">Ver antes/depois</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {remanejamentosOutroDia.length > 0 && (
+          <div>
+            <div className="mb-2 flex items-center gap-1.5 text-[11px] font-extrabold uppercase tracking-wide text-indigo-700 dark:text-indigo-400">
+              <Repeat2 size={13} /> Oportunidade via remanejamento (outro dia)
+            </div>
+            <div className="flex flex-col gap-1.5">
+              {remanejamentosOutroDia.map((v, i) => (
+                <button
+                  key={`remanejamento-outro-dia-${i}`}
+                  type="button"
+                  onClick={() => onEscolherRemanejamento(v)}
+                  className="flex items-center justify-between gap-2 rounded-lg border border-indigo-300 dark:border-indigo-800 bg-indigo-50 dark:bg-indigo-950/30 px-3 py-2 text-left hover:brightness-95"
+                >
+                  <span className="min-w-0">
+                    <span className="block truncate text-[12.5px] font-bold text-foreground">{fmtName(v.profissional)}</span>
+                    <span className="block truncate text-[10.5px] text-muted-foreground">{fmtName(v.paciente?.pac ?? "")} · {v.terapia}</span>
+                  </span>
+                  <span className="shrink-0 text-[10.5px] font-bold text-indigo-700 dark:text-indigo-400">Ver antes/depois</span>
                 </button>
               ))}
             </div>

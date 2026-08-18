@@ -11,7 +11,7 @@ import { useMemo } from "react"
 import { Fragment } from "react"
 import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
 import { Button } from "@/components/ui/button"
-import { DIAS_UTIL, estiloUnidade } from "@/lib/cronograma/constants"
+import { DIAS_UTIL, estiloUnidade, unidadeExibicao } from "@/lib/cronograma/constants"
 import { diaCurto, fmtName } from "@/lib/cronograma/helpers"
 import type { CsvRow } from "@/types/cronograma"
 import type { RemanejamentoDetalhe } from "@/lib/cronograma/sugestaoContratacaoTypes"
@@ -104,7 +104,7 @@ function Grade({ mapa, titulo, dias, horas }: { mapa: Record<string, Celula>; ti
                     <td key={dia} className="px-0.5 py-0">
                       {u && (
                         <div className={`rounded-md py-1 text-center text-[10px] font-black uppercase tracking-wide text-white ${estiloUnidade(u).bar}`}>
-                          {u}
+                          {unidadeExibicao(u)}
                         </div>
                       )}
                     </td>
@@ -128,7 +128,7 @@ function Grade({ mapa, titulo, dias, horas }: { mapa: Record<string, Celula>; ti
                             <span className="min-w-0 truncate text-[11px] font-bold leading-tight text-foreground">{c.terapia}</span>
                             {!combinaComDominante && (
                               <span className={`shrink-0 rounded px-1 text-[9px] font-black leading-tight ${estiloUnidade(c.unidade).bg} ${estiloUnidade(c.unidade).text}`}>
-                                {c.unidade}
+                                {unidadeExibicao(c.unidade)}
                               </span>
                             )}
                           </div>

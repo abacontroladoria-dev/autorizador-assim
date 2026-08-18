@@ -9,37 +9,50 @@
 // Clicar em "Aplicar" preenche os filtros abaixo (unidade/dia+turno/
 // especialidade), reaproveitando a mesma grade já renderizada.
 //
-// Visual alinhado ao painel-irmão (mesmo badge de % colorido por faixa, mesma
-// especialidade colorida, mesmo indicador dia/turno minimalista e mesmo
-// filtro de faixa ≥70/60/50%) — dois painéis com a mesma pergunta ("onde
-// olhar primeiro?") devem parecer a mesma ferramenta.
+// Visual alinhado ao painel-irmão (mesmo badge colorido por faixa, mesma
+// especialidade colorida, mesmo indicador dia/turno minimalista e mesmos
+// filtros de Ocupação/Especialidades) — dois painéis com a mesma pergunta
+// ("onde olhar primeiro?") devem parecer a mesma ferramenta. Diferença
+// deliberada: aqui o ranking é por QUANTIDADE de sessões de oportunidade
+// (não %), porque a pergunta é "onde consigo mais sessões pra agendar
+// agora", não "qual % de ocupação prevista" — sem simular contratação nova,
+// não faz sentido perseguir uma % de "capacidade cheia".
 
 import { startTransition, useMemo, useState } from "react"
 import { ArrowRight, ChevronLeft, ChevronRight, Sparkles } from "lucide-react"
-import { rankearOportunidadesInternas, TODAS_FAIXAS_OPORTUNIDADE, type CategoriaComOportunidade } from "@/lib/cronograma/ocupacaoCategoria"
-import { corTerapiaBadge, escurecerHex, hexParaRgba } from "@/lib/cronograma/constants"
+import { rankearOportunidadesInternas, type CategoriaComOportunidade } from "@/lib/cronograma/ocupacaoCategoria"
+import { corTerapiaBadge, escurecerHex, hexParaRgba, TODAS_ESP } from "@/lib/cronograma/constants"
 import { Button } from "@/components/ui/button"
 import { InlineNotice } from "@/components/cronograma/ui/InlineNotice"
 import { BadgeOcupacao, COR_OCUPACAO } from "@/components/cronograma/ui/BadgeOcupacao"
 import { IndicadorDiaTurno } from "@/components/cronograma/ui/IndicadorDiaTurno"
-import type { FaixaCascata } from "@/lib/cronograma/sugestaoContratacao"
+import { MultiSearchCombobox } from "@/components/cronograma/ui/MultiSearchCombobox"
+import type { ModoCascataOcupacao } from "@/lib/cronograma/sugestaoContratacao"
 import type { GapItem, Turno } from "@/lib/cronograma/simulacaoNovoPrestador"
 import type { CsvRow } from "@/types/cronograma"
 
 const ITENS_POR_PAGINA = 5
-const FAIXAS_FILTRO: FaixaCascata[] = [70, 60, 50]
+const ESPECIALIDADES_OPCOES = TODAS_ESP.map((nome, id) => ({ id, nome }))
 
 interface Props {
   cRows: CsvRow[]
   gapMap: Record<string, GapItem>
-  onAplicar: (unidade: string, dia: string, turno: Turno, especialidade: string) => void
+  /** Unidade já escolhida no filtro "Ocupar por unidade, dia e especialidade"
+   *  abaixo — vazia = ranking compara as 3 unidades juntas. */
+  unidade: string
+  onAplicar: (unidade: string, periodos: { dia: string; turno: Turno }[], especialidade: string) => void
 }
 
 function CardOportunidade({ item, onAplicar }: { item: CategoriaComOportunidade; onAplicar: () => void }) {
-  const total = item.qtdDireto + item.qtdRemanejamento + item.qtdNovoDia
+  const turnos: Turno[] = item.periodo === "diaInteiro" ? ["manha", "tarde"] : [item.periodo]
   return (
     <div className="flex flex-wrap items-start gap-3 rounded-xl border border-border bg-card p-3.5">
-      <BadgeOcupacao pct={item.pctAproveitamento} faixa={item.faixa} label="aproveitado" />
+      <BadgeOcupacao
+        pct={item.pctAproveitamento}
+        faixa={item.faixa}
+        valorExibido={String(item.qtdOportunidade)}
+        sufixo={`de ${item.maxSessoes} sessões`}
+      />
 
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -56,11 +69,11 @@ function CardOportunidade({ item, onAplicar }: { item: CategoriaComOportunidade;
           <span className="text-muted-foreground">·</span>
           <span className="text-[12.5px] font-bold text-foreground">{item.unidade}</span>
         </div>
-        <IndicadorDiaTurno dia={item.dia} turnos={[item.turno]} corBar={COR_OCUPACAO[item.faixa].bar} />
+        <IndicadorDiaTurno dia={item.dia} turnos={turnos} corBar={COR_OCUPACAO[item.faixa].bar} />
 
         <div className="mt-2 flex flex-wrap gap-1.5 text-[11px]">
           <span className="flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-1 font-semibold text-foreground">
-            {total} oportunidade(s) — {item.qtdDireto} direta(s), {item.qtdRemanejamento} via remanejamento, {item.qtdNovoDia} via novo dia
+            {item.qtdOportunidade} oportunidade(s) — {item.qtdDireto} direta(s), {item.qtdRemanejamentoMesmoDia} via remanejamento (mesmo dia), {item.qtdRemanejamentoOutroDia} via remanejamento (outro dia), {item.qtdNovoDia} via novo dia
           </span>
           {item.qtdLivre > 0 && (
             <span className="flex items-center gap-1 rounded-full border border-border bg-muted/40 px-2 py-1 text-muted-foreground">
@@ -77,23 +90,31 @@ function CardOportunidade({ item, onAplicar }: { item: CategoriaComOportunidade;
   )
 }
 
-export function OportunidadesInternasPanel({ cRows, gapMap, onAplicar }: Props) {
-  const [faixasSelecionadas, setFaixasSelecionadas] = useState<ReadonlySet<FaixaCascata>>(TODAS_FAIXAS_OPORTUNIDADE)
+export function OportunidadesInternasPanel({ cRows, gapMap, unidade, onAplicar }: Props) {
+  const [modo, setModo] = useState<ModoCascataOcupacao>("diaInteiro")
+  const [especialidadesIds, setEspecialidadesIds] = useState<Set<number>>(new Set())
   const [pagina, setPagina] = useState(0)
-  const ranking = useMemo(() => rankearOportunidadesInternas(cRows, gapMap, faixasSelecionadas), [cRows, gapMap, faixasSelecionadas])
+
+  const especialidadesSelecionadas = useMemo(
+    () => new Set(ESPECIALIDADES_OPCOES.filter(o => especialidadesIds.has(o.id)).map(o => o.nome)),
+    [especialidadesIds],
+  )
+
+  const ranking = useMemo(
+    () => rankearOportunidadesInternas(cRows, gapMap, { unidade: unidade || undefined, modo, especialidades: especialidadesSelecionadas }),
+    [cRows, gapMap, unidade, modo, especialidadesSelecionadas],
+  )
 
   // startTransition: recalcular o ranking varre unidade × dia × especialidade
-  // (~195 combinações) — sem isso, marcar/desmarcar uma faixa trava o clique
-  // até o recálculo terminar (mesmo cuidado de SugestoesContratacaoPanel.tsx).
-  const alternarFaixa = (faixa: FaixaCascata) => startTransition(() => {
-    setFaixasSelecionadas(prev => {
+  // (até ~195 combinações) — sem isso, trocar modo/especialidade trava o
+  // clique até o recálculo terminar (mesmo cuidado de SugestoesContratacaoPanel.tsx).
+  const mudarModo = (novo: ModoCascataOcupacao) => startTransition(() => { setModo(novo); setPagina(0) })
+
+  const alternarEspecialidade = (id: number) => startTransition(() => {
+    setEspecialidadesIds(prev => {
       const proxima = new Set(prev)
-      if (proxima.has(faixa)) {
-        if (proxima.size === 1) return prev // sempre precisa sobrar pelo menos 1 faixa marcada
-        proxima.delete(faixa)
-      } else {
-        proxima.add(faixa)
-      }
+      if (proxima.has(id)) proxima.delete(id)
+      else proxima.add(id)
       return proxima
     })
     setPagina(0)
@@ -102,6 +123,13 @@ export function OportunidadesInternasPanel({ cRows, gapMap, onAplicar }: Props) 
   const totalPaginas = Math.max(1, Math.ceil(ranking.length / ITENS_POR_PAGINA))
   const paginaAtual = Math.min(pagina, totalPaginas - 1)
   const itensDaPagina = ranking.slice(paginaAtual * ITENS_POR_PAGINA, paginaAtual * ITENS_POR_PAGINA + ITENS_POR_PAGINA)
+
+  const aplicarItem = (item: CategoriaComOportunidade) => {
+    const periodos: { dia: string; turno: Turno }[] = item.periodo === "diaInteiro"
+      ? [{ dia: item.dia, turno: "manha" }, { dia: item.dia, turno: "tarde" }]
+      : [{ dia: item.dia, turno: item.periodo }]
+    onAplicar(item.unidade, periodos, item.especialidade)
+  }
 
   return (
     <div className="rounded-2xl border border-border bg-card p-4">
@@ -113,45 +141,78 @@ export function OportunidadesInternasPanel({ cRows, gapMap, onAplicar }: Props) 
         </span>
       </div>
       <div className="mb-3 text-xs text-muted-foreground">
-        Ranqueado por % da capacidade "Livre" já aproveitada (direto + remanejamento) com quem já está contratado — sem precisar abrir vaga nova.
+        Ranqueado por quantidade de sessões de oportunidade (direto + remanejamento + novo dia) com quem já está contratado — sem precisar abrir vaga nova.
+        {!unidade && " Comparando as 3 unidades — escolha uma abaixo pra focar o ranking nela."}
       </div>
 
-      <div className="mb-3 flex flex-wrap items-center gap-1.5 rounded-xl bg-muted/40 px-3 py-2.5">
-        <span className="text-[11px] font-bold text-muted-foreground">Faixa:</span>
-        <div className="flex gap-1">
-          {FAIXAS_FILTRO.map(faixa => {
-            const ativa = faixasSelecionadas.has(faixa)
-            return (
-              <button
-                key={faixa}
-                type="button"
-                onClick={() => alternarFaixa(faixa)}
-                aria-pressed={ativa}
-                className={`rounded-full border px-3 py-1 text-xs font-bold transition-colors ${
-                  ativa
-                    ? "border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-400"
-                    : "border-border bg-card text-muted-foreground hover:bg-muted/50"
-                }`}
-              >
-                ≥ {faixa}%
-              </button>
-            )
-          })}
+      <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-2.5 rounded-xl bg-muted/40 px-3 py-2.5">
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-bold text-muted-foreground">Ocupação:</span>
+          <div className="flex gap-1">
+            {(
+              [
+                { value: "diaInteiro" as const, label: "Manhã + tarde juntos" },
+                { value: "porTurno" as const, label: "Melhor turno isolado" },
+              ]
+            ).map(tab => {
+              const ativa = modo === tab.value
+              return (
+                <button
+                  key={tab.value}
+                  type="button"
+                  onClick={() => mudarModo(tab.value)}
+                  aria-pressed={ativa}
+                  className={`rounded-full border px-3 py-1 text-xs font-bold transition-colors ${
+                    ativa
+                      ? "border-sky-300 dark:border-sky-700 bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-400"
+                      : "border-border bg-card text-muted-foreground hover:bg-muted/50"
+                  }`}
+                >
+                  {tab.label}
+                </button>
+              )
+            })}
+          </div>
+        </div>
+
+        <div className="hidden h-5 w-px bg-border sm:block" />
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-bold text-muted-foreground">Especialidades:</span>
+          <div className="w-64">
+            <MultiSearchCombobox
+              opcoes={ESPECIALIDADES_OPCOES}
+              selecionados={especialidadesIds}
+              onToggle={alternarEspecialidade}
+              placeholder="Todas as especialidades"
+              nomePlural="especialidades"
+              ariaLabel="Especialidades"
+            />
+          </div>
+          {especialidadesIds.size > 0 && (
+            <button
+              type="button"
+              onClick={() => startTransition(() => { setEspecialidadesIds(new Set()); setPagina(0) })}
+              className="text-[11px] font-bold text-muted-foreground underline decoration-dotted hover:text-foreground"
+            >
+              Limpar filtro
+            </button>
+          )}
         </div>
       </div>
 
       {!ranking.length ? (
         <InlineNotice tone="slate">
-          Nenhuma combinação com oportunidade interna ≥ {Math.min(...faixasSelecionadas)}% no momento — tente marcar uma faixa mais baixa acima.
+          Nenhuma combinação com oportunidade interna no momento — tente trocar a unidade, a ocupação ou as especialidades acima.
         </InlineNotice>
       ) : (
         <>
           <div className="flex flex-col gap-2.5">
             {itensDaPagina.map((item, i) => (
               <CardOportunidade
-                key={`${item.unidade}-${item.dia}-${item.turno}-${item.especialidade}-${i}`}
+                key={`${item.unidade}-${item.dia}-${item.periodo}-${item.especialidade}-${i}`}
                 item={item}
-                onAplicar={() => onAplicar(item.unidade, item.dia, item.turno, item.especialidade)}
+                onAplicar={() => aplicarItem(item)}
               />
             ))}
           </div>

@@ -291,11 +291,20 @@ export function estiloUnidade(unidade: string) {
   return UNIDADE_ESTILO[unidade] || { bg: "bg-muted", text: "text-foreground", bar: "bg-slate-500" }
 }
 
+// Nome exibido pro usuário — "AT Externo" é o valor real usado em toda a
+// lógica de negócio (comparações em disponibilidadeInterna.ts, saida.ts,
+// runAlgorithm.ts, inconsistencias.ts etc.), nunca renomeado ali. Aqui é só
+// o rótulo mostrado nos badges/selos de unidade.
+export function unidadeExibicao(unidade: string): string {
+  return unidade === "AT Externo" ? "Ambiente Natural" : unidade
+}
+
 // Sigla de 3 letras pra caber em badges pequenos (célula de grade) sem
 // precisar do nome inteiro — sempre acompanhada da cor da unidade (nunca só
 // a sigla), já que Realengo×Fazendinha não passam no teste de daltonismo.
 export function unidadeAbrev(unidade: string): string {
-  return unidade === "Padre Miguel" ? "PM" : unidade.slice(0, 3).toUpperCase()
+  const nome = unidadeExibicao(unidade)
+  return nome === "Padre Miguel" ? "PM" : nome.slice(0, 3).toUpperCase()
 }
 
 export const SK = "aba_v8"

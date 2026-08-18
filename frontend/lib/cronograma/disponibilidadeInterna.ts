@@ -115,20 +115,36 @@ export interface SlotLivre {
   unidade: string
 }
 
+// Um horário "Livre" pode servir mais de uma terapia — a view traz isso como
+// uma única string separada por vírgula (ex.: "Aplicador ABA (AE), Aplicador
+// ABA (HS), Psicopedagogia"). Split aqui e emite 1 SlotLivre por especialidade
+// distinta que o horário realmente cobre, em vez de tentar casar a string
+// inteira em TERAPIA_TO_ESP (que nunca bate e derruba o slot pra null — bug
+// real encontrado 2026-08-18, caso Amanda Martins Rodrigues: profissional com
+// disponibilidade real sumia da lista "Ocupar Profissionais Disponíveis").
 export function listarSlotsLivres(cRows: CsvRow[]): SlotLivre[] {
   return cRows
     .filter(r => r["Status do Agendamento"] === "Livre" && r["Profissional"])
-    .map(r => {
-      const esp = TERAPIA_TO_ESP[r.Terapia] ?? null
-      const isolado = esp === "Psicologia ABA" && !PSICOLOGIA_ABA_DISPONIVEL_INTERNAMENTE.has(r.Terapia)
-      return {
+    .flatMap((r): SlotLivre[] => {
+      const base = {
         profissional: r["Profissional"],
         dia: r["Dia da Semana"],
         hora: String(r.HI_str || ""),
-        terapia: r.Terapia,
-        especialidade: isolado ? null : esp,
         unidade: String(r.Unidade || "Desconhecida"),
       }
+      const terapiasBrutas = String(r.Terapia || "").split(",").map(t => t.trim()).filter(Boolean)
+      const porEspecialidade = new Map<string, string>() // especialidade -> terapia bruta que a gerou
+      for (const terapiaBruta of terapiasBrutas) {
+        const esp = TERAPIA_TO_ESP[terapiaBruta] ?? null
+        if (!esp) continue
+        const isolado = esp === "Psicologia ABA" && !PSICOLOGIA_ABA_DISPONIVEL_INTERNAMENTE.has(terapiaBruta)
+        if (isolado) continue
+        if (!porEspecialidade.has(esp)) porEspecialidade.set(esp, terapiaBruta)
+      }
+      if (porEspecialidade.size === 0) {
+        return [{ ...base, terapia: r.Terapia, especialidade: null }]
+      }
+      return [...porEspecialidade.entries()].map(([especialidade, terapia]) => ({ ...base, terapia, especialidade }))
     })
 }
 
@@ -207,17 +223,27 @@ export function listarOportunidadesDiretas(
     for (const e of excedentes) excluir.add(`${e.chave}|||${pac}`)
   }
 
+  // Um horário "Livre" que serve mais de 1 especialidade (ver listarSlotsLivres)
+  // aparece em mais de um grupo aqui — sem essa trava, o MESMO horário físico
+  // podia ser pareado com um paciente pela especialidade A e, no grupo
+  // seguinte, com outro paciente pela especialidade B (double-booking do
+  // mesmo slot real). Uma vez usado por qualquer grupo, some dos demais.
+  const chaveSlotFisico = (s: SlotLivre) => `${s.profissional}|||${s.dia}|||${s.hora}|||${s.unidade}`
+  const slotFisicoUsado = new Set<string>()
+
   const oportunidades: OportunidadeDireta[] = []
   for (const [chave, profissionaisLivres] of porGrupo) {
     const [dia, hora, unidade, especialidade] = chave.split("|||")
     const turno = turnoFromHora(hora)
+    const disponiveis = profissionaisLivres.filter(p => !slotFisicoUsado.has(chaveSlotFisico(p)))
     const sobreviventes = (candidatosPorGrupo.get(chave) ?? []).filter(c => !excluir.has(`${chave}|||${c.pac}`))
-    const n = Math.min(profissionaisLivres.length, sobreviventes.length)
+    const n = Math.min(disponiveis.length, sobreviventes.length)
     for (let i = 0; i < n; i++) {
+      slotFisicoUsado.add(chaveSlotFisico(disponiveis[i]))
       oportunidades.push({
-        profissional: profissionaisLivres[i].profissional,
+        profissional: disponiveis[i].profissional,
         dia, turno, hora, unidade,
-        terapia: profissionaisLivres[i].terapia,
+        terapia: disponiveis[i].terapia,
         especialidade,
         paciente: sobreviventes[i],
       })
