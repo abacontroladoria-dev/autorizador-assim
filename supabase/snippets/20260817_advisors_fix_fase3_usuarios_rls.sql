@@ -79,6 +79,31 @@ comment on function public.email_por_username(text) is
 -- ─────────────────────────────────────────────────────────────────────────────
 -- BLOCO 2 — só depois do deploy do login: ligar a RLS
 -- ─────────────────────────────────────────────────────────────────────────────
+--
+-- APLICADO EM PRODUÇÃO 2026-08-17, com UMA MUDANÇA em relação ao que está escrito
+-- abaixo. A pré-checagem revelou que o anon tinha SELECT **e UPDATE, INSERT e
+-- DELETE** em usuarios — escalação de privilégio ativa, não só vazamento de
+-- leitura: com a chave pública dava para se promover a admin.
+--
+-- E `has_table_privilege` responde true tanto para grant direto quanto herdado de
+-- PUBLIC, enquanto `revoke ... from anon` NÃO remove grant herdado de PUBLIC. Por
+-- isso, em vez do `revoke all ... from anon` isolado previsto aqui, o que rodou
+-- zera e reconstrói explicitamente:
+--
+--   revoke all on public.usuarios from anon;
+--   revoke all on public.usuarios from public;
+--   grant select                  on public.usuarios to authenticated;
+--   grant update (nome, username) on public.usuarios to authenticated;
+--   grant all                     on public.usuarios to service_role;
+--   alter table public.usuarios enable row level security;
+--
+-- Verificado depois: anon_select=false, anon_update=false, auth_select=true,
+-- rls_ligada=true, e `email_por_username('alex-sobrinho')` respondendo como anon
+-- (o caminho do login). Deploy do frontend confirmado ANTES, por grep do bundle
+-- em produção: `email_por_username` presente no chunk 0lkd1.f_-2gmb.js.
+--
+-- Reversão de emergência, se o login cair:
+--   alter table public.usuarios disable row level security;
 
 begin;
 

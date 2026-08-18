@@ -67,10 +67,6 @@ const pathIconMap: Record<string, any> = {
   "/solicitar": PlusCircle,
   "/central-pacientes": Activity,
   "/central-terapeutas": UserRound,
-  "/agenda/pacientes": CalendarDays,
-  "/agenda/terapeutas": CalendarDays,
-  "/agenda/salas": Building2,
-  "/guias-digitais": FileText,
   "/auditoria-assim": ClipboardList,
   "/auditoria-assim?tab=auditoria": ClipboardList,
   "/auditoria-assim?tab=pendencias": ListChecks,
@@ -460,7 +456,7 @@ export default function Sidebar() {
           <hr className="my-2 border-sidebar-border" />
 
           {/* Pacientes */}
-          {(canAccess("/solicitar") || canAccess("/central-pacientes") || canAccess("/agenda/pacientes")) && (
+          {(canAccess("/solicitar") || canAccess("/central-pacientes")) && (
             <SidebarGroup title="Pacientes" icon={Users}>
               {canAccess("/solicitar") && (
                 <MenuItem label="Atendimentos" icon={PlusCircle} path="/solicitar" />
@@ -468,14 +464,11 @@ export default function Sidebar() {
               {canAccess("/central-pacientes") && (
                 <MenuItem label="Gestão" icon={Activity} path="/central-pacientes" />
               )}
-              {canAccess("/agenda/pacientes") && (
-                <MenuItem label="Cronograma" icon={CalendarDays} path="/agenda/pacientes" />
-              )}
             </SidebarGroup>
           )}
 
           {/* Terapêutico */}
-          {(canAccess("/central-terapeutas") || canAccess("/analise-tratativas") || canAccess("/agenda/terapeutas") || canAccess("/agenda/salas")) && (
+          {(canAccess("/central-terapeutas") || canAccess("/analise-tratativas")) && (
             <SidebarGroup title="Terapêutico" icon={Stethoscope}>
               {canAccess("/central-terapeutas") && (
                 <MenuItem label="Gestão" icon={UserRound} path="/central-terapeutas" />
@@ -483,17 +476,11 @@ export default function Sidebar() {
               {canAccess("/analise-tratativas") && (
                 <MenuItem label="Análise de Evolução" icon={ClipboardCheck} path="/analise-tratativas" />
               )}
-              {canAccess("/agenda/terapeutas") && (
-                <MenuItem label="Agenda Terapêutica" icon={CalendarDays} path="/agenda/terapeutas" />
-              )}
-              {canAccess("/agenda/salas") && (
-                <MenuItem label="Salas" icon={Building2} path="/agenda/salas" />
-              )}
             </SidebarGroup>
           )}
 
           {/* Operações */}
-          {(canAccess("/auditoria-assim") || canAccess("/guias-digitais") || canAccess("/cco")) && (
+          {(canAccess("/auditoria-assim") || canAccess("/cco")) && (
             <SidebarGroup title="Operações" icon={BriefcaseBusiness}>
               {canAccess("/cco") && (
                 <MenuItem label="Conciliação ASSIM" icon={BarChart3} path="/cco" />
@@ -506,9 +493,6 @@ export default function Sidebar() {
               )}
               {canAccess("/auditoria-assim?tab=auditoria") && (
                 <MenuItem label="Auditoria ASSIM" icon={ClipboardList} path="/auditoria-assim?tab=auditoria" />
-              )}
-              {canAccess("/guias-digitais") && (
-                <MenuItem label="Guias Digitais" icon={FileText} path="/guias-digitais" />
               )}
             </SidebarGroup>
           )}
