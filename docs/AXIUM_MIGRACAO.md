@@ -145,6 +145,14 @@ Ordem por dependência, não por tamanho.
   Atenção: só `familiares[0]` e `vinc_fav_clinica[0]` são lidos — paciente com
   dois convênios perde o segundo em silêncio (limitação herdada).
 
+> **Nome do papel.** O acesso foi pedido como "setor financeiro", mas o CHECK de
+> `usuarios.role` não tem `financeiro` — o setor financeiro do dia a dia é o papel
+> **`faturamento`**, e foi nele que a permissão entrou. Um papel novo e separado
+> seria outra mudança: mexe no CHECK, na tela de administração e nos roleDefaults.
+>
+> Não há item no Sidebar ainda: `/insumos` não existe e o menu apontaria para 404.
+> O código de permissão e o mapeamento de rota já estão prontos.
+
 **2. Acesso.** Mapear as permissões do AXIUM (`compras.ver`, `compras.aprovar`,
 `compras.comprar`, `compras.confirmar-entrega`, `compras.cotar-manual`,
 `compras.alterar-status`, `compras.solicitar`, `compras.editar`) para
@@ -194,10 +202,17 @@ erro). 10 arquivos de rota cobrindo 14 endpoints.
 - [ ] **4c. Validar a migration.** As de 17/08 foram validadas no Postgres
   local em transação revertida; a `20260818090000` **não** — o engine do Docker
   estava em erro na hora. Rodar antes de aplicar.
-- [ ] **4d. Gate de permissão por rota.** Depende da fase 2. Enquanto não
-  entrar, **qualquer usuário com vínculo na empresa alcança
-  `POST /[id]/status`**, que é o escape hatch que troca status sem validar
-  transição (no AXIUM exigia escopo CONSOLIDADO). Não publicar sem fechar isso.
+- [x] **4d. Gate de permissão.** Fechado em 2026-08-18. Código `insumos`,
+  concedido a `faturamento`, `admin` e `diretoria` (definição do usuário).
+  A checagem vive dentro de `extrairAtor`, não em cada rota: o matcher do
+  `proxy.ts` exclui `/api`, e uma rota que esquecesse a checagem abriria um
+  endpoint — assim, a que esquecer não compila (não tem `supabase`).
+  `resolverPermissoes` foi extraída para `lib/permissions/resolver.ts` e o
+  `proxy.ts` passou a usar a mesma função, para não haver duas implementações
+  da regra. Migration `20260818100000_permissao_insumos.sql`.
+  Ainda **não** existe o equivalente ao escopo CONSOLIDADO do AXIUM: quem
+  enxerga insumos alcança `POST /[id]/status`. Se incomodar, o caminho é um
+  código próprio (`insumos_status`), não um `if` de papel na rota.
 - [ ] **4e. Link público de solicitação** (`GET`/`POST /compras/link-publico` e
   a criação sem login). Rota pública precisa de gate no `proxy.ts` e de revisão
   própria — precedente é o `/tv`. Deixado de fora por ser superfície de
