@@ -21,7 +21,7 @@
 import { startTransition, useMemo, useState } from "react"
 import { ArrowRight, ChevronLeft, ChevronRight, Sparkles } from "lucide-react"
 import { rankearOportunidadesInternas, type CategoriaComOportunidade } from "@/lib/cronograma/ocupacaoCategoria"
-import { corTerapiaBadge, escurecerHex, hexParaRgba, TODAS_ESP } from "@/lib/cronograma/constants"
+import { corTerapiaBadge, escurecerHex, hexParaRgba, TODAS_ESP, UNID_COR } from "@/lib/cronograma/constants"
 import { Button } from "@/components/ui/button"
 import { InlineNotice } from "@/components/cronograma/ui/InlineNotice"
 import { BadgeOcupacao, COR_OCUPACAO } from "@/components/cronograma/ui/BadgeOcupacao"
@@ -33,13 +33,11 @@ import type { CsvRow } from "@/types/cronograma"
 
 const ITENS_POR_PAGINA = 5
 const ESPECIALIDADES_OPCOES = TODAS_ESP.map((nome, id) => ({ id, nome }))
+const UNIDADES_OPCOES = Object.keys(UNID_COR).map((nome, id) => ({ id, nome }))
 
 interface Props {
   cRows: CsvRow[]
   gapMap: Record<string, GapItem>
-  /** Unidade já escolhida no filtro "Ocupar por unidade, dia e especialidade"
-   *  abaixo — vazia = ranking compara as 3 unidades juntas. */
-  unidade: string
   onAplicar: (unidade: string, periodos: { dia: string; turno: Turno }[], especialidade: string) => void
 }
 
@@ -90,19 +88,24 @@ function CardOportunidade({ item, onAplicar }: { item: CategoriaComOportunidade;
   )
 }
 
-export function OportunidadesInternasPanel({ cRows, gapMap, unidade, onAplicar }: Props) {
+export function OportunidadesInternasPanel({ cRows, gapMap, onAplicar }: Props) {
   const [modo, setModo] = useState<ModoCascataOcupacao>("diaInteiro")
   const [especialidadesIds, setEspecialidadesIds] = useState<Set<number>>(new Set())
+  const [unidadesIds, setUnidadesIds] = useState<Set<number>>(new Set())
   const [pagina, setPagina] = useState(0)
 
   const especialidadesSelecionadas = useMemo(
     () => new Set(ESPECIALIDADES_OPCOES.filter(o => especialidadesIds.has(o.id)).map(o => o.nome)),
     [especialidadesIds],
   )
+  const unidadesSelecionadas = useMemo(
+    () => new Set(UNIDADES_OPCOES.filter(o => unidadesIds.has(o.id)).map(o => o.nome)),
+    [unidadesIds],
+  )
 
   const ranking = useMemo(
-    () => rankearOportunidadesInternas(cRows, gapMap, { unidade: unidade || undefined, modo, especialidades: especialidadesSelecionadas }),
-    [cRows, gapMap, unidade, modo, especialidadesSelecionadas],
+    () => rankearOportunidadesInternas(cRows, gapMap, { unidades: unidadesSelecionadas, modo, especialidades: especialidadesSelecionadas }),
+    [cRows, gapMap, unidadesSelecionadas, modo, especialidadesSelecionadas],
   )
 
   // startTransition: recalcular o ranking varre unidade × dia × especialidade
@@ -112,6 +115,16 @@ export function OportunidadesInternasPanel({ cRows, gapMap, unidade, onAplicar }
 
   const alternarEspecialidade = (id: number) => startTransition(() => {
     setEspecialidadesIds(prev => {
+      const proxima = new Set(prev)
+      if (proxima.has(id)) proxima.delete(id)
+      else proxima.add(id)
+      return proxima
+    })
+    setPagina(0)
+  })
+
+  const alternarUnidade = (id: number) => startTransition(() => {
+    setUnidadesIds(prev => {
       const proxima = new Set(prev)
       if (proxima.has(id)) proxima.delete(id)
       else proxima.add(id)
@@ -142,7 +155,7 @@ export function OportunidadesInternasPanel({ cRows, gapMap, unidade, onAplicar }
       </div>
       <div className="mb-3 text-xs text-muted-foreground">
         Ranqueado por quantidade de sessões de oportunidade (direto + remanejamento + novo dia) com quem já está contratado — sem precisar abrir vaga nova.
-        {!unidade && " Comparando as 3 unidades — escolha uma abaixo pra focar o ranking nela."}
+        {!unidadesIds.size && " Comparando as 3 unidades — escolha uma ou mais abaixo pra focar o ranking nelas."}
       </div>
 
       <div className="mb-3 flex flex-wrap items-center gap-x-5 gap-y-2.5 rounded-xl bg-muted/40 px-3 py-2.5">
@@ -193,6 +206,31 @@ export function OportunidadesInternasPanel({ cRows, gapMap, unidade, onAplicar }
             <button
               type="button"
               onClick={() => startTransition(() => { setEspecialidadesIds(new Set()); setPagina(0) })}
+              className="text-[11px] font-bold text-muted-foreground underline decoration-dotted hover:text-foreground"
+            >
+              Limpar filtro
+            </button>
+          )}
+        </div>
+
+        <div className="hidden h-5 w-px bg-border sm:block" />
+
+        <div className="flex flex-wrap items-center gap-1.5">
+          <span className="text-[11px] font-bold text-muted-foreground">Unidade:</span>
+          <div className="w-64">
+            <MultiSearchCombobox
+              opcoes={UNIDADES_OPCOES}
+              selecionados={unidadesIds}
+              onToggle={alternarUnidade}
+              placeholder="Todas as unidades"
+              nomePlural="unidades"
+              ariaLabel="Unidade"
+            />
+          </div>
+          {unidadesIds.size > 0 && (
+            <button
+              type="button"
+              onClick={() => startTransition(() => { setUnidadesIds(new Set()); setPagina(0) })}
               className="text-[11px] font-bold text-muted-foreground underline decoration-dotted hover:text-foreground"
             >
               Limpar filtro

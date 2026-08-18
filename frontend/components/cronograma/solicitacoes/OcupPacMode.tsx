@@ -248,19 +248,26 @@ function buildSugestoes(
     if (bundle.pac === pac || bundle.status !== "confirmado") continue
     for (const s of bundle.sessoes) slotsReservadosOutros.add(`${s.prof}|||${s.dia}|||${s.hora}`)
   }
-  // Vagas comprometidas: sessões aguardando ou confirmadas que ainda não estão no agend
+  // Vagas comprometidas: sessões confirmadas que ainda não estão no agend
+  // ("pendente" não bloqueia mais — é um status que nenhum caminho da UI cria hoje).
   for (const bundle of aceites) {
     if (bundle.pac !== pac) continue
-    if (bundle.status !== "pendente" && bundle.status !== "confirmado") continue
+    if (bundle.status !== "confirmado") continue
     for (const s of bundle.sessoes) {
       if (!dayHours[s.dia]) dayHours[s.dia] = new Set()
       dayHours[s.dia].add(s.hora)
     }
   }
 
-  // Apenas sessões clínicas (excl. EXCLUIR_OCUP) — usado para adjacência e hasDay
+  // Usado só para adjacência/hasDay: "a paciente já está presente nesse dia perto
+  // desse horário?". Inclui sessões administrativas (Coordenador de Caso,
+  // Supervisão ABA etc.) — elas não contam pra déficit/gap, mas contam como
+  // presença real: uma sessão nova de 40min colada numa Coordenação de Caso já
+  // agendada não é um "dia novo" isolado, é uma sessão avulsa aproveitando uma
+  // visita que já vai acontecer. Exclui só AT Externo (atendimento domiciliar,
+  // não é presença física na unidade).
   const dayHoursClin: Record<string, Set<string>> = {}
-  for (const r of agend.filter(r => r["Nome Favorecido"] === pac && !EXCLUIR_OCUP.has(r.Terapia) && !ABA_EXT_NAMES.has(r.Terapia))) {
+  for (const r of agend.filter(r => r["Nome Favorecido"] === pac && !ABA_EXT_NAMES.has(r.Terapia))) {
     const d = r["Dia da Semana"]
     const h = hMin(r)
     if (!h && h !== 0) continue
@@ -272,15 +279,31 @@ function buildSugestoes(
 
   const pacUnidades = new Set(pacClinRows.map(r => rowUnid(r)))
 
-  // R5.4: mapa da unidade que o paciente já usa por dia+turno (manhã < 720 min; tarde ≥ 720)
-  const pacDayTurnoUnid: Record<string, string> = {}
-  for (const r of pacClinRows) {
-    const d = r["Dia da Semana"]
+  // R5.4: mapa da unidade DOMINANTE (maioria das sessões) que o paciente já usa
+  // por dia+turno (manhã < 720 min; tarde ≥ 720) — não a primeira linha
+  // encontrada, já que `clinPuras` não vem em ordem cronológica e "primeira
+  // vence" podia travar o turno inteiro numa unidade minoritária (ex.: uma
+  // sessão isolada às 08:40 decidindo a unidade de todo o resto da manhã).
+  // Mesmo critério de unidadeDominanteDoDia (disponibilidadeInterna.ts), usado
+  // pelas telas de Ocupação Profissional/Categoria: empate → sem restrição.
+  // `clinPuras` já exclui AT Externo (Aplicador ABA Casa/Escola), que não é
+  // unidade física e não deve contar pra maioria.
+  const pacDayTurnoCounts: Record<string, Record<string, number>> = {}
+  for (const r of clinPuras) {
     const h = hMin(r)
     if (!h && h !== 0) continue
     const turno = h < 720 ? "manha" : "tarde"
-    const key = `${d}|||${turno}`
-    if (!pacDayTurnoUnid[key]) pacDayTurnoUnid[key] = rowUnid(r)
+    const key = `${r["Dia da Semana"]}|||${turno}`
+    const unid = rowUnid(r)
+    if (!pacDayTurnoCounts[key]) pacDayTurnoCounts[key] = {}
+    pacDayTurnoCounts[key][unid] = (pacDayTurnoCounts[key][unid] || 0) + 1
+  }
+  const pacDayTurnoUnid: Record<string, string> = {}
+  for (const [key, counts] of Object.entries(pacDayTurnoCounts)) {
+    const entries = Object.entries(counts)
+    const max = Math.max(...entries.map(([, n]) => n))
+    const top = entries.filter(([, n]) => n === max)
+    if (top.length === 1) pacDayTurnoUnid[key] = top[0][0]
   }
 
   const pacGaps = Object.entries(gapMap)
@@ -547,7 +570,6 @@ interface TodasSugestoesModalProps {
   onAceitar: (bundle: { sessoes: AceiteSessao[]; beforeCount: number }) => void
   onInviavel: (sessoes: AceiteSessao[], motivo: string) => void
   onAcaoDireta: (sessoes: AceiteSessao[], status: "pendente" | "recusado" | "inviavel", motivo?: string) => void
-  recusadasSet: Set<string>
   onUndoRecusa: (dia: string, hora: string, tP: string, prof: string) => void
   /** CRON-008: sessões já reservadas (implantação imediata) deste paciente — exibidas
    * diretamente na grade como "Reservado", fora do fluxo normal de sugestões. */
@@ -562,7 +584,7 @@ export interface TodasSugestoesModalHandle {
 const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoesModalProps>(function TodasSugestoesModal({
   pac, conv, cRows, sugestoes, pacGaps, pacAllEsp, stOf, setSt,
   estrategia, setEstrategia, onAceitar, onInviavel, onAcaoDireta,
-  recusadasSet, onUndoRecusa, reservasConfirmadas,
+  onUndoRecusa, reservasConfirmadas,
 }: TodasSugestoesModalProps, ref: React.Ref<TodasSugestoesModalHandle>) {
   const [selIdx, setSelIdx]         = useState<Record<string, Record<string, number>>>({})
   const [profSelIdx, setProfSelIdx] = useState<Record<string, number>>({})
@@ -607,12 +629,8 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
       const next = new Set<string>()
       for (const s of sugestoes) {
         if (stOf(s) === "inviavel") continue
-        const mainKey = `${s.dia}|||${s.hora}|||${s.tP}|||${s.prof}`
-        if (recusadasSet.has(mainKey)) continue
         next.add(s.id)
         for (const vc of getActiveVComps(s)) {
-          const vcKey = `${s.dia}|||${vc.hora}|||${vc.tP}|||${vc.prof}`
-          if (recusadasSet.has(vcKey)) continue
           next.add(`${s.id}|||vc|||${vc.hora}`)
         }
       }
@@ -781,10 +799,10 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     const st  = stOf(s)
     const ae  = getActiveEntry(s)
     const kP  = `${s.dia}|||${s.hora}`
-    // tipo visual: "recusada" se inviavel ou já recusado pelo usuário; "proposta" caso contrário
+    // tipo visual: "recusada" se inviavel; "proposta" caso contrário — recusa da família
+    // não bloqueia mais reoferta (só fica registrada em "rec" para auditoria/histórico).
     // A distinção aceita/não-aceita é feita no render via selectedIds.has(c.sugestaoId)
-    const recKey = `${s.dia}|||${s.hora}|||${ae.tP}|||${ae.prof}`
-    const tipo: CellInfo["tipo"] = st === "inviavel" ? "recusada" : recusadasSet.has(recKey) ? "recusada" : "proposta"
+    const tipo: CellInfo["tipo"] = st === "inviavel" ? "recusada" : "proposta"
     if (!cMap[kP]) cMap[kP] = []
     if (!cMap[kP].some(x => x.sugestaoId === s.id)) {
       cMap[kP].push({ tP: ae.tP, tE: tExib(ae.tP), prof: ae.prof, tipo, unidade: ae.unidade, sugestaoId: s.id })
@@ -807,9 +825,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
       seenSlot.add(kC)
       if (!cMap[kC]) cMap[kC] = []
       if (!cMap[kC].some(x => x.sugestaoId === vcSugId)) {
-        const recKeyVc = `${s.dia}|||${vc.hora}|||${vc.tP}|||${vc.prof}`
-        const tipoVc: CellInfo["tipo"] = recusadasSet.has(recKeyVc) ? "recusada" : "proposta"
-        cMap[kC].push({ tP: vc.tP, tE: tExib(vc.tP), prof: vc.prof, tipo: tipoVc, unidade: activeUnid, sugestaoId: vcSugId, isVComp: true })
+        cMap[kC].push({ tP: vc.tP, tE: tExib(vc.tP), prof: vc.prof, tipo: "proposta", unidade: activeUnid, sugestaoId: vcSugId, isVComp: true })
       }
     }
   }
@@ -1456,134 +1472,6 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
   )
 })
 
-// ─── AceitesPanel ─────────────────────────────────────────────────────────────
-
-const BUNDLE_STATUS_META = {
-  pendente:   { label: "Pendente",  bg: "#fef3c7", c: "#92400e", bd: "#fbbf24" },
-  confirmado: { label: "Confirmou", bg: "#dcfce7", c: "#14532d", bd: "#86efac" },
-  recusado:   { label: "Recusou",   bg: "#fee2e2", c: "#7f1d1d", bd: "#fca5a5" },
-  inviavel:   { label: "⛔ Inviável", bg: "#f3f4f6", c: "#6b7280", bd: "#d1d5db" },
-  removido_tita: { label: "Removido na TiTa", bg: "#fffbeb", c: "#b45309", bd: "#fcd34d" },
-}
-
-function AceitesPanel({
-  pac, aceites, onUpdate, onVerAll,
-}: {
-  pac: string
-  aceites: AceitePacBundle[]
-  onUpdate: (updated: AceitePacBundle[]) => void
-  onVerAll: () => void
-}) {
-  const [confirmandoId, setConfirmandoId] = useState<string | null>(null)
-  const pacAceites = aceites.filter(a => a.pac === pac)
-  if (!pacAceites.length) return null
-
-  function updateBundle(id: string, patch: Partial<AceitePacBundle>) {
-    onUpdate(aceites.map(a => a.id === id ? { ...a, ...patch } : a))
-  }
-
-  function deleteBundle(id: string) {
-    onUpdate(aceites.filter(a => a.id !== id))
-  }
-
-  function toggleInviavel(bundleId: string, slotKey: string) {
-    const bundle = aceites.find(a => a.id === bundleId)
-    if (!bundle) return
-    const inviavelSlots = bundle.inviavelSlots.includes(slotKey)
-      ? bundle.inviavelSlots.filter(k => k !== slotKey)
-      : [...bundle.inviavelSlots, slotKey]
-    updateBundle(bundleId, { inviavelSlots })
-  }
-
-  return (
-    <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px", marginTop: "16px" }}>
-      <div style={{ fontWeight: 800, color: B.navy, fontSize: "13px", marginBottom: "12px" }}>
-        Aceites e Recusas — ocp. paciente
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-        {pacAceites.map(bundle => {
-          const sm = BUNDLE_STATUS_META[bundle.status]
-          const d  = new Date(bundle.ts)
-          const dateStr = `${d.getDate().toString().padStart(2, "0")}/${(d.getMonth() + 1).toString().padStart(2, "0")} ${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`
-          return (
-            <div key={bundle.id} style={{ border: "1px solid var(--border)", borderRadius: "12px", padding: "12px", background: "var(--card)" }}>
-              {/* Bundle header */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                  <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)" }}>{dateStr}</span>
-                  <span style={{ fontSize: "10px", fontWeight: 600, color: "var(--muted-foreground)", background: "var(--muted)", padding: "0 6px", borderRadius: "4px" }}>ocp. paciente</span>
-                  <span style={{ padding: "1px 7px", borderRadius: "5px", fontSize: "11px", fontWeight: 800, background: sm.bg, color: sm.c, border: `1px solid ${sm.bd}` }}>{sm.label}</span>
-                </div>
-                <span style={{ fontSize: "11px", color: "var(--muted-foreground)", flexShrink: 0 }}>{bundle.sessoes.length} sessão(ões)</span>
-              </div>
-
-              {/* Motivo (bundles recusados ou inviáveis) */}
-              {(bundle.status === "inviavel" || bundle.status === "recusado") && bundle.motivo && (
-                <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: "8px", padding: "7px 10px", marginBottom: "10px", fontSize: "11px", color: "#6b7280" }}>
-                  <span style={{ fontWeight: 700 }}>Justificativa: </span>{bundle.motivo}
-                </div>
-              )}
-
-              {/* Sessões */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(155px, 1fr))", gap: "6px", marginBottom: "10px" }}>
-                {bundle.sessoes.map((s, i) => {
-                  const slotKey  = `${s.dia}|||${s.hora}`
-                  const isInv    = bundle.inviavelSlots.includes(slotKey)
-                  const isInvBundle = bundle.status === "inviavel"
-                  return (
-                    <div key={i} style={{ border: `1px solid ${isInv || isInvBundle ? "#fca5a5" : "#e5e7eb"}`, borderRadius: "8px", padding: "7px 9px", background: isInv || isInvBundle ? "#fff1f2" : "white", opacity: isInv ? 0.7 : 1 }}>
-                      <div style={{ fontFamily: "monospace", fontVariantNumeric: "tabular-nums", fontSize: "10px", fontWeight: 800, color: B.navy }}>{s.dia.replace("-feira", "")} {s.hora}</div>
-                      <div style={{ fontSize: "10px", fontWeight: 700, color: "#1f2937", marginTop: "2px" }}>{s.tP}</div>
-                      <div style={{ fontSize: "11px", color: "#6b7280" }}>{fmtName(s.prof)}</div>
-                      {!isInvBundle && (
-                        <button
-                          onClick={() => toggleInviavel(bundle.id, slotKey)}
-                          style={{ ...btnStyle(isInv ? "#f3f4f6" : "#fef2f2", isInv ? "#6b7280" : "#dc2626", isInv ? "#e5e7eb" : "#fca5a5"), fontSize: "10px", marginTop: "5px", width: "100%", textAlign: "center" }}>
-                          {isInv ? "↩ Desfazer" : "⛔ Inviável"}
-                        </button>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-
-              {/* Ações do bundle */}
-              <div style={{ display: "flex", gap: "5px", flexWrap: "wrap", borderTop: "1px solid #f0f0f0", paddingTop: "8px", alignItems: "center" }}>
-                {bundle.status !== "inviavel" && (
-                  <>
-                    <button
-                      onClick={() => updateBundle(bundle.id, { status: "confirmado" })}
-                      style={{ ...btnStyle(bundle.status === "confirmado" ? "#dcfce7" : "#f0fdf4", "#14532d", bundle.status === "confirmado" ? "#86efac" : "#bbf7d0"), fontSize: "10px" }}>
-                      ✓ Responsável Confirmou
-                    </button>
-                    <button
-                      onClick={() => updateBundle(bundle.id, { status: "recusado" })}
-                      style={{ ...btnStyle(bundle.status === "recusado" ? "#fee2e2" : "#fef2f2", "#7f1d1d", bundle.status === "recusado" ? "#fca5a5" : "#fecaca"), fontSize: "10px" }}>
-                      ✗ Recusou
-                    </button>
-                    {bundle.status !== "pendente" && (
-                      <button onClick={() => updateBundle(bundle.id, { status: "pendente" })} style={{ ...btnStyle("#f3f4f6", "#6b7280", "#e5e7eb"), fontSize: "10px" }}>Desfazer</button>
-                    )}
-                  </>
-                )}
-                {confirmandoId === bundle.id ? (
-                  <div style={{ display: "flex", gap: "4px", marginLeft: "auto", alignItems: "center" }}>
-                    <span style={{ fontSize: "10px", color: "#dc2626", fontWeight: 700 }}>Excluir bundle?</span>
-                    <button onClick={() => { deleteBundle(bundle.id); setConfirmandoId(null) }} style={{ ...btnStyle("#fef2f2", "#dc2626", "#fca5a5"), fontSize: "10px" }}>Sim</button>
-                    <button onClick={() => setConfirmandoId(null)} style={{ ...btnStyle("#f3f4f6", "#6b7280", "#e5e7eb"), fontSize: "10px" }}>Não</button>
-                  </div>
-                ) : (
-                  <button onClick={() => setConfirmandoId(bundle.id)} style={{ ...btnStyle("#fef2f2", "#dc2626", "#fca5a5"), fontSize: "10px", marginLeft: "auto" }}>Cancelar</button>
-                )}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
-
 // ─── PacAgendaGrid ────────────────────────────────────────────────────────────
 
 function PacAgendaGrid({ pac, cRows, sugestoes, onVerAll }: { pac: string; cRows: CsvRow[]; sugestoes: Sugestao[]; onVerAll: () => void }) {
@@ -1812,15 +1700,6 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       toast("♻️ Sessões implantadas foram removidas na TiTa — os horários foram liberados.")
     }
   }, [pac, cRows, aceites, persistAceites])
-
-  const recusadasSet = useMemo(() => {
-    const s = new Set<string>()
-    for (const r of recGlobal) {
-      if (r.paciente !== pac) continue
-      s.add(`${r.dia}|||${r.hora}|||${r.especialidade}|||${r.profissional}`)
-    }
-    return s
-  }, [recGlobal, pac])
 
   function openInvModal(s: Sugestao) { setInvPending(s); setInvMotivo("") }
   function confirmInv() {
@@ -2089,11 +1968,12 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       seenOf.add(dk)
       qtdOf[`${p}|||${esp}`] = (qtdOf[`${p}|||${esp}`] || 0) + 1
     }
-    // Reservas aguardando resposta/confirmação também ocupam a vaga — sem isso o
-    // motor de sugestões (buildSugestoes) continuaria ofertando sessões além do que
-    // resta de autorização. `seenOf` evita dupla contagem após a sincronização.
+    // Reservas confirmadas também ocupam a vaga — sem isso o motor de sugestões
+    // (buildSugestoes) continuaria ofertando sessões além do que resta de autorização.
+    // "pendente" não conta mais — nenhum caminho da UI cria esse status hoje.
+    // `seenOf` evita dupla contagem após a sincronização.
     for (const b of aceites) {
-      if (b.status !== "pendente" && b.status !== "confirmado") continue
+      if (b.status !== "confirmado") continue
       if (PACS_ADMIN_OCUP_PAC.has(b.pac)) continue
       for (const s of b.sessoes) {
         if (EXCLUIR_GAPS.has(s.tP)) continue
@@ -2291,8 +2171,9 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     // contam junto com o que já veio de `agend`, num único total (sem "+N" separado
     // à espera de sincronização). `seenOf` evita dupla contagem quando a mesma sessão
     // também aparecer em `agend` após o próximo sync do CSV.
+    // "pendente" não conta mais — nenhum caminho da UI cria esse status hoje.
     for (const b of aceites) {
-      if (b.pac !== pac || (b.status !== "pendente" && b.status !== "confirmado")) continue
+      if (b.pac !== pac || b.status !== "confirmado") continue
       for (const s of b.sessoes) {
         if (EXCLUIR_GAPS.has(s.tP)) continue
         const esp = TERAPIA_TO_ESP[s.tP]
@@ -2687,11 +2568,9 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
             onAceitar={handleAceitar}
             onInviavel={handleInviavel}
             onAcaoDireta={handleAcaoDireta}
-            recusadasSet={recusadasSet}
             onUndoRecusa={onUndoRecusa}
             reservasConfirmadas={reservasConfirmadas}
           />
-          <AceitesPanel pac={pac} aceites={aceites} onUpdate={persistAceites} onVerAll={() => {}} />
         </>
       )}
 
