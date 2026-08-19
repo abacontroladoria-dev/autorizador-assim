@@ -110,6 +110,13 @@ export const PACS_ADMIN = new Set([
   "Supervisora Beatriz Paiva", "Fonoaudiologia", "Facilitador Técnico",
 ])
 
+// Subconjunto de PACS_ADMIN: representam o profissional com o horário
+// deliberadamente reservado/bloqueado (não atendimento real, mas também não
+// um "buraco" a preencher). Usado em RegularizacoesView (Ocupação de Salas)
+// para não sinalizar como "está na Ocupação de Salas, mas não está no TiTa"
+// uma alocação de sala que cobre um desses bloqueios.
+export const PACS_BLOQUEIO_ADMIN = new Set(["Horário Administrativo", "Horário Bloqueado"])
+
 // ─── PROFISSIONAIS ────────────────────────────────────────────────────────────
 export const PROFISSIONAIS_BLOQUEADOS_TEMPORARIAMENTE = [
   "Djinane Ferreira Da Silva",

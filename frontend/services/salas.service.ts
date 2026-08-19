@@ -1,6 +1,7 @@
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { buscarGrade, fixMojibake } from "@/lib/grade/fonte"
 import { isFakePatient } from "@/lib/remuneracao/pacientes"
+import { PACS_BLOQUEIO_ADMIN } from "@/lib/cronograma/constants"
 import type { Sala, SalaInput, AgendaSalaRow, AlocacaoSala, AlocacaoInput, SalaStatus, SalaTerapiaExclusiva, SalaTerapiaExclusivaInput } from "@/lib/cronograma/salasTypes"
 import { registrarAuditoriaSala } from "@/services/salasAuditoria.service"
 
@@ -458,4 +459,25 @@ export async function buscarLinhasAgendaParaSalas(dataInicio: string, dataFim: s
     // lib/remuneracao/pacientes.ts) não são atendimento real e não devem contar
     // como ocupação de sala nem aparecer em "Terapias mais frequentes".
     .filter(r => !isFakePatient(r.paciente_nome, r.paciente_id !== null ? String(r.paciente_id) : null))
+}
+
+/**
+ * Sessões de "Horário Administrativo"/"Horário Bloqueado" no período — mesmos
+ * placeholders excluídos de `buscarLinhasAgendaParaSalas` acima (não são
+ * atendimento real), mas usados em RegularizacoesView (ver
+ * calcularRegularizacoes) só para não sinalizar como "está na Ocupação de
+ * Salas, mas não está no TiTa" uma alocação que cobre um bloqueio desses.
+ */
+export async function buscarTurnosBloqueioAdministrativo(dataInicio: string, dataFim: string): Promise<AgendaSalaRow[]> {
+  const all = await buscarGrade<AgendaSalaRow>({
+    campos: AGENDA_FIELDS,
+    fonte: "base",
+    de: dataInicio,
+    ate: dataFim,
+    ordem: [{ coluna: "data" }, { coluna: "hora_inicial" }, { coluna: "id" }],
+  })
+
+  return all
+    .map(r => ({ ...r, paciente_nome: fixMojibake(r.paciente_nome), profissional_nome: fixMojibake(r.profissional_nome) }))
+    .filter(r => r.paciente_nome != null && PACS_BLOQUEIO_ADMIN.has(r.paciente_nome))
 }

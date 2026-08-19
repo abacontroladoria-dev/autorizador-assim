@@ -426,7 +426,7 @@ export function OcupacaoCategoriaView({ cRows }: Props) {
         </InlineNotice>
       ) : (
         <>
-          <OportunidadesInternasPanel cRows={cRows} gapMap={gapMap} unidade={unidade} onAplicar={aplicarOportunidade} />
+          <OportunidadesInternasPanel cRows={cRows} gapMap={gapMap} onAplicar={aplicarOportunidade} />
 
           <div className="rounded-2xl border border-border bg-card p-4">
             <div className="mb-1 flex items-center gap-1.5">
