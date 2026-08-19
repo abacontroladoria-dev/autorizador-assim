@@ -515,7 +515,7 @@ export default function Sidebar() {
               dentro de Faturamento: aquele grupo é faturamento de convênio
               (ASSIM), este é compra de insumo. Vai crescer com Estoque. */}
           {canAccess("/insumos") && (
-            <SidebarGroup title="Insumos" icon={Package}>
+            <SidebarGroup title="Suprimentos" icon={Package}>
               <MenuItem label="Solicitações" icon={Package} path="/insumos" />
             </SidebarGroup>
           )}
