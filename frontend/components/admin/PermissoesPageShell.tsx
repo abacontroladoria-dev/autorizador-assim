@@ -35,6 +35,10 @@ import {
   UserSearch,
   UserPlus,
   Package,
+  UsersRound,
+  Trash2,
+  X,
+  Lock,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useHeader } from '@/contexts/HeaderContext'
@@ -49,6 +53,18 @@ import {
   salvarPermissoesUsuario,
 } from '@/services/permissoes.service'
 import type { Permissao } from '@/services/permissoes.service'
+import {
+  adicionarMembro,
+  aplicarModeloAoGrupo,
+  criarGrupo,
+  excluirGrupo,
+  getAllMembrosPorGrupo,
+  getGrupos,
+  removerMembro,
+  renomearGrupo,
+  salvarModeloGrupo,
+} from '@/services/grupos.service'
+import type { Grupo } from '@/services/grupos.service'
 import { getRoleDefaultPermissions, hasPermission } from '@/lib/permissions/hasPermission'
 import { getAvatarColor } from '@/lib/admin/avatar-color'
 import {
@@ -296,7 +312,7 @@ export default function PermissoesPageShell() {
   const [openGroups, setOpenGroups] = useState<Set<string>>(INITIAL_OPEN)
 
   // ─── View "por permissão" (quem tem acesso a X) ──────────────────────────
-  const [viewMode, setViewMode] = useState<'usuario' | 'permissao'>('usuario')
+  const [viewMode, setViewMode] = useState<'usuario' | 'permissao' | 'grupo'>('usuario')
   const [allOverrides, setAllOverrides] = useState<Record<string, Record<string, boolean>>>({})
   const [loadingOverrides, setLoadingOverrides] = useState(false)
   const [selectedCodigo, setSelectedCodigo] = useState<string | null>(null)
@@ -305,6 +321,29 @@ export default function PermissoesPageShell() {
   const [onlyGranted, setOnlyGranted] = useState(true)
   const [openGroupsPermView, setOpenGroupsPermView] = useState<Set<string>>(INITIAL_OPEN)
   const [grantingUserId, setGrantingUserId] = useState<string | null>(null)
+
+  // ─── View "por grupo" (membros + modelo de permissões em lote) ──────────
+  const [grupos, setGrupos] = useState<Grupo[]>([])
+  const [loadingGrupos, setLoadingGrupos] = useState(false)
+  const [selectedGrupo, setSelectedGrupo] = useState<Grupo | null>(null)
+  const [grupoSearch, setGrupoSearch] = useState('')
+  const [membrosPorGrupo, setMembrosPorGrupo] = useState<Record<string, string[]>>({})
+  const [grupoModeloPerms, setGrupoModeloPerms] = useState<Record<string, boolean>>({})
+  const [openGroupsGrupoView, setOpenGroupsGrupoView] = useState<Set<string>>(INITIAL_OPEN)
+  const [addMemberSearch, setAddMemberSearch] = useState('')
+  const [memberActionId, setMemberActionId] = useState<string | null>(null)
+  const [applyingModelo, setApplyingModelo] = useState(false)
+  const [showNovoGrupoModal, setShowNovoGrupoModal] = useState(false)
+  const [novoGrupoNome, setNovoGrupoNome] = useState('')
+  const [creatingGrupo, setCreatingGrupo] = useState(false)
+  const [showEditGrupoModal, setShowEditGrupoModal] = useState(false)
+  const [editGrupoNome, setEditGrupoNome] = useState('')
+  const [editGrupoDescricao, setEditGrupoDescricao] = useState('')
+  const [savingGrupoEdit, setSavingGrupoEdit] = useState(false)
+  const [showDeleteGrupoConfirm, setShowDeleteGrupoConfirm] = useState(false)
+  const [deletingGrupo, setDeletingGrupo] = useState(false)
+  const [memberToRemove, setMemberToRemove] = useState<AdminUser | null>(null)
+  const [memberToSync, setMemberToSync] = useState<AdminUser | null>(null)
 
   useEffect(() => {
     setHeader('Permissões', 'Gerencie as permissões de acesso dos usuários aos módulos do sistema.')
@@ -336,7 +375,7 @@ export default function PermissoesPageShell() {
   }, [isAdmin])
 
   useEffect(() => {
-    if (viewMode !== 'permissao' || isAdmin !== true) return
+    if ((viewMode !== 'permissao' && viewMode !== 'grupo') || isAdmin !== true) return
     if (Object.keys(allOverrides).length > 0) return
     setLoadingOverrides(true)
     getAllUsuariosPermissoes().then(overrides => {
@@ -349,6 +388,17 @@ export default function PermissoesPageShell() {
       setLoadingOverrides(false)
     })
   }, [viewMode, isAdmin, allOverrides])
+
+  useEffect(() => {
+    if (viewMode !== 'grupo' || isAdmin !== true) return
+    if (grupos.length > 0) return
+    setLoadingGrupos(true)
+    Promise.all([getGrupos(), getAllMembrosPorGrupo()]).then(([g, m]) => {
+      setGrupos(g)
+      setMembrosPorGrupo(m)
+      setLoadingGrupos(false)
+    })
+  }, [viewMode, isAdmin, grupos])
 
   // ─── Computados ──────────────────────────────────────────────────────────
 
@@ -425,6 +475,60 @@ export default function PermissoesPageShell() {
     () => usersForSelectedCodigo.filter(x => x.granted).length,
     [usersForSelectedCodigo]
   )
+
+  const filteredGrupos = useMemo(() => {
+    if (!grupoSearch) return grupos
+    const q = grupoSearch.toLowerCase()
+    return grupos.filter(g => g.nome.toLowerCase().includes(q))
+  }, [grupos, grupoSearch])
+
+  const selectedGrupoMembroIds = useMemo(
+    () => (selectedGrupo ? membrosPorGrupo[selectedGrupo.id] || [] : []),
+    [selectedGrupo, membrosPorGrupo]
+  )
+
+  const selectedGrupoMembros = useMemo(
+    () => users.filter(u => selectedGrupoMembroIds.includes(u.id)),
+    [users, selectedGrupoMembroIds]
+  )
+
+  const usersDisponiveisParaGrupo = useMemo(() => {
+    let list = users.filter(u => !selectedGrupoMembroIds.includes(u.id))
+    if (addMemberSearch) {
+      const q = addMemberSearch.toLowerCase()
+      list = list.filter(u => (u.nome || u.email || '').toLowerCase().includes(q))
+    }
+    return list
+  }, [users, selectedGrupoMembroIds, addMemberSearch])
+
+  const isModeloDirty = useMemo(
+    () =>
+      JSON.stringify(grupoModeloPerms) !== JSON.stringify(selectedGrupo?.modelo_permissoes || {}),
+    [grupoModeloPerms, selectedGrupo]
+  )
+
+  const modeloLiberadosCount = useMemo(
+    () => Object.values(grupoModeloPerms).filter(Boolean).length,
+    [grupoModeloPerms]
+  )
+
+  // Membros cujas permissões efetivas (padrão do role + overrides individuais)
+  // não batem mais com o modelo salvo do grupo — ficaram assim porque alguém
+  // editou "Por usuário"/"Por permissão" depois da última aplicação do
+  // modelo, ou porque o modelo foi alterado depois.
+  const driftedMemberIds = useMemo(() => {
+    if (!selectedGrupo || loadingOverrides) return new Set<string>()
+    const modelo = selectedGrupo.modelo_permissoes
+    const drifted = new Set<string>()
+    for (const uid of selectedGrupoMembroIds) {
+      const user = users.find(u => u.id === uid)
+      if (!user) continue
+      const effective = computeEffectivePerms(allOverrides[uid] || {}, user.role || '', permissoes)
+      const isDrifted = permissoes.some(p => (effective[p.codigo] ?? false) !== (modelo[p.codigo] ?? false))
+      if (isDrifted) drifted.add(uid)
+    }
+    return drifted
+  }, [selectedGrupo, selectedGrupoMembroIds, users, allOverrides, permissoes, loadingOverrides])
 
   // ─── Handlers (lógica de negócio inalterada) ─────────────────────────────
 
@@ -542,6 +646,170 @@ export default function PermissoesPageShell() {
     })
   }
 
+  function toggleGroupGrupoView(grupo: string) {
+    setOpenGroupsGrupoView(prev => {
+      const next = new Set(prev)
+      if (next.has(grupo)) next.delete(grupo)
+      else next.add(grupo)
+      return next
+    })
+  }
+
+  function handleSelectGrupo(g: Grupo) {
+    setSelectedGrupo(g)
+    setGrupoModeloPerms({ ...g.modelo_permissoes })
+    setAddMemberSearch('')
+  }
+
+  async function handleCriarGrupo() {
+    const nome = novoGrupoNome.trim()
+    if (!nome) return
+    setCreatingGrupo(true)
+    const novo = await criarGrupo(nome)
+    if (novo) {
+      setGrupos(prev => [...prev, novo].sort((a, b) => a.nome.localeCompare(b.nome)))
+      setMembrosPorGrupo(prev => ({ ...prev, [novo.id]: [] }))
+      handleSelectGrupo(novo)
+      setShowNovoGrupoModal(false)
+      setNovoGrupoNome('')
+      toast.success('Grupo criado com sucesso')
+    } else {
+      toast.error('Erro ao criar grupo — verifique se já existe um grupo com esse nome')
+    }
+    setCreatingGrupo(false)
+  }
+
+  function handleAbrirEditGrupo() {
+    if (!selectedGrupo) return
+    setEditGrupoNome(selectedGrupo.nome)
+    setEditGrupoDescricao(selectedGrupo.descricao || '')
+    setShowEditGrupoModal(true)
+  }
+
+  async function handleSalvarEditGrupo() {
+    if (!selectedGrupo) return
+    const nome = editGrupoNome.trim()
+    if (!nome) return
+    setSavingGrupoEdit(true)
+    const ok = await renomearGrupo(selectedGrupo.id, { nome, descricao: editGrupoDescricao.trim() || null })
+    if (ok) {
+      const updated = { ...selectedGrupo, nome, descricao: editGrupoDescricao.trim() || null }
+      setSelectedGrupo(updated)
+      setGrupos(prev =>
+        prev.map(g => (g.id === updated.id ? updated : g)).sort((a, b) => a.nome.localeCompare(b.nome))
+      )
+      toast.success('Grupo atualizado com sucesso')
+      setShowEditGrupoModal(false)
+    } else {
+      toast.error('Erro ao atualizar grupo — verifique se já existe um grupo com esse nome')
+    }
+    setSavingGrupoEdit(false)
+  }
+
+  async function handleExcluirGrupo() {
+    if (!selectedGrupo) return
+    setDeletingGrupo(true)
+    const ok = await excluirGrupo(selectedGrupo.id)
+    if (ok) {
+      setGrupos(prev => prev.filter(g => g.id !== selectedGrupo.id))
+      setMembrosPorGrupo(prev => {
+        const next = { ...prev }
+        delete next[selectedGrupo.id]
+        return next
+      })
+      setSelectedGrupo(null)
+      setShowDeleteGrupoConfirm(false)
+      toast.success('Grupo excluído com sucesso')
+    } else {
+      toast.error('Erro ao excluir grupo')
+    }
+    setDeletingGrupo(false)
+  }
+
+  async function handleAddMembro(userId: string) {
+    if (!selectedGrupo) return
+    setMemberActionId(userId)
+    const ok = await adicionarMembro(selectedGrupo.id, userId)
+    if (ok) {
+      setMembrosPorGrupo(prev => ({
+        ...prev,
+        [selectedGrupo.id]: [...(prev[selectedGrupo.id] || []), userId],
+      }))
+    } else {
+      toast.error('Erro ao adicionar membro ao grupo')
+    }
+    setMemberActionId(null)
+  }
+
+  async function handleRemoveMembro(userId: string) {
+    if (!selectedGrupo) return
+    setMemberActionId(userId)
+    const ok = await removerMembro(selectedGrupo.id, userId)
+    if (ok) {
+      setMembrosPorGrupo(prev => ({
+        ...prev,
+        [selectedGrupo.id]: (prev[selectedGrupo.id] || []).filter(id => id !== userId),
+      }))
+    } else {
+      toast.error('Erro ao remover membro do grupo')
+    }
+    setMemberActionId(null)
+  }
+
+  async function handleConfirmRemoveMembro() {
+    if (!memberToRemove) return
+    await handleRemoveMembro(memberToRemove.id)
+    setMemberToRemove(null)
+  }
+
+  function handleToggleModeloPerm(codigo: string, value: boolean) {
+    setGrupoModeloPerms(prev => ({ ...prev, [codigo]: value }))
+  }
+
+  // Salva o modelo (com o valor de todos os códigos, não só os marcados) e
+  // aplica como override explícito aos usuarioIds informados. Usada tanto por
+  // "Aplicar a todos os membros" quanto por "Aplicar somente a este usuário".
+  async function aplicarModeloAUsuarios(usuarioIds: string[]) {
+    if (!selectedGrupo || usuarioIds.length === 0) return
+    setApplyingModelo(true)
+
+    const todosOsCodigos = permissoes.map(p => p.codigo)
+    const modeloCompleto: Record<string, boolean> = {}
+    for (const codigo of todosOsCodigos) modeloCompleto[codigo] = grupoModeloPerms[codigo] ?? false
+
+    const savedModelo = await salvarModeloGrupo(selectedGrupo.id, modeloCompleto)
+    if (!savedModelo) {
+      toast.error('Erro ao salvar modelo de permissões do grupo')
+      setApplyingModelo(false)
+      return
+    }
+    const updated = { ...selectedGrupo, modelo_permissoes: modeloCompleto }
+    setSelectedGrupo(updated)
+    setGrupos(prev => prev.map(g => (g.id === updated.id ? updated : g)))
+
+    const ok = await aplicarModeloAoGrupo(modeloCompleto, usuarioIds, todosOsCodigos)
+    if (ok) {
+      setAllOverrides(prev => {
+        const next = { ...prev }
+        for (const uid of usuarioIds) next[uid] = { ...modeloCompleto }
+        return next
+      })
+      toast.success(`Modelo aplicado a ${usuarioIds.length} membro${usuarioIds.length !== 1 ? 's' : ''}`)
+    } else {
+      toast.error('Erro ao aplicar modelo aos membros do grupo')
+    }
+    setApplyingModelo(false)
+  }
+
+  function handleAplicarModelo() {
+    if (!selectedGrupo) return
+    return aplicarModeloAUsuarios(membrosPorGrupo[selectedGrupo.id] || [])
+  }
+
+  function handleAplicarModeloAUsuario(userId: string) {
+    return aplicarModeloAUsuarios([userId])
+  }
+
   // ─── Guards ───────────────────────────────────────────────────────────────
 
   if (isAdmin === null) {
@@ -589,12 +857,268 @@ export default function PermissoesPageShell() {
             viewMode === 'permissao' ? 'bg-white text-brand-fg shadow-sm' : 'text-slate-500 hover:text-slate-700'
           }`}
         >
-          <Users size={14} />
+          <Lock size={14} />
           Por permissão
+        </button>
+        <button
+          onClick={() => setViewMode('grupo')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-150 ${
+            viewMode === 'grupo' ? 'bg-white text-brand-fg shadow-sm' : 'text-slate-500 hover:text-slate-700'
+          }`}
+        >
+          <UsersRound size={14} />
+          Por grupo
         </button>
       </div>
 
-      {viewMode === 'permissao' ? (
+      {viewMode === 'grupo' ? (
+        <div className="flex flex-col lg:flex-row gap-4 items-start">
+          {/* ── Lista de grupos ── */}
+          <div className="w-full lg:w-72 lg:shrink-0">
+            <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-4 space-y-3">
+              <div className="flex items-center justify-between px-1">
+                <h2 className="text-sm font-semibold text-slate-700">Grupos</h2>
+                <button
+                  type="button"
+                  onClick={() => { setNovoGrupoNome(''); setShowNovoGrupoModal(true) }}
+                  className="flex items-center gap-1.5 text-xs font-semibold text-brand-fg hover:underline"
+                >
+                  <PlusCircle size={13} />
+                  Novo grupo
+                </button>
+              </div>
+
+              <label className="relative block">
+                <span className="sr-only">Buscar grupo</span>
+                <Search size={13} aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Buscar grupo..."
+                  value={grupoSearch}
+                  onChange={e => setGrupoSearch(e.target.value)}
+                  className="w-full pl-8 pr-3 py-2 text-sm rounded-xl border border-slate-200 bg-slate-50 text-slate-700 placeholder-slate-400 focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/10"
+                />
+              </label>
+
+              <div className="space-y-0.5 max-h-[calc(100vh-300px)] overflow-y-auto">
+                {loadingGrupos ? (
+                  <div className="flex flex-col items-center justify-center py-10 gap-3">
+                    <div className="w-5 h-5 border-2 border-brand border-t-transparent rounded-full animate-spin" />
+                    <span className="text-sm text-slate-500">Carregando grupos...</span>
+                  </div>
+                ) : (
+                  <>
+                    {filteredGrupos.map(g => {
+                      const active = selectedGrupo?.id === g.id
+                      const count = (membrosPorGrupo[g.id] || []).length
+                      return (
+                        <button
+                          key={g.id}
+                          onClick={() => handleSelectGrupo(g)}
+                          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-xl text-left transition-colors duration-150 ${
+                            active
+                              ? 'bg-brand-surface border border-brand/20'
+                              : 'hover:bg-slate-50 border border-transparent'
+                          }`}
+                        >
+                          <div className="w-8 h-8 rounded-lg bg-slate-100 flex items-center justify-center shrink-0">
+                            <UsersRound size={14} className="text-slate-500" aria-hidden="true" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className={`text-sm font-medium truncate leading-tight ${active ? 'text-brand-fg' : 'text-slate-700'}`}>
+                              {g.nome}
+                            </p>
+                            <p className="text-xs text-slate-500 truncate leading-tight mt-0.5">
+                              {count} membro{count !== 1 ? 's' : ''}
+                            </p>
+                          </div>
+                        </button>
+                      )
+                    })}
+                    {filteredGrupos.length === 0 && (
+                      <p className="text-center text-sm text-slate-500 py-6">Nenhum grupo encontrado</p>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ── Painel: detalhe do grupo ── */}
+          <div className="flex-1 space-y-4 min-w-0">
+            {!selectedGrupo ? (
+              <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-12 flex flex-col items-center justify-center text-center min-h-96">
+                <div className="w-14 h-14 rounded-2xl bg-slate-50 flex items-center justify-center mb-4">
+                  <UsersRound size={26} aria-hidden="true" className="text-slate-300" />
+                </div>
+                <p className="text-slate-500 text-sm">
+                  Selecione um grupo para ver os membros e o modelo de permissões.
+                </p>
+              </div>
+            ) : (
+              <>
+                {/* ── Card: dados do grupo ── */}
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-5">
+                  <div className="flex items-start justify-between gap-4 flex-wrap">
+                    <div>
+                      <p className="text-xs font-medium text-slate-500 uppercase tracking-wider mb-2">
+                        Grupo selecionado
+                      </p>
+                      <h2 className="text-lg font-bold text-slate-800">{selectedGrupo.nome}</h2>
+                      {selectedGrupo.descricao && (
+                        <p className="text-sm text-slate-500 mt-1">{selectedGrupo.descricao}</p>
+                      )}
+                      <p className="text-sm text-slate-500 mt-1">
+                        {selectedGrupoMembros.length} membro{selectedGrupoMembros.length !== 1 ? 's' : ''}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        onClick={handleAbrirEditGrupo}
+                        className="flex items-center gap-2 px-4 py-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-2xl hover:bg-slate-50 hover:border-slate-300 transition-all duration-150"
+                      >
+                        <Pencil size={13} />
+                        Editar
+                      </button>
+                      <button
+                        onClick={() => setShowDeleteGrupoConfirm(true)}
+                        className="flex items-center gap-2 px-4 py-3 text-sm font-medium text-rose-500 border border-rose-200 rounded-2xl hover:bg-rose-50 transition-all duration-150"
+                      >
+                        <Trash2 size={13} />
+                        Excluir
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* ── Card: membros ── */}
+                <div className="bg-white rounded-3xl border border-slate-200 shadow-sm p-5 space-y-3">
+                  <h3 className="text-sm font-semibold text-slate-800">Membros do grupo</h3>
+
+                  <div className="space-y-0.5 max-h-64 overflow-y-auto">
+                    {selectedGrupoMembros.map(user => (
+                      <div
+                        key={user.id}
+                        className="flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-slate-50 transition-colors duration-100"
+                      >
+                        <Avatar name={user.nome} userId={user.id} size="sm" />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium truncate leading-tight text-slate-700">
+                            {user.nome || user.email}
+                          </p>
+                          <p className="text-xs text-slate-500 truncate leading-tight mt-0.5">
+                            {ROLE_LABELS[user.role || ''] || user.role || '—'}
+                          </p>
+                        </div>
+                        {driftedMemberIds.has(user.id) && (
+                          <button
+                            type="button"
+                            onClick={() => setMemberToSync(user)}
+                            className="shrink-0 w-7 h-7 flex items-center justify-center text-amber-500 hover:text-amber-600 hover:bg-amber-50 rounded-lg transition-colors duration-150"
+                            aria-label={`${user.nome || user.email} tem permissões fora do modelo do grupo`}
+                            title="Permissões fora do modelo do grupo — clique para sincronizar"
+                          >
+                            <AlertTriangle size={14} />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => setMemberToRemove(user)}
+                          disabled={memberActionId === user.id}
+                          className="shrink-0 w-7 h-7 flex items-center justify-center text-slate-400 hover:text-rose-500 hover:bg-rose-50 rounded-lg transition-colors duration-150 disabled:opacity-50"
+                          aria-label={`Remover ${user.nome || user.email} do grupo`}
+                        >
+                          <X size={14} />
+                        </button>
+                      </div>
+                    ))}
+                    {selectedGrupoMembros.length === 0 && (
+                      <p className="text-center text-sm text-slate-500 py-4">Nenhum membro neste grupo ainda</p>
+                    )}
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-100">
+                    <label className="relative block mb-2">
+                      <span className="sr-only">Adicionar membro</span>
+                      <Search size={13} aria-hidden="true" className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+                      <input
+                        type="text"
+                        placeholder="Adicionar usuário ao grupo..."
+                        value={addMemberSearch}
+                        onChange={e => setAddMemberSearch(e.target.value)}
+                        className="w-full pl-8 pr-3 py-2 text-sm rounded-xl border border-slate-200 bg-slate-50 text-slate-700 placeholder-slate-400 focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/10"
+                      />
+                    </label>
+                    {addMemberSearch && (
+                      <div className="space-y-0.5 max-h-48 overflow-y-auto">
+                        {usersDisponiveisParaGrupo.slice(0, 20).map(user => (
+                          <button
+                            key={user.id}
+                            onClick={() => handleAddMembro(user.id)}
+                            disabled={memberActionId === user.id}
+                            className="w-full flex items-center gap-3 px-3 py-2 rounded-xl hover:bg-slate-50 text-left transition-colors duration-100 disabled:opacity-50"
+                          >
+                            <Avatar name={user.nome} userId={user.id} size="sm" />
+                            <span className="text-sm text-slate-700 truncate flex-1">{user.nome || user.email}</span>
+                            <PlusCircle size={14} className="text-brand shrink-0" />
+                          </button>
+                        ))}
+                        {usersDisponiveisParaGrupo.length === 0 && (
+                          <p className="text-center text-sm text-slate-500 py-3">Nenhum usuário encontrado</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                {/* ── Modelo de permissões do grupo ── */}
+                <div className="flex items-center justify-between flex-wrap gap-2">
+                  <h3 className="text-sm font-semibold text-slate-800">Modelo de permissões do grupo</h3>
+                  <div className="flex items-center gap-2">
+                    {driftedMemberIds.size > 0 && (
+                      <span className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-50 text-amber-600">
+                        <AlertTriangle size={12} />
+                        {driftedMemberIds.size} fora do modelo
+                      </span>
+                    )}
+                    <span className="px-3 py-1 rounded-full text-xs font-semibold bg-brand-surface text-brand-fg">
+                      {modeloLiberadosCount} de {permissoes.length} módulos no modelo
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {sortedGroups.map(([grupo, items]) => (
+                    <GroupCard
+                      key={grupo}
+                      grupo={grupo}
+                      items={items}
+                      perms={grupoModeloPerms}
+                      isOpen={openGroupsGrupoView.has(grupo)}
+                      onToggleOpen={() => toggleGroupGrupoView(grupo)}
+                      onToggle={handleToggleModeloPerm}
+                    />
+                  ))}
+                </div>
+
+                <div className="flex items-center justify-between bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-3.5">
+                  <span className="text-xs text-slate-500">
+                    Aplicar substitui as permissões individuais dos {selectedGrupoMembros.length} membro
+                    {selectedGrupoMembros.length !== 1 ? 's' : ''} pelo modelo acima
+                  </span>
+                  <button
+                    onClick={handleAplicarModelo}
+                    disabled={applyingModelo || selectedGrupoMembros.length === 0}
+                    className="flex items-center gap-2 px-5 py-3 text-sm font-semibold text-white bg-brand-fg rounded-2xl transition-all duration-150 hover:opacity-90 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <Save size={13} />
+                    {applyingModelo ? 'Aplicando...' : 'Aplicar a todos os membros'}
+                  </button>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      ) : viewMode === 'permissao' ? (
         <div className="flex flex-col lg:flex-row gap-4 items-start">
           {/* ── Lista de permissões ── */}
           <div className="w-full lg:w-80 lg:shrink-0">
@@ -994,6 +1518,203 @@ export default function PermissoesPageShell() {
                   className="flex-1 py-3 text-sm font-semibold text-white bg-brand-fg rounded-2xl hover:opacity-90 transition-colors disabled:opacity-50"
                 >
                   {savingRole ? 'Salvando...' : 'Salvar'}
+                </button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ── Modal: Novo grupo ── */}
+      <Dialog open={showNovoGrupoModal} onOpenChange={setShowNovoGrupoModal}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Novo grupo</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <label className="block text-xs font-medium text-slate-600 mb-1.5">Nome do grupo</label>
+              <input
+                type="text"
+                autoFocus
+                value={novoGrupoNome}
+                onChange={e => setNovoGrupoNome(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') handleCriarGrupo() }}
+                placeholder="Ex: Financeiro"
+                className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/10"
+              />
+            </div>
+            <div className="flex items-center gap-2 pt-1">
+              <button
+                onClick={() => setShowNovoGrupoModal(false)}
+                className="flex-1 py-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-2xl hover:bg-slate-50 transition-colors"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleCriarGrupo}
+                disabled={creatingGrupo || !novoGrupoNome.trim()}
+                className="flex-1 py-3 text-sm font-semibold text-white bg-brand-fg rounded-2xl hover:opacity-90 transition-colors disabled:opacity-50"
+              >
+                {creatingGrupo ? 'Criando...' : 'Criar grupo'}
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Modal: Editar grupo ── */}
+      {selectedGrupo && (
+        <Dialog open={showEditGrupoModal} onOpenChange={setShowEditGrupoModal}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Editar grupo</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">Nome</label>
+                <input
+                  type="text"
+                  autoFocus
+                  value={editGrupoNome}
+                  onChange={e => setEditGrupoNome(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/10"
+                />
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-600 mb-1.5">Descrição (opcional)</label>
+                <input
+                  type="text"
+                  value={editGrupoDescricao}
+                  onChange={e => setEditGrupoDescricao(e.target.value)}
+                  className="w-full px-3 py-2 text-sm border border-slate-200 rounded-xl bg-white focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/10"
+                />
+              </div>
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  onClick={() => setShowEditGrupoModal(false)}
+                  className="flex-1 py-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-2xl hover:bg-slate-50 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleSalvarEditGrupo}
+                  disabled={savingGrupoEdit || !editGrupoNome.trim()}
+                  className="flex-1 py-3 text-sm font-semibold text-white bg-brand-fg rounded-2xl hover:opacity-90 transition-colors disabled:opacity-50"
+                >
+                  {savingGrupoEdit ? 'Salvando...' : 'Salvar'}
+                </button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ── Modal: Confirmar exclusão de grupo ── */}
+      {selectedGrupo && (
+        <Dialog open={showDeleteGrupoConfirm} onOpenChange={setShowDeleteGrupoConfirm}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Excluir grupo</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <p className="text-sm text-slate-500">
+                Tem certeza que deseja excluir o grupo{' '}
+                <strong className="text-slate-700">{selectedGrupo.nome}</strong>? Os{' '}
+                {selectedGrupoMembros.length} membro{selectedGrupoMembros.length !== 1 ? 's' : ''} deixam de
+                fazer parte do grupo, mas as permissões já aplicadas a cada um continuam valendo — só o
+                agrupamento é removido.
+              </p>
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  onClick={() => setShowDeleteGrupoConfirm(false)}
+                  className="flex-1 py-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-2xl hover:bg-slate-50 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleExcluirGrupo}
+                  disabled={deletingGrupo}
+                  className="flex-1 py-3 text-sm font-semibold text-white bg-rose-500 rounded-2xl hover:opacity-90 transition-colors disabled:opacity-50"
+                >
+                  {deletingGrupo ? 'Excluindo...' : 'Excluir'}
+                </button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ── Modal: Confirmar remoção de membro ── */}
+      {memberToRemove && (
+        <Dialog open={!!memberToRemove} onOpenChange={open => { if (!open) setMemberToRemove(null) }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Remover membro do grupo</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <p className="text-sm text-slate-500">
+                Tem certeza que deseja remover{' '}
+                <strong className="text-slate-700">{memberToRemove.nome || memberToRemove.email}</strong> do
+                grupo <strong className="text-slate-700">{selectedGrupo?.nome}</strong>? As permissões
+                individuais já aplicadas a essa pessoa continuam valendo — só o vínculo com o grupo é
+                removido.
+              </p>
+              <div className="flex items-center gap-2 pt-1">
+                <button
+                  onClick={() => setMemberToRemove(null)}
+                  className="flex-1 py-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-2xl hover:bg-slate-50 transition-colors"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={handleConfirmRemoveMembro}
+                  disabled={memberActionId === memberToRemove.id}
+                  className="flex-1 py-3 text-sm font-semibold text-white bg-rose-500 rounded-2xl hover:opacity-90 transition-colors disabled:opacity-50"
+                >
+                  {memberActionId === memberToRemove.id ? 'Removendo...' : 'Remover'}
+                </button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+      )}
+
+      {/* ── Modal: Sincronizar membro fora do modelo ── */}
+      {memberToSync && (
+        <Dialog open={!!memberToSync} onOpenChange={open => { if (!open) setMemberToSync(null) }}>
+          <DialogContent className="max-w-sm">
+            <DialogHeader>
+              <DialogTitle>Fora do modelo do grupo</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <p className="text-sm text-slate-500">
+                <strong className="text-slate-700">{memberToSync.nome || memberToSync.email}</strong> tem
+                permissões liberadas que não seguem exatamente o modelo atual do grupo{' '}
+                <strong className="text-slate-700">{selectedGrupo?.nome}</strong> — alguém deve ter ajustado
+                as permissões dessa pessoa individualmente depois da última aplicação. Você pode sincronizar
+                só ela, ou aplicar o modelo a todos os membros de uma vez.
+              </p>
+              <div className="flex flex-col gap-2 pt-1">
+                <button
+                  onClick={async () => { await handleAplicarModeloAUsuario(memberToSync.id); setMemberToSync(null) }}
+                  disabled={applyingModelo}
+                  className="w-full py-3 text-sm font-semibold text-white bg-brand-fg rounded-2xl hover:opacity-90 transition-colors disabled:opacity-50"
+                >
+                  {applyingModelo ? 'Aplicando...' : 'Aplicar somente a este usuário'}
+                </button>
+                <button
+                  onClick={async () => { await handleAplicarModelo(); setMemberToSync(null) }}
+                  disabled={applyingModelo}
+                  className="w-full py-3 text-sm font-medium text-slate-600 border border-slate-200 rounded-2xl hover:bg-slate-50 transition-colors disabled:opacity-50"
+                >
+                  Aplicar a todos os membros
+                </button>
+                <button
+                  onClick={() => setMemberToSync(null)}
+                  className="w-full py-2 text-xs font-medium text-slate-400 hover:text-slate-600 transition-colors"
+                >
+                  Cancelar
                 </button>
               </div>
             </div>
