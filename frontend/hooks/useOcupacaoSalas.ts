@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { listarSalas, listarAlocacoes, buscarLinhasAgendaParaSalas, listarExclusividadesTerapia } from "@/services/salas.service"
+import { listarSalas, listarAlocacoes, buscarLinhasAgendaParaSalas, buscarTurnosBloqueioAdministrativo, listarExclusividadesTerapia } from "@/services/salas.service"
 import { calcularOcupacaoDaSala, calcularResumoUnidades, construirNomeDaSalaPorId } from "@/lib/cronograma/salas"
 import { construirIndiceExclusividadeTerapia } from "@/lib/cronograma/exclusividadeTerapia"
 import { calcularDashboardPacientes } from "@/lib/cronograma/pacientesDashboard"
@@ -32,6 +32,7 @@ export interface UseOcupacaoSalasResult {
   salas: Sala[]
   alocacoes: AlocacaoSala[]
   linhas: AgendaSalaRow[]
+  turnosBloqueioAdmin: AgendaSalaRow[]
   exclusividades: SalaTerapiaExclusiva[]
   salasComOcupacao: SalaComOcupacao[]
   resumoUnidades: ResumoUnidadeSalas[]
@@ -56,6 +57,7 @@ export function useOcupacaoSalas(inicio?: string, fim?: string): UseOcupacaoSala
   const [salas, setSalas] = useState<Sala[]>([])
   const [alocacoes, setAlocacoes] = useState<AlocacaoSala[]>([])
   const [linhas, setLinhas] = useState<AgendaSalaRow[]>([])
+  const [turnosBloqueioAdmin, setTurnosBloqueioAdmin] = useState<AgendaSalaRow[]>([])
   const [exclusividades, setExclusividades] = useState<SalaTerapiaExclusiva[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -70,13 +72,15 @@ export function useOcupacaoSalas(inicio?: string, fim?: string): UseOcupacaoSala
       listarSalas(),
       listarAlocacoes(),
       buscarLinhasAgendaParaSalas(periodo.inicio, periodo.fim),
+      buscarTurnosBloqueioAdministrativo(periodo.inicio, periodo.fim),
       listarExclusividadesTerapia(),
     ])
-      .then(([salasData, alocacoesData, linhasData, exclusividadesData]) => {
+      .then(([salasData, alocacoesData, linhasData, turnosBloqueioAdminData, exclusividadesData]) => {
         if (cancelled) return
         setSalas(salasData)
         setAlocacoes(alocacoesData)
         setLinhas(linhasData)
+        setTurnosBloqueioAdmin(turnosBloqueioAdminData)
         setExclusividades(exclusividadesData)
         setLoading(false)
       })
@@ -145,6 +149,7 @@ export function useOcupacaoSalas(inicio?: string, fim?: string): UseOcupacaoSala
     salas,
     alocacoes,
     linhas,
+    turnosBloqueioAdmin,
     exclusividades,
     salasComOcupacao,
     resumoUnidades,

@@ -230,8 +230,8 @@ export interface CategoriaComOportunidade {
 }
 
 export interface RankearOportunidadesInternasOpts {
-  /** Unidade única a varrer; omitido/vazio = compara as 3 unidades juntas. */
-  unidade?: string
+  /** Unidades a varrer; omitido/vazio = compara as 3 unidades juntas. */
+  unidades?: ReadonlySet<string>
   /** "diaInteiro" agrupa manhã+tarde numa linha por dia; "porTurno" mantém uma linha por turno isolado. */
   modo: ModoCascataOcupacao
   /** Especialidades a considerar; omitido/vazio = todas (TODAS_ESP). */
@@ -252,8 +252,8 @@ export function rankearOportunidadesInternas(
   cRowsBrutos: CsvRow[], gapMap: Record<string, GapItem>,
   opts: RankearOportunidadesInternasOpts,
 ): CategoriaComOportunidade[] {
-  const { unidade, modo, especialidades } = opts
-  const unidades = unidade ? [unidade] : Object.keys(UNID_COR)
+  const { unidades: unidadesFiltro, modo, especialidades } = opts
+  const unidades = unidadesFiltro?.size ? [...unidadesFiltro] : Object.keys(UNID_COR)
   const listaEspecialidades = especialidades?.size ? [...especialidades] : TODAS_ESP
 
   // Pré-calculados UMA VEZ pra toda a varredura — sem isso, gerarVagasCategoria

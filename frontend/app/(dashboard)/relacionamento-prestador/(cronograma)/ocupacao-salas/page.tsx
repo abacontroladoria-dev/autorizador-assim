@@ -26,7 +26,7 @@ export default function OcupacaoSalasPage() {
     return () => setHeader("", "")
   }, [setHeader])
 
-  const { salas, alocacoes, linhas, exclusividades, salasComOcupacao, loading, error, recarregarSalas, recarregarAlocacoes, encontrarAlocacaoDoProfissional } = useOcupacaoSalas()
+  const { salas, alocacoes, linhas, turnosBloqueioAdmin, exclusividades, salasComOcupacao, loading, error, recarregarSalas, recarregarAlocacoes, encontrarAlocacaoDoProfissional } = useOcupacaoSalas()
 
   const [tab, setTab] = useState<ViewTab>("grade")
   const [filtros, setFiltros] = useState<SalasFiltrosState>(SALAS_FILTROS_VAZIO)
@@ -190,6 +190,7 @@ export default function OcupacaoSalasPage() {
         <RegularizacoesView
           alocacoes={alocacoes}
           linhas={linhas}
+          turnosBloqueioAdmin={turnosBloqueioAdmin}
           onVerNaGrade={nome => {
             setFiltros(f => ({ ...f, profissional: nome }))
             setTab("grade")

@@ -16,11 +16,12 @@ import type { AgendaSalaRow, AlocacaoSala } from "@/lib/cronograma/salasTypes"
 interface RegularizacoesViewProps {
   alocacoes: AlocacaoSala[]
   linhas: AgendaSalaRow[]
+  turnosBloqueioAdmin?: AgendaSalaRow[]
   onVerNaGrade: (profissionalNome: string) => void
 }
 
-export function RegularizacoesView({ alocacoes, linhas, onVerNaGrade }: RegularizacoesViewProps) {
-  const regularizacoes = calcularRegularizacoes(alocacoes, linhas)
+export function RegularizacoesView({ alocacoes, linhas, turnosBloqueioAdmin = [], onVerNaGrade }: RegularizacoesViewProps) {
+  const regularizacoes = calcularRegularizacoes(alocacoes, linhas, turnosBloqueioAdmin)
 
   if (regularizacoes.length === 0) {
     return (
@@ -41,8 +42,8 @@ export function RegularizacoesView({ alocacoes, linhas, onVerNaGrade }: Regulari
           <tr className="border-b border-border bg-muted/40 text-left text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             <th className="px-3 py-2">Profissional</th>
             <th className="px-3 py-2">Cadastrado</th>
-            <th className="px-3 py-2">Faltando cadastrar</th>
-            <th className="px-3 py-2">Cadastrado sem sessão real</th>
+            <th className="px-3 py-2">Está no TiTa, mas não está no Ocupação de Salas</th>
+            <th className="px-3 py-2">Está na Ocupação de Salas, mas não está no TiTa</th>
             <th className="px-3 py-2" />
           </tr>
         </thead>

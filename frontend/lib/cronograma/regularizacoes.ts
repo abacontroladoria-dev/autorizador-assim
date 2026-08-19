@@ -13,7 +13,7 @@ import { dowDeDiaSemana } from "./salas"
 import { turnoDoHorario } from "./ocupacaoProf"
 import { DOW_PT } from "./ocupacaoConst"
 import { pm, cleanTxt } from "./helpers"
-import { normTxt, TERAPIA_ID } from "./constants"
+import { normTxt, TERAPIA_ID, PACS_BLOQUEIO_ADMIN } from "./constants"
 import type { AgendaSalaRow, AlocacaoSala } from "./salasTypes"
 
 // Sessão em "Aplicador ABA Casa"/"Aplicador ABA Escola" acontece na casa/escola
@@ -63,8 +63,18 @@ interface GrupoProfissional {
  * Compara, por profissional_id, os turnos com sessão real (agenda) vs turnos
  * cadastrados (alocação) — retorna só quem tem alguma divergência (faltante
  * ou extra). Profissionais 100% regularizados não aparecem no resultado.
+ *
+ * `turnosBloqueioAdmin` (opcional): sessões de "Horário Administrativo"/
+ * "Horário Bloqueado" (ver PACS_BLOQUEIO_ADMIN) — já excluídas de `linhas`
+ * por não serem atendimento real, mas usadas aqui só para NÃO marcar como
+ * "está na Ocupação de Salas, mas não está no TiTa" uma alocação que cobre um
+ * desses bloqueios deliberados do profissional.
  */
-export function calcularRegularizacoes(alocacoes: AlocacaoSala[], linhas: AgendaSalaRow[]): RegularizacaoProfissional[] {
+export function calcularRegularizacoes(
+  alocacoes: AlocacaoSala[],
+  linhas: AgendaSalaRow[],
+  turnosBloqueioAdmin: AgendaSalaRow[] = [],
+): RegularizacaoProfissional[] {
   const agendaPorId = new Map<number, GrupoProfissional>()
   linhas.forEach(r => {
     if (r.profissional_id == null) return
@@ -81,6 +91,21 @@ export function calcularRegularizacoes(alocacoes: AlocacaoSala[], linhas: Agenda
     const t: TurnoSemana = { dow, turno }
     grupo.turnos.set(chaveTurno(t), t)
     agendaPorId.set(r.profissional_id, grupo)
+  })
+
+  const bloqueioPorId = new Map<number, Set<string>>()
+  turnosBloqueioAdmin.forEach(r => {
+    if (r.profissional_id == null) return
+    if (r.paciente_nome == null || !PACS_BLOQUEIO_ADMIN.has(r.paciente_nome)) return
+    if (!normTxt(r.status_agendamento).includes("agendado")) return
+    const dow = dowDeDiaSemana(r.dia_semana)
+    if (!dow) return
+    const minutos = pm(r.hora_inicial)
+    if (minutos === null) return
+    const turno = turnoDoHorario(minutos)
+    const chaves = bloqueioPorId.get(r.profissional_id) ?? new Set<string>()
+    chaves.add(chaveTurno({ dow, turno }))
+    bloqueioPorId.set(r.profissional_id, chaves)
   })
 
   const cadastroPorId = new Map<number, GrupoProfissional>()
@@ -102,8 +127,9 @@ export function calcularRegularizacoes(alocacoes: AlocacaoSala[], linhas: Agenda
     const turnosCadastrados = ordenarTurnos([...(cadastro?.turnos.values() ?? [])])
     const chavesCadastro = new Set(turnosCadastrados.map(chaveTurno))
     const chavesAgenda = new Set(turnosAgenda.map(chaveTurno))
+    const chavesBloqueio = bloqueioPorId.get(id) ?? new Set<string>()
     const turnosFaltantes = turnosAgenda.filter(t => !chavesCadastro.has(chaveTurno(t)))
-    const turnosExtras = turnosCadastrados.filter(t => !chavesAgenda.has(chaveTurno(t)))
+    const turnosExtras = turnosCadastrados.filter(t => !chavesAgenda.has(chaveTurno(t)) && !chavesBloqueio.has(chaveTurno(t)))
     if (turnosFaltantes.length === 0 && turnosExtras.length === 0) return
     resultado.push({
       profissionalId: id,
