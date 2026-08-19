@@ -24,6 +24,7 @@ export const roleDefaults: Record<string, string[]> = {
     'relacionamento_prestador_individual',
     'cadastros_pacientes', 'cadastros_profissionais',
     'cronograma_por_paciente', 'cronograma_por_profissional',
+    'insumos',
   ],
   diretoria: [
     'dashboard', 'atendimentos', 'gestao',
@@ -42,6 +43,7 @@ export const roleDefaults: Record<string, string[]> = {
     'relacionamento_prestador_individual',
     'cadastros_pacientes', 'cadastros_profissionais',
     'cronograma_por_paciente', 'cronograma_por_profissional',
+    'insumos',
   ],
   recepcao: [
     'dashboard', 'atendimentos', 'gestao', 'auditoria_assim',
@@ -52,7 +54,9 @@ export const roleDefaults: Record<string, string[]> = {
     'autorizacoes', 'preauditoria',
   ],
   terapeutico: ['dashboard', 'escala_terapeutica', 'analise_tratativas'],
-  faturamento: ['dashboard'],
+  // O setor que opera o controle de insumos, junto com admin e diretoria
+  // (definido pelo usuario em 2026-08-18). Ate entao tinha so o dashboard.
+  faturamento: ['dashboard', 'insumos'],
   rp: [
     'dashboard', 'escala_terapeutica',
     'cadastros_feriados', 'cadastros_contratos', 'cadastros_taxas',
@@ -128,6 +132,11 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   cadastros_profissionais: ['/cadastros/profissionais'],
   cronograma_por_paciente: ['/cronograma/por-paciente'],
   cronograma_por_profissional: ['/cronograma/por-profissional'],
+  // Controle de insumos (porte do AXIUM). Um código só, não os 8 granulares do
+  // AXIUM (compras.ver/aprovar/comprar/…): o acesso definido pelo usuário é por
+  // setor — faturamento, admin e diretoria. Granularizar depois, se aparecer o
+  // caso de quem cota mas não aprova.
+  insumos: ['/insumos'],
 }
 
 // Converte um conjunto de códigos de permissão em rotas permitidas,

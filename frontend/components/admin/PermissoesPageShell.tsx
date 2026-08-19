@@ -34,6 +34,7 @@ import {
   DoorOpen,
   UserSearch,
   UserPlus,
+  Package,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
 import { useHeader } from '@/contexts/HeaderContext'
@@ -104,6 +105,7 @@ const GROUP_ICONS: Record<string, React.ElementType> = {
   Pacientes: Users,
   Terapêutico: Stethoscope,
   Operações: BriefcaseBusiness,
+  Insumos: Package,
   Cronograma: CalendarRange,
   Indicadores: TrendingUp,
   Cadastros: Database,
@@ -111,7 +113,7 @@ const GROUP_ICONS: Record<string, React.ElementType> = {
   Administração: ShieldCheck,
 }
 
-const GROUP_ORDER = ['Pacientes', 'Terapêutico', 'Operações', 'Cronograma', 'Indicadores', 'Cadastros', 'Relacionamento Prestador', 'Administração', 'Sistema', 'Geral']
+const GROUP_ORDER = ['Pacientes', 'Terapêutico', 'Operações', 'Insumos', 'Cronograma', 'Indicadores', 'Cadastros', 'Relacionamento Prestador', 'Administração', 'Sistema', 'Geral']
 
 const INITIAL_OPEN = new Set(GROUP_ORDER)
 

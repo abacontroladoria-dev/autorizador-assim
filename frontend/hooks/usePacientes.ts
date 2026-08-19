@@ -1,10 +1,11 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { getPacientes, type RebootPaciente } from "@/services/reboot/pacientes.service"
+import { getPacientes } from "@/services/pacientes.service"
+import type { Paciente } from "@/types/paciente"
 
 type PacientesState = {
-  pacientes: RebootPaciente[]
+  pacientes: Paciente[]
   loading: boolean
   error: string | null
 }
