@@ -23,6 +23,15 @@ export type AuditoriaAssimItem = {
   motivo_glosa: string | null
   teve_token: boolean | null
   token: string | null
+  criado_por: string | null
+  forma_autorizacao: string | null
+  horario_autorizacao: string | null
+  observacao_manual: string | null
+  observacao_manual_atualizado_em: string | null
+  observacao_manual_atualizado_por_nome: string | null
+  token_conferido: boolean | null
+  token_conferido_em: string | null
+  token_conferido_por_nome: string | null
 }
 
 export type KpisAuditoriaAssim = {

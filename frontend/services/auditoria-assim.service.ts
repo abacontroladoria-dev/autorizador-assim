@@ -54,6 +54,15 @@ export async function listarFaltasAuditoria(data: string): Promise<AuditoriaAssi
       motivo_glosa: null,
       teve_token: null,
       token: null,
+      criado_por: null,
+      forma_autorizacao: null,
+      horario_autorizacao: null,
+      observacao_manual: null,
+      observacao_manual_atualizado_em: null,
+      observacao_manual_atualizado_por_nome: null,
+      token_conferido: null,
+      token_conferido_em: null,
+      token_conferido_por_nome: null,
     }
   })
 }
@@ -62,6 +71,104 @@ export async function salvarMotivoGlosa(bloco_id: string, motivo_glosa: string):
   const { error } = await supabase
     .from('auditoria_glosa_motivos')
     .upsert({ bloco_id, motivo_glosa, atualizado_em: new Date().toISOString() }, { onConflict: 'bloco_id' })
+  if (error) throw error
+}
+
+type NotaManual = {
+  bloco_id: string
+  texto: string
+  atualizado_em: string
+  atualizado_por_nome: string | null
+}
+
+type TokenConferencia = {
+  bloco_id: string
+  conferido: boolean
+  conferido_em: string | null
+  conferido_por_nome: string | null
+}
+
+export async function buscarNotasEConferencias(blocoIds: string[]): Promise<{
+  notas: Map<string, NotaManual>
+  conferencias: Map<string, TokenConferencia>
+}> {
+  const notas = new Map<string, NotaManual>()
+  const conferencias = new Map<string, TokenConferencia>()
+
+  if (blocoIds.length === 0) return { notas, conferencias }
+
+  const [notasResult, conferenciasResult] = await Promise.all([
+    supabase
+      .from('auditoria_atendimento_notas')
+      .select('bloco_id, texto, atualizado_em, atualizado_por_nome')
+      .in('bloco_id', blocoIds),
+    supabase
+      .from('auditoria_token_conferencias')
+      .select('bloco_id, conferido, conferido_em, conferido_por_nome')
+      .in('bloco_id', blocoIds),
+  ])
+
+  if (notasResult.error) {
+    console.error('Erro ao buscar observações de auditoria:', notasResult.error.message, notasResult.error.details)
+  } else {
+    for (const nota of notasResult.data ?? []) notas.set(nota.bloco_id, nota)
+  }
+
+  if (conferenciasResult.error) {
+    console.error('Erro ao buscar conferências de token:', conferenciasResult.error.message, conferenciasResult.error.details)
+  } else {
+    for (const conf of conferenciasResult.data ?? []) conferencias.set(conf.bloco_id, conf)
+  }
+
+  return { notas, conferencias }
+}
+
+async function nomeUsuarioLogado(): Promise<{ id: string | null; nome: string | null }> {
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user?.id) return { id: null, nome: null }
+  const { data } = await supabase.from('usuarios').select('nome').eq('id', user.id).maybeSingle()
+  return { id: user.id, nome: data?.nome ?? null }
+}
+
+export async function salvarObservacaoManual(bloco_id: string, texto: string): Promise<void> {
+  const { data: antes } = await supabase
+    .from('auditoria_atendimento_notas')
+    .select('bloco_id')
+    .eq('bloco_id', bloco_id)
+    .maybeSingle()
+  const { id, nome } = await nomeUsuarioLogado()
+
+  const { error } = await supabase
+    .from('auditoria_atendimento_notas')
+    .upsert(
+      {
+        bloco_id,
+        texto: texto.trim(),
+        atualizado_por: id,
+        atualizado_por_nome: nome,
+        atualizado_em: new Date().toISOString(),
+        ...(antes ? {} : { criado_por: id }),
+      },
+      { onConflict: 'bloco_id' }
+    )
+  if (error) throw error
+}
+
+export async function marcarTokenConferido(bloco_id: string, conferido: boolean): Promise<void> {
+  const { id, nome } = await nomeUsuarioLogado()
+
+  const { error } = await supabase
+    .from('auditoria_token_conferencias')
+    .upsert(
+      {
+        bloco_id,
+        conferido,
+        conferido_em: conferido ? new Date().toISOString() : null,
+        conferido_por: conferido ? id : null,
+        conferido_por_nome: conferido ? nome : null,
+      },
+      { onConflict: 'bloco_id' }
+    )
   if (error) throw error
 }
 

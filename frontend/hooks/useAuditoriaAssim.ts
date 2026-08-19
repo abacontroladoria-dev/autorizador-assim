@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { listarAuditoriaAssim, listarFaltasAuditoria } from '@/services/auditoria-assim.service'
+import { listarAuditoriaAssim, listarFaltasAuditoria, buscarNotasEConferencias } from '@/services/auditoria-assim.service'
 import { getSupabaseClient } from '@/lib/supabase/client'
 import type { AuditoriaAssimItem, AuditoriaFilters, KpisAuditoriaAssim } from '@/components/auditoria-assim/types'
 
@@ -79,7 +79,24 @@ export function useAuditoriaAssim() {
         }
       }
 
-      setRawDados(deduplicated)
+      const blocoIds = deduplicated.map((item) => item.bloco_id).filter((id): id is string => !!id)
+      const { notas, conferencias } = await buscarNotasEConferencias(blocoIds)
+
+      const enriquecido = deduplicated.map((item) => {
+        const nota = item.bloco_id ? notas.get(item.bloco_id) : undefined
+        const conferencia = item.bloco_id ? conferencias.get(item.bloco_id) : undefined
+        return {
+          ...item,
+          observacao_manual: nota?.texto ?? null,
+          observacao_manual_atualizado_em: nota?.atualizado_em ?? null,
+          observacao_manual_atualizado_por_nome: nota?.atualizado_por_nome ?? null,
+          token_conferido: conferencia?.conferido ?? false,
+          token_conferido_em: conferencia?.conferido_em ?? null,
+          token_conferido_por_nome: conferencia?.conferido_por_nome ?? null,
+        }
+      })
+
+      setRawDados(enriquecido)
     } catch (error) {
       console.error('Erro ao carregar dados de auditoria:', error)
     } finally {
@@ -88,7 +105,12 @@ export function useAuditoriaAssim() {
     }
   }
 
-  // KPIs derivados client-side — elimina o 3º round-trip ao banco
+  // KPIs derivados client-side — elimina o 3º round-trip ao banco.
+  // De propósito, NÃO filtra por `filters.situacao`: esse filtro é o próprio
+  // clique num KPI, e só deve recortar a tabela (`filtrados`/`totalFiltrados`).
+  // Se entrasse aqui, selecionar um card colapsava todos os outros (e o Total
+  // de Sessões, que é a soma deles) para a contagem só daquela situação — o
+  // Total deixaria de ser âncora e passaria a mudar com o KPI selecionado.
   const kpis = useMemo((): KpisAuditoriaAssim | null => {
     if (loading) return null
 
@@ -97,14 +119,6 @@ export function useAuditoriaAssim() {
         filters.paciente &&
         !item.paciente_nome?.toLowerCase().includes(filters.paciente.toLowerCase())
       ) return false
-
-      if (filters.situacao) {
-        if (filters.situacao === 'TOKENS') {
-          if (!item.teve_token) return false
-        } else {
-          if (item.situacao !== filters.situacao) return false
-        }
-      }
 
       if (
         filters.tuss &&
@@ -135,7 +149,7 @@ export function useAuditoriaAssim() {
       glosas: registros.filter((d) => d.situacao === 'GLOSA').length,
       tokens: comToken,
     }
-  }, [rawDados, loading, filters])
+  }, [rawDados, loading, filters.paciente, filters.tuss, filters.horario_bloco])
 
   useEffect(() => {
     carregarDados()
@@ -169,6 +183,8 @@ export function useAuditoriaAssim() {
       .channel('auditoria-assim-live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'fila_autorizacoes' }, dispatchReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'autorizacoes_assim' }, dispatchReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'auditoria_atendimento_notas' }, dispatchReload)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'auditoria_token_conferencias' }, dispatchReload)
       .subscribe()
 
     return () => {

@@ -2,7 +2,6 @@
 
 import { useEffect } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ClipboardList, ListChecks } from 'lucide-react'
 
 import { useHeader } from '@/contexts/HeaderContext'
 import AuditoriaTab from './tabs/AuditoriaTab'
@@ -11,18 +10,14 @@ import PendenciasTab from './tabs/PendenciasTab'
 const TABS = ['pendencias', 'auditoria'] as const
 type TabKey = (typeof TABS)[number]
 
-const TAB_META: Record<TabKey, { label: string; titulo: string; subtitulo: string; icon: typeof ListChecks }> = {
+const TAB_META: Record<TabKey, { titulo: string; subtitulo: string }> = {
   pendencias: {
-    label: 'Pendências',
     titulo: 'Pendências ASSIM',
     subtitulo: 'Atendimentos que precisam de ação — o sistema detecta e encerra sozinho',
-    icon: ListChecks,
   },
   auditoria: {
-    label: 'Auditoria',
     titulo: 'Auditoria ASSIM',
     subtitulo: 'Controle operacional de autorizações e pendências',
-    icon: ClipboardList,
   },
 }
 
@@ -62,40 +57,6 @@ export default function AuditoriaAssimShell() {
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Alternador de abas. As duas visões são do MESMO domínio (ao contrário
-          das abas de /cronograma/ocupacao, que navegam só pelo Sidebar), então
-          vale um switch em tela para ir de uma à outra sem passar pelo menu. */}
-      <nav
-        role="tablist"
-        aria-label="Visões do módulo ASSIM"
-        className="inline-flex w-fit gap-1 rounded-2xl border border-slate-200 bg-white p-1"
-      >
-        {TABS.map((tab) => {
-          const meta = TAB_META[tab]
-          const Icon = meta.icon
-          const ativo = tab === activeTab
-          return (
-            <button
-              key={tab}
-              role="tab"
-              aria-selected={ativo}
-              type="button"
-              onClick={() => router.replace(`/auditoria-assim?tab=${tab}`)}
-              className={`
-                inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-semibold transition
-                ${ativo
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:bg-slate-50'
-                }
-              `}
-            >
-              <Icon size={15} />
-              {meta.label}
-            </button>
-          )
-        })}
-      </nav>
-
       {activeTab === 'pendencias' && <PendenciasTab />}
       {activeTab === 'auditoria' && <AuditoriaTab />}
     </div>

@@ -1,10 +1,13 @@
 'use client'
 
 import { useState } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsUpDown, FileText } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsUpDown, FileText, Loader2 } from 'lucide-react'
+import { toast } from 'react-hot-toast'
 import type { AuditoriaAssimItem } from './types'
 import type { SortDir, SortKey } from '@/hooks/useAuditoriaAssim'
-import ModalDetalhamentoGlosa from './ModalDetalhamentoGlosa'
+import ModalDetalhamentoAtendimento from './ModalDetalhamentoAtendimento'
+import SituacaoBadge from './SituacaoBadge'
+import { marcarTokenConferido } from '@/services/auditoria-assim.service'
 
 type Props = {
   dados: AuditoriaAssimItem[]
@@ -33,58 +36,8 @@ const COLUNAS: ColConfig[] = [
   { label: 'Terapias', sortKey: 'terapias', width: 'w-[160px]' },
   { label: 'Situação', sortKey: 'situacao', width: 'w-[170px]' },
   { label: 'Observação' },
+  { label: '', width: 'w-[110px]' },
 ]
-
-type SituacaoConfigEntry = { label: string; dot: string; className: string }
-
-const SITUACAO_CONFIG: Record<string, SituacaoConfigEntry> = {
-  NAO_SOLICITADA: {
-    label: 'Não Solicitada',
-    dot: 'bg-red-600',
-    className: 'bg-red-50 text-red-600 ring-1 ring-red-300',
-  },
-  SINCRONIZANDO: {
-    label: 'Sincronizando',
-    dot: 'bg-blue-600',
-    className: 'bg-blue-50 text-blue-600 ring-1 ring-blue-300',
-  },
-  RETORNO_NAO_CONFIRMADO: {
-    label: 'Retorno Não Confirmado',
-    dot: 'bg-orange-600',
-    className: 'bg-orange-50 text-orange-600 ring-1 ring-orange-300',
-  },
-  // alias legado — removível após migration aplicada
-  AGUARDANDO_RETORNO: {
-    label: 'Retorno Não Confirmado',
-    dot: 'bg-orange-600',
-    className: 'bg-orange-50 text-orange-600 ring-1 ring-orange-300',
-  },
-  LIBERADA: {
-    label: 'Liberada',
-    dot: 'bg-green-600',
-    className: 'bg-green-50 text-green-600 ring-1 ring-green-300',
-  },
-  GLOSA: {
-    label: 'Glosa',
-    dot: 'bg-violet-600',
-    className: 'bg-violet-50 text-violet-600 ring-1 ring-violet-300',
-  },
-  CANCELADA: {
-    label: 'Cancelada',
-    dot: 'bg-gray-500',
-    className: 'bg-gray-100 text-gray-500 ring-1 ring-gray-300',
-  },
-  FALTA: {
-    label: 'Falta',
-    dot: 'bg-yellow-500',
-    className: 'bg-yellow-50 text-yellow-600 ring-1 ring-yellow-300',
-  },
-  FALTA_TERAPEUTA: {
-    label: 'Falta Terapeuta',
-    dot: 'bg-red-500',
-    className: 'bg-red-50 text-red-600 ring-1 ring-red-300',
-  },
-}
 
 export default function TabelaAuditoria({
   dados,
@@ -99,6 +52,20 @@ export default function TabelaAuditoria({
   onRefresh,
 }: Props) {
   const [itemSelecionado, setItemSelecionado] = useState<AuditoriaAssimItem | null>(null)
+  const [conferindoBloco, setConferindoBloco] = useState<string | null>(null)
+
+  async function handleToggleConferido(item: AuditoriaAssimItem, checked: boolean) {
+    if (!item.bloco_id) return
+    setConferindoBloco(item.bloco_id)
+    try {
+      await marcarTokenConferido(item.bloco_id, checked)
+      onRefresh()
+    } catch {
+      toast.error('Erro ao marcar conferência. Tente novamente.')
+    } finally {
+      setConferindoBloco(null)
+    }
+  }
 
   return (
     <div className="flex flex-col gap-3">
@@ -161,24 +128,47 @@ export default function TabelaAuditoria({
                   <td className="px-4 py-3">
                     <div className="flex items-center gap-2">
                       <SituacaoBadge situacao={item.situacao} />
-                      {item.situacao === 'GLOSA' && (
-                        <button
-                          onClick={() => setItemSelecionado(item)}
-                          className={
-                            item.motivo_glosa
-                              ? 'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold text-green-700 border border-green-300 bg-green-50 hover:bg-green-100 hover:border-green-400 transition-all duration-150 whitespace-nowrap cursor-pointer select-none'
-                              : 'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold text-violet-600 border border-violet-300 bg-transparent hover:bg-violet-50 hover:border-violet-400 hover:text-violet-700 transition-all duration-150 whitespace-nowrap cursor-pointer select-none'
+                      {item.teve_token && (
+                        <label
+                          className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-500 cursor-pointer select-none whitespace-nowrap"
+                          title={
+                            item.token_conferido
+                              ? `Conferido${item.token_conferido_por_nome ? ` por ${item.token_conferido_por_nome}` : ''}${item.token_conferido_em ? ` em ${formatarDataHora(item.token_conferido_em)}` : ''}`
+                              : 'Marcar filipeta como conferida pela operadora'
                           }
                         >
-                          <FileText size={11} className="shrink-0" />
-                          {item.motivo_glosa ? 'Detalhado' : 'Detalhe'}
-                        </button>
+                          {conferindoBloco === item.bloco_id ? (
+                            <Loader2 size={12} className="animate-spin text-slate-400" />
+                          ) : (
+                            <input
+                              type="checkbox"
+                              checked={Boolean(item.token_conferido)}
+                              onChange={(e) => handleToggleConferido(item, e.target.checked)}
+                              className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                            />
+                          )}
+                          Conferido
+                        </label>
                       )}
                     </div>
                   </td>
 
                   <td className="px-4 py-3 text-slate-500 min-w-55 truncate">
                     {item.observacao ?? '—'}
+                  </td>
+
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={() => setItemSelecionado(item)}
+                      className={
+                        item.motivo_glosa || item.observacao_manual
+                          ? 'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold text-green-700 border border-green-300 bg-green-50 hover:bg-green-100 hover:border-green-400 transition-all duration-150 whitespace-nowrap cursor-pointer select-none'
+                          : 'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold text-slate-500 border border-slate-200 bg-transparent hover:bg-slate-50 hover:border-slate-300 hover:text-slate-700 transition-all duration-150 whitespace-nowrap cursor-pointer select-none'
+                      }
+                    >
+                      <FileText size={11} className="shrink-0" />
+                      {item.motivo_glosa || item.observacao_manual ? 'Detalhado' : 'Detalhe'}
+                    </button>
                   </td>
                 </tr>
               ))}
@@ -193,7 +183,7 @@ export default function TabelaAuditoria({
         onChange={onPaginaChange}
       />
 
-      <ModalDetalhamentoGlosa
+      <ModalDetalhamentoAtendimento
         item={itemSelecionado}
         open={itemSelecionado !== null}
         onClose={() => setItemSelecionado(null)}
@@ -212,29 +202,16 @@ function SortIcon({ colKey, sortKey, sortDir }: { colKey: SortKey; sortKey: Sort
     : <ChevronDown size={12} className="text-violet-500" />
 }
 
-function SituacaoBadge({ situacao }: { situacao: string | null }) {
-  if (!situacao) return <span className="text-slate-400">—</span>
-
-  const config: SituacaoConfigEntry = SITUACAO_CONFIG[situacao] ?? {
-    label: situacao,
-    dot: 'bg-slate-400',
-    className: 'bg-slate-100 text-slate-500 ring-1 ring-slate-300',
-  }
-
-  return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap ${config.className}`}
-    >
-      <span className={`h-1.5 w-1.5 rounded-full shrink-0 ${config.dot}`} />
-      {config.label}
-    </span>
-  )
-}
-
 function formatarData(data: string | null) {
   if (!data) return '—'
   const [ano, mes, dia] = data.split('-')
   return `${dia}/${mes}/${ano}`
+}
+
+function formatarDataHora(data: string | null) {
+  if (!data) return '—'
+  const d = new Date(data)
+  return `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
 }
 
 function SkeletonRows() {
