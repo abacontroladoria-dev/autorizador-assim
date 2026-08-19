@@ -1,6 +1,6 @@
 'use client'
 
-import { AlertCircle, AlertTriangle, Ban, Calendar, CheckCircle2, RefreshCw, UserX, XCircle, Ticket } from 'lucide-react'
+import { AlertCircle, AlertTriangle, Ban, Calendar, CheckCircle2, RefreshCw, UserMinus, UserX, XCircle, Ticket } from 'lucide-react'
 import type { KpisAuditoriaAssim } from './types'
 
 type Props = {
@@ -35,12 +35,12 @@ export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, 
       situacao: 'NAO_SOLICITADA',
       title: 'Não Solicitadas',
       value: kpis?.nao_solicitadas ?? 0,
-      tone: 'text-red-600',
-      iconTone: 'bg-red-50 text-red-600',
-      barTone: 'bg-red-500',
-      borderActive: 'border-red-400',
-      hoverBorder: 'hover:border-red-300',
-      bgActive: 'bg-red-50/60',
+      tone: 'text-rose-700',
+      iconTone: 'bg-rose-50 text-rose-700',
+      barTone: 'bg-rose-500',
+      borderActive: 'border-rose-400',
+      hoverBorder: 'hover:border-rose-300',
+      bgActive: 'bg-rose-50/60',
       icon: AlertCircle,
     },
     {
@@ -49,12 +49,12 @@ export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, 
       title: 'Sincronizando',
       hint: 'até 10 min',
       value: kpis?.sincronizando ?? 0,
-      tone: 'text-blue-600',
-      iconTone: 'bg-blue-50 text-blue-600',
-      barTone: 'bg-blue-500',
-      borderActive: 'border-blue-400',
-      hoverBorder: 'hover:border-blue-300',
-      bgActive: 'bg-blue-50/60',
+      tone: 'text-sky-700',
+      iconTone: 'bg-sky-50 text-sky-700',
+      barTone: 'bg-sky-500',
+      borderActive: 'border-sky-400',
+      hoverBorder: 'hover:border-sky-300',
+      bgActive: 'bg-sky-50/60',
       icon: RefreshCw,
     },
     {
@@ -63,12 +63,12 @@ export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, 
       title: 'Retorno Não\nConfirmado',
       hint: 'mais de 10 min',
       value: kpis?.retorno_nao_confirmado ?? 0,
-      tone: 'text-orange-600',
-      iconTone: 'bg-orange-50 text-orange-600',
-      barTone: 'bg-orange-500',
-      borderActive: 'border-orange-400',
-      hoverBorder: 'hover:border-orange-300',
-      bgActive: 'bg-orange-50/60',
+      tone: 'text-amber-700',
+      iconTone: 'bg-amber-50 text-amber-700',
+      barTone: 'bg-amber-500',
+      borderActive: 'border-amber-400',
+      hoverBorder: 'hover:border-amber-300',
+      bgActive: 'bg-amber-50/60',
       icon: AlertTriangle,
     },
     {
@@ -76,25 +76,29 @@ export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, 
       situacao: 'LIBERADA',
       title: 'Liberadas',
       value: kpis?.liberadas ?? 0,
-      tone: 'text-green-600',
-      iconTone: 'bg-green-50 text-green-600',
-      barTone: 'bg-green-500',
-      borderActive: 'border-green-400',
-      hoverBorder: 'hover:border-green-300',
-      bgActive: 'bg-green-50/60',
+      tone: 'text-emerald-700',
+      iconTone: 'bg-emerald-50 text-emerald-700',
+      barTone: 'bg-emerald-500',
+      borderActive: 'border-emerald-400',
+      hoverBorder: 'hover:border-emerald-300',
+      bgActive: 'bg-emerald-50/60',
       icon: CheckCircle2,
     },
     {
+      // "Com Token" não é uma situação — é um atributo transversal (toda
+      // liberada pode ter filipeta) e o contador da feature que o botão
+      // Token Mensal abre. Fica no steel da marca, fora da régua de situação,
+      // justamente para não parecer mais um estado do ciclo.
       key: 'tokens',
       situacao: 'TOKENS',
       title: 'Com Token',
       value: kpis?.tokens ?? 0,
-      tone: 'text-indigo-600',
-      iconTone: 'bg-indigo-50 text-indigo-600',
-      barTone: 'bg-indigo-500',
-      borderActive: 'border-indigo-400',
-      hoverBorder: 'hover:border-indigo-300',
-      bgActive: 'bg-indigo-50/60',
+      tone: 'text-brand-fg',
+      iconTone: 'bg-brand-surface text-brand-fg',
+      barTone: 'bg-brand',
+      borderActive: 'border-brand',
+      hoverBorder: 'hover:border-brand/50',
+      bgActive: 'bg-brand-surface',
       icon: Ticket,
     },
     {
@@ -102,8 +106,8 @@ export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, 
       situacao: 'GLOSA',
       title: 'Glosas',
       value: kpis?.glosas ?? 0,
-      tone: 'text-violet-600',
-      iconTone: 'bg-violet-50 text-violet-600',
+      tone: 'text-violet-700',
+      iconTone: 'bg-violet-50 text-violet-700',
       barTone: 'bg-violet-500',
       borderActive: 'border-violet-400',
       hoverBorder: 'hover:border-violet-300',
@@ -115,8 +119,8 @@ export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, 
       situacao: 'CANCELADA',
       title: 'Canceladas',
       value: kpis?.canceladas ?? 0,
-      tone: 'text-slate-500',
-      iconTone: 'bg-slate-100 text-slate-500',
+      tone: 'text-slate-600',
+      iconTone: 'bg-slate-100 text-slate-600',
       barTone: 'bg-slate-400',
       borderActive: 'border-slate-400',
       hoverBorder: 'hover:border-slate-300',
@@ -124,16 +128,20 @@ export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, 
       icon: Ban,
     },
     {
+      // As duas faltas vivem em stone, fora da régua de autorização: sessão que
+      // não aconteceu é outra categoria. Distinguem-se por peso (stone-600 vs
+      // stone-700), ícone e título — não por matiz. Antes, "Faltas Terapeuta"
+      // era red-600, idêntico a "Não Solicitadas".
       key: 'faltas',
       situacao: 'FALTA',
       title: 'Faltas Paciente',
       value: kpis?.faltas ?? 0,
-      tone: 'text-yellow-600',
-      iconTone: 'bg-yellow-50 text-yellow-600',
-      barTone: 'bg-yellow-400',
-      borderActive: 'border-yellow-400',
-      hoverBorder: 'hover:border-yellow-300',
-      bgActive: 'bg-yellow-50/60',
+      tone: 'text-stone-600',
+      iconTone: 'bg-stone-100 text-stone-600',
+      barTone: 'bg-stone-400',
+      borderActive: 'border-stone-400',
+      hoverBorder: 'hover:border-stone-300',
+      bgActive: 'bg-stone-50',
       icon: UserX,
     },
     {
@@ -141,13 +149,13 @@ export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, 
       situacao: 'FALTA_TERAPEUTA',
       title: 'Faltas Terapeuta',
       value: kpis?.faltas_terapeuta ?? 0,
-      tone: 'text-red-600',
-      iconTone: 'bg-red-50 text-red-600',
-      barTone: 'bg-red-500',
-      borderActive: 'border-red-400',
-      hoverBorder: 'hover:border-red-300',
-      bgActive: 'bg-red-50/60',
-      icon: UserX,
+      tone: 'text-stone-700',
+      iconTone: 'bg-stone-200 text-stone-700',
+      barTone: 'bg-stone-500',
+      borderActive: 'border-stone-500',
+      hoverBorder: 'hover:border-stone-400',
+      bgActive: 'bg-stone-100/80',
+      icon: UserMinus,
     },
   ]
 
@@ -200,7 +208,7 @@ function TotalCard({
         xl:w-40 xl:shrink-0
         flex flex-col items-center justify-between
         rounded-2xl p-2.5 pt-3
-        bg-linear-to-br from-indigo-600 to-violet-700
+        bg-linear-to-br from-[oklch(0.52_0.092_217)] to-[oklch(0.34_0.070_217)]
         shadow-md min-h-24
         cursor-pointer text-left
         transition hover:-translate-y-px hover:shadow-lg
@@ -213,7 +221,7 @@ function TotalCard({
           <Calendar size={17} className="text-white" />
         </div>
 
-        <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-200 leading-tight text-center">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-[oklch(0.86_0.040_217)] leading-tight text-center">
           Total de Sessões
         </span>
 
@@ -222,7 +230,7 @@ function TotalCard({
             <span className="text-4xl font-bold text-white leading-none">
               {loading ? '—' : totalFiltrados}
             </span>
-            <span className="text-[11px] text-indigo-300 mt-0.5">
+            <span className="text-[11px] text-[oklch(0.82_0.045_217)] mt-0.5">
               {loading ? '' : `/ ${total} no dia`}
             </span>
           </div>
@@ -231,7 +239,7 @@ function TotalCard({
             <span className="text-4xl font-bold text-white leading-none mt-1">
               {loading ? '—' : total}
             </span>
-            <span className="text-[11px] text-indigo-300 mt-0.5">100% do total</span>
+            <span className="text-[11px] text-[oklch(0.82_0.045_217)] mt-0.5">100% do total</span>
           </>
         )}
       </div>

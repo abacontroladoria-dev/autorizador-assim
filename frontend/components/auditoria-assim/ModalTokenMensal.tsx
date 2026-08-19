@@ -131,7 +131,7 @@ export default function ModalTokenMensal({ open, onClose }: Props) {
         <div className="flex items-start justify-between px-8 pt-6 pb-5">
           <div>
             <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
-              <KeySquare size={19} className="text-indigo-500" />
+              <KeySquare size={19} className="text-brand" />
               Token mensal
             </h2>
             <p className="mt-0.5 text-sm text-slate-500">

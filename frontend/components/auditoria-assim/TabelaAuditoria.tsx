@@ -1,7 +1,7 @@
 'use client'
 
 import { useState } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsUpDown, FileText, Loader2 } from 'lucide-react'
+import { Check, ChevronDown, ChevronLeft, ChevronRight, ChevronUp, ChevronsUpDown, Circle, FileText, Loader2 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import type { AuditoriaAssimItem } from './types'
 import type { SortDir, SortKey } from '@/hooks/useAuditoriaAssim'
@@ -96,29 +96,16 @@ export default function TabelaAuditoria({
 
                 {/* Status + observação + conferência de token */}
                 <div className="w-64 shrink-0">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-1.5">
                     <SituacaoBadge situacao={item.situacao} />
                     {item.teve_token && (
-                      <label
-                        className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-500 cursor-pointer select-none whitespace-nowrap"
-                        title={
-                          item.token_conferido
-                            ? `Conferido${item.token_conferido_por_nome ? ` por ${item.token_conferido_por_nome}` : ''}${item.token_conferido_em ? ` em ${formatarDataHora(item.token_conferido_em)}` : ''}`
-                            : 'Marcar filipeta como conferida pela operadora'
-                        }
-                      >
-                        {conferindoBloco === item.bloco_id ? (
-                          <Loader2 size={12} className="animate-spin text-slate-400" />
-                        ) : (
-                          <input
-                            type="checkbox"
-                            checked={Boolean(item.token_conferido)}
-                            onChange={(e) => handleToggleConferido(item, e.target.checked)}
-                            className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                          />
-                        )}
-                        Conferido
-                      </label>
+                      <ConferenciaPill
+                        conferido={Boolean(item.token_conferido)}
+                        carregando={conferindoBloco === item.bloco_id}
+                        por={item.token_conferido_por_nome}
+                        em={item.token_conferido_em}
+                        onToggle={() => handleToggleConferido(item, !item.token_conferido)}
+                      />
                     )}
                   </div>
                   <p className="mt-1 truncate text-xs text-slate-400">{item.observacao ?? '—'}</p>
@@ -160,6 +147,53 @@ export default function TabelaAuditoria({
   )
 }
 
+/**
+ * Pill irmão do SituacaoBadge (mesma geometria e escala de tipo), em vez de um
+ * checkbox de formulário solto ao lado dele. Verde = filipeta conferida,
+ * âmbar = ainda por conferir — mesmo vocabulário do modal Token Mensal.
+ */
+function ConferenciaPill({
+  conferido,
+  carregando,
+  por,
+  em,
+  onToggle,
+}: {
+  conferido: boolean
+  carregando: boolean
+  por: string | null
+  em: string | null
+  onToggle: () => void
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      disabled={carregando}
+      aria-pressed={conferido}
+      title={
+        conferido
+          ? `Filipeta conferida${por ? ` por ${por}` : ''}${em ? ` em ${formatarDataHora(em)}` : ''} — clique para desmarcar`
+          : 'Marcar filipeta como conferida'
+      }
+      className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-60 ${
+        conferido
+          ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200 hover:bg-emerald-100'
+          : 'bg-amber-50 text-amber-700 ring-1 ring-amber-200 hover:bg-amber-100'
+      }`}
+    >
+      {carregando ? (
+        <Loader2 size={11} className="shrink-0 animate-spin" />
+      ) : conferido ? (
+        <Check size={11} strokeWidth={3} className="shrink-0" />
+      ) : (
+        <Circle size={11} className="shrink-0" />
+      )}
+      {conferido ? 'Conferida' : 'Conferir'}
+    </button>
+  )
+}
+
 function HeaderLabel({
   label,
   colKey,
@@ -190,9 +224,11 @@ function SortIcon({ colKey, sortKey, sortDir }: { colKey: SortKey; sortKey: Sort
   if (colKey !== sortKey) {
     return <ChevronsUpDown size={12} className="text-slate-300" />
   }
+  // steel da marca, não violeta: violeta é o matiz semântico de GLOSA e não
+  // pode significar "ordenado por esta coluna" na linha de cima.
   return sortDir === 'asc'
-    ? <ChevronUp size={12} className="text-violet-500" />
-    : <ChevronDown size={12} className="text-violet-500" />
+    ? <ChevronUp size={12} className="text-brand" />
+    : <ChevronDown size={12} className="text-brand" />
 }
 
 function formatarData(data: string | null) {
@@ -276,7 +312,7 @@ function Paginacao({
               onClick={() => onChange(p as number)}
               className={`h-8 w-8 flex items-center justify-center rounded-lg text-xs font-semibold transition ${
                 p === pagina
-                  ? 'bg-indigo-600 text-white border border-indigo-600 shadow-sm'
+                  ? 'bg-brand-fg text-white border border-brand-fg shadow-sm'
                   : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
               }`}
             >

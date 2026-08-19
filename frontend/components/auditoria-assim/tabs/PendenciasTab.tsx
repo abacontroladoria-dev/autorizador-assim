@@ -82,7 +82,7 @@ export default function PendenciasTab() {
           value={contadores.total_pendente}
           loading={loading}
           icon={Inbox}
-          tone="bg-indigo-50 text-indigo-600"
+          tone="bg-brand-surface text-brand-fg"
           ativo={filtro === 'abertos'}
           onClick={() => setFiltro('abertos')}
         />
@@ -91,7 +91,7 @@ export default function PendenciasTab() {
           value={contadores.abertos}
           loading={loading}
           icon={AlertCircle}
-          tone="bg-red-50 text-red-600"
+          tone="bg-rose-50 text-rose-700"
           ativo={filtro === 'aberto'}
           onClick={() => setFiltro('aberto')}
         />
@@ -100,7 +100,7 @@ export default function PendenciasTab() {
           value={contadores.em_andamento}
           loading={loading}
           icon={PlayCircle}
-          tone="bg-blue-50 text-blue-600"
+          tone="bg-sky-50 text-sky-700"
           ativo={filtro === 'em_andamento'}
           onClick={() => setFiltro('em_andamento')}
         />
@@ -109,7 +109,7 @@ export default function PendenciasTab() {
           value={contadores.criticos}
           loading={loading}
           icon={CheckCircle2}
-          tone="bg-orange-50 text-orange-600"
+          tone="bg-amber-50 text-amber-700"
         />
       </section>
 
@@ -124,7 +124,7 @@ export default function PendenciasTab() {
               className={`
                 rounded-xl px-3 py-1.5 text-xs font-semibold transition
                 ${filtro === f.key
-                  ? 'bg-indigo-600 text-white'
+                  ? 'bg-brand-fg text-white'
                   : 'border border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
                 }
               `}
@@ -150,7 +150,7 @@ export default function PendenciasTab() {
             <button
               type="button"
               onClick={() => setModalAberto(true)}
-              className="inline-flex items-center gap-1.5 rounded-xl bg-indigo-600 px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-indigo-700"
+              className="inline-flex items-center gap-1.5 rounded-xl bg-brand-fg px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-brand-dark"
             >
               <Plus size={13} />
               Nova pendência
@@ -251,7 +251,7 @@ function Kpi({
       disabled={!clicavel}
       className={`
         flex items-center gap-3 rounded-xl border-2 bg-white p-3 text-left transition
-        ${ativo ? 'border-indigo-400 bg-indigo-50/50' : 'border-slate-200/80'}
+        ${ativo ? 'border-brand bg-brand-surface' : 'border-slate-200/80'}
         ${clicavel ? 'cursor-pointer hover:shadow-sm' : 'cursor-default'}
       `}
     >

@@ -247,7 +247,7 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
                     onChange={(e) => setMotivo(e.target.value.slice(0, 1000))}
                     placeholder="Ex.: Beneficiário inativo — carteirinha vencida em 15/08."
                     rows={3}
-                    className="w-full resize-none rounded-xl border border-violet-200 bg-white p-3 text-sm text-slate-700 transition placeholder:text-slate-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-violet-400"
+                    className="w-full resize-none rounded-xl border border-violet-200 bg-white p-3 text-sm text-slate-700 transition placeholder:text-slate-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand"
                   />
                   <div className="mt-1.5 mb-2 flex justify-between">
                     <span className="text-xs text-slate-400">Campo obrigatório.</span>
@@ -277,7 +277,7 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
               onChange={(e) => setObservacao(e.target.value.slice(0, 1000))}
               placeholder="Registre um lembrete ou combinado sobre este atendimento."
               rows={3}
-              className="w-full resize-none rounded-xl border border-slate-200 p-3 text-sm text-slate-700 transition placeholder:text-slate-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-[#3A8FB7]"
+              className="w-full resize-none rounded-xl border border-slate-200 p-3 text-sm text-slate-700 transition placeholder:text-slate-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand"
             />
             <div className="mt-1.5 mb-2 flex justify-between gap-4">
               <span className="truncate text-xs text-slate-400">
@@ -290,7 +290,7 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
             <button
               onClick={handleSalvarObservacao}
               disabled={salvandoObservacao || observacao.trim() === (item.observacao_manual ?? '')}
-              className="flex items-center gap-2 rounded-xl bg-[#3A8FB7] px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex items-center gap-2 rounded-xl bg-brand-fg px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
             >
               {salvandoObservacao ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
               {salvandoObservacao ? 'Salvando...' : 'Salvar observação'}

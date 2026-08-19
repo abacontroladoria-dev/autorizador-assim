@@ -104,7 +104,7 @@ export default function FiltrosAuditoria({ filters, onChange }: Props) {
         <button
           type="button"
           onClick={() => setTokenMensalAberto(true)}
-          className="flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-2xl bg-indigo-600 px-4 text-sm font-semibold text-white transition hover:bg-indigo-500"
+          className="flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-2xl bg-brand-fg px-4 text-sm font-semibold text-white transition hover:bg-brand-dark"
         >
           <KeySquare size={16} />
           Token Mensal
@@ -128,7 +128,7 @@ const inputClass = `
   text-slate-700
   outline-none
   focus:ring-4
-  focus:ring-violet-100
-  focus:border-violet-300
+  focus:ring-brand/15
+  focus:border-brand
   transition
 `

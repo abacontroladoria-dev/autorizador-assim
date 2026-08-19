@@ -147,7 +147,7 @@ export default function NovaPendenciaModal({ open, onClose, onCriado }: Props) {
                 type="date"
                 value={data}
                 onChange={(e) => setData(e.target.value)}
-                className="h-10 rounded-xl border border-slate-200 px-3 text-sm text-slate-700 outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
+                className="h-10 rounded-xl border border-slate-200 px-3 text-sm text-slate-700 outline-none focus:border-brand focus:ring-4 focus:ring-brand/15"
               />
               <label className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -156,7 +156,7 @@ export default function NovaPendenciaModal({ open, onClose, onCriado }: Props) {
                   placeholder="Buscar paciente"
                   value={busca}
                   onChange={(e) => setBusca(e.target.value)}
-                  className="h-10 w-full rounded-xl border border-slate-200 pl-9 pr-3 text-sm text-slate-700 outline-none focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
+                  className="h-10 w-full rounded-xl border border-slate-200 pl-9 pr-3 text-sm text-slate-700 outline-none focus:border-brand focus:ring-4 focus:ring-brand/15"
                 />
               </label>
             </div>
@@ -184,7 +184,7 @@ export default function NovaPendenciaModal({ open, onClose, onCriado }: Props) {
                     type="button"
                     onClick={() => setSelecionado(item)}
                     className={`flex w-full items-center gap-3 border-b border-slate-50 px-3 py-2 text-left text-sm transition last:border-0 ${
-                      ativo ? 'bg-indigo-50 text-indigo-900' : 'hover:bg-slate-50'
+                      ativo ? 'bg-brand-surface text-brand-fg' : 'hover:bg-slate-50'
                     }`}
                   >
                     <span className="w-11 shrink-0 tabular-nums text-xs text-slate-500">
@@ -210,7 +210,7 @@ export default function NovaPendenciaModal({ open, onClose, onCriado }: Props) {
               onChange={(e) => setMotivo(e.target.value.slice(0, 1000))}
               placeholder="Ex.: Atendimento sem autorização localizada. Favor verificar se a solicitação foi esquecida."
               rows={3}
-              className="w-full resize-none rounded-xl border border-slate-200 p-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-indigo-300 focus:ring-4 focus:ring-indigo-100"
+              className="w-full resize-none rounded-xl border border-slate-200 p-3 text-sm text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-brand focus:ring-4 focus:ring-brand/15"
             />
             <div className="mt-1.5 flex items-center justify-between">
               <div className="flex gap-1.5">
@@ -221,7 +221,7 @@ export default function NovaPendenciaModal({ open, onClose, onCriado }: Props) {
                     onClick={() => setPrioridade(p.key)}
                     className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition ${
                       prioridade === p.key
-                        ? 'bg-indigo-600 text-white'
+                        ? 'bg-brand-fg text-white'
                         : 'border border-slate-200 text-slate-600 hover:bg-slate-50'
                     }`}
                   >
@@ -245,7 +245,7 @@ export default function NovaPendenciaModal({ open, onClose, onCriado }: Props) {
           <button
             onClick={salvar}
             disabled={salvando || !selecionado || !motivo.trim()}
-            className="flex items-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"
+            className="flex items-center gap-2 rounded-xl bg-brand-fg px-5 py-2.5 text-sm font-medium text-white transition hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
           >
             {salvando ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
             {salvando ? 'Criando…' : 'Criar pendência'}
