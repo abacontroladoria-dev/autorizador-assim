@@ -5,7 +5,7 @@ import toast from "react-hot-toast"
 import { type CSSProperties, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import {
   ABA_EXIB_PSICO_NAMES, B, DIAS_LIST, DIAS_ORD, EXCLUIR_OCUP, EXIB_ID, EXIB_NOME,
-  HORAS_GRID, PACS_ADMIN, TERAPIA_TO_ESP, isProfBloqueadoTemp,
+  HORAS_GRID, PACS_ADMIN, TERAPIA_TO_ESP, isProfBloqueadoTemp, normTxt,
 } from "@/lib/cronograma/constants"
 import {
   buildCronoUnitMeta, espRealPorExibicao, fm, fmtName, isLaudoComAlta, pm,
@@ -260,14 +260,20 @@ function buildSugestoes(
   }
 
   // Usado só para adjacência/hasDay: "a paciente já está presente nesse dia perto
-  // desse horário?". Inclui sessões administrativas (Coordenador de Caso,
-  // Supervisão ABA etc.) — elas não contam pra déficit/gap, mas contam como
-  // presença real: uma sessão nova de 40min colada numa Coordenação de Caso já
-  // agendada não é um "dia novo" isolado, é uma sessão avulsa aproveitando uma
-  // visita que já vai acontecer. Exclui só AT Externo (atendimento domiciliar,
-  // não é presença física na unidade).
+  // desse horário?". "Coordenador de Caso" é a ÚNICA exceção de EXCLUIR_OCUP aqui
+  // (mesmo carve-out do allFreeRows acima): mesmo sendo administrativa, uma sessão
+  // nova de 40min colada nela não é um "dia novo" isolado, é avulsa aproveitando
+  // uma visita que já vai acontecer. As demais administrativas (Supervisão ABA,
+  // Visita Guiada, Triagem, Avaliações) NÃO contam — a paciente não está
+  // fisicamente presente nelas, então usá-las como âncora criaria um buraco real
+  // (ex.: oferecer 08:00 só porque 08:40 é Supervisão ABA, sem ninguém de verdade
+  // até bem mais tarde). Exclui também AT Externo (atendimento domiciliar, não é
+  // presença física na unidade).
   const dayHoursClin: Record<string, Set<string>> = {}
-  for (const r of agend.filter(r => r["Nome Favorecido"] === pac && !ABA_EXT_NAMES.has(r.Terapia))) {
+  for (const r of agend.filter(r =>
+    r["Nome Favorecido"] === pac && !ABA_EXT_NAMES.has(r.Terapia)
+    && (!EXCLUIR_OCUP.has(r.Terapia) || r.Terapia === "Coordenador de Caso"),
+  )) {
     const d = r["Dia da Semana"]
     const h = hMin(r)
     if (!h && h !== 0) continue
@@ -275,6 +281,25 @@ function buildSugestoes(
     if (!canonical) continue
     if (!dayHoursClin[d]) dayHoursClin[d] = new Set()
     dayHoursClin[d].add(canonical)
+  }
+
+  // Sessões administrativas onde a paciente NÃO está fisicamente presente (tudo de
+  // EXCLUIR_OCUP exceto Coordenador de Caso, que já tem tratamento próprio acima) —
+  // nunca servem de vizinha pra justificar uma sessão nova adjacente a elas: colar
+  // um horário novo do lado de uma Supervisão ABA (por ex.), sem ninguém de verdade
+  // logo depois/antes, cria um buraco real na presença da paciente, mesmo que o dia
+  // tenha presença real em outro horário mais distante (hasDay true não basta aqui).
+  const adminSemPresenca: Record<string, Set<string>> = {}
+  for (const r of agend.filter(r =>
+    r["Nome Favorecido"] === pac && EXCLUIR_OCUP.has(r.Terapia) && r.Terapia !== "Coordenador de Caso",
+  )) {
+    const d = r["Dia da Semana"]
+    const h = hMin(r)
+    if (!h && h !== 0) continue
+    const canonical = fm(h)
+    if (!canonical) continue
+    if (!adminSemPresenca[d]) adminSemPresenca[d] = new Set()
+    adminSemPresenca[d].add(canonical)
   }
 
   const pacUnidades = new Set(pacClinRows.map(r => rowUnid(r)))
@@ -305,6 +330,19 @@ function buildSugestoes(
     const top = entries.filter(([, n]) => n === max)
     if (top.length === 1) pacDayTurnoUnid[key] = top[0][0]
   }
+  // Fallback pro empate acima (turno sem maioria clara — ex.: tarde real. meio a
+  // meio entre duas unidades): usa a unidade do horário exato vizinho, se houver.
+  // Cobre "16:20 é Fazendinha → 17:00 só pode ser Fazendinha ou nada", mesmo
+  // quando o turno inteiro não tem unidade dominante pra decidir sozinho.
+  const dayHourUnid: Record<string, string> = {}
+  for (const r of clinPuras) {
+    const h = hMin(r)
+    if (!h && h !== 0) continue
+    const canonical = fm(h)
+    if (!canonical) continue
+    const key = `${r["Dia da Semana"]}|||${canonical}`
+    if (!dayHourUnid[key]) dayHourUnid[key] = rowUnid(r)
+  }
 
   const pacGaps = Object.entries(gapMap)
     .filter(([k]) => k.startsWith(`${pac}|||`))
@@ -318,9 +356,18 @@ function buildSugestoes(
   const espMeta: Record<string, { dif: number; aut: number; of: number }> = {}
   for (const g of pacGaps) { espDif[g.esp] = g.dif; espMeta[g.esp] = g }
 
-  // Rastreia sessões já propostas nesta rodada para não ultrapassar o autorizado.
+  // Rastreia sessões já propostas nesta rodada — usado só pra ORDENAR (prioriza
+  // quem ainda tem mais déficit efetivo), nunca pra parar de gerar candidatos:
+  // a tela deve mostrar toda vaga encaixável mesmo além do que falta pro
+  // autorizado (o usuário decide o que aceitar); quem trava a escrita real na
+  // TiTa é o "hasExcesso"/excessoEsps no render, que desabilita "Aceitar
+  // alterações" quando a seleção ultrapassa a CH Autorizada.
   const proposedOf: Record<string, number> = {}
   const effDif = (e: string, extra = 0) => (espDif[e] ?? 0) - (proposedOf[e] ?? 0) - extra
+  // Elegibilidade (gera candidato ou não) usa o déficit ORIGINAL, fixo — nunca o
+  // efetivo (effDif), que cairia a 0 assim que a rodada já tivesse proposto o
+  // suficiente e impediria mostrar mais opções encaixáveis pro usuário escolher.
+  const hasGap = (e: string) => (espDif[e] ?? 0) > 0
 
   const isAssimSaude = /assim/i.test(conv)
   const isGratuidade = /gratuidade/i.test(conv)
@@ -335,15 +382,30 @@ function buildSugestoes(
     if (isAssimSaude) return (gapMap[`${pac}|||${laudoEsp}`]?.aut ?? 0) <= 1
     return false
   }
+  // Coordenador de Caso só pode ser ofertado como acréscimo pra compor o déficit de
+  // Psicologia ABA — nunca cria o vínculo do zero (paciente sem Coordenador de Caso
+  // agendado não recebe a oferta) e nunca troca de coordenador (só o mesmo
+  // profissional que já é o Coordenador de Caso atual dela).
+  const coordenadorAtual = new Set(
+    agend
+      .filter(r => r["Nome Favorecido"] === pac && r.Terapia === "Coordenador de Caso")
+      .map(r => normTxt(r.Profissional)),
+  )
   const seenFree = new Set<string>()
   const allFreeRows: Array<CsvRow & { _hMin: number; _hora: string }> = []
   for (const r of cRows) {
     if (r["Status do Agendamento"] !== "Livre") continue
     if (isProfBloqueadoTemp(r.Profissional)) continue
-    // Aplicador ABA (AE) é a única exceção liberada de EXCLUIR_OCUP aqui — as
-    // demais (Coordenador de Caso, Supervisão ABA etc.) continuam fora da oferta
-    // de sugestões. Ver AE_HS_LAUDO_ESP acima para a condição real de elegibilidade.
-    if (EXCLUIR_OCUP.has(r.Terapia) && r.Terapia !== "Aplicador ABA (AE)") continue
+    // Aplicador ABA (AE) é a única exceção "de sempre" liberada de EXCLUIR_OCUP aqui.
+    // Coordenador de Caso é uma segunda exceção, condicional: só passa se for
+    // exatamente o profissional que já é o coordenador atual da paciente (ver
+    // coordenadorAtual acima). As demais (Supervisão ABA etc.) continuam fora da
+    // oferta de sugestões. Ver AE_HS_LAUDO_ESP acima para a condição real de
+    // elegibilidade do Aplicador ABA (AE).
+    if (EXCLUIR_OCUP.has(r.Terapia) && r.Terapia !== "Aplicador ABA (AE)") {
+      const coordMatch = r.Terapia === "Coordenador de Caso" && coordenadorAtual.has(normTxt(r.Profissional))
+      if (!coordMatch) continue
+    }
     if (aeHsBloqueado(r.Terapia)) continue
     const esp = TERAPIA_TO_ESP[r.Terapia]
     if (!esp || !espDif[esp]) continue
@@ -369,13 +431,27 @@ function buildSugestoes(
   }
 
   const sugestoes: Sugestao[] = []
+  // "Dia novo" (!hasDay) não tem nenhuma sessão real pra ancorar R5.4 — o turno
+  // inteiro está sendo inventado slot a slot. Sem isso, cada horário escolhia
+  // unidade de forma independente (ex.: 13:00–16:20 saem Fazendinha "por sorte"
+  // de ordem, 17:00 sai Realengo). `cRows` chega ordenado por data+hora (ver
+  // buscarGradeComoCSVRows), e slotMap preserva essa ordem de inserção — então o
+  // PRIMEIRO horário processado de um dia+turno "trava" a unidade pros seguintes:
+  // ou o resto do turno usa a mesma unidade, ou não oferece nada ali.
+  const novoDiaUnidEscolhida: Record<string, string> = {}
 
   for (const [slotKey, slotRows] of Object.entries(slotMap)) {
     const parts = slotKey.split("|||")
     const dia  = parts[0]
     const hora = slotRows[0]._hora
+    const slotTurno = (pm(hora) ?? 0) < 720 ? "manha" : "tarde"
 
     if (dayHours[dia]?.has(hora)) continue
+
+    const adjs = adjHs(hora)
+    // Nunca oferece colado numa sessão administrativa sem presença física da
+    // paciente (Supervisão ABA etc.) — ver adminSemPresenca acima.
+    if (adjs.some(a => adminSemPresenca[dia]?.has(a))) continue
 
     const byEspRows: Record<string, typeof allFreeRows> = {}
     const seenProf = new Set<string>()
@@ -390,12 +466,12 @@ function buildSugestoes(
 
     const hoursOnDay = dayHoursClin[dia]
     const hasDay = !!hoursOnDay && hoursOnDay.size > 0
-    const adjs   = adjHs(hora)
-    const isAdj  = hasDay && adjs.some(a => hoursOnDay!.has(a))
 
-    // Esps elegíveis: ordenadas por déficit efetivo desc; tiebreak por taxa de preenchimento asc.
+    // Esps elegíveis: qualquer uma com déficit original (hasGap) — não para de gerar
+    // candidato só porque a rodada já propôs o suficiente (ver comentário em hasGap).
+    // Ordenadas por déficit efetivo desc; tiebreak por taxa de preenchimento asc.
     const eligibleEsps = Object.keys(byEspRows)
-      .filter(esp => effDif(esp) > 0)
+      .filter(esp => hasGap(esp))
       .sort((a, b) => {
         const da = effDif(a), db = effDif(b)
         if (db !== da) return db - da
@@ -407,7 +483,12 @@ function buildSugestoes(
 
     // Constrói os dados de uma esp para este slot; retorna null se inválido.
     const buildEntry = (esp: string): EspAlt | null => {
-      const espRows = byEspRows[esp]
+      const chaveTurnoNovoDia = `${dia}|||${slotTurno}`
+      const unidJaEscolhida = !hasDay ? novoDiaUnidEscolhida[chaveTurnoNovoDia] : undefined
+      const espRows = unidJaEscolhida
+        ? byEspRows[esp].filter(r => rowUnid(r) === unidJaEscolhida)
+        : byEspRows[esp]
+      if (espRows.length === 0) return null
       const [primaryRow, ...altRows] = espRows
       const unid = rowUnid(primaryRow)
       // Para dia-novo: restringe profAlts à mesma unidade do slot principal, pois os
@@ -429,8 +510,8 @@ function buildSugestoes(
           if (EXCLUIR_OCUP.has(r.Terapia) && r.Terapia !== "Aplicador ABA (AE)") continue
           if (aeHsBloqueado(r.Terapia)) continue
           const compEsp = TERAPIA_TO_ESP[r.Terapia]
-          // Desconta 1 do esp principal, pois ele já será adicionado neste slot.
-          if (!compEsp || effDif(compEsp, compEsp === esp ? 1 : 0) <= 0) continue
+          // hasGap (déficit original), não effDif — mesmo motivo do eligibleEsps acima.
+          if (!compEsp || !hasGap(compEsp)) continue
           const ch = hMin(r)
           if (!isTurnoOk(ch)) continue
           const cHora = fm(ch)
@@ -440,7 +521,12 @@ function buildSugestoes(
           seenComp.add(ck)
           compRows.push({ tP: r.Terapia, prof: r.Profissional, hora: cHora, csvGradeId: r.CsvGradeId! })
         }
-        if (compRows.length === 0) return null
+        // Não exige mais compRows não-vazio: uma vaga isolada (sem parceira livre
+        // adjacente pra formar dupla) ainda é "encaixável" — o usuário decide se
+        // aceita; só a escrita real na TiTa fica travada acima do autorizado
+        // (hasExcesso/excessoEsps no render). Sem isso, uma sessão avulsa útil
+        // (ex.: déficit grande, sem vaga livre adjacente de outra especialidade)
+        // era descartada por inteiro em vez de oferecida sozinha.
         // Ordena por déficit desc + taxa de preenchimento asc para que g[0] seja sempre
         // a especialidade mais necessária em cada hora.
         compRows.sort((a, b) => {
@@ -468,8 +554,16 @@ function buildSugestoes(
       // R5.4: slot adjacente deve estar na mesma unidade que as sessões existentes do
       // paciente naquele dia+turno. Filtra todas as linhas pelo turno correto e rejeita
       // se nenhuma tiver a unidade esperada.
-      const slotTurno = (pm(hora) ?? 0) < 720 ? "manha" : "tarde"
-      const existingUnid = pacDayTurnoUnid[`${dia}|||${slotTurno}`]
+      let existingUnid = pacDayTurnoUnid[`${dia}|||${slotTurno}`]
+      if (!existingUnid) {
+        // Turno sem maioria clara (empate): usa a unidade do horário vizinho mais
+        // próximo, se houver — ver dayHourUnid acima. Cobre "16:20 é Fazendinha →
+        // 17:00 só pode ser Fazendinha ou nada", mesmo com o turno inteiro empatado.
+        for (const a of adjs) {
+          const vizinho = dayHourUnid[`${dia}|||${a}`]
+          if (vizinho) { existingUnid = vizinho; break }
+        }
+      }
       if (existingUnid) {
         const validRows = espRows.filter(r => rowUnid(r) === existingUnid)
         if (validRows.length === 0) return null
@@ -502,7 +596,15 @@ function buildSugestoes(
     // (Profissional + Terapia + Status=Livre). allEsps e allProfs no render são a única
     // fonte de verdade para terapias e profissionais disponíveis — não há terapia elegível
     // sem profissional correspondente.
-    if (hasDay && isAdj) {
+    // Antes só empurrava quando hasDay && isAdj (dia já frequentado E o horário
+    // colado numa sessão existente) ou quando !hasDay (dia novo). O meio-termo —
+    // dia já frequentado, mas esse horário específico não está a ±40min de
+    // nenhuma sessão existente (ex.: só sessões à tarde, oferta às 13:00 quando a
+    // mais próxima é 14:20) — não caía em nenhuma das duas: buildEntry calculava
+    // a entrada certinha (já validada por unidade/turno via R5.4) e ela era
+    // descartada sem nunca virar sugestão. `isAdj` continua sem uso aqui — a
+    // vaga é "encaixável" (unidade/turno batem) mesmo sem adjacência estrita.
+    if (hasDay) {
       sugestoes.push({
         id: `${dia}|||${hora}|||${defaultEntry.esp}`,
         esp: defaultEntry.esp, tP: defaultEntry.tP,
@@ -513,7 +615,7 @@ function buildSugestoes(
         espAlts: altEntries,
       })
       proposedOf[defaultEntry.esp] = (proposedOf[defaultEntry.esp] ?? 0) + 1
-    } else if (!hasDay) {
+    } else {
       sugestoes.push({
         id: `${dia}|||${hora}|||${defaultEntry.esp}`,
         esp: defaultEntry.esp, tP: defaultEntry.tP,
@@ -524,6 +626,10 @@ function buildSugestoes(
         profAlts: defaultEntry.profAlts,
         espAlts: altEntries,
       })
+      // Trava a unidade desse dia+turno pros próximos horários "dia novo" — ver
+      // comentário em novoDiaUnidEscolhida.
+      const chaveTurnoNovoDia = `${dia}|||${slotTurno}`
+      if (!novoDiaUnidEscolhida[chaveTurnoNovoDia]) novoDiaUnidEscolhida[chaveTurnoNovoDia] = defaultEntry.unidade
       proposedOf[defaultEntry.esp] = (proposedOf[defaultEntry.esp] ?? 0) + 1
       for (const vc of defaultEntry.vComp) {
         const e = TERAPIA_TO_ESP[vc.tP]
@@ -911,13 +1017,11 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
 
   const selectedCount = buildSelectedSessoes().length
 
-  // Verdadeiro quando algum card selecionado tem múltiplas terapias sem wizard completo
-  const hasPendingEsp = Array.from(selectedIds).some(id => {
-    if (id.includes("|||vc|||")) return false
-    const s = sugestoes.find(x => x.id === id)
-    if (!s || s.espAlts.length === 0) return false
-    return espSelIdx[s.id] === undefined || !profConfirmed.has(s.id)
-  })
+  // Cards multi-terapia já vêm com terapia/profissional pré-selecionados (maior
+  // déficit primeiro — ver wizardComplete acima), então nunca ficam "pendentes"
+  // de escolha antes de aceitar. Mantido como constante pra não mexer nos
+  // pontos que ainda leem essa variável (label/estilo do botão "Aceitar").
+  const hasPendingEsp = false
 
   const selectedByEsp: Record<string, number> = {}
   for (const id of selectedIds) {
@@ -1043,12 +1147,14 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                 const espAltCount = Math.max(0, allEsps.length - 1)
                                 const isEspExpanded = expandedEspCardId === c.sugestaoId
                                 const curEspIdx   = mainSug ? (espSelIdx[mainSug.id] ?? 0) : 0
-                                // Wizard multi-terapia: estados derivados
-                                const espIsExplicitlySet = mainSug ? espSelIdx[mainSug.id] !== undefined : true
-                                const wizardComplete = mainSug
-                                  ? (allEsps.length > 1 && espIsExplicitlySet && profConfirmed.has(mainSug.id))
-                                  : false
-                                const espIsPending = mainSug ? (allEsps.length > 1 && !wizardComplete) : false
+                                // Wizard multi-terapia: estados derivados. Terapia/profissional já vêm
+                                // pré-selecionados no índice 0 — que é sempre a maior distância entre
+                                // autorizado e ofertado, porque buildSugestoes já ordena eligibleEsps por
+                                // déficit efetivo desc (ver comentário em hasGap/eligibleEsps). Não exige
+                                // mais escolha explícita pra liberar o card: "Alterar terapia" reabre o
+                                // mesmo picker pra quem quiser trocar.
+                                const wizardComplete = !!mainSug && allEsps.length > 1
+                                const espIsPending = false
                                 const cardEsp = isVCompCard
                                   ? (TERAPIA_TO_ESP[c.tP] ?? null)
                                   : (mainEd?.esp ?? TERAPIA_TO_ESP[c.tP] ?? null)
@@ -1172,7 +1278,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                           <div data-esp-dropdown="true" onClick={e => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                                             <div style={{ fontSize: "9px", fontWeight: 800, color: "#374151", marginBottom: "1px" }}>Escolha uma terapia</div>
                                             {allEsps.map((e, i) => {
-                                              const isCurr = espIsExplicitlySet && curEspIdx === i
+                                              const isCurr = curEspIdx === i
                                               return (
                                                 <button key={i}
                                                   onClick={evt => { evt.stopPropagation(); setEspSelIdx(prev => ({ ...prev, [mainSug!.id]: i })); setProfSelIdx(prev => ({ ...prev, [mainSug!.id]: 0 })); setSelIdx(prev => ({ ...prev, [mainSug!.id]: {} })); setProfConfirmed(prev => { const s = new Set(prev); s.delete(mainSug!.id); return s }) }}
@@ -1182,13 +1288,12 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                                 </button>
                                               )
                                             })}
-                                            {/* Estágio 3: lista de profissionais aparece após terapia escolhida */}
-                                            {espIsExplicitlySet && (
-                                              <>
+                                            {/* Lista de profissionais sempre visível — a terapia já vem pré-selecionada */}
+                                            <>
                                                 <div style={{ borderTop: "1px solid #e5e7eb", margin: "2px 0" }} />
                                                 <div style={{ fontSize: "9px", fontWeight: 800, color: "#374151", marginBottom: "1px" }}>Escolha um profissional</div>
                                                 {allProfs.map((p, i) => {
-                                                  const isCurr = profConfirmed.has(mainSug!.id) && (profSelIdx[mainSug!.id] ?? 0) === i
+                                                  const isCurr = (profSelIdx[mainSug!.id] ?? 0) === i
                                                   return (
                                                     <button key={i}
                                                       onClick={evt => { evt.stopPropagation(); setProfSelIdx(prev => ({ ...prev, [mainSug!.id]: i })); setProfConfirmed(prev => { const s = new Set(prev); s.add(mainSug!.id); return s }); setExpandedEspCardId(null) }}
@@ -1198,8 +1303,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                                     </button>
                                                   )
                                                 })}
-                                              </>
-                                            )}
+                                            </>
                                           </div>
                                         )}
 
