@@ -1,7 +1,9 @@
 'use client'
 
-import { CalendarDays, Clock, Hash, Search, SlidersHorizontal } from 'lucide-react'
+import { useState } from 'react'
+import { CalendarDays, Clock, KeySquare, Search, SlidersHorizontal } from 'lucide-react'
 import type { AuditoriaFilters } from './types'
+import ModalTokenMensal from './ModalTokenMensal'
 
 type Props = {
   filters: AuditoriaFilters
@@ -36,13 +38,15 @@ const HORARIOS_BLOCOS = [
 ]
 
 export default function FiltrosAuditoria({ filters, onChange }: Props) {
+  const [tokenMensalAberto, setTokenMensalAberto] = useState(false)
+
   function update<K extends keyof AuditoriaFilters>(key: K, value: AuditoriaFilters[K]) {
     onChange({ ...filters, [key]: value })
   }
 
   return (
     <div className="bg-white/90 backdrop-blur border border-white/50 rounded-2xl p-3 shadow-sm">
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-[180px_1fr_200px_160px_180px]">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-[180px_1fr_200px_180px_auto]">
 
         <label className="relative">
           <CalendarDays className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -72,24 +76,13 @@ export default function FiltrosAuditoria({ filters, onChange }: Props) {
             onChange={(e) => update('situacao', e.target.value)}
             className={`${inputClass} pl-11`}
           >
-            <option value="">Todas as situações</option>
+            <option value="">Status</option>
             {SITUACOES.map((s) => (
               <option key={s.value} value={s.value}>
                 {s.label}
               </option>
             ))}
           </select>
-        </label>
-
-        <label className="relative">
-          <Hash className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Código TUSS"
-            value={filters.tuss}
-            onChange={(e) => update('tuss', e.target.value)}
-            className={`${inputClass} pl-11`}
-          />
         </label>
 
         <label className="relative">
@@ -108,7 +101,18 @@ export default function FiltrosAuditoria({ filters, onChange }: Props) {
           </select>
         </label>
 
+        <button
+          type="button"
+          onClick={() => setTokenMensalAberto(true)}
+          className="flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-2xl bg-indigo-600 px-4 text-sm font-semibold text-white transition hover:bg-indigo-500"
+        >
+          <KeySquare size={16} />
+          Token Mensal
+        </button>
+
       </div>
+
+      <ModalTokenMensal open={tokenMensalAberto} onClose={() => setTokenMensalAberto(false)} />
     </div>
   )
 }

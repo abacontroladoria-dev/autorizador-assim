@@ -35,7 +35,6 @@ export function useAuditoriaAssim() {
     paciente: '',
     situacao: '',
     data: getHojeLocal(),
-    tuss: '',
     horario_bloco: '',
   })
 
@@ -120,11 +119,6 @@ export function useAuditoriaAssim() {
         !item.paciente_nome?.toLowerCase().includes(filters.paciente.toLowerCase())
       ) return false
 
-      if (
-        filters.tuss &&
-        !item.codigo_tuss?.toLowerCase().includes(filters.tuss.toLowerCase())
-      ) return false
-
       if (filters.horario_bloco && item.hora_inicial) {
         const [inicio, fim] = filters.horario_bloco.split('-')
         if (item.hora_inicial < inicio || item.hora_inicial >= fim) return false
@@ -149,7 +143,7 @@ export function useAuditoriaAssim() {
       glosas: registros.filter((d) => d.situacao === 'GLOSA').length,
       tokens: comToken,
     }
-  }, [rawDados, loading, filters.paciente, filters.tuss, filters.horario_bloco])
+  }, [rawDados, loading, filters.paciente, filters.horario_bloco])
 
   useEffect(() => {
     carregarDados()
@@ -209,11 +203,6 @@ export function useAuditoriaAssim() {
         }
       }
 
-      if (
-        filters.tuss &&
-        !item.codigo_tuss?.toLowerCase().includes(filters.tuss.toLowerCase())
-      ) return false
-
       if (filters.horario_bloco && item.hora_inicial) {
         const [inicio, fim] = filters.horario_bloco.split('-')
         if (item.hora_inicial < inicio || item.hora_inicial >= fim) return false
@@ -238,7 +227,7 @@ export function useAuditoriaAssim() {
       }
       return 0
     })
-  }, [rawDados, filters.paciente, filters.situacao, filters.tuss, filters.horario_bloco, sortKey, sortDir])
+  }, [rawDados, filters.paciente, filters.situacao, filters.horario_bloco, sortKey, sortDir])
 
   const totalPaginas = useMemo(
     () => Math.max(1, Math.ceil(filtrados.length / PAGE_SIZE)),

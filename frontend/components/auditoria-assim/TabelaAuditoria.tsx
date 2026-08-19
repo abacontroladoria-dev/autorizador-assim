@@ -22,23 +22,11 @@ type Props = {
   onRefresh: () => void
 }
 
-type ColConfig = {
-  label: string
-  sortKey?: SortKey
-  width?: string
-}
-
-const COLUNAS: ColConfig[] = [
-  { label: 'Paciente', sortKey: 'paciente_nome' },
-  { label: 'Data', sortKey: 'data_atendimento', width: 'w-[95px]' },
-  { label: 'Hora', sortKey: 'hora_inicial', width: 'w-[65px]' },
-  { label: 'TUSS', sortKey: 'codigo_tuss', width: 'w-[85px]' },
-  { label: 'Terapias', sortKey: 'terapias', width: 'w-[160px]' },
-  { label: 'Situação', sortKey: 'situacao', width: 'w-[170px]' },
-  { label: 'Observação' },
-  { label: '', width: 'w-[110px]' },
-]
-
+/**
+ * Layout de lista (não grade): cada linha agrupa fatos relacionados na mesma
+ * célula (paciente+terapia, data+hora, status+observação) em vez de uma
+ * coluna por campo — evita a leitura "planilha" de uma grade densa.
+ */
 export default function TabelaAuditoria({
   dados,
   loading,
@@ -69,111 +57,90 @@ export default function TabelaAuditoria({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="overflow-x-auto rounded-2xl border border-slate-200 bg-white shadow-sm">
-        <table className="w-full text-sm">
-          <thead className="sticky top-0 z-10 bg-white border-b border-slate-100">
-            <tr>
-              {COLUNAS.map((col) => (
-                <th
-                  key={col.label}
-                  className={`px-4 py-3 text-left ${col.width ?? ''} ${col.sortKey ? 'cursor-pointer select-none' : ''}`}
-                  onClick={col.sortKey ? () => onSort(col.sortKey!) : undefined}
-                >
-                  <span className="inline-flex items-center gap-1 text-[11px] font-semibold text-slate-400 hover:text-slate-600 transition-colors whitespace-nowrap">
-                    {col.label}
-                    {col.sortKey && <SortIcon colKey={col.sortKey} sortKey={sortKey} sortDir={sortDir} />}
-                  </span>
-                </th>
-              ))}
-            </tr>
-          </thead>
+      <div className="rounded-2xl border border-slate-200 bg-white shadow-sm">
+        {/* Cabeçalho */}
+        <div className="flex items-center gap-4 border-b border-slate-100 px-5 py-2.5">
+          <HeaderLabel label="Paciente" colKey="paciente_nome" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="min-w-0 flex-1" />
+          <HeaderLabel label="Quando" colKey="hora_inicial" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="w-20 shrink-0" />
+          <HeaderLabel label="Status" colKey="situacao" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="w-64 shrink-0" />
+          <span className="w-24 shrink-0" />
+        </div>
 
-          <tbody>
-            {loading && <SkeletonRows />}
+        {/* Linhas */}
+        <div>
+          {loading && <SkeletonRows />}
 
-            {!loading && dados.length === 0 && (
-              <tr>
-                <td colSpan={COLUNAS.length} className="px-4 py-10 text-center text-slate-400">
-                  Nenhum registro encontrado
-                </td>
-              </tr>
-            )}
+          {!loading && dados.length === 0 && (
+            <div className="px-5 py-14 text-center text-sm text-slate-400">Nenhum registro encontrado</div>
+          )}
 
-            {!loading &&
-              dados.map((item, idx) => (
-                <tr
-                  key={item.bloco_id ?? idx}
-                  className="border-b border-slate-50 hover:bg-slate-50 transition-colors"
-                >
-                  <td className="px-4 py-3 font-medium text-slate-800 whitespace-nowrap">
-                    {item.paciente_nome ?? '—'}
-                  </td>
+          {!loading &&
+            dados.map((item, idx) => (
+              <div
+                key={item.bloco_id ?? idx}
+                className="flex items-center gap-4 border-b border-slate-50 px-5 py-3.5 transition-colors last:border-b-0 hover:bg-slate-50/70"
+              >
+                {/* Paciente + terapia */}
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-slate-800">{item.paciente_nome ?? '—'}</p>
+                  <p className="truncate text-xs text-slate-400">{item.terapias ?? '—'}</p>
+                </div>
 
-                  <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
-                    {formatarData(item.data_atendimento)}
-                  </td>
-
-                  <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
+                {/* Quando */}
+                <div className="w-20 shrink-0">
+                  <p className="text-sm font-medium tabular-nums text-slate-700">
                     {item.hora_inicial ? item.hora_inicial.slice(0, 5) : '—'}
-                  </td>
+                  </p>
+                  <p className="text-xs tabular-nums text-slate-400">{formatarData(item.data_atendimento)}</p>
+                </div>
 
-                  <td className="px-4 py-3 text-slate-600 whitespace-nowrap">
-                    {item.codigo_tuss ?? '—'}
-                  </td>
+                {/* Status + observação + conferência de token */}
+                <div className="w-64 shrink-0">
+                  <div className="flex items-center gap-2">
+                    <SituacaoBadge situacao={item.situacao} />
+                    {item.teve_token && (
+                      <label
+                        className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-500 cursor-pointer select-none whitespace-nowrap"
+                        title={
+                          item.token_conferido
+                            ? `Conferido${item.token_conferido_por_nome ? ` por ${item.token_conferido_por_nome}` : ''}${item.token_conferido_em ? ` em ${formatarDataHora(item.token_conferido_em)}` : ''}`
+                            : 'Marcar filipeta como conferida pela operadora'
+                        }
+                      >
+                        {conferindoBloco === item.bloco_id ? (
+                          <Loader2 size={12} className="animate-spin text-slate-400" />
+                        ) : (
+                          <input
+                            type="checkbox"
+                            checked={Boolean(item.token_conferido)}
+                            onChange={(e) => handleToggleConferido(item, e.target.checked)}
+                            className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                          />
+                        )}
+                        Conferido
+                      </label>
+                    )}
+                  </div>
+                  <p className="mt-1 truncate text-xs text-slate-400">{item.observacao ?? '—'}</p>
+                </div>
 
-                  <td className="px-4 py-3 text-slate-600 w-40 truncate">
-                    {item.terapias ?? '—'}
-                  </td>
-
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2">
-                      <SituacaoBadge situacao={item.situacao} />
-                      {item.teve_token && (
-                        <label
-                          className="inline-flex items-center gap-1.5 text-[11px] font-medium text-slate-500 cursor-pointer select-none whitespace-nowrap"
-                          title={
-                            item.token_conferido
-                              ? `Conferido${item.token_conferido_por_nome ? ` por ${item.token_conferido_por_nome}` : ''}${item.token_conferido_em ? ` em ${formatarDataHora(item.token_conferido_em)}` : ''}`
-                              : 'Marcar filipeta como conferida pela operadora'
-                          }
-                        >
-                          {conferindoBloco === item.bloco_id ? (
-                            <Loader2 size={12} className="animate-spin text-slate-400" />
-                          ) : (
-                            <input
-                              type="checkbox"
-                              checked={Boolean(item.token_conferido)}
-                              onChange={(e) => handleToggleConferido(item, e.target.checked)}
-                              className="h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
-                            />
-                          )}
-                          Conferido
-                        </label>
-                      )}
-                    </div>
-                  </td>
-
-                  <td className="px-4 py-3 text-slate-500 min-w-55 truncate">
-                    {item.observacao ?? '—'}
-                  </td>
-
-                  <td className="px-4 py-3">
-                    <button
-                      onClick={() => setItemSelecionado(item)}
-                      className={
-                        item.motivo_glosa || item.observacao_manual
-                          ? 'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold text-green-700 border border-green-300 bg-green-50 hover:bg-green-100 hover:border-green-400 transition-all duration-150 whitespace-nowrap cursor-pointer select-none'
-                          : 'inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-[11px] font-semibold text-slate-500 border border-slate-200 bg-transparent hover:bg-slate-50 hover:border-slate-300 hover:text-slate-700 transition-all duration-150 whitespace-nowrap cursor-pointer select-none'
-                      }
-                    >
-                      <FileText size={11} className="shrink-0" />
-                      {item.motivo_glosa || item.observacao_manual ? 'Detalhado' : 'Detalhe'}
-                    </button>
-                  </td>
-                </tr>
-              ))}
-          </tbody>
-        </table>
+                {/* Ações */}
+                <div className="w-24 shrink-0 text-right">
+                  <button
+                    onClick={() => setItemSelecionado(item)}
+                    className={
+                      item.motivo_glosa || item.observacao_manual
+                        ? 'inline-flex items-center gap-1 rounded-full border border-green-300 bg-green-50 px-2.5 py-1 text-[11px] font-semibold text-green-700 transition-all duration-150 whitespace-nowrap hover:border-green-400 hover:bg-green-100'
+                        : 'inline-flex items-center gap-1 rounded-full border border-slate-200 bg-transparent px-2.5 py-1 text-[11px] font-semibold text-slate-500 transition-all duration-150 whitespace-nowrap hover:border-slate-300 hover:bg-slate-50 hover:text-slate-700'
+                    }
+                  >
+                    <FileText size={11} className="shrink-0" />
+                    {item.motivo_glosa || item.observacao_manual ? 'Detalhado' : 'Detalhe'}
+                  </button>
+                </div>
+              </div>
+            ))}
+        </div>
       </div>
 
       <Paginacao
@@ -193,6 +160,32 @@ export default function TabelaAuditoria({
   )
 }
 
+function HeaderLabel({
+  label,
+  colKey,
+  sortKey,
+  sortDir,
+  onSort,
+  className,
+}: {
+  label: string
+  colKey: SortKey
+  sortKey: SortKey
+  sortDir: SortDir
+  onSort: (key: SortKey) => void
+  className?: string
+}) {
+  return (
+    <button
+      onClick={() => onSort(colKey)}
+      className={`flex items-center gap-1 text-left text-[11px] font-semibold text-slate-400 transition-colors hover:text-slate-600 ${className ?? ''}`}
+    >
+      {label}
+      <SortIcon colKey={colKey} sortKey={sortKey} sortDir={sortDir} />
+    </button>
+  )
+}
+
 function SortIcon({ colKey, sortKey, sortDir }: { colKey: SortKey; sortKey: SortKey; sortDir: SortDir }) {
   if (colKey !== sortKey) {
     return <ChevronsUpDown size={12} className="text-slate-300" />
@@ -205,7 +198,7 @@ function SortIcon({ colKey, sortKey, sortDir }: { colKey: SortKey; sortKey: Sort
 function formatarData(data: string | null) {
   if (!data) return '—'
   const [ano, mes, dia] = data.split('-')
-  return `${dia}/${mes}/${ano}`
+  return `${dia}/${mes}`
 }
 
 function formatarDataHora(data: string | null) {
@@ -218,16 +211,12 @@ function SkeletonRows() {
   return (
     <>
       {Array.from({ length: 5 }).map((_, i) => (
-        <tr key={i} className="border-b border-slate-50">
-          {COLUNAS.map((col) => (
-            <td key={col.label} className="px-4 py-3">
-              <div
-                className="h-4 rounded bg-slate-100 animate-pulse"
-                style={{ width: col.label === 'Paciente' ? '140px' : '80px' }}
-              />
-            </td>
-          ))}
-        </tr>
+        <div key={i} className="flex items-center gap-4 border-b border-slate-50 px-5 py-3.5 last:border-b-0">
+          <div className="h-4 w-40 min-w-0 flex-1 animate-pulse rounded bg-slate-100" />
+          <div className="h-4 w-20 shrink-0 animate-pulse rounded bg-slate-100" />
+          <div className="h-4 w-64 shrink-0 animate-pulse rounded bg-slate-100" />
+          <div className="h-4 w-24 shrink-0 animate-pulse rounded bg-slate-100" />
+        </div>
       ))}
     </>
   )

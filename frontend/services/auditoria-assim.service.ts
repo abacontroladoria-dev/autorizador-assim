@@ -1,5 +1,5 @@
 import { getSupabaseClient } from '@/lib/supabase/client'
-import type { AuditoriaAssimItem, KpisAuditoriaAssim } from '@/components/auditoria-assim/types'
+import type { AuditoriaAssimItem, KpisAuditoriaAssim, TokenMensalItem } from '@/components/auditoria-assim/types'
 
 const supabase = getSupabaseClient()
 
@@ -170,6 +170,30 @@ export async function marcarTokenConferido(bloco_id: string, conferido: boolean)
       { onConflict: 'bloco_id' }
     )
   if (error) throw error
+}
+
+export async function listarTokensMensal(mes: string): Promise<TokenMensalItem[]> {
+  const { data: result, error } = await supabase
+    .rpc('get_tokens_mensal', { p_mes: mes })
+
+  if (error) {
+    console.error('Erro ao buscar tokens do mês:', error.message, error.details)
+    throw error
+  }
+
+  const itens = (result || []) as Omit<TokenMensalItem, 'token_conferido' | 'token_conferido_em' | 'token_conferido_por_nome'>[]
+  const blocoIds = itens.map((item) => item.bloco_id).filter((id): id is string => !!id)
+  const { conferencias } = await buscarNotasEConferencias(blocoIds)
+
+  return itens.map((item) => {
+    const conferencia = item.bloco_id ? conferencias.get(item.bloco_id) : undefined
+    return {
+      ...item,
+      token_conferido: conferencia?.conferido ?? false,
+      token_conferido_em: conferencia?.conferido_em ?? null,
+      token_conferido_por_nome: conferencia?.conferido_por_nome ?? null,
+    }
+  })
 }
 
 export async function buscarKpisAuditoriaAssim(data: string): Promise<KpisAuditoriaAssim | null> {

@@ -51,6 +51,24 @@ export type AuditoriaFilters = {
   paciente: string
   situacao: string
   data: string
-  tuss: string
   horario_bloco: string
+}
+
+export type TokenMensalItem = {
+  bloco_id: string | null
+  paciente_id: string | null
+  paciente_nome: string | null
+  data_atendimento: string | null
+  hora_inicial: string | null
+  codigo_tuss: string | null
+  terapias: string | null
+  profissionais: string | null
+  guia: string | null
+  token: string | null
+  data_execucao: string | null
+  criado_por: string | null
+  forma_autorizacao: string | null
+  token_conferido: boolean | null
+  token_conferido_em: string | null
+  token_conferido_por_nome: string | null
 }
