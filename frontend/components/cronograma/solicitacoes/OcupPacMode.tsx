@@ -320,12 +320,23 @@ function buildSugestoes(
   // Considera também recusa slot a slot (slotStatus), não só o status do bundle:
   // a aba Acompanhamento permite recusar sessões individuais de um bundle que
   // continua "pendente" como um todo.
+  //
+  // Achado 2026-08-20 (caso Adrian Araújo Nery): a chave incluía o profissional,
+  // então recusar "Psicopedagogia com a Ana Beatriz" às 08:00 não impedia oferecer
+  // "Psicomotricidade com a Rafaela" no MESMO horário — o sistema ofertava outra
+  // coisa bem em cima de um horário que a família já tinha dito não servir.
+  // Os motivos reais de recusa (ver Arthur Luiz Maciel Fortes) são quase sempre
+  // sobre o HORÁRIO, não sobre o profissional específico: "não consegue chegar
+  // às 13h por causa da escola", "não aguenta muitas terapias no mesmo dia". A
+  // chave agora é só dia+hora — qualquer recusa nesse paciente naquele dia/hora
+  // bloqueia QUALQUER terapia/profissional novo ali, não só o que foi recusado.
+  const chaveDiaHora = (dia: string, hora: string) => `${dia}|||${hora}`
   const slotsRecusados = new Set<string>()
   for (const bundle of aceites) {
     if (bundle.pac !== pac) continue
     for (const s of bundle.sessoes) {
       const recusadoNoSlot = bundle.slotStatus?.[`${s.dia}|||${s.hora}`] === "recusado"
-      if (bundle.status === "recusado" || recusadoNoSlot) slotsRecusados.add(chaveSlot(s.prof, s.dia, s.hora))
+      if (bundle.status === "recusado" || recusadoNoSlot) slotsRecusados.add(chaveDiaHora(s.dia, s.hora))
     }
   }
   // Vagas comprometidas: sessões confirmadas que ainda não estão no agend
@@ -497,7 +508,7 @@ function buildSugestoes(
     const canonical = fm(h)
     if (!canonical) continue
     if (slotsReservadosOutros.has(chaveSlot(r.Profissional, r["Dia da Semana"], canonical))) continue
-    if (slotsRecusados.has(chaveSlot(r.Profissional, r["Dia da Semana"], canonical))) continue
+    if (slotsRecusados.has(chaveDiaHora(r["Dia da Semana"], canonical))) continue
     // Vaga "Livre" gêmea de um horário já agendado do mesmo profissional — ver profOcupado.
     if (isProfOcupado(r.Profissional, r["Dia da Semana"], canonical)) continue
     const dk = `${r["Dia da Semana"]}|||${h}|||${r.Terapia}|||${r.Profissional}`
@@ -608,7 +619,7 @@ function buildSugestoes(
           // voltava a ser ofertado como sessão adjacente mesmo estando bloqueado.
           if (isProfOcupado(r.Profissional, dia, cHora)) continue
           if (slotsReservadosOutros.has(chaveSlot(r.Profissional, dia, cHora))) continue
-          if (slotsRecusados.has(chaveSlot(r.Profissional, dia, cHora))) continue
+          if (slotsRecusados.has(chaveDiaHora(dia, cHora))) continue
           const ck = `${r.Terapia}|||${r.Profissional}|||${cHora}`
           if (seenComp.has(ck)) continue
           seenComp.add(ck)
@@ -1013,6 +1024,14 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     recusasPorSlot[k].push(r)
   }
   for (const [k, lista] of Object.entries(recusasPorSlot)) {
+    // Se o horário já tem uma sessão REAL do paciente (tipo "exist"/adminSuperv/
+    // adminWarn/reservado, inseridas acima a partir de sessPac/reservasConfirmadas),
+    // mostrar a recusa ali é redundante: dayHours já impede qualquer oferta nova
+    // nesse dia/hora por causa da sessão existente, com ou sem a recusa histórica.
+    // O card vermelho ficaria competindo com o card real por atenção sem acrescentar
+    // nada — foi o caso do Adrian às 10:00 (Psicopedagogia real + recusa antiga de
+    // "Aplicador ABA (PS)" empilhadas sem necessidade).
+    if ((cMap[k] ?? []).some(x => x.tipo !== "recusadoFamilia")) continue
     if (!cMap[k]) cMap[k] = []
     const n = lista.length
     const detalhe = lista
