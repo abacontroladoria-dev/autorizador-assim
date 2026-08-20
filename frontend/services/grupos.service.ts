@@ -138,17 +138,73 @@ export async function salvarModeloGrupo(
   return true
 }
 
-// Aplica o modelo como override explícito (true ou false) em
-// usuarios_permissoes para cada membro — mesma tabela usada pelas telas "por
-// usuário"/"por permissão", só que em lote. Escreve um override para TODOS os
-// códigos de permissão existentes (não só os marcados como true no modelo),
-// pra garantir que o membro fique exatamente igual ao modelo — sem sobras de
-// um override individual anterior que o modelo não previa.
-export async function aplicarModeloAoGrupo(
-  modelo: Record<string, boolean>,
-  usuarioIds: string[],
+// Substitui os grupos de um usuário pelo conjunto informado (usada pela lista
+// suspensa de grupos no Painel Administrativo). Só mexe nas diferenças pra não
+// perder o created_at das associações que já existiam.
+export async function sincronizarGruposDoUsuario(
+  usuarioId: string,
+  grupoIds: string[],
+  grupoIdsAtuais: string[]
+): Promise<boolean> {
+  const supabase = getSupabaseClient()
+  const alvo = new Set(grupoIds)
+  const atuais = new Set(grupoIdsAtuais)
+
+  const aAdicionar = grupoIds.filter(id => !atuais.has(id))
+  const aRemover = grupoIdsAtuais.filter(id => !alvo.has(id))
+
+  if (aAdicionar.length > 0) {
+    const { error } = await supabase
+      .from('grupos_permissoes_membros')
+      .upsert(
+        aAdicionar.map(grupo_id => ({ grupo_id, usuario_id: usuarioId })),
+        { onConflict: 'grupo_id,usuario_id' }
+      )
+    if (error) {
+      console.error('Erro ao adicionar usuário aos grupos:', error)
+      return false
+    }
+  }
+
+  if (aRemover.length > 0) {
+    const { error } = await supabase
+      .from('grupos_permissoes_membros')
+      .delete()
+      .eq('usuario_id', usuarioId)
+      .in('grupo_id', aRemover)
+    if (error) {
+      console.error('Erro ao remover usuário dos grupos:', error)
+      return false
+    }
+  }
+
+  return true
+}
+
+// Os grupos de um usuário não se excluem, se complementam: quem está em
+// "Cronograma" e "Autorização" fica com a UNIÃO das permissões dos dois
+// modelos. Um código só é negado se nenhum dos grupos o libera.
+export function unirModelos(modelos: Record<string, boolean>[]): Record<string, boolean> {
+  const uniao: Record<string, boolean> = {}
+  for (const modelo of modelos) {
+    for (const [codigo, permitido] of Object.entries(modelo)) {
+      if (permitido) uniao[codigo] = true
+    }
+  }
+  return uniao
+}
+
+// Aplica o modelo resolvido de cada usuário (já unido entre os grupos dele)
+// como override explícito (true ou false) em usuarios_permissoes — mesma tabela
+// usada pelas telas "por usuário"/"por permissão", só que em lote. Escreve um
+// override para TODOS os códigos de permissão existentes (não só os marcados
+// como true), pra garantir que o membro fique exatamente igual à união dos
+// modelos — sem sobras de um override individual anterior que ela não prevê.
+export async function aplicarModelosAosUsuarios(
+  modelosPorUsuario: Record<string, Record<string, boolean>>,
   todosOsCodigos: string[]
 ): Promise<boolean> {
+  const usuarioIds = Object.keys(modelosPorUsuario)
   if (usuarioIds.length === 0 || todosOsCodigos.length === 0) return true
 
   const supabase = getSupabaseClient()
@@ -156,7 +212,7 @@ export async function aplicarModeloAoGrupo(
     todosOsCodigos.map(permissao_codigo => ({
       usuario_id,
       permissao_codigo,
-      permitido: modelo[permissao_codigo] ?? false,
+      permitido: modelosPorUsuario[usuario_id][permissao_codigo] ?? false,
     }))
   )
 
