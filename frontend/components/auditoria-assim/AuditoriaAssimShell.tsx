@@ -16,7 +16,7 @@ const TAB_META: Record<TabKey, { titulo: string; subtitulo: string }> = {
     subtitulo: 'Atendimentos que precisam de ação — o sistema detecta e encerra sozinho',
   },
   auditoria: {
-    titulo: 'Auditoria ASSIM',
+    titulo: 'Conferência ASSIM',
     subtitulo: 'Controle operacional de autorizações e pendências',
   },
 }
