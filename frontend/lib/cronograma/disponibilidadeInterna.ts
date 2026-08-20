@@ -17,7 +17,7 @@
 
 import { agendaClinica, avaliarPeriodo, type CandidatoSlot, type GapItem, type Turno } from "./simulacaoNovoPrestador"
 import { turnoFromHora } from "./helpers"
-import { TERAPIA_TO_ESP } from "./constants"
+import { TERAPIA_TO_ESP, normTxt } from "./constants"
 import type { CsvRow } from "@/types/cronograma"
 
 /**
@@ -122,9 +122,29 @@ export interface SlotLivre {
 // inteira em TERAPIA_TO_ESP (que nunca bate e derruba o slot pra null — bug
 // real encontrado 2026-08-18, caso Amanda Martins Rodrigues: profissional com
 // disponibilidade real sumia da lista "Ocupar Profissionais Disponíveis").
+// Achado 2026-08-20 (caso Marcia Regina Araujo de Paula, Fonoaudiologia): a TiTa
+// mantém uma linha por terapia ofertada, então quando um horário do profissional é
+// preenchido as OUTRAS linhas dele no mesmo dia/hora podem continuar "Livre" — seja
+// por atraso de sincronização, seja pelo formato do CSV. Sem esta trava, um
+// profissional já ocupado (inclusive por "Horário Bloqueado"/PACS_ADMIN) reaparecia
+// como disponível aqui. Mesma trava de profOcupado em OcupPacMode.tsx — usa TODAS as
+// linhas "Agendado" de cRows, sem filtrar por paciente, exatamente pelo mesmo motivo.
+function construirProfOcupado(cRows: CsvRow[]): Set<string> {
+  const ocupado = new Set<string>()
+  for (const r of cRows) {
+    if (r["Status do Agendamento"] !== "Agendado" || !r["Profissional"]) continue
+    ocupado.add(`${normTxt(r["Profissional"])}|||${r["Dia da Semana"]}|||${String(r.HI_str || "")}`)
+  }
+  return ocupado
+}
+
 export function listarSlotsLivres(cRows: CsvRow[]): SlotLivre[] {
+  const profOcupado = construirProfOcupado(cRows)
   return cRows
-    .filter(r => r["Status do Agendamento"] === "Livre" && r["Profissional"])
+    .filter(r =>
+      r["Status do Agendamento"] === "Livre" && r["Profissional"]
+      && !profOcupado.has(`${normTxt(r["Profissional"])}|||${r["Dia da Semana"]}|||${String(r.HI_str || "")}`),
+    )
     .flatMap((r): SlotLivre[] => {
       const base = {
         profissional: r["Profissional"],
