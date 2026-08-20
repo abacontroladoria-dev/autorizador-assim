@@ -2657,6 +2657,11 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
             <input
               id="pac-search"
               type="text"
+              // O campo não tinha autoComplete definido, então o Chrome guardava o que
+              // já foi digitado aqui e sobrepunha sua própria caixa de sugestão (preta,
+              // fora do nosso CSS) por cima da lista branca do sistema. "off" some com
+              // ela; a lista própria (role="listbox" abaixo) continua funcionando igual.
+              autoComplete="off"
               aria-label="Buscar paciente"
               aria-autocomplete="list"
               aria-controls={dropOpen ? "pac-listbox" : undefined}
