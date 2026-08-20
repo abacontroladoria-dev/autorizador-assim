@@ -10,8 +10,13 @@ type Props = {
   onChange: (filters: AuditoriaFilters) => void
 }
 
+// `NAO_SOLICITADA` aqui é o grupo (inclui Solicitação Cancelada), o mesmo
+// significado que o card de KPI aplica — os dois controles escrevem no mesmo
+// campo e não podem querer coisas diferentes com o mesmo valor. A entrada
+// seguinte é o recorte exato de quem quer só as tentativas que quebraram.
 const SITUACOES = [
-  { value: 'NAO_SOLICITADA', label: 'Não Solicitada' },
+  { value: 'NAO_SOLICITADA', label: 'Não Solicitadas (todas)' },
+  { value: 'SOLICITACAO_CANCELADA', label: 'Solicitação Cancelada' },
   { value: 'SINCRONIZANDO', label: 'Sincronizando' },
   { value: 'RETORNO_NAO_CONFIRMADO', label: 'Retorno Não Confirmado' },
   { value: 'LIBERADA', label: 'Liberada' },

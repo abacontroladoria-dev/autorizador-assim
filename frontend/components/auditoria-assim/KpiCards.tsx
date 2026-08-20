@@ -32,8 +32,15 @@ export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, 
   const cards: KpiConfig[] = [
     {
       key: 'nao-solicitadas',
+      // O valor 'NAO_SOLICITADA' aqui é o grupo: soma as que nunca foram
+      // enviadas e as que tiveram a solicitação quebrada no meio
+      // (SOLICITACAO_CANCELADA). As duas pedem a mesma coisa — solicitar de
+      // novo — e a régua de agrupamento vive em situacoes.ts, uma só para a
+      // contagem e para o filtro que o clique aplica. O rótulo de cada linha
+      // continua dizendo qual das duas é.
       situacao: 'NAO_SOLICITADA',
       title: 'Não Solicitadas',
+      hint: 'inclui canceladas',
       value: kpis?.nao_solicitadas ?? 0,
       tone: 'text-rose-700',
       iconTone: 'bg-rose-50 text-rose-700',

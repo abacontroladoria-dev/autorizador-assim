@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { listarAuditoriaAssim, listarFaltasAuditoria, buscarNotasEConferencias } from '@/services/auditoria-assim.service'
 import { getSupabaseClient } from '@/lib/supabase/client'
 import type { AuditoriaAssimItem, AuditoriaFilters, KpisAuditoriaAssim } from '@/components/auditoria-assim/types'
+import { situacaoNoRecorte } from '@/components/auditoria-assim/situacoes'
 
 const PAGE_SIZE       = 30
 const DEBOUNCE_MS     = 800
@@ -147,7 +148,11 @@ export function useAuditoriaAssim() {
       faltas: faltas.length,
       faltas_terapeuta: faltasTerapeuta.length,
       liberadas: registros.filter((d) => d.situacao === 'LIBERADA').length - comToken,
-      nao_solicitadas: registros.filter((d) => d.situacao === 'NAO_SOLICITADA').length,
+      // O card conta o grupo: a sessão cuja solicitação quebrou no meio
+      // (SOLICITACAO_CANCELADA) não tem autorização nem resposta da ASSIM, e o
+      // que falta nela é o mesmo que falta na que nunca foi solicitada. Contar
+      // separado criaria um décimo card para dizer duas vezes "solicite isso".
+      nao_solicitadas: registros.filter((d) => situacaoNoRecorte(d.situacao, 'NAO_SOLICITADA')).length,
       sincronizando: registros.filter((d) => d.situacao === 'SINCRONIZANDO').length,
       retorno_nao_confirmado: registros.filter((d) => d.situacao === 'RETORNO_NAO_CONFIRMADO' || d.situacao === 'AGUARDANDO_RETORNO').length,
       canceladas: registros.filter((d) => d.situacao === 'CANCELADA').length,
@@ -210,7 +215,9 @@ export function useAuditoriaAssim() {
         if (filters.situacao === 'TOKENS') {
           if (!item.teve_token) return false
         } else {
-          if (item.situacao !== filters.situacao) return false
+          // Mesma regra da contagem do KPI, de propósito: clicar num card tem
+          // que devolver exatamente as linhas que ele somou.
+          if (!situacaoNoRecorte(item.situacao, filters.situacao)) return false
         }
       }
 

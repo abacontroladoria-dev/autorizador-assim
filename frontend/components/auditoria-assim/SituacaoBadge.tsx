@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import {
   AlertCircle,
+  AlertOctagon,
   Ban,
   CheckCircle2,
   Clock,
@@ -29,7 +30,9 @@ import {
  * - Texto em `-700` sobre fundo `-50`, nunca `-600`. A 11px o par -600/-50 fica
  *   entre 3.4:1 e 3.9:1 e reprova no AA (4.5:1). Medidos aqui: rose 6.5:1,
  *   violet 7.5:1, amber 5.5:1, sky 6.3:1, slate 6.9:1, emerald 6.4:1,
- *   stone 7.3:1.
+ *   stone 7.3:1. SOLICITACAO_CANCELADA é o único par mais escuro
+ *   (rose-800/rose-100, 6.7:1) — sobe um degrau para não repetir o par de
+ *   NAO_SOLICITADA, e passa no AA pela mesma régua.
  * - Violeta é semântico (glosa) e só. Setas de ordenação e focus ring usam o
  *   steel da marca (--color-brand), não violeta — senão o mesmo matiz significa
  *   "glosa" numa célula e "foco" na de cima.
@@ -67,6 +70,20 @@ export const SITUACAO_CONFIG: Record<string, SituacaoConfigEntry> = {
     surface: 'bg-rose-50 border-rose-200',
     strong: 'text-rose-700',
     icon: AlertCircle,
+  },
+  // prioridade 1 — houve tentativa e ela quebrou (aba da ASSIM fechada no meio
+  // da identificação, envio não concluído, solicitação cancelada). Mesma régua
+  // de NAO_SOLICITADA porque a ação exigida é a mesma — solicitar de novo — e
+  // por isso o mesmo matiz, um degrau mais firme para não ser o mesmo estado.
+  // O par (rose-100, rose-800) não se repete em nenhuma outra entrada, e o
+  // ícone octogonal separa "quebrou no meio" de "nunca começou".
+  SOLICITACAO_CANCELADA: {
+    label: 'Solicitação Cancelada',
+    dot: 'bg-rose-600',
+    className: 'bg-rose-100 text-rose-800 ring-1 ring-rose-300',
+    surface: 'bg-rose-100/70 border-rose-300',
+    strong: 'text-rose-800',
+    icon: AlertOctagon,
   },
   // prioridade 2 — recusa financeira; exige tratativa, não reenvio
   GLOSA: {
