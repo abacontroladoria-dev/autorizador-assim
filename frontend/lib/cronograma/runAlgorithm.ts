@@ -19,6 +19,7 @@ import {
 } from "./constants"
 import {
   cFx,
+  construirProfissionaisOcupados,
   espRealPorExibicao,
   exU,
   fm,
@@ -28,6 +29,7 @@ import {
   isSupervisaoAba,
   isUnidadeValida,
   pm,
+  profissionalEstaOcupado,
 } from "./helpers"
 import { slotValidoParaPaciente } from "./candidatos"
 import type {
@@ -58,8 +60,14 @@ export function runAlgorithm(
   }))
 
   const agend = df.filter(r => r["Status do Agendamento"] === "Agendado")
+  // Vaga "Livre" gêmea de um horário já agendado do mesmo profissional (ver
+  // construirProfissionaisOcupados em helpers.ts) — a TiTa mantém uma linha por
+  // terapia ofertada, então preencher um horário não apaga as outras linhas
+  // "Livre" do mesmo profissional nesse dia/hora.
+  const profOcupado = construirProfissionaisOcupados(agend)
   const livre = df.filter(
-    r => r["Status do Agendamento"] === "Livre" && !isProfBloqueadoTemp(r["Profissional"]),
+    r => r["Status do Agendamento"] === "Livre" && !isProfBloqueadoTemp(r["Profissional"])
+      && !profissionalEstaOcupado(profOcupado, r["Profissional"], r["Dia da Semana"], r.HI_str || ""),
   )
 
   const qtdAut: Record<string, number> = {}
