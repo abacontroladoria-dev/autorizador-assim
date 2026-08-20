@@ -144,7 +144,9 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     cRows, rec, inv, waMap, statusMap, sRec, sInv, sWa, persistStatus,
     profMap, pacBundles, conf, persistProfMap, persistPacBundles, persistConf,
   } = useCronogramaData()
-  const [sub, setSub] = useState<Sub>("aguardando")
+  // Abre em "recusados": é a única aba visível hoje (ver SUBS_VISIVEIS abaixo).
+  // Se outra aba voltar a ser exibida, este padrão continua válido.
+  const [sub, setSub] = useState<Sub>("recusados")
   const [ocupOpen, setOcupOpen] = useState(false)
   const [saidaOpen, setSaidaOpen] = useState(false)
   const [ocupProfOpen, setOcupProfOpen] = useState(false)
@@ -350,12 +352,26 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     if (idx !== -1) persistConf(conf.filter((_, j) => j !== idx))
   }
 
-  const SUBS: { key: Sub; label: string; count: number; icon: LucideIcon }[] = [
+  const TODAS_SUBS: { key: Sub; label: string; count: number; icon: LucideIcon }[] = [
     { key: "aguardando",  label: "Aguardando",          count: aguardandoCount,  icon: Clock },
     { key: "confirmados", label: "Confirmados",          count: allConf.length,   icon: CheckCircle2 },
     { key: "recusados",   label: "Recusados",            count: allRec.length,    icon: X },
     { key: "inviavel",    label: "Inviáveis",             count: allInv.length,    icon: Ban },
   ]
+
+  // Abas visíveis — decisão do usuário em 2026-08-20: a operação usa só "Recusados".
+  // OCULTAR, não apagar: nenhum dado é excluído e nenhuma lógica é removida; as
+  // outras abas continuam sendo alimentadas normalmente e voltam ao ar bastando
+  // acrescentar a chave aqui. Medição que embasou a decisão (ação por mês):
+  //   Recusados   243 registros — 5 jun / 47 jul / 191 ago  (uso intenso)
+  //   Confirmados  34 bundles   —      8 jul /  26 ago      (uso ativo)
+  //   Aguardando   13 bundles   — 3 jun /  9 jul /   1 ago  (praticamente parada)
+  //   Inviáveis     0 bundles no banco (os itens exibidos vinham do localStorage)
+  // Registro de divergência: "Confirmados" tinha 26 implantações em agosto e é o
+  // registro visível do que foi escrito na TiTa; recomendei mantê-la e o usuário
+  // optou por ocultar assim mesmo. Reverter = devolver "confirmados" a esta lista.
+  const SUBS_VISIVEIS: Sub[] = ["recusados"]
+  const SUBS = TODAS_SUBS.filter(s => SUBS_VISIVEIS.includes(s.key))
 
   function handleOcupAceito(key: string, sug: { pac: string; prof: string; tP?: string; esp?: string; unidade?: string; dia?: string; hora?: string } | null) {
     sWa({ ...waMap, [key]: "aceito" as WaStatus })
