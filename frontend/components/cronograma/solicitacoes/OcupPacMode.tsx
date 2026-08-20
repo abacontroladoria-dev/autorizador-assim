@@ -588,8 +588,12 @@ function buildSugestoes(
           if (!isTurnoOk(ch)) continue
           const cHora = fm(ch)
           if (!adjs.includes(cHora)) continue
-          // Mesma trava do allFreeRows: nunca ofertar vaga de profissional já agendado.
+          // Mesmas travas do allFreeRows — a varredura de companheiras tinha ficado de
+          // fora, e por isso um horário recusado (ou já reservado por outro paciente)
+          // voltava a ser ofertado como sessão adjacente mesmo estando bloqueado.
           if (isProfOcupado(r.Profissional, dia, cHora)) continue
+          if (slotsReservadosOutros.has(`${r.Profissional}|||${dia}|||${cHora}`)) continue
+          if (slotsRecusados.has(`${r.Profissional}|||${dia}|||${cHora}`)) continue
           const ck = `${r.Terapia}|||${r.Profissional}|||${cHora}`
           if (seenComp.has(ck)) continue
           seenComp.add(ck)

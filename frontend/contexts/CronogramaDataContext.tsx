@@ -199,11 +199,14 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
         if (p.cfg) setCfgState(prev => ({ ...prev, ...p.cfg }))
         if (p.savedAt) setSavedAt(p.savedAt)
       }
-      const rawPreencher = localStorage.getItem(SK_PREENCHER)
-      if (rawPreencher) {
-        const wp = JSON.parse(rawPreencher)
-        if (wp && Object.keys(wp).length) waInicial = { ...wp, ...waInicial }
-      }
+      // SK_PREENCHER era um blob legado que NUNCA foi escrito por este código — só
+      // lido, e mesclado no waMap a cada carregamento. Efeito: cancelar um item de
+      // "Aguardando" (Ocupação Clínica) funcionava na tela, mas o item voltava no
+      // próximo refresh, porque a chave sobrevivia nesse blob e era remesclada aqui.
+      // Não há o que migrar (o formato é o mesmo do waMap salvo em SK), então a
+      // limpeza é remover a chave de vez — senão o resquício continua ressuscitando
+      // para quem já o tem no navegador.
+      try { localStorage.removeItem(SK_PREENCHER) } catch {}
       if (Object.keys(waInicial).length) setWaMap(waInicial)
     } catch {}
 
