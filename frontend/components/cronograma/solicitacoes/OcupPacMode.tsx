@@ -789,9 +789,12 @@ interface TodasSugestoesModalProps {
   reservasConfirmadas: AceiteSessao[]
   /** Horários recusados pela família para este paciente — exibidos em vermelho na
    *  grade para o bloqueio ficar visível no próprio horário. Não são sugestões. */
-  recusasPac: { dia: string; hora: string; tP: string; prof: string; unidade: string; motivo?: string }[]
+  recusasPac: {
+    dia: string; hora: string; tP: string; prof: string; unidade: string
+    ocorrencias: Array<{ ts: number; data: string; motivo?: string }>
+  }[]
   /** Abre o modal de detalhe do card "recusadoFamilia" ao ser clicado. */
-  onAbrirRecusaDetalhe: (dia: string, hora: string, recusas: Array<{ tP: string; prof: string; motivo?: string }>) => void
+  onAbrirRecusaDetalhe: (dia: string, hora: string, recusas: Array<{ tP: string; prof: string; ocorrencias: Array<{ ts: number; data: string; motivo?: string }> }>) => void
 }
 
 export interface TodasSugestoesModalHandle {
@@ -984,10 +987,14 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     unidade: string; target?: string
     sugestaoId?: string
     isVComp?: boolean
-    motivo?: string
     // Lista estruturada por trás do card "recusadoFamilia" — o modal de detalhe
-    // (aberto ao clicar no card) usa isto em vez de reparsear `motivo`.
-    recusas?: Array<{ tP: string; prof: string; motivo?: string }>
+    // (aberto ao clicar no card) usa isto. Cada combinação terapia+profissional
+    // carrega TODAS as vezes que foi recusada (data + motivo de cada uma), pra
+    // deixar claro se é uma recusa isolada ou a mesma oferta recusada de novo.
+    recusas?: Array<{
+      tP: string; prof: string
+      ocorrencias: Array<{ ts: number; data: string; motivo?: string }>
+    }>
   }
 
   const cMap: Record<string, CellInfo[]> = {}
@@ -1038,19 +1045,17 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     // "Aplicador ABA (PS)" empilhadas sem necessidade).
     if ((cMap[k] ?? []).some(x => x.tipo !== "recusadoFamilia")) continue
     if (!cMap[k]) cMap[k] = []
+    // n = combinações terapia+profissional distintas recusadas nesse horário — não
+    // o total de recusas (uma combinação pode ter sido recusada mais de uma vez).
     const n = lista.length
-    const detalhe = lista
-      .map(r => `• ${r.tP} — ${r.prof}${r.motivo ? ` (${r.motivo})` : ""}`)
-      .join("\n")
     cMap[k].push({
-      // Com mais de uma recusa não dá pra eleger uma como "a" recusa do horário sem
-      // mentir sobre as outras — então o título passa a ser a contagem.
+      // Com mais de uma combinação não dá pra eleger uma como "a" recusa do horário
+      // sem mentir sobre as outras — então o título passa a ser a contagem.
       tP: n === 1 ? lista[0].tP : `${n} recusas neste horário`,
       prof: n === 1 ? lista[0].prof : "",
       tipo: "recusadoFamilia",
       unidade: lista[0].unidade,
-      motivo: detalhe,
-      recusas: lista.map(r => ({ tP: r.tP, prof: r.prof, motivo: r.motivo })),
+      recusas: lista.map(r => ({ tP: r.tP, prof: r.prof, ocorrencias: r.ocorrencias })),
     })
   }
 
@@ -1962,7 +1967,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
   // de depender só do title nativo (que não funciona em toque e não é clicável).
   const [recusaDetalheAberto, setRecusaDetalheAberto] = useState<{
     dia: string; hora: string
-    recusas: Array<{ tP: string; prof: string; motivo?: string }>
+    recusas: Array<{ tP: string; prof: string; ocorrencias: Array<{ ts: number; data: string; motivo?: string }> }>
   } | null>(null)
   const [inputFocused, setInputFocused] = useState(false)
   const [highlightedIdx, setHighlightedIdx] = useState(-1)
@@ -1983,21 +1988,31 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
   // Horários recusados pela família, para marcar a grade em vermelho. Mesma regra de
   // slotsRecusados em buildSugestoes (status do bundle OU recusa slot a slot), para
   // que o que é BLOQUEADO e o que é MOSTRADO como bloqueado nunca divirjam.
+  // Achado 2026-08-20 (caso Arthur Luiz Maciel Fortes, quarta 13:00): o mesmo
+  // horário pode ter sido recusado mais de uma vez — às vezes para a MESMA
+  // combinação terapia+profissional (a família recusa, o sistema volta a oferecer
+  // exatamente aquilo meses depois, ela recusa de novo), às vezes para combinações
+  // diferentes. Antes isso era achatado num único ponto por combinação, sem data
+  // — no modal ficava impossível saber se era "recusado 1 vez, bloqueando 3
+  // opções" ou "recusado 3 vezes, uma por opção". Agora cada combinação carrega
+  // TODAS as ocorrências (data + motivo), em ordem cronológica.
   const recusasPac = useMemo(() => {
-    const vistos = new Set<string>()
-    const out: { dia: string; hora: string; tP: string; prof: string; unidade: string; motivo?: string }[] = []
+    type Ocorrencia = { ts: number; data: string; motivo?: string }
+    const porCombo = new Map<string, { dia: string; hora: string; tP: string; prof: string; unidade: string; ocorrencias: Ocorrencia[] }>()
     for (const b of aceites) {
       if (b.pac !== pac) continue
       for (const s of b.sessoes) {
         const recusadoNoSlot = b.slotStatus?.[`${s.dia}|||${s.hora}`] === "recusado"
         if (b.status !== "recusado" && !recusadoNoSlot) continue
         const k = `${s.dia}|||${s.hora}|||${s.tP}|||${s.prof}`
-        if (vistos.has(k)) continue
-        vistos.add(k)
-        out.push({ dia: s.dia, hora: s.hora, tP: s.tP, prof: s.prof, unidade: s.unidade, motivo: b.motivo })
+        if (!porCombo.has(k)) porCombo.set(k, { dia: s.dia, hora: s.hora, tP: s.tP, prof: s.prof, unidade: s.unidade, ocorrencias: [] })
+        // Ordena pela data real (ts), não pelo texto já formatado — "09/07" vem
+        // antes de "19/08" no calendário, mas depois em ordem alfabética de string.
+        porCombo.get(k)!.ocorrencias.push({ ts: b.ts, data: new Date(b.ts).toLocaleDateString("pt-BR"), motivo: b.motivo })
       }
     }
-    return out
+    for (const combo of porCombo.values()) combo.ocorrencias.sort((a, b) => a.ts - b.ts)
+    return [...porCombo.values()]
   }, [aceites, pac])
 
   // Reconciliação com a TiTa. A API só grava, não exclui — então uma série pode ser
@@ -3059,36 +3074,63 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
         </div>
       )}
 
-      {recusaDetalheAberto && (
+      {recusaDetalheAberto && (() => {
+        const combos = recusaDetalheAberto.recusas
+        return (
         <div
           style={{ position: "fixed", inset: 0, zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.4)", padding: "16px" }}
           onClick={e => { if (e.target === e.currentTarget) setRecusaDetalheAberto(null) }}
         >
-          <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "440px", width: "100%", padding: "20px", maxHeight: "80vh", overflowY: "auto" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "7px", fontWeight: 900, fontSize: "16px", marginBottom: "4px", color: "#dc2626" }}>
+          <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "420px", width: "100%", padding: "18px", maxHeight: "80vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "7px", fontWeight: 900, fontSize: "15px", marginBottom: "3px", color: "#dc2626" }}>
               🚫 Recusado pela família
             </div>
-            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "12px" }}>
-              {recusaDetalheAberto.dia.replace("-feira", "")} · {recusaDetalheAberto.hora} — este horário não será sugerido para {pac} enquanto a recusa não for desfeita.
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "16px" }}>
-              {recusaDetalheAberto.recusas.map((r, i) => (
-                <div key={i} style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "10px", padding: "9px 12px" }}>
-                  <div style={{ fontSize: "13px", fontWeight: 700, color: "#7f1d1d" }}>{r.tP}</div>
-                  <div style={{ fontSize: "12px", color: "#991b1b" }}>{fmtName(r.prof)}</div>
-                  {r.motivo && <div style={{ fontSize: "12px", color: "#7f1d1d", marginTop: "4px", fontStyle: "italic" }}>"{r.motivo}"</div>}
-                </div>
-              ))}
-            </div>
             <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "14px" }}>
-              Para liberar este horário, use <strong>"Reativar sugestão"</strong> na aba Recusados (Aceites e Recusas).
+              {recusaDetalheAberto.dia.replace("-feira", "")} · {recusaDetalheAberto.hora} · {fmtName(pac)}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "7px", marginBottom: "14px" }}>
+              {combos.map((r, i) => {
+                // Acha o olho: mesma data + mesmo motivo (ou os dois sem motivo) é a
+                // MESMA recusa que já apareceria idêntica de novo — junta numa linha só
+                // em vez de repetir a data (achado real: duas linhas "23/06/2026" iguais
+                // uma embaixo da outra, sem nada que as diferenciasse).
+                const vistos = new Set<string>()
+                const linhas: typeof r.ocorrencias = []
+                for (const o of r.ocorrencias) {
+                  const k = `${o.data}|||${o.motivo ?? ""}`
+                  if (vistos.has(k)) continue
+                  vistos.add(k)
+                  linhas.push(o)
+                }
+                return (
+                <div key={i} style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "10px", padding: "8px 11px" }}>
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "8px" }}>
+                    <div style={{ fontSize: "12.5px", fontWeight: 700, color: "#7f1d1d" }}>{r.tP} · {fmtName(r.prof)}</div>
+                    {r.ocorrencias.length > 1 && (
+                      <span style={{ fontSize: "10px", fontWeight: 800, color: "#7f1d1d", background: "rgba(255,255,255,.6)", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 5px", flexShrink: 0 }}>
+                        {r.ocorrencias.length}x
+                      </span>
+                    )}
+                  </div>
+                  {linhas.map((o, j) => (
+                    <div key={j} style={{ fontSize: "11px", color: "#991b1b", marginTop: "2px" }}>
+                      {o.data}{o.motivo && <span> — "{o.motivo}"</span>}
+                    </div>
+                  ))}
+                </div>
+                )
+              })}
+            </div>
+            <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginBottom: "14px" }}>
+              Para liberar: <strong>"Reativar sugestão"</strong> em Aceites e Recusas.
             </div>
             <button onClick={() => setRecusaDetalheAberto(null)} style={{ width: "100%", padding: "8px 16px", borderRadius: "10px", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: "13px" }}>
               Fechar
             </button>
           </div>
         </div>
-      )}
+        )
+      })()}
     </>
   )
 }
