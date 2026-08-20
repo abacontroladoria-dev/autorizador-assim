@@ -8,6 +8,7 @@ import type { SortDir, SortKey } from '@/hooks/useAuditoriaAssim'
 import ModalDetalhamentoAtendimento from './ModalDetalhamentoAtendimento'
 import SituacaoBadge from './SituacaoBadge'
 import { marcarTokenConferido } from '@/services/auditoria-assim.service'
+import { LABEL_ERRO_FACIAL, OBS_CONFIRMADA, erroReconhecimentoFacial } from './formaValidacao'
 
 type Props = {
   dados: AuditoriaAssimItem[]
@@ -61,7 +62,8 @@ export default function TabelaAuditoria({
         {/* Cabeçalho */}
         <div className="flex items-center gap-4 border-b border-slate-100 px-5 py-2.5">
           <HeaderLabel label="Paciente" colKey="paciente_nome" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="min-w-0 flex-1" />
-          <HeaderLabel label="Quando" colKey="hora_inicial" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="w-20 shrink-0" />
+          <HeaderLabel label="Horário" colKey="hora_inicial" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="w-20 shrink-0" />
+          <HeaderLabel label="Guia" colKey="guia" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="w-24 shrink-0" />
           <HeaderLabel label="Status" colKey="situacao" sortKey={sortKey} sortDir={sortDir} onSort={onSort} className="w-64 shrink-0" />
           <span className="w-24 shrink-0" />
         </div>
@@ -75,7 +77,19 @@ export default function TabelaAuditoria({
           )}
 
           {!loading &&
-            dados.map((item, idx) => (
+            dados.map((item, idx) => {
+              // Filipeta (token) e erro de reconhecimento facial são os dois
+              // casos em que existe papel para conferir na recepção — ambos
+              // recebem o mesmo botão.
+              const erroFacial = erroReconhecimentoFacial(item.forma_autorizacao)
+              const precisaConferir = Boolean(item.teve_token) || erroFacial
+              // O texto de sucesso genérico esconde o que de fato aconteceu na
+              // validação; só ele é substituído (glosa/cancelamento seguem
+              // aparecendo com o motivo real).
+              const observacao =
+                erroFacial && item.observacao === OBS_CONFIRMADA ? LABEL_ERRO_FACIAL : item.observacao
+
+              return (
               <div
                 key={item.bloco_id ?? idx}
                 className="flex items-center gap-4 border-b border-slate-50 px-5 py-3.5 transition-colors last:border-b-0 hover:bg-slate-50/70"
@@ -86,7 +100,7 @@ export default function TabelaAuditoria({
                   <p className="truncate text-xs text-slate-400">{item.terapias ?? '—'}</p>
                 </div>
 
-                {/* Quando */}
+                {/* Horário */}
                 <div className="w-20 shrink-0">
                   <p className="text-sm font-medium tabular-nums text-slate-700">
                     {item.hora_inicial ? item.hora_inicial.slice(0, 5) : '—'}
@@ -94,11 +108,18 @@ export default function TabelaAuditoria({
                   <p className="text-xs tabular-nums text-slate-400">{formatarData(item.data_atendimento)}</p>
                 </div>
 
+                {/* Guia */}
+                <div className="w-24 shrink-0">
+                  <p className="truncate text-sm tabular-nums text-slate-600" title={item.guia ?? undefined}>
+                    {item.guia ?? '—'}
+                  </p>
+                </div>
+
                 {/* Status + observação + conferência de token */}
                 <div className="w-64 shrink-0">
                   <div className="flex flex-wrap items-center gap-1.5">
                     <SituacaoBadge situacao={item.situacao} />
-                    {item.teve_token && (
+                    {precisaConferir && (
                       <ConferenciaPill
                         conferido={Boolean(item.token_conferido)}
                         carregando={conferindoBloco === item.bloco_id}
@@ -108,7 +129,9 @@ export default function TabelaAuditoria({
                       />
                     )}
                   </div>
-                  <p className="mt-1 truncate text-xs text-slate-400">{item.observacao ?? '—'}</p>
+                  <p className="mt-1 truncate text-xs text-slate-400" title={observacao ?? undefined}>
+                    {observacao ?? '—'}
+                  </p>
                 </div>
 
                 {/* Ações */}
@@ -126,7 +149,8 @@ export default function TabelaAuditoria({
                   </button>
                 </div>
               </div>
-            ))}
+              )
+            })}
         </div>
       </div>
 
@@ -150,7 +174,8 @@ export default function TabelaAuditoria({
 /**
  * Pill irmão do SituacaoBadge (mesma geometria e escala de tipo), em vez de um
  * checkbox de formulário solto ao lado dele. Verde = filipeta conferida,
- * âmbar = ainda por conferir — mesmo vocabulário do modal Token Mensal.
+ * âmbar = ainda por conferir — mesmo vocabulário do modal de Conferência de
+ * Filipetas.
  */
 function ConferenciaPill({
   conferido,
@@ -173,8 +198,8 @@ function ConferenciaPill({
       aria-pressed={conferido}
       title={
         conferido
-          ? `Filipeta conferida${por ? ` por ${por}` : ''}${em ? ` em ${formatarDataHora(em)}` : ''} — clique para desmarcar`
-          : 'Marcar filipeta como conferida'
+          ? `Conferida${por ? ` por ${por}` : ''}${em ? ` em ${formatarDataHora(em)}` : ''} — clique para desmarcar`
+          : 'Marcar este papel como conferido'
       }
       className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold whitespace-nowrap transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand/40 disabled:opacity-60 ${
         conferido
@@ -233,7 +258,7 @@ function SortIcon({ colKey, sortKey, sortDir }: { colKey: SortKey; sortKey: Sort
 
 function formatarData(data: string | null) {
   if (!data) return '—'
-  const [ano, mes, dia] = data.split('-')
+  const [, mes, dia] = data.split('-')
   return `${dia}/${mes}`
 }
 
@@ -250,6 +275,7 @@ function SkeletonRows() {
         <div key={i} className="flex items-center gap-4 border-b border-slate-50 px-5 py-3.5 last:border-b-0">
           <div className="h-4 w-40 min-w-0 flex-1 animate-pulse rounded bg-slate-100" />
           <div className="h-4 w-20 shrink-0 animate-pulse rounded bg-slate-100" />
+          <div className="h-4 w-24 shrink-0 animate-pulse rounded bg-slate-100" />
           <div className="h-4 w-64 shrink-0 animate-pulse rounded bg-slate-100" />
           <div className="h-4 w-24 shrink-0 animate-pulse rounded bg-slate-100" />
         </div>

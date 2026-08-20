@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, KeySquare, Loader2, RefreshCw, X } from 'lucide-react'
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, KeySquare, Loader2, RefreshCw, Search, X } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { listarTokensMensal, marcarTokenConferido } from '@/services/auditoria-assim.service'
+import { LABEL_ERRO_FACIAL, erroReconhecimentoFacial } from './formaValidacao'
 import type { TokenMensalItem } from './types'
 
 type Props = {
@@ -36,12 +37,18 @@ function formatarDataHora(data: string | null) {
   return `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
 }
 
+/** Sem acento e sem caixa: "joao" acha "João". */
+function normalizar(valor: string) {
+  return valor.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase()
+}
+
 export default function ModalTokenMensal({ open, onClose }: Props) {
   const [mesRef, setMesRef] = useState(() => primeiroDiaDoMes(new Date()))
   const [itens, setItens] = useState<TokenMensalItem[]>([])
   const [loading, setLoading] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const [aba, setAba] = useState<Aba>('pendentes')
+  const [busca, setBusca] = useState('')
   const [conferindoBloco, setConferindoBloco] = useState<string | null>(null)
   const [montado, setMontado] = useState(false)
 
@@ -54,7 +61,7 @@ export default function ModalTokenMensal({ open, onClose }: Props) {
       const dados = await listarTokensMensal(paramMes(mesRef))
       setItens(dados)
     } catch {
-      setErro('Não foi possível carregar os tokens deste mês.')
+      setErro('Não foi possível carregar as conferências deste mês.')
     } finally {
       setLoading(false)
     }
@@ -65,21 +72,42 @@ export default function ModalTokenMensal({ open, onClose }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, mesRef])
 
+  // Dia → horário → paciente: dentro do mesmo horário a ordem é alfabética,
+  // que é como a pilha de filipetas da recepção é conferida.
   const ordenados = useMemo(
     () =>
       [...itens].sort((a, b) => {
         const dia = (a.data_atendimento ?? '').localeCompare(b.data_atendimento ?? '')
-        return dia !== 0 ? dia : (a.hora_inicial ?? '').localeCompare(b.hora_inicial ?? '')
+        if (dia !== 0) return dia
+        const hora = (a.hora_inicial ?? '').localeCompare(b.hora_inicial ?? '')
+        if (hora !== 0) return hora
+        return (a.paciente_nome ?? '').localeCompare(b.paciente_nome ?? '', 'pt-BR')
       }),
     [itens]
   )
 
-  const conferidas = useMemo(() => ordenados.filter((i) => i.token_conferido), [ordenados])
-  const pendentes = useMemo(() => ordenados.filter((i) => !i.token_conferido), [ordenados])
+  // A busca recorta a base inteira — contagens das abas e progresso acompanham,
+  // como os KPIs da página acompanham o filtro de paciente.
+  const base = useMemo(() => {
+    const termo = normalizar(busca.trim())
+    if (!termo) return ordenados
+    return ordenados.filter((i) =>
+      // A forma entra no lastro para que a linha de erro facial seja
+      // encontrável pelo texto que ela mostra no lugar do número.
+      [i.paciente_nome, i.guia, i.token, i.forma_autorizacao].some(
+        (campo) => campo && normalizar(campo).includes(termo)
+      )
+    )
+  }, [ordenados, busca])
 
-  const visiveis = aba === 'pendentes' ? pendentes : aba === 'conferidas' ? conferidas : ordenados
+  const conferidas = useMemo(() => base.filter((i) => i.token_conferido), [base])
+  const pendentes = useMemo(() => base.filter((i) => !i.token_conferido), [base])
 
-  const total = ordenados.length
+  const visiveis = aba === 'pendentes' ? pendentes : aba === 'conferidas' ? conferidas : base
+
+  const total = base.length
+  const totalMes = ordenados.length
+  const buscando = busca.trim().length > 0
   const progresso = total > 0 ? Math.round((conferidas.length / total) * 100) : 0
 
   if (!open || !montado) return null
@@ -132,10 +160,10 @@ export default function ModalTokenMensal({ open, onClose }: Props) {
           <div>
             <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
               <KeySquare size={19} className="text-brand" />
-              Token mensal
+              Conferência de filipetas
             </h2>
             <p className="mt-0.5 text-sm text-slate-500">
-              Atendimentos do mês autorizados por filipeta. Marque cada papel conferido.
+              Atendimentos do mês com filipeta ou erro de reconhecimento facial. Marque cada papel conferido.
             </p>
           </div>
           <button
@@ -182,28 +210,54 @@ export default function ModalTokenMensal({ open, onClose }: Props) {
           )}
         </div>
 
-        {/* Abas */}
-        {!loading && !erro && total > 0 && (
-          <div className="flex gap-1.5 border-t border-slate-100 px-8 py-3">
-            {abas.map((a) => {
-              const ativa = aba === a.id
-              const cor =
-                a.id === 'pendentes'
-                  ? ativa ? 'bg-amber-500 text-white' : 'text-amber-700 hover:bg-amber-50'
-                  : a.id === 'conferidas'
-                    ? ativa ? 'bg-emerald-600 text-white' : 'text-emerald-700 hover:bg-emerald-50'
-                    : ativa ? 'bg-slate-700 text-white' : 'text-slate-600 hover:bg-slate-100'
-              return (
+        {/* Abas + busca */}
+        {!loading && !erro && totalMes > 0 && (
+          <div className="flex items-center gap-3 border-t border-slate-100 px-8 py-3">
+            <div className="flex flex-1 flex-wrap gap-1.5">
+              {abas.map((a) => {
+                const ativa = aba === a.id
+                const cor =
+                  a.id === 'pendentes'
+                    ? ativa ? 'bg-amber-500 text-white' : 'text-amber-700 hover:bg-amber-50'
+                    : a.id === 'conferidas'
+                      ? ativa ? 'bg-emerald-600 text-white' : 'text-emerald-700 hover:bg-emerald-50'
+                      : ativa ? 'bg-slate-700 text-white' : 'text-slate-600 hover:bg-slate-100'
+                return (
+                  <button
+                    key={a.id}
+                    onClick={() => setAba(a.id)}
+                    className={`rounded-lg px-3.5 py-1.5 text-sm font-semibold transition ${cor}`}
+                  >
+                    {a.label}
+                    <span className={`ml-1.5 tabular-nums ${ativa ? 'opacity-80' : 'opacity-60'}`}>{a.count}</span>
+                  </button>
+                )
+              })}
+            </div>
+
+            <div className="relative w-72 shrink-0">
+              <Search size={14} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-slate-400" />
+              <input
+                // `type="text"`, não `search`: o Chrome desenha o próprio X e
+                // ficariam dois botões de limpar lado a lado.
+                type="text"
+                value={busca}
+                onChange={(e) => setBusca(e.target.value)}
+                placeholder="Paciente, guia ou token"
+                aria-label="Buscar por paciente, guia ou token"
+                className="w-full rounded-lg border border-slate-200 bg-white py-1.5 pr-8 pl-9 text-sm text-slate-700 placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-brand/20 focus:outline-none"
+              />
+              {buscando && (
                 <button
-                  key={a.id}
-                  onClick={() => setAba(a.id)}
-                  className={`rounded-lg px-3.5 py-1.5 text-sm font-semibold transition ${cor}`}
+                  type="button"
+                  onClick={() => setBusca('')}
+                  aria-label="Limpar busca"
+                  className="absolute top-1/2 right-2 -translate-y-1/2 rounded p-0.5 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
                 >
-                  {a.label}
-                  <span className={`ml-1.5 tabular-nums ${ativa ? 'opacity-80' : 'opacity-60'}`}>{a.count}</span>
+                  <X size={13} />
                 </button>
-              )
-            })}
+              )}
+            </div>
           </div>
         )}
 
@@ -237,11 +291,31 @@ export default function ModalTokenMensal({ open, onClose }: Props) {
             </div>
           )}
 
-          {!loading && !erro && total === 0 && (
+          {!loading && !erro && totalMes === 0 && (
             <div className="flex flex-col items-center justify-center gap-1 py-20 text-center">
               <KeySquare size={22} className="text-slate-300" />
-              <p className="text-sm font-medium text-slate-500">Nenhum token neste mês</p>
-              <p className="text-xs text-slate-400">Nenhuma autorização por filipeta foi registrada em {labelMes}.</p>
+              <p className="text-sm font-medium text-slate-500">Nada para conferir neste mês</p>
+              <p className="text-xs text-slate-400">
+                Nenhuma filipeta nem erro de reconhecimento facial em {labelMes}.
+              </p>
+            </div>
+          )}
+
+          {!loading && !erro && totalMes > 0 && total === 0 && (
+            <div className="flex flex-col items-center justify-center gap-2 py-20 text-center">
+              <Search size={22} className="text-slate-300" />
+              <div>
+                <p className="text-sm font-medium text-slate-500">Nenhum resultado para “{busca.trim()}”</p>
+                <p className="text-xs text-slate-400">
+                  {totalMes} conferência(s) em {labelMes} — nenhuma bate com paciente, guia ou token.
+                </p>
+              </div>
+              <button
+                onClick={() => setBusca('')}
+                className="mt-1 rounded-xl border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-600 transition hover:bg-slate-50"
+              >
+                Limpar busca
+              </button>
             </div>
           )}
 
@@ -249,7 +323,7 @@ export default function ModalTokenMensal({ open, onClose }: Props) {
             <div className="flex flex-col items-center justify-center gap-1 py-20 text-center">
               <Check size={22} className="text-emerald-400" />
               <p className="text-sm font-medium text-slate-600">
-                {aba === 'pendentes' ? 'Todas as filipetas do mês foram conferidas' : 'Nenhuma filipeta conferida ainda'}
+                {aba === 'pendentes' ? 'Tudo do mês já foi conferido' : 'Nada conferido ainda'}
               </p>
               <p className="text-xs text-slate-400">
                 {aba === 'pendentes' ? `${total} de ${total} em ${labelMes}.` : 'Comece pela aba Pendentes.'}
@@ -289,16 +363,28 @@ export default function ModalTokenMensal({ open, onClose }: Props) {
                       <p className="text-xs text-slate-400">Solicitou</p>
                     </div>
 
-                    <div className="w-40 shrink-0 text-right">
+                    {/* Guia primeiro: é a chave de conferência contra o papel;
+                        o token é o detalhe que a acompanha. Sem token, a forma
+                        de validação explica a ausência — e só quando não há
+                        explicação nenhuma é que o alerta vermelho aparece. */}
+                    <div className="w-52 shrink-0 text-right">
+                      <p className="text-sm font-semibold text-slate-800 tabular-nums">
+                        <span className="mr-1 text-[11px] font-medium text-slate-400">Guia</span>
+                        {item.guia ?? '—'}
+                      </p>
                       {item.token ? (
-                        <p className="font-mono text-sm font-medium text-slate-800 tabular-nums">{item.token}</p>
+                        <p className="font-mono text-[11px] text-slate-500 tabular-nums">
+                          <span className="mr-1 font-sans text-slate-400">Token</span>
+                          {item.token}
+                        </p>
+                      ) : erroReconhecimentoFacial(item.forma_autorizacao) ? (
+                        <p className="text-[11px] whitespace-nowrap text-slate-500">{LABEL_ERRO_FACIAL}</p>
                       ) : (
-                        <p className="inline-flex items-center gap-1 text-xs font-semibold text-rose-600">
-                          <AlertTriangle size={11} />
+                        <p className="inline-flex items-center gap-1 text-[11px] font-semibold text-rose-600">
+                          <AlertTriangle size={10} />
                           Sem token
                         </p>
                       )}
-                      <p className="text-[11px] text-slate-400">Guia {item.guia ?? '—'}</p>
                     </div>
 
                     <button
@@ -307,7 +393,7 @@ export default function ModalTokenMensal({ open, onClose }: Props) {
                       title={
                         conferido
                           ? `Conferida${item.token_conferido_por_nome ? ` por ${item.token_conferido_por_nome}` : ''}${item.token_conferido_em ? ` em ${formatarDataHora(item.token_conferido_em)}` : ''} — clique para desmarcar`
-                          : 'Marcar esta filipeta como conferida'
+                          : 'Marcar este papel como conferido'
                       }
                       className={`inline-flex w-32 shrink-0 items-center justify-center gap-1.5 rounded-lg py-2 text-xs font-semibold transition ${
                         conferido

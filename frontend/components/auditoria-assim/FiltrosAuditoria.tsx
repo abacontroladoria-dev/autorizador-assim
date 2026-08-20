@@ -38,7 +38,7 @@ const HORARIOS_BLOCOS = [
 ]
 
 export default function FiltrosAuditoria({ filters, onChange }: Props) {
-  const [tokenMensalAberto, setTokenMensalAberto] = useState(false)
+  const [conferenciaAberta, setConferenciaAberta] = useState(false)
 
   function update<K extends keyof AuditoriaFilters>(key: K, value: AuditoriaFilters[K]) {
     onChange({ ...filters, [key]: value })
@@ -103,16 +103,16 @@ export default function FiltrosAuditoria({ filters, onChange }: Props) {
 
         <button
           type="button"
-          onClick={() => setTokenMensalAberto(true)}
+          onClick={() => setConferenciaAberta(true)}
           className="flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-2xl bg-brand-fg px-4 text-sm font-semibold text-white transition hover:bg-brand-dark"
         >
           <KeySquare size={16} />
-          Token Mensal
+          Conferência de Filipetas
         </button>
 
       </div>
 
-      <ModalTokenMensal open={tokenMensalAberto} onClose={() => setTokenMensalAberto(false)} />
+      <ModalTokenMensal open={conferenciaAberta} onClose={() => setConferenciaAberta(false)} />
     </div>
   )
 }
