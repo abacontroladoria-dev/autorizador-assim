@@ -1,6 +1,7 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { useModalDialog } from '@/hooks/useModalDialog'
 import {
   AlertOctagon,
   Calendar,
@@ -23,7 +24,7 @@ import {
 import { toast } from 'react-hot-toast'
 import { salvarMotivoGlosa, salvarObservacaoManual } from '@/services/auditoria-assim.service'
 import type { AuditoriaAssimItem } from './types'
-import SituacaoBadge, { SITUACAO_CONFIG } from './SituacaoBadge'
+import SituacaoBadge, { SITUACAO_CONFIG, SITUACAO_FALLBACK } from './SituacaoBadge'
 
 type Props = {
   item: AuditoriaAssimItem | null
@@ -44,6 +45,21 @@ function formatarDataHora(data: string | null) {
   return `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
 }
 
+/**
+ * Estados que uma célula de fato pode carregar.
+ *
+ * Só a conferência de filipeta usa isto, e de propósito: é o par emerald/amber
+ * que a TabelaAuditoria já pinta no botão de conferir, então a mesma dimensão
+ * tem a mesma aparência na lista e no detalhe. Âmbar aqui significa o que
+ * significa em toda a tela — esperando alguém. Rótulo e valor continuam em
+ * texto; a cor confirma, não informa sozinha.
+ */
+const FACT_STATE = {
+  neutro: { box: 'border-slate-200/80 bg-slate-50/70', dt: 'text-slate-600', dd: 'text-slate-800' },
+  ok: { box: 'border-emerald-200 bg-emerald-50/70', dt: 'text-emerald-700', dd: 'text-emerald-800' },
+  espera: { box: 'border-amber-200 bg-amber-50/70', dt: 'text-amber-700', dd: 'text-amber-800' },
+} as const
+
 /** Ficha compacta: uma célula de fato (rótulo + valor), não uma linha de lista. */
 function Fact({
   icon: Icon,
@@ -51,33 +67,42 @@ function Fact({
   value,
   mono,
   full,
-  tone,
+  state = 'neutro',
 }: {
   icon: React.ComponentType<{ size?: number; className?: string }>
   label: string
   value: React.ReactNode
   mono?: boolean
   full?: boolean
-  tone?: string
+  state?: keyof typeof FACT_STATE
 }) {
+  const tom = FACT_STATE[state]
   return (
-    <div className={`rounded-lg border border-slate-100 bg-slate-50/70 px-3 py-2 ${full ? 'col-span-2' : ''}`}>
-      <dt className="flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide text-slate-400">
+    <div className={`rounded-lg border px-3 py-2 ${tom.box} ${full ? 'col-span-2' : ''}`}>
+      <dt className={`flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide ${tom.dt}`}>
         <Icon size={11} className="shrink-0" />
         {label}
       </dt>
       <dd
-        className={`mt-1 text-sm font-medium leading-snug wrap-break-word ${mono ? 'font-mono tabular-nums text-[13px]' : ''} ${tone ?? 'text-slate-800'}`}
+        className={`mt-1 text-sm font-medium leading-snug wrap-break-word ${mono ? 'font-mono tabular-nums text-[13px]' : ''} ${tom.dd}`}
       >
-        {value ?? <span className="font-normal text-slate-300">—</span>}
+        {value ?? <span className="font-normal text-slate-500">—</span>}
       </dd>
     </div>
   )
 }
 
+/**
+ * Rótulo estrutural das seções — a única aparição do steel da marca na ficha.
+ *
+ * Steel aqui e em mais nenhum lugar: é o que dá identidade à superfície sem
+ * disputar com os matizes de situação, que são os que carregam significado. Se
+ * ele descesse para os 16 rótulos de campo deixaria de ser sinal e viraria a
+ * cor do texto do modal.
+ */
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-400">
+    <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-brand-fg">
       {children}
     </h3>
   )
@@ -98,6 +123,17 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
       setObservacao(item.observacao_manual ?? '')
     }
   }, [open, item])
+
+  // Mesmo hook do ModalTokenMensal: semântica de diálogo, Escape, foco preso e
+  // devolvido ao gatilho, e trava de rolagem do fundo. Passou a importar mais
+  // aqui depois que o "Fechar" do rodapé saiu — sem Escape, quem usa teclado
+  // dependia de tabular até o X.
+  const fechar = useCallback(() => onClose(), [onClose])
+  const { refDialogo, propsDialogo } = useModalDialog(
+    open && Boolean(item),
+    fechar,
+    'titulo-detalhamento-atendimento'
+  )
 
   if (!open || !item) return null
 
@@ -129,42 +165,48 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
   }
 
   const atualizadoObservacao = formatarDataHora(item.observacao_manual_atualizado_em)
-  const corSituacao = (item.situacao && SITUACAO_CONFIG[item.situacao]?.dot) || 'bg-slate-400'
+  // O cabeçalho inteiro veste o matiz da situação, no lugar da lombada de 4px
+  // que existia antes: a faixa era cor sem contato com conteúdo nenhum, e a
+  // severidade só se lia mesmo no badge. Tingindo a superfície, o estado chega
+  // junto com o nome do paciente. Continua sendo tinta -50 sob texto slate — a
+  // cor reforça o badge, nunca substitui o rótulo.
+  const superficieSituacao =
+    (item.situacao && SITUACAO_CONFIG[item.situacao]?.surface) || SITUACAO_FALLBACK.surface
   const temErro = Boolean(item.codigo_erro || item.descricao_erro)
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm"
       onClick={onClose}
     >
       <div
-        className="motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-150 flex max-h-[90vh] w-full max-w-160 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+        ref={refDialogo}
+        {...propsDialogo}
+        className="motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-150 flex max-h-[90dvh] w-full max-w-160 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Lombada colorida — leitura de severidade antes de qualquer texto */}
-        <div className={`h-1 shrink-0 ${corSituacao}`} />
-
-        {/* Header */}
-        <div className="flex items-start justify-between px-6 pt-5 pb-4">
+        {/* Header — a superfície é o sinal de severidade */}
+        <div className={`flex items-start justify-between border-b px-6 pt-5 pb-4 ${superficieSituacao}`}>
           <div className="min-w-0">
-            <h2 className="truncate text-lg font-semibold text-slate-900">
+            <h2
+              id="titulo-detalhamento-atendimento"
+              className="truncate text-lg font-semibold text-slate-900"
+            >
               {item.paciente_nome ?? 'Detalhamento do atendimento'}
             </h2>
-            <p className="mt-0.5 truncate text-sm text-slate-500">{item.terapias ?? 'Sem terapia'}</p>
+            <p className="mt-0.5 truncate text-sm text-slate-600">{item.terapias ?? 'Sem terapia'}</p>
             <div className="mt-2">
               <SituacaoBadge situacao={item.situacao} />
             </div>
           </div>
           <button
             onClick={onClose}
-            className="ml-4 shrink-0 rounded-lg p-1 text-slate-400 transition hover:bg-slate-100 hover:text-slate-600"
+            className="ml-4 shrink-0 rounded-lg p-1 text-slate-500 transition hover:bg-white/80 hover:text-slate-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand"
             aria-label="Fechar"
           >
             <X size={20} />
           </button>
         </div>
-
-        <div className="border-t border-slate-100" />
 
         {/* Content */}
         <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
@@ -184,7 +226,7 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
           {/* Autorização ASSIM — grade + rodapé de retorno, um único bloco */}
           <section>
             <SectionTitle>Autorização ASSIM</SectionTitle>
-            <div className="overflow-hidden rounded-xl border border-slate-100">
+            <div className="overflow-hidden rounded-xl border border-slate-200">
               <dl className="grid grid-cols-2 gap-2 p-2">
                 <Fact icon={FileText} label="Guia" value={item.guia} mono />
                 <Fact icon={CreditCard} label="Convênio" value={item.convenio_nome} />
@@ -202,7 +244,7 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
                         ? `Sim${item.token_conferido_por_nome ? ` · ${item.token_conferido_por_nome}` : ''}`
                         : 'Ainda não'
                     }
-                    tone={item.token_conferido ? 'text-emerald-700' : 'text-amber-600'}
+                    state={item.token_conferido ? 'ok' : 'espera'}
                   />
                 )}
               </dl>
@@ -211,14 +253,14 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
                 <div
                   className={`flex items-start gap-2 border-t px-3 py-2.5 text-xs ${
                     temErro
-                      ? 'border-rose-100 bg-rose-50 text-rose-700'
-                      : 'border-slate-100 bg-slate-50 text-slate-500'
+                      ? 'border-rose-200 bg-rose-50 text-rose-700'
+                      : 'border-slate-200 bg-slate-50 text-slate-600'
                   }`}
                 >
                   {temErro ? (
                     <AlertOctagon size={13} className="mt-0.5 shrink-0" />
                   ) : (
-                    <ShieldCheck size={13} className="mt-0.5 shrink-0 text-slate-400" />
+                    <ShieldCheck size={13} className="mt-0.5 shrink-0 text-slate-500" />
                   )}
                   <span>
                     {item.status_assim && <span className="font-semibold">{item.status_assim} — </span>}
@@ -232,7 +274,7 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
 
           {/* Motivo da glosa — só para linhas GLOSA */}
           {item.situacao === 'GLOSA' && (
-            <section className="rounded-xl border border-violet-100 bg-violet-50/40 p-4">
+            <section className="rounded-xl border border-violet-200 bg-violet-50/40 p-4">
               <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-violet-900">
                 <AlertOctagon size={14} />
                 Motivo da glosa
@@ -247,16 +289,21 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
                     onChange={(e) => setMotivo(e.target.value.slice(0, 1000))}
                     placeholder="Ex.: Beneficiário inativo — carteirinha vencida em 15/08."
                     rows={3}
-                    className="w-full resize-none rounded-xl border border-violet-200 bg-white p-3 text-sm text-slate-700 transition placeholder:text-slate-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand"
+                    className="w-full resize-none rounded-xl border border-violet-200 bg-white p-3 text-sm text-slate-700 transition placeholder:text-slate-500 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand"
                   />
                   <div className="mt-1.5 mb-2 flex justify-between">
-                    <span className="text-xs text-slate-400">Campo obrigatório.</span>
-                    <span className="text-xs text-slate-400">{motivo.length} / 1000</span>
+                    <span className="text-xs text-violet-700">Campo obrigatório.</span>
+                    <span className="text-xs tabular-nums text-slate-500">{motivo.length} / 1000</span>
                   </div>
+                  {/* Steel, não violeta: violeta é o matiz de GLOSA e ação
+                      primária usa a marca. Fosse violeta, o mesmo tom estaria
+                      dizendo "este bloco é glosa" e "clique aqui" na mesma
+                      seção — e os dois botões de salvar do modal não seriam o
+                      mesmo botão. */}
                   <button
                     onClick={handleSalvarMotivo}
                     disabled={salvandoMotivo || !motivo.trim()}
-                    className="flex items-center gap-2 rounded-xl bg-violet-600 px-4 py-2 text-sm font-medium text-white transition hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-50"
+                    className="flex items-center gap-2 rounded-xl bg-brand-fg px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   >
                     {salvandoMotivo ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
                     {salvandoMotivo ? 'Salvando...' : 'Salvar motivo'}
@@ -269,7 +316,7 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
           {/* Observações — livre, qualquer status, sempre editável */}
           <section className="rounded-xl border border-slate-200 p-4">
             <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-slate-700">
-              <MessageSquare size={14} />
+              <MessageSquare size={14} className="text-brand" />
               Observações
             </h3>
             <textarea
@@ -277,20 +324,20 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
               onChange={(e) => setObservacao(e.target.value.slice(0, 1000))}
               placeholder="Registre um lembrete ou combinado sobre este atendimento."
               rows={3}
-              className="w-full resize-none rounded-xl border border-slate-200 p-3 text-sm text-slate-700 transition placeholder:text-slate-400 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand"
+              className="w-full resize-none rounded-xl border border-slate-200 p-3 text-sm text-slate-700 transition placeholder:text-slate-500 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand"
             />
             <div className="mt-1.5 mb-2 flex justify-between gap-4">
-              <span className="truncate text-xs text-slate-400">
+              <span className="truncate text-xs text-slate-500">
                 {item.observacao_manual_atualizado_por_nome && atualizadoObservacao
                   ? `Atualizado por ${item.observacao_manual_atualizado_por_nome} em ${atualizadoObservacao}`
                   : ''}
               </span>
-              <span className="shrink-0 text-xs text-slate-400">{observacao.length} / 1000</span>
+              <span className="shrink-0 text-xs tabular-nums text-slate-500">{observacao.length} / 1000</span>
             </div>
             <button
               onClick={handleSalvarObservacao}
               disabled={salvandoObservacao || observacao.trim() === (item.observacao_manual ?? '')}
-              className="flex items-center gap-2 rounded-xl bg-brand-fg px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-dark disabled:cursor-not-allowed disabled:opacity-50"
+              className="flex items-center gap-2 rounded-xl bg-brand-fg px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
             >
               {salvandoObservacao ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
               {salvandoObservacao ? 'Salvando...' : 'Salvar observação'}
@@ -299,15 +346,6 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
 
         </div>
 
-        {/* Footer */}
-        <div className="flex justify-end border-t border-slate-100 px-6 py-4">
-          <button
-            onClick={onClose}
-            className="rounded-xl border border-slate-200 px-5 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-50"
-          >
-            Fechar
-          </button>
-        </div>
       </div>
     </div>
   )

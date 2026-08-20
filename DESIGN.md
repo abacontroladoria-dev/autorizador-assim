@@ -182,6 +182,31 @@ Colors are assigned by the `prioridade` the RPC already returns (1 = most urgent
 
 **Two orthogonal axes may appear in the same row.** Situação (above) and conferência de filipeta (emerald = conferida, amber = a conferir) are different dimensions, so an emerald "Liberada" pill beside an amber "Conferir" pill is correct, not a collision — both carry text labels. Amber's meaning is consistent across both axes: *waiting on something*.
 
+##### The surface step (2026-08-20)
+
+Each situação now carries a **second, weaker form of the same hue** — a `surface` entry (`-50/70` fill + `-200/80` hairline) alongside the badge recipe, both living in `SITUACAO_CONFIG`. No new hue: the surface step is the existing hue at container strength, for when a situação has to tint a whole region instead of a pill.
+
+Its only consumer is the header of `ModalDetalhamentoAtendimento`, which previously carried a 4px colored spine across the top of the dialog. The spine was color touching no content — the severity still had to be read off the badge, so the hue was spent on decoration. Wearing the hue on the header surface makes the state arrive with the patient's name.
+
+Two constraints ride with it, and a new situação must satisfy both or get neither form:
+
+- **Tint only, never text.** What sits on a surface is slate (title `slate-900`, subtitle `slate-600` — measured 7.1:1 to 7.4:1 across all six tints). A situação hue never becomes reading text outside its own badge.
+- **The surface reinforces a label, never replaces one.** The tinted header still contains the `SituacaoBadge`. Remove the badge and the tint alone would be the state — which is the color-as-sole-signal failure the vocabulary exists to prevent.
+
+##### Âmbar sólido não é botão (2026-08-20)
+
+Amber has no accessible solid-fill form. White text needs `-700` or darker to clear 4.5:1 (`amber-500` measures **2.15:1**, `amber-600` 3.0:1), and `amber-700` as a fill reads as rust — fine once, a wall when it repeats down a list. So **amber never fills a button.** The conferência control is a tint-and-ring pill in both states, which is what `TabelaAuditoria` already used: `bg-amber-100 / text-amber-900 / ring-amber-400` a conferir, `bg-emerald-50 / text-emerald-700 / ring-emerald-200` conferida.
+
+The same reasoning governs filter chips. `KpiCards` had already settled the pattern — active = `-50` tint + `-400` border + `-700`/`-800` text, never a saturated fill with white text — and the Conferência de Filipetas tabs now follow it instead of the `bg-amber-500 text-white` they shipped with.
+
+A filter chip *may* wear a status hue, and that is not a Decoration-Free violation: the chip filters that exact status, so the hue is still the state. The rule bans a status hue on something that isn't that status.
+
+##### Steel on `/auditoria-assim` (2026-08-20)
+
+The 2026-08-19 pass removed the competing blues from this surface but left brand steel absent from it, which is half the Decoration-Free Semantics Rule: status hues stop decorating *and* steel takes the roles they vacated. In the detail modal steel now holds exactly three: the section titles (`brand-fg`, the structural wayfinding layer), both save buttons, and the focus rings.
+
+Notably, **"Salvar motivo" moved off `violet-600` onto `brand-fg`**. Filled violet made one hue mean "this block is a glosa" and "primary action" within a single section, and made the modal's two save buttons two different components. Steel is deliberately kept off the 16 field labels — spread that far it stops being a signal and just becomes the modal's text color.
+
 ### Neutral
 
 - **Ink** (`#1e293b` / slate-800): Primary text. Therapist names, patient names, any primary label.
