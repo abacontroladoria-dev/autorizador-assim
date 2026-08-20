@@ -78,13 +78,13 @@ function Fact({
 }) {
   const tom = FACT_STATE[state]
   return (
-    <div className={`rounded-lg border px-3 py-2 ${tom.box} ${full ? 'col-span-2' : ''}`}>
+    <div className={`rounded-lg border px-2.5 py-1.5 ${tom.box} ${full ? 'col-span-2' : ''}`}>
       <dt className={`flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wide ${tom.dt}`}>
         <Icon size={11} className="shrink-0" />
         {label}
       </dt>
       <dd
-        className={`mt-1 text-sm font-medium leading-snug wrap-break-word ${mono ? 'font-mono tabular-nums text-[13px]' : ''} ${tom.dd}`}
+        className={`mt-0.5 text-sm font-medium leading-snug wrap-break-word ${mono ? 'font-mono tabular-nums text-[13px]' : ''} ${tom.dd}`}
       >
         {value ?? <span className="font-normal text-slate-500">—</span>}
       </dd>
@@ -102,7 +102,7 @@ function Fact({
  */
 function SectionTitle({ children }: { children: React.ReactNode }) {
   return (
-    <h3 className="mb-2 text-[11px] font-semibold uppercase tracking-[0.08em] text-brand-fg">
+    <h3 className="mb-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-brand-fg">
       {children}
     </h3>
   )
@@ -182,11 +182,11 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
       <div
         ref={refDialogo}
         {...propsDialogo}
-        className="motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-150 flex max-h-[90dvh] w-full max-w-160 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl focus:outline-none"
+        className="motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-150 flex max-h-[90dvh] w-full max-w-5xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
         {/* Header — a superfície é o sinal de severidade */}
-        <div className={`flex items-start justify-between border-b px-6 pt-5 pb-4 ${superficieSituacao}`}>
+        <div className={`flex items-start justify-between border-b px-6 pt-4 pb-3 ${superficieSituacao}`}>
           <div className="min-w-0">
             <h2
               id="titulo-detalhamento-atendimento"
@@ -208,141 +208,155 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
           </button>
         </div>
 
-        {/* Content */}
-        <div className="flex-1 overflow-y-auto px-6 py-5 space-y-5">
+        {/* Content — duas colunas lado a lado: leitura à esquerda, ação à
+            direita. Cada painel rola de forma independente só como rede de
+            segurança para conteúdo excepcionalmente longo; no caso comum as
+            duas colunas cabem inteiras em 90dvh e o corpo do modal não rola. */}
+        <div className="flex min-h-0 flex-1 flex-col md:flex-row md:divide-x md:divide-slate-200">
 
-          {/* Sessão */}
-          <section>
-            <SectionTitle>Sessão</SectionTitle>
-            <dl className="grid grid-cols-2 gap-2">
-              <Fact icon={Calendar} label="Data" value={formatarData(item.data_atendimento)} />
-              <Fact icon={Clock} label="Hora" value={item.hora_inicial ? item.hora_inicial.slice(0, 5) : null} />
-              <Fact icon={Hash} label="Código TUSS" value={item.codigo_tuss} mono />
-              <Fact icon={Layers} label="Qtd. sessões" value={item.quantidade_sessoes} mono />
-              <Fact icon={Users} label="Profissional" value={item.profissionais} full />
-            </dl>
-          </section>
+          {/* Coluna esquerda — dados do atendimento, somente leitura */}
+          <div className="min-h-0 space-y-4 overflow-y-auto px-6 py-4 md:w-1/2 md:shrink-0">
 
-          {/* Autorização ASSIM — grade + rodapé de retorno, um único bloco */}
-          <section>
-            <SectionTitle>Autorização ASSIM</SectionTitle>
-            <div className="overflow-hidden rounded-xl border border-slate-200">
-              <dl className="grid grid-cols-2 gap-2 p-2">
-                <Fact icon={FileText} label="Guia" value={item.guia} mono />
-                <Fact icon={CreditCard} label="Convênio" value={item.convenio_nome} />
-                <Fact icon={User} label="Solicitado por" value={item.criado_por} />
-                <Fact icon={Send} label="Forma" value={item.forma_autorizacao} />
-                <Fact icon={Clock} label="Autorizado em" value={formatarDataHora(item.horario_autorizacao)} />
-                <Fact icon={CalendarCheck} label="Executado em" value={formatarDataHora(item.data_execucao)} />
-                {item.teve_token && <Fact icon={KeySquare} label="Token" value={item.token} mono />}
-                {item.teve_token && (
-                  <Fact
-                    icon={ShieldCheck}
-                    label="Filipeta conferida"
-                    value={
-                      item.token_conferido
-                        ? `Sim${item.token_conferido_por_nome ? ` · ${item.token_conferido_por_nome}` : ''}`
-                        : 'Ainda não'
-                    }
-                    state={item.token_conferido ? 'ok' : 'espera'}
-                  />
-                )}
+            {/* Sessão */}
+            <section>
+              <SectionTitle>Sessão</SectionTitle>
+              <dl className="grid grid-cols-2 gap-1.5">
+                <Fact icon={Calendar} label="Data" value={formatarData(item.data_atendimento)} />
+                <Fact icon={Clock} label="Hora" value={item.hora_inicial ? item.hora_inicial.slice(0, 5) : null} />
+                <Fact icon={Hash} label="Código TUSS" value={item.codigo_tuss} mono />
+                <Fact icon={Layers} label="Qtd. sessões" value={item.quantidade_sessoes} mono />
+                <Fact icon={Users} label="Profissional" value={item.profissionais} full />
               </dl>
-
-              {(item.status_assim || temErro || item.observacao) && (
-                <div
-                  className={`flex items-start gap-2 border-t px-3 py-2.5 text-xs ${
-                    temErro
-                      ? 'border-rose-200 bg-rose-50 text-rose-700'
-                      : 'border-slate-200 bg-slate-50 text-slate-600'
-                  }`}
-                >
-                  {temErro ? (
-                    <AlertOctagon size={13} className="mt-0.5 shrink-0" />
-                  ) : (
-                    <ShieldCheck size={13} className="mt-0.5 shrink-0 text-slate-500" />
-                  )}
-                  <span>
-                    {item.status_assim && <span className="font-semibold">{item.status_assim} — </span>}
-                    {item.codigo_erro && <span className="font-semibold">{item.codigo_erro}: </span>}
-                    {item.descricao_erro || item.observacao}
-                  </span>
-                </div>
-              )}
-            </div>
-          </section>
-
-          {/* Motivo da glosa — só para linhas GLOSA */}
-          {item.situacao === 'GLOSA' && (
-            <section className="rounded-xl border border-violet-200 bg-violet-50/40 p-4">
-              <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-violet-900">
-                <AlertOctagon size={14} />
-                Motivo da glosa
-              </h3>
-
-              {soLeituraGlosa ? (
-                <p className="text-sm whitespace-pre-wrap text-violet-900">{item.motivo_glosa}</p>
-              ) : (
-                <>
-                  <textarea
-                    value={motivo}
-                    onChange={(e) => setMotivo(e.target.value.slice(0, 1000))}
-                    placeholder="Ex.: Beneficiário inativo — carteirinha vencida em 15/08."
-                    rows={3}
-                    className="w-full resize-none rounded-xl border border-violet-200 bg-white p-3 text-sm text-slate-700 transition placeholder:text-slate-500 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand"
-                  />
-                  <div className="mt-1.5 mb-2 flex justify-between">
-                    <span className="text-xs text-violet-700">Campo obrigatório.</span>
-                    <span className="text-xs tabular-nums text-slate-500">{motivo.length} / 1000</span>
-                  </div>
-                  {/* Steel, não violeta: violeta é o matiz de GLOSA e ação
-                      primária usa a marca. Fosse violeta, o mesmo tom estaria
-                      dizendo "este bloco é glosa" e "clique aqui" na mesma
-                      seção — e os dois botões de salvar do modal não seriam o
-                      mesmo botão. */}
-                  <button
-                    onClick={handleSalvarMotivo}
-                    disabled={salvandoMotivo || !motivo.trim()}
-                    className="flex items-center gap-2 rounded-xl bg-brand-fg px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    {salvandoMotivo ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
-                    {salvandoMotivo ? 'Salvando...' : 'Salvar motivo'}
-                  </button>
-                </>
-              )}
             </section>
-          )}
 
-          {/* Observações — livre, qualquer status, sempre editável */}
-          <section className="rounded-xl border border-slate-200 p-4">
-            <h3 className="mb-2 flex items-center gap-1.5 text-sm font-semibold text-slate-700">
-              <MessageSquare size={14} className="text-brand" />
-              Observações
-            </h3>
-            <textarea
-              value={observacao}
-              onChange={(e) => setObservacao(e.target.value.slice(0, 1000))}
-              placeholder="Registre um lembrete ou combinado sobre este atendimento."
-              rows={3}
-              className="w-full resize-none rounded-xl border border-slate-200 p-3 text-sm text-slate-700 transition placeholder:text-slate-500 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand"
-            />
-            <div className="mt-1.5 mb-2 flex justify-between gap-4">
-              <span className="truncate text-xs text-slate-500">
-                {item.observacao_manual_atualizado_por_nome && atualizadoObservacao
-                  ? `Atualizado por ${item.observacao_manual_atualizado_por_nome} em ${atualizadoObservacao}`
-                  : ''}
-              </span>
-              <span className="shrink-0 text-xs tabular-nums text-slate-500">{observacao.length} / 1000</span>
-            </div>
-            <button
-              onClick={handleSalvarObservacao}
-              disabled={salvandoObservacao || observacao.trim() === (item.observacao_manual ?? '')}
-              className="flex items-center gap-2 rounded-xl bg-brand-fg px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {salvandoObservacao ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
-              {salvandoObservacao ? 'Salvando...' : 'Salvar observação'}
-            </button>
-          </section>
+            {/* Autorização ASSIM — grade + rodapé de retorno, um único bloco */}
+            <section>
+              <SectionTitle>Autorização ASSIM</SectionTitle>
+              <div className="overflow-hidden rounded-xl border border-slate-200">
+                <dl className="grid grid-cols-2 gap-1.5 p-1.5">
+                  <Fact icon={FileText} label="Guia" value={item.guia} mono />
+                  <Fact icon={CreditCard} label="Convênio" value={item.convenio_nome} />
+                  <Fact icon={User} label="Solicitado por" value={item.criado_por} />
+                  <Fact icon={Send} label="Forma" value={item.forma_autorizacao} />
+                  <Fact icon={Clock} label="Autorizado em" value={formatarDataHora(item.horario_autorizacao)} />
+                  <Fact icon={CalendarCheck} label="Executado em" value={formatarDataHora(item.data_execucao)} />
+                  {item.teve_token && <Fact icon={KeySquare} label="Token" value={item.token} mono />}
+                  {item.teve_token && (
+                    <Fact
+                      icon={ShieldCheck}
+                      label="Filipeta conferida"
+                      value={
+                        item.token_conferido
+                          ? `Sim${item.token_conferido_por_nome ? ` · ${item.token_conferido_por_nome}` : ''}`
+                          : 'Ainda não'
+                      }
+                      state={item.token_conferido ? 'ok' : 'espera'}
+                    />
+                  )}
+                </dl>
+
+                {(item.status_assim || temErro || item.observacao) && (
+                  <div
+                    className={`flex items-start gap-2 border-t px-3 py-2 text-xs ${
+                      temErro
+                        ? 'border-rose-200 bg-rose-50 text-rose-700'
+                        : 'border-slate-200 bg-slate-50 text-slate-600'
+                    }`}
+                  >
+                    {temErro ? (
+                      <AlertOctagon size={13} className="mt-0.5 shrink-0" />
+                    ) : (
+                      <ShieldCheck size={13} className="mt-0.5 shrink-0 text-slate-500" />
+                    )}
+                    <span>
+                      {item.status_assim && <span className="font-semibold">{item.status_assim} — </span>}
+                      {item.codigo_erro && <span className="font-semibold">{item.codigo_erro}: </span>}
+                      {item.descricao_erro || item.observacao}
+                    </span>
+                  </div>
+                )}
+              </div>
+            </section>
+
+          </div>
+
+          {/* Coluna direita — o que fazer a respeito do atendimento */}
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-4">
+
+            {/* Motivo da glosa — só para linhas GLOSA */}
+            {item.situacao === 'GLOSA' && (
+              <section className="shrink-0 rounded-xl border border-violet-200 bg-violet-50/40 p-3.5">
+                <h3 className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-violet-900">
+                  <AlertOctagon size={14} />
+                  Motivo da glosa
+                </h3>
+
+                {soLeituraGlosa ? (
+                  <p className="text-sm whitespace-pre-wrap text-violet-900">{item.motivo_glosa}</p>
+                ) : (
+                  <>
+                    <textarea
+                      value={motivo}
+                      onChange={(e) => setMotivo(e.target.value.slice(0, 1000))}
+                      placeholder="Ex.: Beneficiário inativo — carteirinha vencida em 15/08."
+                      rows={2}
+                      className="w-full resize-none rounded-xl border border-violet-200 bg-white p-3 text-sm text-slate-700 transition placeholder:text-slate-500 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand"
+                    />
+                    <div className="mt-1 mb-1.5 flex justify-between">
+                      <span className="text-xs text-violet-700">Campo obrigatório.</span>
+                      <span className="text-xs tabular-nums text-slate-500">{motivo.length} / 1000</span>
+                    </div>
+                    {/* Steel, não violeta: violeta é o matiz de GLOSA e ação
+                        primária usa a marca. Fosse violeta, o mesmo tom estaria
+                        dizendo "este bloco é glosa" e "clique aqui" na mesma
+                        seção — e os dois botões de salvar do modal não seriam o
+                        mesmo botão. */}
+                    <button
+                      onClick={handleSalvarMotivo}
+                      disabled={salvandoMotivo || !motivo.trim()}
+                      className="flex items-center gap-2 rounded-xl bg-brand-fg px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+                    >
+                      {salvandoMotivo ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+                      {salvandoMotivo ? 'Salvando...' : 'Salvar motivo'}
+                    </button>
+                  </>
+                )}
+              </section>
+            )}
+
+            {/* Observações — livre, qualquer status, sempre editável. Cresce
+                para preencher o restante da coluna, então o textarea usa o
+                espaço vertical que sobra em vez de ficar minúsculo. */}
+            <section className="flex min-h-0 flex-1 flex-col rounded-xl border border-slate-200 p-3.5">
+              <h3 className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-slate-700">
+                <MessageSquare size={14} className="text-brand" />
+                Observações
+              </h3>
+              <textarea
+                value={observacao}
+                onChange={(e) => setObservacao(e.target.value.slice(0, 1000))}
+                placeholder="Registre um lembrete ou combinado sobre este atendimento."
+                className="w-full min-h-20 flex-1 resize-none rounded-xl border border-slate-200 p-3 text-sm text-slate-700 transition placeholder:text-slate-500 focus:border-transparent focus:outline-none focus:ring-2 focus:ring-brand"
+              />
+              <div className="mt-1 mb-1.5 flex justify-between gap-4">
+                <span className="truncate text-xs text-slate-500">
+                  {item.observacao_manual_atualizado_por_nome && atualizadoObservacao
+                    ? `Atualizado por ${item.observacao_manual_atualizado_por_nome} em ${atualizadoObservacao}`
+                    : ''}
+                </span>
+                <span className="shrink-0 text-xs tabular-nums text-slate-500">{observacao.length} / 1000</span>
+              </div>
+              <button
+                onClick={handleSalvarObservacao}
+                disabled={salvandoObservacao || observacao.trim() === (item.observacao_manual ?? '')}
+                className="flex shrink-0 items-center gap-2 rounded-xl bg-brand-fg px-4 py-2 text-sm font-medium text-white transition hover:bg-brand-dark focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
+              >
+                {salvandoObservacao ? <Loader2 size={15} className="animate-spin" /> : <Save size={15} />}
+                {salvandoObservacao ? 'Salvando...' : 'Salvar observação'}
+              </button>
+            </section>
+
+          </div>
 
         </div>
 
