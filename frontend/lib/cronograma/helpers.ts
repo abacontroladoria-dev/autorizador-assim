@@ -150,16 +150,28 @@ export function filtrarCapacidadeLivreReservada(cRows: CsvRow[]): CsvRow[] {
   return cRows.filter(r => !(r["Status do Agendamento"] === "Livre" && PROFISSIONAIS_SEM_CAPACIDADE_LIVRE_NORM.has(normTxt(r["Profissional"]))))
 }
 
-// Achado 2026-08-20 (casos Mariana Ferreira Reis e Marcia Regina Araujo de Paula):
-// a TiTa mantém uma linha por terapia ofertada, então quando um horário de um
-// profissional é preenchido as OUTRAS linhas dele no mesmo dia/hora podem
-// continuar "Livre" — uma vaga "gêmea" da que já foi ocupada (inclusive por
-// PACS_ADMIN como "Horário Bloqueado"). Toda ferramenta que trata "Livre" como
-// vaga a oferecer/aceitar precisa excluir essa gêmea. Extraído aqui porque o
-// mesmo princípio se repetia (com pequenas variações) em remanejamento.ts,
-// saida.ts, runAlgorithm.ts e novoCronograma.ts — profOcupado em OcupPacMode.tsx
-// e construirProfOcupado em disponibilidadeInterna.ts continuam com sua própria
-// cópia inline (já corrigidas e testadas antes deste helper existir).
+// Nunca ofertar horário de profissional que já tem uma linha "Agendado" no mesmo
+// dia/hora — inclusive quando o "paciente" é administrativo (PACS_ADMIN, ex.:
+// "Horário Bloqueado").
+//
+// HONESTIDADE SOBRE O ALCANCE (medido em 2026-08-20, 24.599 linhas ativas na
+// janela operacional): esta trava é uma REDE DE SEGURANÇA, não a correção de um
+// problema observado. A hipótese original era que a TiTa manteria uma linha por
+// terapia ofertada, deixando uma vaga "Livre" gêmea sobreviver quando o horário
+// fosse preenchido. A medição REFUTOU isso: existem ZERO slots com Livre+Agendado
+// no mesmo profissional/data/hora. A TiTa emite uma linha por profissional/slot,
+// e o sync a substitui. Os 279 slots com mais de uma linha são todos
+// Agendado+Agendado — sessões em grupo legítimas (Aplicador ABA (EF),
+// Musicoterapia, Terapia Alimentar).
+//
+// A causa real dos casos Mariana Ferreira Reis e Marcia Regina Araujo de Paula
+// era GRADE DESATUALIZADA: o sync diário falhou e o banco guardava o estado
+// anterior, com o horário ainda Livre. A defesa contra isso é o sync confiável e
+// com falha visível (fn_sync_grade_csv_em_lotes, retry + alerta), não esta função.
+//
+// Mantida mesmo assim por ser barata e invariante: se um dia a TiTa mudar de
+// formato, o sistema já não oferta horário ocupado. Não a trate como prova de
+// que o problema está resolvido.
 //
 // Ignora unidade de propósito: o mesmo profissional não pode estar em duas
 // salas ao mesmo tempo, então a unidade da linha "Agendado" é irrelevante pra

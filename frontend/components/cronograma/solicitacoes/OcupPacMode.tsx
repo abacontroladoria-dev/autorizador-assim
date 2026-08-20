@@ -56,6 +56,11 @@ interface AceitePacBundle {
   status: "pendente" | "confirmado" | "recusado" | "inviavel" | "removido_tita"
   inviavelSlots: string[]
   motivo?: string
+  // Recusa/confirmação slot a slot feita na aba Acompanhamento — um bundle pode
+  // seguir "pendente" no todo com sessões individuais já recusadas. Espelha o
+  // campo homônimo do tipo canônico em types/acompanhamento.ts.
+  slotStatus?: Record<string, "confirmado" | "recusado" | "inviavel">
+
   // Auditoria da implantação (imutável) — ver types/acompanhamento.ts.
   implantadoPor?: string
   implantadoPorEmail?: string
@@ -299,19 +304,29 @@ function buildSugestoes(
     profOcupado.has(`${normTxt(prof)}|||${dia}|||${hora}`)
   // CRON-008: slots já reservados (implantação imediata) por OUTROS pacientes — vagas
   // ainda "Livre" no CSV mas comprometidas, não podem ser sugeridas para ninguém mais.
+  // Chave normalizada (normTxt no profissional), igual à de profOcupado: o nome do
+  // bundle vem do que foi gravado no aceite e o da grade vem do CSV da TiTa, e uma
+  // diferença de acento/caixa/espaço faria a trava falhar em silêncio.
+  const chaveSlot = (prof: string, dia: string, hora: string) => `${normTxt(prof)}|||${dia}|||${hora}`
   const slotsReservadosOutros = new Set<string>()
   for (const bundle of aceites) {
     if (bundle.pac === pac || bundle.status !== "confirmado") continue
-    for (const s of bundle.sessoes) slotsReservadosOutros.add(`${s.prof}|||${s.dia}|||${s.hora}`)
+    for (const s of bundle.sessoes) slotsReservadosOutros.add(chaveSlot(s.prof, s.dia, s.hora))
   }
   // Slots que a própria família já recusou pra esse paciente — não podem ser
   // reofertados enquanto a recusa não for desfeita ("Reativar sugestão" na aba
   // Recusados). Sem essa trava, buildSugestoes ignorava "rec" (só auditoria) e
   // reofertava o mesmo horário/profissional a cada recálculo.
+  // Considera também recusa slot a slot (slotStatus), não só o status do bundle:
+  // a aba Acompanhamento permite recusar sessões individuais de um bundle que
+  // continua "pendente" como um todo.
   const slotsRecusados = new Set<string>()
   for (const bundle of aceites) {
-    if (bundle.pac !== pac || bundle.status !== "recusado") continue
-    for (const s of bundle.sessoes) slotsRecusados.add(`${s.prof}|||${s.dia}|||${s.hora}`)
+    if (bundle.pac !== pac) continue
+    for (const s of bundle.sessoes) {
+      const recusadoNoSlot = bundle.slotStatus?.[`${s.dia}|||${s.hora}`] === "recusado"
+      if (bundle.status === "recusado" || recusadoNoSlot) slotsRecusados.add(chaveSlot(s.prof, s.dia, s.hora))
+    }
   }
   // Vagas comprometidas: sessões confirmadas que ainda não estão no agend
   // ("pendente" não bloqueia mais — é um status que nenhum caminho da UI cria hoje).
@@ -481,8 +496,8 @@ function buildSugestoes(
     if (!isTurnoOk(h)) continue
     const canonical = fm(h)
     if (!canonical) continue
-    if (slotsReservadosOutros.has(`${r.Profissional}|||${r["Dia da Semana"]}|||${canonical}`)) continue
-    if (slotsRecusados.has(`${r.Profissional}|||${r["Dia da Semana"]}|||${canonical}`)) continue
+    if (slotsReservadosOutros.has(chaveSlot(r.Profissional, r["Dia da Semana"], canonical))) continue
+    if (slotsRecusados.has(chaveSlot(r.Profissional, r["Dia da Semana"], canonical))) continue
     // Vaga "Livre" gêmea de um horário já agendado do mesmo profissional — ver profOcupado.
     if (isProfOcupado(r.Profissional, r["Dia da Semana"], canonical)) continue
     const dk = `${r["Dia da Semana"]}|||${h}|||${r.Terapia}|||${r.Profissional}`
@@ -592,8 +607,8 @@ function buildSugestoes(
           // fora, e por isso um horário recusado (ou já reservado por outro paciente)
           // voltava a ser ofertado como sessão adjacente mesmo estando bloqueado.
           if (isProfOcupado(r.Profissional, dia, cHora)) continue
-          if (slotsReservadosOutros.has(`${r.Profissional}|||${dia}|||${cHora}`)) continue
-          if (slotsRecusados.has(`${r.Profissional}|||${dia}|||${cHora}`)) continue
+          if (slotsReservadosOutros.has(chaveSlot(r.Profissional, dia, cHora))) continue
+          if (slotsRecusados.has(chaveSlot(r.Profissional, dia, cHora))) continue
           const ck = `${r.Terapia}|||${r.Profissional}|||${cHora}`
           if (seenComp.has(ck)) continue
           seenComp.add(ck)

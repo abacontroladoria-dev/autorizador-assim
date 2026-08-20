@@ -384,17 +384,24 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
   }
 
   function handlePacCancelar(id: string) {
-    persistPacBundles(pacBundles.filter(b => b.id !== id))
+    // Forma de função: cancelar vários itens em cliques seguidos parte sempre do
+    // estado mais recente, não do array capturado no render (ver persistPacBundles).
+    persistPacBundles(prev => prev.filter(b => b.id !== id))
   }
   function handlePacSlotStatus(id: string, slotKey: string, status: SlotStatus | null) {
     const bundle = pacBundles.find(b => b.id === id)
     const sessao = bundle?.sessoes.find(s => `${s.dia}|||${s.hora}` === slotKey)
-    persistPacBundles(pacBundles.map(b => {
+    persistPacBundles(prev => prev.map(b => {
       if (b.id !== id) return b
       const slotStatus = { ...(b.slotStatus ?? {}) }
       if (status === null) delete slotStatus[slotKey]
       else slotStatus[slotKey] = status
-      return { ...b, slotStatus }
+      // Recusar slot a slot também tem que marcar o bundle como recusado quando
+      // TODAS as sessões dele foram recusadas — buildSugestoes bloqueia reoferta
+      // por bundle.status, então sem isso um bundle inteiro recusado slot a slot
+      // continuava sendo reofertado.
+      const todasRecusadas = b.sessoes.every(s => slotStatus[`${s.dia}|||${s.hora}`] === "recusado")
+      return { ...b, slotStatus, status: todasRecusadas ? "recusado" as const : b.status }
     }))
     if (bundle && sessao && status) {
       const d = hoje()
@@ -407,7 +414,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     }
   }
   function handlePacSlotRemove(id: string, slotKey: string) {
-    persistPacBundles(pacBundles.map(b => {
+    persistPacBundles(prev => prev.map(b => {
       if (b.id !== id) return b
       const sessoes = b.sessoes.filter(s => `${s.dia}|||${s.hora}` !== slotKey)
       const slotStatus = { ...(b.slotStatus ?? {}) }
@@ -418,7 +425,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
   function handlePacBulkStatus(id: string, status: SlotStatus | "cancelar") {
     if (status === "cancelar") { handlePacCancelar(id); return }
     const bundle = pacBundles.find(b => b.id === id)
-    persistPacBundles(pacBundles.map(b => {
+    persistPacBundles(prev => prev.map(b => {
       if (b.id !== id) return b
       const slotStatus: Record<string, SlotStatus> = {}
       for (const s of b.sessoes) slotStatus[`${s.dia}|||${s.hora}`] = status
@@ -670,15 +677,14 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
             // slotsRecusados em buildSugestoes): remove a sessão recusada
             // correspondente do bundle, ou o bundle inteiro se ficar vazio — senão
             // "Reativar sugestão" limpava só a auditoria e o slot continuava preso.
-            const atualizados = pacBundles
+            persistPacBundles(prev => prev
               .map(b => {
                 if (b.status !== "recusado" || b.pac !== item.paciente) return b
                 const sessoes = b.sessoes.filter(s =>
                   !(s.prof === item.profissional && s.dia === item.dia && s.hora === item.hora))
                 return sessoes.length === b.sessoes.length ? b : { ...b, sessoes }
               })
-              .filter(b => b.status !== "recusado" || b.sessoes.length > 0)
-            persistPacBundles(atualizados)
+              .filter(b => b.status !== "recusado" || b.sessoes.length > 0))
           }} />
       )}
       {sub === "inviavel" && (
