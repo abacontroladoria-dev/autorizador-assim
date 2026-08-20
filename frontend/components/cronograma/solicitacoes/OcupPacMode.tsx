@@ -3076,58 +3076,53 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
 
       {recusaDetalheAberto && (() => {
         const combos = recusaDetalheAberto.recusas
-        // Achado 2026-08-20 (Arthur Luiz Maciel Fortes, quarta 13:00): recusar 1
-        // combinação e recusar 3 combinações diferentes pareciam a mesma coisa no
-        // modal antigo — nenhuma das duas dizia QUANTAS VEZES nem QUANDO. Os dois
-        // totais abaixo respondem isso de cara: quantas combinações distintas
-        // (terapia+profissional) já foram recusadas, e quantas vezes ao todo —
-        // um número maior que o outro significa que alguma foi recusada mais de
-        // uma vez (o sistema voltou a oferecer o que já tinha sido recusado).
-        const totalOcorrencias = combos.reduce((soma, r) => soma + r.ocorrencias.length, 0)
         return (
         <div
           style={{ position: "fixed", inset: 0, zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.4)", padding: "16px" }}
           onClick={e => { if (e.target === e.currentTarget) setRecusaDetalheAberto(null) }}
         >
-          <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "460px", width: "100%", padding: "20px", maxHeight: "80vh", overflowY: "auto" }}>
-            <div style={{ display: "flex", alignItems: "center", gap: "7px", fontWeight: 900, fontSize: "16px", marginBottom: "4px", color: "#dc2626" }}>
+          <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "420px", width: "100%", padding: "18px", maxHeight: "80vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "7px", fontWeight: 900, fontSize: "15px", marginBottom: "3px", color: "#dc2626" }}>
               🚫 Recusado pela família
             </div>
-            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "2px" }}>
-              {recusaDetalheAberto.dia.replace("-feira", "")} · {recusaDetalheAberto.hora} — {pac}
+            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "14px" }}>
+              {recusaDetalheAberto.dia.replace("-feira", "")} · {recusaDetalheAberto.hora} · {fmtName(pac)}
             </div>
-            <div style={{ fontSize: "12px", fontWeight: 700, color: "#dc2626", marginBottom: "12px" }}>
-              {totalOcorrencias === 1
-                ? "Recusado 1 vez."
-                : combos.length === 1
-                  ? `Recusado ${totalOcorrencias}x, sempre para a mesma opção — nenhuma outra foi ofertada ainda.`
-                  : `Recusado ${totalOcorrencias}x ao todo, em ${combos.length} opções diferentes de terapia/profissional.`}
-              {" "}Nenhuma delas será sugerida de novo enquanto a recusa não for desfeita.
-            </div>
-            <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "16px" }}>
-              {combos.map((r, i) => (
-                <div key={i} style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "10px", padding: "9px 12px" }}>
+            <div style={{ display: "flex", flexDirection: "column", gap: "7px", marginBottom: "14px" }}>
+              {combos.map((r, i) => {
+                // Acha o olho: mesma data + mesmo motivo (ou os dois sem motivo) é a
+                // MESMA recusa que já apareceria idêntica de novo — junta numa linha só
+                // em vez de repetir a data (achado real: duas linhas "23/06/2026" iguais
+                // uma embaixo da outra, sem nada que as diferenciasse).
+                const vistos = new Set<string>()
+                const linhas: typeof r.ocorrencias = []
+                for (const o of r.ocorrencias) {
+                  const k = `${o.data}|||${o.motivo ?? ""}`
+                  if (vistos.has(k)) continue
+                  vistos.add(k)
+                  linhas.push(o)
+                }
+                return (
+                <div key={i} style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "10px", padding: "8px 11px" }}>
                   <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "8px" }}>
-                    <div style={{ fontSize: "13px", fontWeight: 700, color: "#7f1d1d" }}>{r.tP} <span style={{ fontWeight: 500 }}>· {fmtName(r.prof)}</span></div>
+                    <div style={{ fontSize: "12.5px", fontWeight: 700, color: "#7f1d1d" }}>{r.tP} · {fmtName(r.prof)}</div>
                     {r.ocorrencias.length > 1 && (
                       <span style={{ fontSize: "10px", fontWeight: 800, color: "#7f1d1d", background: "rgba(255,255,255,.6)", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 5px", flexShrink: 0 }}>
-                        recusado {r.ocorrencias.length}x
+                        {r.ocorrencias.length}x
                       </span>
                     )}
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", gap: "3px", marginTop: "5px" }}>
-                    {r.ocorrencias.map((o, j) => (
-                      <div key={j} style={{ fontSize: "11.5px", color: "#991b1b" }}>
-                        <span style={{ fontWeight: 700 }}>{o.data}</span>
-                        {o.motivo && <span style={{ fontStyle: "italic" }}> — "{o.motivo}"</span>}
-                      </div>
-                    ))}
-                  </div>
+                  {linhas.map((o, j) => (
+                    <div key={j} style={{ fontSize: "11px", color: "#991b1b", marginTop: "2px" }}>
+                      {o.data}{o.motivo && <span> — "{o.motivo}"</span>}
+                    </div>
+                  ))}
                 </div>
-              ))}
+                )
+              })}
             </div>
-            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "14px" }}>
-              Para liberar este horário, use <strong>"Reativar sugestão"</strong> na aba Recusados (Aceites e Recusas).
+            <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginBottom: "14px" }}>
+              Para liberar: <strong>"Reativar sugestão"</strong> em Aceites e Recusas.
             </div>
             <button onClick={() => setRecusaDetalheAberto(null)} style={{ width: "100%", padding: "8px 16px", borderRadius: "10px", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: "13px" }}>
               Fechar
