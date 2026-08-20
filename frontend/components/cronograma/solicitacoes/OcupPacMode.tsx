@@ -790,6 +790,8 @@ interface TodasSugestoesModalProps {
   /** Horários recusados pela família para este paciente — exibidos em vermelho na
    *  grade para o bloqueio ficar visível no próprio horário. Não são sugestões. */
   recusasPac: { dia: string; hora: string; tP: string; prof: string; unidade: string; motivo?: string }[]
+  /** Abre o modal de detalhe do card "recusadoFamilia" ao ser clicado. */
+  onAbrirRecusaDetalhe: (dia: string, hora: string, recusas: Array<{ tP: string; prof: string; motivo?: string }>) => void
 }
 
 export interface TodasSugestoesModalHandle {
@@ -800,7 +802,7 @@ export interface TodasSugestoesModalHandle {
 const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoesModalProps>(function TodasSugestoesModal({
   pac, conv, cRows, sugestoes, pacGaps, pacAllEsp, stOf, setSt,
   estrategia, setEstrategia, onAceitar, onInviavel, onAcaoDireta,
-  onUndoRecusa, reservasConfirmadas, recusasPac,
+  onUndoRecusa, reservasConfirmadas, recusasPac, onAbrirRecusaDetalhe,
 }: TodasSugestoesModalProps, ref: React.Ref<TodasSugestoesModalHandle>) {
   const [selIdx, setSelIdx]         = useState<Record<string, Record<string, number>>>({})
   const [profSelIdx, setProfSelIdx] = useState<Record<string, number>>({})
@@ -983,6 +985,9 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     sugestaoId?: string
     isVComp?: boolean
     motivo?: string
+    // Lista estruturada por trás do card "recusadoFamilia" — o modal de detalhe
+    // (aberto ao clicar no card) usa isto em vez de reparsear `motivo`.
+    recusas?: Array<{ tP: string; prof: string; motivo?: string }>
   }
 
   const cMap: Record<string, CellInfo[]> = {}
@@ -1045,6 +1050,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
       tipo: "recusadoFamilia",
       unidade: lista[0].unidade,
       motivo: detalhe,
+      recusas: lista.map(r => ({ tP: r.tP, prof: r.prof, motivo: r.motivo })),
     })
   }
 
@@ -1170,7 +1176,9 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     // Vermelho forte e borda sólida: precisa ler como BLOQUEIO, não como sugestão
     // desbotada — é a diferença entre "não há vaga aqui" e "há vaga, mas a família
     // recusou". O tom fraco (#fff5f5) já é usado acima para a recusa de sugestão.
-    if (tipo === "recusadoFamilia") return { bg: "#fee2e2", bd: "#dc2626", label: "🚫 Recusado" }
+    // "Ver detalhe" no rótulo: única pista visual de que o card abre um modal ao
+    // ser clicado — não há botão de ação aqui como nos cards de proposta.
+    if (tipo === "recusadoFamilia") return { bg: "#fee2e2", bd: "#dc2626", label: "🚫 Recusado · ver detalhe" }
     if (tipo === "reservado")    return { bg: "#f0fdf4", bd: "#16a34a", label: "✅ Implantado" }
     return                              { bg: "#f8fafc", bd: "#e2e8f0", label: null       }
   }
@@ -1352,10 +1360,11 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                 return (
                                   <div
                                     key={ci}
-                                    onClick={cardClickable ? () => toggleSelected(c.sugestaoId!) : undefined}
-                                    title={c.tipo === "recusadoFamilia"
-                                      ? `Recusado pela família — não será sugerido.${c.motivo ? `\n\n${c.motivo}` : ""}\n\nPara liberar, use "Reativar sugestão" em Aceites e Recusas.`
-                                      : undefined}
+                                    onClick={
+                                      cardClickable ? () => toggleSelected(c.sugestaoId!)
+                                        : c.tipo === "recusadoFamilia" ? () => onAbrirRecusaDetalhe(d, slot, c.recusas ?? [])
+                                        : undefined
+                                    }
                                     style={{
                                       background: bg,
                                       // Sprint 4: borda sólida também para "reservado" — a implantação na TiTa é
@@ -1365,7 +1374,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                       flex: (isExpanded || isEspExpanded) ? "none" : "1",
                                       boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "2px",
                                       outline: isDisc ? "2px solid #fed7aa" : "none",
-                                      cursor: cardClickable ? "pointer" : "default",
+                                      cursor: (cardClickable || c.tipo === "recusadoFamilia") ? "pointer" : "default",
                                       position: "relative",
                                       opacity: isRecusadaCard ? 0.65 : 1,
                                       zIndex: (isExpanded || isEspExpanded) ? 20 : "auto",
@@ -1949,6 +1958,12 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
   const persistAceites = persistPacBundles
   const [invPending, setInvPending] = useState<Sugestao | null>(null)
   const [invMotivo, setInvMotivo]   = useState("")
+  // Modal de detalhe do card "recusadoFamilia" — aberto ao clicar no card, em vez
+  // de depender só do title nativo (que não funciona em toque e não é clicável).
+  const [recusaDetalheAberto, setRecusaDetalheAberto] = useState<{
+    dia: string; hora: string
+    recusas: Array<{ tP: string; prof: string; motivo?: string }>
+  } | null>(null)
   const [inputFocused, setInputFocused] = useState(false)
   const [highlightedIdx, setHighlightedIdx] = useState(-1)
   const listboxRef = useRef<HTMLDivElement>(null)
@@ -2994,6 +3009,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
             onUndoRecusa={onUndoRecusa}
             reservasConfirmadas={reservasConfirmadas}
             recusasPac={recusasPac}
+            onAbrirRecusaDetalhe={(dia, hora, recusas) => setRecusaDetalheAberto({ dia, hora, recusas })}
           />
         </>
       )}
@@ -3034,6 +3050,37 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
                 Cancelar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {recusaDetalheAberto && (
+        <div
+          style={{ position: "fixed", inset: 0, zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.4)", padding: "16px" }}
+          onClick={e => { if (e.target === e.currentTarget) setRecusaDetalheAberto(null) }}
+        >
+          <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "440px", width: "100%", padding: "20px", maxHeight: "80vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "7px", fontWeight: 900, fontSize: "16px", marginBottom: "4px", color: "#dc2626" }}>
+              🚫 Recusado pela família
+            </div>
+            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "12px" }}>
+              {recusaDetalheAberto.dia.replace("-feira", "")} · {recusaDetalheAberto.hora} — este horário não será sugerido para {pac} enquanto a recusa não for desfeita.
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "16px" }}>
+              {recusaDetalheAberto.recusas.map((r, i) => (
+                <div key={i} style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "10px", padding: "9px 12px" }}>
+                  <div style={{ fontSize: "13px", fontWeight: 700, color: "#7f1d1d" }}>{r.tP}</div>
+                  <div style={{ fontSize: "12px", color: "#991b1b" }}>{fmtName(r.prof)}</div>
+                  {r.motivo && <div style={{ fontSize: "12px", color: "#7f1d1d", marginTop: "4px", fontStyle: "italic" }}>"{r.motivo}"</div>}
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "14px" }}>
+              Para liberar este horário, use <strong>"Reativar sugestão"</strong> na aba Recusados (Aceites e Recusas).
+            </div>
+            <button onClick={() => setRecusaDetalheAberto(null)} style={{ width: "100%", padding: "8px 16px", borderRadius: "10px", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: "13px" }}>
+              Fechar
+            </button>
           </div>
         </div>
       )}
