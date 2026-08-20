@@ -1001,12 +1001,32 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
   // sugestões desapareceram todas de uma vez. Entram aqui só como marcação visual
   // (vermelho, não clicável, sem sugestaoId), para o bloqueio ficar explícito no
   // próprio horário.
+  // UM card por horário, nunca um por recusa: o mesmo horário costuma acumular
+  // várias recusas (terapias/profissionais diferentes, ou a mesma recusada mais de
+  // uma vez ao longo do tempo). Empilhadas, elas transbordavam a célula e invadiam
+  // as linhas seguintes da grade. O que importa visualmente é "este horário está
+  // bloqueado"; o detalhe de quantas e quais vai no tooltip.
+  const recusasPorSlot: Record<string, typeof recusasPac> = {}
   for (const r of recusasPac) {
     const k = `${r.dia}|||${r.hora}`
+    if (!recusasPorSlot[k]) recusasPorSlot[k] = []
+    recusasPorSlot[k].push(r)
+  }
+  for (const [k, lista] of Object.entries(recusasPorSlot)) {
     if (!cMap[k]) cMap[k] = []
-    if (!cMap[k].some(x => x.tP === r.tP && x.prof === r.prof)) {
-      cMap[k].push({ tP: r.tP, prof: r.prof, tipo: "recusadoFamilia", unidade: r.unidade, motivo: r.motivo })
-    }
+    const n = lista.length
+    const detalhe = lista
+      .map(r => `• ${r.tP} — ${r.prof}${r.motivo ? ` (${r.motivo})` : ""}`)
+      .join("\n")
+    cMap[k].push({
+      // Com mais de uma recusa não dá pra eleger uma como "a" recusa do horário sem
+      // mentir sobre as outras — então o título passa a ser a contagem.
+      tP: n === 1 ? lista[0].tP : `${n} recusas neste horário`,
+      prof: n === 1 ? lista[0].prof : "",
+      tipo: "recusadoFamilia",
+      unidade: lista[0].unidade,
+      motivo: detalhe,
+    })
   }
 
   // Todos os cards de proposta sempre visíveis na grade — o estado visual muda, não a presença.
@@ -1315,7 +1335,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                     key={ci}
                                     onClick={cardClickable ? () => toggleSelected(c.sugestaoId!) : undefined}
                                     title={c.tipo === "recusadoFamilia"
-                                      ? `Recusado pela família — não será sugerido.${c.motivo ? `\nMotivo: ${c.motivo}` : ""}\nPara liberar, use "Reativar sugestão" em Aceites e Recusas.`
+                                      ? `Recusado pela família — não será sugerido.${c.motivo ? `\n\n${c.motivo}` : ""}\n\nPara liberar, use "Reativar sugestão" em Aceites e Recusas.`
                                       : undefined}
                                     style={{
                                       background: bg,
