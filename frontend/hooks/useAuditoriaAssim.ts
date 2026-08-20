@@ -42,7 +42,18 @@ export function useAuditoriaAssim() {
   useEffect(() => { filtersRef.current = filters }, [filters])
 
   function setFilters(next: AuditoriaFilters) {
-    setFiltersState(next)
+    setFiltersState((prev) => {
+      // Trocar de data zera o recorte por KPI. O número que levou a pessoa a
+      // clicar em "Glosas" era do dia anterior; carregar esse filtro para o dia
+      // seguinte costuma devolver tela vazia, que se lê como bug e não como
+      // filtro ativo. Os demais filtros (paciente, bloco) sobrevivem — só o
+      // recorte por situação nasce da contagem daquele dia específico.
+      //
+      // Fica aqui, e não no seletor de data, porque este é o funil único: todo
+      // controle da tela chama setFilters, então nenhum caminho novo escapa.
+      if (next.data !== prev.data) return { ...next, situacao: '' }
+      return next
+    })
     setPagina(1)
   }
 

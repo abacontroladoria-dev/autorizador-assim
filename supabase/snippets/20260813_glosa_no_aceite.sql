@@ -1,4 +1,24 @@
 -- ============================================================
+-- ⚠️  NAO RODE ESTE ARQUIVO INTEIRO. Use
+--     snippets/20260820_glosa_no_aceite_faltante_remoto.sql.
+--
+-- Rodar este aqui hoje FALHA em
+--   42P13: cannot change return type of existing function
+--   HINT: Use DROP FUNCTION listar_central_autorizacoes(date) first.
+--
+-- E o Postgres impedindo um retrocesso, nao um defeito: este arquivo
+-- e de 2026-08-13, anterior a 20260814130000, que acrescentou
+-- `criado_por` a listar_central_autorizacoes. O CREATE OR REPLACE
+-- daqui devolveria a funcao a 24 colunas e apagaria o "Solicitado
+-- por" da /solicitar.
+--
+-- Alem disso, o essencial deste lote JA ESTA EM PRODUCAO (medido em
+-- 2026-08-20): robo_concluir_tarefa aceita p_status_assim,
+-- listar_central_autorizacoes ja devolve criado_por com os ramos de
+-- glosa embutidos, e ha linhas status='glosa' na fila desde 03/08.
+-- O arquivo fica como registro do que foi desenhado.
+-- ============================================================
+--
 -- Glosa reconhecida no aceite
 --
 -- Empacota as tres migrations 20260813130000/130100/130200 para

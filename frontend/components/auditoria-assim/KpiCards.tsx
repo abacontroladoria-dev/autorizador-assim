@@ -87,7 +87,7 @@ export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, 
     {
       // "Com Token" não é uma situação — é um atributo transversal (toda
       // liberada pode ter filipeta) e o contador da feature que o botão
-      // Token Mensal abre. Fica no steel da marca, fora da régua de situação,
+      // Conferência de Filipetas abre. Fica no steel da marca, fora da régua de situação,
       // justamente para não parecer mais um estado do ciclo.
       key: 'tokens',
       situacao: 'TOKENS',

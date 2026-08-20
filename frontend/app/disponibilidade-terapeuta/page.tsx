@@ -269,9 +269,11 @@ export default function RegistroDisponibilidadePage() {
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <div className="h-10 w-10 rounded-xl border border-slate-200 overflow-hidden bg-white flex items-center justify-center">
+              {/* Glifo isolado: o tile do header tem 40px. Ver o comentário
+                  da tela de login deste mesmo app. */}
               <img
-                src="/logo-universo-aba.png"
-                alt="Universo ABA"
+                src="/icon.png"
+                alt="Pulsar"
                 className="h-9 w-9 object-contain"
               />
             </div>

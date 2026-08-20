@@ -14,6 +14,8 @@ import {
   realizouPor,
   houveSubstituicao,
 } from '@/lib/central/severity'
+import { completarMotivoGlosa, motivoGlosaDaSessao } from '@/lib/glosa'
+import { useGlosaCodigos } from '@/hooks/useGlosaCodigos'
 
 interface Props {
   atendimento: any
@@ -32,6 +34,12 @@ function fraseSituacao(item: any): string {
       return 'Paciente faltou. Avaliar remarcação.'
     case 'erro':
       return 'Atendimento sem autorização. Requer ação manual.'
+    // Frase própria, e não a de 'erro': 'erro' é o robô que não terminou
+    // (refazer); glosa é a ASSIM que respondeu recusando (contestar). Sem este
+    // caso a ficha caía no `default` e repetia o rótulo do badge — "Glosa" — sem
+    // dizer o que fazer a respeito.
+    case 'glosa':
+      return 'A ASSIM recusou a autorização. Requer contestação.'
     case 'processando':
       return 'Autorização em processamento pelo sistema.'
     case 'concluido_sem_guia':
@@ -49,6 +57,9 @@ function SidePanel({ atendimento, onReverterFalta }: Props) {
   const [logsAbertos, setLogsAbertos] = useState(false)
   const [modalReverterAberto, setModalReverterAberto] = useState(false)
   const [loadingReverter, setLoadingReverter] = useState(false)
+  // Antes do early return de "nenhum atendimento": hook não pode ficar atrás de
+  // condicional.
+  const codigosGlosa = useGlosaCodigos()
 
   useEffect(() => {
     async function carregarLogs() {
@@ -90,6 +101,10 @@ function SidePanel({ atendimento, onReverterFalta }: Props) {
   const ui = SEVERIDADE_UI[token.severidade]
   const realizou = realizouPor(atendimento)
   const subbed = houveSubstituicao(atendimento)
+  // Motivo por extenso da recusa. Só existe em sessão glosada — nas demais,
+  // `status_assim` é 'Liberado' e afins. O de-para entra porque a coluna pode
+  // ter vindo do relatório, onde a ASSIM corta o texto em 25 caracteres.
+  const motivoGlosa = completarMotivoGlosa(motivoGlosaDaSessao(atendimento), codigosGlosa)
 
   const unidade =
     atendimento.unidade?.replace('Unid. ', '')?.split(' - ')[0] ||
@@ -137,6 +152,19 @@ function SidePanel({ atendimento, onReverterFalta }: Props) {
       <div className={`px-5 py-4 ${ui.soft} border-b border-slate-100`}>
         <SectionTitle>Situação atual</SectionTitle>
         <p className={`text-sm font-medium ${ui.text}`}>{fraseSituacao(atendimento)}</p>
+        {/* O motivo é o que a coordenação precisa para contestar, então fica na
+            frase de situação e não numa Row lá embaixo. Herda o `ui.text` da
+            severidade — mesma tinta da frase que ele completa. O código sai em
+            fonte tabular por ser número de protocolo, que se lê dígito a
+            dígito. */}
+        {motivoGlosa && (
+          <p className={`mt-1.5 text-sm ${ui.text} opacity-90 wrap-break-word`}>
+            {motivoGlosa.codigo && (
+              <span className="font-mono tabular-nums">{motivoGlosa.codigo} · </span>
+            )}
+            {motivoGlosa.descricao}
+          </p>
+        )}
         {atendimento.status_operacional === 'falta_paciente' && onReverterFalta && (
           <Button
             size="sm"

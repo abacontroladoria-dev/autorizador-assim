@@ -745,6 +745,13 @@ html {
 .dark .hover\:bg-gray-100:hover      { background-color: oklch(0.26 0    0);    }
 .dark .hover\:bg-emerald-100:hover   { background-color: oklch(0.32 0.05  160); }
 .dark .hover\:bg-rose-100:hover      { background-color: oklch(0.32 0.05   10); }
+/* Âmbar (matiz 80, o mesmo de .dark .bg-amber-*) faltava só no hover, então a
+   aba "Pendentes" e o botão "Conferir" da Conferência de Filipetas piscavam
+   âmbar claro sobre fundo escuro ao passar o mouse. Um degrau acima do estado
+   de repouso correspondente, como nas outras famílias daqui. */
+.dark .hover\:bg-amber-50:hover      { background-color: oklch(0.28 0.04   80); }
+.dark .hover\:bg-amber-100:hover     { background-color: oklch(0.32 0.05   80); }
+.dark .hover\:bg-amber-200:hover     { background-color: oklch(0.36 0.06   80); }
 .dark .hover\:border-blue-300:hover  { border-color: oklch(0.38 0.06 245); }
 .dark .hover\:border-orange-300:hover { border-color: oklch(0.38 0.06  50); }
 
