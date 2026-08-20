@@ -776,6 +776,9 @@ interface TodasSugestoesModalProps {
   /** CRON-008: sessões já reservadas (implantação imediata) deste paciente — exibidas
    * diretamente na grade como "Reservado", fora do fluxo normal de sugestões. */
   reservasConfirmadas: AceiteSessao[]
+  /** Horários recusados pela família para este paciente — exibidos em vermelho na
+   *  grade para o bloqueio ficar visível no próprio horário. Não são sugestões. */
+  recusasPac: { dia: string; hora: string; tP: string; prof: string; unidade: string; motivo?: string }[]
 }
 
 export interface TodasSugestoesModalHandle {
@@ -786,7 +789,7 @@ export interface TodasSugestoesModalHandle {
 const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoesModalProps>(function TodasSugestoesModal({
   pac, conv, cRows, sugestoes, pacGaps, pacAllEsp, stOf, setSt,
   estrategia, setEstrategia, onAceitar, onInviavel, onAcaoDireta,
-  onUndoRecusa, reservasConfirmadas,
+  onUndoRecusa, reservasConfirmadas, recusasPac,
 }: TodasSugestoesModalProps, ref: React.Ref<TodasSugestoesModalHandle>) {
   const [selIdx, setSelIdx]         = useState<Record<string, Record<string, number>>>({})
   const [profSelIdx, setProfSelIdx] = useState<Record<string, number>>({})
@@ -961,10 +964,14 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
 
   type CellInfo = {
     tP: string; tE?: string; prof: string
-    tipo: "proposta" | "aceito" | "exist" | "adminSuperv" | "adminWarn" | "supervDesloc" | "recusada" | "reservado"
+    // "recusadoFamilia": horário que a família recusou. NÃO é sugestão (buildSugestoes
+    // já o exclui) — existe só para o bloqueio ficar visível no próprio horário, em
+    // vermelho, em vez de o card simplesmente sumir sem explicação.
+    tipo: "proposta" | "aceito" | "exist" | "adminSuperv" | "adminWarn" | "supervDesloc" | "recusada" | "reservado" | "recusadoFamilia"
     unidade: string; target?: string
     sugestaoId?: string
     isVComp?: boolean
+    motivo?: string
   }
 
   const cMap: Record<string, CellInfo[]> = {}
@@ -985,6 +992,20 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     if (!cMap[k]) cMap[k] = []
     if (!cMap[k].some(x => x.tP === s.tP && x.prof === s.prof)) {
       cMap[k].push({ tP: s.tP, prof: s.prof, tipo: "reservado", unidade: s.unidade })
+    }
+  }
+
+  // Horários recusados pela família: buildSugestoes já os exclui das sugestões, mas
+  // sumir sem deixar rastro fazia a grade parecer vazia sem motivo aparente — foi
+  // exatamente o que aconteceu com o paciente Arthur Luiz Maciel Fortes, cujas
+  // sugestões desapareceram todas de uma vez. Entram aqui só como marcação visual
+  // (vermelho, não clicável, sem sugestaoId), para o bloqueio ficar explícito no
+  // próprio horário.
+  for (const r of recusasPac) {
+    const k = `${r.dia}|||${r.hora}`
+    if (!cMap[k]) cMap[k] = []
+    if (!cMap[k].some(x => x.tP === r.tP && x.prof === r.prof)) {
+      cMap[k].push({ tP: r.tP, prof: r.prof, tipo: "recusadoFamilia", unidade: r.unidade, motivo: r.motivo })
     }
   }
 
@@ -1107,6 +1128,10 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     if (tipo === "aceito")       return { bg: B.blueLt,  bd: B.blue,    label: "Aceito"   }
     if (tipo === "proposta")     return { bg: B.blueLt,  bd: B.blue,    label: null       }
     if (tipo === "recusada")     return { bg: "#fff5f5", bd: "#fca5a5", label: null       }
+    // Vermelho forte e borda sólida: precisa ler como BLOQUEIO, não como sugestão
+    // desbotada — é a diferença entre "não há vaga aqui" e "há vaga, mas a família
+    // recusou". O tom fraco (#fff5f5) já é usado acima para a recusa de sugestão.
+    if (tipo === "recusadoFamilia") return { bg: "#fee2e2", bd: "#dc2626", label: "🚫 Recusado" }
     if (tipo === "reservado")    return { bg: "#f0fdf4", bd: "#16a34a", label: "✅ Implantado" }
     return                              { bg: "#f8fafc", bd: "#e2e8f0", label: null       }
   }
@@ -1289,6 +1314,9 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                   <div
                                     key={ci}
                                     onClick={cardClickable ? () => toggleSelected(c.sugestaoId!) : undefined}
+                                    title={c.tipo === "recusadoFamilia"
+                                      ? `Recusado pela família — não será sugerido.${c.motivo ? `\nMotivo: ${c.motivo}` : ""}\nPara liberar, use "Reativar sugestão" em Aceites e Recusas.`
+                                      : undefined}
                                     style={{
                                       background: bg,
                                       // Sprint 4: borda sólida também para "reservado" — a implantação na TiTa é
@@ -1357,7 +1385,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                             ) : isMultiProf ? (
                                               <span style={{ fontSize: "9px", fontWeight: 800, color: "#dc2626", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 5px", lineHeight: "1.6" }}>3+ profissionais</span>
                                             ) : cs.label ? (
-                                              <span style={{ color: c.tipo === "aceito" ? B.blue : "#374151" }}>{cs.label}</span>
+                                              <span style={{ color: c.tipo === "aceito" ? B.blue : c.tipo === "recusadoFamilia" ? "#dc2626" : "#374151" }}>{cs.label}</span>
                                             ) : null}
                                             {isClickable && c.sugestaoId && (
                                               <button onClick={e => { e.stopPropagation(); const sid = isVCompCard ? c.sugestaoId!.slice(0, c.sugestaoId!.indexOf("|||vc|||")) : c.sugestaoId!; const sug = sugestoes.find(x => x.id === sid); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, csvGradeId: ae.csvGradeId, acao: "recusar" }); setAcaoMotivo("") }}
@@ -1897,6 +1925,26 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     () => aceites.filter(b => b.pac === pac && b.status === "confirmado").flatMap(b => b.sessoes),
     [aceites, pac],
   )
+
+  // Horários recusados pela família, para marcar a grade em vermelho. Mesma regra de
+  // slotsRecusados em buildSugestoes (status do bundle OU recusa slot a slot), para
+  // que o que é BLOQUEADO e o que é MOSTRADO como bloqueado nunca divirjam.
+  const recusasPac = useMemo(() => {
+    const vistos = new Set<string>()
+    const out: { dia: string; hora: string; tP: string; prof: string; unidade: string; motivo?: string }[] = []
+    for (const b of aceites) {
+      if (b.pac !== pac) continue
+      for (const s of b.sessoes) {
+        const recusadoNoSlot = b.slotStatus?.[`${s.dia}|||${s.hora}`] === "recusado"
+        if (b.status !== "recusado" && !recusadoNoSlot) continue
+        const k = `${s.dia}|||${s.hora}|||${s.tP}|||${s.prof}`
+        if (vistos.has(k)) continue
+        vistos.add(k)
+        out.push({ dia: s.dia, hora: s.hora, tP: s.tP, prof: s.prof, unidade: s.unidade, motivo: b.motivo })
+      }
+    }
+    return out
+  }, [aceites, pac])
 
   // Reconciliação com a TiTa. A API só grava, não exclui — então uma série pode ser
   // removida diretamente na TiTa sem que o Pulsar saiba. Como o estado "Implantado"
@@ -2906,6 +2954,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
             onAcaoDireta={handleAcaoDireta}
             onUndoRecusa={onUndoRecusa}
             reservasConfirmadas={reservasConfirmadas}
+            recusasPac={recusasPac}
           />
         </>
       )}
