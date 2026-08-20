@@ -55,7 +55,7 @@ import {
 import type { Permissao } from '@/services/permissoes.service'
 import {
   adicionarMembro,
-  aplicarModeloAoGrupo,
+  aplicarModelosAosUsuarios,
   criarGrupo,
   excluirGrupo,
   getAllMembrosPorGrupo,
@@ -63,6 +63,7 @@ import {
   removerMembro,
   renomearGrupo,
   salvarModeloGrupo,
+  unirModelos,
 } from '@/services/grupos.service'
 import type { Grupo } from '@/services/grupos.service'
 import { getRoleDefaultPermissions, hasPermission } from '@/lib/permissions/hasPermission'
@@ -87,9 +88,16 @@ const ROLE_LABELS: Record<string, string> = {
   faturamento: 'Faturamento',
   rp: 'RP',
   cronograma: 'Cronograma',
+  // Mesmo rótulo do roleOptions em AdminUsersTable — sem ele o valor cru do
+  // banco ("disponibilidade_terapeuta") vazava pra tela e estourava a linha.
+  disponibilidade_terapeuta: 'Disponib. Terapeuta',
 }
 
 const ROLES = Object.entries(ROLE_LABELS).map(([value, label]) => ({ value, label }))
+
+function labelSetor(role?: string) {
+  return ROLE_LABELS[role || ''] || role || '—'
+}
 
 const MODULE_ICONS: Record<string, React.ElementType> = {
   dashboard: LayoutDashboard,
@@ -166,6 +174,40 @@ function Avatar({ name, userId, size = 'md' }: {
     >
       {initial}
     </div>
+  )
+}
+
+// Setor + grupos numa única linha nas listas de usuário das três visões.
+//
+// O seed criou um grupo por role (ver 20260819120000_create_grupos_permissoes),
+// então na maioria dos casos o setor e o grupo têm o mesmo nome — repetir os
+// dois viraria "RP / RP". Quando o setor está entre os grupos, o nome aparece
+// uma vez só, sob o ícone de grupo, e os demais grupos vêm depois:
+// "Cronograma, Autorização". Quando não está (ou não há grupo nenhum), o setor
+// vem separado, pra nunca dar a entender que existe um grupo com o nome dele.
+function SetorEGrupos({ setor, grupos }: { setor: string; grupos: string[] }) {
+  const setorEhGrupo = grupos.includes(setor)
+  const listados = setorEhGrupo ? [setor, ...grupos.filter(g => g !== setor)] : grupos
+
+  return (
+    <p className="mt-0.5 flex items-center gap-1 text-xs text-slate-500 leading-tight">
+      {!setorEhGrupo && (
+        <>
+          <span className="truncate">{setor}</span>
+          <span aria-hidden="true" className="shrink-0 text-slate-300">·</span>
+        </>
+      )}
+      {listados.length > 0 ? (
+        <>
+          <UsersRound size={11} aria-hidden="true" className="shrink-0" />
+          <span className="truncate">{listados.join(', ')}</span>
+        </>
+      ) : (
+        // shrink-0: "Sem grupo" nunca é a parte que encolhe — quem trunca é o
+        // nome do setor, que é o pedaço adivinhável.
+        <span className="shrink-0 whitespace-nowrap text-slate-500 italic">Sem grupo</span>
+      )}
+    </p>
   )
 }
 
@@ -389,16 +431,17 @@ export default function PermissoesPageShell() {
     })
   }, [viewMode, isAdmin, allOverrides])
 
+  // Grupos entram no carregamento inicial (e não só na aba "Por grupo") porque
+  // as três visões mostram os grupos de cada usuário separados por vírgula.
   useEffect(() => {
-    if (viewMode !== 'grupo' || isAdmin !== true) return
-    if (grupos.length > 0) return
+    if (isAdmin !== true) return
     setLoadingGrupos(true)
     Promise.all([getGrupos(), getAllMembrosPorGrupo()]).then(([g, m]) => {
       setGrupos(g)
       setMembrosPorGrupo(m)
       setLoadingGrupos(false)
     })
-  }, [viewMode, isAdmin, grupos])
+  }, [isAdmin])
 
   // ─── Computados ──────────────────────────────────────────────────────────
 
@@ -482,6 +525,33 @@ export default function PermissoesPageShell() {
     return grupos.filter(g => g.nome.toLowerCase().includes(q))
   }, [grupos, grupoSearch])
 
+  // usuário → grupos a que pertence, na ordem alfabética de `grupos`. É a base
+  // do "Cronograma, Autorização" mostrado em todas as visões.
+  const gruposDoUsuario = useMemo(() => {
+    const map: Record<string, Grupo[]> = {}
+    for (const g of grupos) {
+      for (const uid of membrosPorGrupo[g.id] || []) {
+        if (!map[uid]) map[uid] = []
+        map[uid].push(g)
+      }
+    }
+    return map
+  }, [grupos, membrosPorGrupo])
+
+  // Modelo efetivo de cada usuário: união dos modelos de todos os grupos dele —
+  // as permissões dos grupos não se excluem, se complementam.
+  const modelosResolvidos = useMemo(() => {
+    const map: Record<string, Record<string, boolean>> = {}
+    for (const [uid, gs] of Object.entries(gruposDoUsuario)) {
+      map[uid] = unirModelos(gs.map(g => g.modelo_permissoes))
+    }
+    return map
+  }, [gruposDoUsuario])
+
+  function nomesGrupos(userId: string) {
+    return (gruposDoUsuario[userId] || []).map(g => g.nome)
+  }
+
   const selectedGrupoMembroIds = useMemo(
     () => (selectedGrupo ? membrosPorGrupo[selectedGrupo.id] || [] : []),
     [selectedGrupo, membrosPorGrupo]
@@ -513,22 +583,23 @@ export default function PermissoesPageShell() {
   )
 
   // Membros cujas permissões efetivas (padrão do role + overrides individuais)
-  // não batem mais com o modelo salvo do grupo — ficaram assim porque alguém
-  // editou "Por usuário"/"Por permissão" depois da última aplicação do
-  // modelo, ou porque o modelo foi alterado depois.
+  // não batem mais com o modelo resolvido — ficaram assim porque alguém editou
+  // "Por usuário"/"Por permissão" depois da última aplicação do modelo, porque
+  // o modelo foi alterado depois, ou porque o membro entrou/saiu de outro grupo
+  // (a comparação é contra a UNIÃO dos modelos dos grupos dele, não só o deste).
   const driftedMemberIds = useMemo(() => {
     if (!selectedGrupo || loadingOverrides) return new Set<string>()
-    const modelo = selectedGrupo.modelo_permissoes
     const drifted = new Set<string>()
     for (const uid of selectedGrupoMembroIds) {
       const user = users.find(u => u.id === uid)
       if (!user) continue
+      const modelo = modelosResolvidos[uid] || {}
       const effective = computeEffectivePerms(allOverrides[uid] || {}, user.role || '', permissoes)
       const isDrifted = permissoes.some(p => (effective[p.codigo] ?? false) !== (modelo[p.codigo] ?? false))
       if (isDrifted) drifted.add(uid)
     }
     return drifted
-  }, [selectedGrupo, selectedGrupoMembroIds, users, allOverrides, permissoes, loadingOverrides])
+  }, [selectedGrupo, selectedGrupoMembroIds, users, allOverrides, permissoes, loadingOverrides, modelosResolvidos])
 
   // ─── Handlers (lógica de negócio inalterada) ─────────────────────────────
 
@@ -769,6 +840,12 @@ export default function PermissoesPageShell() {
   // Salva o modelo (com o valor de todos os códigos, não só os marcados) e
   // aplica como override explícito aos usuarioIds informados. Usada tanto por
   // "Aplicar a todos os membros" quanto por "Aplicar somente a este usuário".
+  //
+  // O que cada membro recebe não é o modelo deste grupo, e sim a UNIÃO dos
+  // modelos de todos os grupos dele — quem está em "Cronograma, Autorização"
+  // fica com as permissões dos dois. Sem isso, aplicar um grupo apagaria as
+  // permissões que vêm do outro (o upsert escreve `false` explícito em tudo que
+  // o modelo não libera).
   async function aplicarModeloAUsuarios(usuarioIds: string[]) {
     if (!selectedGrupo || usuarioIds.length === 0) return
     setApplyingModelo(true)
@@ -787,11 +864,26 @@ export default function PermissoesPageShell() {
     setSelectedGrupo(updated)
     setGrupos(prev => prev.map(g => (g.id === updated.id ? updated : g)))
 
-    const ok = await aplicarModeloAoGrupo(modeloCompleto, usuarioIds, todosOsCodigos)
+    // `gruposDoUsuario` ainda carrega o modelo antigo deste grupo (o setGrupos
+    // acima só vale no próximo render), então o modelo recém-salvo entra na
+    // união por substituição explícita.
+    const modelosPorUsuario: Record<string, Record<string, boolean>> = {}
+    for (const uid of usuarioIds) {
+      const uniao = unirModelos(
+        (gruposDoUsuario[uid] || []).map(g =>
+          g.id === selectedGrupo.id ? modeloCompleto : g.modelo_permissoes
+        )
+      )
+      const completo: Record<string, boolean> = {}
+      for (const codigo of todosOsCodigos) completo[codigo] = uniao[codigo] ?? false
+      modelosPorUsuario[uid] = completo
+    }
+
+    const ok = await aplicarModelosAosUsuarios(modelosPorUsuario, todosOsCodigos)
     if (ok) {
       setAllOverrides(prev => {
         const next = { ...prev }
-        for (const uid of usuarioIds) next[uid] = { ...modeloCompleto }
+        for (const uid of usuarioIds) next[uid] = { ...modelosPorUsuario[uid] }
         return next
       })
       toast.success(`Modelo aplicado a ${usuarioIds.length} membro${usuarioIds.length !== 1 ? 's' : ''}`)
@@ -1006,9 +1098,7 @@ export default function PermissoesPageShell() {
                           <p className="text-sm font-medium truncate leading-tight text-slate-700">
                             {user.nome || user.email}
                           </p>
-                          <p className="text-xs text-slate-500 truncate leading-tight mt-0.5">
-                            {ROLE_LABELS[user.role || ''] || user.role || '—'}
-                          </p>
+                          <SetorEGrupos setor={labelSetor(user.role)} grupos={nomesGrupos(user.id)} />
                         </div>
                         {driftedMemberIds.has(user.id) && (
                           <button
@@ -1103,7 +1193,8 @@ export default function PermissoesPageShell() {
                 <div className="flex items-center justify-between bg-white rounded-2xl border border-slate-200 shadow-sm px-5 py-3.5">
                   <span className="text-xs text-slate-500">
                     Aplicar substitui as permissões individuais dos {selectedGrupoMembros.length} membro
-                    {selectedGrupoMembros.length !== 1 ? 's' : ''} pelo modelo acima
+                    {selectedGrupoMembros.length !== 1 ? 's' : ''} pela união deste modelo com os dos
+                    outros grupos de cada um
                   </span>
                   <button
                     onClick={handleAplicarModelo}
@@ -1263,9 +1354,7 @@ export default function PermissoesPageShell() {
                             <p className="text-sm font-medium truncate leading-tight text-slate-700">
                               {user.nome || user.email}
                             </p>
-                            <p className="text-xs text-slate-500 truncate leading-tight mt-0.5">
-                              {ROLE_LABELS[user.role || ''] || user.role || '—'}
-                            </p>
+                            <SetorEGrupos setor={labelSetor(user.role)} grupos={nomesGrupos(user.id)} />
                           </div>
                           <span
                             className={`shrink-0 w-24 text-center px-2.5 py-1 rounded-lg text-xs font-semibold ${
@@ -1343,9 +1432,7 @@ export default function PermissoesPageShell() {
                       <p className={`text-sm font-medium truncate leading-tight ${active ? 'text-brand-fg' : 'text-slate-700'}`}>
                         {user.nome || user.email}
                       </p>
-                      <p className="text-xs text-slate-500 truncate leading-tight mt-0.5">
-                        {ROLE_LABELS[user.role || ''] || user.role || '—'}
-                      </p>
+                      <SetorEGrupos setor={labelSetor(user.role)} grupos={nomesGrupos(user.id)} />
                     </div>
                   </button>
                 )
@@ -1399,6 +1486,12 @@ export default function PermissoesPageShell() {
                         >
                           {ROLE_LABELS[selectedUser.role || ''] || selectedUser.role}
                         </button>
+                      </p>
+                      <p className="text-sm text-slate-500 mt-1">
+                        Grupos:{' '}
+                        <span className="text-slate-700 font-medium">
+                          {nomesGrupos(selectedUser.id).join(', ') || 'Sem grupo'}
+                        </span>
                       </p>
                     </div>
                   </div>
@@ -1690,10 +1783,11 @@ export default function PermissoesPageShell() {
             <div className="space-y-4">
               <p className="text-sm text-slate-500">
                 <strong className="text-slate-700">{memberToSync.nome || memberToSync.email}</strong> tem
-                permissões liberadas que não seguem exatamente o modelo atual do grupo{' '}
-                <strong className="text-slate-700">{selectedGrupo?.nome}</strong> — alguém deve ter ajustado
-                as permissões dessa pessoa individualmente depois da última aplicação. Você pode sincronizar
-                só ela, ou aplicar o modelo a todos os membros de uma vez.
+                permissões liberadas que não seguem exatamente a união dos modelos dos grupos dela (
+                <strong className="text-slate-700">{nomesGrupos(memberToSync.id).join(', ')}</strong>) —
+                alguém deve ter ajustado as permissões dessa pessoa individualmente depois da última
+                aplicação, ou os modelos mudaram desde então. Você pode sincronizar só ela, ou aplicar o
+                modelo a todos os membros de uma vez.
               </p>
               <div className="flex flex-col gap-2 pt-1">
                 <button
