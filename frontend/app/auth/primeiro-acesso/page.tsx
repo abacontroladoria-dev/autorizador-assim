@@ -142,10 +142,11 @@ export default function PrimeiroAcessoPage() {
 
         <div className="mb-8 text-center">
 
+          {/* h-28 e não h-20: ~40% da altura do arquivo é margem transparente. */}
           <img
-            src="/logo-universo-aba.png"
-            alt="Universo ABA"
-            className="mx-auto mb-4 h-20 object-contain"
+            src="/pulsar-lockup-1920-transparent.png"
+            alt="Pulsar"
+            className="mx-auto mb-4 h-28 object-contain"
           />
 
           <h1 className="text-2xl font-bold text-slate-800">

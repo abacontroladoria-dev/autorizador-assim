@@ -207,9 +207,12 @@ export default function LoginDisponibilidadePage() {
           className="w-24 h-24 bg-white flex items-center justify-center"
           style={{ borderRadius: '26px', boxShadow: '0 12px 32px rgba(0,0,0,0.22)' }}
         >
+          {/* Glifo isolado, não o lockup: este tile é quadrado (96px) e o
+              lockup é 2,45:1 — espremido aqui a marca encolhe e a tagline fica
+              ilegível. O "P" é a forma certa da marca em slot quadrado. */}
           <img
-            src="/logo-universo-aba.png"
-            alt="Universo ABA"
+            src="/icon.png"
+            alt="Pulsar"
             className="w-20 h-20 object-contain"
           />
         </div>

@@ -190,10 +190,11 @@ function DefinirSenhaContent() {
       <div className="w-full max-w-md rounded-3xl bg-white p-8 shadow-xl">
 
         <div className="mb-8 text-center">
+          {/* h-24 e não h-16: ~40% da altura do arquivo é margem transparente. */}
           <img
-            src="/logo-universo-aba.png"
-            alt="Universo ABA"
-            className="mx-auto mb-6 h-16 object-contain"
+            src="/pulsar-lockup-1920-transparent.png"
+            alt="Pulsar"
+            className="mx-auto mb-6 h-24 object-contain"
           />
 
           {expired ? (

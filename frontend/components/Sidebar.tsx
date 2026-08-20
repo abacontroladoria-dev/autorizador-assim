@@ -417,12 +417,35 @@ export default function Sidebar() {
         className="fixed top-0 left-0 w-64 h-screen flex flex-col z-50 bg-sidebar border-r border-sidebar-border transition-colors duration-300"
       >
 
-        {/* LOGO */}
+        {/* LOGO — lockup do Pulsar.
+
+            Duas imagens trocadas por CSS (`dark:`) em vez de um `src`
+            condicional: o tema só é conhecido depois da hidratação, e trocar a
+            URL ali faz o navegador buscar o outro arquivo e piscar. Com as duas
+            no HTML o swap é imediato e sem requisição extra.
+
+            E não é mais `filter: brightness(0) invert(1)`, que era o jeito de
+            clarear o logo antigo: aplicado neste lockup ele achataria tudo em
+            branco sólido e apagaria o ponto rosa, que é o único acento de cor
+            da marca. A variante clara já existe no repo (a mesma que a /tv usa)
+            e preserva o rosa. */}
         <div className="h-20 flex items-center justify-center px-6 border-b border-sidebar-border">
           <img
-            src="/logo-universo-aba.png"
-            className="h-20 object-contain"
-            style={{ filter: isDark ? 'brightness(0) invert(1)' : 'none' }}
+            src="/pulsar-lockup-1920-transparent.png"
+            alt="Pulsar"
+            className="max-h-full w-full object-contain dark:hidden"
+          />
+          {/* `max-h-[60%]` não é chute: os dois arquivos têm exatamente o mesmo
+              conteúdo (1133x462), mas o de 1920x768 carrega 39,8% de margem
+              transparente embutida e este aqui é recorte justo (0%). Sem
+              compensar, a marca aparecia 66% maior no tema escuro e encostava
+              nas bordas da barra. 60% ≈ os 60,2% que a arte ocupa no arquivo
+              acolchoado, então a marca fica do mesmo tamanho nos dois temas. */}
+          <img
+            src="/pulsar-lockup-tv-light.png"
+            alt=""
+            aria-hidden="true"
+            className="hidden max-h-[60%] w-full object-contain dark:block"
           />
         </div>
 
