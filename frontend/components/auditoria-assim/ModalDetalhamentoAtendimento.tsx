@@ -174,6 +174,25 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
     (item.situacao && SITUACAO_CONFIG[item.situacao]?.surface) || SITUACAO_FALLBACK.surface
   const temErro = Boolean(item.codigo_erro || item.descricao_erro)
 
+  // O que a ASSIM respondeu ao recusar. Vem decomposto da RPC: do relatório
+  // (autorizacoes_assim) ou, horas antes dele, do recibo que o robô leu no ato
+  // do envio — nos dois casos no mesmo vocabulário, "1013" + "CADASTRO DO
+  // BENEFICIARIO COM PROBLEMAS".
+  const respostaAssim: { codigo: string | null; descricao: string } | null = item.descricao_erro
+    ? { codigo: item.codigo_erro, descricao: item.descricao_erro }
+    : item.codigo_erro
+      ? { codigo: item.codigo_erro, descricao: 'Motivo não informado pela ASSIM.' }
+      : null
+
+  // Numa recusa, o rodapé desta coluna diria o MESMO que o bloco "Resposta da
+  // ASSIM" da coluna ao lado — e diria pior: `status_assim` chega truncado da
+  // origem ("1601-REINCIDENCIA NO ATEN"), então a linha saía
+  // "1601-REINCIDENCIA NO ATEN — 1601: REINCIDENCIA NO ATENDIMENTO": o mesmo
+  // fato duas vezes, uma delas pela metade. O motivo tem um lugar só no modal,
+  // e é o lado onde se age sobre ele. Fora da glosa o rodapé segue intacto —
+  // ali ele carrega 'Liberado', o token e a observação, que não repetem nada.
+  const motivoJaMostradoAoLado = item.situacao === 'GLOSA' && respostaAssim !== null
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm"
@@ -255,7 +274,7 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
                   )}
                 </dl>
 
-                {(item.status_assim || temErro || item.observacao) && (
+                {!motivoJaMostradoAoLado && (item.status_assim || temErro || item.observacao) && (
                   <div
                     className={`flex items-start gap-2 border-t px-3 py-2 text-xs ${
                       temErro
@@ -290,6 +309,37 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
                   <AlertOctagon size={14} />
                   Motivo da glosa
                 </h3>
+
+                {/* O que o convênio respondeu — o fato que a contestação
+                    precisa citar, e que antes só existia depois do relatório.
+                    Fica acima do campo de tratativa de propósito: primeiro o
+                    que a ASSIM disse, depois o que a clínica vai fazer.
+
+                    Violeta e não rose: violeta é o matiz de GLOSA e a seção
+                    inteira já é dele. Um bloco rose aqui estaria dizendo "erro"
+                    dentro de um painel que já diz "glosa" — duas cores para o
+                    mesmo fato. O destaque vem da superfície branca sobre o
+                    violeta-50 da seção.
+
+                    O rótulo depende do código: com ele, o texto é o vocabulário
+                    do convênio e pode ser creditado à ASSIM sem ressalva. Sem
+                    ele, o que sobrou pode ser a perícia do próprio robô
+                    (`error_message`), e atribuí-la ao convênio seria mentira. */}
+                {respostaAssim && (
+                  <div className="mb-3 rounded-lg border border-violet-200 bg-white px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-violet-700">
+                      {respostaAssim.codigo ? 'Resposta da ASSIM' : 'Retorno da solicitação'}
+                    </p>
+                    <p className="mt-0.5 text-sm leading-snug font-medium wrap-break-word text-violet-900">
+                      {respostaAssim.codigo && (
+                        <span className="font-mono tabular-nums text-violet-700">
+                          {respostaAssim.codigo} ·{' '}
+                        </span>
+                      )}
+                      {respostaAssim.descricao}
+                    </p>
+                  </div>
+                )}
 
                 {soLeituraGlosa ? (
                   <p className="text-sm whitespace-pre-wrap text-violet-900">{item.motivo_glosa}</p>

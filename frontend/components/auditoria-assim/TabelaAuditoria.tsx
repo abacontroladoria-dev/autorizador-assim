@@ -359,6 +359,13 @@ function legendaSituacao(item: AuditoriaAssimItem, erroFacial: boolean): string 
   if (item.observacao === OBS_CONFIRMADA) {
     return erroFacial ? LABEL_ERRO_FACIAL : (item.convenio_nome ?? 'ASSIM')
   }
+  // A RPC prefixa a observação de recusa com "Glosa: " para quem a lê fora
+  // desta tela. Aqui o rótulo do bloco já diz Glosa, e a legenda tem uma linha
+  // truncada: os 7 caracteres do prefixo custariam pedaço do motivo real
+  // ("1013 - CADASTRO DO BENEFICIARIO COM PROBLEMAS"), que é o que se lê.
+  if (item.situacao === 'GLOSA' && item.observacao?.startsWith('Glosa: ')) {
+    return item.observacao.slice('Glosa: '.length)
+  }
   return item.observacao ?? item.convenio_nome ?? null
 }
 
