@@ -5,14 +5,15 @@ import toast from "react-hot-toast"
 import { type CSSProperties, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import {
   ABA_EXIB_PSICO_NAMES, B, DIAS_LIST, DIAS_ORD, EXCLUIR_OCUP, EXIB_ID, EXIB_NOME,
-  HORAS_GRID, PACS_ADMIN, TERAPIA_TO_ESP, isProfBloqueadoTemp, normTxt,
+  HORAS_GRID, PACS_ADMIN, TERAPIA_TO_ESP, TODAS_ESP, isProfBloqueadoTemp, normTxt,
 } from "@/lib/cronograma/constants"
 import {
   buildCronoUnitMeta, espRealPorExibicao, fm, fmtName, isLaudoComAlta, pm,
   shouldShowSessionUnit, unidadeBadgeText,
 } from "@/lib/cronograma/helpers"
 import { UnitHeaderBadges, CronoGlobalUnitBadge } from "@/components/cronograma/ui/UnitBadges"
-import { ConfirmarImplantacaoModal } from "./ConfirmarImplantacaoModal"
+import { MultiSearchCombobox } from "@/components/cronograma/ui/MultiSearchCombobox"
+import { ConfirmarImplantacaoModal, type AvisoMultiProf } from "./ConfirmarImplantacaoModal"
 import { ObservacaoPacienteBox } from "./ObservacaoPacienteBox"
 import type { CsvRow, LaudoRow, CfgState, RecItem, InvItem } from "@/types/cronograma"
 import type { AceiteSessao } from "@/types/acompanhamento"
@@ -184,6 +185,18 @@ function countSlots(rows: CsvRow[]): number {
 // Pedido 1: encontra slot livre mais próximo para deslocar a Supervisão ABA
 function findSupervTarget(dia: string, hora: string, prof: string, cRows: CsvRow[]): string | null {
   const myHMin = pm(hora) ?? 0
+  // Mesma regra do profOcupado em buildSugestoes: horário "Agendado" do profissional
+  // nunca pode ser alvo, mesmo existindo uma linha "Livre" gêmea dele no mesmo dia/hora
+  // (a TiTa mantém uma linha por terapia ofertada). Vale para qualquer paciente —
+  // real ou fictício de bloqueio —, porque o critério é o status, não o nome.
+  const horasOcupadas = new Set<string>()
+  for (const r of cRows) {
+    if (r["Status do Agendamento"] !== "Agendado") continue
+    if (r["Dia da Semana"] !== dia) continue
+    if (normTxt(r.Profissional) !== normTxt(prof)) continue
+    const c = fm(pm(hiStr(r)) ?? hiMin(r))
+    if (c) horasOcupadas.add(c)
+  }
   let best: { dist: number; hora: string } | null = null
   for (const r of cRows) {
     if (r["Status do Agendamento"] !== "Livre") continue
@@ -193,10 +206,25 @@ function findSupervTarget(dia: string, hora: string, prof: string, cRows: CsvRow
     const h = pm(hiStr(r)) ?? hiMin(r)
     const canonical = fm(h)
     if (!canonical) continue
+    if (horasOcupadas.has(canonical)) continue
     const dist = Math.abs(h - myHMin)
     if (!best || dist < best.dist) best = { dist, hora: canonical }
   }
   return best?.hora ?? null
+}
+
+// Opções do multiselect de "Alterar preferência → Por especialidade". O índice é o id
+// exigido por MultiSearchCombobox; o nome é a chave real usada em prefEsps/prefSet.
+const ESP_PREF_OPCOES = TODAS_ESP.map((nome, id) => ({ id, nome }))
+
+// Marcador de rádio das opções de "Alterar preferência" — anel + miolo, para as duas
+// alternativas se lerem como escolhas mutuamente exclusivas do mesmo grupo.
+function PrefRadio({ ativo }: { ativo: boolean }) {
+  return (
+    <span aria-hidden="true" style={{ width: "13px", height: "13px", borderRadius: "50%", flexShrink: 0, marginTop: "1px", border: `2px solid ${ativo ? B.navy : "var(--border)"}`, background: "var(--card)", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+      {ativo && <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: B.navy }} />}
+    </span>
+  )
 }
 
 // ─── buildSugestoes ───────────────────────────────────────────────────────────
@@ -210,7 +238,13 @@ function buildSugestoes(
   aceites: AceitePacBundle[] = [],
   conv = "",
   isLiminar = false,
+  // "Alterar preferência" → Por especialidade. Nomes de especialidade a priorizar na
+  // escolha automática da terapia de cada card. Vazio = preferência natural (maior
+  // distância entre ofertado e autorizado). Só reordena: nunca muda a elegibilidade,
+  // então nenhuma vaga deixa de ser ofertada por causa da preferência.
+  prefEsps: string[] = [],
 ): Sugestao[] {
+  const prefSet = new Set(prefEsps)
   const pacClinRows = agendClin.filter(r => r["Nome Favorecido"] === pac)
   const clinPuras   = pacClinRows.filter(r => !ABA_EXT_NAMES.has(r.Terapia))
 
@@ -241,6 +275,28 @@ function buildSugestoes(
     if (!dayHours[d]) dayHours[d] = new Set()
     dayHours[d].add(canonical)
   }
+  // Ocupação REAL do profissional (independe do paciente da vez). A TiTa mantém uma
+  // linha por terapia ofertada, então quando um horário do profissional é preenchido
+  // as OUTRAS linhas dele no mesmo dia/hora continuam com Status "Livre". Sem esta
+  // trava, o horário volta a ser ofertado mesmo já estando ocupado — bastava a vaga
+  // "Livre" gêmea existir. dayHours só olha a agenda do próprio paciente e por isso
+  // nunca pegou esse caso.
+  // Usa `agend` inteiro de propósito (nunca `agendClin`): pacientes-bloqueio como
+  // "Horário Bloqueado" / "Horário Administrativo" ocupam a agenda do profissional
+  // exatamente como um paciente real — é justamente esse tipo de linha que o
+  // agendClin descarta.
+  const profOcupado = new Set<string>()
+  for (const r of agend) {
+    const p = normTxt(r.Profissional)
+    if (!p) continue
+    const h = hMin(r)
+    if (!h && h !== 0) continue
+    const canonical = fm(h)
+    if (!canonical) continue
+    profOcupado.add(`${p}|||${r["Dia da Semana"]}|||${canonical}`)
+  }
+  const isProfOcupado = (prof: string, dia: string, hora: string) =>
+    profOcupado.has(`${normTxt(prof)}|||${dia}|||${hora}`)
   // CRON-008: slots já reservados (implantação imediata) por OUTROS pacientes — vagas
   // ainda "Livre" no CSV mas comprometidas, não podem ser sugeridas para ninguém mais.
   const slotsReservadosOutros = new Set<string>()
@@ -417,6 +473,8 @@ function buildSugestoes(
     const canonical = fm(h)
     if (!canonical) continue
     if (slotsReservadosOutros.has(`${r.Profissional}|||${r["Dia da Semana"]}|||${canonical}`)) continue
+    // Vaga "Livre" gêmea de um horário já agendado do mesmo profissional — ver profOcupado.
+    if (isProfOcupado(r.Profissional, r["Dia da Semana"], canonical)) continue
     const dk = `${r["Dia da Semana"]}|||${h}|||${r.Terapia}|||${r.Profissional}`
     if (seenFree.has(dk)) continue
     seenFree.add(dk)
@@ -470,9 +528,13 @@ function buildSugestoes(
     // Esps elegíveis: qualquer uma com déficit original (hasGap) — não para de gerar
     // candidato só porque a rodada já propôs o suficiente (ver comentário em hasGap).
     // Ordenadas por déficit efetivo desc; tiebreak por taxa de preenchimento asc.
+    // Com preferência "Por especialidade" ativa, as escolhidas vêm primeiro — entre
+    // elas (e entre as demais) a ordenação natural acima continua valendo intacta.
     const eligibleEsps = Object.keys(byEspRows)
       .filter(esp => hasGap(esp))
       .sort((a, b) => {
+        const pa = prefSet.has(a) ? 0 : 1, pb = prefSet.has(b) ? 0 : 1
+        if (pa !== pb) return pa - pb
         const da = effDif(a), db = effDif(b)
         if (db !== da) return db - da
         const ra = (espMeta[a]?.aut ?? 0) > 0 ? (espMeta[a].of / espMeta[a].aut) : 0
@@ -516,6 +578,8 @@ function buildSugestoes(
           if (!isTurnoOk(ch)) continue
           const cHora = fm(ch)
           if (!adjs.includes(cHora)) continue
+          // Mesma trava do allFreeRows: nunca ofertar vaga de profissional já agendado.
+          if (isProfOcupado(r.Profissional, dia, cHora)) continue
           const ck = `${r.Terapia}|||${r.Profissional}|||${cHora}`
           if (seenComp.has(ck)) continue
           seenComp.add(ck)
@@ -531,6 +595,9 @@ function buildSugestoes(
         // a especialidade mais necessária em cada hora.
         compRows.sort((a, b) => {
           const espA = TERAPIA_TO_ESP[a.tP] ?? "", espB = TERAPIA_TO_ESP[b.tP] ?? ""
+          // Preferência "Por especialidade" também vale para as sessões companheiras.
+          const pa = prefSet.has(espA) ? 0 : 1, pb = prefSet.has(espB) ? 0 : 1
+          if (pa !== pb) return pa - pb
           // Desconta 1 do esp principal ao comparar vComps do mesmo slot.
           const da = effDif(espA, espA === esp ? 1 : 0)
           const db = effDif(espB, espB === esp ? 1 : 0)
@@ -673,7 +740,7 @@ interface TodasSugestoesModalProps {
   stOf: (s: Sugestao) => Status | null
   setSt: (s: Sugestao, st: Status | null) => void
   estrategia: Estrategia; setEstrategia: (e: Estrategia) => void
-  onAceitar: (bundle: { sessoes: AceiteSessao[]; beforeCount: number }) => void
+  onAceitar: (bundle: { sessoes: AceiteSessao[]; beforeCount: number; avisoMultiProf: AvisoMultiProf[] }) => void
   onInviavel: (sessoes: AceiteSessao[], motivo: string) => void
   onAcaoDireta: (sessoes: AceiteSessao[], status: "pendente" | "recusado" | "inviavel", motivo?: string) => void
   onUndoRecusa: (dia: string, hora: string, tP: string, prof: string) => void
@@ -837,7 +904,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     // CRON-008: não aplica nem limpa a seleção aqui — o pai abre o modal premium de
     // confirmação; a seleção só é limpa (via ref.clearAll) após a implantação ser
     // efetivamente confirmada, permitindo cancelar sem perder o que foi selecionado.
-    onAceitar({ sessoes, beforeCount: sessPac.length })
+    onAceitar({ sessoes, beforeCount: sessPac.length, avisoMultiProf: multiProfTerapias })
   }
 
   const sessPac = useMemo(() => {
@@ -1056,6 +1123,28 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     pacAllEsp.filter(g => (g.of + (selectedByEsp[g.esp] || 0)) > g.aut).map(g => g.esp)
   )
 
+  // AVISO (nunca bloqueia): 3+ profissionais diferentes atendendo a mesma terapia.
+  // Diferente do hasExcesso/CH Autorizada, que trava a escrita na TiTa, aqui só
+  // pintamos de vermelho e explicamos — o usuário decide se aceita mesmo assim.
+  // Conta o quadro final do paciente: sessões já existentes/implantadas + as
+  // propostas efetivamente selecionadas nesta rodada.
+  const profsPorTerapia: Record<string, Map<string, string>> = {}
+  for (const cells of Object.values(cMap)) {
+    for (const c of cells) {
+      if (c.tipo === "adminSuperv" || c.tipo === "adminWarn" || c.tipo === "supervDesloc" || c.tipo === "recusada") continue
+      if (c.tipo === "proposta" && !(c.sugestaoId && selectedIds.has(c.sugestaoId))) continue
+      const key = normTxt(c.prof)
+      if (!key) continue
+      if (!profsPorTerapia[c.tP]) profsPorTerapia[c.tP] = new Map()
+      if (!profsPorTerapia[c.tP].has(key)) profsPorTerapia[c.tP].set(key, c.prof)
+    }
+  }
+  const multiProfTerapias = Object.entries(profsPorTerapia)
+    .filter(([, m]) => m.size >= 3)
+    .map(([tP, m]) => ({ tP, profs: [...m.values()] }))
+  const multiProfSet = new Set<string>(multiProfTerapias.map(x => x.tP))
+  const hasMultiProf = multiProfTerapias.length > 0
+
   return (
     <>
     {/* Barra de estratégias */}
@@ -1159,9 +1248,12 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                   ? (TERAPIA_TO_ESP[c.tP] ?? null)
                                   : (mainEd?.esp ?? TERAPIA_TO_ESP[c.tP] ?? null)
                                 const isExcesso = isSel && cardEsp !== null && excessoEsps.has(cardEsp)
-                                // Cor do card: amarelo se pendente, vermelho se excesso, verde se selecionado, default caso contrário
-                                const bg  = espIsPending ? "#fefce8" : isExcesso ? "#fff1f2" : (isSel ? "#dcfce7" : cs.bg)
-                                const bd  = espIsPending ? "#fbbf24" : isExcesso ? "#fca5a5" : (isSel ? "#16a34a" : cs.bd)
+                                // Aviso (não bloqueia): esta terapia ficou com 3+ profissionais diferentes
+                                const isMultiProf = isSel && multiProfSet.has(c.tP)
+                                const isVermelho = isExcesso || isMultiProf
+                                // Cor do card: amarelo se pendente, vermelho se excesso/3+ profissionais, verde se selecionado, default caso contrário
+                                const bg  = espIsPending ? "#fefce8" : isVermelho ? "#fff1f2" : (isSel ? "#dcfce7" : cs.bg)
+                                const bd  = espIsPending ? "#fbbf24" : isVermelho ? "#fca5a5" : (isSel ? "#16a34a" : cs.bd)
                                 const isMultiEsp = !!(mainSug && allEsps.length > 1)
                                 const cardClickable = isClickable && (!isMultiEsp || wizardComplete)
                                 return (
@@ -1189,7 +1281,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                     {!isMultiEsp && (
                                       <>
                                         {isSel && !isExpanded && (
-                                          <span style={{ position: "absolute", top: "3px", right: "4px", fontSize: "10px", fontWeight: 900, color: isExcesso ? "#dc2626" : "#16a34a", lineHeight: 1, pointerEvents: "none" }}>{isExcesso ? "⚠" : "✓"}</span>
+                                          <span style={{ position: "absolute", top: "3px", right: "4px", fontSize: "10px", fontWeight: 900, color: isVermelho ? "#dc2626" : "#16a34a", lineHeight: 1, pointerEvents: "none" }}>{isVermelho ? "⚠" : "✓"}</span>
                                         )}
                                         {isRecusadaCard && (
                                           <span style={{ position: "absolute", top: "2px", right: "4px", fontSize: "9px", lineHeight: 1, pointerEvents: "none", opacity: 0.7 }}>🚫</span>
@@ -1233,6 +1325,8 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                               </div>
                                             ) : isExcesso ? (
                                               <span style={{ fontSize: "9px", fontWeight: 800, color: "#dc2626", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 5px", lineHeight: "1.6" }}>Acima do limite</span>
+                                            ) : isMultiProf ? (
+                                              <span style={{ fontSize: "9px", fontWeight: 800, color: "#dc2626", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 5px", lineHeight: "1.6" }}>3+ profissionais</span>
                                             ) : cs.label ? (
                                               <span style={{ color: c.tipo === "aceito" ? B.blue : "#374151" }}>{cs.label}</span>
                                             ) : null}
@@ -1311,7 +1405,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                         {!isEspExpanded && wizardComplete && (
                                           <>
                                             {isSel && (
-                                              <span style={{ position: "absolute", top: "3px", right: "4px", fontSize: "10px", fontWeight: 900, color: isExcesso ? "#dc2626" : "#16a34a", lineHeight: 1, pointerEvents: "none" }}>{isExcesso ? "⚠" : "✓"}</span>
+                                              <span style={{ position: "absolute", top: "3px", right: "4px", fontSize: "10px", fontWeight: 900, color: isVermelho ? "#dc2626" : "#16a34a", lineHeight: 1, pointerEvents: "none" }}>{isVermelho ? "⚠" : "✓"}</span>
                                             )}
                                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "2px" }}>
                                               <span style={{ fontSize: "10px", fontWeight: 600, color: "#111827", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{c.tP}</span>
@@ -1324,6 +1418,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                             {isDisc && <div style={{ fontSize: "11px", fontWeight: 700, color: "#ea580c", marginTop: "2px", display: "flex", alignItems: "center", gap: "3px" }}>⚠ {c.unidade}</div>}
                                             <div style={{ fontSize: "10px", fontWeight: 700, marginTop: "auto", display: "flex", alignItems: "center", gap: "3px" }}>
                                               {isExcesso && <span style={{ fontSize: "9px", fontWeight: 800, color: "#dc2626", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 5px", lineHeight: "1.6" }}>Acima do limite</span>}
+                                              {!isExcesso && isMultiProf && <span style={{ fontSize: "9px", fontWeight: 800, color: "#dc2626", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 5px", lineHeight: "1.6" }}>3+ profissionais</span>}
                                               <button
                                                 data-esp-dropdown="true"
                                                 onClick={e => { e.stopPropagation(); setProfConfirmed(prev => { const s = new Set(prev); s.delete(mainSug!.id); return s }); setExpandedEspCardId(c.sugestaoId!); setExpandedProfCardId(null) }}
@@ -1403,12 +1498,15 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                     <button
                       disabled={hasExcesso || hasPendingEsp}
                       onClick={() => !hasExcesso && !hasPendingEsp && handleAceitar()}
-                      style={{ padding: "8px 16px", borderRadius: "9px", border: "none", background: (hasExcesso || hasPendingEsp) ? "#e5e7eb" : "#16a34a", color: (hasExcesso || hasPendingEsp) ? "#9ca3af" : "white", cursor: (hasExcesso || hasPendingEsp) ? "not-allowed" : "pointer", fontFamily: "inherit", fontWeight: 800, fontSize: "12px", boxShadow: (hasExcesso || hasPendingEsp) ? "none" : "0 2px 8px rgba(22,163,74,0.30)" }}>
+                      style={{ padding: "8px 16px", borderRadius: "9px", border: "none", background: (hasExcesso || hasPendingEsp) ? "#e5e7eb" : hasMultiProf ? "#dc2626" : "#16a34a", color: (hasExcesso || hasPendingEsp) ? "#9ca3af" : "white", cursor: (hasExcesso || hasPendingEsp) ? "not-allowed" : "pointer", fontFamily: "inherit", fontWeight: 800, fontSize: "12px", boxShadow: (hasExcesso || hasPendingEsp) ? "none" : hasMultiProf ? "0 2px 8px rgba(220,38,38,0.30)" : "0 2px 8px rgba(22,163,74,0.30)" }}>
                       Aceitar alterações ({n})
                     </button>
                   </div>
-                  <div style={{ fontSize: "10px", color: hasExcesso ? "#dc2626" : hasPendingEsp ? "#d97706" : "var(--muted-foreground)", fontWeight: (hasExcesso || hasPendingEsp) ? 700 : 400 }}>
-                    {hasExcesso ? "⚠ Limite ultrapassado — desmarque sessões em excesso." : hasPendingEsp ? "⚠ Selecione a terapia de todas as sugestões antes de continuar." : "As alterações só serão aplicadas após a confirmação."}
+                  <div style={{ fontSize: "10px", maxWidth: "340px", textAlign: "right", color: (hasExcesso || hasMultiProf) ? "#dc2626" : hasPendingEsp ? "#d97706" : "var(--muted-foreground)", fontWeight: (hasExcesso || hasPendingEsp || hasMultiProf) ? 700 : 400 }}>
+                    {hasExcesso ? "⚠ Limite ultrapassado — desmarque sessões em excesso."
+                      : hasPendingEsp ? "⚠ Selecione a terapia de todas as sugestões antes de continuar."
+                      : hasMultiProf ? `⚠ ${multiProfTerapias.map(x => x.tP).join(", ")} ficará com 3 ou mais profissionais diferentes. O ideal é no máximo 2 por terapia — você pode continuar, mas revise antes.`
+                      : "As alterações só serão aplicadas após a confirmação."}
                   </div>
                 </div>
               </div>
@@ -1496,6 +1594,16 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
             {hasExcesso && (
               <div style={{ marginTop: "12px", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "8px", padding: "8px 10px", fontSize: "10px", color: "#dc2626", fontWeight: 700, flexShrink: 0 }}>
                 ⚠ Limite ultrapassado. Desmarque sessões em excesso antes de aceitar.
+              </div>
+            )}
+            {hasMultiProf && (
+              <div style={{ marginTop: "12px", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "8px", padding: "8px 10px", fontSize: "10px", color: "#dc2626", fontWeight: 700, flexShrink: 0 }}>
+                <div>⚠ 3 ou mais profissionais na mesma terapia (ideal: até 2).</div>
+                {multiProfTerapias.map(x => (
+                  <div key={x.tP} style={{ marginTop: "5px", fontWeight: 400 }}>
+                    <span style={{ fontWeight: 700 }}>{x.tP}</span>: {x.profs.map(p => fmtName(p)).join(" · ")}
+                  </div>
+                ))}
               </div>
             )}
         </div>
@@ -1749,7 +1857,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
   const [highlightedIdx, setHighlightedIdx] = useState(-1)
   const listboxRef = useRef<HTMLDivElement>(null)
   // CRON-008: sessões aguardando confirmação no modal premium de implantação
-  const [pendingConfirm, setPendingConfirm] = useState<{ sessoes: AceiteSessao[]; beforeCount: number } | null>(null)
+  const [pendingConfirm, setPendingConfirm] = useState<{ sessoes: AceiteSessao[]; beforeCount: number; avisoMultiProf: AvisoMultiProf[] } | null>(null)
   // Confirmação agora chama a API da TiTa (fetch assíncrono) — usado para desabilitar
   // o modal e impedir cancelar/duplo-clique enquanto a chamada está em andamento.
   const [confirmando, setConfirmando] = useState(false)
@@ -1821,9 +1929,9 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
 
   // CRON-008: "Aceitar alterações" não aplica mais direto — abre o modal premium de
   // confirmação. A implantação de fato só ocorre em confirmarImplantacao().
-  function handleAceitar({ sessoes, beforeCount }: { sessoes: AceiteSessao[]; beforeCount: number }) {
+  function handleAceitar({ sessoes, beforeCount, avisoMultiProf }: { sessoes: AceiteSessao[]; beforeCount: number; avisoMultiProf: AvisoMultiProf[] }) {
     if (!sessoes.length) return
-    setPendingConfirm({ sessoes, beforeCount })
+    setPendingConfirm({ sessoes, beforeCount, avisoMultiProf })
   }
 
   function cancelarImplantacao() {
@@ -2199,6 +2307,34 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
   const [statusFilter, setStatusFilter]   = useState<Set<string>>(new Set())
   const [situacaoOpen, setSituacaoOpen]   = useState(false)
   const [convOpen, setConvOpen]           = useState(false)
+  // "Alterar preferência": quais especialidades priorizar na escolha automática da
+  // terapia de cada card. Vazio = preferência natural (maior distância entre ofertado
+  // e autorizado), que é o padrão e segue valendo sempre que nada é escolhido aqui.
+  const [prefOpen, setPrefOpen]           = useState(false)
+  const [prefEspIds, setPrefEspIds]       = useState<Set<number>>(new Set())
+  const prefEsps = useMemo(
+    () => ESP_PREF_OPCOES.filter(o => prefEspIds.has(o.id)).map(o => o.nome),
+    [prefEspIds],
+  )
+  // Nenhuma especialidade escolhida = preferência natural em vigor.
+  const prefPadrao = prefEspIds.size === 0
+  const alternarPrefEsp = (id: number) => setPrefEspIds(prev => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
+  // Fecha ao clicar fora. O ref envolve gatilho + painel (mesmo padrão de
+  // MultiSearchCombobox), então clicar no próprio gatilho continua alternando.
+  const prefRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!prefOpen) return
+    const fechar = (e: MouseEvent) => {
+      if (prefRef.current?.contains(e.target as Node)) return
+      setPrefOpen(false)
+    }
+    document.addEventListener("mousedown", fechar)
+    return () => document.removeEventListener("mousedown", fechar)
+  }, [prefOpen])
 
   const convenios = useMemo(() => {
     const s = new Set<string>()
@@ -2319,8 +2455,9 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     // Bundles "pendente" continuam fora do cálculo — preserva o comportamento anterior
     // de manter os cards visíveis enquanto aguardam confirmação do responsável.
     const aceitesConfirmados = aceites.filter(a => a.status === "confirmado")
-    return buildSugestoes(pac, agend, agendClin, cRows, gapMap, aceitesConfirmados, conv, isLiminar)
-  }, [pac, estrategia, agend, agendClin, cRows, gapMap, pacConvMap, cfg.judicialMap, aceites])
+    return buildSugestoes(pac, agend, agendClin, cRows, gapMap, aceitesConfirmados, conv, isLiminar, prefEsps)
+    // prefEsps nas deps: trocar a preferência recalcula as sugestões na hora, sem recarregar a página.
+  }, [pac, estrategia, agend, agendClin, cRows, gapMap, pacConvMap, cfg.judicialMap, aceites, prefEsps])
 
   useEffect(() => {
     if (!pac) return
@@ -2339,7 +2476,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setSituacaoOpen(false); setConvOpen(false); setDropOpen(false) }
+      if (e.key === "Escape") { setSituacaoOpen(false); setConvOpen(false); setDropOpen(false); setPrefOpen(false) }
     }
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
@@ -2525,6 +2662,69 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
             </div>
 
           </div>
+
+          {/* Alterar preferência — qual terapia o sistema escolhe sozinho em cada card */}
+          <div style={{ display: "flex", gap: "8px" }}>
+            <div ref={prefRef} style={{ position: "relative", flex: 1 }}>
+              <button
+                type="button"
+                aria-expanded={prefOpen}
+                aria-haspopup="listbox"
+                onClick={() => { setPrefOpen(v => !v); setSituacaoOpen(false); setConvOpen(false) }}
+                className="ocup-btn-situacao"
+                style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${prefEspIds.size > 0 ? B.navy : "var(--border)"}`, background: prefEspIds.size > 0 ? `${B.navy}15` : "var(--muted)", color: prefEspIds.size > 0 ? B.navy : "var(--card-foreground)" }}>
+                <span>Alterar preferência{prefEspIds.size > 0 ? ` (${prefEspIds.size})` : ""}</span>
+                <span aria-hidden="true" style={{ fontSize: "10px", marginLeft: "4px" }}>{prefOpen ? "▲" : "▼"}</span>
+              </button>
+              {prefOpen && (
+                <div role="radiogroup" aria-label="Preferência de escolha automática da terapia" style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 200, background: "var(--card)", border: "1px solid var(--border)", borderRadius: "12px", boxShadow: "0 8px 24px rgba(0,0,0,.1)", padding: "10px", width: "300px", display: "flex", flexDirection: "column", gap: "7px" }}>
+                  <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.02em" }}>
+                    Como o sistema escolhe a terapia de cada card
+                  </div>
+
+                  {/* Opção 1 — preferência natural. Ativa sempre que nenhuma especialidade está escolhida. */}
+                  <button type="button" role="radio" aria-checked={prefPadrao}
+                    onClick={() => setPrefEspIds(new Set())}
+                    style={{ display: "flex", alignItems: "flex-start", gap: "8px", padding: "9px 10px", borderRadius: "10px", cursor: "pointer", fontFamily: "inherit", textAlign: "left", border: `1px solid ${prefPadrao ? B.navy : "var(--border)"}`, background: prefPadrao ? `${B.navy}0d` : "transparent" }}>
+                    <PrefRadio ativo={prefPadrao} />
+                    <span style={{ display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: "5px", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: prefPadrao ? B.navy : "var(--card-foreground)" }}>Quantidade ofertada mais distante da autorizada</span>
+                        <span style={{ fontSize: "9px", fontWeight: 800, color: "var(--muted-foreground)", background: "var(--muted)", border: "1px solid var(--border)", borderRadius: "4px", padding: "0 4px", lineHeight: "1.6" }}>Padrão</span>
+                      </span>
+                      <span style={{ fontSize: "10px", color: "var(--muted-foreground)", lineHeight: 1.35 }}>
+                        Prioriza a especialidade com o maior vão entre o ofertado e o autorizado.
+                      </span>
+                    </span>
+                  </button>
+
+                  {/* Opção 2 — por especialidade. A caixa de seleção fica dentro do próprio cartão. */}
+                  <div role="radio" aria-checked={!prefPadrao}
+                    style={{ display: "flex", alignItems: "flex-start", gap: "8px", padding: "9px 10px", borderRadius: "10px", border: `1px solid ${!prefPadrao ? B.navy : "var(--border)"}`, background: !prefPadrao ? `${B.navy}0d` : "transparent" }}>
+                    <PrefRadio ativo={!prefPadrao} />
+                    <div style={{ display: "flex", flexDirection: "column", gap: "6px", minWidth: 0, flex: 1 }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: !prefPadrao ? B.navy : "var(--card-foreground)" }}>Por especialidade</span>
+                        <span style={{ fontSize: "10px", color: "var(--muted-foreground)", lineHeight: 1.35 }}>
+                          {prefPadrao
+                            ? "Escolha uma ou mais especialidades abaixo para priorizá-las."
+                            : "As escolhidas passam à frente. Nenhuma oferta deixa de aparecer — só muda a ordem."}
+                        </span>
+                      </div>
+                      <MultiSearchCombobox
+                        opcoes={ESP_PREF_OPCOES}
+                        selecionados={prefEspIds}
+                        onToggle={alternarPrefEsp}
+                        placeholder="Todas as especialidades"
+                        nomePlural="especialidades"
+                        ariaLabel="Especialidades a priorizar"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
         </div>
 
         {/* Área 5 — Exportação */}
@@ -2683,6 +2883,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
           pac={pac}
           sessoesAtuais={pendingConfirm.beforeCount}
           sessoes={pendingConfirm.sessoes}
+          avisoMultiProf={pendingConfirm.avisoMultiProf}
           confirming={confirmando}
           onConfirm={confirmarImplantacao}
           onCancel={cancelarImplantacao}
