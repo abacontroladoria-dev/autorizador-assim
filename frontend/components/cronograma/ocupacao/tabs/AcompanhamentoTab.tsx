@@ -144,7 +144,9 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     cRows, rec, inv, waMap, statusMap, sRec, sInv, sWa, persistStatus,
     profMap, pacBundles, conf, persistProfMap, persistPacBundles, persistConf,
   } = useCronogramaData()
-  const [sub, setSub] = useState<Sub>("aguardando")
+  // Abre em "recusados": é a única aba visível hoje (ver SUBS_VISIVEIS abaixo).
+  // Se outra aba voltar a ser exibida, este padrão continua válido.
+  const [sub, setSub] = useState<Sub>("recusados")
   const [ocupOpen, setOcupOpen] = useState(false)
   const [saidaOpen, setSaidaOpen] = useState(false)
   const [ocupProfOpen, setOcupProfOpen] = useState(false)
@@ -294,8 +296,39 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
       })))
   ), [pacBundles])
 
+  // Recusas vindas dos bundles COMPARTILHADOS (acomp_pac_bundles), no mesmo padrão
+  // de pacConfDerived. Sem isto a aba mostrava só `rec`, que vive no localStorage
+  // de cada navegador (a tabela cronograma_estado não existe no banco): o motor de
+  // sugestões bloqueava por bundle — visível para todo mundo — mas a tela listava
+  // apenas as recusas registradas NESTE navegador. Resultado observado no paciente
+  // Arthur Luiz Maciel Fortes: 17 slots bloqueados, 4 visíveis, e nenhuma forma de
+  // reativar os outros 13 nem de entender por que as sugestões sumiram.
+  // Dedup contra `rec` pela coordenada, porque a mesma recusa costuma existir nos
+  // dois lugares (handleAcaoDireta grava em ambos) e apareceria duplicada.
+  const pacRecDerived = useMemo((): RecItem[] => {
+    const jaEmRec = new Set(rec.map(r => `${r.paciente}|||${r.profissional}|||${r.dia}|||${r.hora}`))
+    const vistos = new Set<string>()
+    const out: RecItem[] = []
+    for (const b of pacBundles) {
+      for (const s of b.sessoes) {
+        const recusadoNoSlot = b.slotStatus?.[`${s.dia}|||${s.hora}`] === "recusado"
+        if (b.status !== "recusado" && !recusadoNoSlot) continue
+        const chave = `${b.pac}|||${s.prof}|||${s.dia}|||${s.hora}`
+        if (jaEmRec.has(chave) || vistos.has(chave)) continue
+        vistos.add(chave)
+        out.push({
+          paciente: b.pac, profissional: s.prof, especialidade: s.tP, unidade: s.unidade,
+          dia: s.dia, hora: s.hora,
+          registradoEm: new Date(b.ts).toLocaleDateString("pt-BR"),
+          obs: b.motivo || undefined,
+        })
+      }
+    }
+    return out
+  }, [pacBundles, rec])
+
   const allConf = useMemo(() => [...conf, ...saidaConfDerived, ...pacConfDerived], [conf, saidaConfDerived, pacConfDerived])
-  const allRec  = useMemo(() => [...rec,  ...saidaRecDerived],  [rec,  saidaRecDerived])
+  const allRec  = useMemo(() => [...rec,  ...saidaRecDerived, ...pacRecDerived],  [rec,  saidaRecDerived, pacRecDerived])
   const allInv  = useMemo(() => [...inv,  ...saidaInvDerived],  [inv,  saidaInvDerived])
 
   // CRON-008: remover um Confirmado derivado de Reserva Pendente precisa reverter a
@@ -319,12 +352,26 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     if (idx !== -1) persistConf(conf.filter((_, j) => j !== idx))
   }
 
-  const SUBS: { key: Sub; label: string; count: number; icon: LucideIcon }[] = [
+  const TODAS_SUBS: { key: Sub; label: string; count: number; icon: LucideIcon }[] = [
     { key: "aguardando",  label: "Aguardando",          count: aguardandoCount,  icon: Clock },
     { key: "confirmados", label: "Confirmados",          count: allConf.length,   icon: CheckCircle2 },
     { key: "recusados",   label: "Recusados",            count: allRec.length,    icon: X },
     { key: "inviavel",    label: "Inviáveis",             count: allInv.length,    icon: Ban },
   ]
+
+  // Abas visíveis — decisão do usuário em 2026-08-20: a operação usa só "Recusados".
+  // OCULTAR, não apagar: nenhum dado é excluído e nenhuma lógica é removida; as
+  // outras abas continuam sendo alimentadas normalmente e voltam ao ar bastando
+  // acrescentar a chave aqui. Medição que embasou a decisão (ação por mês):
+  //   Recusados   243 registros — 5 jun / 47 jul / 191 ago  (uso intenso)
+  //   Confirmados  34 bundles   —      8 jul /  26 ago      (uso ativo)
+  //   Aguardando   13 bundles   — 3 jun /  9 jul /   1 ago  (praticamente parada)
+  //   Inviáveis     0 bundles no banco (os itens exibidos vinham do localStorage)
+  // Registro de divergência: "Confirmados" tinha 26 implantações em agosto e é o
+  // registro visível do que foi escrito na TiTa; recomendei mantê-la e o usuário
+  // optou por ocultar assim mesmo. Reverter = devolver "confirmados" a esta lista.
+  const SUBS_VISIVEIS: Sub[] = ["recusados"]
+  const SUBS = TODAS_SUBS.filter(s => SUBS_VISIVEIS.includes(s.key))
 
   function handleOcupAceito(key: string, sug: { pac: string; prof: string; tP?: string; esp?: string; unidade?: string; dia?: string; hora?: string } | null) {
     sWa({ ...waMap, [key]: "aceito" as WaStatus })
@@ -384,17 +431,24 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
   }
 
   function handlePacCancelar(id: string) {
-    persistPacBundles(pacBundles.filter(b => b.id !== id))
+    // Forma de função: cancelar vários itens em cliques seguidos parte sempre do
+    // estado mais recente, não do array capturado no render (ver persistPacBundles).
+    persistPacBundles(prev => prev.filter(b => b.id !== id))
   }
   function handlePacSlotStatus(id: string, slotKey: string, status: SlotStatus | null) {
     const bundle = pacBundles.find(b => b.id === id)
     const sessao = bundle?.sessoes.find(s => `${s.dia}|||${s.hora}` === slotKey)
-    persistPacBundles(pacBundles.map(b => {
+    persistPacBundles(prev => prev.map(b => {
       if (b.id !== id) return b
       const slotStatus = { ...(b.slotStatus ?? {}) }
       if (status === null) delete slotStatus[slotKey]
       else slotStatus[slotKey] = status
-      return { ...b, slotStatus }
+      // Recusar slot a slot também tem que marcar o bundle como recusado quando
+      // TODAS as sessões dele foram recusadas — buildSugestoes bloqueia reoferta
+      // por bundle.status, então sem isso um bundle inteiro recusado slot a slot
+      // continuava sendo reofertado.
+      const todasRecusadas = b.sessoes.every(s => slotStatus[`${s.dia}|||${s.hora}`] === "recusado")
+      return { ...b, slotStatus, status: todasRecusadas ? "recusado" as const : b.status }
     }))
     if (bundle && sessao && status) {
       const d = hoje()
@@ -407,7 +461,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     }
   }
   function handlePacSlotRemove(id: string, slotKey: string) {
-    persistPacBundles(pacBundles.map(b => {
+    persistPacBundles(prev => prev.map(b => {
       if (b.id !== id) return b
       const sessoes = b.sessoes.filter(s => `${s.dia}|||${s.hora}` !== slotKey)
       const slotStatus = { ...(b.slotStatus ?? {}) }
@@ -418,7 +472,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
   function handlePacBulkStatus(id: string, status: SlotStatus | "cancelar") {
     if (status === "cancelar") { handlePacCancelar(id); return }
     const bundle = pacBundles.find(b => b.id === id)
-    persistPacBundles(pacBundles.map(b => {
+    persistPacBundles(prev => prev.map(b => {
       if (b.id !== id) return b
       const slotStatus: Record<string, SlotStatus> = {}
       for (const s of b.sessoes) slotStatus[`${s.dia}|||${s.hora}`] = status
@@ -663,22 +717,30 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
       {sub === "recusados" && (
         <RecusadosTab rec={allRec} inv={allInv} waMap={waMap}
           onRemove={i => {
-            if (i >= rec.length) return
-            const item = rec[i]
-            sRec(rec.filter((_, j) => j !== i))
-            // Desfaz também o bloqueio de reoferta em Ocupação Paciente (ver
-            // slotsRecusados em buildSugestoes): remove a sessão recusada
-            // correspondente do bundle, ou o bundle inteiro se ficar vazio — senão
-            // "Reativar sugestão" limpava só a auditoria e o slot continuava preso.
-            const atualizados = pacBundles
+            // allRec = [...rec, ...saidaRecDerived, ...pacRecDerived]. O item pode vir
+            // de qualquer um dos três; só `rec` é editável diretamente (localStorage),
+            // os derivados são reflexo dos bundles compartilhados. Em ambos os casos o
+            // que precisa sair é o bloqueio no bundle — senão "Reativar sugestão"
+            // limparia só a auditoria e o slot continuaria preso.
+            const item = allRec[i]
+            if (!item) return
+            if (i < rec.length) sRec(rec.filter((_, j) => j !== i))
+            persistPacBundles(prev => prev
               .map(b => {
-                if (b.status !== "recusado" || b.pac !== item.paciente) return b
+                if (b.pac !== item.paciente) return b
+                const chaveSlot = `${item.dia}|||${item.hora}`
+                const eraRecusadoNoSlot = b.slotStatus?.[chaveSlot] === "recusado"
+                if (b.status !== "recusado" && !eraRecusadoNoSlot) return b
                 const sessoes = b.sessoes.filter(s =>
                   !(s.prof === item.profissional && s.dia === item.dia && s.hora === item.hora))
-                return sessoes.length === b.sessoes.length ? b : { ...b, sessoes }
+                if (sessoes.length === b.sessoes.length) return b
+                // Limpa também o slotStatus da sessão removida, senão a recusa slot a
+                // slot continuaria bloqueando (ver slotsRecusados em buildSugestoes).
+                const slotStatus = { ...(b.slotStatus ?? {}) }
+                delete slotStatus[chaveSlot]
+                return { ...b, sessoes, slotStatus }
               })
-              .filter(b => b.status !== "recusado" || b.sessoes.length > 0)
-            persistPacBundles(atualizados)
+              .filter(b => b.sessoes.length > 0))
           }} />
       )}
       {sub === "inviavel" && (

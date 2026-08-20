@@ -56,6 +56,11 @@ interface AceitePacBundle {
   status: "pendente" | "confirmado" | "recusado" | "inviavel" | "removido_tita"
   inviavelSlots: string[]
   motivo?: string
+  // Recusa/confirmação slot a slot feita na aba Acompanhamento — um bundle pode
+  // seguir "pendente" no todo com sessões individuais já recusadas. Espelha o
+  // campo homônimo do tipo canônico em types/acompanhamento.ts.
+  slotStatus?: Record<string, "confirmado" | "recusado" | "inviavel">
+
   // Auditoria da implantação (imutável) — ver types/acompanhamento.ts.
   implantadoPor?: string
   implantadoPorEmail?: string
@@ -299,19 +304,40 @@ function buildSugestoes(
     profOcupado.has(`${normTxt(prof)}|||${dia}|||${hora}`)
   // CRON-008: slots já reservados (implantação imediata) por OUTROS pacientes — vagas
   // ainda "Livre" no CSV mas comprometidas, não podem ser sugeridas para ninguém mais.
+  // Chave normalizada (normTxt no profissional), igual à de profOcupado: o nome do
+  // bundle vem do que foi gravado no aceite e o da grade vem do CSV da TiTa, e uma
+  // diferença de acento/caixa/espaço faria a trava falhar em silêncio.
+  const chaveSlot = (prof: string, dia: string, hora: string) => `${normTxt(prof)}|||${dia}|||${hora}`
   const slotsReservadosOutros = new Set<string>()
   for (const bundle of aceites) {
     if (bundle.pac === pac || bundle.status !== "confirmado") continue
-    for (const s of bundle.sessoes) slotsReservadosOutros.add(`${s.prof}|||${s.dia}|||${s.hora}`)
+    for (const s of bundle.sessoes) slotsReservadosOutros.add(chaveSlot(s.prof, s.dia, s.hora))
   }
   // Slots que a própria família já recusou pra esse paciente — não podem ser
   // reofertados enquanto a recusa não for desfeita ("Reativar sugestão" na aba
   // Recusados). Sem essa trava, buildSugestoes ignorava "rec" (só auditoria) e
   // reofertava o mesmo horário/profissional a cada recálculo.
+  // Considera também recusa slot a slot (slotStatus), não só o status do bundle:
+  // a aba Acompanhamento permite recusar sessões individuais de um bundle que
+  // continua "pendente" como um todo.
+  //
+  // Achado 2026-08-20 (caso Adrian Araújo Nery): a chave incluía o profissional,
+  // então recusar "Psicopedagogia com a Ana Beatriz" às 08:00 não impedia oferecer
+  // "Psicomotricidade com a Rafaela" no MESMO horário — o sistema ofertava outra
+  // coisa bem em cima de um horário que a família já tinha dito não servir.
+  // Os motivos reais de recusa (ver Arthur Luiz Maciel Fortes) são quase sempre
+  // sobre o HORÁRIO, não sobre o profissional específico: "não consegue chegar
+  // às 13h por causa da escola", "não aguenta muitas terapias no mesmo dia". A
+  // chave agora é só dia+hora — qualquer recusa nesse paciente naquele dia/hora
+  // bloqueia QUALQUER terapia/profissional novo ali, não só o que foi recusado.
+  const chaveDiaHora = (dia: string, hora: string) => `${dia}|||${hora}`
   const slotsRecusados = new Set<string>()
   for (const bundle of aceites) {
-    if (bundle.pac !== pac || bundle.status !== "recusado") continue
-    for (const s of bundle.sessoes) slotsRecusados.add(`${s.prof}|||${s.dia}|||${s.hora}`)
+    if (bundle.pac !== pac) continue
+    for (const s of bundle.sessoes) {
+      const recusadoNoSlot = bundle.slotStatus?.[`${s.dia}|||${s.hora}`] === "recusado"
+      if (bundle.status === "recusado" || recusadoNoSlot) slotsRecusados.add(chaveDiaHora(s.dia, s.hora))
+    }
   }
   // Vagas comprometidas: sessões confirmadas que ainda não estão no agend
   // ("pendente" não bloqueia mais — é um status que nenhum caminho da UI cria hoje).
@@ -481,8 +507,8 @@ function buildSugestoes(
     if (!isTurnoOk(h)) continue
     const canonical = fm(h)
     if (!canonical) continue
-    if (slotsReservadosOutros.has(`${r.Profissional}|||${r["Dia da Semana"]}|||${canonical}`)) continue
-    if (slotsRecusados.has(`${r.Profissional}|||${r["Dia da Semana"]}|||${canonical}`)) continue
+    if (slotsReservadosOutros.has(chaveSlot(r.Profissional, r["Dia da Semana"], canonical))) continue
+    if (slotsRecusados.has(chaveDiaHora(r["Dia da Semana"], canonical))) continue
     // Vaga "Livre" gêmea de um horário já agendado do mesmo profissional — ver profOcupado.
     if (isProfOcupado(r.Profissional, r["Dia da Semana"], canonical)) continue
     const dk = `${r["Dia da Semana"]}|||${h}|||${r.Terapia}|||${r.Profissional}`
@@ -588,8 +614,12 @@ function buildSugestoes(
           if (!isTurnoOk(ch)) continue
           const cHora = fm(ch)
           if (!adjs.includes(cHora)) continue
-          // Mesma trava do allFreeRows: nunca ofertar vaga de profissional já agendado.
+          // Mesmas travas do allFreeRows — a varredura de companheiras tinha ficado de
+          // fora, e por isso um horário recusado (ou já reservado por outro paciente)
+          // voltava a ser ofertado como sessão adjacente mesmo estando bloqueado.
           if (isProfOcupado(r.Profissional, dia, cHora)) continue
+          if (slotsReservadosOutros.has(chaveSlot(r.Profissional, dia, cHora))) continue
+          if (slotsRecusados.has(chaveDiaHora(dia, cHora))) continue
           const ck = `${r.Terapia}|||${r.Profissional}|||${cHora}`
           if (seenComp.has(ck)) continue
           seenComp.add(ck)
@@ -757,6 +787,11 @@ interface TodasSugestoesModalProps {
   /** CRON-008: sessões já reservadas (implantação imediata) deste paciente — exibidas
    * diretamente na grade como "Reservado", fora do fluxo normal de sugestões. */
   reservasConfirmadas: AceiteSessao[]
+  /** Horários recusados pela família para este paciente — exibidos em vermelho na
+   *  grade para o bloqueio ficar visível no próprio horário. Não são sugestões. */
+  recusasPac: { dia: string; hora: string; tP: string; prof: string; unidade: string; motivo?: string }[]
+  /** Abre o modal de detalhe do card "recusadoFamilia" ao ser clicado. */
+  onAbrirRecusaDetalhe: (dia: string, hora: string, recusas: Array<{ tP: string; prof: string; motivo?: string }>) => void
 }
 
 export interface TodasSugestoesModalHandle {
@@ -767,7 +802,7 @@ export interface TodasSugestoesModalHandle {
 const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoesModalProps>(function TodasSugestoesModal({
   pac, conv, cRows, sugestoes, pacGaps, pacAllEsp, stOf, setSt,
   estrategia, setEstrategia, onAceitar, onInviavel, onAcaoDireta,
-  onUndoRecusa, reservasConfirmadas,
+  onUndoRecusa, reservasConfirmadas, recusasPac, onAbrirRecusaDetalhe,
 }: TodasSugestoesModalProps, ref: React.Ref<TodasSugestoesModalHandle>) {
   const [selIdx, setSelIdx]         = useState<Record<string, Record<string, number>>>({})
   const [profSelIdx, setProfSelIdx] = useState<Record<string, number>>({})
@@ -942,10 +977,17 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
 
   type CellInfo = {
     tP: string; tE?: string; prof: string
-    tipo: "proposta" | "aceito" | "exist" | "adminSuperv" | "adminWarn" | "supervDesloc" | "recusada" | "reservado"
+    // "recusadoFamilia": horário que a família recusou. NÃO é sugestão (buildSugestoes
+    // já o exclui) — existe só para o bloqueio ficar visível no próprio horário, em
+    // vermelho, em vez de o card simplesmente sumir sem explicação.
+    tipo: "proposta" | "aceito" | "exist" | "adminSuperv" | "adminWarn" | "supervDesloc" | "recusada" | "reservado" | "recusadoFamilia"
     unidade: string; target?: string
     sugestaoId?: string
     isVComp?: boolean
+    motivo?: string
+    // Lista estruturada por trás do card "recusadoFamilia" — o modal de detalhe
+    // (aberto ao clicar no card) usa isto em vez de reparsear `motivo`.
+    recusas?: Array<{ tP: string; prof: string; motivo?: string }>
   }
 
   const cMap: Record<string, CellInfo[]> = {}
@@ -967,6 +1009,49 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     if (!cMap[k].some(x => x.tP === s.tP && x.prof === s.prof)) {
       cMap[k].push({ tP: s.tP, prof: s.prof, tipo: "reservado", unidade: s.unidade })
     }
+  }
+
+  // Horários recusados pela família: buildSugestoes já os exclui das sugestões, mas
+  // sumir sem deixar rastro fazia a grade parecer vazia sem motivo aparente — foi
+  // exatamente o que aconteceu com o paciente Arthur Luiz Maciel Fortes, cujas
+  // sugestões desapareceram todas de uma vez. Entram aqui só como marcação visual
+  // (vermelho, não clicável, sem sugestaoId), para o bloqueio ficar explícito no
+  // próprio horário.
+  // UM card por horário, nunca um por recusa: o mesmo horário costuma acumular
+  // várias recusas (terapias/profissionais diferentes, ou a mesma recusada mais de
+  // uma vez ao longo do tempo). Empilhadas, elas transbordavam a célula e invadiam
+  // as linhas seguintes da grade. O que importa visualmente é "este horário está
+  // bloqueado"; o detalhe de quantas e quais vai no tooltip.
+  const recusasPorSlot: Record<string, typeof recusasPac> = {}
+  for (const r of recusasPac) {
+    const k = `${r.dia}|||${r.hora}`
+    if (!recusasPorSlot[k]) recusasPorSlot[k] = []
+    recusasPorSlot[k].push(r)
+  }
+  for (const [k, lista] of Object.entries(recusasPorSlot)) {
+    // Se o horário já tem uma sessão REAL do paciente (tipo "exist"/adminSuperv/
+    // adminWarn/reservado, inseridas acima a partir de sessPac/reservasConfirmadas),
+    // mostrar a recusa ali é redundante: dayHours já impede qualquer oferta nova
+    // nesse dia/hora por causa da sessão existente, com ou sem a recusa histórica.
+    // O card vermelho ficaria competindo com o card real por atenção sem acrescentar
+    // nada — foi o caso do Adrian às 10:00 (Psicopedagogia real + recusa antiga de
+    // "Aplicador ABA (PS)" empilhadas sem necessidade).
+    if ((cMap[k] ?? []).some(x => x.tipo !== "recusadoFamilia")) continue
+    if (!cMap[k]) cMap[k] = []
+    const n = lista.length
+    const detalhe = lista
+      .map(r => `• ${r.tP} — ${r.prof}${r.motivo ? ` (${r.motivo})` : ""}`)
+      .join("\n")
+    cMap[k].push({
+      // Com mais de uma recusa não dá pra eleger uma como "a" recusa do horário sem
+      // mentir sobre as outras — então o título passa a ser a contagem.
+      tP: n === 1 ? lista[0].tP : `${n} recusas neste horário`,
+      prof: n === 1 ? lista[0].prof : "",
+      tipo: "recusadoFamilia",
+      unidade: lista[0].unidade,
+      motivo: detalhe,
+      recusas: lista.map(r => ({ tP: r.tP, prof: r.prof, motivo: r.motivo })),
+    })
   }
 
   // Todos os cards de proposta sempre visíveis na grade — o estado visual muda, não a presença.
@@ -1088,6 +1173,12 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     if (tipo === "aceito")       return { bg: B.blueLt,  bd: B.blue,    label: "Aceito"   }
     if (tipo === "proposta")     return { bg: B.blueLt,  bd: B.blue,    label: null       }
     if (tipo === "recusada")     return { bg: "#fff5f5", bd: "#fca5a5", label: null       }
+    // Vermelho forte e borda sólida: precisa ler como BLOQUEIO, não como sugestão
+    // desbotada — é a diferença entre "não há vaga aqui" e "há vaga, mas a família
+    // recusou". O tom fraco (#fff5f5) já é usado acima para a recusa de sugestão.
+    // "Ver detalhe" no rótulo: única pista visual de que o card abre um modal ao
+    // ser clicado — não há botão de ação aqui como nos cards de proposta.
+    if (tipo === "recusadoFamilia") return { bg: "#fee2e2", bd: "#dc2626", label: "🚫 Recusado · ver detalhe" }
     if (tipo === "reservado")    return { bg: "#f0fdf4", bd: "#16a34a", label: "✅ Implantado" }
     return                              { bg: "#f8fafc", bd: "#e2e8f0", label: null       }
   }
@@ -1269,7 +1360,11 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                 return (
                                   <div
                                     key={ci}
-                                    onClick={cardClickable ? () => toggleSelected(c.sugestaoId!) : undefined}
+                                    onClick={
+                                      cardClickable ? () => toggleSelected(c.sugestaoId!)
+                                        : c.tipo === "recusadoFamilia" ? () => onAbrirRecusaDetalhe(d, slot, c.recusas ?? [])
+                                        : undefined
+                                    }
                                     style={{
                                       background: bg,
                                       // Sprint 4: borda sólida também para "reservado" — a implantação na TiTa é
@@ -1279,7 +1374,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                       flex: (isExpanded || isEspExpanded) ? "none" : "1",
                                       boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "2px",
                                       outline: isDisc ? "2px solid #fed7aa" : "none",
-                                      cursor: cardClickable ? "pointer" : "default",
+                                      cursor: (cardClickable || c.tipo === "recusadoFamilia") ? "pointer" : "default",
                                       position: "relative",
                                       opacity: isRecusadaCard ? 0.65 : 1,
                                       zIndex: (isExpanded || isEspExpanded) ? 20 : "auto",
@@ -1338,7 +1433,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                             ) : isMultiProf ? (
                                               <span style={{ fontSize: "9px", fontWeight: 800, color: "#dc2626", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 5px", lineHeight: "1.6" }}>3+ profissionais</span>
                                             ) : cs.label ? (
-                                              <span style={{ color: c.tipo === "aceito" ? B.blue : "#374151" }}>{cs.label}</span>
+                                              <span style={{ color: c.tipo === "aceito" ? B.blue : c.tipo === "recusadoFamilia" ? "#dc2626" : "#374151" }}>{cs.label}</span>
                                             ) : null}
                                             {isClickable && c.sugestaoId && (
                                               <button onClick={e => { e.stopPropagation(); const sid = isVCompCard ? c.sugestaoId!.slice(0, c.sugestaoId!.indexOf("|||vc|||")) : c.sugestaoId!; const sug = sugestoes.find(x => x.id === sid); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, csvGradeId: ae.csvGradeId, acao: "recusar" }); setAcaoMotivo("") }}
@@ -1863,6 +1958,12 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
   const persistAceites = persistPacBundles
   const [invPending, setInvPending] = useState<Sugestao | null>(null)
   const [invMotivo, setInvMotivo]   = useState("")
+  // Modal de detalhe do card "recusadoFamilia" — aberto ao clicar no card, em vez
+  // de depender só do title nativo (que não funciona em toque e não é clicável).
+  const [recusaDetalheAberto, setRecusaDetalheAberto] = useState<{
+    dia: string; hora: string
+    recusas: Array<{ tP: string; prof: string; motivo?: string }>
+  } | null>(null)
   const [inputFocused, setInputFocused] = useState(false)
   const [highlightedIdx, setHighlightedIdx] = useState(-1)
   const listboxRef = useRef<HTMLDivElement>(null)
@@ -1878,6 +1979,26 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     () => aceites.filter(b => b.pac === pac && b.status === "confirmado").flatMap(b => b.sessoes),
     [aceites, pac],
   )
+
+  // Horários recusados pela família, para marcar a grade em vermelho. Mesma regra de
+  // slotsRecusados em buildSugestoes (status do bundle OU recusa slot a slot), para
+  // que o que é BLOQUEADO e o que é MOSTRADO como bloqueado nunca divirjam.
+  const recusasPac = useMemo(() => {
+    const vistos = new Set<string>()
+    const out: { dia: string; hora: string; tP: string; prof: string; unidade: string; motivo?: string }[] = []
+    for (const b of aceites) {
+      if (b.pac !== pac) continue
+      for (const s of b.sessoes) {
+        const recusadoNoSlot = b.slotStatus?.[`${s.dia}|||${s.hora}`] === "recusado"
+        if (b.status !== "recusado" && !recusadoNoSlot) continue
+        const k = `${s.dia}|||${s.hora}|||${s.tP}|||${s.prof}`
+        if (vistos.has(k)) continue
+        vistos.add(k)
+        out.push({ dia: s.dia, hora: s.hora, tP: s.tP, prof: s.prof, unidade: s.unidade, motivo: b.motivo })
+      }
+    }
+    return out
+  }, [aceites, pac])
 
   // Reconciliação com a TiTa. A API só grava, não exclui — então uma série pode ser
   // removida diretamente na TiTa sem que o Pulsar saiba. Como o estado "Implantado"
@@ -2536,6 +2657,11 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
             <input
               id="pac-search"
               type="text"
+              // O campo não tinha autoComplete definido, então o Chrome guardava o que
+              // já foi digitado aqui e sobrepunha sua própria caixa de sugestão (preta,
+              // fora do nosso CSS) por cima da lista branca do sistema. "off" some com
+              // ela; a lista própria (role="listbox" abaixo) continua funcionando igual.
+              autoComplete="off"
               aria-label="Buscar paciente"
               aria-autocomplete="list"
               aria-controls={dropOpen ? "pac-listbox" : undefined}
@@ -2887,6 +3013,8 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
             onAcaoDireta={handleAcaoDireta}
             onUndoRecusa={onUndoRecusa}
             reservasConfirmadas={reservasConfirmadas}
+            recusasPac={recusasPac}
+            onAbrirRecusaDetalhe={(dia, hora, recusas) => setRecusaDetalheAberto({ dia, hora, recusas })}
           />
         </>
       )}
@@ -2927,6 +3055,37 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
                 Cancelar
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {recusaDetalheAberto && (
+        <div
+          style={{ position: "fixed", inset: 0, zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.4)", padding: "16px" }}
+          onClick={e => { if (e.target === e.currentTarget) setRecusaDetalheAberto(null) }}
+        >
+          <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "440px", width: "100%", padding: "20px", maxHeight: "80vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "7px", fontWeight: 900, fontSize: "16px", marginBottom: "4px", color: "#dc2626" }}>
+              🚫 Recusado pela família
+            </div>
+            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "12px" }}>
+              {recusaDetalheAberto.dia.replace("-feira", "")} · {recusaDetalheAberto.hora} — este horário não será sugerido para {pac} enquanto a recusa não for desfeita.
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "16px" }}>
+              {recusaDetalheAberto.recusas.map((r, i) => (
+                <div key={i} style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "10px", padding: "9px 12px" }}>
+                  <div style={{ fontSize: "13px", fontWeight: 700, color: "#7f1d1d" }}>{r.tP}</div>
+                  <div style={{ fontSize: "12px", color: "#991b1b" }}>{fmtName(r.prof)}</div>
+                  {r.motivo && <div style={{ fontSize: "12px", color: "#7f1d1d", marginTop: "4px", fontStyle: "italic" }}>"{r.motivo}"</div>}
+                </div>
+              ))}
+            </div>
+            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "14px" }}>
+              Para liberar este horário, use <strong>"Reativar sugestão"</strong> na aba Recusados (Aceites e Recusas).
+            </div>
+            <button onClick={() => setRecusaDetalheAberto(null)} style={{ width: "100%", padding: "8px 16px", borderRadius: "10px", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: "13px" }}>
+              Fechar
+            </button>
           </div>
         </div>
       )}

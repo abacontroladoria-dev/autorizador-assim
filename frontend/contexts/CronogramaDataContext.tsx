@@ -144,7 +144,9 @@ export interface CronogramaDataContextValue {
   /** Grava o statusMap de acompanhamento por profissional (diff contra acomp_prof_map). */
   persistProfMap: (map: Record<string, string>) => void
   /** Grava os bundles de aceite do OcupPacMode (upsert + delete contra acomp_pac_bundles). */
-  persistPacBundles: (bundles: AceitePacBundle[]) => void
+  /** Aceita array ou função de atualização; a forma de função parte sempre do estado
+   *  mais recente e é a correta para ações em sequência (ver a implementação). */
+  persistPacBundles: (bundles: AceitePacBundle[] | ((prev: AceitePacBundle[]) => AceitePacBundle[])) => void
   /** Grava sessões confirmadas (somente insere novas, nunca deleta). */
   persistConf: (items: ConfItem[]) => void
 }
@@ -199,11 +201,14 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
         if (p.cfg) setCfgState(prev => ({ ...prev, ...p.cfg }))
         if (p.savedAt) setSavedAt(p.savedAt)
       }
-      const rawPreencher = localStorage.getItem(SK_PREENCHER)
-      if (rawPreencher) {
-        const wp = JSON.parse(rawPreencher)
-        if (wp && Object.keys(wp).length) waInicial = { ...wp, ...waInicial }
-      }
+      // SK_PREENCHER era um blob legado que NUNCA foi escrito por este código — só
+      // lido, e mesclado no waMap a cada carregamento. Efeito: cancelar um item de
+      // "Aguardando" (Ocupação Clínica) funcionava na tela, mas o item voltava no
+      // próximo refresh, porque a chave sobrevivia nesse blob e era remesclada aqui.
+      // Não há o que migrar (o formato é o mesmo do waMap salvo em SK), então a
+      // limpeza é remover a chave de vez — senão o resquício continua ressuscitando
+      // para quem já o tem no navegador.
+      try { localStorage.removeItem(SK_PREENCHER) } catch {}
       if (Object.keys(waInicial).length) setWaMap(waInicial)
     } catch {}
 
@@ -522,7 +527,10 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
           if (error) throw error
         }
         if (deletes.length) {
-          await Promise.all(deletes.map(k => sb.from("acomp_prof_map").delete().eq("id", k)))
+          // Mesma correção de acomp_pac_bundles: erro de exclusão não pode passar batido.
+          const resultados = await Promise.all(deletes.map(k => sb.from("acomp_prof_map").delete().eq("id", k)))
+          const erroDelete = resultados.find(r => r.error)?.error
+          if (erroDelete) throw erroDelete
         }
       } catch (e) {
         const msg = (e as Error).message || ""
@@ -533,10 +541,18 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
   }, [])
 
   // Grava bundles de aceite do OcupPacMode (upsert dos alterados, delete dos removidos)
-  const persistPacBundles = useCallback((next: AceitePacBundle[]) => {
+  // Aceita array OU função de atualização. A forma de função é a correta para
+  // ações em sequência (ex.: cancelar vários itens de "Aguardando" em cliques
+  // seguidos): o handler da tela fecha sobre o `pacBundles` do render, então dois
+  // cliques antes do re-render partiam do MESMO array e o segundo ressuscitava o
+  // que o primeiro tinha removido — o item sumia da tela e voltava no refresh.
+  // Resolvendo pelo ref, cada chamada parte sempre do estado mais recente.
+  const persistPacBundles = useCallback((entrada: AceitePacBundle[] | ((prev: AceitePacBundle[]) => AceitePacBundle[])) => {
     hasAcompActedRef.current = true
     // Capturado ANTES do setState — é o estado que estava persistido, base do diff.
     const prev = pacBundlesRef.current
+    const next = typeof entrada === "function" ? entrada(prev) : entrada
+    pacBundlesRef.current = next
     setPacBundles(next)
     try { localStorage.setItem(SK_BUNDLES_LEGACY, JSON.stringify(next)) } catch {}
 
@@ -569,7 +585,10 @@ export function CronogramaDataProvider({ children }: { children: React.ReactNode
           if (error) throw error
         }
         if (toDelete.length) {
-          await sb.from("acomp_pac_bundles").delete().in("id", toDelete)
+          // Erro verificado: sem isso a exclusão falhava em SILÊNCIO — o item sumia
+          // da tela, continuava no banco, e voltava no próximo carregamento.
+          const { error } = await sb.from("acomp_pac_bundles").delete().in("id", toDelete)
+          if (error) throw error
         }
       } catch (e) {
         const msg = (e as Error).message || ""
