@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react"
 import { B, DIAS_LIST, HORAS_GRID, REGRAS_NOVO_CRON } from "@/lib/cronograma/constants"
 import { buildNewCronograma, type NovoCronogramaResult, type EspEntry } from "@/lib/cronograma/novoCronograma"
-import { fm, fmtName, pm } from "@/lib/cronograma/helpers"
+import { construirProfissionaisOcupados, fm, fmtName, pm, profissionalEstaOcupado } from "@/lib/cronograma/helpers"
 import type { CsvRow, DispRow, LaudoRow } from "@/types/cronograma"
 
 interface Props {
@@ -46,10 +46,17 @@ export function NovoCronogramaTab({ cRows, lRows, dispRows }: Props) {
     return [...s].sort()
   }, [lRows])
 
-  const livreSlots = useMemo(
-    () => cRows.filter(r => r["Status do Agendamento"] === "Livre"),
-    [cRows],
-  )
+  const livreSlots = useMemo(() => {
+    // Vaga "Livre" gêmea de um horário já agendado do mesmo profissional (ver
+    // construirProfissionaisOcupados em helpers.ts) — a TiTa mantém uma linha
+    // por terapia ofertada, então preencher um horário não apaga as outras
+    // linhas "Livre" do mesmo profissional nesse dia/hora.
+    const profOcupado = construirProfissionaisOcupados(cRows.filter(r => r["Status do Agendamento"] === "Agendado"))
+    return cRows.filter(r =>
+      r["Status do Agendamento"] === "Livre"
+      && !profissionalEstaOcupado(profOcupado, r["Profissional"], r["Dia da Semana"], String(r.HI_str || "")),
+    )
+  }, [cRows])
 
   function handleGerar() {
     if (!paciente || lRows.length === 0 || cRows.length === 0) return

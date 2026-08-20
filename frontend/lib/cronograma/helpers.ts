@@ -150,6 +150,33 @@ export function filtrarCapacidadeLivreReservada(cRows: CsvRow[]): CsvRow[] {
   return cRows.filter(r => !(r["Status do Agendamento"] === "Livre" && PROFISSIONAIS_SEM_CAPACIDADE_LIVRE_NORM.has(normTxt(r["Profissional"]))))
 }
 
+// Achado 2026-08-20 (casos Mariana Ferreira Reis e Marcia Regina Araujo de Paula):
+// a TiTa mantém uma linha por terapia ofertada, então quando um horário de um
+// profissional é preenchido as OUTRAS linhas dele no mesmo dia/hora podem
+// continuar "Livre" — uma vaga "gêmea" da que já foi ocupada (inclusive por
+// PACS_ADMIN como "Horário Bloqueado"). Toda ferramenta que trata "Livre" como
+// vaga a oferecer/aceitar precisa excluir essa gêmea. Extraído aqui porque o
+// mesmo princípio se repetia (com pequenas variações) em remanejamento.ts,
+// saida.ts, runAlgorithm.ts e novoCronograma.ts — profOcupado em OcupPacMode.tsx
+// e construirProfOcupado em disponibilidadeInterna.ts continuam com sua própria
+// cópia inline (já corrigidas e testadas antes deste helper existir).
+//
+// Ignora unidade de propósito: o mesmo profissional não pode estar em duas
+// salas ao mesmo tempo, então a unidade da linha "Agendado" é irrelevante pra
+// decidir se ele está ocupado naquele dia/hora.
+export function construirProfissionaisOcupados(cRows: CsvRow[]): Set<string> {
+  const ocupado = new Set<string>()
+  for (const r of cRows) {
+    if (r["Status do Agendamento"] !== "Agendado" || !r["Profissional"]) continue
+    ocupado.add(`${normTxt(r["Profissional"])}|||${r["Dia da Semana"]}|||${String(r.HI_str || "")}`)
+  }
+  return ocupado
+}
+
+export function profissionalEstaOcupado(ocupado: Set<string>, profissional: string, dia: string, hora: string): boolean {
+  return ocupado.has(`${normTxt(profissional)}|||${dia}|||${hora}`)
+}
+
 // ─── LAUDO / ALTA ─────────────────────────────────────────────────────────────
 
 export function isSupervisaoAba(terapia: string | null | undefined): boolean {

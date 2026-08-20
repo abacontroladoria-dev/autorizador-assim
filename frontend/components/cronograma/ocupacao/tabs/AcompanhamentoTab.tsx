@@ -662,7 +662,24 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
       )}
       {sub === "recusados" && (
         <RecusadosTab rec={allRec} inv={allInv} waMap={waMap}
-          onRemove={i => { if (i < rec.length) sRec(rec.filter((_, j) => j !== i)) }} />
+          onRemove={i => {
+            if (i >= rec.length) return
+            const item = rec[i]
+            sRec(rec.filter((_, j) => j !== i))
+            // Desfaz também o bloqueio de reoferta em Ocupação Paciente (ver
+            // slotsRecusados em buildSugestoes): remove a sessão recusada
+            // correspondente do bundle, ou o bundle inteiro se ficar vazio — senão
+            // "Reativar sugestão" limpava só a auditoria e o slot continuava preso.
+            const atualizados = pacBundles
+              .map(b => {
+                if (b.status !== "recusado" || b.pac !== item.paciente) return b
+                const sessoes = b.sessoes.filter(s =>
+                  !(s.prof === item.profissional && s.dia === item.dia && s.hora === item.hora))
+                return sessoes.length === b.sessoes.length ? b : { ...b, sessoes }
+              })
+              .filter(b => b.status !== "recusado" || b.sessoes.length > 0)
+            persistPacBundles(atualizados)
+          }} />
       )}
       {sub === "inviavel" && (
         <InviavelTab inv={allInv} rec={allRec} waMap={waMap}

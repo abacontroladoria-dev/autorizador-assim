@@ -304,6 +304,15 @@ function buildSugestoes(
     if (bundle.pac === pac || bundle.status !== "confirmado") continue
     for (const s of bundle.sessoes) slotsReservadosOutros.add(`${s.prof}|||${s.dia}|||${s.hora}`)
   }
+  // Slots que a própria família já recusou pra esse paciente — não podem ser
+  // reofertados enquanto a recusa não for desfeita ("Reativar sugestão" na aba
+  // Recusados). Sem essa trava, buildSugestoes ignorava "rec" (só auditoria) e
+  // reofertava o mesmo horário/profissional a cada recálculo.
+  const slotsRecusados = new Set<string>()
+  for (const bundle of aceites) {
+    if (bundle.pac !== pac || bundle.status !== "recusado") continue
+    for (const s of bundle.sessoes) slotsRecusados.add(`${s.prof}|||${s.dia}|||${s.hora}`)
+  }
   // Vagas comprometidas: sessões confirmadas que ainda não estão no agend
   // ("pendente" não bloqueia mais — é um status que nenhum caminho da UI cria hoje).
   for (const bundle of aceites) {
@@ -473,6 +482,7 @@ function buildSugestoes(
     const canonical = fm(h)
     if (!canonical) continue
     if (slotsReservadosOutros.has(`${r.Profissional}|||${r["Dia da Semana"]}|||${canonical}`)) continue
+    if (slotsRecusados.has(`${r.Profissional}|||${r["Dia da Semana"]}|||${canonical}`)) continue
     // Vaga "Livre" gêmea de um horário já agendado do mesmo profissional — ver profOcupado.
     if (isProfOcupado(r.Profissional, r["Dia da Semana"], canonical)) continue
     const dk = `${r["Dia da Semana"]}|||${h}|||${r.Terapia}|||${r.Profissional}`
@@ -2452,10 +2462,13 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     // CRON-008: bundles "confirmado" (Reserva Pendente) são passados para que a vaga
     // implantada saia da lista de sugestões — tanto para o próprio paciente (não pode
     // ser reofertada) quanto para os demais (slot já reservado, ver slotsReservadosOutros).
+    // Bundles "recusado" também são passados: a família já recusou aquele horário
+    // (com justificativa registrada em "rec"), então buildSugestoes não pode reofertá-lo
+    // até a família reativar via "Reativar sugestão" na aba Recusados (ver slotsRecusados).
     // Bundles "pendente" continuam fora do cálculo — preserva o comportamento anterior
     // de manter os cards visíveis enquanto aguardam confirmação do responsável.
-    const aceitesConfirmados = aceites.filter(a => a.status === "confirmado")
-    return buildSugestoes(pac, agend, agendClin, cRows, gapMap, aceitesConfirmados, conv, isLiminar, prefEsps)
+    const aceitesRelevantes = aceites.filter(a => a.status === "confirmado" || a.status === "recusado")
+    return buildSugestoes(pac, agend, agendClin, cRows, gapMap, aceitesRelevantes, conv, isLiminar, prefEsps)
     // prefEsps nas deps: trocar a preferência recalcula as sugestões na hora, sem recarregar a página.
   }, [pac, estrategia, agend, agendClin, cRows, gapMap, pacConvMap, cfg.judicialMap, aceites, prefEsps])
 
