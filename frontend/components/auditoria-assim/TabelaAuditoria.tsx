@@ -61,6 +61,8 @@ type Props = {
   onSort: (key: SortKey) => void
   onPaginaChange: (p: number) => void
   onRefresh: () => void
+  /** Abre a Análise de Reincidência na semana daquele atendimento. */
+  onAnalisarSemana: (item: AuditoriaAssimItem) => void
 }
 
 /**
@@ -85,6 +87,7 @@ export default function TabelaAuditoria({
   onSort,
   onPaginaChange,
   onRefresh,
+  onAnalisarSemana,
 }: Props) {
   const [itemSelecionado, setItemSelecionado] = useState<AuditoriaAssimItem | null>(null)
   const [conferindoBloco, setConferindoBloco] = useState<string | null>(null)
@@ -234,6 +237,10 @@ export default function TabelaAuditoria({
         open={itemSelecionado !== null}
         onClose={() => setItemSelecionado(null)}
         onSalvo={() => { setItemSelecionado(null); onRefresh() }}
+        // Fecha o detalhe antes de abrir a análise: dois diálogos modais
+        // empilhados são dois focus traps, e ao fechar o de cima o foco não
+        // volta para onde saiu.
+        onAnalisarSemana={(item) => { setItemSelecionado(null); onAnalisarSemana(item) }}
       />
     </div>
   )

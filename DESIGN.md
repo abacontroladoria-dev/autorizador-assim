@@ -207,6 +207,21 @@ The 2026-08-19 pass removed the competing blues from this surface but left brand
 
 Notably, **"Salvar motivo" moved off `violet-600` onto `brand-fg`**. Filled violet made one hue mean "this block is a glosa" and "primary action" within a single section, and made the modal's two save buttons two different components. Steel is deliberately kept off the 16 field labels — spread that far it stops being a signal and just becomes the modal's text color.
 
+##### The third axis: cota semanal (2026-08-20)
+
+A row on this surface can now carry **three orthogonal dimensions**, and the Status Lock Rule is satisfied by reusing hues rather than adding one:
+
+1. **Situação** — the six-stage authorization lifecycle above. Its own hue per stage.
+2. **Conferência de filipeta** — emerald conferida / amber a conferir.
+3. **Cota semanal** — emerald *a conta bate*, amber *divergente*. Introduced by the Análise de Reincidência modal, which compares the sessions a patient had scheduled in a week against the authorizations ASSIM actually processed for that week, per TUSS.
+
+**No new hue.** Amber keeps the meaning it already carries on both other axes — *waiting on someone to look* — and emerald keeps meaning *settled*. That consistency is the whole reason a third axis can coexist in one row without the reader having to learn a third vocabulary.
+
+Two constraints, same as the other axes:
+
+- **Violet stays out.** Glosa is the *consequence* of a blown quota, not the quota state itself. Letting violet mean "over quota" here would make the hue mean two things one modal apart.
+- **The tally chips wear the hue because they filter it.** Each chip in the placar filters both columns to its TUSS, so the hue is still the state — the Decoration-Free Semantics Rule bans a status hue on something that *isn't* that status, not on a control that selects it. Chips follow the `KpiCards` recipe: active = `-50` tint + `-300` border + `-700` text, never a saturated fill (see Âmbar sólido não é botão).
+
 ### Neutral
 
 - **Ink** (`#1e293b` / slate-800): Primary text. Therapist names, patient names, any primary label.

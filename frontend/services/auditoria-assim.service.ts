@@ -1,5 +1,10 @@
 import { getSupabaseClient } from '@/lib/supabase/client'
-import type { AuditoriaAssimItem, KpisAuditoriaAssim, TokenMensalItem } from '@/components/auditoria-assim/types'
+import type {
+  AuditoriaAssimItem,
+  AutorizacaoAssimSemana,
+  KpisAuditoriaAssim,
+  TokenMensalItem,
+} from '@/components/auditoria-assim/types'
 
 const supabase = getSupabaseClient()
 
@@ -31,6 +36,9 @@ export async function listarFaltasAuditoria(data: string): Promise<AuditoriaAssi
       bloco_id,
       paciente_id: String(f.paciente_id),
       paciente_nome: f.paciente_nome,
+      // A RPC de faltas não devolve carteirinha; quem precisa dela (a Análise de
+      // Reincidência) a pega das sessões do próprio paciente, que a têm.
+      carteirinha: null,
       data_atendimento: f.data_atendimento,
       hora_inicial: f.hora_inicial,
       codigo_tuss: f.tuss,
@@ -194,6 +202,62 @@ export async function listarTokensMensal(mes: string): Promise<TokenMensalItem[]
       token_conferido_por_nome: conferencia?.conferido_por_nome ?? null,
     }
   })
+}
+
+/** Teto de linhas que o PostgREST pode aplicar por resposta. */
+const TETO_POSTGREST = 1000
+
+/**
+ * Todas as autorizações que a ASSIM registrou para uma carteirinha numa semana —
+ * inclusive as que não casam com sessão nenhuma.
+ *
+ * Por que ler a tabela direto em vez de usar a RPC da auditoria: a auditoria é
+ * dirigida pela sessão (LEFT JOIN com a agenda_tita à esquerda), então a
+ * autorização EXCEDENTE não aparece nela. E é a excedente que estoura a cota
+ * semanal e provoca a glosa 1601. `autorizacoes_assim` tem policy
+ * "authenticated read", então o navegador lê sem RPC nova.
+ *
+ * Três detalhes que não são estilo:
+ *
+ * - Colunas explícitas, nunca `select('*')`: sob privilégio por coluna o `*`
+ *   responde 403.
+ * - `matricula` guarda a carteirinha pontuada (`empresa.matricula.dep`), que é o
+ *   mesmo texto que a RPC devolve como `carteirinha`.
+ * - `data_execucao` é `timestamp without time zone` guardando hora de São Paulo,
+ *   então os limites vão como texto naive — nada de `toISOString()`, que
+ *   converteria para UTC e deslocaria a janela em 3h.
+ */
+export async function listarAutorizacoesAssimSemana(
+  carteirinhas: string[],
+  inicio: string,
+  fimExclusivo: string
+): Promise<AutorizacaoAssimSemana[]> {
+  if (carteirinhas.length === 0) return []
+
+  const { data: result, error } = await supabase
+    .from('autorizacoes_assim')
+    .select('guia, matricula, paciente_nome, data_execucao, status, codigo_tuss, codigo_erro, descricao_erro, teve_token, token')
+    .in('matricula', carteirinhas)
+    .gte('data_execucao', `${inicio}T00:00:00`)
+    .lt('data_execucao', `${fimExclusivo}T00:00:00`)
+    .order('data_execucao')
+
+  if (error) {
+    console.error('Erro ao buscar autorizações da semana:', error.message, error.details)
+    throw error
+  }
+
+  const itens = (result ?? []) as AutorizacaoAssimSemana[]
+  // Uma semana de um paciente são dezenas de linhas. Encostar no teto significa
+  // que a resposta veio cortada, e um corte silencioso aqui faria a análise
+  // mentir por baixo — exatamente no número que ela existe para conferir.
+  if (itens.length >= TETO_POSTGREST) {
+    console.error(
+      `listarAutorizacoesAssimSemana: ${itens.length} linhas — a resposta pode ter sido truncada pelo PostgREST.`
+    )
+  }
+
+  return itens
 }
 
 export async function buscarKpisAuditoriaAssim(data: string): Promise<KpisAuditoriaAssim | null> {

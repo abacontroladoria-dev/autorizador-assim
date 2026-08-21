@@ -6,6 +6,7 @@ import {
   AlertOctagon,
   Calendar,
   CalendarCheck,
+  CalendarSearch,
   Clock,
   CreditCard,
   FileText,
@@ -32,6 +33,8 @@ type Props = {
   open: boolean
   onClose: () => void
   onSalvo: () => void
+  /** Abre a Análise de Reincidência para este paciente, nesta semana. */
+  onAnalisarSemana: (item: AuditoriaAssimItem) => void
 }
 
 function formatarData(data: string | null) {
@@ -109,7 +112,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   )
 }
 
-export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSalvo }: Props) {
+export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSalvo, onAnalisarSemana }: Props) {
   const [motivo, setMotivo] = useState('')
   const [salvandoMotivo, setSalvandoMotivo] = useState(false)
 
@@ -196,6 +199,12 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
   // da ASSIM, então o rodapé repetiria o motivo do mesmo jeito.
   const motivoJaMostradoAoLado = ehGlosa(item.situacao) && respostaAssim !== null
 
+  // A recusa por cota estourada. O código é o sinal confiável; o texto entra
+  // porque a ASSIM o corta em 25 caracteres ("1601-REINCIDENCIA NO ATEN") e nem
+  // toda linha chega com o código separado.
+  const ehReincidencia =
+    item.codigo_erro === '1601' ||
+    /reincidencia|reincidência/i.test(`${item.descricao_erro ?? ''} ${item.status_assim ?? ''}`)
 
   return (
     <div
@@ -347,6 +356,23 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
                     </p>
                   </div>
                 )}
+
+                {/* A ponte para a única tela que consegue conferir a recusa.
+                    Fica em Brand Outline, não em steel cheio: "Salvar motivo" já
+                    é a ação primária desta seção, e conferir a cota é o passo
+                    ANTES de escrever a tratativa — subordinado a ela, não par.
+
+                    Aparece em toda glosa, não só na 1601: a cota da semana é o
+                    contexto que qualquer contestação usa. Quando o código É o da
+                    reincidência, o rótulo diz por quê. */}
+                <button
+                  type="button"
+                  onClick={() => onAnalisarSemana(item)}
+                  className="mb-3 flex w-full items-center justify-center gap-2 rounded-xl border border-brand bg-white px-4 py-2 text-sm font-semibold text-brand-fg transition hover:bg-brand-hover focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none"
+                >
+                  <CalendarSearch size={15} />
+                  {ehReincidencia ? 'Conferir a cota da semana' : 'Analisar cota da semana'}
+                </button>
 
                 {soLeituraGlosa ? (
                   <p className="text-sm whitespace-pre-wrap text-violet-900">{item.motivo_glosa}</p>

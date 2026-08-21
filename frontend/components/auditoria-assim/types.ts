@@ -2,6 +2,13 @@ export type AuditoriaAssimItem = {
   bloco_id: string | null
   paciente_id: string | null
   paciente_nome: string | null
+  /**
+   * A carteirinha pontuada (`empresa.matricula.dep`) que a RPC monta a partir de
+   * `agenda_tita.numero_carteirinha`. É a chave que casa com
+   * `autorizacoes_assim.matricula`, e por isso a Análise de Reincidência depende
+   * dela. Nula nas linhas de falta, que são sintetizadas no serviço.
+   */
+  carteirinha: string | null
   data_atendimento: string | null
   hora_inicial: string | null
   codigo_tuss: string | null
@@ -59,6 +66,58 @@ export type AuditoriaFilters = {
   situacao: string
   data: string
   horario_bloco: string
+}
+
+/**
+ * Uma autorização como a ASSIM a registrou, lida direto de `autorizacoes_assim`.
+ *
+ * Existe separada de `AuditoriaAssimItem` porque a auditoria é dirigida pela
+ * SESSÃO: ela só mostra autorização que casou com uma sessão agendada. A que
+ * sobrou — a excedente, que é justamente a que estoura a cota semanal e provoca
+ * a glosa 1601 — não tem sessão para se pendurar e por isso não existe em
+ * `AuditoriaAssimItem` nenhum.
+ *
+ * `data_execucao` é `timestamp without time zone` guardando hora de São Paulo.
+ * Lido cru pelo PostgREST chega sem sufixo de fuso: formatar por fatia de
+ * string, nunca via `new Date()`.
+ */
+export type AutorizacaoAssimSemana = {
+  guia: string
+  matricula: string | null
+  paciente_nome: string | null
+  data_execucao: string | null
+  status: string | null
+  codigo_tuss: string | null
+  codigo_erro: string | null
+  descricao_erro: string | null
+  teve_token: boolean | null
+  token: string | null
+}
+
+/**
+ * O placar de um TUSS na semana: a cota (o que estava agendado) contra o que a
+ * ASSIM de fato processou.
+ *
+ * `excedente` mede sobre `liberadas`, não sobre `autorizadas` — recusa não
+ * consome cota. Os dois números ficam visíveis para que a diferença entre
+ * "pediram demais" e "pediram e levaram demais" não se perca.
+ */
+export type PlacarTuss = {
+  codigo_tuss: string
+  terapias: string
+  agendadas: number
+  autorizadas: number
+  liberadas: number
+  excedente: number
+}
+
+/** O que a Análise de Reincidência precisa saber para abrir já resolvida. */
+export type AlvoAnalise = {
+  pacienteNome: string | null
+  /** Vem preenchida quando se abre pela linha; pela busca livre, nasce nula. */
+  carteirinha: string | null
+  /** Qualquer dia da semana a exibir — o hook recua até a segunda. */
+  data: string
 }
 
 export type TokenMensalItem = {

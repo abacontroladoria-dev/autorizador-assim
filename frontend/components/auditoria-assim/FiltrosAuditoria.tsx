@@ -1,13 +1,15 @@
 'use client'
 
 import { useState } from 'react'
-import { CalendarDays, Clock, KeySquare, Search, SlidersHorizontal } from 'lucide-react'
+import { CalendarDays, CalendarSearch, Clock, KeySquare, Search, SlidersHorizontal } from 'lucide-react'
 import type { AuditoriaFilters } from './types'
 import ModalTokenMensal from './ModalTokenMensal'
 
 type Props = {
   filters: AuditoriaFilters
   onChange: (filters: AuditoriaFilters) => void
+  /** Abre a Análise de Reincidência na semana da data filtrada, sem paciente. */
+  onAbrirAnalise: () => void
 }
 
 // `NAO_SOLICITADA` aqui é o grupo (inclui Solicitação Cancelada), o mesmo
@@ -43,7 +45,7 @@ const HORARIOS_BLOCOS = [
   { value: '17:00-17:40', label: '17:00 - 17:40' },
 ]
 
-export default function FiltrosAuditoria({ filters, onChange }: Props) {
+export default function FiltrosAuditoria({ filters, onChange, onAbrirAnalise }: Props) {
   const [conferenciaAberta, setConferenciaAberta] = useState(false)
 
   function update<K extends keyof AuditoriaFilters>(key: K, value: AuditoriaFilters[K]) {
@@ -52,7 +54,15 @@ export default function FiltrosAuditoria({ filters, onChange }: Props) {
 
   return (
     <div className="bg-white/90 backdrop-blur border border-white/50 rounded-2xl p-3 shadow-sm">
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-[180px_1fr_200px_180px_auto]">
+      {/* A faixa única de seis colunas só a partir de `xl`.
+          Medido: ela pede 1021px, e a área de conteúdo tem ~990px numa tela de
+          1280 (a sidebar fixa come 256px) — ou seja, a barra estourava
+          horizontalmente no laptop mais comum. Já estourava antes do botão de
+          reincidência, abaixo de 1024; o botão novo levou o problema para o
+          1280. Duas colunas no intervalo médio resolvem os dois casos sem
+          apertar nenhum controle: a barra fica mais alta, nunca mais estreita
+          que o conteúdo. */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-[180px_1fr_200px_180px_auto_auto]">
 
         <label className="relative">
           <CalendarDays className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -114,6 +124,20 @@ export default function FiltrosAuditoria({ filters, onChange }: Props) {
         >
           <KeySquare size={16} />
           Conferência de Filipetas
+        </button>
+
+        {/* Brand Outline, e não um segundo preenchido: a barra já tem uma ação
+            primária. Dois botões de steel cheio ao lado um do outro diriam que
+            as duas são a ação principal desta tela — e nenhuma é: conferir
+            filipeta é rotina diária, analisar reincidência é diagnóstico. */}
+        <button
+          type="button"
+          onClick={onAbrirAnalise}
+          title="Cota semanal por TUSS: agendado × autorizado"
+          className="flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-2xl border border-brand bg-white px-4 text-sm font-semibold text-brand-fg transition hover:bg-brand-hover focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none"
+        >
+          <CalendarSearch size={16} />
+          Reincidência
         </button>
 
       </div>
