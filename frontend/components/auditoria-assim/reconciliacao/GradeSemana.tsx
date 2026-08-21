@@ -1,6 +1,5 @@
 'use client'
 
-import { iconeTerapia } from '@/lib/cronograma/iconeTerapia'
 import type { LinhaGrade } from '../types'
 import CartaoAtendimento from './CartaoAtendimento'
 import { formatarDia } from './datas'
@@ -14,20 +13,22 @@ function rotuloColuna(iso: string): { nome: string; data: string } {
 }
 
 /**
- * A semana do paciente como calendário: TUSS nas linhas, dias úteis nas colunas.
+ * A semana do paciente como agenda: horários nas linhas, dias úteis nas colunas.
  *
- * É o elemento principal do modal, e por isso é o único que rola. A primeira
- * coluna fica grudada na esquerda porque, com scroll horizontal, uma célula sem
- * o nome da terapia ao lado não diz nada — o horário sozinho não identifica o
- * atendimento.
+ * É o elemento principal do modal, e por isso é o único que rola. A coluna do
+ * horário fica grudada na esquerda porque, com rolagem lateral, uma célula sem a
+ * escala ao lado deixa de dizer a que hora aquele atendimento pertence — e a
+ * hora é justamente o eixo.
  *
- * Largura mínima de 9,5rem por dia é medida, não estética: abaixo disso a guia
- * de seis dígitos em tabular-nums quebra em duas linhas e o cartão deixa de ser
- * lido de relance, que é a única razão de ele existir.
+ * Largura mínima de 11rem por dia é medida, não estética: abaixo disso o nome da
+ * terapia quebra em três linhas e o cartão deixa de ser lido de relance, que é a
+ * única razão de ele existir. Onde a coluna é larga (telas grandes), dois
+ * atendimentos da mesma faixa cabem lado a lado; onde é estreita, eles
+ * empilham — encolher o cartão até caber seria trocar legibilidade por simetria.
  *
- * Célula vazia recebe um travessão, nunca "sem sessão" repetido cinco vezes por
- * linha: o vazio é o estado mais comum de uma grade semanal, e escrevê-lo por
- * extenso faz o ruído crescer justamente com o tamanho da tela.
+ * Célula vazia fica VAZIA. Numa agenda o vazio é a maioria das células, e
+ * escrever "sem sessão" em cada uma faz o ruído crescer com o tamanho da tela; o
+ * dia inteiro sem nada, esse sim, é dito uma vez no cabeçalho da coluna.
  */
 export default function GradeSemana({
   linhas,
@@ -45,13 +46,17 @@ export default function GradeSemana({
   podeVincular: boolean
   onVincularGuia: (guia: string) => void
 }) {
+  const diasVazios = new Set(
+    dias.filter((dia) => linhas.every((linha) => (linha.celulas[dia] ?? []).length === 0))
+  )
+
   return (
     // `relative` mantém a rolagem lateral aqui dentro: sem contêiner
     // posicionado, a largura mínima das colunas escapa do `overflow-x-auto` e é
     // o documento que rola de lado (medido em 390px).
     <div className="relative overflow-x-auto">
       {/*
-        As larguras mínimas das colunas somam ~57,5rem. Abaixo disso a grade
+        As larguras mínimas das colunas somam ~59,5rem. Abaixo disso a grade
         transborda e o contêiner rola de lado, em vez de espremer os cartões até
         a ilegibilidade; acima, o `1fr` distribui a sobra pelos cinco dias.
 
@@ -61,10 +66,10 @@ export default function GradeSemana({
         logo acima é anunciado por `aria-live`, e cada cartão carrega o estado
         escrito.
       */}
-      <div className="grid w-full grid-cols-[minmax(10rem,13rem)_repeat(5,minmax(9.5rem,1fr))]">
+      <div className="grid w-full grid-cols-[4.5rem_repeat(5,minmax(11rem,1fr))]">
         {/* Cabeçalho */}
-        <div className="sticky left-0 z-20 border-b border-slate-200 bg-white px-4 py-2.5 text-[11px] font-semibold text-slate-500">
-          Terapias
+        <div className="sticky left-0 z-20 border-b border-slate-200 bg-white px-3 py-2.5 text-right text-[11px] font-semibold text-slate-500">
+          Horário
         </div>
         {dias.map((dia) => {
           const { nome, data } = rotuloColuna(dia)
@@ -78,38 +83,32 @@ export default function GradeSemana({
             >
               {nome} <span className="tabular-nums">{data}</span>
               {ehHoje && <span className="ml-1 font-medium normal-case">· hoje</span>}
+              {/* Dito uma vez, no alto da coluna: repetir isso em cada faixa
+                  encheria o dia mais vazio de texto. */}
+              {diasVazios.has(dia) && (
+                <span className="mt-0.5 block font-normal text-slate-400 normal-case">
+                  Nenhum atendimento
+                </span>
+              )}
             </div>
           )
         })}
 
-        {/* Linhas */}
+        {/* A escala de horários */}
         {linhas.map((linha) => {
-          const Icone = iconeTerapia(linha.terapias || linha.codigo_tuss)
+          const semHora = linha.hora === '—'
           return (
-            <div key={linha.codigo_tuss} className="contents">
-              <div className="sticky left-0 z-10 flex items-start gap-2.5 border-b border-slate-100 bg-white px-4 py-3">
-                <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-brand-surface text-brand-fg">
-                  <Icone size={14} aria-hidden />
-                </span>
-                <div className="min-w-0">
-                  <p
-                    className="text-[13px] leading-tight font-semibold text-slate-800"
-                    title={linha.terapias || undefined}
-                  >
-                    {linha.terapias || 'Terapia não identificada'}
-                  </p>
-                  <p className="mt-0.5 font-mono text-[11px] tabular-nums text-slate-500">
-                    {linha.codigo_tuss}
-                  </p>
-                  {/* A frequência esperada sai da própria semana — é o maior número
-                      de sessões desse TUSS num único dia. Sem sessão nenhuma (linha
-                      que só tem guia sobrando), não há o que afirmar. */}
-                  {linha.sessoesPorDia > 0 && (
-                    <p className="mt-0.5 text-[11px] text-slate-500">
-                      {linha.sessoesPorDia} {linha.sessoesPorDia === 1 ? 'sessão' : 'sessões'}/dia
-                    </p>
-                  )}
-                </div>
+            <div key={linha.hora} className="contents">
+              <div className="sticky left-0 z-10 border-b border-slate-100 bg-white px-3 py-3 text-right">
+                {semHora ? (
+                  <span className="text-[10px] leading-tight font-semibold text-slate-400">
+                    sem horário
+                  </span>
+                ) : (
+                  <span className="text-[12px] leading-none font-semibold tabular-nums text-slate-500">
+                    {linha.hora}
+                  </span>
+                )}
               </div>
 
               {dias.map((dia) => {
@@ -117,25 +116,21 @@ export default function GradeSemana({
                 return (
                   <div
                     key={dia}
-                    className={`border-b border-l border-slate-100 p-2 ${
+                    className={`min-h-14 border-b border-l border-slate-100 p-2 ${
                       dia === hoje ? 'bg-brand-surface/40' : ''
                     }`}
                   >
-                    {cartoes.length === 0 ? (
-                      <p className="py-3 text-center text-[11px] text-slate-400">
-                        <span aria-hidden>—</span>
-                        <span className="sr-only">Nenhum atendimento</span>
-                      </p>
-                    ) : (
-                      <div className="flex flex-col gap-1.5">
+                    {cartoes.length > 0 && (
+                      <div className="flex flex-wrap items-start gap-1.5">
                         {cartoes.map((cartao) => (
-                          <CartaoAtendimento
-                            key={cartao.chave}
-                            cartao={cartao}
-                            codigosGlosa={codigosGlosa}
-                            podeVincular={podeVincular}
-                            onVincular={onVincularGuia}
-                          />
+                          <div key={cartao.chave} className="min-w-0 grow basis-34">
+                            <CartaoAtendimento
+                              cartao={cartao}
+                              codigosGlosa={codigosGlosa}
+                              podeVincular={podeVincular}
+                              onVincular={onVincularGuia}
+                            />
+                          </div>
                         ))}
                       </div>
                     )}

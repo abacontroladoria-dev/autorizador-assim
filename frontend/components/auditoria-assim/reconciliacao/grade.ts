@@ -8,27 +8,56 @@ import type {
 import type { EstadoAutorizacao } from './LinhaAutorizacao'
 import { diaDoTimestamp, horaDoTimestamp } from './datas'
 
+/** A faixa dos atendimentos cujo horário a origem não informou. Sempre a última. */
+const SEM_HORA = '—'
+
 /**
- * A semana do paciente como grade: TUSS nas linhas, dias úteis nas colunas.
+ * "14:34" → "14:00". Nula quando não há hora para arredondar.
  *
- * Por que a grade e não duas listas lado a lado — que foi o desenho anterior:
- * a pergunta que a tela responde é "a cota desta terapia bateu nesta semana?", e
- * a cota é por TUSS. Duas colunas cronológicas obrigavam a pessoa a cruzar
- * mentalmente sessão e guia linha a linha; a grade põe as duas na MESMA célula.
+ * Por fatia de string, como todo horário nesta tela: `hora_inicial` é `time` e
+ * `data_execucao` é `timestamp without time zone` guardando hora de São Paulo —
+ * passar qualquer um dos dois por `new Date()` é o caminho que já fez dois
+ * campos da mesma linha discordarem em 3h.
+ */
+function faixaDaHora(hora: string): string | null {
+  if (!/^\d{2}:\d{2}$/.test(hora)) return null
+  return `${hora.slice(0, 2)}:00`
+}
+
+/**
+ * A semana do paciente como agenda: HORÁRIOS nas linhas, dias úteis nas colunas.
+ *
+ * O eixo vertical era o TUSS até 2026-08-21, e a troca não foi estética. A
+ * pergunta que se faz de frente para esta tela é "em que dia e hora o paciente
+ * foi atendido, e qual é a situação daquela autorização?" — e com o TUSS nas
+ * linhas o mesmo dia aparecia repartido em quatro linhas distantes, obrigando a
+ * remontar a agenda de cabeça. A cota por TUSS, que era o que a grade antiga
+ * mostrava, não se perdeu: ela vive nos chips do painel de filtros, onde
+ * `PlacarTuss` já a calculava.
+ *
+ * A escala vertical é CONTÍNUA entre a primeira e a última hora que a semana de
+ * fato tem (nunca 00:00–23:00 fixo): uma faixa vazia no meio do dia é
+ * informação — mostra o intervalo entre o turno da manhã e o da tarde —, mas
+ * faixas vazias além das pontas são só rolagem.
  *
  * As duas espécies de cartão convivem de propósito, e não medem a mesma coisa:
  *
- * - a SESSÃO é posicionada pela `data_atendimento` — quando o paciente foi;
- * - a AUTORIZAÇÃO sem par é posicionada pelo dia de `data_execucao`, que é o
- *   instante em que a ASSIM a registrou no portal e **não** a data do
- *   atendimento (ver `reference_data_execucao_assim`). Uma guia autorizada na
- *   quarta pode cobrir a sessão de segunda — por isso o cartão diz "autorizada
- *   em", e por isso escolher a sessão que ela cobre continua sendo um ato
- *   manual, no modal de vínculo.
+ * - a SESSÃO é posicionada pela `data_atendimento` + `hora_inicial` — quando o
+ *   paciente foi;
+ * - a AUTORIZAÇÃO sem par é posicionada por `data_execucao`, que é o instante em
+ *   que a ASSIM a registrou no portal e **não** a data do atendimento (ver
+ *   `reference_data_execucao_assim`). Uma guia autorizada quarta às 14:34 pode
+ *   cobrir a sessão de segunda às 09:20 — por isso o cartão diz "autorizada em",
+ *   e por isso escolher a sessão que ela cobre continua sendo um ato manual, no
+ *   modal de vínculo.
  *
  * Guia PAREADA não vira cartão próprio: ela já está impressa no cartão da sessão
  * que cobriu. Repeti-la faria a mesma autorização aparecer duas vezes na semana
  * e inflaria visualmente uma cota que está correta.
+ *
+ * Duração não é representada porque não existe: `get_auditoria_assim` devolve
+ * `hora_inicial` e não devolve hora final. Desenhar um bloco de 40 ou 60 minutos
+ * aqui seria afirmar em pixels uma coisa que o dado não diz.
  */
 export function montarGrade(
   sessoes: AuditoriaAssimItem[],
@@ -39,43 +68,30 @@ export function montarGrade(
 ): LinhaGrade[] {
   const diasValidos = new Set(dias)
   const terapiaDoTuss = new Map(placar.map((p) => [p.codigo_tuss, p.terapias]))
+  const nomeDaTerapia = (codigo: string | null) => terapiaDoTuss.get(codigo ?? '—') || null
 
-  const linhas = new Map<string, LinhaGrade & { porDia: Map<string, number> }>()
-
-  const abrir = (codigo: string | null) => {
-    const chave = codigo ?? '—'
-    let atual = linhas.get(chave)
-    if (!atual) {
-      atual = {
-        codigo_tuss: chave,
-        terapias: terapiaDoTuss.get(chave) ?? '',
-        sessoesPorDia: 0,
-        celulas: Object.fromEntries(dias.map((d) => [d, [] as CartaoGrade[]])),
-        porDia: new Map<string, number>(),
-      }
-      linhas.set(chave, atual)
-    }
-    return atual
-  }
+  const lancados: { dia: string; faixa: string; cartao: CartaoGrade }[] = []
 
   for (const s of sessoes) {
     const dia = s.data_atendimento ?? ''
     if (!diasValidos.has(dia)) continue
-    const linha = abrir(s.codigo_tuss)
-    if (!linha.terapias && s.terapias) linha.terapias = s.terapias
-    linha.celulas[dia].push({
-      tipo: 'sessao',
-      chave: s.bloco_id ?? `${dia}-${s.hora_inicial}-${s.codigo_tuss}`,
-      hora: s.hora_inicial?.slice(0, 5) ?? '—',
-      codigo_tuss: s.codigo_tuss,
-      guia: s.guia,
-      situacao: s.situacao,
-      terapia: s.terapias,
-      legenda: s.profissionais ?? s.observacao ?? null,
-      teve_token: s.teve_token,
-      token: s.token,
+    const hora = s.hora_inicial?.slice(0, 5) ?? SEM_HORA
+    lancados.push({
+      dia,
+      faixa: faixaDaHora(hora) ?? SEM_HORA,
+      cartao: {
+        tipo: 'sessao',
+        chave: s.bloco_id ?? `${dia}-${hora}-${s.codigo_tuss}`,
+        hora,
+        codigo_tuss: s.codigo_tuss,
+        guia: s.guia,
+        situacao: s.situacao,
+        terapia: s.terapias || nomeDaTerapia(s.codigo_tuss),
+        legenda: s.profissionais ?? s.observacao ?? null,
+        teve_token: s.teve_token,
+        token: s.token,
+      },
     })
-    linha.porDia.set(dia, (linha.porDia.get(dia) ?? 0) + 1)
   }
 
   for (const a of autorizacoes) {
@@ -83,30 +99,57 @@ export function montarGrade(
     if (estado === 'pareada') continue
     const dia = diaDoTimestamp(a.data_execucao) ?? ''
     if (!diasValidos.has(dia)) continue
-    const linha = abrir(a.codigo_tuss)
-    linha.celulas[dia].push({
-      tipo: 'autorizacao',
-      chave: `guia-${a.guia}-${a.data_execucao ?? ''}`,
-      hora: horaDoTimestamp(a.data_execucao),
-      codigo_tuss: a.codigo_tuss,
-      guia: a.guia,
-      estado,
-      status: a.status,
-      descricao_erro: a.descricao_erro,
-      teve_token: a.teve_token,
-      token: a.token,
+    const hora = horaDoTimestamp(a.data_execucao)
+    lancados.push({
+      dia,
+      faixa: faixaDaHora(hora) ?? SEM_HORA,
+      cartao: {
+        tipo: 'autorizacao',
+        chave: `guia-${a.guia}-${a.data_execucao ?? ''}`,
+        hora,
+        codigo_tuss: a.codigo_tuss,
+        guia: a.guia,
+        terapia: nomeDaTerapia(a.codigo_tuss),
+        estado,
+        status: a.status,
+        descricao_erro: a.descricao_erro,
+        teve_token: a.teve_token,
+        token: a.token,
+      },
     })
   }
 
-  return [...linhas.values()]
-    .map(({ porDia, ...linha }) => {
-      for (const dia of dias) linha.celulas[dia].sort((a, b) => a.hora.localeCompare(b.hora))
-      return { ...linha, sessoesPorDia: Math.max(0, ...porDia.values()) }
-    })
-    // Terapia primeiro (é o que a pessoa lê), TUSS como desempate estável.
-    .sort(
-      (a, b) =>
-        (a.terapias || 'zzz').localeCompare(b.terapias || 'zzz', 'pt-BR') ||
-        a.codigo_tuss.localeCompare(b.codigo_tuss)
-    )
+  if (lancados.length === 0) return []
+
+  const criar = (hora: string): LinhaGrade => ({
+    hora,
+    celulas: Object.fromEntries(dias.map((d) => [d, [] as CartaoGrade[]])),
+  })
+
+  const faixas = new Set(lancados.map((l) => l.faixa))
+  const cheias = [...faixas].filter((f) => f !== SEM_HORA).map((f) => Number(f.slice(0, 2)))
+
+  const linhas: LinhaGrade[] = []
+  if (cheias.length > 0) {
+    for (let h = Math.min(...cheias); h <= Math.max(...cheias); h += 1) {
+      linhas.push(criar(`${String(h).padStart(2, '0')}:00`))
+    }
+  }
+  // Atendimento sem horário existe (falta sintetizada, guia com `data_execucao`
+  // truncada) e some da tela se não tiver faixa. Vai para o pé da escala, onde
+  // não empurra a agenda real para baixo.
+  if (faixas.has(SEM_HORA)) linhas.push(criar(SEM_HORA))
+
+  const porFaixa = new Map(linhas.map((l) => [l.hora, l]))
+  for (const { dia, faixa, cartao } of lancados) porFaixa.get(faixa)?.celulas[dia].push(cartao)
+
+  // Dentro da célula, o minuto exato ordena — é o que faz dois atendimentos na
+  // mesma faixa se lerem na ordem em que aconteceram.
+  for (const linha of linhas) {
+    for (const dia of dias) {
+      linha.celulas[dia].sort((a, b) => a.hora.localeCompare(b.hora))
+    }
+  }
+
+  return linhas
 }

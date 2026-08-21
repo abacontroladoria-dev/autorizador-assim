@@ -180,6 +180,11 @@ export type PacientePendencias = {
  * não casou com sessão nenhuma (posicionada pelo dia em que a ASSIM a
  * registrou). A segunda é justamente a que não aparece em tela nenhuma do
  * sistema — é ela que estoura a cota semanal.
+ *
+ * As duas carregam `terapia` porque a grade é indexada por HORÁRIO, não por
+ * terapia: o nome dela deixou de ser o cabeçalho da linha e passou a ser
+ * informação do cartão, senão o atendimento chega ao olho como um par de números
+ * sem assunto.
  */
 export type CartaoGrade =
   | {
@@ -203,6 +208,12 @@ export type CartaoGrade =
       hora: string
       codigo_tuss: string | null
       guia: string
+      /**
+       * O nome da terapia do TUSS da guia, quando a semana o revela. Guia de um
+       * TUSS sem sessão nenhuma (a "sobrando" pura) não tem de onde tirar nome —
+       * fica nula, e o cartão mostra só o código.
+       */
+      terapia: string | null
       /** Ver `EstadoAutorizacao` em reconciliacao/LinhaAutorizacao.tsx. */
       estado: 'sem-vinculo' | 'fora-da-semana'
       status: string | null
@@ -211,12 +222,19 @@ export type CartaoGrade =
       token: string | null
     }
 
-/** Uma linha da grade: um TUSS, as terapias que ele nomeia, e os 5 dias. */
+/**
+ * Uma linha da grade: uma faixa de horário e os 5 dias úteis dela.
+ *
+ * A linha é a HORA CHEIA ("14:00"), não o horário exato do atendimento. A sessão
+ * da clínica cai em passos de 40 minutos e `data_execucao` de uma guia é o
+ * instante em que a ASSIM respondeu — 14:34, 09:07. Uma linha por horário exato
+ * daria uma escala de dezenas de faixas com um cartão em cada, que é o oposto de
+ * uma agenda: o horário cheio agrupa, e o minuto exato continua impresso no
+ * cartão.
+ */
 export type LinhaGrade = {
-  codigo_tuss: string
-  terapias: string
-  /** Máximo de sessões desse TUSS num único dia da semana. 0 quando só há guia. */
-  sessoesPorDia: number
+  /** "08:00" … "18:00", ou "—" na faixa dos atendimentos sem horário. */
+  hora: string
   /** Indexado pela data ISO do dia útil. */
   celulas: Record<string, CartaoGrade[]>
 }

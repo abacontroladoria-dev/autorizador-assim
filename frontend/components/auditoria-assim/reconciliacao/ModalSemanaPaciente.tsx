@@ -363,7 +363,7 @@ export default function ModalSemanaPaciente({
               <p className="text-sm font-medium text-slate-600">
                 {analise.tussFiltro || analise.estadoFiltro
                   ? 'Nada neste recorte'
-                  : 'Nenhuma terapia nem guia nesta semana'}
+                  : 'Nenhum atendimento nem guia nesta semana'}
               </p>
               <p className="max-w-md text-xs text-slate-500">
                 {analise.tussFiltro || analise.estadoFiltro
