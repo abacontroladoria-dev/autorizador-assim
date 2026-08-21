@@ -187,7 +187,13 @@ export const SITUACAO_FALLBACK: Omit<SituacaoConfigEntry, 'label'> = {
   icon: AlertCircle,
 }
 
-function resolverConfig(situacao: string): SituacaoConfigEntry {
+/**
+ * Exportada porque a grade semanal precisa das MESMAS quatro formas (label,
+ * surface, strong, icon) para vestir um cartão que não é pill nem bloco. Uma
+ * quarta cópia do `?? fallback` é o jeito de um estado novo aparecer certo em
+ * três lugares e cinza no quarto.
+ */
+export function resolverConfig(situacao: string): SituacaoConfigEntry {
   return SITUACAO_CONFIG[situacao] ?? { label: situacao, ...SITUACAO_FALLBACK }
 }
 

@@ -36,6 +36,21 @@ export function dataHoraCurta(valor: string | null): string {
   return `${formatarDia(valor.slice(0, 10))} ${horaDoTimestamp(valor)}`
 }
 
+/**
+ * "Hoje 09:42" ou "20/07 09:42" — a coluna "última atualização" da listagem.
+ *
+ * A comparação com hoje é textual e no fuso do navegador, que é o mesmo fuso em
+ * que `data_execucao` guarda a hora (São Paulo, sem sufixo). Converter por
+ * `new Date()` é o caminho que já fez "Autorizado em" e "Executado em"
+ * discordarem em 3h.
+ */
+export function dataHoraRelativa(valor: string | null): string {
+  if (!valor) return '—'
+  const dia = valor.slice(0, 10)
+  const hora = horaDoTimestamp(valor)
+  return dia === hojeLocal() ? `Hoje ${hora}` : `${formatarDia(dia)} ${hora}`
+}
+
 /** Sem acento e sem caixa: "joao" acha "João". */
 export function normalizar(valor: string): string {
   return valor.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase()

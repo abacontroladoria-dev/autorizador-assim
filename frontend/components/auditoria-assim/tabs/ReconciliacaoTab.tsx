@@ -6,14 +6,24 @@ import { useAnaliseReincidencia } from '@/hooks/useAnaliseReincidencia'
 import { useGlosaCodigos } from '@/hooks/useGlosaCodigos'
 import { JANELA_PADRAO, useReconciliacaoAssim } from '@/hooks/useReconciliacaoAssim'
 import ModalConfirmarVinculo from '../ModalConfirmarVinculo'
-import FilaOrfas from '../reconciliacao/FilaOrfas'
+import ListaPendencias from '../reconciliacao/ListaPendencias'
 import ModalEscolherSessao from '../reconciliacao/ModalEscolherSessao'
-import PainelSemana from '../reconciliacao/PainelSemana'
-import { diaDoTimestamp, hojeLocal } from '../reconciliacao/datas'
+import ModalSemanaPaciente from '../reconciliacao/ModalSemanaPaciente'
+import { hojeLocal } from '../reconciliacao/datas'
 import type { AlvoAnalise, CandidataVinculo, GuiaOrfa } from '../types'
 
 /** Os papéis que a RPC aceita para escrever. `diretoria` vê, mas não vincula. */
 const PAPEIS_QUE_VINCULAM = new Set(['admin', 'autorizacao', 'recepcao'])
+
+/**
+ * Os diálogos desta aba, sempre um só de cada vez.
+ *
+ * `grade` é a semana do paciente; `escolher` é "esta guia cobre qual sessão?";
+ * `confirmar` é o aceite. Não empilham porque cada um instala um focus trap
+ * próprio, e dois traps ativos ao mesmo tempo brigam pelo Tab e fazem o Escape
+ * fechar os dois. A grade volta ao fim do fluxo, já refletindo o vínculo.
+ */
+type Etapa = 'grade' | 'escolher' | 'confirmar'
 
 type Props = {
   /** Alvo vindo da Conferência (linha em glosa). Nulo na navegação normal. */
@@ -22,18 +32,19 @@ type Props = {
 }
 
 /**
- * Reconciliação de Autorizações — a semana do paciente, e a ação sobre ela.
+ * Autorizações com pendências — a fila da semana, e a semana do paciente dentro dela.
  *
- * O problema que ela resolve: quando a ASSIM glosa uma solicitação do Pulsar e o
- * setor consegue a liberação depois, direto no portal, o match posicional da
+ * O problema que a aba resolve: quando a ASSIM glosa uma solicitação do Pulsar e
+ * o setor consegue a liberação depois, direto no portal, o match posicional da
  * Conferência deixa a glosa casada com a sessão e a liberação órfã. A sessão fica
  * GLOSA para sempre e o faturamento vê pendência que não existe.
  *
- * O desenho segue o modo como o trabalho acontece de verdade: a análise semanal é
- * COMO se descobre que há algo a vincular — não um anexo do fluxo de vínculo. Por
- * isso a fila à esquerda apenas indexa ("quais pacientes merecem uma olhada"), o
- * painel explica (cota por TUSS, cronograma × autorizações), e a ação mora dentro
- * do painel: a guia sem vínculo pede a sessão, e a sessão está ali do lado.
+ * O desenho segue a ordem em que a pergunta é feita de verdade. Primeiro "quem
+ * precisa de mim nesta semana?" — a listagem, um paciente por linha, com as
+ * cinco espécies de pendência lado a lado. Depois "o que aconteceu com esta
+ * pessoa?" — a grade semanal no modal, terapias nas linhas e dias nas colunas,
+ * onde a guia sem vínculo aparece no dia em que foi autorizada. E a ação mora na
+ * evidência: clicar na guia âmbar é o que abre a escolha da sessão.
  *
  * Foi medido em produção (2026-08-20) que 39% das órfãs NÃO cobrem sessão
  * nenhuma — são autorizações extras. Por isso "sem sessão correspondente" é ação
@@ -46,18 +57,17 @@ export default function ReconciliacaoTab({ alvo, onAlvoConsumido }: Props) {
   const codigosGlosa = useGlosaCodigos()
 
   const analise = useAnaliseReincidencia(alvo?.data ?? hojeLocal(), alvo?.pacienteNome ?? null)
-  const { reabrirEm, recarregar: recarregarSemana } = analise
+  const { reabrirEm, escolherPaciente, recarregar: recarregarSemana } = analise
 
   const fila = useReconciliacaoAssim(recarregarSemana)
   const { selecionarGuia } = fila
 
-  const [filaRecolhida, setFilaRecolhida] = useState(false)
-
-  // Dois diálogos em SEQUÊNCIA, nunca empilhados: escolher a sessão e confirmar
-  // o vínculo são passos distintos, e dois focus traps ativos ao mesmo tempo
-  // quebram a devolução do foco. Abrir um fecha o outro.
-  const [escolhendo, setEscolhendo] = useState(false)
-  const [modal, setModal] = useState<{ candidata: CandidataVinculo | null } | null>(null)
+  // A semana do paciente está aberta? Separado da `etapa` de propósito: durante
+  // a escolha da sessão a grade sai da tela, mas o paciente continua aberto — é
+  // para ela que o fluxo volta.
+  const [semanaAberta, setSemanaAberta] = useState(!!alvo?.pacienteNome)
+  const [etapa, setEtapa] = useState<Etapa>('grade')
+  const [candidataEscolhida, setCandidataEscolhida] = useState<CandidataVinculo | null>(null)
 
   // A ponte vinda da Conferência. Consome o alvo depois de aplicá-lo, senão
   // voltar para esta aba mais tarde ressuscitaria a semana antiga — o erro mais
@@ -65,44 +75,33 @@ export default function ReconciliacaoTab({ alvo, onAlvoConsumido }: Props) {
   useEffect(() => {
     if (!alvo) return
     reabrirEm(alvo.data, alvo.pacienteNome, alvo.carteirinha)
+    setSemanaAberta(!!alvo.pacienteNome)
+    setEtapa('grade')
     onAlvoConsumido()
   }, [alvo, reabrirEm, onAlvoConsumido])
 
-  /**
-   * Clique na fila: reposiciona a semana no paciente e no período da guia, e
-   * NÃO abre o vínculo. A fila é índice — leva a pessoa até a evidência, que é
-   * onde ela decide.
-   */
-  const escolherDaFila = useCallback(
-    (g: GuiaOrfa | null) => {
-      void selecionarGuia(g?.guia ?? null)
-      if (g) reabrirEm(diaDoTimestamp(g.data_execucao) ?? hojeLocal(), g.paciente_nome, g.carteirinha)
-    },
-    [selecionarGuia, reabrirEm]
-  )
+  const fecharSemana = useCallback(() => {
+    setSemanaAberta(false)
+    escolherPaciente(null)
+  }, [escolherPaciente])
 
-  /** Clique em "sem vínculo": seleciona a guia e abre a escolha da sessão. */
+  /** Clique em "sem vínculo": seleciona a guia e troca a grade pela escolha da sessão. */
   const vincularGuia = useCallback(
     (guia: string) => {
       void selecionarGuia(guia)
-      setEscolhendo(true)
+      setEtapa('escolher')
     },
     [selecionarGuia]
   )
 
   /**
-   * A guia em foco.
-   *
-   * `fila.guiaAtual` procura no intervalo de 30 dias da fila; navegando para uma
-   * semana fora dele, a guia existe na tela mas não naquela lista. O fallback
-   * pela busca da própria semana evita que a faixa de escolha suma justamente
-   * quando se escolheu por ali.
+   * A guia em foco. Vem do recorte de órfãs da semana exibida — a mesma lista
+   * que classificou o cartão âmbar que foi clicado, então as duas nunca podem
+   * discordar sobre o que precisa de vínculo.
    */
   const guiaAtual = useMemo<GuiaOrfa | null>(
-    () =>
-      fila.guiaAtual ??
-      (fila.guiaSelecionada ? analise.orfasDaSemana.get(fila.guiaSelecionada) ?? null : null),
-    [fila.guiaAtual, fila.guiaSelecionada, analise.orfasDaSemana]
+    () => (fila.guiaSelecionada ? analise.orfasDaSemana.get(fila.guiaSelecionada) ?? null : null),
+    [fila.guiaSelecionada, analise.orfasDaSemana]
   )
 
   return (
@@ -113,50 +112,36 @@ export default function ReconciliacaoTab({ alvo, onAlvoConsumido }: Props) {
         </p>
       )}
 
-      {/* A fila recolhe para devolver largura às duas colunas: num laptop de
-          1280 a sidebar fixa já come 256px, e os 320px dela saem direto de onde
-          a leitura acontece. Padrão aberta, sem media query em JS — decidir isso
-          por `window.innerWidth` no primeiro render é divergência de hidratação. */}
-      <div
-        // `min-w-0` nos dois filhos não é zelo: item de grid nasce com
-        // `min-width: auto`, então a faixa de datas da fila (que tem largura
-        // mínima intrínseca maior que um celular) esticava a trilha e levava a
-        // página inteira a rolar de lado — medido, 341px de sobra em 390.
-        className={`grid grid-cols-1 gap-4 xl:h-[calc(100dvh-11rem)] ${
-          filaRecolhida ? 'xl:grid-cols-[3rem_1fr]' : 'xl:grid-cols-[320px_1fr]'
-        }`}
-      >
-        <FilaOrfas
-          de={fila.de}
-          ate={fila.ate}
-          setDe={fila.setDe}
-          setAte={fila.setAte}
-          busca={fila.busca}
-          setBusca={fila.setBusca}
-          pacientes={fila.pacientes}
-          total={fila.orfas.length}
-          carregando={fila.carregandoOrfas}
-          erro={fila.erroOrfas}
-          onRecarregar={() => void fila.recarregarOrfas()}
-          guiaSelecionada={fila.guiaSelecionada}
-          onSelecionar={escolherDaFila}
-          recolhida={filaRecolhida}
-          onAlternar={() => setFilaRecolhida((v) => !v)}
-        />
+      <ListaPendencias
+        pacientes={analise.pacientesDaSemana}
+        unidades={analise.unidadesDaSemana}
+        semanaInicio={analise.semanaInicio}
+        semanaFim={analise.semanaFim}
+        semanaAtual={analise.semanaAtual}
+        carregando={analise.loading}
+        erro={analise.erro}
+        onSemana={analise.irParaSemana}
+        onIrParaData={analise.irParaData}
+        onRecarregar={recarregarSemana}
+        onAbrir={(paciente) => {
+          escolherPaciente(paciente.nome, paciente.carteirinhas)
+          setSemanaAberta(true)
+          setEtapa('grade')
+        }}
+      />
 
-        <div className="h-[75dvh] min-h-0 min-w-0 xl:h-auto">
-          <PainelSemana
-            analise={analise}
-            podeVincular={podeVincular}
-            codigosGlosa={codigosGlosa}
-            onVincularGuia={vincularGuia}
-          />
-        </div>
-      </div>
+      <ModalSemanaPaciente
+        open={semanaAberta && etapa === 'grade'}
+        onClose={fecharSemana}
+        analise={analise}
+        podeVincular={podeVincular}
+        codigosGlosa={codigosGlosa}
+        onVincularGuia={vincularGuia}
+      />
 
       <ModalEscolherSessao
-        open={escolhendo}
-        onClose={() => setEscolhendo(false)}
+        open={etapa === 'escolher'}
+        onClose={() => setEtapa('grade')}
         guia={guiaAtual}
         candidatas={fila.candidatas}
         carregando={fila.carregandoCandidatas}
@@ -164,29 +149,31 @@ export default function ReconciliacaoTab({ alvo, onAlvoConsumido }: Props) {
         janelaDias={JANELA_PADRAO}
         podeVincular={podeVincular}
         onEscolher={(candidata) => {
-          setEscolhendo(false)
-          setModal({ candidata })
+          setCandidataEscolhida(candidata)
+          setEtapa('confirmar')
         }}
         onSemSessao={() => {
-          setEscolhendo(false)
-          setModal({ candidata: null })
+          setCandidataEscolhida(null)
+          setEtapa('confirmar')
         }}
       />
 
       <ModalConfirmarVinculo
-        open={modal !== null}
-        onClose={() => setModal(null)}
+        open={etapa === 'confirmar'}
+        onClose={() => setEtapa('grade')}
         guia={guiaAtual}
-        candidata={modal?.candidata ?? null}
+        candidata={candidataEscolhida}
         salvando={fila.salvando}
         onConfirmar={async (observacao) => {
           if (!guiaAtual) return
-          if (modal?.candidata) await fila.confirmarVinculo(modal.candidata, observacao)
+          if (candidataEscolhida) await fila.confirmarVinculo(candidataEscolhida, observacao)
           else await fila.descartarGuia(guiaAtual.guia, observacao)
-          // Os dois lados envelhecem juntos: a guia sai da fila e a sessão vira
-          // GLOSA_RESOLVIDA no cronograma, na mesma tela onde se clicou.
+          // Os dois lados envelhecem juntos: a guia sai da contagem de "sem
+          // vínculo" e a sessão vira GLOSA_RESOLVIDA na grade — na mesma tela
+          // para onde o fluxo volta.
           recarregarSemana()
-          setModal(null)
+          setCandidataEscolhida(null)
+          setEtapa('grade')
         }}
       />
     </div>

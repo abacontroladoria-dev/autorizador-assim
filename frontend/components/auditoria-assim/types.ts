@@ -106,11 +106,21 @@ export type PlacarTuss = {
   codigo_tuss: string
   terapias: string
   agendadas: number
+  /**
+   * Das `agendadas`, as que já aconteceram (data <= hoje, ou a semana inteira se
+   * ela já passou). É sobre estas — nunca sobre a semana toda — que "autorização
+   * faltando" faz sentido: numa segunda-feira, cobrar cobertura do que a clínica
+   * ainda vai atender na sexta transformaria toda a agenda em pendência.
+   */
+  decorridas: number
   autorizadas: number
   liberadas: number
   /** `Liberado *` — saiu e foi desfeita. Não entra em `liberadas`. */
   canceladas: number
+  /** Positivo = autorização a mais do que sessão agendada. Mede sobre `liberadas`. */
   excedente: number
+  /** Sessão já ocorrida sem liberação que a cubra. Nunca negativo. */
+  faltante: number
 }
 
 /**
@@ -120,6 +130,96 @@ export type PlacarTuss = {
  * contador de cada um é o próprio filtro dele. Nulo = todas.
  */
 export type EstadoFiltro = 'sem-vinculo' | 'glosa' | 'cancelada'
+
+/**
+ * As cinco espécies de pendência que a listagem semanal indexa.
+ *
+ * Três vêm do `ledger` (o estado das guias) e duas do `placar` (a cota por
+ * TUSS). Ficam num tipo só porque a listagem as trata igual: cada uma é uma
+ * coluna, um contador e um filtro — e um sexto valor entrando aqui tem de
+ * ganhar as três formas de uma vez.
+ */
+export type TipoPendencia = 'glosa' | 'cancelamento' | 'sem-vinculo' | 'faltando' | 'sobrando'
+
+/** Os cinco contadores de um paciente numa semana, mais o total. */
+export type ContagemPendencias = Record<TipoPendencia, number> & { total: number }
+
+/**
+ * Uma linha da listagem "Autorizações com pendências".
+ *
+ * `carteirinhas` é plural porque a carteirinha, e não o nome, é o que casa com
+ * `autorizacoes_assim.matricula` — e um mesmo paciente pode ter mais de uma
+ * (dependente que troca de titular, recadastro). Somá-las aqui é o que faz o
+ * modal abrir sem buscar nada: ele recorta a semana já carregada por estas
+ * chaves.
+ *
+ * `pacienteIds` com mais de um elemento significa homônimos somados na mesma
+ * linha — dito em tela, nunca escolhido em silêncio.
+ */
+export type PacientePendencias = {
+  /** Carteirinha quando existe, `nome:<NOME>` quando o paciente só tem falta. */
+  chave: string
+  nome: string
+  carteirinhas: string[]
+  pacienteIds: string[]
+  /** `convenio_nome` da agenda. Nesta aba é sempre um plano da ASSIM. */
+  plano: string | null
+  /** Inferida da sala agendada. Nula quando a origem não informou. */
+  unidade: string | null
+  contagem: ContagemPendencias
+  sessoes: number
+  /** Instante da autorização mais recente da semana. Não é a data do atendimento. */
+  ultimaAutorizacao: string | null
+}
+
+/**
+ * Um cartão dentro de uma célula da grade semanal.
+ *
+ * Duas espécies, porque a grade mostra duas coisas no mesmo eixo: a SESSÃO que a
+ * clínica agendou (posicionada pelo horário do atendimento) e a AUTORIZAÇÃO que
+ * não casou com sessão nenhuma (posicionada pelo dia em que a ASSIM a
+ * registrou). A segunda é justamente a que não aparece em tela nenhuma do
+ * sistema — é ela que estoura a cota semanal.
+ */
+export type CartaoGrade =
+  | {
+      tipo: 'sessao'
+      chave: string
+      /** `hora_inicial` do atendimento. */
+      hora: string
+      codigo_tuss: string | null
+      guia: string | null
+      situacao: string | null
+      terapia: string | null
+      /** Profissional, ou o motivo quando a linha é uma falta. */
+      legenda: string | null
+      teve_token: boolean | null
+      token: string | null
+    }
+  | {
+      tipo: 'autorizacao'
+      chave: string
+      /** Hora de `data_execucao` — quando a ASSIM registrou, não quando atendeu. */
+      hora: string
+      codigo_tuss: string | null
+      guia: string
+      /** Ver `EstadoAutorizacao` em reconciliacao/LinhaAutorizacao.tsx. */
+      estado: 'sem-vinculo' | 'fora-da-semana'
+      status: string | null
+      descricao_erro: string | null
+      teve_token: boolean | null
+      token: string | null
+    }
+
+/** Uma linha da grade: um TUSS, as terapias que ele nomeia, e os 5 dias. */
+export type LinhaGrade = {
+  codigo_tuss: string
+  terapias: string
+  /** Máximo de sessões desse TUSS num único dia da semana. 0 quando só há guia. */
+  sessoesPorDia: number
+  /** Indexado pela data ISO do dia útil. */
+  celulas: Record<string, CartaoGrade[]>
+}
 
 /** O que a Análise de Reincidência precisa saber para abrir já resolvida. */
 export type AlvoAnalise = {
