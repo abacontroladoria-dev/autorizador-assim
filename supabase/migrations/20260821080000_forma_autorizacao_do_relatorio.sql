@@ -330,9 +330,15 @@ SELECT
   public.forma_validacao_do_biofacial(fa.biofacial_assim)                AS relatorio_mapeado,
   count(*)                                                               AS linhas
 FROM public.fila_autorizacoes fa
-WHERE fa.forma_autorizacao        IS NOT NULL
-  AND fa.biofacial_assim          IS NOT NULL
-  AND fa.forma_autorizacao_origem = 'modal'
+WHERE fa.forma_autorizacao IS NOT NULL
+  AND fa.biofacial_assim   IS NOT NULL
+  -- IS DISTINCT FROM 'relatorio', e não `= 'modal'`: as linhas que a atendente
+  -- respondeu ANTES desta migration têm origem NULL, porque a coluna não
+  -- existia — 5.161 delas em 21/08/2026. Filtrar por igual a 'modal' esvaziaria
+  -- a view justamente onde está o histórico que ela serve para comparar. Só o
+  -- sync e o backfill escrevem 'relatorio', então tudo que não é 'relatorio'
+  -- veio do modal.
+  AND fa.forma_autorizacao_origem IS DISTINCT FROM 'relatorio'
 GROUP BY 1, 2, 3, 4
 ORDER BY fa.data_atendimento DESC, linhas DESC;
 

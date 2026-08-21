@@ -109,3 +109,24 @@ WHERE forma_autorizacao IS NOT NULL
   AND horario_autorizacao >= TIMESTAMP '2026-07-22 00:00:00'
 GROUP BY 1, 2
 ORDER BY 1, linhas DESC;
+
+
+-- ---------------------------------------------------------------------------
+-- 5. Carimbar 'modal' no que a atendente respondeu antes desta mudanca
+-- ---------------------------------------------------------------------------
+-- MEDIDO em 21/08/2026, depois de rodar o bloco 3: 146 linhas ficaram
+-- 'relatorio' (exatamente o buraco previsto no diagnostico) e 5.161 ficaram com
+-- origem NULL. Essas 5.161 nao sao um problema de dado: a coluna nao existia
+-- quando elas foram gravadas.
+--
+-- So o sync e o bloco 3 escrevem 'relatorio'. Logo, forma_autorizacao
+-- preenchida com origem nula = veio do modal, sem ambiguidade. Este UPDATE so
+-- torna explicito o que ja e verdade, e deixa a coluna completa para quem for
+-- ler depois sem conhecer esta historia.
+--
+-- Nao e obrigatorio: vw_forma_validacao_divergencias usa
+-- `IS DISTINCT FROM 'relatorio'` e enxerga essas linhas de qualquer jeito.
+UPDATE public.fila_autorizacoes
+SET forma_autorizacao_origem = 'modal'
+WHERE forma_autorizacao        IS NOT NULL
+  AND forma_autorizacao_origem IS NULL;
