@@ -25,6 +25,7 @@ import { toast } from 'react-hot-toast'
 import { salvarMotivoGlosa, salvarObservacaoManual } from '@/services/auditoria-assim.service'
 import type { AuditoriaAssimItem } from './types'
 import SituacaoBadge, { SITUACAO_CONFIG, SITUACAO_FALLBACK } from './SituacaoBadge'
+import { ehGlosa } from './situacoes'
 
 type Props = {
   item: AuditoriaAssimItem | null
@@ -191,7 +192,10 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
   // fato duas vezes, uma delas pela metade. O motivo tem um lugar só no modal,
   // e é o lado onde se age sobre ele. Fora da glosa o rodapé segue intacto —
   // ali ele carrega 'Liberado', o token e a observação, que não repetem nada.
-  const motivoJaMostradoAoLado = item.situacao === 'GLOSA' && respostaAssim !== null
+  // `ehGlosa`: em GLOSA_RESOLVIDA a coluna ao lado continua mostrando a resposta
+  // da ASSIM, então o rodapé repetiria o motivo do mesmo jeito.
+  const motivoJaMostradoAoLado = ehGlosa(item.situacao) && respostaAssim !== null
+
 
   return (
     <div
@@ -302,8 +306,11 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
           {/* Coluna direita — o que fazer a respeito do atendimento */}
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-4">
 
-            {/* Motivo da glosa — só para linhas GLOSA */}
-            {item.situacao === 'GLOSA' && (
+            {/* Motivo da glosa — em GLOSA e também em GLOSA_RESOLVIDA: o vínculo
+                não apaga a recusa, e é aqui que o motivo é lido e anotado.
+                Esconder a seção depois de resolvida jogaria fora justamente o
+                histórico que o vínculo se comprometeu a preservar. */}
+            {ehGlosa(item.situacao) && (
               <section className="shrink-0 rounded-xl border border-violet-200 bg-violet-50/40 p-3.5">
                 <h3 className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-violet-900">
                   <AlertOctagon size={14} />

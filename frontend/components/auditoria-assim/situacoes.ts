@@ -22,6 +22,20 @@
 export const GRUPO_NAO_SOLICITADAS = ['NAO_SOLICITADA', 'SOLICITACAO_CANCELADA'] as const
 
 /**
+ * `GLOSA_RESOLVIDA` deliberadamente NÃO é agrupada com `GLOSA`.
+ *
+ * O agrupamento acima existe porque a ação exigida é idêntica — solicitar de
+ * novo. Aqui as ações são opostas: glosa pede tratativa, glosa resolvida não
+ * pede nada. Somá-las faria o card violeta ("trate isso") listar linhas que não
+ * precisam de nada, e o número que a operação usa para dimensionar trabalho
+ * incluiria trabalho já feito.
+ *
+ * "Continuar contabilizando que houve glosa" é atendido por outras duas vias, em
+ * vez do agrupamento: o badge da linha diz GLOSA RESOLVIDA (a recusa continua
+ * visível na tela) e o card de Glosas traz a contagem do período como dica.
+ */
+
+/**
  * A linha entra no recorte pedido?
  *
  * `NAO_SOLICITADA` como filtro significa o GRUPO — é o valor que o card
@@ -35,5 +49,23 @@ export function situacaoNoRecorte(situacao: string | null, recorte: string): boo
   if (recorte === 'NAO_SOLICITADA') {
     return GRUPO_NAO_SOLICITADAS.includes(situacao as (typeof GRUPO_NAO_SOLICITADAS)[number])
   }
+  // 'GLOSA' segue sendo comparação exata: não inclui GLOSA_RESOLVIDA. Ver a nota
+  // acima — as duas pedem ações opostas, e o card de Glosas dimensiona trabalho.
   return situacao === recorte
+}
+
+/**
+ * A ASSIM recusou esta sessão — resolvida por vínculo posterior ou não.
+ *
+ * Pergunta diferente de `situacaoNoRecorte(s, 'GLOSA')`, que é "preciso tratar
+ * isto?". Esta é "houve recusa?", e é a que interessa a quem exibe o MOTIVO: a
+ * observação vem prefixada de "Glosa: " nos dois estados, e o motivo continua
+ * existindo depois de resolvido — o histórico não se apaga.
+ *
+ * Existe como função porque três lugares precisavam dela (a legenda da linha e
+ * dois trechos do modal de detalhamento) e cada um teria escrito o seu
+ * `=== 'GLOSA' || === 'GLOSA_RESOLVIDA'`. A quarta cópia é que sempre esquece.
+ */
+export function ehGlosa(situacao: string | null): boolean {
+  return situacao === 'GLOSA' || situacao === 'GLOSA_RESOLVIDA'
 }

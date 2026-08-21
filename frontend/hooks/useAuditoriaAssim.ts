@@ -156,7 +156,10 @@ export function useAuditoriaAssim() {
       sincronizando: registros.filter((d) => d.situacao === 'SINCRONIZANDO').length,
       retorno_nao_confirmado: registros.filter((d) => d.situacao === 'RETORNO_NAO_CONFIRMADO' || d.situacao === 'AGUARDANDO_RETORNO').length,
       canceladas: registros.filter((d) => d.situacao === 'CANCELADA').length,
+      // Comparação exata: GLOSA_RESOLVIDA não entra. Este card é o trabalho a
+      // fazer, e uma glosa já coberta por vínculo não pede tratativa.
       glosas: registros.filter((d) => d.situacao === 'GLOSA').length,
+      glosas_resolvidas: registros.filter((d) => d.situacao === 'GLOSA_RESOLVIDA').length,
       tokens: comToken,
     }
   }, [rawDados, loading, filters.paciente, filters.horario_bloco])

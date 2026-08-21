@@ -21,6 +21,7 @@ const SITUACOES = [
   { value: 'RETORNO_NAO_CONFIRMADO', label: 'Retorno Não Confirmado' },
   { value: 'LIBERADA', label: 'Liberada' },
   { value: 'GLOSA', label: 'Glosa' },
+  { value: 'GLOSA_RESOLVIDA', label: 'Glosa Resolvida' },
   { value: 'CANCELADA', label: 'Cancelada' },
   { value: 'FALTA', label: 'Falta Paciente' },
   { value: 'FALTA_TERAPEUTA', label: 'Falta Terapeuta' },

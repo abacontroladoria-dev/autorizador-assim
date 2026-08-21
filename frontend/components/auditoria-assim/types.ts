@@ -44,6 +44,13 @@ export type KpisAuditoriaAssim = {
   retorno_nao_confirmado: number
   canceladas: number
   glosas: number
+  /**
+   * Glosas que uma autorização externa passou a cobrir (aba Reconciliação).
+   * Fora de `glosas` de propósito: aquele card dimensiona trabalho a fazer, e
+   * estas não pedem nada. Aparece como dica no card de Glosas — ver a nota em
+   * situacoes.ts.
+   */
+  glosas_resolvidas: number
   tokens: number
 }
 
