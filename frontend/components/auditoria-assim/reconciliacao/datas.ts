@@ -37,6 +37,21 @@ export function dataHoraCurta(valor: string | null): string {
 }
 
 /**
+ * "17/08 a 21/08/2026" — o rótulo da semana no cabeçalho e no modal.
+ *
+ * O ano aparece uma vez, no fim, porque a tela navega meses para trás e "17/08 a
+ * 21/08" sozinho não diz de qual agosto se trata. Na virada de ano (seg 29/12 a
+ * sex 02/01) os dois anos aparecem — é o único caso em que um só mentiria.
+ */
+export function rotuloSemana(inicio: string, fim: string): string {
+  const anoInicio = inicio.slice(0, 4)
+  const anoFim = fim.slice(0, 4)
+  return anoInicio === anoFim
+    ? `${formatarDia(inicio)} a ${formatarDia(fim)}/${anoFim}`
+    : `${formatarDia(inicio)}/${anoInicio} a ${formatarDia(fim)}/${anoFim}`
+}
+
+/**
  * "Hoje 09:42" ou "20/07 09:42" — a coluna "última atualização" da listagem.
  *
  * A comparação com hoje é textual e no fuso do navegador, que é o mesmo fuso em

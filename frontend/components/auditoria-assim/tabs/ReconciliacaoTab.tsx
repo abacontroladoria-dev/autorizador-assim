@@ -62,28 +62,27 @@ export default function ReconciliacaoTab({ alvo, onAlvoConsumido }: Props) {
   const fila = useReconciliacaoAssim(recarregarSemana)
   const { selecionarGuia } = fila
 
-  // A semana do paciente está aberta? Separado da `etapa` de propósito: durante
-  // a escolha da sessão a grade sai da tela, mas o paciente continua aberto — é
-  // para ela que o fluxo volta.
-  const [semanaAberta, setSemanaAberta] = useState(!!alvo?.pacienteNome)
   const [etapa, setEtapa] = useState<Etapa>('grade')
   const [candidataEscolhida, setCandidataEscolhida] = useState<CandidataVinculo | null>(null)
 
+  // Haver paciente escolhido JÁ é "a semana está aberta" — não há um segundo
+  // estado dizendo a mesma coisa, que é como as duas versões divergem. Durante a
+  // escolha da sessão o paciente continua escolhido e só a `etapa` muda: é para
+  // a grade dele que o fluxo volta.
+  const semanaAberta = !!analise.pacienteNome
+
   // A ponte vinda da Conferência. Consome o alvo depois de aplicá-lo, senão
   // voltar para esta aba mais tarde ressuscitaria a semana antiga — o erro mais
-  // fácil de não notar nesta tela.
+  // fácil de não notar nesta tela. A `etapa` não precisa ser reposta aqui: o
+  // Shell desmonta esta aba ao trocar de aba, então chegar da Conferência é
+  // sempre um `grade` recém-nascido.
   useEffect(() => {
     if (!alvo) return
     reabrirEm(alvo.data, alvo.pacienteNome, alvo.carteirinha)
-    setSemanaAberta(!!alvo.pacienteNome)
-    setEtapa('grade')
     onAlvoConsumido()
   }, [alvo, reabrirEm, onAlvoConsumido])
 
-  const fecharSemana = useCallback(() => {
-    setSemanaAberta(false)
-    escolherPaciente(null)
-  }, [escolherPaciente])
+  const fecharSemana = useCallback(() => escolherPaciente(null), [escolherPaciente])
 
   /** Clique em "sem vínculo": seleciona a guia e troca a grade pela escolha da sessão. */
   const vincularGuia = useCallback(
@@ -125,7 +124,6 @@ export default function ReconciliacaoTab({ alvo, onAlvoConsumido }: Props) {
         onRecarregar={recarregarSemana}
         onAbrir={(paciente) => {
           escolherPaciente(paciente.nome, paciente.carteirinhas)
-          setSemanaAberta(true)
           setEtapa('grade')
         }}
       />

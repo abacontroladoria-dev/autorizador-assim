@@ -46,7 +46,10 @@ export default function GradeSemana({
   onVincularGuia: (guia: string) => void
 }) {
   return (
-    <div className="overflow-x-auto">
+    // `relative` mantém a rolagem lateral aqui dentro: sem contêiner
+    // posicionado, a largura mínima das colunas escapa do `overflow-x-auto` e é
+    // o documento que rola de lado (medido em 390px).
+    <div className="relative overflow-x-auto">
       {/*
         As larguras mínimas das colunas somam ~57,5rem. Abaixo disso a grade
         transborda e o contêiner rola de lado, em vez de espremer os cartões até
@@ -119,8 +122,9 @@ export default function GradeSemana({
                     }`}
                   >
                     {cartoes.length === 0 ? (
-                      <p className="py-3 text-center text-[11px] text-slate-300" aria-label="Nenhum atendimento">
-                        —
+                      <p className="py-3 text-center text-[11px] text-slate-400">
+                        <span aria-hidden>—</span>
+                        <span className="sr-only">Nenhum atendimento</span>
                       </p>
                     ) : (
                       <div className="flex flex-col gap-1.5">

@@ -1,6 +1,6 @@
 'use client'
 
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   AlertOctagon, AlertTriangle, Ban, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, History,
@@ -13,7 +13,7 @@ import ChipTuss from './ChipTuss'
 import FiltrosEstado from './FiltrosEstado'
 import GradeSemana from './GradeSemana'
 import LinhaAutorizacao from './LinhaAutorizacao'
-import { diaDoTimestamp, formatarDia, formatarDiaComNome, hojeLocal } from './datas'
+import { diaDoTimestamp, formatarDiaComNome, hojeLocal, rotuloSemana } from './datas'
 import { montarGrade } from './grade'
 
 const ID_TITULO = 'titulo-semana-paciente'
@@ -31,32 +31,41 @@ function iniciais(nome: string): string {
   return ((partes[0][0] ?? '') + (partes.length > 1 ? partes[partes.length - 1][0] : '')).toUpperCase()
 }
 
+/**
+ * Um dos cinco números do resumo da semana.
+ *
+ * O matiz só aparece quando o número é maior que zero: uma fileira de cinco
+ * cartões coloridos onde três deles dizem "0" gasta a cor em repouso e deixa de
+ * apontar para onde há trabalho. Zero recua para branco e cinza.
+ *
+ * `tom` e `bolha` usam só degraus que o shim de tema escuro de globals.css
+ * remapeia (-50/-100/-200/-300 e texto -700). `bg-white/70` na bolha, que era o
+ * desenho anterior, atravessava claro para o escuro — modificador de opacidade
+ * não é remapeado.
+ */
 function Indicador({
-  valor, rotulo, Icone, tom, atencao,
+  valor, rotulo, Icone, tom, bolha, atencao,
 }: {
   valor: number
   rotulo: string
   Icone: typeof CheckCircle2
   tom: string
-  /** Zero recua para cinza: contador em repouso não deve competir com o que pede ação. */
+  bolha: string
   atencao?: boolean
 }) {
+  const aceso = !!atencao && valor > 0
   return (
     <div
       className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 ${
-        atencao && valor > 0 ? tom : 'border-slate-200 bg-white'
+        aceso ? tom : 'border-slate-200 bg-white'
       }`}
     >
       <span
         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-          atencao && valor > 0 ? 'bg-white/70' : 'bg-slate-100'
+          aceso ? bolha : 'bg-slate-100'
         }`}
       >
-        <Icone
-          size={15}
-          className={atencao && valor > 0 ? '' : 'text-slate-500'}
-          aria-hidden
-        />
+        <Icone size={15} className={aceso ? '' : 'text-slate-500'} aria-hidden />
       </span>
       <span className="min-w-0">
         <span className="block text-xl leading-none font-bold tabular-nums text-slate-900">{valor}</span>
@@ -97,6 +106,21 @@ export default function ModalSemanaPaciente({
 
   const [mostrarFiltros, setMostrarFiltros] = useState(false)
   const [mostrarHistorico, setMostrarHistorico] = useState(false)
+  const refHistorico = useRef<HTMLElement>(null)
+
+  /**
+   * Abrir o histórico o traz para a vista.
+   *
+   * Ele nasce abaixo da grade, fora da área visível: sem isto, clicar no botão
+   * do rodapé não muda nada na tela e o controle parece quebrado. O scroll roda
+   * no próximo quadro, quando a seção já existe no DOM.
+   */
+  const alternarHistorico = useCallback(() => {
+    setMostrarHistorico((v) => {
+      if (!v) requestAnimationFrame(() => refHistorico.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
+      return !v
+    })
+  }, [])
 
   const dias = useMemo(() => diasUteisDe(analise.semanaInicio), [analise.semanaInicio])
 
@@ -125,7 +149,7 @@ export default function ModalSemanaPaciente({
 
   if (!open || !analise.pacienteNome) return null
 
-  const labelSemana = `${formatarDia(analise.semanaInicio)} a ${formatarDia(analise.semanaFim)}`
+  const labelSemana = rotuloSemana(analise.semanaInicio, analise.semanaFim)
   const linha = analise.linhaSelecionada
   const totalAutorizacoes = analise.autorizacoesVisiveis.length
 
@@ -173,7 +197,7 @@ export default function ModalSemanaPaciente({
                   /* Nome não é identidade. Dizer que são dois cadastros é melhor
                      que escolher um em silêncio e mostrar meia semana como se
                      fosse toda. */
-                  <span className="text-amber-800">
+                  <span className="text-amber-700">
                     {' '}· dois cadastros ({analise.idsDoPaciente.join(', ')}), somados aqui
                   </span>
                 )}
@@ -241,25 +265,28 @@ export default function ModalSemanaPaciente({
         </header>
 
         {/* ── Resumo da semana ────────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 gap-2 border-b border-slate-100 px-4 py-3 sm:px-6 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-2 border-b border-slate-100 px-4 py-3 sm:grid-cols-3 sm:px-6 xl:grid-cols-5">
           <Indicador
             valor={analise.liberadas}
             rotulo="Autorizações liberadas"
             Icone={ShieldCheck}
             tom="border-slate-200 bg-white"
+            bolha="bg-slate-100"
           />
           <Indicador
             valor={analise.utilizadas}
             rotulo="Utilizadas"
             Icone={CheckCircle2}
             tom="border-emerald-200 bg-emerald-50 text-emerald-700"
+            bolha="bg-emerald-100"
             atencao
           />
           <Indicador
             valor={analise.ledger.semVinculo}
             rotulo="Sem vínculo"
             Icone={Link2}
-            tom="border-amber-300 bg-amber-50 text-amber-800"
+            tom="border-amber-300 bg-amber-50 text-amber-700"
+            bolha="bg-amber-100"
             atencao
           />
           <Indicador
@@ -267,6 +294,7 @@ export default function ModalSemanaPaciente({
             rotulo="Glosas"
             Icone={AlertOctagon}
             tom="border-violet-200 bg-violet-50 text-violet-700"
+            bolha="bg-violet-100"
             atencao
           />
           <Indicador
@@ -274,6 +302,7 @@ export default function ModalSemanaPaciente({
             rotulo="Cancelamentos"
             Icone={Ban}
             tom="border-slate-300 bg-slate-100 text-slate-600"
+            bolha="bg-slate-200"
             atencao
           />
         </div>
@@ -306,7 +335,10 @@ export default function ModalSemanaPaciente({
         )}
 
         {/* ── A grade ─────────────────────────────────────────────────────── */}
-        <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50">
+        {/* Fundo branco no contêiner inteiro, e não só sob a grade: a grade
+            raramente chega ao pé do modal, e uma faixa cinza logo abaixo da
+            última linha fazia parecer que faltava carregar algo. */}
+        <div className="min-h-0 flex-1 overflow-y-auto bg-white">
           {analise.erro ? (
             <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
               <AlertTriangle size={24} className="text-rose-600" />
@@ -322,7 +354,7 @@ export default function ModalSemanaPaciente({
           ) : analise.carregandoSemana ? (
             <div className="space-y-2 p-4 sm:p-6">
               {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="h-24 animate-pulse rounded-xl bg-white" />
+                <div key={i} className="h-24 animate-pulse rounded-xl bg-slate-100" />
               ))}
             </div>
           ) : linhas.length === 0 ? (
@@ -340,23 +372,25 @@ export default function ModalSemanaPaciente({
               </p>
             </div>
           ) : (
-            <div className="bg-white">
-              <GradeSemana
-                linhas={linhas}
-                dias={dias}
-                hoje={hojeLocal()}
-                codigosGlosa={codigosGlosa}
-                podeVincular={podeVincular}
-                onVincularGuia={onVincularGuia}
-              />
-            </div>
+            <GradeSemana
+              linhas={linhas}
+              dias={dias}
+              hoje={hojeLocal()}
+              codigosGlosa={codigosGlosa}
+              podeVincular={podeVincular}
+              onVincularGuia={onVincularGuia}
+            />
           )}
 
           {/* Histórico: a mesma leitura cronológica que a tela sempre teve, com o
               motivo da recusa por extenso — coisa que não cabe num cartão de
               célula. Fechado por padrão porque a grade é o assunto. */}
           {mostrarHistorico && !analise.erro && (
-            <section className="border-t border-slate-200 px-4 py-4 sm:px-6" aria-label="Histórico de autorizações">
+            <section
+              ref={refHistorico}
+              className="border-t border-slate-200 bg-slate-50 px-4 py-4 sm:px-6"
+              aria-label="Histórico de autorizações"
+            >
               <h3 className="mb-2 text-[13px] font-semibold text-brand-fg">
                 Autorizações da semana{' '}
                 <span className="font-normal text-slate-500">
@@ -401,7 +435,7 @@ export default function ModalSemanaPaciente({
               <CheckCircle2 size={13} className="text-emerald-700" aria-hidden /> Utilizada
             </li>
             <li className="flex items-center gap-1.5">
-              <Link2 size={13} className="text-amber-800" aria-hidden /> Sem vínculo
+              <Link2 size={13} className="text-amber-700" aria-hidden /> Sem vínculo
             </li>
             <li className="flex items-center gap-1.5">
               <AlertOctagon size={13} className="text-violet-700" aria-hidden /> Glosa
@@ -414,7 +448,7 @@ export default function ModalSemanaPaciente({
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => setMostrarHistorico((v) => !v)}
+              onClick={alternarHistorico}
               aria-pressed={mostrarHistorico}
               className={`inline-flex h-11 items-center gap-1.5 rounded-xl border px-4 text-[12px] font-semibold transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none ${
                 mostrarHistorico

@@ -6,7 +6,7 @@ import {
   RefreshCw, Search, TrendingDown, TrendingUp, X,
 } from 'lucide-react'
 import type { PacientePendencias, TipoPendencia } from '../types'
-import { dataHoraRelativa, formatarDia, normalizar } from './datas'
+import { dataHoraRelativa, normalizar, rotuloSemana } from './datas'
 
 /**
  * A ordem dos chips E a ordem das colunas numéricas — a mesma lista, um lugar
@@ -54,7 +54,7 @@ const PENDENCIAS: {
     rotulo: 'Sem vínculo',
     coluna: 'Sem vínculo',
     Icone: Link2,
-    tinta: 'text-amber-800',
+    tinta: 'text-amber-700',
     ativo: 'border-amber-300 bg-amber-50 text-amber-900',
     inativo: 'border-slate-200 bg-white text-slate-600 hover:border-amber-300 hover:bg-amber-50',
     ajuda: 'Guias liberadas que sobraram do pareamento e esperam alguém dizer que sessão elas cobrem.',
@@ -74,17 +74,27 @@ const PENDENCIAS: {
     rotulo: 'Sobrando',
     coluna: 'Sobrando',
     Icone: TrendingUp,
-    tinta: 'text-amber-800',
+    tinta: 'text-amber-700',
     ativo: 'border-amber-300 bg-amber-50 text-amber-900',
     inativo: 'border-slate-200 bg-white text-slate-600 hover:border-amber-300 hover:bg-amber-50',
     ajuda: 'Liberações a mais do que sessões agendadas naquele TUSS — é o que provoca a glosa 1601.',
   },
 ]
 
-/** Número de coluna: zero recua, o resto chama. A cor é a do estado que a coluna nomeia. */
+/**
+ * Número de coluna: zero recua, o resto chama.
+ *
+ * O recuo é por PESO e matiz, não por apagamento. `text-slate-300` era o desenho
+ * anterior e mede 1,49:1 sobre branco — um zero que reprova em AA por sete
+ * vezes, e "nenhuma glosa nesta semana" é informação, não enfeite. Em
+ * `slate-500` regular ele mede 4,76:1 e continua três degraus atrás do número
+ * que pede trabalho.
+ */
 function Contagem({ valor, tinta }: { valor: number; tinta: string }) {
   return (
-    <span className={`text-sm font-semibold tabular-nums ${valor > 0 ? tinta : 'text-slate-300'}`}>
+    <span
+      className={`text-sm tabular-nums ${valor > 0 ? `font-semibold ${tinta}` : 'font-normal text-slate-500'}`}
+    >
       {valor}
     </span>
   )
@@ -156,7 +166,7 @@ export default function ListaPendencias({
   }, [naUnidade, comPendencia, filtro, busca])
 
   const buscando = busca.trim().length > 0
-  const labelSemana = `${formatarDia(semanaInicio)} a ${formatarDia(semanaFim)}`
+  const labelSemana = rotuloSemana(semanaInicio, semanaFim)
 
   return (
     <div className="flex flex-col gap-3">
@@ -207,7 +217,10 @@ export default function ListaPendencias({
           )}
         </div>
 
-        <div className="flex flex-1 flex-wrap items-center justify-end gap-2">
+        {/* No celular os três controles compartilham a linha em vez de a busca
+            tomar a largura toda e empurrar seletor e refresh para linhas
+            próprias — três faixas de um controle cada. */}
+        <div className="flex flex-1 flex-wrap items-center gap-2 sm:justify-end">
           <label className="flex items-center gap-2">
             <span className="sr-only">Unidade</span>
             <select
@@ -222,7 +235,7 @@ export default function ListaPendencias({
             </select>
           </label>
 
-          <div className="relative w-full sm:w-64">
+          <div className="relative min-w-40 flex-1 sm:max-w-64 sm:flex-none sm:basis-64">
             <Search size={14} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-slate-400" aria-hidden />
             <input
               value={busca}
@@ -343,8 +356,13 @@ export default function ListaPendencias({
             </p>
           </div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[62rem] border-collapse text-left">
+          // `relative` não é decoração: medido em 390px, sem ele a largura
+          // intrínseca da tabela escapa do `overflow-x-auto` e é a PÁGINA que
+          // passa a rolar de lado (590px de vazio à direita) — o mesmo defeito
+          // que a fila antiga já teve. Com o contêiner posicionado a rolagem
+          // fica onde deve, e a coluna grudada tem contra o que se grudar.
+          <div className="relative overflow-x-auto">
+            <table className="w-full min-w-248 border-collapse text-left">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
                   <th scope="col" className="sticky left-0 z-10 bg-slate-50 px-4 py-2.5 text-[11px] font-semibold text-slate-500">
@@ -409,7 +427,7 @@ export default function ListaPendencias({
                           {p.contagem.total}
                         </span>
                       ) : (
-                        <span className="text-sm tabular-nums text-slate-300">0</span>
+                        <span className="text-sm font-normal tabular-nums text-slate-500">0</span>
                       )}
                     </td>
                     {PENDENCIAS.map(({ chave, tinta }) => (

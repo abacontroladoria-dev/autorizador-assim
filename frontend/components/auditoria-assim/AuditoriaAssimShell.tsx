@@ -22,8 +22,9 @@ const TAB_META: Record<TabKey, { titulo: string; subtitulo: string }> = {
     subtitulo: 'Controle operacional de autorizações e pendências',
   },
   reconciliacao: {
-    titulo: 'Reconciliação ASSIM',
-    subtitulo: 'Guias autorizadas fora do Pulsar — vincular à sessão que elas cobrem',
+    titulo: 'Autorizações com pendências',
+    subtitulo:
+      'Pacientes que possuem cancelamentos, glosas ou autorizações faltando/sobrando na semana selecionada.',
   },
 }
 

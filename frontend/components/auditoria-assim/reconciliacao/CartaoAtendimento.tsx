@@ -55,7 +55,7 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
           </span>
           <Icone size={13} strokeWidth={2.25} className={`mt-px shrink-0 ${config.strong}`} aria-hidden />
         </div>
-        <p className="mt-1 font-mono text-[11px] leading-tight tabular-nums text-slate-500">
+        <p className="mt-1 font-mono text-[11px] leading-tight tabular-nums text-slate-600">
           {cartao.codigo_tuss ?? '—'}
         </p>
         <p className="font-mono text-[11px] leading-tight tabular-nums text-slate-600">
@@ -95,7 +95,7 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
       ? 'border-slate-200 bg-slate-50'
       : 'border-violet-200 bg-violet-50'
   const tinta = semVinculo
-    ? 'text-amber-800'
+    ? 'text-amber-700'
     : cancelada || liberada
       ? 'text-slate-600'
       : 'text-violet-700'
@@ -109,7 +109,7 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
         </span>
         <Icone size={13} strokeWidth={2.25} className={`mt-px shrink-0 ${tinta}`} aria-hidden />
       </div>
-      <p className="mt-1 font-mono text-[11px] leading-tight tabular-nums text-slate-500">
+      <p className="mt-1 font-mono text-[11px] leading-tight tabular-nums text-slate-600">
         {cartao.codigo_tuss ?? '—'}
       </p>
       <p className="font-mono text-[11px] leading-tight tabular-nums text-slate-600">{cartao.guia}</p>
