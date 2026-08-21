@@ -6,8 +6,9 @@ import { useRouter, useSearchParams } from 'next/navigation'
 import { useHeader } from '@/contexts/HeaderContext'
 import AuditoriaTab from './tabs/AuditoriaTab'
 import PendenciasTab from './tabs/PendenciasTab'
+import ReconciliacaoTab from './tabs/ReconciliacaoTab'
 
-const TABS = ['pendencias', 'auditoria'] as const
+const TABS = ['pendencias', 'auditoria', 'reconciliacao'] as const
 type TabKey = (typeof TABS)[number]
 
 const TAB_META: Record<TabKey, { titulo: string; subtitulo: string }> = {
@@ -18,6 +19,10 @@ const TAB_META: Record<TabKey, { titulo: string; subtitulo: string }> = {
   auditoria: {
     titulo: 'Conferência ASSIM',
     subtitulo: 'Controle operacional de autorizações e pendências',
+  },
+  reconciliacao: {
+    titulo: 'Reconciliação ASSIM',
+    subtitulo: 'Guias autorizadas fora do Pulsar — vincular à sessão que elas cobrem',
   },
 }
 
@@ -59,6 +64,7 @@ export default function AuditoriaAssimShell() {
     <div className="flex flex-col gap-4">
       {activeTab === 'pendencias' && <PendenciasTab />}
       {activeTab === 'auditoria' && <AuditoriaTab />}
+      {activeTab === 'reconciliacao' && <ReconciliacaoTab />}
     </div>
   )
 }

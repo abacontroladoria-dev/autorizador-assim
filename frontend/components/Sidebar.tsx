@@ -9,6 +9,7 @@ import {
   ShieldCheck,
   ClipboardList,
   ListChecks,
+  Link2,
   CalendarDays,
   UserRound,
   Building2,
@@ -72,6 +73,7 @@ const pathIconMap: Record<string, any> = {
   "/auditoria-assim": ClipboardList,
   "/auditoria-assim?tab=auditoria": ClipboardList,
   "/auditoria-assim?tab=pendencias": ListChecks,
+  "/auditoria-assim?tab=reconciliacao": Link2,
   "/cco": BarChart3,
   "/admin": ShieldCheck,
   "/admin/permissoes": KeyRound,
@@ -506,14 +508,20 @@ export default function Sidebar() {
               {canAccess("/cco") && (
                 <MenuItem label="Conciliação ASSIM" icon={BarChart3} path="/cco" />
               )}
-              {/* Duas visões da mesma rota. canAccess("/auditoria-assim?tab=…")
+              {/* Três visões da mesma rota. canAccess("/auditoria-assim?tab=…")
                   resolve para o bare path '/auditoria-assim' de CODIGO_PARA_ROTAS,
-                  então nenhum código de permissão novo foi necessário. */}
+                  então nenhum código de permissão novo foi necessário.
+                  Reconciliação: quem vê a Conferência vê a aba; quem pode VINCULAR
+                  é decidido pelas RPCs (admin/autorizacao/recepcao), não aqui —
+                  diretoria consulta sem escrever. */}
               {canAccess("/auditoria-assim?tab=pendencias") && (
                 <MenuItem label="Pendências ASSIM" icon={ListChecks} path="/auditoria-assim?tab=pendencias" />
               )}
               {canAccess("/auditoria-assim?tab=auditoria") && (
                 <MenuItem label="Conferência ASSIM" icon={ClipboardList} path="/auditoria-assim?tab=auditoria" />
+              )}
+              {canAccess("/auditoria-assim?tab=reconciliacao") && (
+                <MenuItem label="Reconciliação ASSIM" icon={Link2} path="/auditoria-assim?tab=reconciliacao" />
               )}
             </SidebarGroup>
           )}
