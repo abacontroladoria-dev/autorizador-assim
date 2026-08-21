@@ -302,10 +302,17 @@ SELECT
   array_agg(fa.id ORDER BY fa.horario)            AS fila_ids
 FROM public.fila_autorizacoes fa
 WHERE fa.numero_autorizacao IS NOT NULL
+  -- SÓ DÍGITO. `numero_autorizacao` guarda a string literal 'N/A' nas linhas de
+  -- PRESENÇA (completion_type = 'presenca'), que não são autorizações ASSIM e
+  -- não têm guia nenhuma — 1.125 delas na janela de 22/07 a 21/08, medido em
+  -- 21/08/2026. Sem este filtro a view abriria todo dia com 'N/A' repetida
+  -- centenas de vezes e o alerta real ficaria enterrado embaixo.
+  AND fa.numero_autorizacao ~ '^[0-9]+$'
 GROUP BY fa.numero_autorizacao, fa.data_atendimento
 HAVING count(*) > 1;
 
 COMMENT ON VIEW public.vw_guias_duplicadas IS
   'Mesmo numero de guia em mais de uma sessao no MESMO dia. O numero da ASSIM '
   'recicla ao longo do tempo, por isso o agrupamento e por dia — duas linhas de '
-  'meses diferentes com o mesmo numero sao normais e nao aparecem aqui.';
+  'meses diferentes com o mesmo numero sao normais e nao aparecem aqui. '
+  'Linhas de presenca (numero_autorizacao = ''N/A'') sao excluidas.';
