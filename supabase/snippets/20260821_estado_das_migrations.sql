@@ -56,11 +56,24 @@ SELECT * FROM (
     ('080000 · view vw_forma_validacao_divergencias existe',
      EXISTS (SELECT 1 FROM pg_views WHERE schemaname = 'public' AND viewname = 'vw_forma_validacao_divergencias')),
 
-    -- AS DUAS LINHAS QUE DECIDEM A ORDEM. Ambas têm de ficar TRUE no fim.
-    ('sync ATIVO chama a guarda de guia duplicada (070000 viva)',
+    -- AS TRÊS LINHAS QUE DECIDEM A ORDEM. Todas têm de ficar TRUE no fim.
+    --
+    -- CUIDADO ao ler as duas primeiras: elas olham o TEXTO do corpo, não se a
+    -- função chamada existe. Em 21/08/2026 o banco estava com
+    -- 'sync ATIVO chama a guarda' = true e 'funcao ... existe' = false ao mesmo
+    -- tempo — que é precisamente o estado quebrado: o corpo chama uma função
+    -- inexistente e o cron falha a cada rodada, sem erro visível em lugar
+    -- nenhum. Por isso a terceira linha abaixo, que executa de verdade.
+    ('sync ATIVO menciona a guarda de guia duplicada',
      (SELECT sync LIKE '%guia_ja_usada_por_outra_linha%' FROM def)),
 
-    ('sync ATIVO copia o biofacial (080000 viva)',
-     (SELECT sync LIKE '%biofacial_assim%' FROM def))
+    ('sync ATIVO menciona a copia do biofacial',
+     (SELECT sync LIKE '%biofacial_assim%' FROM def)),
+
+    -- A PROVA REAL: chama a guarda. Se a função não existir, esta linha
+    -- levanta 42883 (undefined_function) e a consulta inteira falha — que é
+    -- melhor do que devolver true e deixar o cron quebrado em silêncio.
+    ('a guarda EXECUTA (prova que o sync nao vai quebrar em runtime)',
+     public.guia_ja_usada_por_outra_linha(NULL, NULL, gen_random_uuid()) IS NOT NULL)
 ) AS t(item, aplicado)
 ORDER BY item;
