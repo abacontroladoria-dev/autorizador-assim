@@ -213,14 +213,16 @@ A row on this surface can now carry **three orthogonal dimensions**, and the Sta
 
 1. **Situação** — the six-stage authorization lifecycle above. Its own hue per stage.
 2. **Conferência de filipeta** — emerald conferida / amber a conferir.
-3. **Cota semanal** — emerald *a conta bate*, amber *divergente*. Introduced by the Análise de Reincidência modal, which compares the sessions a patient had scheduled in a week against the authorizations ASSIM actually processed for that week, per TUSS.
+3. **Cota semanal** — emerald *a conta bate*, amber *divergente*. It lives on the Reconciliação tab, which compares the sessions a patient had scheduled in a week against the authorizations ASSIM actually processed for that week, per TUSS. (It shipped as a modal on the Conferência tab on 2026-08-20 and was folded into that tab a day later: the weekly read is *how* you discover a guia needs linking, so it belongs on the screen where the linking happens.)
 
 **No new hue.** Amber keeps the meaning it already carries on both other axes — *waiting on someone to look* — and emerald keeps meaning *settled*. That consistency is the whole reason a third axis can coexist in one row without the reader having to learn a third vocabulary.
 
 Two constraints, same as the other axes:
 
-- **Violet stays out.** Glosa is the *consequence* of a blown quota, not the quota state itself. Letting violet mean "over quota" here would make the hue mean two things one modal apart.
+- **Violet stays out.** Glosa is the *consequence* of a blown quota, not the quota state itself. Letting violet mean "over quota" here would make the hue mean two things one screen apart.
 - **The tally chips wear the hue because they filter it.** Each chip in the placar filters both columns to its TUSS, so the hue is still the state — the Decoration-Free Semantics Rule bans a status hue on something that *isn't* that status, not on a control that selects it. Chips follow the `KpiCards` recipe: active = `-50` tint + `-300` border + `-700` text, never a saturated fill (see Âmbar sólido não é botão).
+
+**"Not paired" is not a state, so it gets no hue.** In the authorizations column, amber is reserved for the guia that is genuinely in the reconciliation queue — the one `get_guias_orfas` says needs a link. A guia that merely fails to touch any session of the *displayed* week (already triaged, paired to a neighbouring week, or captured by Pulsar itself) wears a slate pill reading *fora desta semana*. The distinction is the whole point: amber promises there is work to do, and a screen that promises work where there is none stops being read.
 
 ### Neutral
 

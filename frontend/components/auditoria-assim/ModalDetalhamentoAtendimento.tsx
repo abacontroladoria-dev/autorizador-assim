@@ -33,7 +33,7 @@ type Props = {
   open: boolean
   onClose: () => void
   onSalvo: () => void
-  /** Abre a Análise de Reincidência para este paciente, nesta semana. */
+  /** Leva para a aba Reconciliação, na semana deste paciente. */
   onAnalisarSemana: (item: AuditoriaAssimItem) => void
 }
 
@@ -357,7 +357,11 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
                   </div>
                 )}
 
-                {/* A ponte para a única tela que consegue conferir a recusa.
+                {/* A ponte para a única tela que consegue conferir a recusa — a
+                    aba Reconciliação, posicionada na semana deste paciente. Vai
+                    embora desta tela, então o modal fecha antes (quem fecha é a
+                    TabelaAuditoria, ao repassar o callback).
+
                     Fica em Brand Outline, não em steel cheio: "Salvar motivo" já
                     é a ação primária desta seção, e conferir a cota é o passo
                     ANTES de escrever a tratativa — subordinado a ela, não par.

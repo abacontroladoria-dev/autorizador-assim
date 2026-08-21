@@ -108,8 +108,18 @@ export type PlacarTuss = {
   agendadas: number
   autorizadas: number
   liberadas: number
+  /** `Liberado *` — saiu e foi desfeita. Não entra em `liberadas`. */
+  canceladas: number
   excedente: number
 }
+
+/**
+ * O recorte por estado da guia na coluna de autorizações.
+ *
+ * São os três estados que a Reconciliação existe para vigiar, e por isso o
+ * contador de cada um é o próprio filtro dele. Nulo = todas.
+ */
+export type EstadoFiltro = 'sem-vinculo' | 'glosa' | 'cancelada'
 
 /** O que a Análise de Reincidência precisa saber para abrir já resolvida. */
 export type AlvoAnalise = {

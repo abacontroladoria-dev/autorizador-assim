@@ -6,11 +6,15 @@ import {
   listarAutorizacoesAssimSemana,
   listarFaltasAuditoria,
 } from '@/services/auditoria-assim.service'
+import { listarGuiasOrfas } from '@/services/reconciliacao-assim.service'
 import type {
   AuditoriaAssimItem,
   AutorizacaoAssimSemana,
+  EstadoFiltro,
+  GuiaOrfa,
   PlacarTuss,
 } from '@/components/auditoria-assim/types'
+import type { EstadoAutorizacao } from '@/components/auditoria-assim/reconciliacao/LinhaAutorizacao'
 
 /**
  * Análise de reincidência — a cota semanal de um paciente por TUSS.
@@ -30,9 +34,15 @@ import type {
  * bloco), e as autorizações direto de `autorizacoes_assim`, sem passar pelo
  * pareamento — que é o único jeito de a órfã aparecer.
  *
- * O pareamento em si NÃO é reimplementado aqui: a órfã é definida por diferença
- * de conjuntos sobre `guia`, usando as guias que a própria RPC casou. Se um dia
- * a regra de pareamento do banco mudar, esta tela acompanha sozinha.
+ * O pareamento em si NÃO é reimplementado aqui, em duas camadas:
+ *
+ * 1. quais guias casaram com sessão desta semana sai das próprias linhas da RPC;
+ * 2. quais guias PRECISAM de vínculo sai de `get_guias_orfas` — a mesma função
+ *    que alimenta a fila ao lado. A diferença entre as duas não é acadêmica: a
+ *    fila exclui guia já triada ANTES do `row_number()`, exclui guia capturada
+ *    pelo próprio Pulsar e só considera `status = 'Liberado'`. Decidir isso aqui
+ *    faria a tela oferecer vínculo para guia que a Conferência já casou — o erro
+ *    que a migration 20260821040000 existe para não deixar acontecer.
  */
 
 /** Cota = quantas sessões daquele TUSS o paciente tem na semana. Falta não conta. */
@@ -82,18 +92,33 @@ export function somarDias(iso: string, dias: number): string {
   return comoIso(d)
 }
 
-/** "Liberado" e "Liberado *" são o que consumiu cota; o resto é recusa. */
+/**
+ * Só `Liberado` cru consumiu cota.
+ *
+ * Comparação EXATA, e não por prefixo: `Liberado *` é o rótulo que a ASSIM usa
+ * para autorização **cancelada** — é assim que a migration 20260528120000 a
+ * traduz para a situação CANCELADA, e é por isso que `get_guias_orfas` filtra
+ * `status = 'Liberado'` e não `like 'Liberado%'`. Casar por prefixo contava
+ * cancelada como cota gasta e inventava excedente onde não havia.
+ */
 export function autorizacaoLiberada(status: string | null): boolean {
-  return /^liberado/i.test((status ?? '').trim())
+  return (status ?? '').trim() === 'Liberado'
 }
 
-export function useAnaliseReincidencia(ativo: boolean, dataInicial: string, pacienteInicial: string | null) {
+/** A autorização saiu e foi desfeita. Não consumiu cota e não pede nada. */
+export function autorizacaoCancelada(status: string | null): boolean {
+  return (status ?? '').trim() === 'Liberado *'
+}
+
+export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: string | null) {
   const [semanaInicio, setSemanaInicio] = useState(() => segundaDe(dataInicial))
   const [pacienteNome, setPacienteNome] = useState<string | null>(pacienteInicial)
   const [tussFiltro, setTussFiltro] = useState<string | null>(null)
+  const [estadoFiltro, setEstadoFiltro] = useState<EstadoFiltro | null>(null)
 
   const [sessoes, setSessoes] = useState<AuditoriaAssimItem[]>([])
   const [autorizacoes, setAutorizacoes] = useState<AutorizacaoAssimSemana[]>([])
+  const [orfasDaSemana, setOrfasDaSemana] = useState<Map<string, GuiaOrfa>>(() => new Map())
   const [carregandoSemana, setCarregandoSemana] = useState(false)
   const [carregandoAutorizacoes, setCarregandoAutorizacoes] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
@@ -107,13 +132,22 @@ export function useAnaliseReincidencia(ativo: boolean, dataInicial: string, paci
   // atrasada não sobrescreve a atual.
   const geracaoSemana = useRef(0)
   const geracaoAutorizacoes = useRef(0)
+  const geracaoOrfas = useRef(0)
 
+  /**
+   * Reposiciona a análise — semana, paciente e carteirinha de uma vez.
+   *
+   * NÃO limpa `sessoes` aqui, e isso é deliberado: as buscas são disparadas por
+   * mudança de dependência, então reposicionar para a MESMA semana esvaziaria o
+   * cronograma sem nada para reenchê-lo. E não há o que limpar — a carga da
+   * semana é da clínica inteira, independente de paciente; quem recorta é o
+   * `sessoesPaciente`.
+   */
   const reabrirEm = useCallback((data: string, paciente: string | null, carteirinha: string | null) => {
     setSemanaInicio(segundaDe(data))
     setPacienteNome(paciente)
     setTussFiltro(null)
-    setSessoes([])
-    setAutorizacoes([])
+    setEstadoFiltro(null)
     setErro(null)
     setCarteirinhas(carteirinha ? [carteirinha] : [])
   }, [])
@@ -153,8 +187,31 @@ export function useAnaliseReincidencia(ativo: boolean, dataInicial: string, paci
   }, [semanaInicio])
 
   useEffect(() => {
-    if (ativo) carregarSemana()
-  }, [ativo, carregarSemana])
+    carregarSemana()
+  }, [carregarSemana])
+
+  // ── A fila de órfãs recortada nesta semana ─────────────────────────────────
+  // Chamada própria, de 5 dias, independente do intervalo de 30 dias da fila ao
+  // lado: navegar para uma semana fora daquele intervalo deixaria a
+  // classificação cega, e "sem vínculo" viraria silêncio em vez de âmbar.
+  const carregarOrfasDaSemana = useCallback(async () => {
+    const geracao = ++geracaoOrfas.current
+    try {
+      const lista = await listarGuiasOrfas(semanaInicio, somarDias(semanaInicio, 4))
+      if (geracao !== geracaoOrfas.current) return
+      setOrfasDaSemana(new Map(lista.map((g) => [g.guia, g])))
+    } catch {
+      // Silencioso de propósito: sem esta lista o painel ainda diz a verdade
+      // sobre a cota — só deixa de oferecer o atalho de vincular. Derrubar a
+      // tela inteira por causa do atalho seria pior que perdê-lo.
+      if (geracao !== geracaoOrfas.current) return
+      setOrfasDaSemana(new Map())
+    }
+  }, [semanaInicio])
+
+  useEffect(() => {
+    carregarOrfasDaSemana()
+  }, [carregarOrfasDaSemana])
 
   // Pacientes com sessão ASSIM na semana — a lista que a busca oferece.
   const pacientesDaSemana = useMemo(() => {
@@ -220,8 +277,8 @@ export function useAnaliseReincidencia(ativo: boolean, dataInicial: string, paci
   }, [pacienteNome, semanaInicio, carteirinhas])
 
   useEffect(() => {
-    if (ativo) carregarAutorizacoes()
-  }, [ativo, carregarAutorizacoes])
+    carregarAutorizacoes()
+  }, [carregarAutorizacoes])
 
   /**
    * As guias que a própria RPC casou com uma sessão desta semana. É o pareamento
@@ -232,9 +289,19 @@ export function useAnaliseReincidencia(ativo: boolean, dataInicial: string, paci
     [sessoesPaciente]
   )
 
-  const orfas = useMemo(
-    () => new Set(autorizacoes.filter((a) => !guiasPareadas.has(a.guia)).map((a) => a.guia)),
-    [autorizacoes, guiasPareadas]
+  /**
+   * O destino de uma autorização, em três estados. Ver `EstadoAutorizacao`.
+   *
+   * A ordem importa: estar na fila de órfãs vence tudo, porque é a única
+   * afirmação que autoriza ação. Só depois se pergunta se a guia encosta em
+   * alguma sessão que a pessoa está vendo.
+   */
+  const estadoDaGuia = useCallback(
+    (guia: string): EstadoAutorizacao => {
+      if (orfasDaSemana.has(guia)) return 'sem-vinculo'
+      return guiasPareadas.has(guia) ? 'pareada' : 'fora-da-semana'
+    },
+    [orfasDaSemana, guiasPareadas]
   )
 
   const placar = useMemo<PlacarTuss[]>(() => {
@@ -250,6 +317,7 @@ export function useAnaliseReincidencia(ativo: boolean, dataInicial: string, paci
           agendadas: 0,
           autorizadas: 0,
           liberadas: 0,
+          canceladas: 0,
           excedente: 0,
           terapiasVistas: new Set<string>(),
         }
@@ -270,6 +338,7 @@ export function useAnaliseReincidencia(ativo: boolean, dataInicial: string, paci
       const item = entrada(a.codigo_tuss)
       item.autorizadas += 1
       if (autorizacaoLiberada(a.status)) item.liberadas += 1
+      else if (autorizacaoCancelada(a.status)) item.canceladas += 1
     }
 
     return [...porTuss.values()]
@@ -286,10 +355,36 @@ export function useAnaliseReincidencia(ativo: boolean, dataInicial: string, paci
     [sessoesPaciente, tussFiltro]
   )
 
-  const autorizacoesVisiveis = useMemo(
+  const autorizacoesDoTuss = useMemo(
     () => (tussFiltro ? autorizacoes.filter((a) => (a.codigo_tuss ?? '—') === tussFiltro) : autorizacoes),
     [autorizacoes, tussFiltro]
   )
+
+  /**
+   * Os três estados que esta tela existe para vigiar, contados ANTES do filtro
+   * de estado — senão escolher "glosas" zeraria os outros dois contadores e a
+   * pessoa perderia a única visão do que mais há para olhar na semana.
+   */
+  const ledger = useMemo(() => {
+    let semVinculo = 0
+    let glosas = 0
+    let canceladas = 0
+    for (const a of autorizacoesDoTuss) {
+      if (estadoDaGuia(a.guia) === 'sem-vinculo') semVinculo += 1
+      if (autorizacaoCancelada(a.status)) canceladas += 1
+      else if (!autorizacaoLiberada(a.status)) glosas += 1
+    }
+    return { semVinculo, glosas, canceladas }
+  }, [autorizacoesDoTuss, estadoDaGuia])
+
+  const autorizacoesVisiveis = useMemo(() => {
+    if (!estadoFiltro) return autorizacoesDoTuss
+    return autorizacoesDoTuss.filter((a) => {
+      if (estadoFiltro === 'sem-vinculo') return estadoDaGuia(a.guia) === 'sem-vinculo'
+      if (estadoFiltro === 'cancelada') return autorizacaoCancelada(a.status)
+      return !autorizacaoLiberada(a.status) && !autorizacaoCancelada(a.status)
+    })
+  }, [autorizacoesDoTuss, estadoFiltro, estadoDaGuia])
 
   const totalExcedente = useMemo(
     () => placar.reduce((soma, p) => soma + Math.max(0, p.excedente), 0),
@@ -302,29 +397,38 @@ export function useAnaliseReincidencia(ativo: boolean, dataInicial: string, paci
     irParaSemana: (delta: number) => {
       setSemanaInicio((atual) => somarDias(atual, delta * 7))
       setTussFiltro(null)
+      setEstadoFiltro(null)
     },
     pacienteNome,
     escolherPaciente: (nome: string | null) => {
       setPacienteNome(nome)
       setTussFiltro(null)
+      setEstadoFiltro(null)
       setCarteirinhas([])
     },
     reabrirEm,
     pacientesDaSemana,
     idsDoPaciente,
+    /** Para o cabeçalho de identidade. Nula até a semana carregar. */
+    carteirinhaDoPaciente: carteirinhas[0] ?? null,
     tussFiltro,
     setTussFiltro,
+    estadoFiltro,
+    setEstadoFiltro,
+    ledger,
     placar,
     totalExcedente,
     sessoesVisiveis,
     autorizacoesVisiveis,
-    orfas,
+    estadoDaGuia,
+    orfasDaSemana,
     loading: carregandoSemana || carregandoAutorizacoes,
     carregandoSemana,
     erro,
-    recarregar: () => {
+    recarregar: useCallback(() => {
       carregarSemana()
       carregarAutorizacoes()
-    },
+      carregarOrfasDaSemana()
+    }, [carregarSemana, carregarAutorizacoes, carregarOrfasDaSemana]),
   }
 }

@@ -1,12 +1,13 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 
 import { useHeader } from '@/contexts/HeaderContext'
 import AuditoriaTab from './tabs/AuditoriaTab'
 import PendenciasTab from './tabs/PendenciasTab'
 import ReconciliacaoTab from './tabs/ReconciliacaoTab'
+import type { AlvoAnalise } from './types'
 
 const TABS = ['pendencias', 'auditoria', 'reconciliacao'] as const
 type TabKey = (typeof TABS)[number]
@@ -60,11 +61,33 @@ export default function AuditoriaAssimShell() {
     setHeader(meta.titulo, meta.subtitulo)
   }, [activeTab, setHeader])
 
+  /**
+   * A ponte da Conferência para a Reconciliação: a linha em glosa manda o
+   * paciente e a semana, e a outra aba abre já resolvida.
+   *
+   * Estado, e não query string, por dois motivos. Nome de paciente e carteirinha
+   * numa URL vazam para o histórico do navegador sem necessidade. E o Shell é o
+   * mesmo componente montado nas duas abas — só o `?tab=` muda —, então o estado
+   * sobrevive à navegação. O preço, aceito: o pulo não é bookmarkável e se perde
+   * no reload.
+   */
+  const [alvoAnalise, setAlvoAnalise] = useState<AlvoAnalise | null>(null)
+
+  const irParaAnalise = useCallback(
+    (alvo: AlvoAnalise) => {
+      setAlvoAnalise(alvo)
+      router.push('/auditoria-assim?tab=reconciliacao')
+    },
+    [router]
+  )
+
   return (
     <div className="flex flex-col gap-4">
       {activeTab === 'pendencias' && <PendenciasTab />}
-      {activeTab === 'auditoria' && <AuditoriaTab />}
-      {activeTab === 'reconciliacao' && <ReconciliacaoTab />}
+      {activeTab === 'auditoria' && <AuditoriaTab onAnalisarSemana={irParaAnalise} />}
+      {activeTab === 'reconciliacao' && (
+        <ReconciliacaoTab alvo={alvoAnalise} onAlvoConsumido={() => setAlvoAnalise(null)} />
+      )}
     </div>
   )
 }

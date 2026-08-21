@@ -32,7 +32,13 @@ export type PacienteComOrfas = {
   guias: GuiaOrfa[]
 }
 
-export function useReconciliacaoAssim() {
+/**
+ * @param aoMudarExternamente chamado quando o realtime acusa mudança em
+ * `autorizacoes_assim` / `autorizacoes_vinculos`. Serve para o painel semanal
+ * envelhecer junto com a fila — sem ele, o robô importa um lote e a coluna de
+ * autorizações continua mostrando o estado anterior, calada.
+ */
+export function useReconciliacaoAssim(aoMudarExternamente?: () => void) {
   // 30 dias: a tabela autorizacoes_assim só existe desde 21/07/2026, e o volume
   // medido é de ~18 órfãs/mês. Um mês cabe na tela sem paginação.
   const [de, setDe] = useState(() => diasAtras(30))
@@ -70,18 +76,23 @@ export function useReconciliacaoAssim() {
 
   useEffect(() => { void recarregarOrfas() }, [recarregarOrfas])
 
+  // Guardado num ref porque a identidade do callback muda a cada semana
+  // navegada, e o canal do realtime não pode reassinar por causa disso.
+  const aoMudarRef = useRef(aoMudarExternamente)
+  useEffect(() => { aoMudarRef.current = aoMudarExternamente })
+
   // O robô do relatório importa a cada ~5 min. Sem isto a fila de trabalho fica
   // velha na tela justamente enquanto alguém trabalha nela.
   useEffect(() => {
     const supabase = getSupabaseClient()
+    const aoMudar = () => {
+      void recarregarOrfas()
+      aoMudarRef.current?.()
+    }
     const canal = supabase
       .channel('reconciliacao-assim')
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'autorizacoes_assim' }, () => {
-        void recarregarOrfas()
-      })
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'autorizacoes_vinculos' }, () => {
-        void recarregarOrfas()
-      })
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'autorizacoes_assim' }, aoMudar)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'autorizacoes_vinculos' }, aoMudar)
       .subscribe()
     return () => { void supabase.removeChannel(canal) }
   }, [recarregarOrfas])
