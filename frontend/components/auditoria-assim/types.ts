@@ -202,6 +202,16 @@ export type CartaoGrade =
        */
       semCobertura: boolean
       /**
+       * A sessão já aconteceu (com os 30 min de tolerância).
+       *
+       * Separado de `semCobertura` porque as duas respondem perguntas
+       * diferentes, e a que faltava era esta: sem ela o cartão não conseguia
+       * distinguir "ninguém pediu autorização e a sessão já passou" (problema)
+       * de "ninguém pediu ainda porque a sessão é sexta" (normal). Os dois
+       * chegavam como NAO_SOLICITADA e saíam vermelhos.
+       */
+      decorrida: boolean
+      /**
        * O texto da recusa, ainda cru. Pode vir já decomposto pela RPC
        * (`descricao_erro`) ou no formato "1601-REINCIDENCIA NO ATEN" cortado em
        * 25 caracteres (`motivo_glosa`) — quem resolve é `lib/glosa`, no cartão,
@@ -210,6 +220,18 @@ export type CartaoGrade =
       motivoBruto: string | null
       teve_token: boolean | null
       token: string | null
+      /**
+       * A linha da RPC, inteira, para o detalhamento do cartão.
+       *
+       * O cartão continua com os campos copiados acima porque é ele quem os
+       * desenha e quem decide a silhueta a partir deles; `origem` existe para a
+       * gaveta de detalhe, que mostra os outros vinte — observação manual,
+       * conferência da filipeta, forma de autorização, quem solicitou. Carregar
+       * a referência não custa nada (o objeto já está em memória) e evita a
+       * alternativa: copiar mais vinte campos aqui, um por um, e ter de mexer
+       * neste tipo toda vez que a gaveta quiser mostrar mais um.
+       */
+      origem: AuditoriaAssimItem
     }
   | {
       tipo: 'autorizacao'
@@ -236,6 +258,8 @@ export type CartaoGrade =
       descricao_erro: string | null
       teve_token: boolean | null
       token: string | null
+      /** A linha de `autorizacoes_assim`, inteira, para o detalhamento. */
+      origem: AutorizacaoAssimSemana
     }
 
 /**

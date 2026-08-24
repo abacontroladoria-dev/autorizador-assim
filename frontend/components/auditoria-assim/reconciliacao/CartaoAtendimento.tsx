@@ -1,12 +1,16 @@
 'use client'
 
 import { createElement, memo } from 'react'
-import { AlertOctagon, Ban, CheckCircle2, KeySquare, Link2, type LucideIcon } from 'lucide-react'
+import {
+  AlertCircle, AlertOctagon, Ban, CalendarClock, CheckCircle2, KeySquare, Link2,
+  type LucideIcon,
+} from 'lucide-react'
 import { autorizacaoCancelada, autorizacaoLiberada } from '@/hooks/useAnaliseReincidencia'
 import { iconeTerapia } from '@/lib/cronograma/iconeTerapia'
 import { completarMotivoGlosa, lerMotivoGlosa } from '@/lib/glosa'
 import { resolverConfig } from '../SituacaoBadge'
 import type { CartaoGrade } from '../types'
+import { SITUACOES_COBERTAS, SITUACOES_SEM_SESSAO } from './cobertura'
 import { cartaoPendente } from './grade'
 
 /**
@@ -36,9 +40,12 @@ import { cartaoPendente } from './grade'
  * `agendadas == autorizadas == liberadas`, então ~85% dos cartões colapsam e os
  * dois ou três que sobram viram os únicos objetos altos da tela.
  *
- * Nenhum matiz novo entrou. "Sem cobertura" não ganha cor própria: é qualificador
- * da `situacao` que a sessão já tem, e sai escrito no matiz dela — do contrário
- * seria um sétimo significado brigando com a Status Lock Rule do DESIGN.md.
+ * Nenhum matiz novo entrou, e o cartão só tem DUAS manchetes de problema:
+ * "Glosa" (violeta, uma recusa que pede tratativa) e "Sem cobertura" (rose, "a
+ * lacuna mais larga" do DESIGN.md — a sessão aconteceu e nada a cobre). Por que
+ * a sessão está descoberta — não solicitada, solicitação cancelada, retorno não
+ * confirmado, sincronizando — é pergunta da gaveta, que tem largura para
+ * responder; numa célula de 11rem a resposta só cabe truncada.
  *
  * Nada abaixo de 11px, que é o piso do DESIGN.md §3. O rótulo de estado e a
  * linha do token estavam em 10px; o token virou glifo e as linhas que sobravam
@@ -133,6 +140,7 @@ function Compacto({
   teveToken,
   token,
   titulo,
+  onAbrir,
 }: {
   hora: string
   terapia: string | null
@@ -142,9 +150,16 @@ function Compacto({
   teveToken: boolean | null
   token: string | null
   titulo: string
+  /** Todo cartão abre o detalhe — ver a nota do componente. */
+  onAbrir: () => void
 }) {
   return (
-    <div className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5" title={titulo}>
+    <button
+      type="button"
+      onClick={onAbrir}
+      title={titulo}
+      className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-left transition hover:border-slate-300 hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none"
+    >
       <Cabecalho hora={hora} tinta={tinta} Icone={Icone} teveToken={teveToken} token={token} />
       <p className="mt-0.5 flex items-start justify-between gap-1.5 text-[11px] leading-tight">
         {terapia && (
@@ -155,7 +170,7 @@ function Compacto({
         )}
         <span className={`shrink-0 font-semibold ${tinta}`}>{rotulo}</span>
       </p>
-    </div>
+    </button>
   )
 }
 
@@ -183,14 +198,23 @@ function CorpoPendente({
 }) {
   return (
     <>
-      {terapia && (
-        <p className="mt-0.5 flex items-start gap-1 text-[11px] leading-tight font-medium text-slate-700">
-          <IconeDaTerapia terapia={terapia} />
-          <span className="line-clamp-2">{terapia}</span>
-        </p>
-      )}
-      {/* A cor nunca é o único sinal: o problema vem escrito, no matiz dele. */}
-      <p className={`mt-1 text-[11px] leading-tight font-semibold ${tinta}`}>{frase}</p>
+      {/* Terapia à esquerda, estado à direita — a MESMA disposição do cartão
+          compacto. O estado morava numa linha própria abaixo, e isso fazia o
+          rótulo pular de altura conforme o cartão: no compacto ele estava no
+          canto direito da segunda linha, no pendente duas linhas mais abaixo e
+          à esquerda. Varrer uma coluna com o mesmo dado em dois lugares obriga
+          a reler cada cartão. Agora o estado está sempre no mesmo canto, e é a
+          terapia que trunca — ela sobrevive inteira no `title`. */}
+      <p className="mt-0.5 flex items-start justify-between gap-1.5 text-[11px] leading-tight">
+        {terapia && (
+          <span className="flex min-w-0 items-start gap-1 font-medium text-slate-700">
+            <IconeDaTerapia terapia={terapia} />
+            <span className="truncate">{terapia}</span>
+          </span>
+        )}
+        {/* A cor nunca é o único sinal: o problema vem escrito, no matiz dele. */}
+        <span className={`shrink-0 text-right font-semibold ${tinta}`}>{frase}</span>
+      </p>
       {/* Código e guia na MESMA linha: são os dois identificadores do mesmo
           atendimento, e a grade por horário não tem altura para dar a cada um. */}
       <p className="mt-1 font-mono text-[11px] leading-tight tabular-nums text-slate-600">
@@ -210,17 +234,26 @@ function Espinha({ dot }: { dot: string }) {
   return <span aria-hidden className={`absolute inset-y-0 left-0 w-0.75 rounded-l-lg ${dot}`} />
 }
 
+/**
+ * Todo cartão é um botão, e todo botão abre a MESMA coisa: o detalhe.
+ *
+ * Até 2026-08-24 só a guia órfã era clicável — ela levava direto à escolha da
+ * sessão — e os outros vinte cartões da semana não faziam nada. Uma grade em que
+ * um cartão em vinte responde ao clique ensina a não clicar em nenhum, e ainda
+ * escondia num gesto exclusivo os dados que a pessoa precisava conferir (motivo
+ * da recusa por extenso, quem solicitou, se a filipeta foi conferida).
+ *
+ * Agora o gesto é um só e as ações moram na gaveta, onde há espaço para dizer o
+ * que cada uma faz. Ver `DetalheCartao`.
+ */
 const CartaoAtendimento = memo(function CartaoAtendimento({
   cartao,
   codigosGlosa,
-  podeVincular,
-  onVincular,
+  onAbrir,
 }: {
   cartao: CartaoGrade
   codigosGlosa: Map<string, string>
-  podeVincular: boolean
-  /** Só chamado por cartão de guia sem vínculo. */
-  onVincular: (guia: string) => void
+  onAbrir: (cartao: CartaoGrade) => void
 }) {
   if (cartao.tipo === 'sessao') {
     const config = resolverConfig(cartao.situacao ?? '—')
@@ -230,53 +263,92 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
       .join(' · ')
 
     if (!pendente) {
-      // "Liberada" em esmeralda, "Falta" em stone, "Cancelada" em cinza — todas
-      // escritas, todas no matiz do próprio estado, que sai de SITUACAO_CONFIG.
+      /*
+        A sessão que AINDA NÃO ACONTECEU não veste o vocabulário da auditoria.
+
+        "Não Solicitada" é rótulo de auditoria e nasce vermelho, porque depois do
+        atendimento não ter pedido autorização é a lacuna mais larga que existe.
+        Antes do atendimento é o estado normal — a autorização se tira na hora —,
+        e a tela pintava de rose a agenda inteira de quinta e sexta, dizendo que
+        havia erro onde não havia nada ainda.
+
+        Então enquanto não decorre, e enquanto ninguém liberou, o cartão diz o
+        que de fato é: "Agendada", em slate. Nenhum matiz novo — slate já é
+        "nenhum status registrado" no DESIGN.md — e nenhuma situação nova em
+        SITUACAO_CONFIG: é só esta tela escolhendo não gritar cedo demais.
+      */
+      const aguardando =
+        !cartao.decorrida &&
+        !SITUACOES_SEM_SESSAO.has(cartao.situacao ?? '') &&
+        (cartao.situacao ?? '') !== 'CANCELADA' &&
+        !SITUACOES_COBERTAS.has(cartao.situacao ?? '')
+
       return (
         <Compacto
           hora={cartao.hora}
           terapia={cartao.terapia}
-          rotulo={config.label}
-          tinta={config.strong}
-          Icone={config.icon}
+          rotulo={aguardando ? 'Agendada' : config.label}
+          tinta={aguardando ? 'text-slate-500' : config.strong}
+          Icone={aguardando ? CalendarClock : config.icon}
           teveToken={cartao.teve_token}
           token={cartao.token}
-          titulo={titulo}
+          titulo={aguardando ? `${titulo} · ainda não aconteceu` : titulo}
+          onAbrir={() => onAbrir(cartao)}
         />
       )
     }
 
-    // "Sem cobertura" é qualificador da situação, não estado próprio — por isso
-    // uma frase só, no matiz da situação. Duas linhas no mesmo matiz diriam o
-    // mesmo fato duas vezes, e um matiz próprio inventaria um sétimo
-    // significado que a Status Lock Rule não admite.
-    const frase = cartao.semCobertura ? `${config.label} · sem cobertura` : config.label
+    /*
+      Duas manchetes, e só duas: "Glosa" e "Sem cobertura".
+
+      A frase era composta — "Não Solicitada · sem cobertura", "Glosa · sem
+      cobertura" — e dizia o mesmo fato duas vezes num espaço onde não cabe
+      nem uma. Quem lê a grade precisa saber SE está descoberta; POR QUE (não
+      solicitada, solicitação cancelada, retorno não confirmado, sincronizando)
+      é pergunta da gaveta, que tem largura para responder.
+
+      Glosa é a exceção porque não é uma variedade de "descoberta": é uma
+      recusa, o único estado aqui que pede tratativa em vez de solicitação, e
+      por isso mantém o nome e o violeta.
+
+      "Sem cobertura" veste ROSE, sempre, seja qual for a situação por baixo.
+      Rose é "a lacuna mais larga" no DESIGN.md e é exatamente isso — a sessão
+      aconteceu e nada a cobre. Sem esse alinhamento a mesma manchete sairia em
+      três matizes conforme o estado que ela acabou de deixar de mostrar.
+    */
+    const descoberta = cartao.semCobertura && cartao.situacao !== 'GLOSA'
+    const frase = descoberta ? 'Sem cobertura' : config.label
+    const tinta = descoberta ? 'text-rose-700' : config.strong
+    const superficie = descoberta ? 'border-rose-200 bg-rose-50' : config.surface
+    const dot = descoberta ? 'bg-rose-500' : config.dot
+    const Icone = descoberta ? AlertCircle : config.icon
     const motivo =
       completarMotivoGlosa(lerMotivoGlosa(cartao.motivoBruto), codigosGlosa)?.descricao ?? null
 
     return (
-      <div
-        tabIndex={0}
+      <button
+        type="button"
+        onClick={() => onAbrir(cartao)}
         title={`${titulo}${cartao.semCobertura ? ' · sem cobertura' : ''}`}
-        className={`relative w-full min-w-0 rounded-lg border py-2 pr-2 pl-2.5 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none ${config.surface}`}
+        className={`relative w-full min-w-0 rounded-lg border py-2 pr-2 pl-2.5 text-left transition hover:brightness-97 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none ${superficie}`}
       >
-        <Espinha dot={config.dot} />
+        <Espinha dot={dot} />
         <Cabecalho
           hora={cartao.hora}
-          tinta={config.strong}
-          Icone={config.icon}
+          tinta={tinta}
+          Icone={Icone}
           teveToken={cartao.teve_token}
           token={cartao.token}
         />
         <CorpoPendente
           terapia={cartao.terapia}
           frase={frase}
-          tinta={config.strong}
+          tinta={tinta}
           codigo={cartao.codigo_tuss}
           guia={cartao.guia}
           motivo={motivo}
         />
-      </div>
+      </button>
     )
   }
 
@@ -341,6 +413,7 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
         teveToken={cartao.teve_token}
         token={cartao.token}
         titulo={[tituloBase, cartao.terapia, motivo ?? rotulo].filter(Boolean).join(' · ')}
+        onAbrir={() => onAbrir(cartao)}
       />
     )
   }
@@ -366,37 +439,17 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
     </>
   )
 
-  // O rótulo E a ação são o mesmo controle: "sem vínculo" descreve o estado, e
-  // clicar nele é o que se faz a respeito. Guia que não pede nada não é botão —
-  // um controle que não leva a lugar nenhum ensina a ignorar os que levam.
-  if (semVinculo) {
-    return (
-      <button
-        type="button"
-        onClick={() => onVincular(cartao.guia)}
-        disabled={!podeVincular}
-        title={
-          podeVincular
-            ? `${tituloBase} — ver as sessões que ela pode cobrir`
-            : 'Seu perfil não permite vincular autorizações'
-        }
-        className={`relative w-full min-w-0 rounded-lg border py-2 pr-2 pl-2.5 text-left transition hover:bg-amber-100 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-60 ${tom}`}
-      >
-        {miolo}
-      </button>
-    )
-  }
-
-  // Excedente sem estar na fila: nada a clicar, mas a tela precisa dizer que
-  // esta é a liberação que passou do agendado.
   return (
-    <div
-      tabIndex={0}
-      title={`${tituloBase} — liberação além das sessões agendadas deste TUSS na semana`}
-      className={`relative w-full min-w-0 rounded-lg border py-2 pr-2 pl-2.5 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none ${tom}`}
+    <button
+      type="button"
+      onClick={() => onAbrir(cartao)}
+      title={`${tituloBase} — ${
+        semVinculo ? 'ver o que ela pode cobrir' : 'liberação além das sessões agendadas do TUSS'
+      }`}
+      className={`relative w-full min-w-0 rounded-lg border py-2 pr-2 pl-2.5 text-left transition hover:brightness-97 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none ${tom}`}
     >
       {miolo}
-    </div>
+    </button>
   )
 })
 

@@ -1,6 +1,6 @@
 'use client'
 
-import type { LinhaGrade } from '../types'
+import type { CartaoGrade, LinhaGrade } from '../types'
 import CartaoAtendimento from './CartaoAtendimento'
 import { formatarDia } from './datas'
 
@@ -40,22 +40,20 @@ export default function GradeSemana({
   dias,
   hoje,
   codigosGlosa,
-  podeVincular,
-  onVincularGuia,
-  chaveDestacada,
+  chaveAberta,
+  onAbrirDetalhe,
 }: {
   linhas: LinhaGrade[]
   dias: string[]
   /** Data local de hoje, para destacar a coluna do dia. */
   hoje: string
   codigosGlosa: Map<string, string>
-  podeVincular: boolean
-  onVincularGuia: (guia: string) => void
   /**
-   * O cartão onde o navegador de pendências pousou. Anel de steel, nunca matiz
-   * semântico: "você está aqui" e "isto é uma glosa" não podem ser a mesma cor.
+   * O cartão que está aberto na gaveta. Anel de steel, nunca matiz semântico:
+   * "você está aqui" e "isto é uma glosa" não podem ser a mesma cor.
    */
-  chaveDestacada: string | null
+  chaveAberta: string | null
+  onAbrirDetalhe: (cartao: CartaoGrade) => void
 }) {
   const diasVazios = new Set(
     dias.filter((dia) => linhas.every((linha) => (linha.celulas[dia] ?? []).length === 0))
@@ -145,7 +143,7 @@ export default function GradeSemana({
                             key={cartao.chave}
                             data-chave={cartao.chave}
                             className={`min-w-0 grow basis-34 rounded-lg ${
-                              cartao.chave === chaveDestacada
+                              cartao.chave === chaveAberta
                                 ? 'ring-2 ring-brand ring-offset-1'
                                 : ''
                             }`}
@@ -153,8 +151,7 @@ export default function GradeSemana({
                             <CartaoAtendimento
                               cartao={cartao}
                               codigosGlosa={codigosGlosa}
-                              podeVincular={podeVincular}
-                              onVincular={onVincularGuia}
+                              onAbrir={onAbrirDetalhe}
                             />
                           </div>
                         ))}

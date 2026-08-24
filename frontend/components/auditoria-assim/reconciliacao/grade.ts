@@ -12,22 +12,28 @@ import { diaDoTimestamp, horaDoTimestamp } from './datas'
 const SEM_HORA = '—'
 
 /**
- * As situações que são problema independentemente do relógio.
+ * A única situação que é problema independentemente do relógio.
  *
- * As que dependem dele — sincronizando, retorno não confirmado — ficam de fora
- * de propósito: dentro do prazo elas se resolvem sozinhas e não pedem nada, e
- * quando vencem o `semCobertura` já as promove. É o que evita a tela gritar por
- * uma solicitação enviada há dez minutos.
+ * Glosa é RESPOSTA da ASSIM: só existe depois de alguém ter pedido e ter sido
+ * recusado, e uma recusa pede tratativa mesmo que a sessão ainda vá acontecer.
+ *
+ * Tudo o mais depende do relógio e por isso fica de fora. "Não solicitada" e
+ * "solicitação cancelada" estavam aqui até 2026-08-24 e não deviam: numa sessão
+ * que ainda nem aconteceu, não haver solicitação é o estado NORMAL — a
+ * autorização se tira na hora do atendimento. A tela pintava de vermelho, e em
+ * cartão alto, a agenda inteira de quinta e sexta. Quando essas situações
+ * realmente viram problema — a sessão passou e ninguém cobriu — quem as promove
+ * é o `semCobertura`, que já mede exatamente isso.
  */
-const SITUACOES_PENDENTES = new Set(['NAO_SOLICITADA', 'SOLICITACAO_CANCELADA', 'GLOSA'])
+const SITUACOES_PENDENTES = new Set(['GLOSA'])
 
 /**
  * Este cartão pede trabalho?
  *
  * Uma definição só, porque três consomem: o cartão decide se veste a espécie
- * expandida, o navegador do rodapé decide o que percorrer, e a grade decide onde
- * pousar o anel. Divergirem faria o rodapé prometer "3 pendências" e a grade
- * mostrar duas destacadas — que é o gênero de mentira que esta tela caça.
+ * expandida, a faixa de semanas conta por ela, e o modal a usa para saber em que
+ * semana abrir. Divergirem faria a faixa prometer "4 aqui" e a grade destacar
+ * duas — que é o gênero de mentira que esta tela existe para caçar.
  */
 export function cartaoPendente(c: CartaoGrade): boolean {
   if (c.tipo === 'sessao') return c.semCobertura || SITUACOES_PENDENTES.has(c.situacao ?? '')
@@ -97,6 +103,8 @@ export function montarGrade(
   marcas: {
     /** A sessão já ocorreu e ninguém a liberou. */
     descoberta: (s: AuditoriaAssimItem) => boolean
+    /** A sessão já ocorreu, coberta ou não. */
+    decorrida: (s: AuditoriaAssimItem) => boolean
     /** As guias que passaram da cota do TUSS. */
     excedentes: ReadonlySet<string>
   }
@@ -124,9 +132,11 @@ export function montarGrade(
         terapia: s.terapias || nomeDaTerapia(s.codigo_tuss),
         legenda: s.profissionais ?? s.observacao ?? null,
         semCobertura: marcas.descoberta(s),
+        decorrida: marcas.decorrida(s),
         motivoBruto: s.descricao_erro ?? s.motivo_glosa,
         teve_token: s.teve_token,
         token: s.token,
+        origem: s,
       },
     })
   }
@@ -153,6 +163,7 @@ export function montarGrade(
         descricao_erro: a.descricao_erro,
         teve_token: a.teve_token,
         token: a.token,
+        origem: a,
       },
     })
   }

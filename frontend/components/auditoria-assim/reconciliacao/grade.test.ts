@@ -6,7 +6,7 @@ import type { AuditoriaAssimItem, AutorizacaoAssimSemana, PlacarTuss } from '../
 const DIAS = ['2026-08-17', '2026-08-18', '2026-08-19', '2026-08-20', '2026-08-21']
 
 /** Nada marcado — o cenário dos testes de posicionamento, que não olham marca. */
-const SEM_MARCAS = { descoberta: () => false, excedentes: new Set<string>() }
+const SEM_MARCAS = { descoberta: () => false, decorrida: () => true, excedentes: new Set<string>() }
 
 function sessao(p: Partial<AuditoriaAssimItem>): AuditoriaAssimItem {
   return {
@@ -120,6 +120,7 @@ describe('montarGrade por horário', () => {
       PLACAR,
       {
         descoberta: (s) => s.bloco_id === 'descoberta',
+        decorrida: () => true,
         excedentes: new Set(['demais']),
       }
     )
@@ -138,9 +139,10 @@ describe('montarGrade por horário', () => {
  */
 describe('cartaoPendente', () => {
   const base = { chave: 'k', hora: '09:00', codigo_tuss: null, terapia: null } as const
+  const linha = sessao({})
 
   it('promove a sessão descoberta e a que está em glosa, mas não a liberada', () => {
-    const sessaoBase = { ...base, tipo: 'sessao', guia: null, legenda: null, motivoBruto: null, teve_token: null, token: null } as const
+    const sessaoBase = { ...base, tipo: 'sessao', guia: null, legenda: null, motivoBruto: null, teve_token: null, token: null, decorrida: true, origem: linha } as const
     expect(cartaoPendente({ ...sessaoBase, situacao: 'LIBERADA', semCobertura: false })).toBe(false)
     expect(cartaoPendente({ ...sessaoBase, situacao: 'GLOSA_RESOLVIDA', semCobertura: false })).toBe(false)
     expect(cartaoPendente({ ...sessaoBase, situacao: 'GLOSA', semCobertura: false })).toBe(true)
@@ -150,7 +152,7 @@ describe('cartaoPendente', () => {
   })
 
   it('promove a guia órfã e a excedente, e deixa a de outra semana quieta', () => {
-    const guiaBase = { ...base, tipo: 'autorizacao', guia: 'g', status: 'Liberado', descricao_erro: null, teve_token: null, token: null } as const
+    const guiaBase = { ...base, tipo: 'autorizacao', guia: 'g', status: 'Liberado', descricao_erro: null, teve_token: null, token: null, origem: guia({ guia: 'g' }) } as const
     expect(cartaoPendente({ ...guiaBase, estado: 'fora-da-semana', excedente: false })).toBe(false)
     expect(cartaoPendente({ ...guiaBase, estado: 'sem-vinculo', excedente: false })).toBe(true)
     expect(cartaoPendente({ ...guiaBase, estado: 'fora-da-semana', excedente: true })).toBe(true)

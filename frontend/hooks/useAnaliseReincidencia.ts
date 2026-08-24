@@ -389,6 +389,7 @@ function marcadosDaSemana(
     placar,
     {
       descoberta: (s) => sessaoSemCobertura(s, cutoff),
+      decorrida: (s) => sessaoDecorrida(s, cutoff),
       excedentes: excedentesDoPlacar(placar, autorizacoes),
     }
   )
@@ -866,6 +867,20 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   )
 
   /**
+   * Esta sessão já ocorreu — coberta ou não.
+   *
+   * Separada de `sessaoDescoberta` porque o cartão precisa distinguir "ninguém
+   * pediu e a sessão já passou" (problema) de "ninguém pediu ainda porque a
+   * sessão é sexta" (normal). Sem ela as duas chegavam como NAO_SOLICITADA e
+   * saíam vermelhas, e a tela cobrava autorização da agenda que ainda nem
+   * aconteceu.
+   */
+  const sessaoJaDecorrida = useCallback(
+    (s: AuditoriaAssimItem) => sessaoDecorrida(s, cutoff),
+    [cutoff]
+  )
+
+  /**
    * As guias que estouraram a cota — nomeadas, não contadas.
    *
    * `excedente` é um número por TUSS ("6 liberadas para 5 sessões"), e um número
@@ -980,6 +995,8 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
     estadoDaGuia,
     /** Marca a sessão que já ocorreu e ninguém liberou — o "faltando" apontável. */
     sessaoDescoberta,
+    /** Marca a sessão que já ocorreu, coberta ou não. */
+    sessaoJaDecorrida,
     /** As guias que passaram da cota, nomeadas — o "sobrando" apontável. */
     guiasExcedentes,
     orfasDaSemana,
