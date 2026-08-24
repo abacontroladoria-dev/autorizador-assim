@@ -1,6 +1,6 @@
 'use client'
 
-import { createElement, memo } from 'react'
+import { createElement, memo, type ReactNode } from 'react'
 import {
   AlertCircle, AlertOctagon, Ban, CalendarClock, CheckCircle2, KeySquare, Link2,
   type LucideIcon,
@@ -12,6 +12,7 @@ import { resolverConfig } from '../SituacaoBadge'
 import type { CartaoGrade } from '../types'
 import { SITUACOES_COBERTAS, SITUACOES_SEM_SESSAO } from './cobertura'
 import { cartaoPendente } from './grade'
+import { distanciaCurta, distanciaPorExtenso, type PapelNaSelecao } from './vinculo'
 
 /**
  * Um atendimento dentro de uma célula da grade — e, desde 2026-08-24, em DUAS
@@ -120,6 +121,45 @@ function Cabecalho({
 }
 
 /**
+ * A tarja que o modo de vínculo acrescenta ao pé do cartão.
+ *
+ * Ela carrega a DISTÂNCIA — as horas entre a sessão e o instante em que a ASSIM
+ * registrou a guia. É o critério da reconciliação, e no modal que este modo
+ * aposentou ele era o dado mais escondido da tela: 11px cinza, encostado no
+ * número da guia, no canto direito de uma linha de lista.
+ *
+ * Steel, e só steel, no cartão escolhível: "esta é a que você pode clicar" é
+ * seleção, não estado clínico — o matiz semântico do cartão continua sendo do
+ * cartão. A candidata já coberta veste slate e some do primeiro plano sem sair
+ * da tela, porque é justamente ela que revela a guia extra.
+ */
+function Tarja({ papel, distancia }: { papel: PapelNaSelecao; distancia: number | null }) {
+  if (papel === 'inerte') return null
+
+  const conteudo: Record<'foco' | 'alvo' | 'coberta', { Icone: LucideIcon; texto: string }> = {
+    foco: { Icone: Link2, texto: 'Esta guia' },
+    alvo: { Icone: Link2, texto: 'Esta sessão' },
+    coberta: { Icone: CheckCircle2, texto: 'já coberta' },
+  }
+  const { Icone, texto } = conteudo[papel]
+  const alvo = papel === 'alvo'
+
+  return (
+    <p
+      className={`mt-1.5 flex items-center justify-between gap-1.5 border-t pt-1 text-[11px] leading-tight font-semibold ${
+        alvo ? 'border-brand text-brand-fg' : 'border-slate-200 text-slate-500'
+      }`}
+    >
+      <span className="truncate tabular-nums">{distanciaCurta(distancia) ?? ''}</span>
+      <span className="flex shrink-0 items-center gap-1">
+        <Icone size={11} aria-hidden />
+        {texto}
+      </span>
+    </p>
+  )
+}
+
+/**
  * A espécie compacta: duas linhas e nada mais.
  *
  * A segunda linha diz as duas coisas de uma vez — a TERAPIA à esquerda e o
@@ -141,6 +181,9 @@ function Compacto({
   token,
   titulo,
   onAbrir,
+  desabilitado,
+  inerte,
+  tarja,
 }: {
   hora: string
   terapia: string | null
@@ -152,13 +195,20 @@ function Compacto({
   titulo: string
   /** Todo cartão abre o detalhe — ver a nota do componente. */
   onAbrir: () => void
+  desabilitado?: boolean
+  /** Modo de vínculo: este cartão não é candidato nem é a guia em foco. */
+  inerte?: boolean
+  tarja?: ReactNode
 }) {
   return (
     <button
       type="button"
       onClick={onAbrir}
+      disabled={desabilitado}
       title={titulo}
-      className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-left transition hover:border-slate-300 hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none"
+      className={`w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-left transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none ${
+        inerte ? 'opacity-35' : ''
+      } ${desabilitado ? '' : 'hover:border-slate-300 hover:bg-slate-50'}`}
     >
       <Cabecalho hora={hora} tinta={tinta} Icone={Icone} teveToken={teveToken} token={token} />
       <p className="mt-0.5 flex items-start justify-between gap-1.5 text-[11px] leading-tight">
@@ -170,6 +220,7 @@ function Compacto({
         )}
         <span className={`shrink-0 font-semibold ${tinta}`}>{rotulo}</span>
       </p>
+      {tarja}
     </button>
   )
 }
@@ -250,11 +301,42 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
   cartao,
   codigosGlosa,
   onAbrir,
+  papel,
+  distanciaSelecao,
 }: {
   cartao: CartaoGrade
   codigosGlosa: Map<string, string>
   onAbrir: (cartao: CartaoGrade) => void
+  /**
+   * O papel deste cartão no modo de vínculo. Ausente = modo normal.
+   *
+   * Primitivos, e não um objeto `selecao`, porque este componente é `memo`: um
+   * objeto recriado a cada render derrubaria a comparação rasa das ~55 células
+   * mesmo fora do modo de vínculo, que é quando a grade rola.
+   */
+  papel?: PapelNaSelecao
+  distanciaSelecao?: number | null
 }) {
+  // Duas coisas diferentes, e por isso duas variáveis. No modo de vínculo o
+  // ÚNICO cartão que aceita clique é o alvo — abrir a gaveta de detalhe no meio
+  // de uma escolha trocaria a pergunta debaixo da mão de quem está decidindo.
+  // Mas só o cartão fora da janela ESMAECE: a candidata já coberta precisa
+  // continuar legível, porque é ela que revela que a guia é extra.
+  const desabilitado = papel !== undefined && papel !== 'alvo'
+  const inerte = papel === 'inerte'
+  const tarja = papel ? <Tarja papel={papel} distancia={distanciaSelecao ?? null} /> : null
+  // No modo de vínculo o `title` responde à pergunta do modo, não à do cartão.
+  const tituloSelecao =
+    papel === 'alvo'
+      ? (distanciaPorExtenso(distanciaSelecao ?? null) ?? 'vincular a guia a esta sessão')
+      : papel === 'coberta'
+        ? 'esta sessão já está coberta — não pode receber a guia'
+        : papel === 'foco'
+          ? 'a guia que está sendo vinculada'
+          : papel === 'inerte'
+            ? 'fora da janela de busca desta guia'
+            : null
+
   if (cartao.tipo === 'sessao') {
     const config = resolverConfig(cartao.situacao ?? '—')
     const pendente = cartaoPendente(cartao)
@@ -292,8 +374,11 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
           Icone={aguardando ? CalendarClock : config.icon}
           teveToken={cartao.teve_token}
           token={cartao.token}
-          titulo={aguardando ? `${titulo} · ainda não aconteceu` : titulo}
+          titulo={tituloSelecao ?? (aguardando ? `${titulo} · ainda não aconteceu` : titulo)}
           onAbrir={() => onAbrir(cartao)}
+          desabilitado={desabilitado}
+          inerte={inerte}
+          tarja={tarja}
         />
       )
     }
@@ -329,8 +414,13 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
       <button
         type="button"
         onClick={() => onAbrir(cartao)}
-        title={`${titulo}${cartao.semCobertura ? ' · sem cobertura' : ''}`}
-        className={`relative w-full min-w-0 rounded-lg border py-2 pr-2 pl-2.5 text-left transition hover:brightness-97 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none ${superficie}`}
+        disabled={desabilitado}
+        title={tituloSelecao ?? `${titulo}${cartao.semCobertura ? ' · sem cobertura' : ''}`}
+        className={`relative w-full min-w-0 rounded-lg border py-2 pr-2 pl-2.5 text-left transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none ${superficie} ${
+          inerte ? 'opacity-35' : ''
+        } ${
+          desabilitado ? '' : 'hover:brightness-97'
+        }`}
       >
         <Espinha dot={dot} />
         <Cabecalho
@@ -348,6 +438,7 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
           guia={cartao.guia}
           motivo={motivo}
         />
+        {tarja}
       </button>
     )
   }
@@ -412,8 +503,13 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
         Icone={Icone}
         teveToken={cartao.teve_token}
         token={cartao.token}
-        titulo={[tituloBase, cartao.terapia, motivo ?? rotulo].filter(Boolean).join(' · ')}
+        titulo={
+          tituloSelecao ?? [tituloBase, cartao.terapia, motivo ?? rotulo].filter(Boolean).join(' · ')
+        }
         onAbrir={() => onAbrir(cartao)}
+        desabilitado={desabilitado}
+        inerte={inerte}
+        tarja={tarja}
       />
     )
   }
@@ -436,6 +532,7 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
         guia={cartao.guia}
         motivo={motivo}
       />
+      {tarja}
     </>
   )
 
@@ -443,10 +540,18 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
     <button
       type="button"
       onClick={() => onAbrir(cartao)}
-      title={`${tituloBase} — ${
-        semVinculo ? 'ver o que ela pode cobrir' : 'liberação além das sessões agendadas do TUSS'
+      disabled={desabilitado}
+      title={
+        tituloSelecao ??
+        `${tituloBase} — ${
+          semVinculo ? 'ver o que ela pode cobrir' : 'liberação além das sessões agendadas do TUSS'
+        }`
+      }
+      className={`relative w-full min-w-0 rounded-lg border py-2 pr-2 pl-2.5 text-left transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none ${tom} ${
+        inerte ? 'opacity-35' : ''
+      } ${
+        desabilitado ? '' : 'hover:brightness-97'
       }`}
-      className={`relative w-full min-w-0 rounded-lg border py-2 pr-2 pl-2.5 text-left transition hover:brightness-97 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none ${tom}`}
     >
       {miolo}
     </button>

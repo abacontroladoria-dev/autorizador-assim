@@ -1,8 +1,18 @@
 'use client'
 
-import type { CartaoGrade, LinhaGrade } from '../types'
+import type { CandidataVinculo, CartaoGrade, LinhaGrade } from '../types'
 import CartaoAtendimento from './CartaoAtendimento'
 import { formatarDia } from './datas'
+import { candidataElegivel, type PapelNaSelecao } from './vinculo'
+
+/** O modo de vínculo, visto de dentro da grade. Ausente = grade normal. */
+export type SelecaoNaGrade = {
+  /** `bloco_id` → candidata, só as que esta semana desenha. */
+  porBloco: Map<string, CandidataVinculo>
+  /** A guia sendo vinculada, para marcá-la sem torná-la clicável. */
+  guiaEmFoco: string
+  onEscolher: (candidata: CandidataVinculo) => void
+}
 
 const DIA_CURTO = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB']
 
@@ -42,6 +52,7 @@ export default function GradeSemana({
   codigosGlosa,
   chaveAberta,
   onAbrirDetalhe,
+  selecao,
 }: {
   linhas: LinhaGrade[]
   dias: string[]
@@ -54,6 +65,15 @@ export default function GradeSemana({
    */
   chaveAberta: string | null
   onAbrirDetalhe: (cartao: CartaoGrade) => void
+  /**
+   * Modo de vínculo: a grade vira o seletor de "esta guia cobre qual sessão?".
+   *
+   * Substituiu um modal próprio em 2026-08-24. Ele desmontava o modal da semana
+   * para abrir, então a evidência que trouxe a pessoa até ali — a agenda do
+   * paciente, com a guia órfã no dia em que foi autorizada — desaparecia
+   * justamente no momento de decidir. Aqui a escolha acontece em cima dela.
+   */
+  selecao?: SelecaoNaGrade
 }) {
   const diasVazios = new Set(
     dias.filter((dia) => linhas.every((linha) => (linha.celulas[dia] ?? []).length === 0))
@@ -138,23 +158,51 @@ export default function GradeSemana({
                   >
                     {cartoes.length > 0 && (
                       <div className="flex flex-wrap items-start gap-1.5">
-                        {cartoes.map((cartao) => (
-                          <div
-                            key={cartao.chave}
-                            data-chave={cartao.chave}
-                            className={`min-w-0 grow basis-34 rounded-lg ${
-                              cartao.chave === chaveAberta
-                                ? 'ring-2 ring-brand ring-offset-1'
+                        {cartoes.map((cartao) => {
+                          const candidata = selecao?.porBloco.get(cartao.chave)
+                          const papel: PapelNaSelecao | undefined = !selecao
+                            ? undefined
+                            : candidata
+                              ? candidataElegivel(candidata)
+                                ? 'alvo'
+                                : 'coberta'
+                              : cartao.tipo === 'autorizacao' &&
+                                  cartao.guia === selecao.guiaEmFoco
+                                ? 'foco'
+                                : 'inerte'
+
+                          // Anel CHEIO no que se pode clicar, TRACEJADO na guia
+                          // em foco. Os dois são steel — os dois são "em jogo" —
+                          // e o traço é o que separa "clique aqui" de "é isto
+                          // que estamos vinculando", sem gastar um segundo
+                          // matiz num vocabulário que já tem seis.
+                          const anel =
+                            papel === 'alvo' || cartao.chave === chaveAberta
+                              ? 'ring-2 ring-brand ring-offset-1'
+                              : papel === 'foco'
+                                ? 'outline-2 outline-dashed outline-brand outline-offset-2'
                                 : ''
-                            }`}
-                          >
-                            <CartaoAtendimento
-                              cartao={cartao}
-                              codigosGlosa={codigosGlosa}
-                              onAbrir={onAbrirDetalhe}
-                            />
-                          </div>
-                        ))}
+
+                          return (
+                            <div
+                              key={cartao.chave}
+                              data-chave={cartao.chave}
+                              className={`min-w-0 grow basis-34 rounded-lg ${anel}`}
+                            >
+                              <CartaoAtendimento
+                                cartao={cartao}
+                                codigosGlosa={codigosGlosa}
+                                onAbrir={
+                                  papel === 'alvo' && candidata
+                                    ? () => selecao?.onEscolher(candidata)
+                                    : onAbrirDetalhe
+                                }
+                                papel={papel}
+                                distanciaSelecao={candidata?.distancia_horas ?? null}
+                              />
+                            </div>
+                          )
+                        })}
                       </div>
                     )}
                   </div>

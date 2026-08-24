@@ -2,21 +2,44 @@
 
 import { useCallback, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
-import { AlertTriangle, CalendarDays, CheckCircle2, RefreshCw, X } from 'lucide-react'
-import { diasUteisDe, type useAnaliseReincidencia } from '@/hooks/useAnaliseReincidencia'
+import {
+  AlertTriangle, Ban, CalendarDays, CheckCircle2, Link2, Loader2, RefreshCw, X,
+} from 'lucide-react'
+import { diasUteisDe, segundaDe, type useAnaliseReincidencia } from '@/hooks/useAnaliseReincidencia'
 import { useModalDialog } from '@/hooks/useModalDialog'
-import type { CartaoGrade } from '../types'
+import type { CandidataVinculo, CartaoGrade, GuiaOrfa } from '../types'
 import DetalheCartao from './DetalheCartao'
 import GradeSemana from './GradeSemana'
 import { PENDENCIAS } from './pendencias'
-import { hojeLocal, rotuloSemana } from './datas'
+import { dataHoraCurta, formatarDia, formatarDiaComNome, hojeLocal, rotuloSemana } from './datas'
 import { montarGrade } from './grade'
+import { mapearCandidatas, type MapaCandidatas } from './vinculo'
 
 const ID_TITULO = 'titulo-semana-paciente'
 
 /** "17–21" — a semana em duas datas, sem o mês, que a faixa já diz. */
 function rotuloCurtoSemana(inicio: string, fim: string): string {
   return `${inicio.slice(8, 10)}–${fim.slice(8, 10)}`
+}
+
+/**
+ * O modo "esta guia cobre qual sessão?", que a grade passou a hospedar.
+ *
+ * Era um modal próprio (`ModalEscolherSessao`, removido em 2026-08-24). Ele
+ * prometia no comentário que "a semana continua atrás" e não continuava: abri-lo
+ * fechava o modal da semana, então tudo o que se sabia sobre a guia — motivo da
+ * recusa, quem solicitou, os vizinhos da agenda — sumia no exato momento de
+ * decidir, e voltava reduzido a uma linha cinza de subtítulo.
+ */
+export type ModoVinculo = {
+  guia: GuiaOrfa
+  candidatas: CandidataVinculo[]
+  carregando: boolean
+  erro: string | null
+  janelaDias: number
+  onEscolher: (candidata: CandidataVinculo) => void
+  onSemSessao: () => void
+  onCancelar: () => void
 }
 
 /**
@@ -39,12 +62,21 @@ function FaixaDeSemanas({
   semanas,
   atual,
   onEscolher,
+  tom = 'pendencia',
 }: {
   semanas: { inicio: string; fim: string; marcados: number }[]
   atual: string
   onEscolher: (inicio: string) => void
+  /**
+   * O que o número conta. No modo de vínculo a faixa deixa de contar pendências
+   * e passa a contar CANDIDATAS — a mesma pergunta ("para que lado navegar?")
+   * com outra resposta —, e o distintivo troca de âmbar para steel: ali ele é
+   * seleção, não um estado da semana.
+   */
+  tom?: 'pendencia' | 'candidata'
 }) {
   if (semanas.length < 2) return null
+  const emVinculo = tom === 'candidata'
 
   return (
     <nav
@@ -60,7 +92,11 @@ function FaixaDeSemanas({
             onClick={() => onEscolher(inicio)}
             aria-current={aberta ? 'true' : undefined}
             aria-label={`Semana de ${rotuloCurtoSemana(inicio, fim)}, ${
-              marcados === 0 ? 'nada a conferir' : `${marcados} a conferir`
+              marcados === 0
+                ? emVinculo
+                  ? 'nenhuma candidata'
+                  : 'nada a conferir'
+                : `${marcados} ${emVinculo ? 'candidata(s)' : 'a conferir'}`
             }`}
             className={`flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[12px] transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none ${
               aberta
@@ -70,7 +106,11 @@ function FaixaDeSemanas({
           >
             <span className="tabular-nums">{rotuloCurtoSemana(inicio, fim)}</span>
             {marcados > 0 ? (
-              <span className="rounded-full bg-amber-100 px-1.5 text-[11px] font-bold tabular-nums text-amber-800">
+              <span
+                className={`rounded-full px-1.5 text-[11px] font-bold tabular-nums ${
+                  emVinculo ? 'bg-brand text-white' : 'bg-amber-100 text-amber-800'
+                }`}
+              >
                 {marcados}
               </span>
             ) : (
@@ -82,6 +122,158 @@ function FaixaDeSemanas({
         )
       })}
     </nav>
+  )
+}
+
+/**
+ * A barra do modo de vínculo: o que se está vinculando, e onde estão as opções.
+ *
+ * A janela de candidatas é de 7 dias RETROATIVOS a partir do instante em que a
+ * ASSIM registrou a guia, e ela atravessa a semana exibida — às vezes o mês. Uma
+ * guia autorizada na segunda procura sessões da quinta anterior, que a grade
+ * aberta não tem onde desenhar. Toda candidata que a semana não mostra sai
+ * escrita aqui, com o gesto que chega até ela: sem isso a tela contaria "3
+ * candidatas" e mostraria uma, calada.
+ *
+ * "É autorização extra" é ação de PRIMEIRA CLASSE e não caso de borda — 39% das
+ * órfãs medidas em produção (2026-08-20) não cobrem sessão nenhuma. No modal
+ * antigo ela era um botão de contorno cinza no rodapé, isto é, o desfecho mais
+ * provável vestido como o controle mais fraco. Quando não há candidata nenhuma,
+ * ela vira o botão preenchido: é literalmente a única coisa a fazer.
+ */
+function BarraVinculo({
+  modo,
+  mapa,
+  semanas,
+  semanaAtual,
+  onIrParaSemana,
+  onIrParaData,
+}: {
+  modo: ModoVinculo
+  mapa: MapaCandidatas
+  semanas: { inicio: string; fim: string }[]
+  semanaAtual: string
+  onIrParaSemana: (inicio: string) => void
+  onIrParaData: (dia: string) => void
+}) {
+  const { guia } = modo
+  const nesta = mapa.porSemana.get(semanaAtual) ?? 0
+  const outras = semanas.filter(
+    (s) => s.inicio !== semanaAtual && (mapa.porSemana.get(s.inicio) ?? 0) > 0
+  )
+  // Uma entrada por DIA, e não por candidata: duas sessões do mesmo dia são um
+  // destino só, e o botão diz a data porque é ela que a pessoa vai reconhecer.
+  const diasForaDoMes = [...new Set(mapa.foraDoMes.map((c) => c.data_atendimento ?? ''))]
+    .filter(Boolean)
+    .sort()
+  const vazio = !modo.carregando && !modo.erro && mapa.totalElegiveis === 0
+
+  return (
+    <div className="flex flex-col gap-2.5 border-b border-slate-200 bg-brand-surface px-4 py-3 sm:px-6 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
+      <div className="min-w-0">
+        <p className="flex items-center gap-1.5 text-[13px] leading-tight font-bold text-brand-fg">
+          <Link2 size={15} aria-hidden />A guia{' '}
+          <span className="font-mono tabular-nums">{guia.guia}</span> cobre qual sessão?
+        </p>
+        <p className="mt-0.5 text-[11px] leading-relaxed text-slate-600">
+          {guia.codigo_tuss && <span className="tabular-nums">TUSS {guia.codigo_tuss} · </span>}
+          autorizada em <span className="tabular-nums">{dataHoraCurta(guia.data_execucao)}</span> ·
+          sessões dos {modo.janelaDias} dias anteriores
+        </p>
+
+        <div className="mt-1.5 text-[12px] leading-relaxed" role="status" aria-live="polite">
+          {modo.carregando ? (
+            <p className="flex items-center gap-1.5 text-slate-600">
+              <Loader2 size={13} className="animate-spin" aria-hidden />
+              Procurando as sessões que esta guia pode cobrir…
+            </p>
+          ) : modo.erro ? (
+            <p className="flex items-start gap-1.5 font-medium text-rose-700">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" aria-hidden />
+              {modo.erro}
+            </p>
+          ) : vazio ? (
+            <p className="text-slate-700">
+              Nenhuma sessão candidata nos {modo.janelaDias} dias anteriores. Costuma ser
+              autorização extra.
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+              <span className="font-semibold text-brand-fg">
+                {nesta > 0
+                  ? 'Clique na sessão marcada que ela cobre.'
+                  : 'Nenhuma candidata nesta semana.'}
+              </span>
+              {outras.map((s) => (
+                <button
+                  key={s.inicio}
+                  type="button"
+                  onClick={() => onIrParaSemana(s.inicio)}
+                  className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-brand bg-white px-2 text-[11px] font-semibold text-brand-fg transition hover:bg-brand-hover focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none"
+                >
+                  <span className="tabular-nums">{rotuloCurtoSemana(s.inicio, s.fim)}</span>
+                  <span className="rounded-full bg-brand px-1.5 font-bold tabular-nums text-white">
+                    {mapa.porSemana.get(s.inicio)}
+                  </span>
+                </button>
+              ))}
+              {diasForaDoMes.map((dia) => (
+                <button
+                  key={dia}
+                  type="button"
+                  onClick={() => onIrParaData(dia)}
+                  title="Está fora do mês carregado — abrir o mês dessa sessão"
+                  className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-brand bg-white px-2 text-[11px] font-semibold text-brand-fg transition hover:bg-brand-hover focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none"
+                >
+                  <CalendarDays size={11} aria-hidden />
+                  <span className="tabular-nums">{formatarDia(dia)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Não deveria acontecer. Dito em voz alta justamente por isso: uma
+              candidata que cai na semana aberta e mesmo assim não tem cartão
+              sumiria da tela sem deixar rastro, e o total acima ficaria
+              prometendo uma opção que não existe em lugar nenhum. */}
+          {mapa.semCartao.length > 0 && (
+            <p className="mt-1 text-[11px] text-amber-800">
+              {mapa.semCartao.length} candidata(s) desta semana não aparecem na grade:{' '}
+              {mapa.semCartao
+                .map((c) =>
+                  c.data_atendimento
+                    ? `${formatarDiaComNome(c.data_atendimento)} ${(c.hora_inicial ?? '').slice(0, 5)}`.trim()
+                    : 'sem data'
+                )
+                .join(', ')}
+              .
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={modo.onSemSessao}
+          className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-[12px] font-semibold transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none ${
+            vazio
+              ? 'bg-brand-fg text-white hover:bg-brand-dark'
+              : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          <Ban size={13} aria-hidden />
+          Nenhuma — é autorização extra
+        </button>
+        <button
+          type="button"
+          onClick={modo.onCancelar}
+          className="inline-flex h-9 items-center rounded-lg px-3 text-[12px] font-medium text-slate-600 transition hover:bg-white focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none"
+        >
+          Cancelar
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -99,6 +291,8 @@ type Props = {
   podeVincular: boolean
   codigosGlosa: Map<string, string>
   onVincularGuia: (guia: string) => void
+  /** Ligado = a grade está escolhendo a sessão desta guia. Ver `ModoVinculo`. */
+  vinculo: ModoVinculo | null
 }
 
 /**
@@ -139,27 +333,32 @@ type Props = {
  * listagem continua sendo onde elas se leem com os olhos.
  */
 export default function ModalSemanaPaciente({
-  open, onClose, analise, podeVincular, codigosGlosa, onVincularGuia,
+  open, onClose, analise, podeVincular, codigosGlosa, onVincularGuia, vinculo,
 }: Props) {
   /** O cartão aberto na gaveta lateral. Nulo = só a grade. */
   const [detalhe, setDetalhe] = useState<CartaoGrade | null>(null)
 
   /**
-   * Escape fecha a GAVETA primeiro, e só depois o modal.
+   * Escape desfaz um estágio por vez: o modo de vínculo, depois a gaveta,
+   * depois o modal.
    *
-   * A gaveta não instala focus trap próprio de propósito (ver `DetalheCartao`),
-   * então quem escuta o Escape continua sendo o `useModalDialog` daqui — em
-   * captura no `document`, antes de qualquer handler do React. Encadear os dois
-   * estágios AQUI é o único ponto onde funciona: um `onKeyDown` na gaveta
-   * parece resolver e não resolve.
+   * Nem a gaveta nem o modo instalam focus trap próprio, de propósito (ver
+   * `DetalheCartao`), então quem escuta o Escape continua sendo o
+   * `useModalDialog` daqui — em captura no `document`, antes de qualquer handler
+   * do React. Encadear os estágios AQUI é o único ponto onde funciona: um
+   * `onKeyDown` no filho parece resolver e não resolve.
    */
   const fechar = useCallback(() => {
+    if (vinculo) {
+      vinculo.onCancelar()
+      return
+    }
     if (detalhe) {
       setDetalhe(null)
       return
     }
     onClose()
-  }, [detalhe, onClose])
+  }, [vinculo, detalhe, onClose])
   const { refDialogo, propsDialogo } = useModalDialog(open, fechar, ID_TITULO)
 
   const dias = useMemo(() => diasUteisDe(analise.semanaInicio), [analise.semanaInicio])
@@ -186,8 +385,38 @@ export default function ModalSemanaPaciente({
   )
 
   /**
+   * A junção entre as candidatas da guia e o que a semana aberta desenha.
+   *
+   * Pelas CHAVES dos cartões, e não pelas datas: o `chave` de um cartão de
+   * sessão é o `bloco_id`, que é a mesma coluna que a RPC de candidatas
+   * devolve. Comparar por data e hora seria uma segunda definição de "é a mesma
+   * sessão", e ela divergiria no primeiro atendimento sem `hora_inicial`.
+   */
+  const chavesNaGrade = useMemo(() => {
+    const chaves = new Set<string>()
+    for (const linha of linhas) {
+      for (const dia of dias) {
+        for (const cartao of linha.celulas[dia] ?? []) chaves.add(cartao.chave)
+      }
+    }
+    return chaves
+  }, [linhas, dias])
+
+  const candidatas = vinculo?.candidatas
+  const mapa = useMemo(
+    () =>
+      mapearCandidatas(
+        candidatas ?? [],
+        analise.semanasDoMes,
+        analise.semanaInicio,
+        chavesNaGrade
+      ),
+    [candidatas, analise.semanasDoMes, analise.semanaInicio, chavesNaGrade]
+  )
+
+  /**
    * A gaveta fecha quando o recorte atrás dela muda — abrir/fechar o modal,
-   * trocar de paciente, trocar de semana.
+   * trocar de paciente, trocar de semana, entrar ou sair do modo de vínculo.
    *
    * Fechar o modal NÃO desmonta este componente: ele renderiza `null` e a
    * instância continua viva, com o estado inteiro. Sem esta guarda, abrir a
@@ -199,7 +428,9 @@ export default function ModalSemanaPaciente({
    * para "resetar estado quando uma prop muda", e um efeito com setState
    * síncrono aqui causaria renderização em cascata.
    */
-  const recorte = `${open}|${analise.pacienteNome ?? ''}|${analise.semanaInicio}`
+  const recorte = `${open}|${analise.pacienteNome ?? ''}|${analise.semanaInicio}|${
+    vinculo?.guia.guia ?? ''
+  }`
   const [recorteAnterior, setRecorteAnterior] = useState(recorte)
   if (recorteAnterior !== recorte) {
     setRecorteAnterior(recorte)
@@ -286,9 +517,17 @@ export default function ModalSemanaPaciente({
               </span>
             </span>
             <FaixaDeSemanas
-              semanas={analise.semanasDoMes}
+              semanas={
+                vinculo
+                  ? analise.semanasDoMes.map((s) => ({
+                      ...s,
+                      marcados: mapa.porSemana.get(s.inicio) ?? 0,
+                    }))
+                  : analise.semanasDoMes
+              }
               atual={analise.semanaInicio}
               onEscolher={analise.irParaSemanaEm}
+              tom={vinculo ? 'candidata' : 'pendencia'}
             />
             <button
               type="button"
@@ -300,6 +539,24 @@ export default function ModalSemanaPaciente({
             </button>
           </div>
         </header>
+
+        {vinculo && (
+          <BarraVinculo
+            modo={vinculo}
+            mapa={mapa}
+            semanas={analise.semanasDoMes}
+            semanaAtual={analise.semanaInicio}
+            onIrParaSemana={analise.irParaSemanaEm}
+            onIrParaData={(dia) => {
+              // O mês primeiro, a semana depois: `irParaMesData` também mexe em
+              // `semanaInicio` (leva para a semana de hoje, ou para a primeira
+              // do mês), então a ordem inversa seria sobrescrita. Os dois são
+              // setState do mesmo handler, e o React os aplica em lote.
+              analise.irParaMesData(dia)
+              analise.irParaSemanaEm(segundaDe(dia))
+            }}
+          />
+        )}
 
         {/* ── A grade, e a gaveta ao lado dela ────────────────────────────── */}
         {/* O contêiner externo é `relative` para a gaveta se ancorar nele, e não
@@ -324,7 +581,12 @@ export default function ModalSemanaPaciente({
                   Tentar novamente
                 </button>
               </div>
-            ) : analise.carregandoSemana ? (
+            ) : /* As TRÊS cargas do mês, e não só a das sessões: a grade lê
+                   autorizações (o cartão da guia) e órfãs (o estado
+                   "sem vínculo") tanto quanto lê sessões. Gatear numa só fazia
+                   a semana pintar com guia vestida de "Outra semana" e trocar
+                   para "Sem vínculo" segundos depois. */
+              analise.loading ? (
               <div className="space-y-2 p-4 sm:p-6">
                 {Array.from({ length: 4 }).map((_, i) => (
                   <div key={i} className="h-24 animate-pulse rounded-xl bg-slate-100" />
@@ -349,11 +611,23 @@ export default function ModalSemanaPaciente({
                 codigosGlosa={codigosGlosa}
                 chaveAberta={detalhe?.chave ?? null}
                 onAbrirDetalhe={setDetalhe}
+                selecao={
+                  vinculo
+                    ? {
+                        porBloco: mapa.naGrade,
+                        guiaEmFoco: vinculo.guia.guia,
+                        onEscolher: vinculo.onEscolher,
+                      }
+                    : undefined
+                }
               />
             )}
           </div>
 
-          {detalhe && (
+          {/* A gaveta não convive com o modo de vínculo: o `recorte` acima a
+              fecha ao entrar, e este guarda impede que ela reapareça por cima
+              da escolha se algo abrir um detalhe no meio do caminho. */}
+          {detalhe && !vinculo && (
             <>
               {/* O véu é clicável e nomeado: fechar tocando fora da gaveta é o
                   gesto que se espera, e sem `aria-label` ele seria um botão sem
