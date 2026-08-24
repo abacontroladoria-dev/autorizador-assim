@@ -1,24 +1,37 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { CalendarPlus, CalendarRange, Calculator } from "lucide-react"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 import { useHeader } from "@/contexts/HeaderContext"
 import { OcupPacMode } from "@/components/cronograma/solicitacoes/OcupPacMode"
+import { CriarNovoCronogramaPacMode } from "@/components/cronograma/solicitacoes/CriarNovoCronogramaPacMode"
+import { OrcamentoPacMode } from "@/components/cronograma/solicitacoes/OrcamentoPacMode"
+import { WorkspaceEmptyState } from "@/components/cronograma/ui/CronogramaWorkspace"
 import { buscarGradeComoCSVRows } from "@/lib/cronograma/gradeService"
 import { getJanelaOcupacaoPaciente } from "@/lib/cronograma/helpers"
 import type { CsvRow } from "@/types/cronograma"
+
+type ModoOcupacao = "aumentar" | "novo" | "orcamento"
+
+const MODOS: { key: ModoOcupacao; label: string; icon: typeof CalendarPlus }[] = [
+  { key: "aumentar", label: "Aumentar Cronograma", icon: CalendarPlus },
+  { key: "novo", label: "Criar Novo Cronograma", icon: CalendarRange },
+  { key: "orcamento", label: "Orçamento", icon: Calculator },
+]
 
 // Ocupação de Paciente precisa de uma janela de grade diferente do resto do
 // módulo Cronograma (ver getJanelaOcupacaoPaciente) — por isso busca a sua
 // própria cópia aqui em vez de usar o cRows compartilhado por
 // CronogramaDataProvider (usado pelas outras abas via layout.tsx, com a janela
-// getRefWeek() inalterada).
+// getRefWeek() inalterada). As três modalidades compartilham essa mesma cópia.
 export default function OcupacaoPacientePage() {
   const { lRows, cfg, rec, inv, sRec, sInv } = useCronogramaData()
   const { setHeader } = useHeader()
   const [cRows, setCRows] = useState<CsvRow[]>([])
   const [erro, setErro] = useState<string | null>(null)
   const fetchedRef = useRef(false)
+  const [modo, setModo] = useState<ModoOcupacao>("aumentar")
 
   useEffect(() => {
     setHeader("Ocupação · Paciente", "Aumente a ocupação de sessões por paciente")
@@ -36,10 +49,58 @@ export default function OcupacaoPacientePage() {
       })
   }, [])
 
+  // O relatório de laudos é pré-requisito das TRÊS modalidades, não um dado
+  // opcional: "Aumentar Cronograma" mede déficit contra a quantidade autorizada,
+  // "Criar Novo Cronograma" monta a lista de elegíveis a partir do laudo (e tira
+  // dele o ID Favorecido usado para gravar na TiTa), e o "Orçamento" compara o
+  // simulado com o autorizado. Sem ele, as telas responderiam com números
+  // silenciosamente errados — então a página inteira fica travada até o anexo,
+  // em vez de deixar consultar e induzir a decisão equivocada.
+  const laudosCarregados = lRows.length > 0
+
   return (
     <>
-      {erro && <p className="px-4 pt-2 text-sm text-destructive">{erro}</p>}
-      <OcupPacMode cRows={cRows} lRows={lRows} cfg={cfg} rec={rec} inv={inv} sRec={sRec} sInv={sInv} />
+      {erro && <p className="pb-2 text-sm text-destructive">{erro}</p>}
+
+      {/* Alternador de modalidade — alinhado ao eixo esquerdo do conteúdo (o
+          layout do dashboard já dá o p-6; nada de padding extra aqui, senão a
+          workbench bar de cada modo desalinha da barra do Modo 1). */}
+      <div className="mb-3">
+        <div className="inline-flex items-center gap-1 bg-slate-100 rounded-2xl p-1">
+          {MODOS.map(({ key, label, icon: Icon }) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setModo(key)}
+              disabled={!laudosCarregados}
+              aria-disabled={!laudosCarregados}
+              title={laudosCarregados ? undefined : "Anexe o relatório de laudos para liberar"}
+              className={`flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium transition-all duration-150 ${
+                !laudosCarregados ? "text-slate-400 cursor-not-allowed"
+                  : modo === key ? "bg-white text-brand-fg shadow-sm"
+                  : "text-slate-500 hover:text-slate-700"
+              }`}
+            >
+              <Icon size={14} />
+              {label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {!laudosCarregados && (
+        <WorkspaceEmptyState
+          emoji="📋"
+          titulo="Anexe o relatório de laudos para começar"
+          subtitulo="Use o badge “Laudos” no topo da página. As três modalidades dependem das quantidades autorizadas do laudo, por isso ficam bloqueadas até o anexo."
+        />
+      )}
+
+      {laudosCarregados && modo === "aumentar" && (
+        <OcupPacMode cRows={cRows} lRows={lRows} cfg={cfg} rec={rec} inv={inv} sRec={sRec} sInv={sInv} />
+      )}
+      {laudosCarregados && modo === "novo" && <CriarNovoCronogramaPacMode cRows={cRows} lRows={lRows} />}
+      {laudosCarregados && modo === "orcamento" && <OrcamentoPacMode cRows={cRows} />}
     </>
   )
 }
