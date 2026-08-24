@@ -428,6 +428,23 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   const [unidades, setUnidades] = useState<Map<string, string>>(() => new Map())
   const [carregandoSemana, setCarregandoSemana] = useState(false)
   const [carregandoAutorizacoes, setCarregandoAutorizacoes] = useState(false)
+  /**
+   * A terceira carga do mês, e a única que não tinha porteiro até 2026-08-24.
+   *
+   * As três disparam JUNTAS, em efeitos independentes, mas `loading` só olhava
+   * duas — então a listagem pintava assim que sessões e autorizações chegavam,
+   * com `orfasDaSemana` ainda vazio. Com o mapa vazio `ehOrfa` responde "não"
+   * para toda guia, a coluna "Sem vínculo" nasce zerada, e
+   * `ListaPendencias` descarta quem tem `contagem.total === 0` — ou seja, todo
+   * paciente cuja única pendência era guia sem vínculo SUMIA da listagem. Aí a
+   * resposta de `get_guias_orfas` chegava e a tela se corrigia sozinha: os
+   * números dos chips pulavam, linhas apareciam e a paginação se remontava.
+   *
+   * Gatear aqui não serializa nada — as três já corriam em paralelo, e isto só
+   * adia a primeira pintura até a última terminar. É o preço de não mostrar uma
+   * listagem que exclui gente de verdade sem dizer.
+   */
+  const [carregandoOrfas, setCarregandoOrfas] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
   // Cada carga carrega seu número de série: resposta de mês antigo que chega
@@ -518,16 +535,20 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   // ── A fila de órfãs recortada neste período ────────────────────────────
   const carregarOrfasDoMes = useCallback(async () => {
     const geracao = ++geracaoOrfas.current
+    setCarregandoOrfas(true)
     try {
       const lista = await listarGuiasOrfas(inicioFetch, fimFetch)
       if (geracao !== geracaoOrfas.current) return
       setOrfasDaSemana(new Map(lista.map((g) => [g.guia, g])))
     } catch {
-      // Silencioso de propósito: sem esta lista a tela ainda diz a verdade sobre
-      // a cota — só deixa de oferecer o atalho de vincular. Derrubar a tela
-      // inteira por causa do atalho seria pior que perdê-lo.
+      // Silencioso de propósito: sem esta lista a cota por TUSS continua certa
+      // (ela sai de sessões e autorizações), e derrubar a tela inteira por causa
+      // da coluna "Sem vínculo" seria pior que perdê-la. O que NÃO se pode fazer
+      // é pintar antes de saber — ver `carregandoOrfas`.
       if (geracao !== geracaoOrfas.current) return
       setOrfasDaSemana(new Map())
+    } finally {
+      if (geracao === geracaoOrfas.current) setCarregandoOrfas(false)
     }
   }, [inicioFetch, fimFetch])
 
@@ -1066,8 +1087,12 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
     /** As guias que passaram da cota, nomeadas — o "sobrando" apontável. */
     guiasExcedentes,
     orfasDaSemana,
-    loading: carregandoSemana || carregandoAutorizacoes,
-    carregandoSemana,
+    /**
+     * As TRÊS cargas do mês juntas. Não exponha uma sozinha: gatear numa só foi
+     * exatamente o defeito que fazia a listagem pintar e se corrigir na frente
+     * de quem estava lendo (ver `carregandoOrfas`).
+     */
+    loading: carregandoSemana || carregandoAutorizacoes || carregandoOrfas,
     erro,
     recarregar: useCallback(() => {
       carregarMes()
