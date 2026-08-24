@@ -8,8 +8,8 @@
 import { startTransition, useMemo, useState } from "react"
 import { ArrowRight, Building2, ChevronLeft, ChevronRight, Sparkles, Users } from "lucide-react"
 import { useSugestoesContratacao } from "@/hooks/useSugestoesContratacao"
-import { useTaxasEspecialidade } from "@/hooks/useTaxasEspecialidade"
-import { useParametrosGerais } from "@/hooks/useParametrosGerais"
+import { useTaxasEspecialidadeCalculo } from "@/hooks/useTaxasEspecialidade"
+import { useParametrosGeraisCalculo } from "@/hooks/useParametrosGerais"
 import {
   calcularBreakEvenPJ, projetarMargemBreakEvenPJ, calcularBreakEvenAtendimento, projetarMargemBreakEvenAtendimento,
   ESPECIALIDADES_BREAK_EVEN_PJ, SEMANAS_POR_MES,
@@ -106,8 +106,8 @@ function CardSugestao({
   // Break Even sempre a 20% de perda neste card (o seletor de cenário fica só
   // em "Parâmetros da simulação" — aqui é uma prévia rápida, não uma análise
   // configurável) — mesmos modelos de lib/remuneracao/pontoEquilibrio.ts.
-  const { taxas_pa: taxasPA, be_custo_mensal_pj: beCustoMensalPJ, be_capacidade_manha: beCapacidadeManha, be_capacidade_tarde: beCapacidadeTarde } = useTaxasEspecialidade()
-  const { parametros: parametrosGerais } = useParametrosGerais()
+  const { taxas_pa: taxasPA, be_custo_mensal_pj: beCustoMensalPJ, be_capacidade_manha: beCapacidadeManha, be_capacidade_tarde: beCapacidadeTarde } = useTaxasEspecialidadeCalculo()
+  const { parametros: parametrosGerais } = useParametrosGeraisCalculo()
   const PERDA_PADRAO_CARD = 20
 
   const isolada = useMemo(

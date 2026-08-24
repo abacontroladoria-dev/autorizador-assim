@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { getParametrosGerais } from '@/services/parametrosGerais.service'
+import { getParametrosGerais, getParametrosGeraisCalculo } from '@/services/parametrosGerais.service'
 import type { ParametrosGerais } from '@/types/remuneracao'
 
 type ParametrosState = {
@@ -58,6 +58,28 @@ export function useParametrosGerais() {
     return () => {
       subscribers.delete(setState)
     }
+  }, [])
+
+  return state
+}
+
+/**
+ * Mesmo campo `parametros` de `useParametrosGerais`, mas via RPC (migration
+ * 20260824160000) em vez da tabela crua — para telas de CÁLCULO (Simulação,
+ * Sugestões de Contratação) que não devem exigir acesso a Taxas/Parâmetros de
+ * Remuneração (restrito a rp/admin/diretoria). Sem cache compartilhado entre
+ * instâncias — só 2 consumidores, sem ganho em dividir.
+ */
+export function useParametrosGeraisCalculo(): ParametrosState {
+  const [state, setState] = useState<ParametrosState>(INITIAL_STATE)
+
+  useEffect(() => {
+    let cancelled = false
+    getParametrosGeraisCalculo().then(({ data, error: fetchError }) => {
+      if (cancelled) return
+      setState({ parametros: data, loading: false, error: fetchError })
+    })
+    return () => { cancelled = true }
   }, [])
 
   return state

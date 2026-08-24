@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useState } from 'react'
-import { getTaxasEspecialidade } from '@/services/taxasEspecialidade.service'
+import { getTaxasEspecialidade, getTaxasEspecialidadeCalculo } from '@/services/taxasEspecialidade.service'
 
 type TaxasState = {
   taxas_pa: Record<string, number>
@@ -79,6 +79,39 @@ export function useTaxasEspecialidade() {
     return () => {
       subscribers.delete(setState)
     }
+  }, [])
+
+  return state
+}
+
+/**
+ * Mesmos campos de `useTaxasEspecialidade`, mas via RPC (migration
+ * 20260824160000) em vez da tabela crua — para telas de CÁLCULO (Simulação,
+ * Sugestões de Contratação) que não devem exigir acesso a Taxas/Parâmetros de
+ * Remuneração (restrito a rp/admin/diretoria). `diarias` sempre vazio: a RPC
+ * não devolve `diaria`, não usada por quem só calcula simulação. Sem cache
+ * compartilhado entre instâncias — só 2 consumidores, sem ganho em dividir.
+ */
+export function useTaxasEspecialidadeCalculo(): TaxasState {
+  const [state, setState] = useState<TaxasState>(INITIAL_STATE)
+
+  useEffect(() => {
+    let cancelled = false
+    getTaxasEspecialidadeCalculo().then(({ data, error }) => {
+      if (cancelled) return
+      const taxas_pa: Record<string, number> = {}
+      const be_custo_mensal_pj: Record<string, number | null> = {}
+      const be_capacidade_manha: Record<string, number | null> = {}
+      const be_capacidade_tarde: Record<string, number | null> = {}
+      for (const row of data) {
+        taxas_pa[row.especialidade] = row.taxa_pa
+        be_custo_mensal_pj[row.especialidade] = row.be_custo_mensal_pj
+        be_capacidade_manha[row.especialidade] = row.be_capacidade_manha
+        be_capacidade_tarde[row.especialidade] = row.be_capacidade_tarde
+      }
+      setState({ taxas_pa, diarias: {}, be_custo_mensal_pj, be_capacidade_manha, be_capacidade_tarde, loading: false, error })
+    })
+    return () => { cancelled = true }
   }, [])
 
   return state
