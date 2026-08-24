@@ -37,6 +37,29 @@ export function dataHoraCurta(valor: string | null): string {
 }
 
 /**
+ * "24/08 15:10" a partir de um `timestamptz` de verdade.
+ *
+ * O oposto exato de `dataHoraCurta`, e por isso uma função separada em vez de um
+ * parâmetro: aquela FATIA a string porque a coluna de origem (`data_execucao`) é
+ * `timestamp without time zone` guardando hora de São Paulo, e passá-la por
+ * `new Date()` erraria 3h. `autorizacoes_vinculos.vinculado_em` é o outro caso —
+ * `timestamptz`, com sufixo de fuso na resposta do PostgREST —, e aí é FATIAR
+ * que erra 3h, mostrando UTC. Duas colunas, dois tipos, duas funções; misturá-las
+ * é o defeito que a tela de fila já pagou (ver `fila_autorizacoes` e seus dois
+ * fusos).
+ */
+export function dataHoraDeTimestamptz(valor: string | null): string {
+  if (!valor) return '—'
+  const d = new Date(valor)
+  if (Number.isNaN(d.getTime())) return '—'
+  const dia = String(d.getDate()).padStart(2, '0')
+  const mes = String(d.getMonth() + 1).padStart(2, '0')
+  const hora = String(d.getHours()).padStart(2, '0')
+  const minuto = String(d.getMinutes()).padStart(2, '0')
+  return `${dia}/${mes} ${hora}:${minuto}`
+}
+
+/**
  * "17/08 a 21/08/2026" — o rótulo da semana no cabeçalho e no modal.
  *
  * O ano aparece uma vez, no fim, porque a tela navega meses para trás e "17/08 a

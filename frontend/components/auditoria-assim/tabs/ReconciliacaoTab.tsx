@@ -202,9 +202,13 @@ export default function ReconciliacaoTab({ alvo, onAlvoConsumido }: Props) {
           if (!guiaEmVinculo) return
           if (candidataEscolhida) await fila.confirmarVinculo(candidataEscolhida, observacao)
           else await fila.descartarGuia(guiaEmVinculo.guia, observacao)
-          // Os dois lados envelhecem juntos: a guia sai da contagem de "sem
-          // vínculo" e a sessão vira GLOSA_RESOLVIDA na grade — na mesma tela
-          // para onde o fluxo volta.
+          // Os dois lados envelhecem juntos, e a recarga é o que traz as
+          // QUATRO cargas de volta em bloco — inclusive a das triagens, que é o
+          // que faz a grade desenhar o depois: a guia aparece "Vinculada"
+          // apontando a sessão, a sessão aparece "Coberta pela guia N", e o par
+          // inteiro (mais a glosa que ele aposentou) sai das contagens do
+          // cabeçalho e da listagem. Sem essa quarta carga a guia voltaria
+          // rotulada "Outra semana", desmentindo a decisão recém-tomada.
           recarregarSemana()
           setCandidataEscolhida(null)
           setGuiaEmVinculo(null)

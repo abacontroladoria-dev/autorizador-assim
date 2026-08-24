@@ -79,6 +79,31 @@ export default function GradeSemana({
     dias.filter((dia) => linhas.every((linha) => (linha.celulas[dia] ?? []).length === 0))
   )
 
+  /**
+   * Há alguma sessão escolhível desenhada nesta semana?
+   *
+   * Atenuar é um recurso RELATIVO: ele só significa alguma coisa quando existe
+   * um destaque contra o qual recuar. Sem essa guarda o modo de vínculo apagava
+   * a semana INTEIRA, e em dois momentos que não são raros — enquanto as
+   * candidatas carregam (a RPC vai dia a dia e leva segundos, então `candidatas`
+   * fica `[]`) e quando a guia não tem candidata nenhuma, que são 39% das órfãs
+   * medidas em produção.
+   *
+   * O efeito era o oposto do pretendido: a grade abria com tudo a 35% de
+   * opacidade, inclusive a glosa que o operador foi ali justamente ler para
+   * decidir. "Recua para o fundo, sem sumir" virou sumir.
+   */
+  const haAlvo =
+    !!selecao &&
+    linhas.some((linha) =>
+      dias.some((dia) =>
+        (linha.celulas[dia] ?? []).some((cartao) => {
+          const candidata = selecao.porBloco.get(cartao.chave)
+          return !!candidata && candidataElegivel(candidata)
+        })
+      )
+    )
+
   return (
     // Sem `overflow-x-auto` PRÓPRIO, e isto é deliberado: quem rola nos dois
     // eixos é o corpo do modal. Um `overflow-x` aqui criaria um scroller
@@ -198,6 +223,7 @@ export default function GradeSemana({
                                     : onAbrirDetalhe
                                 }
                                 papel={papel}
+                                atenuar={haAlvo}
                                 distanciaSelecao={candidata?.distancia_horas ?? null}
                               />
                             </div>

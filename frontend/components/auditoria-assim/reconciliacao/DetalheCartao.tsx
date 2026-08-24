@@ -1,13 +1,14 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { KeySquare, Link2, X } from 'lucide-react'
+import { Ban, KeySquare, Link2, X } from 'lucide-react'
 import { autorizacaoCancelada, autorizacaoLiberada } from '@/hooks/useAnaliseReincidencia'
 import { completarMotivoGlosa, lerMotivoGlosa } from '@/lib/glosa'
 import SituacaoBadge from '../SituacaoBadge'
 import type { NotaManual, TokenConferencia } from '@/services/auditoria-assim.service'
 import type { CartaoGrade } from '../types'
-import { dataHoraCurta, formatarDiaComNome } from './datas'
+import { dataHoraCurta, dataHoraDeTimestamptz, formatarDiaComNome } from './datas'
+import { sessaoDoBloco } from './vinculo'
 
 /**
  * Tudo o que se sabe sobre um atendimento — sem sair da semana.
@@ -101,12 +102,33 @@ export default function DetalheCartao({
   // "1601-REINCIDENCIA NO ATEN", cortado em 25 caracteres, e o de-para completa
   // o que a ASSIM truncou. Aqui ele cabe inteiro — era a única coisa que o
   // histórico do rodapé mostrava e o cartão não.
+  //
+  // Só `descricao_erro`, e não mais `descricao_erro ?? motivo_glosa`: os dois
+  // são vozes diferentes sobre o mesmo bloco — um é o que a ASSIM respondeu, o
+  // outro é o que alguém escreveu à mão na aba Auditoria — e o `??` fazia o
+  // texto manual sumir sempre que houvesse resposta da ASSIM, isto é, quase
+  // sempre. As duas abas leem o MESMO bloco e têm de dizer as mesmas coisas
+  // sobre ele; ver a seção "Motivo da glosa" abaixo.
   const motivoBruto = daSessao
-    ? daSessao.motivoBruto
+    ? daSessao.origem.descricao_erro
     : autorizacaoLiberada(daGuia?.status ?? null) || autorizacaoCancelada(daGuia?.status ?? null)
       ? null
       : (daGuia?.descricao_erro ?? daGuia?.status ?? null)
   const motivo = completarMotivoGlosa(lerMotivoGlosa(motivoBruto), codigosGlosa)
+
+  /**
+   * O motivo escrito à mão na aba Auditoria (`auditoria_glosa_motivos`).
+   *
+   * É o mesmo campo que o `ModalDetalhamentoAtendimento` lê e edita, e ele
+   * sobrevive à resolução de propósito: o vínculo não apaga a recusa. Aqui é
+   * somente leitura — quem escreve é a aba que tem o formulário.
+   */
+  const motivoManual = daSessao?.origem.motivo_glosa ?? null
+
+  // A triagem chega pelo cartão nas duas espécies (ver `CartaoGrade`), então a
+  // gaveta não precisa saber de qual lado do par ela veio para exibi-la.
+  const vinculo = cartao.vinculo
+  const blocoVinculado = sessaoDoBloco(vinculo?.bloco_id ?? null)
 
   const origem = cartao.origem
   const titulo = daSessao
@@ -172,6 +194,27 @@ export default function DetalheCartao({
             Sem vínculo
           </span>
         )}
+        {/* Os dois desfechos da triagem também são estado, e por isso ficam na
+            mesma fileira de pílulas: quem abre a gaveta de uma guia decidida
+            precisa ler o veredito antes de qualquer campo. */}
+        {daGuia?.estado === 'vinculada' && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
+            <Link2 size={11} aria-hidden />
+            Vinculada
+          </span>
+        )}
+        {daGuia?.estado === 'sem-sessao' && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-semibold text-slate-600 ring-1 ring-slate-300">
+            <Ban size={11} aria-hidden />
+            Autorização extra
+          </span>
+        )}
+        {daSessao?.vinculo && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
+            <Link2 size={11} aria-hidden />
+            Coberta por vínculo
+          </span>
+        )}
         {daGuia?.excedente && (
           <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-300">
             Além do agendado
@@ -223,6 +266,67 @@ export default function DetalheCartao({
         )}
       </Secao>
 
+      {/* ── A triagem, quando houve ────────────────────────────────────────
+          Vem logo depois da autorização e ANTES do motivo da recusa, porque é
+          ela que explica por que a recusa deixou de pedir tratativa. O
+          histórico não se apaga: a glosa continua abaixo, por extenso.
+
+          A seção é a mesma para as duas pontas do par — o cartão da guia e o da
+          sessão vinculada —, e o que muda é qual dos dois lados já está na tela.
+          Na guia falta dizer a SESSÃO; na sessão falta dizer a GUIA. */}
+      {vinculo && (
+        <Secao titulo={vinculo.tipo === 'vinculo' ? 'Vínculo' : 'Triagem'}>
+          {daSessao ? (
+            <Campo rotulo="Coberta pela guia">
+              <span className="font-mono tabular-nums">{vinculo.guia}</span>
+            </Campo>
+          ) : vinculo.tipo === 'vinculo' ? (
+            <Campo rotulo="Cobre a sessão de">
+              {/* Do próprio `bloco_id`, e não de uma busca: a sessão coberta
+                  pode estar noutra semana ou noutro mês — a janela é de 7 dias
+                  retroativos —, e nesse caso ela não está carregada. */}
+              {blocoVinculado ? (
+                <span className="tabular-nums">
+                  {formatarDiaComNome(blocoVinculado.dia)} {blocoVinculado.hora}
+                </span>
+              ) : null}
+            </Campo>
+          ) : (
+            <Campo rotulo="Sessão correspondente">
+              <span className="font-normal text-slate-500">nenhuma — autorização extra</span>
+            </Campo>
+          )}
+          {/* A guia glosada que esta substituiu, congelada no momento do vínculo
+              — é o que dá sentido ao vínculo, e `fila_autorizacoes` pode
+              sobrescrever a sua depois.
+
+              Só do lado da GUIA: na sessão ela seria a terceira vez que o mesmo
+              número aparece na gaveta (o campo "Guia" acima já é ele, porque o
+              vínculo não reescreve a autorização que a RPC pareou). */}
+          {!daSessao && (
+            <Campo rotulo="Substitui a guia">
+              {vinculo.guia_original ? (
+                <span className="font-mono tabular-nums">{vinculo.guia_original}</span>
+              ) : null}
+            </Campo>
+          )}
+          <Campo rotulo="Decidido por">{vinculo.vinculado_por}</Campo>
+          <Campo rotulo="Decidido em">
+            {/* `vinculado_em` é timestamptz de verdade, ao contrário de
+                `data_execucao` — daí a outra função de data. */}
+            {vinculo.vinculado_em ? dataHoraDeTimestamptz(vinculo.vinculado_em) : null}
+          </Campo>
+          {vinculo.observacao && (
+            <div className="py-1.5">
+              <p className="text-[11px] text-slate-500">Observação da triagem</p>
+              <p className="mt-0.5 text-[12px] leading-relaxed text-slate-700">
+                {vinculo.observacao}
+              </p>
+            </div>
+          )}
+        </Secao>
+      )}
+
       {motivo && (
         <Secao titulo="Motivo da recusa">
           <div className="py-1.5">
@@ -232,6 +336,24 @@ export default function DetalheCartao({
               </p>
             )}
             <p className="mt-0.5 text-[12px] leading-relaxed text-slate-700">{motivo.descricao}</p>
+          </div>
+        </Secao>
+      )}
+
+      {/* A voz da CLÍNICA sobre a recusa, ao lado da voz da ASSIM acima. Mesmo
+          texto que a aba Auditoria mostra e edita — as duas abas trabalham o
+          mesmo bloco, e quem resolve a inconsistência aqui precisa ler o que
+          quem auditou anotou lá. Violeta porque é assunto de glosa, o mesmo
+          matiz que o painel da outra aba usa. */}
+      {motivoManual && (
+        <Secao titulo="Motivo da glosa">
+          <div className="py-1.5">
+            <p className="text-[12px] leading-relaxed whitespace-pre-wrap text-violet-900">
+              {motivoManual}
+            </p>
+            <p className="mt-1 text-[11px] text-slate-500">
+              anotado na aba Auditoria — é lá que se edita
+            </p>
           </div>
         </Secao>
       )}
@@ -263,13 +385,21 @@ export default function DetalheCartao({
       )}
 
       {/* A nota manual vem de `nota`, não de `origem.observacao_manual`, pela
-          mesma razão da conferência: a RPC não a devolve. `origem.observacao` é
-          diferente — essa é da agenda e vem na linha. */}
+          mesma razão da conferência: a RPC não a devolve.
+
+          `origem.observacao` NÃO é da agenda — o rótulo dizia isso e estava
+          errado. É a narrativa que a RPC monta sobre o que aconteceu com o
+          bloco ("Glosa: 1403 - …", "Autorização confirmada pela ASSIM",
+          "TOKEN - 318580"), a mesma que a aba Auditoria imprime no rodapé do
+          painel "Autorização ASSIM". E é justamente nela que o vínculo se
+          escreve quando a migration 20260821030000 está aplicada — "· Coberta
+          pela guia N de … — vínculo por …" —, então chamá-la de "da agenda"
+          escondia a prova de que a reconciliação chegou ao outro lado. */}
       {daSessao && temAlgum(daSessao.origem.observacao, nota?.texto) && (
         <Secao titulo="Observações">
           {daSessao.origem.observacao && (
             <div className="py-1.5">
-              <p className="text-[11px] text-slate-500">Da agenda</p>
+              <p className="text-[11px] text-slate-500">Resposta da ASSIM</p>
               <p className="mt-0.5 text-[12px] leading-relaxed text-slate-700">
                 {daSessao.origem.observacao}
               </p>

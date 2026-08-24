@@ -375,12 +375,13 @@ export default function ModalSemanaPaciente({
           descoberta: analise.sessaoDescoberta,
           decorrida: analise.sessaoJaDecorrida,
           excedentes: analise.guiasExcedentes,
-        }
+        },
+        analise.vinculos
       ),
     [
       analise.sessoesVisiveis, analise.autorizacoesVisiveis, analise.estadoDaGuia, dias,
       analise.placar, analise.sessaoDescoberta, analise.sessaoJaDecorrida,
-      analise.guiasExcedentes,
+      analise.guiasExcedentes, analise.vinculos,
     ]
   )
 
@@ -581,11 +582,12 @@ export default function ModalSemanaPaciente({
                   Tentar novamente
                 </button>
               </div>
-            ) : /* As TRÊS cargas do mês, e não só a das sessões: a grade lê
-                   autorizações (o cartão da guia) e órfãs (o estado
-                   "sem vínculo") tanto quanto lê sessões. Gatear numa só fazia
-                   a semana pintar com guia vestida de "Outra semana" e trocar
-                   para "Sem vínculo" segundos depois. */
+            ) : /* As QUATRO cargas, e não só a das sessões: a grade lê
+                   autorizações (o cartão da guia), órfãs (o estado "sem
+                   vínculo") e triagens (os estados "vinculada" e "autorização
+                   extra") tanto quanto lê sessões. Gatear numa só fazia a
+                   semana pintar com guia vestida de "Outra semana" e trocar de
+                   rótulo segundos depois — nas duas direções. */
               analise.loading ? (
               <div className="space-y-2 p-4 sm:p-6">
                 {Array.from({ length: 4 }).map((_, i) => (

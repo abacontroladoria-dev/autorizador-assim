@@ -1,7 +1,20 @@
 import { getSupabaseClient } from '@/lib/supabase/client'
-import type { CandidataVinculo, GuiaOrfa } from '@/components/auditoria-assim/types'
+import type {
+  CandidataVinculo,
+  GuiaOrfa,
+  VinculoAutorizacao,
+} from '@/components/auditoria-assim/types'
 
 const supabase = getSupabaseClient()
+
+/**
+ * Teto de segurança da carga de triagens. Ver `listarVinculosAtivos`.
+ *
+ * A tabela é um livro de triagem manual: 18 guias órfãs no mês inteiro medido em
+ * 2026-08-20, e nem todas são triadas. Mil linhas são anos de operação. O limite
+ * existe só para que um erro de dado não vire uma resposta sem fim.
+ */
+const TETO_VINCULOS = 1000
 
 /**
  * Guias da ASSIM que sobraram do match posicional da Conferência.
@@ -23,6 +36,40 @@ export async function listarGuiasOrfas(de: string, ate: string): Promise<GuiaOrf
     throw error
   }
   return (data || []) as GuiaOrfa[]
+}
+
+/**
+ * As triagens vivas da Reconciliação — o que a tela sabe sobre o DEPOIS da ação.
+ *
+ * Sem período, e é deliberado. A janela de vínculo é de 7 dias retroativos a
+ * partir do instante em que a ASSIM registrou a guia, e ela atravessa a virada
+ * do mês: uma guia de 03/08 pode cobrir uma sessão de 30/07. Recortar por
+ * `vinculado_em` (quando alguém triou) ou pela data da guia deixaria de fora
+ * exatamente o vínculo que cruza a borda — e o cartão da guia voltaria a mentir
+ * "Outra semana" justamente no caso mais delicado. Como a tabela é um livro de
+ * triagem manual (dezenas de linhas por mês), carregá-la inteira é mais barato
+ * que qualquer recorte que precise estar certo nas duas pontas.
+ *
+ * `desfeito_em is null` porque desfazer é soft: a linha continua no banco para
+ * dizer quem desfez e por quê, e uma triagem desfeita não cobre mais nada.
+ *
+ * Falha em silêncio não é opção aqui — quem chama gateia a primeira pintura
+ * nesta carga, pelo mesmo motivo que `get_guias_orfas` passou a ser gateada:
+ * pintar antes de saber faz a grade se corrigir na frente de quem está lendo.
+ */
+export async function listarVinculosAtivos(): Promise<VinculoAutorizacao[]> {
+  const { data, error } = await supabase
+    .from('autorizacoes_vinculos')
+    .select('id, guia, tipo, bloco_id, guia_original, observacao, vinculado_por, vinculado_em')
+    .is('desfeito_em', null)
+    .order('vinculado_em', { ascending: false })
+    .limit(TETO_VINCULOS)
+
+  if (error) {
+    console.error('Erro ao buscar vínculos ativos:', error.message, error.details)
+    throw error
+  }
+  return (data || []) as VinculoAutorizacao[]
 }
 
 /**

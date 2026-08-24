@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import { cartaoPendente, montarGrade } from './grade'
-import { sessaoSemCobertura } from './cobertura'
-import type { AuditoriaAssimItem, AutorizacaoAssimSemana, PlacarTuss } from '../types'
+import { guiasSubstituidas, sessaoSemCobertura, situacaoComVinculo } from './cobertura'
+import type {
+  AuditoriaAssimItem,
+  AutorizacaoAssimSemana,
+  PlacarTuss,
+  VinculoAutorizacao,
+} from '../types'
 
 const DIAS = ['2026-08-17', '2026-08-18', '2026-08-19', '2026-08-20', '2026-08-21']
 
@@ -30,6 +35,21 @@ function guia(p: Partial<AutorizacaoAssimSemana> & { guia: string }): Autorizaca
     codigo_tuss: null, codigo_erro: null, descricao_erro: null, teve_token: null, token: null,
     ...p,
   }
+}
+
+/**
+ * A triagem do caso medido em produção (2026-08-20): a guia 15032 saiu no portal
+ * às 14:39 e cobre a sessão glosada das 11:20 do mesmo dia.
+ */
+const VINCULO: VinculoAutorizacao = {
+  id: 'v1',
+  guia: '15032',
+  tipo: 'vinculo',
+  bloco_id: '11649_2026-08-03_22070435_11:20:00',
+  guia_original: '9229',
+  observacao: null,
+  vinculado_por: 'Fulano',
+  vinculado_em: '2026-08-24T18:10:00+00:00',
 }
 
 const PLACAR: PlacarTuss[] = [
@@ -161,6 +181,61 @@ describe('montarGrade por horário', () => {
     expect(porChave.get(`guia-demais-${DIAS[1]}T10:00:00`)).toMatchObject({ excedente: true })
     expect(porChave.get(`guia-normal-${DIAS[1]}T09:00:00`)).toMatchObject({ excedente: false })
   })
+
+  it('leva a triagem aos DOIS cartões do par — a guia e a sessão que ela cobre', () => {
+    // O defeito que isto pina: a guia vinculada continua sem casar com sessão
+    // pelo pareamento do banco (a sessão coberta guarda a guia ANTIGA), então
+    // sem `vinculos` ela chegava aqui como uma guia qualquer e a grade a
+    // desenhava com o rótulo de "Outra semana".
+    const linhas = montarGrade(
+      [sessao({ bloco_id: VINCULO.bloco_id, data_atendimento: DIAS[0], hora_inicial: '11:20:00', guia: '9229', situacao: 'GLOSA_RESOLVIDA' })],
+      [guia({ guia: VINCULO.guia, data_execucao: `${DIAS[0]}T14:39:00` })],
+      (g) => (g === VINCULO.guia ? 'vinculada' : 'fora-da-semana'),
+      DIAS,
+      PLACAR,
+      SEM_MARCAS,
+      { porGuia: new Map([[VINCULO.guia, VINCULO]]), porBloco: new Map([[VINCULO.bloco_id!, VINCULO]]) }
+    )
+    const porChave = new Map(todos(linhas).map((c) => [c.chave, c]))
+    // A guia sabe que sessão cobre…
+    expect(porChave.get(`guia-${VINCULO.guia}-${DIAS[0]}T14:39:00`)).toMatchObject({
+      estado: 'vinculada',
+      vinculo: VINCULO,
+    })
+    // …e a sessão sabe que guia a cobriu, que é o que a `situacao` nunca diz.
+    expect(porChave.get(VINCULO.bloco_id!)).toMatchObject({ vinculo: VINCULO })
+    // Nenhum dos dois pede trabalho: o par inteiro sai da contagem.
+    expect(todos(linhas).filter(cartaoPendente)).toHaveLength(0)
+  })
+
+  it('aplica o vínculo na situação do cartão, sem esperar a RPC concordar', () => {
+    // A RPC devolve GLOSA (o banco pode não ter a migration 20260821030000), e
+    // mesmo assim o cartão precisa se ler como resolvido — senão a sessão volta
+    // a ser cartão marcado e a glosa coberta reaparece na contagem do cabeçalho.
+    const linhas = montarGrade(
+      [sessao({ bloco_id: VINCULO.bloco_id, data_atendimento: DIAS[0], hora_inicial: '11:20:00', guia: '9229', situacao: 'GLOSA' })],
+      [],
+      () => 'fora-da-semana',
+      DIAS,
+      PLACAR,
+      SEM_MARCAS,
+      { porGuia: new Map(), porBloco: new Map([[VINCULO.bloco_id!, VINCULO]]) }
+    )
+    const cartao = todos(linhas)[0]
+    expect(cartao).toMatchObject({ situacao: 'GLOSA_RESOLVIDA' })
+    expect(cartaoPendente(cartao)).toBe(false)
+    // O valor cru sobrevive em `origem`: o histórico não se apaga.
+    expect(cartao.tipo === 'sessao' && cartao.origem.situacao).toBe('GLOSA')
+  })
+
+  it('sem triagem nenhuma, os cartões nascem com vínculo nulo', () => {
+    const linhas = montarGrade(
+      [sessao({ bloco_id: 'a', data_atendimento: DIAS[0], hora_inicial: '09:00:00' })],
+      [guia({ guia: 'g', data_execucao: `${DIAS[0]}T10:00:00` })],
+      () => 'fora-da-semana', DIAS, PLACAR, SEM_MARCAS
+    )
+    expect(todos(linhas).every((c) => c.vinculo === null)).toBe(true)
+  })
 })
 
 /**
@@ -173,7 +248,7 @@ describe('cartaoPendente', () => {
   const linha = sessao({})
 
   it('promove a sessão descoberta e a que está em glosa, mas não a liberada', () => {
-    const sessaoBase = { ...base, tipo: 'sessao', guia: null, legenda: null, motivoBruto: null, teve_token: null, token: null, decorrida: true, origem: linha } as const
+    const sessaoBase = { ...base, tipo: 'sessao', guia: null, legenda: null, motivoBruto: null, teve_token: null, token: null, decorrida: true, vinculo: null, origem: linha } as const
     expect(cartaoPendente({ ...sessaoBase, situacao: 'LIBERADA', semCobertura: false })).toBe(false)
     expect(cartaoPendente({ ...sessaoBase, situacao: 'GLOSA_RESOLVIDA', semCobertura: false })).toBe(false)
     expect(cartaoPendente({ ...sessaoBase, situacao: 'GLOSA', semCobertura: false })).toBe(true)
@@ -183,10 +258,22 @@ describe('cartaoPendente', () => {
   })
 
   it('promove a guia órfã e a excedente, e deixa a de outra semana quieta', () => {
-    const guiaBase = { ...base, tipo: 'autorizacao', guia: 'g', status: 'Liberado', descricao_erro: null, teve_token: null, token: null, origem: guia({ guia: 'g' }) } as const
+    const guiaBase = { ...base, tipo: 'autorizacao', guia: 'g', status: 'Liberado', descricao_erro: null, teve_token: null, token: null, vinculo: null, origem: guia({ guia: 'g' }) } as const
     expect(cartaoPendente({ ...guiaBase, estado: 'fora-da-semana', excedente: false })).toBe(false)
     expect(cartaoPendente({ ...guiaBase, estado: 'sem-vinculo', excedente: false })).toBe(true)
     expect(cartaoPendente({ ...guiaBase, estado: 'fora-da-semana', excedente: true })).toBe(true)
+  })
+
+  it('aposenta a guia já triada — vinculada ou descartada não é fila de trabalho', () => {
+    // O depois da ação: a pergunta "que sessão esta guia cobre?" foi respondida,
+    // e a guia não pode continuar contando como cartão marcado. Se contasse, a
+    // faixa de semanas prometeria trabalho que a listagem já não vê.
+    const guiaBase = { ...base, tipo: 'autorizacao', guia: 'g', status: 'Liberado', descricao_erro: null, teve_token: null, token: null, vinculo: VINCULO, origem: guia({ guia: 'g' }) } as const
+    expect(cartaoPendente({ ...guiaBase, estado: 'vinculada', excedente: false })).toBe(false)
+    expect(cartaoPendente({ ...guiaBase, estado: 'sem-sessao', excedente: false })).toBe(false)
+    // A cota é outro eixo: o excedente provoca a glosa 1601 esteja a guia triada
+    // ou não, e por isso sobrevive à triagem.
+    expect(cartaoPendente({ ...guiaBase, estado: 'vinculada', excedente: true })).toBe(true)
   })
 })
 
@@ -230,7 +317,7 @@ describe('sessaoSemCobertura', () => {
       cartaoPendente({
         tipo: 'sessao', chave: 'k', hora: '09:00', codigo_tuss: null, terapia: null,
         guia: null, legenda: null, motivoBruto: null, teve_token: null, token: null,
-        decorrida: true, origem: s, situacao: 'CANCELADA', semCobertura: true,
+        decorrida: true, vinculo: null, origem: s, situacao: 'CANCELADA', semCobertura: true,
       })
     ).toBe(true)
   })
@@ -240,5 +327,82 @@ describe('sessaoSemCobertura', () => {
     const ontem = sessao({ data_atendimento: DIAS[0], hora_inicial: null, situacao: 'GLOSA' })
     expect(sessaoSemCobertura(hoje, CUTOFF)).toBe(false)
     expect(sessaoSemCobertura(ontem, CUTOFF)).toBe(true)
+  })
+})
+
+/**
+ * A outra metade de "sair da contagem". `sessaoSemCobertura` já tira a sessão de
+ * "faltando" e a fila de órfãs já tira a guia de "sem vínculo"; o que sobrava de
+ * pé era a GLOSA original, que é uma linha de `autorizacoes_assim` e não muda
+ * quando o vínculo é gravado.
+ */
+/**
+ * O eco local da migration 20260821030000. Existe porque a tela não pode ficar
+ * dizendo "Glosa · pendência" sobre uma sessão que ela mesma acabou de cobrir só
+ * porque a RPC ainda não concorda — foi assim que a glosa coberta continuou
+ * contando como pendência no cabeçalho do modal.
+ */
+describe('situacaoComVinculo', () => {
+  const VIN = { tipo: 'vinculo' } as const
+
+  it('aplica os dois ramos que a RPC aplica', () => {
+    expect(situacaoComVinculo('GLOSA', VIN)).toBe('GLOSA_RESOLVIDA')
+    // Sem glosa prévia não há o que "resolver": a sessão passa a ser liberada.
+    expect(situacaoComVinculo('NAO_SOLICITADA', VIN)).toBe('LIBERADA')
+    expect(situacaoComVinculo('CANCELADA', VIN)).toBe('LIBERADA')
+  })
+
+  it('não mexe em nada sem vínculo do tipo certo', () => {
+    expect(situacaoComVinculo('GLOSA', null)).toBe('GLOSA')
+    // 'sem_sessao' é o oposto de cobertura: o operador disse que a guia NÃO
+    // corresponde a sessão nenhuma. Ela nunca tem bloco, mas a guarda é barata.
+    expect(situacaoComVinculo('GLOSA', { tipo: 'sem_sessao' })).toBe('GLOSA')
+  })
+
+  it('falta continua falta — uma guia não faz a sessão ter acontecido', () => {
+    expect(situacaoComVinculo('FALTA', VIN)).toBe('FALTA')
+    expect(situacaoComVinculo('FALTA_TERAPEUTA', VIN)).toBe('FALTA_TERAPEUTA')
+  })
+
+  it('a sessão coberta para de ser cobrada mesmo com a RPC dizendo GLOSA', () => {
+    // O caso reportado: header do modal continuava contando a glosa coberta.
+    const s = sessao({
+      bloco_id: VINCULO.bloco_id,
+      data_atendimento: '2026-08-17',
+      hora_inicial: '09:00:00',
+      situacao: 'GLOSA',
+    })
+    const porBloco = new Map([[VINCULO.bloco_id!, VINCULO]])
+    expect(sessaoSemCobertura(s, '2026-08-19T12:00')).toBe(true)
+    expect(sessaoSemCobertura(s, '2026-08-19T12:00', porBloco)).toBe(false)
+  })
+})
+
+describe('guiasSubstituidas', () => {
+  const BLOCO = VINCULO.bloco_id!
+  const porBloco = new Map([[BLOCO, VINCULO]])
+
+  it('nomeia a guia antiga a partir da sessão que o vínculo cobriu', () => {
+    const sessoes = [
+      sessao({ bloco_id: BLOCO, guia: '9229', situacao: 'GLOSA_RESOLVIDA' }),
+      sessao({ bloco_id: 'outro', guia: '7777', situacao: 'GLOSA' }),
+    ]
+    // Só a do bloco coberto: a glosa do bloco vizinho continua pedindo tratativa.
+    expect([...guiasSubstituidas(sessoes, porBloco)]).toEqual(['9229'])
+  })
+
+  it('não inventa guia quando a sessão nunca teve uma', () => {
+    // Cenário B da migration: sessão que nunca foi solicitada pelo Pulsar e que
+    // o vínculo passou a cobrir. Não havia glosa para aposentar.
+    const sessoes = [sessao({ bloco_id: BLOCO, guia: null, situacao: 'LIBERADA' })]
+    expect(guiasSubstituidas(sessoes, porBloco).size).toBe(0)
+  })
+
+  it('não casa sessão sem bloco com um mapa vazio de chave vazia', () => {
+    // `bloco_id` nulo vira `''` na consulta ao mapa. Se alguma triagem entrasse
+    // no índice com chave vazia, TODA sessão sem id sairia "substituída".
+    const sessoes = [sessao({ bloco_id: null, guia: '9229' })]
+    expect(guiasSubstituidas(sessoes, porBloco).size).toBe(0)
+    expect(guiasSubstituidas(sessoes, new Map()).size).toBe(0)
   })
 })

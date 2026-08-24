@@ -9,10 +9,16 @@ import { autorizacaoCancelada, autorizacaoLiberada } from '@/hooks/useAnaliseRei
 import { iconeTerapia } from '@/lib/cronograma/iconeTerapia'
 import { completarMotivoGlosa, lerMotivoGlosa } from '@/lib/glosa'
 import { resolverConfig } from '../SituacaoBadge'
-import type { CartaoGrade } from '../types'
+import type { CartaoGrade, VinculoAutorizacao } from '../types'
 import { SITUACOES_COBERTAS, SITUACOES_COM_VEREDITO, SITUACOES_SEM_SESSAO } from './cobertura'
+import { dataHoraDeTimestamptz, formatarDia, formatarDiaComNome } from './datas'
 import { cartaoPendente } from './grade'
-import { distanciaCurta, distanciaPorExtenso, type PapelNaSelecao } from './vinculo'
+import {
+  distanciaCurta,
+  distanciaPorExtenso,
+  sessaoDoBloco,
+  type PapelNaSelecao,
+} from './vinculo'
 
 /**
  * Um atendimento dentro de uma célula da grade — e, desde 2026-08-24, em DUAS
@@ -60,13 +66,74 @@ import { distanciaCurta, distanciaPorExtenso, type PapelNaSelecao } from './vinc
  * Nada abaixo de 11px, que é o piso do DESIGN.md §3. O rótulo de estado e a
  * linha do token estavam em 10px; o token virou glifo e as linhas que sobravam
  * foram fundidas, em vez de encolhidas.
+ *
+ * ── O DEPOIS DA TRIAGEM (2026-08-24) ───────────────────────────────────────
+ *
+ * Vincular uma guia a uma sessão não deixava rastro visual nenhum. A guia saía
+ * da fila de órfãs e continuava sem casar com sessão pelo pareamento do banco —
+ * a sessão coberta guarda a guia ANTIGA, a glosada —, então ela caía no `else`
+ * do vocabulário e a grade a rotulava **"Outra semana"**, que afirma o contrário
+ * do que acabara de ser feito. Do outro lado, a sessão trocava de situação (para
+ * GLOSA_RESOLVIDA, ou para LIBERADA quando não havia glosa) sem dizer o que a
+ * resolveu — e o segundo caso ficava indistinguível de uma liberação normal.
+ *
+ * A primeira versão disto escreveu a frase no rodapé dos dois cartões ("Cobre
+ * Seg 03/08 11:20" / "Coberta pela guia 15032") e foi reprovada em tela: *"o
+ * operador precisa abrir o detalhamento pra descobrir quem é"*. Duas causas, e a
+ * segunda é a de fundo. Prosa num contêiner de 144px trunca, e truncava pelo
+ * fim — comendo justamente o número e a hora. E a espécie compacta esconde guia
+ * e TUSS de propósito, o que é certo para a sessão que está tudo bem e errado
+ * para a guia triada: ela não é um cartão que se pula, é um cartão que existe
+ * para ser identificado.
+ *
+ * O que substituiu é o **selo do par** (`SeloDoPar`): o número da guia, em
+ * tabular, num selo de largura fixa, no CABEÇALHO — a mesma linha da hora, que é
+ * por onde a coluna do dia é varrida. Ele aparece igual nos dois cartões, então
+ * o par se acha sozinho na grade sem que ninguém leia uma palavra. Sobra um
+ * único fato que selo nenhum carrega — QUAL sessão —, e esse fica no rodapé da
+ * guia, em rótulo/valor (`ReferenciaDaSessao`), que não trunca.
+ *
+ * A guia vinculada veste esmeralda — o matiz que esta tela já usa para "está
+ * coberto", o mesmo de GLOSA_RESOLVIDA e LIBERADA —, e a descartada ("é
+ * autorização extra") veste slate, que é o que acabou sem efeito. Nenhum matiz
+ * novo.
  */
 
-/** Rótulo curto do que a ASSIM devolveu numa guia que não casou com sessão. */
+/**
+ * Rótulo curto do que a ASSIM devolveu numa guia que não casou com sessão.
+ *
+ * Só para a guia que ninguém triou. "Outra semana" é afirmação sobre uma guia
+ * que a tela não sabe explicar — e era exatamente o que aparecia numa guia
+ * recém-vinculada, porque ela deixa a fila de órfãs sem entrar no pareamento do
+ * banco. Os dois desfechos da triagem têm rótulo próprio e nunca chegam aqui.
+ */
 function rotuloAutorizacao(status: string | null): string {
   if (autorizacaoCancelada(status)) return 'Cancelada'
   if (autorizacaoLiberada(status)) return 'Outra semana'
   return 'Glosa'
+}
+
+/**
+ * A sessão que uma triagem aponta, lida do próprio bloco, em duas medidas.
+ *
+ * `curta` ("03/08 11:20") é a que cabe no cartão; `longa` ("Seg 03/08 11:20") é
+ * a do `title`, onde o dia da semana cabe e ajuda.
+ */
+function sessaoCoberta(vinculo: VinculoAutorizacao | null): { curta: string; longa: string } | null {
+  const sessao = sessaoDoBloco(vinculo?.bloco_id ?? null)
+  if (!sessao) return null
+  return {
+    curta: `${formatarDia(sessao.dia)} ${sessao.hora}`,
+    longa: `${formatarDiaComNome(sessao.dia)} ${sessao.hora}`,
+  }
+}
+
+/** "por Fulano · 24/08 15:10" — a autoria da triagem, para o `title`. */
+function autoriaDaTriagem(vinculo: VinculoAutorizacao | null): string {
+  if (!vinculo) return ''
+  const quem = vinculo.vinculado_por ? ` por ${vinculo.vinculado_por}` : ''
+  const quando = vinculo.vinculado_em ? ` em ${dataHoraDeTimestamptz(vinculo.vinculado_em)}` : ''
+  return `${quem}${quando}`
 }
 
 /**
@@ -98,19 +165,22 @@ function Cabecalho({
   Icone,
   teveToken,
   token,
+  selo,
 }: {
   hora: string
   tinta: string
   Icone: LucideIcon
   teveToken: boolean | null
   token: string | null
+  /** O selo do par, quando há triagem. Toma o lugar do ícone — ver `SeloDoPar`. */
+  selo?: ReactNode
 }) {
   return (
     <div className="flex items-center justify-between gap-1.5">
       <span className="text-[13px] leading-tight font-semibold tabular-nums text-slate-900">
         {hora}
       </span>
-      <span className="flex shrink-0 items-center gap-1">
+      <span className="flex min-w-0 shrink items-center gap-1">
         {/* Glifo, e não linha própria: o token é dado de conferência de filipeta,
             um eixo diferente do estado da autorização, e gastava a quinta linha
             do cartão a 10px para dizer o que um ícone com `title` já diz. */}
@@ -121,11 +191,71 @@ function Cabecalho({
             como glifo ele responde ao piso de 3:1 de elemento não-textual, não
             ao de 4,5:1 de texto. */}
         {teveToken && (
-          <KeySquare size={12} className="text-amber-600" aria-label={`filipeta ${token ?? ''}`} />
+          <KeySquare
+            size={12}
+            className="shrink-0 text-amber-600"
+            aria-label={`filipeta ${token ?? ''}`}
+          />
         )}
-        <Icone size={13} strokeWidth={2.25} className={tinta} aria-hidden />
+        {/* O selo SUBSTITUI o ícone de estado em vez de conviver com ele: ele já
+            carrega glifo próprio, e o estado continua escrito por extenso na
+            linha de baixo. Dois glifos mais um número numa faixa de 144px é
+            onde o cabeçalho deixa de ser varrível. */}
+        {selo ?? <Icone size={13} strokeWidth={2.25} className={`shrink-0 ${tinta}`} aria-hidden />}
       </span>
     </div>
+  )
+}
+
+/**
+ * O selo do par: o mesmo número, no mesmo lugar, nos dois cartões.
+ *
+ * O problema que ele resolve foi reportado da tela: *"o operador precisa abrir o
+ * detalhamento pra descobrir quem é"*. A causa era estrutural — o cartão triado
+ * é da espécie COMPACTA, e a espécie compacta esconde guia e TUSS de propósito
+ * ("uma sessão que está certa não precisa ser lida"). Só que uma guia vinculada
+ * não é um cartão que se pula: ele existe justamente para ser identificado, e
+ * dizia "Vinculada" sem dizer *qual*.
+ *
+ * A primeira tentativa foi escrever a frase no rodapé ("Coberta pela guia
+ * 15032"). Prosa num contêiner de 144px trunca — e truncava exatamente no
+ * número, que é a única parte que importa. A troca é de FORMA: sai a frase,
+ * entra um selo de largura fixa com o número em tabular.
+ *
+ * Ele fica no cabeçalho, na mesma linha da hora, porque é ali que a coluna do
+ * dia é varrida de cima a baixo — e é isso que faz o par se achar sozinho: dois
+ * cartões distantes na grade carregando `15032` idêntico, na mesma altura, se
+ * lêem como um objeto só sem que ninguém precise ler uma palavra.
+ *
+ * O número é o da GUIA nos dois cartões, e não "o outro lado" de cada um: o selo
+ * é o nome do par, não um ponteiro. A guia é quem dá nome porque é ela que foi
+ * autorizada — é o número que se digita no portal da ASSIM.
+ */
+function SeloDoPar({
+  guia,
+  tom,
+  Icone,
+  titulo,
+}: {
+  guia: string
+  tom: string
+  Icone: LucideIcon
+  titulo: string
+}) {
+  return (
+    <span
+      title={titulo}
+      className={`inline-flex min-w-0 items-center gap-1 rounded px-1.5 py-px text-[11px] font-semibold ${tom}`}
+    >
+      {/* Para quem lê por leitor de tela, o selo sozinho seria um número solto
+          no meio do cartão. A frase inteira vai aqui e o visível fica oculto do
+          leitor — o `title` não é anunciado de forma confiável num span. */}
+      <span className="sr-only">{titulo}</span>
+      <Icone size={10} className="shrink-0" aria-hidden />
+      <span aria-hidden className="truncate font-mono tabular-nums">
+        {guia}
+      </span>
+    </span>
   )
 }
 
@@ -169,6 +299,35 @@ function Tarja({ papel, distancia }: { papel: PapelNaSelecao; distancia: number 
 }
 
 /**
+ * O rodapé da guia vinculada: a sessão que ela cobre, em rótulo e valor.
+ *
+ * O selo do cabeçalho nomeia o par; falta o fato que nenhum selo carrega — QUAL
+ * sessão. Ele só existe deste lado, e a assimetria é a economia do desenho: a
+ * sessão não precisa de rodapé porque o selo já diz a guia, e um "coberta pela
+ * guia 15032" embaixo de um selo escrito `15032` seria o mesmo dado duas vezes
+ * num cartão que tem duas linhas.
+ *
+ * Rótulo à esquerda e valor à direita, como todo o resto do cartão (hora/glifos,
+ * terapia/estado). A frase corrida que estava aqui truncava a 144px, e truncava
+ * pelo fim — comendo a hora, que é a parte que identifica. Com os dois lados
+ * curtos e `justify-between`, nada é cortado.
+ *
+ * Sem o nome do dia: "Seg 03/08 11:20" não cabe, e a data já é inequívoca. Onde
+ * há largura para o dia por extenso é no `title` e na gaveta.
+ */
+function ReferenciaDaSessao({ valor, titulo }: { valor: string; titulo: string }) {
+  return (
+    <p
+      title={titulo}
+      className="mt-1.5 flex items-baseline justify-between gap-1.5 border-t border-emerald-200 pt-1 text-[11px] leading-tight"
+    >
+      <span className="shrink-0 text-slate-500">cobre</span>
+      <span className="truncate font-semibold tabular-nums text-emerald-700">{valor}</span>
+    </p>
+  )
+}
+
+/**
  * A espécie compacta: duas linhas e nada mais.
  *
  * A segunda linha diz as duas coisas de uma vez — a TERAPIA à esquerda e o
@@ -192,6 +351,7 @@ function Compacto({
   onAbrir,
   desabilitado,
   inerte,
+  selo,
   tarja,
 }: {
   hora: string
@@ -207,6 +367,8 @@ function Compacto({
   desabilitado?: boolean
   /** Modo de vínculo: este cartão não é candidato nem é a guia em foco. */
   inerte?: boolean
+  /** O selo do par, no cabeçalho, no lugar do ícone de estado. */
+  selo?: ReactNode
   tarja?: ReactNode
 }) {
   return (
@@ -216,10 +378,17 @@ function Compacto({
       disabled={desabilitado}
       title={titulo}
       className={`w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-left transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none ${
-        inerte ? 'opacity-35' : ''
+        inerte ? 'opacity-60' : ''
       } ${desabilitado ? '' : 'hover:border-slate-300 hover:bg-slate-50'}`}
     >
-      <Cabecalho hora={hora} tinta={tinta} Icone={Icone} teveToken={teveToken} token={token} />
+      <Cabecalho
+        hora={hora}
+        tinta={tinta}
+        Icone={Icone}
+        teveToken={teveToken}
+        token={token}
+        selo={selo}
+      />
       <p className="mt-0.5 flex items-start justify-between gap-1.5 text-[11px] leading-tight">
         {terapia && (
           <span className="flex min-w-0 items-start gap-1 text-slate-600">
@@ -311,6 +480,7 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
   codigosGlosa,
   onAbrir,
   papel,
+  atenuar,
   distanciaSelecao,
 }: {
   cartao: CartaoGrade
@@ -324,6 +494,11 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
    * mesmo fora do modo de vínculo, que é quando a grade rola.
    */
   papel?: PapelNaSelecao
+  /**
+   * Há alvo escolhível na semana desenhada. Só então o recuo do `inerte` é
+   * aplicado — ver a nota em `GradeSemana`. Fora do modo de vínculo é ignorado.
+   */
+  atenuar?: boolean
   distanciaSelecao?: number | null
 }) {
   // Duas coisas diferentes, e por isso duas variáveis. No modo de vínculo o
@@ -332,8 +507,16 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
   // Mas só o cartão fora da janela ESMAECE: a candidata já coberta precisa
   // continuar legível, porque é ela que revela que a guia é extra.
   const desabilitado = papel !== undefined && papel !== 'alvo'
-  const inerte = papel === 'inerte'
-  const tarja = papel ? <Tarja papel={papel} distancia={distanciaSelecao ?? null} /> : null
+  // Não clicável e recuado são coisas DIFERENTES, e separá-las é o que conserta
+  // a semana apagada: enquanto as candidatas carregam — ou quando a guia não tem
+  // candidata nenhuma — nada é alvo, e aí ninguém recua. O clique continua
+  // bloqueado nos dois casos, porque abrir a gaveta no meio de uma escolha
+  // trocaria a pergunta debaixo da mão de quem decide.
+  const inerte = papel === 'inerte' && atenuar === true
+  // Uma tarja de cada vez, e a da seleção vence: enquanto se escolhe a sessão de
+  // uma guia, o rodapé do cartão responde à pergunta do MODO ("esta é a que você
+  // pode clicar"), não ao histórico dele.
+  const tarjaSelecao = papel ? <Tarja papel={papel} distancia={distanciaSelecao ?? null} /> : null
   // No modo de vínculo o `title` responde à pergunta do modo, não à do cartão.
   const tituloSelecao =
     papel === 'alvo'
@@ -349,7 +532,36 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
   if (cartao.tipo === 'sessao') {
     const config = resolverConfig(cartao.situacao ?? '—')
     const pendente = cartaoPendente(cartao)
-    const titulo = [cartao.hora, cartao.terapia, cartao.legenda, config.label]
+
+    /*
+      Qual guia cobriu esta sessão — na primeira linha, sem gastar altura.
+
+      A `situacao` diz QUE está coberta e nunca diz POR QUÊ: a sessão continua
+      guardando no campo `guia` a autorização ANTIGA, a glosada, porque o vínculo
+      não a reescreve. E no ramo LIBERADA (sessão que nunca foi solicitada e que
+      alguém acabou de cobrir por fora) ela fica indistinguível de uma liberação
+      normal do robô — a ação do operador some da grade no instante em que surte
+      efeito.
+
+      O selo responde as duas coisas de uma vez e é o mesmo que o cartão da guia
+      carrega: é assim que os dois se acham na grade. Ver `SeloDoPar`.
+    */
+    const selo = cartao.vinculo ? (
+      <SeloDoPar
+        guia={cartao.vinculo.guia}
+        Icone={Link2}
+        tom="bg-emerald-100 text-emerald-800"
+        titulo={`Coberta pela guia ${cartao.vinculo.guia}${autoriaDaTriagem(cartao.vinculo)}`}
+      />
+    ) : undefined
+
+    const titulo = [
+      cartao.hora,
+      cartao.terapia,
+      cartao.legenda,
+      config.label,
+      cartao.vinculo ? `coberta pela guia ${cartao.vinculo.guia}` : null,
+    ]
       .filter(Boolean)
       .join(' · ')
 
@@ -387,7 +599,8 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
           onAbrir={() => onAbrir(cartao)}
           desabilitado={desabilitado}
           inerte={inerte}
-          tarja={tarja}
+          selo={selo}
+          tarja={tarjaSelecao}
         />
       )
     }
@@ -428,7 +641,7 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
         disabled={desabilitado}
         title={tituloSelecao ?? `${titulo}${cartao.semCobertura ? ' · sem cobertura' : ''}`}
         className={`relative w-full min-w-0 rounded-lg border py-2 pr-2 pl-2.5 text-left transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none ${superficie} ${
-          inerte ? 'opacity-35' : ''
+          inerte ? 'opacity-60' : ''
         } ${
           desabilitado ? '' : 'hover:brightness-97'
         }`}
@@ -440,6 +653,7 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
           Icone={Icone}
           teveToken={cartao.teve_token}
           token={cartao.token}
+          selo={selo}
         />
         <CorpoPendente
           terapia={cartao.terapia}
@@ -449,7 +663,7 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
           guia={cartao.guia}
           motivo={motivo}
         />
-        {tarja}
+        {tarjaSelecao}
       </button>
     )
   }
@@ -457,10 +671,16 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
   const cancelada = autorizacaoCancelada(cartao.status)
   const liberada = autorizacaoLiberada(cartao.status)
   const semVinculo = cartao.estado === 'sem-vinculo'
+  // Os dois desfechos da triagem. Antes deles a guia recém-decidida caía em
+  // `fora-da-semana` e a grade a rotulava "Outra semana" — a única afirmação que
+  // a tela conseguia fazer sobre ela era a mais errada possível.
+  const vinculada = cartao.estado === 'vinculada'
+  const semSessao = cartao.estado === 'sem-sessao'
   // Estourar a cota é pendência mesmo quando a guia não está na fila de órfãs:
   // é o excedente que provoca a glosa 1601, e ele existia só como `+1` num chip
   // do placar — um número que a grade não tinha como apontar.
   const pendente = cartaoPendente(cartao)
+  const coberta = sessaoCoberta(cartao.vinculo)
 
   // Mesmo parser que a Conferência e a Central usam: numa recusa o `status`
   // vem "1601-REINCIDENCIA NO ATEN" (cortado em 25 caracteres) e o de-para
@@ -475,31 +695,99 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
   // Cota divergente é âmbar pelo mesmo motivo que a chip do placar é âmbar
   // (DESIGN.md, o terceiro eixo): âmbar significa "esperando alguém olhar" nos
   // três eixos desta tela, e o excedente é exatamente isso.
+  //
+  // A guia VINCULADA veste esmeralda, o mesmo matiz que GLOSA_RESOLVIDA e
+  // LIBERADA já usam aqui para "está coberto" — nenhum matiz novo entra, e a
+  // guia sai lida no mesmo tom da sessão que ela cobre. A DESCARTADA veste
+  // slate, que nesta tela é o que acabou sem efeito: ela não cobre sessão
+  // nenhuma, e é isso que o operador afirmou sobre ela.
   const tom = pendente
     ? 'border-amber-300 bg-amber-50'
-    : cancelada || liberada
-      ? 'border-slate-200 bg-slate-50'
-      : 'border-violet-200 bg-violet-50'
+    : vinculada
+      ? 'border-emerald-200 bg-emerald-50'
+      : semSessao || cancelada || liberada
+        ? 'border-slate-200 bg-slate-50'
+        : 'border-violet-200 bg-violet-50'
   const tinta = pendente
     ? 'text-amber-700'
-    : cancelada || liberada
-      ? 'text-slate-600'
-      : 'text-violet-700'
-  const dot = pendente ? 'bg-amber-500' : 'bg-violet-500'
-  const Icone = pendente ? Link2 : cancelada ? Ban : liberada ? CheckCircle2 : AlertOctagon
+    : vinculada
+      ? 'text-emerald-700'
+      : semSessao || cancelada || liberada
+        ? 'text-slate-600'
+        : 'text-violet-700'
+  const dot = pendente ? 'bg-amber-500' : vinculada ? 'bg-emerald-500' : 'bg-violet-500'
+  // Link2 tanto na órfã quanto na vinculada de propósito: é o mesmo eixo — o do
+  // vínculo — em dois momentos, e quem separa os dois é o matiz mais o rótulo,
+  // que vem escrito. Ban na descartada porque é o ícone do botão que a produziu
+  // ("Nenhuma — é autorização extra").
+  const Icone = pendente
+    ? Link2
+    : vinculada
+      ? Link2
+      : semSessao || cancelada
+        ? Ban
+        : liberada
+          ? CheckCircle2
+          : AlertOctagon
 
-  const rotulo = semVinculo ? 'Sem vínculo' : rotuloAutorizacao(cartao.status)
+  const rotulo = semVinculo
+    ? 'Sem vínculo'
+    : vinculada
+      ? 'Vinculada'
+      : semSessao
+        ? 'Autorização extra'
+        : rotuloAutorizacao(cartao.status)
   // Excedente que não está na fila SUBSTITUI o rótulo em vez de qualificá-lo:
   // "Outra semana · além do agendado" se contradiz — "outra semana" afirma que a
   // guia não encosta nesta semana, e "além do agendado" fala da cota desta
-  // semana. Quando ela também é órfã, aí sim os dois fatos convivem: há o que
-  // vincular E ela passou da cota.
-  const frase = cartao.excedente
-    ? semVinculo
-      ? 'Sem vínculo · além do agendado'
+  // semana. Os rótulos que afirmam algo sobre ESTA semana — a órfã e as duas
+  // triadas — convivem com o excedente: sabe-se o que a guia é E ela passou da
+  // cota.
+  const frase = !cartao.excedente
+    ? rotulo
+    : semVinculo || vinculada || semSessao
+      ? `${rotulo} · além do agendado`
       : 'Liberada além do agendado'
-    : rotulo
   const tituloBase = `Guia ${cartao.guia}, autorizada às ${cartao.hora}`
+
+  /*
+    O que faltava neste cartão era o próprio NÚMERO dele.
+
+    A espécie compacta esconde guia e TUSS de propósito — "uma sessão que está
+    certa não precisa ser lida" —, e a guia triada herdou esse silêncio sem
+    merecê-lo: ela não é um cartão que se pula, é um cartão que existe para ser
+    identificado, e dizia "Vinculada" sem dizer qual. Era isso que obrigava a
+    abrir a gaveta.
+
+    O selo repõe o número no cabeçalho, e é o MESMO que a sessão coberta carrega
+    — é o que faz os dois se acharem na grade sem ler nada (ver `SeloDoPar`). O
+    rodapé fica com o único fato que o selo não carrega: qual sessão. Ele sai do
+    próprio `bloco_id`, e não de uma busca, porque a sessão coberta pode estar
+    noutra semana — a janela é de 7 dias retroativos e atravessa a virada do
+    mês —, e aí ela não está entre as linhas desenhadas aqui.
+  */
+  const selo =
+    vinculada || semSessao ? (
+      <SeloDoPar
+        guia={cartao.guia}
+        Icone={vinculada ? Link2 : Ban}
+        tom={vinculada ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}
+        titulo={
+          vinculada
+            ? `${tituloBase} — cobre a sessão de ${coberta?.longa ?? 'outra semana'}${autoriaDaTriagem(cartao.vinculo)}`
+            : `${tituloBase} — triada como autorização extra${autoriaDaTriagem(cartao.vinculo)}`
+        }
+      />
+    ) : undefined
+
+  const tarja =
+    tarjaSelecao ??
+    (vinculada && coberta ? (
+      <ReferenciaDaSessao
+        valor={coberta.curta}
+        titulo={`Cobre a sessão de ${coberta.longa}${autoriaDaTriagem(cartao.vinculo)}`}
+      />
+    ) : null)
 
   if (!pendente) {
     // Guia recusada que não está na fila e não estourou cota: a recusa continua
@@ -515,11 +803,26 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
         teveToken={cartao.teve_token}
         token={cartao.token}
         titulo={
-          tituloSelecao ?? [tituloBase, cartao.terapia, motivo ?? rotulo].filter(Boolean).join(' · ')
+          tituloSelecao ??
+          [
+            tituloBase,
+            cartao.terapia,
+            // A guia triada fala do PAR, não do próprio estado: repetir aqui o
+            // rótulo que já está escrito ao lado gastaria o `title` dizendo o
+            // que o olho acabou de ler.
+            vinculada && coberta
+              ? `cobre a sessão de ${coberta.longa}${autoriaDaTriagem(cartao.vinculo)}`
+              : semSessao
+                ? `sem sessão correspondente${autoriaDaTriagem(cartao.vinculo)}`
+                : (motivo ?? rotulo),
+          ]
+            .filter(Boolean)
+            .join(' · ')
         }
         onAbrir={() => onAbrir(cartao)}
         desabilitado={desabilitado}
         inerte={inerte}
+        selo={selo}
         tarja={tarja}
       />
     )
@@ -528,6 +831,9 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
   const miolo = (
     <>
       <Espinha dot={dot} />
+      {/* Sem selo na espécie expandida: `CorpoPendente` já imprime a guia numa
+          linha própria, e repetir o número no cabeçalho seria dizê-lo duas vezes
+          no mesmo cartão. */}
       <Cabecalho
         hora={cartao.hora}
         tinta={tinta}
@@ -559,7 +865,7 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
         }`
       }
       className={`relative w-full min-w-0 rounded-lg border py-2 pr-2 pl-2.5 text-left transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none ${tom} ${
-        inerte ? 'opacity-35' : ''
+        inerte ? 'opacity-60' : ''
       } ${
         desabilitado ? '' : 'hover:brightness-97'
       }`}
