@@ -113,6 +113,13 @@ export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, 
       situacao: 'GLOSA',
       title: 'Glosas',
       value: kpis?.glosas ?? 0,
+      // O valor é só o que ainda pede tratativa. As já cobertas por vínculo
+      // aparecem como dica, e não somadas: "houve glosa" continua na tela sem
+      // inflar o número que a operação usa para dimensionar trabalho. Some
+      // quando é zero — dica que diz "0" é ruído.
+      ...(kpis?.glosas_resolvidas
+        ? { hint: `+${kpis.glosas_resolvidas} resolvida${kpis.glosas_resolvidas > 1 ? 's' : ''}` }
+        : {}),
       tone: 'text-violet-700',
       iconTone: 'bg-violet-50 text-violet-700',
       barTone: 'bg-violet-500',

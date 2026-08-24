@@ -4,11 +4,10 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import * as XLSX from 'xlsx'
 import { useHeader } from '@/contexts/HeaderContext'
 import {
-  ChevronDown, ChevronRight, Search, SlidersHorizontal, Download, X, Users, Building2,
-  Apple, Waves, Activity, Mic2, Hand, Music, Palette, PawPrint, HeartHandshake, Move,
-  BookOpen, ClipboardList, Stethoscope, Puzzle, Brain, MapPin, Dumbbell, type LucideIcon,
+  ChevronDown, ChevronRight, Search, SlidersHorizontal, Download, X, Building2,
   LayoutDashboard, Table2,
 } from 'lucide-react'
+import { iconeTerapia } from '@/lib/cronograma/iconeTerapia'
 import { StatCard } from '@/components/cronograma/ui/StatCard'
 import { SegmentedTabs } from '@/components/cronograma/ui/SegmentedTabs'
 import { TONE_ACCENT, type Tone } from '@/components/cronograma/ui/tones'
@@ -97,36 +96,6 @@ function corTerapiaEsp(esp: string, fallback: string): string {
   const c = TERAPIA_CORES[esp]
   if (!c || c.toUpperCase() === '#FFFFFF') return fallback
   return c
-}
-
-// Ícone por especialidade — associação por palavra-chave no nome (ordem importa:
-// regras mais específicas primeiro, ex.: "arteterapia" antes de "aba" pra não
-// perder o ícone de arte em "Arteterapia (Psicologia ABA)").
-const ICONE_TERAPIA_REGRAS: [RegExp, LucideIcon][] = [
-  [/nutri|alimentar|cozinha/,                 Apple],
-  [/fisioterapia aquatica|hidro/,             Waves],
-  [/fisioterapia/,                            Activity],
-  [/fonoaudiologia/,                          Mic2],
-  [/terapia ocupacional/,                     Hand],
-  [/musicoterapia|musicalizacao/,             Music],
-  [/arteterapia/,                             Palette],
-  [/equoterapia/,                             PawPrint],
-  [/habilidades sociais|trilha socioemocional/, HeartHandshake],
-  [/psicomotricidade/,                        Move],
-  [/psicopedagogia|oficina de aprendizagem|estagio/, BookOpen],
-  [/avaliacao neuropsicologica|triagem/,       ClipboardList],
-  [/psiquiatr|neurolog/,                       Stethoscope],
-  [/aba/,                                      Puzzle],
-  [/psicologia|psicoeducacao/,                 Brain],
-  [/visita guiada/,                            MapPin],
-  [/esporte adaptado|circuito funcional/,      Dumbbell],
-  [/coordenador|supervis|especialista tecnico|facilitador|operacoes clinicas|apoio operacional|assistente de desenvolvimento|tecnico terapeutico/, Users],
-]
-
-function iconeTerapia(esp: string): LucideIcon {
-  const norm = normTxt(esp)
-  const regra = ICONE_TERAPIA_REGRAS.find(([re]) => re.test(norm))
-  return regra ? regra[1] : Stethoscope
 }
 
 // Badge que identifica o tipo de seção (dashboard de cards vs. tabela) — substitui

@@ -21,6 +21,7 @@ const SITUACOES = [
   { value: 'RETORNO_NAO_CONFIRMADO', label: 'Retorno Não Confirmado' },
   { value: 'LIBERADA', label: 'Liberada' },
   { value: 'GLOSA', label: 'Glosa' },
+  { value: 'GLOSA_RESOLVIDA', label: 'Glosa Resolvida' },
   { value: 'CANCELADA', label: 'Cancelada' },
   { value: 'FALTA', label: 'Falta Paciente' },
   { value: 'FALTA_TERAPEUTA', label: 'Falta Terapeuta' },
@@ -51,7 +52,13 @@ export default function FiltrosAuditoria({ filters, onChange }: Props) {
 
   return (
     <div className="bg-white/90 backdrop-blur border border-white/50 rounded-2xl p-3 shadow-sm">
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-[180px_1fr_200px_180px_auto]">
+      {/* A faixa única só a partir de `xl`, e não de `md`.
+          Medido: com cinco colunas ela pede ~870px, e a área de conteúdo tem
+          ~990px numa tela de 1280 (a sidebar fixa come 256px) — cabe, mas por
+          pouco, e abaixo de 1024 estourava horizontalmente. Duas colunas no
+          intervalo médio resolvem sem apertar nenhum controle: a barra fica mais
+          alta, nunca mais estreita que o conteúdo. */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-[180px_1fr_200px_180px_auto]">
 
         <label className="relative">
           <CalendarDays className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />

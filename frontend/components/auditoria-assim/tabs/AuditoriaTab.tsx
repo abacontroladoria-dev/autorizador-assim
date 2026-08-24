@@ -4,6 +4,12 @@ import { useAuditoriaAssim } from '@/hooks/useAuditoriaAssim'
 import KpiCards from '@/components/auditoria-assim/KpiCards'
 import FiltrosAuditoria from '@/components/auditoria-assim/FiltrosAuditoria'
 import TabelaAuditoria from '@/components/auditoria-assim/TabelaAuditoria'
+import type { AlvoAnalise } from '@/components/auditoria-assim/types'
+
+type Props = {
+  /** Leva para a aba Reconciliação, posicionada na semana daquele atendimento. */
+  onAnalisarSemana: (alvo: AlvoAnalise) => void
+}
 
 /**
  * Aba Auditoria — a visão analítica e de conferência.
@@ -13,7 +19,7 @@ import TabelaAuditoria from '@/components/auditoria-assim/TabelaAuditoria'
  * paginação e modal de glosa. A única diferença é que o título do header agora é
  * definido pelo Shell, não aqui.
  */
-export default function AuditoriaTab() {
+export default function AuditoriaTab({ onAnalisarSemana }: Props) {
   const {
     dados,
     kpis,
@@ -54,6 +60,13 @@ export default function AuditoriaTab() {
           onSort={setSort}
           onPaginaChange={setPagina}
           onRefresh={() => carregarDados(true)}
+          onAnalisarSemana={(item) =>
+            onAnalisarSemana({
+              pacienteNome: item.paciente_nome,
+              carteirinha: item.carteirinha,
+              data: item.data_atendimento ?? filters.data,
+            })
+          }
         />
 
       </div>
