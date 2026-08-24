@@ -25,6 +25,24 @@ export const SITUACOES_SEM_SESSAO = new Set(['FALTA', 'FALTA_TERAPEUTA'])
  */
 export const SITUACOES_COBERTAS = new Set(['LIBERADA', 'GLOSA_RESOLVIDA'])
 
+/**
+ * As situações em que a ASSIM DEU um veredito sobre a sessão.
+ *
+ * Elas continuam sem cobertura — ninguém as liberou —, mas o cartão diz o nome
+ * do veredito em vez de "Sem cobertura", porque as duas coisas não são a mesma
+ * pergunta. "Sem cobertura" é a AUSÊNCIA de resposta: não solicitada, retorno
+ * não confirmado, sincronizando, solicitação cancelada. Aqui houve resposta, e
+ * saber QUAL é o que decide o que fazer a seguir — glosa pede tratativa, e
+ * `CANCELADA` (que é `status = 'Liberado *'`, a liberação que a ASSIM desfez)
+ * pede uma autorização nova.
+ *
+ * `CANCELADA` entrou em 2026-08-24, reportada da tela: a sessão de 21/08 13:00
+ * do Eric Gabriel Vitório Nunes aparecia como "Sem cobertura" e o operador lê
+ * "Cancelada" em todo o resto do sistema. Nada muda na PENDÊNCIA — ela segue
+ * contada e segue passível de vínculo com uma guia solta —, só a manchete.
+ */
+export const SITUACOES_COM_VEREDITO = new Set(['GLOSA', 'CANCELADA'])
+
 /** O instante de uma sessão: "2026-08-24T08:00". Nulo quando falta a hora. */
 function instanteSessao(s: AuditoriaAssimItem): string | null {
   if (!s.data_atendimento) return null

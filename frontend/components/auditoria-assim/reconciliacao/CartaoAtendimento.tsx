@@ -10,7 +10,7 @@ import { iconeTerapia } from '@/lib/cronograma/iconeTerapia'
 import { completarMotivoGlosa, lerMotivoGlosa } from '@/lib/glosa'
 import { resolverConfig } from '../SituacaoBadge'
 import type { CartaoGrade } from '../types'
-import { SITUACOES_COBERTAS, SITUACOES_SEM_SESSAO } from './cobertura'
+import { SITUACOES_COBERTAS, SITUACOES_COM_VEREDITO, SITUACOES_SEM_SESSAO } from './cobertura'
 import { cartaoPendente } from './grade'
 import { distanciaCurta, distanciaPorExtenso, type PapelNaSelecao } from './vinculo'
 
@@ -41,12 +41,15 @@ import { distanciaCurta, distanciaPorExtenso, type PapelNaSelecao } from './vinc
  * `agendadas == autorizadas == liberadas`, então ~85% dos cartões colapsam e os
  * dois ou três que sobram viram os únicos objetos altos da tela.
  *
- * Nenhum matiz novo entrou, e o cartão só tem DUAS manchetes de problema:
- * "Glosa" (violeta, uma recusa que pede tratativa) e "Sem cobertura" (rose, "a
- * lacuna mais larga" do DESIGN.md — a sessão aconteceu e nada a cobre). Por que
- * a sessão está descoberta — não solicitada, solicitação cancelada, retorno não
- * confirmado, sincronizando — é pergunta da gaveta, que tem largura para
- * responder; numa célula de 11rem a resposta só cabe truncada.
+ * Nenhum matiz novo entrou, e a manchete de problema é "Sem cobertura" (rose,
+ * "a lacuna mais larga" do DESIGN.md — a sessão aconteceu e nada a cobre),
+ * exceto onde a ASSIM já respondeu: aí vale o nome do veredito, com o matiz
+ * dele — "Glosa" (violeta, recusa que pede tratativa) e "Cancelada" (slate,
+ * liberação desfeita, que pede autorização nova). Ver `SITUACOES_COM_VEREDITO`.
+ * Por que a sessão está descoberta quando NÃO houve resposta — não solicitada,
+ * solicitação cancelada, retorno não confirmado, sincronizando — é pergunta da
+ * gaveta, que tem largura para responder; numa célula de 11rem a resposta só
+ * cabe truncada.
  *
  * Nada abaixo de 11px, que é o piso do DESIGN.md §3. O rótulo de estado e a
  * linha do token estavam em 10px; o token virou glifo e as linhas que sobravam
@@ -362,7 +365,7 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
       const aguardando =
         !cartao.decorrida &&
         !SITUACOES_SEM_SESSAO.has(cartao.situacao ?? '') &&
-        (cartao.situacao ?? '') !== 'CANCELADA' &&
+        !SITUACOES_COM_VEREDITO.has(cartao.situacao ?? '') &&
         !SITUACOES_COBERTAS.has(cartao.situacao ?? '')
 
       return (
@@ -384,7 +387,8 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
     }
 
     /*
-      Duas manchetes, e só duas: "Glosa" e "Sem cobertura".
+      A manchete é "Sem cobertura", exceto quando a ASSIM já deu um veredito —
+      aí é o nome do veredito ("Glosa", "Cancelada").
 
       A frase era composta — "Não Solicitada · sem cobertura", "Glosa · sem
       cobertura" — e dizia o mesmo fato duas vezes num espaço onde não cabe
@@ -392,16 +396,17 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
       solicitada, solicitação cancelada, retorno não confirmado, sincronizando)
       é pergunta da gaveta, que tem largura para responder.
 
-      Glosa é a exceção porque não é uma variedade de "descoberta": é uma
-      recusa, o único estado aqui que pede tratativa em vez de solicitação, e
-      por isso mantém o nome e o violeta.
+      As situações de `SITUACOES_COM_VEREDITO` são a exceção porque não são
+      variedades de "descoberta": houve resposta da ASSIM, e QUAL foi a resposta
+      decide o próximo passo. Elas mantêm o nome e o matiz próprio.
 
       "Sem cobertura" veste ROSE, sempre, seja qual for a situação por baixo.
       Rose é "a lacuna mais larga" no DESIGN.md e é exatamente isso — a sessão
       aconteceu e nada a cobre. Sem esse alinhamento a mesma manchete sairia em
       três matizes conforme o estado que ela acabou de deixar de mostrar.
     */
-    const descoberta = cartao.semCobertura && cartao.situacao !== 'GLOSA'
+    const descoberta =
+      cartao.semCobertura && !SITUACOES_COM_VEREDITO.has(cartao.situacao ?? '')
     const frase = descoberta ? 'Sem cobertura' : config.label
     const tinta = descoberta ? 'text-rose-700' : config.strong
     const superficie = descoberta ? 'border-rose-200 bg-rose-50' : config.surface

@@ -188,6 +188,22 @@ describe('sessaoSemCobertura', () => {
     expect(sessaoSemCobertura(s, CUTOFF)).toBe(true)
   })
 
+  it('continua cobrando da CANCELADA — a liberação foi desfeita', () => {
+    // `CANCELADA` é `status = 'Liberado *'`: a ASSIM desfez a liberação, então
+    // nada cobre a sessão e ela segue passível de vínculo com uma guia solta.
+    // Só a MANCHETE do cartão muda (ver SITUACOES_COM_VEREDITO) — a pendência
+    // não, e é o que este caso pina.
+    const s = sessao({ data_atendimento: DIAS[0], hora_inicial: '09:00:00', situacao: 'CANCELADA' })
+    expect(sessaoSemCobertura(s, CUTOFF)).toBe(true)
+    expect(
+      cartaoPendente({
+        tipo: 'sessao', chave: 'k', hora: '09:00', codigo_tuss: null, terapia: null,
+        guia: null, legenda: null, motivoBruto: null, teve_token: null, token: null,
+        decorrida: true, origem: s, situacao: 'CANCELADA', semCobertura: true,
+      })
+    ).toBe(true)
+  })
+
   it('sem horário, só conta a partir do dia seguinte', () => {
     const hoje = sessao({ data_atendimento: CUTOFF.slice(0, 10), hora_inicial: null, situacao: 'GLOSA' })
     const ontem = sessao({ data_atendimento: DIAS[0], hora_inicial: null, situacao: 'GLOSA' })
