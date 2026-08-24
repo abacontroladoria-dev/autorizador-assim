@@ -23,6 +23,13 @@ export function resumoUnidadesAgenda(slots: SlotNormalizado[] | undefined): stri
   return partes.join(' · ')
 }
 
+/** Unidade(s) de um dow+turno específico — usado na tabela "Ocupação por dia e turno" (uma linha por dia × turno, não só por dia). */
+export function unidadeDiaTurnoAgenda(slots: SlotNormalizado[] | undefined, dow: number, turno: string): string {
+  const validos = (slots ?? []).filter(s => s?.dow === dow && s.turno === turno)
+  const unidades = [...new Set(validos.map(s => normalizarUnidadeOcupacao(s.unidade)))].sort((a, b) => a.localeCompare(b))
+  return unidades.join(', ')
+}
+
 export function unidadeDiaAgenda(slots: SlotNormalizado[] | undefined, dow: number): string {
   const validos = (slots ?? []).filter(s => s?.dow === dow)
   const unidades = [...new Set(validos.map(s => normalizarUnidadeOcupacao(s.unidade)))].sort((a, b) => a.localeCompare(b))

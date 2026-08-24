@@ -5,7 +5,7 @@ import * as XLSX from 'xlsx'
 import { useHeader } from '@/contexts/HeaderContext'
 import {
   ChevronDown, ChevronRight, Search, SlidersHorizontal, Download, X, Building2,
-  LayoutDashboard, Table2,
+  LayoutDashboard, Table2, ClipboardEdit, Eye, EyeOff,
 } from 'lucide-react'
 import { iconeTerapia } from '@/lib/cronograma/iconeTerapia'
 import { StatCard } from '@/components/cronograma/ui/StatCard'
@@ -31,12 +31,16 @@ import {
 import { DOW_PT, OCUP_COMPARE_SLOTS, OCUP_FAIXAS, OCUP_SORTS } from '@/lib/cronograma/ocupacaoConst'
 import { useOcupacaoProf } from '@/hooks/useOcupacaoProf'
 import { getRefWeek } from '@/lib/cronograma/helpers'
-import { AgendaMinimalista, resumoUnidadesAgenda, unidadeDiaAgenda } from './AgendaMinimalista'
+import { AgendaMinimalista, resumoUnidadesAgenda, unidadeDiaAgenda, unidadeDiaTurnoAgenda } from './AgendaMinimalista'
 import { OcupacaoDonut } from './OcupacaoDonut'
 import { FiltroCheckbox, FiltroRadio, PercentualOcupacao } from './OcupacaoAtomicos'
+import { CadastroCapacidadeProfissionalDia } from './CadastroCapacidadeProfissionalDia'
 import type { BaseOcup, OcupacaoAgregada, OcupacaoFinalizada, SlotNormalizado } from '@/types/ocupacaoProf'
 
 // ─── CONSTANTES LOCAIS ────────────────────────────────────────────────────────
+
+/** "Segunda - Manhã" etc. na tabela "Ocupação por dia e turno" — sem o "-feira" que DOW_PT_LONG (ocupacaoProf.ts) usa. */
+const DOW_LABEL: Record<number, string> = { 1: 'Segunda', 2: 'Terça', 3: 'Quarta', 4: 'Quinta', 5: 'Sexta' }
 
 const UNIDADES_DASHBOARD = ['Realengo', 'Fazendinha', 'Padre Miguel', 'Ambiente Natural']
 const UNIDADE_CORRIGIR   = 'Consertar Unidade no sistema'
@@ -98,19 +102,21 @@ function corTerapiaEsp(esp: string, fallback: string): string {
   return c
 }
 
-// Badge que identifica o tipo de seção (dashboard de cards vs. tabela) — substitui
-// repetir "Ocupação de Profissionais - Dashboard/Tabela por..." em cada título.
-function TipoSecaoBadge({ tipo }: { tipo: 'dashboard' | 'tabela' }) {
-  const isDash = tipo === 'dashboard'
-  const Icon = isDash ? LayoutDashboard : Table2
+// Badge que identifica o tipo de seção (dashboard de cards vs. tabela vs.
+// cadastro editável) — substitui repetir "Ocupação de Profissionais -
+// Dashboard/Tabela/Cadastro por..." em cada título.
+function TipoSecaoBadge({ tipo }: { tipo: 'dashboard' | 'tabela' | 'cadastro' }) {
+  const Icon = tipo === 'dashboard' ? LayoutDashboard : tipo === 'cadastro' ? ClipboardEdit : Table2
+  const label = tipo === 'dashboard' ? 'Dashboard' : tipo === 'cadastro' ? 'Cadastro' : 'Tabela'
+  const cor = tipo === 'dashboard'
+    ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300'
+    : tipo === 'cadastro'
+      ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/40 dark:text-emerald-300'
+      : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${
-      isDash
-        ? 'bg-sky-100 text-sky-700 dark:bg-sky-900/40 dark:text-sky-300'
-        : 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
-    }`}>
+    <span className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide ${cor}`}>
       <Icon size={11} />
-      {isDash ? 'Dashboard' : 'Tabela'}
+      {label}
     </span>
   )
 }
@@ -296,7 +302,10 @@ function TabelaResumo({ linhas, sortPadrao = { key: 'label', dir: 'asc' }, recor
 
 export function OcupacaoProfShell() {
   const refWeek = getRefWeek()
-  const { dadosPorProf, allTerps, allUnits, analMes, loading, error } = useOcupacaoProf(refWeek.inicio, refWeek.fim, refWeek.label)
+  const {
+    dadosPorProf, allTerps, allUnits, analMes, loading, error,
+    capacidadeOverrides, salvarCapacidadeProfissionalDia,
+  } = useOcupacaoProf(refWeek.inicio, refWeek.fim, refWeek.label)
 
   const { setHeader, setRightContent } = useHeader()
 
@@ -324,6 +333,9 @@ export function OcupacaoProfShell() {
   const [unidadeAberto,   setUnidadeAberto]   = useState(false)
   const [espAberto,       setEspAberto]       = useState(false)
   const [diaTurnoAberto,  setDiaTurnoAberto]  = useState(false)
+  const [cadastroAberto,  setCadastroAberto]  = useState(false)
+  /** "Ocupação por dia" (agregado) vs "Ocupação por dia e turno" (detalhado) — mesmo interruptor pros cards de todos os profissionais. */
+  const [verPorTurno,     setVerPorTurno]     = useState(true)
   const [profsAbertos,    setProfsAbertos]    = useState<Record<string, boolean>>({})
 
   // ── opções derivadas ──
@@ -886,12 +898,33 @@ export function OcupacaoProfShell() {
             </div>
           )}
         </div>
+
+        <div className="rounded-xl border border-border bg-card overflow-hidden">
+          <button type="button" onClick={() => setCadastroAberto(v => !v)}
+            className="w-full px-4 py-3 flex items-center justify-between text-left hover:bg-muted/50">
+            <span className="font-bold text-sm text-foreground flex items-center gap-1.5">
+              {cadastroAberto ? <ChevronDown size={14} className="text-muted-foreground" /> : <ChevronRight size={14} className="text-muted-foreground" />}
+              <TipoSecaoBadge tipo="cadastro" />
+              Quantidade esperada de pacientes
+            </span>
+            <span className="text-xs text-muted-foreground">{dadosPorProf.length} profissional(is)</span>
+          </button>
+          {cadastroAberto && (
+            <div className="px-4 pb-4">
+              <CadastroCapacidadeProfissionalDia
+                dadosPorProf={dadosPorProf}
+                capacidadeOverrides={capacidadeOverrides}
+                onSalvar={salvarCapacidadeProfissionalDia}
+              />
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── cards de profissionais ── */}
       <div className="space-y-2">
         {dadosFiltrados.map(d => {
-          const temRegraEspecial = !!regrasCapacidadeTexto(d)
+          const temRegraEspecial = !!regrasCapacidadeTexto(d, capacidadeOverrides)
           const temAdmin         = (d.ocupacao?.horasTecnicas ?? 0) > 0
           const aberto           = !!profsAbertos[d.prof]
           const pctVal           = Math.max(0, Math.min(100, (Number(d.taxaOcupacao) || 0) * 100))
@@ -976,56 +1009,77 @@ export function OcupacaoProfShell() {
                       {/* tabelas por dia e por especialidade */}
                       <div className="flex flex-col gap-3">
 
-                        {/* por dia */}
+                        {/* por dia (ou por dia e turno) */}
                         <div className="rounded-xl p-3" style={{ background: 'var(--card)', border: '1px solid var(--border)' }}>
                           <div className="font-bold text-xs mb-1 flex items-center gap-1.5 text-foreground">
                             <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ color: B.purple, flexShrink: 0 }}><rect x="3" y="4" width="18" height="18" rx="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
-                            Ocupação por dia{unidadeSoUma ? ` · ${resumoUnidade}` : ''}
+                            Ocupação por dia{verPorTurno ? ' e turno' : ''}{unidadeSoUma ? ` · ${resumoUnidade}` : ''}
+                            <button
+                              type="button"
+                              onClick={() => setVerPorTurno(v => !v)}
+                              title={verPorTurno ? 'Ver agregado só por dia' : 'Ver detalhado por dia e turno'}
+                              className="ml-auto shrink-0 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground"
+                            >
+                              {verPorTurno ? <Eye size={16} /> : <EyeOff size={16} />}
+                            </button>
                           </div>
                           {temRegraEspecial && (
                             <div className="text-[11px] font-semibold mb-2" style={{ color: B.purple }}>
-                              {regrasCapacidadeTexto(d)}
+                              {regrasCapacidadeTexto(d, capacidadeOverrides)}
                             </div>
                           )}
                           <table className="w-full table-fixed text-xs">
                             <thead>
                               <tr className="text-muted-foreground text-[11px] border-b">
-                                <th className="w-32 text-left px-1 pb-2 pt-1 font-medium">Dia</th>
-                                <th className="text-left px-1 pb-2 pt-1 font-medium">% ocup.</th>
+                                <th className="w-24 text-left px-1 pb-2 pt-1 font-medium">Unidade</th>
+                                <th className="w-28 text-left px-1 pb-2 pt-1 font-medium">Dia</th>
                                 {temRegraEspecial ? (
                                   <>
-                                    <th className="text-right px-1 pb-2 pt-1 font-medium whitespace-nowrap">Vagas simult.</th>
-                                    <th className="text-right px-1 pb-2 pt-1 font-medium">Sessões</th>
+                                    <th className="text-right px-1 pb-2 pt-1 font-medium whitespace-nowrap">Sessões simult.</th>
+                                    <th className="text-left px-1 pb-2 pt-1 font-medium whitespace-nowrap">% ocup. vagas</th>
+                                    <th className="text-right px-1 pb-2 pt-1 font-medium">Horários</th>
+                                    <th className="text-right px-1 pb-2 pt-1 font-medium whitespace-nowrap">% ocup. horários</th>
                                   </>
                                 ) : (
-                                  <th className="text-right px-1 pb-2 pt-1 font-medium w-24">Base</th>
+                                  <>
+                                    <th className="text-left px-1 pb-2 pt-1 font-medium">% ocup. vagas</th>
+                                    <th className="text-right px-1 pb-2 pt-1 font-medium w-24">Base</th>
+                                  </>
                                 )}
                                 <th className="text-right px-1 pb-2 pt-1 font-medium">Livre</th>
                               </tr>
                             </thead>
                             <tbody>
-                              {(d.ocupacao?.porDia ?? []).filter(temBaseOcupacaoLinha).map(x => {
-                                const uDia = unidadeSoUma ? '' : unidadeDiaAgenda(d.ocupacao?.slots, x.dow)
+                              {(verPorTurno ? (d.ocupacao?.porTurno ?? []) : (d.ocupacao?.porDia ?? [])).filter(temBaseOcupacaoLinha).map(x => {
+                                const turno = 'turno' in x ? x.turno : undefined
+                                const uDia = turno
+                                  ? unidadeDiaTurnoAgenda(d.ocupacao?.slots, x.dow, turno)
+                                  : unidadeDiaAgenda(d.ocupacao?.slots, x.dow)
                                 const pctSess = x.capacidadeMultipla && x.horariosTotal > 0
                                   ? x.horariosOcupados / x.horariosTotal : null
                                 const cor = corFaixaOcupacao(x.pct) ?? B.green
+                                const corSess = corFaixaOcupacao(pctSess) ?? B.green
                                 const pctNum = Math.max(0, Math.min(100, (Number(x.pct) || 0) * 100))
-                                return (
-                                  <tr key={x.dow} className="border-t">
-                                    <td className="px-1 py-2">
-                                      <div className="truncate font-medium">{x.dia}</div>
-                                      {uDia && <div className="truncate text-[10px] mt-0.5" style={{ color: B.blue }} title={uDia}>· {uDia}</div>}
-                                    </td>
-                                    <td className="px-1 py-2" style={{ minWidth: 160 }}>
-                                      <div className="flex items-center gap-2">
-                                        <span className="inline-block min-w-[4.4rem] rounded-full px-2.5 py-0.5 text-center font-bold whitespace-nowrap text-xs"
-                                          style={{ background: `${cor}22`, color: cor, border: `1.5px solid ${cor}55` }}>
-                                          {fmtPctOcup(x.pct)}
-                                        </span>
-                                        <div className="flex-1 h-1.5 rounded-full bg-muted min-w-[48px]">
-                                          <div className="h-full rounded-full" style={{ width: `${pctNum}%`, background: cor }} />
-                                        </div>
+                                const pctVagasCel = (
+                                  <td className="px-1 py-2" style={{ minWidth: 160 }}>
+                                    <div className="flex items-center gap-2">
+                                      <span className="inline-block min-w-[4.4rem] rounded-full px-2.5 py-0.5 text-center font-bold whitespace-nowrap text-xs"
+                                        style={{ background: `${cor}22`, color: cor, border: `1.5px solid ${cor}55` }}>
+                                        {fmtPctOcup(x.pct)}
+                                      </span>
+                                      <div className="flex-1 h-1.5 rounded-full bg-muted min-w-[48px]">
+                                        <div className="h-full rounded-full" style={{ width: `${pctNum}%`, background: cor }} />
                                       </div>
+                                    </div>
+                                  </td>
+                                )
+                                return (
+                                  <tr key={turno ? `${x.dow}-${turno}` : x.dow} className="border-t">
+                                    <td className="px-1 py-2 truncate text-muted-foreground" title={uDia || undefined}>
+                                      {uDia || '—'}
+                                    </td>
+                                    <td className="px-1 py-2">
+                                      <div className="truncate font-medium">{DOW_LABEL[x.dow]}{turno ? ` - ${turno}` : ''}</div>
                                     </td>
                                     {temRegraEspecial ? (
                                       <>
@@ -1035,25 +1089,34 @@ export function OcupacaoProfShell() {
                                             {Math.round(x.slotsOcupados)} / {Math.round(x.slotsTotal)}
                                           </span>
                                         </td>
+                                        {pctVagasCel}
                                         <td className="px-1 py-2 text-right">
                                           {x.capacidadeMultipla ? (
-                                            <>
-                                              <div className="font-semibold text-foreground whitespace-nowrap">
-                                                {Math.round(x.horariosOcupados)} / {Math.round(x.horariosTotal)}
-                                              </div>
-                                              {pctSess !== null && (
-                                                <div className="text-[10px] text-muted-foreground">{fmtPctOcup(pctSess)}</div>
-                                              )}
-                                            </>
+                                            <div className="font-semibold text-foreground whitespace-nowrap">
+                                              {Math.round(x.horariosOcupados)} / {Math.round(x.horariosTotal)}
+                                            </div>
+                                          ) : (
+                                            <span className="text-muted-foreground/50 text-sm">—</span>
+                                          )}
+                                        </td>
+                                        <td className="px-1 py-2 text-right">
+                                          {pctSess !== null ? (
+                                            <span className="inline-block rounded-full px-2.5 py-0.5 font-bold whitespace-nowrap"
+                                              style={{ background: `${corSess}22`, color: corSess, border: `1.5px solid ${corSess}55` }}>
+                                              {fmtPctOcup(pctSess)}
+                                            </span>
                                           ) : (
                                             <span className="text-muted-foreground/50 text-sm">—</span>
                                           )}
                                         </td>
                                       </>
                                     ) : (
-                                      <td className="px-1 py-2 text-right whitespace-nowrap text-muted-foreground">
-                                        {x.baseCompacta || '—'}
-                                      </td>
+                                      <>
+                                        {pctVagasCel}
+                                        <td className="px-1 py-2 text-right whitespace-nowrap text-muted-foreground">
+                                          {x.baseCompacta || '—'}
+                                        </td>
+                                      </>
                                     )}
                                     <td className="px-1 py-2 text-right whitespace-nowrap font-semibold" style={{ color: B.red }}>
                                       {fmtH(x.horasLivres)}
@@ -1073,14 +1136,18 @@ export function OcupacaoProfShell() {
                               <thead>
                                 <tr className="text-muted-foreground text-[11px] border-b">
                                   <th className="w-32 text-left px-1 pb-2 pt-1 font-medium">Especialidade</th>
-                                  <th className="text-left px-1 pb-2 pt-1 font-medium">% ocup.</th>
                                   {temRegraEspecial ? (
                                     <>
-                                      <th className="text-right px-1 pb-2 pt-1 font-medium whitespace-nowrap">Vagas simult.</th>
-                                      <th className="text-right px-1 pb-2 pt-1 font-medium">Sessões</th>
+                                      <th className="text-right px-1 pb-2 pt-1 font-medium whitespace-nowrap">Sessões simult.</th>
+                                      <th className="text-left px-1 pb-2 pt-1 font-medium whitespace-nowrap">% ocup. vagas</th>
+                                      <th className="text-right px-1 pb-2 pt-1 font-medium">Horários</th>
+                                      <th className="text-right px-1 pb-2 pt-1 font-medium whitespace-nowrap">% ocup. horários</th>
                                     </>
                                   ) : (
-                                    <th className="text-right px-1 pb-2 pt-1 font-medium w-24">Base</th>
+                                    <>
+                                      <th className="text-left px-1 pb-2 pt-1 font-medium">% ocup. vagas</th>
+                                      <th className="text-right px-1 pb-2 pt-1 font-medium w-24">Base</th>
+                                    </>
                                   )}
                                   <th className="text-right px-1 pb-2 pt-1 font-medium">Livre</th>
                                 </tr>
@@ -1090,21 +1157,24 @@ export function OcupacaoProfShell() {
                                   const pctSessEsp = x.capacidadeMultipla && x.horariosTotal > 0
                                     ? x.horariosOcupados / x.horariosTotal : null
                                   const corEsp = corFaixaOcupacao(x.pct) ?? B.green
+                                  const corSessEsp = corFaixaOcupacao(pctSessEsp) ?? B.green
                                   const pctNumEsp = Math.max(0, Math.min(100, (Number(x.pct) || 0) * 100))
+                                  const pctVagasCelEsp = (
+                                    <td className="px-1 py-2" style={{ minWidth: 140 }}>
+                                      <div className="flex items-center gap-2">
+                                        <span className="inline-block min-w-[4.4rem] rounded-full px-2.5 py-0.5 text-center font-bold whitespace-nowrap text-xs"
+                                          style={{ background: `${corEsp}22`, color: corEsp, border: `1.5px solid ${corEsp}55` }}>
+                                          {fmtPctOcup(x.pct)}
+                                        </span>
+                                        <div className="flex-1 h-1.5 rounded-full bg-muted min-w-[48px]">
+                                          <div className="h-full rounded-full" style={{ width: `${pctNumEsp}%`, background: corEsp }} />
+                                        </div>
+                                      </div>
+                                    </td>
+                                  )
                                   return (
                                     <tr key={x.terp} className="border-t">
                                       <td className="px-1 py-2 truncate max-w-[120px]" title={x.terp}>{x.terp}</td>
-                                      <td className="px-1 py-2" style={{ minWidth: 140 }}>
-                                        <div className="flex items-center gap-2">
-                                          <span className="inline-block min-w-[4.4rem] rounded-full px-2.5 py-0.5 text-center font-bold whitespace-nowrap text-xs"
-                                            style={{ background: `${corEsp}22`, color: corEsp, border: `1.5px solid ${corEsp}55` }}>
-                                            {fmtPctOcup(x.pct)}
-                                          </span>
-                                          <div className="flex-1 h-1.5 rounded-full bg-muted min-w-[48px]">
-                                            <div className="h-full rounded-full" style={{ width: `${pctNumEsp}%`, background: corEsp }} />
-                                          </div>
-                                        </div>
-                                      </td>
                                       {temRegraEspecial ? (
                                         <>
                                           <td className="px-1 py-2 text-right">
@@ -1113,23 +1183,32 @@ export function OcupacaoProfShell() {
                                               {Math.round(x.slotsOcupados)} / {Math.round(x.slotsTotal)}
                                             </span>
                                           </td>
+                                          {pctVagasCelEsp}
                                           <td className="px-1 py-2 text-right">
                                             {x.capacidadeMultipla ? (
-                                              <>
-                                                <div className="font-semibold text-foreground whitespace-nowrap">
-                                                  {Math.round(x.horariosOcupados)} / {Math.round(x.horariosTotal)}
-                                                </div>
-                                                {pctSessEsp !== null && (
-                                                  <div className="text-[10px] text-muted-foreground">{fmtPctOcup(pctSessEsp)}</div>
-                                                )}
-                                              </>
+                                              <div className="font-semibold text-foreground whitespace-nowrap">
+                                                {Math.round(x.horariosOcupados)} / {Math.round(x.horariosTotal)}
+                                              </div>
+                                            ) : (
+                                              <span className="text-muted-foreground/50 text-sm">—</span>
+                                            )}
+                                          </td>
+                                          <td className="px-1 py-2 text-right">
+                                            {pctSessEsp !== null ? (
+                                              <span className="inline-block rounded-full px-2.5 py-0.5 font-bold whitespace-nowrap"
+                                                style={{ background: `${corSessEsp}22`, color: corSessEsp, border: `1.5px solid ${corSessEsp}55` }}>
+                                                {fmtPctOcup(pctSessEsp)}
+                                              </span>
                                             ) : (
                                               <span className="text-muted-foreground/50 text-sm">—</span>
                                             )}
                                           </td>
                                         </>
                                       ) : (
-                                        <td className="px-1 py-2 text-right whitespace-nowrap text-muted-foreground">{x.baseCompacta || '—'}</td>
+                                        <>
+                                          {pctVagasCelEsp}
+                                          <td className="px-1 py-2 text-right whitespace-nowrap text-muted-foreground">{x.baseCompacta || '—'}</td>
+                                        </>
                                       )}
                                       <td className="px-1 py-2 text-right whitespace-nowrap font-semibold" style={{ color: B.red }}>
                                         {fmtH(x.horasLivres)}

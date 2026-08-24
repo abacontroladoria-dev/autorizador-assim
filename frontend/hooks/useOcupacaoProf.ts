@@ -2,8 +2,12 @@
 
 import { useEffect, useMemo, useState } from 'react'
 import { buscarGradeComoCSVRows } from '@/lib/cronograma/gradeService'
-import { calcularOcupacaoSemanal, parseUnidadeSala } from '@/lib/cronograma/ocupacaoProf'
+import { calcularOcupacaoSemanal, parseUnidadeSala, type CapacidadeOverrides } from '@/lib/cronograma/ocupacaoProf'
 import { normTxt } from '@/lib/cronograma/constants'
+import {
+  listarCapacidadesProfissionalDia, definirCapacidadeProfissionalDia,
+  type CapacidadeProfissionalDiaRow,
+} from '@/services/capacidadeProfissional.service'
 import type { CsvRow } from '@/types/cronograma'
 import type { DadosProfissional, SlotData, SlotDetalhe } from '@/types/ocupacaoProf'
 
@@ -164,12 +168,17 @@ export interface UseOcupacaoProfResult {
   analMes: string
   loading: boolean
   error: string | null
+  /** Cadastro de vagas simultâneas esperadas por profissional × dia (ver capacidadeProfissional.service) — chave normalizada (normTxt) do nome. */
+  capacidadeOverrides: CapacidadeOverrides
+  /** Cria ou edita uma linha do cadastro; recalcula `dadosPorProf` (via `capacidadeOverrides`) assim que a escrita confirma. */
+  salvarCapacidadeProfissionalDia: (profissionalNome: string, dow: number, capacidade: number) => Promise<void>
 }
 
 export function useOcupacaoProf(inicio: string, fim: string, label: string): UseOcupacaoProfResult {
   const [rows, setRows]       = useState<CsvRow[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError]     = useState<string | null>(null)
+  const [capacidades, setCapacidades] = useState<CapacidadeProfissionalDiaRow[]>([])
 
   useEffect(() => {
     let cancelled = false
@@ -182,6 +191,39 @@ export function useOcupacaoProf(inicio: string, fim: string, label: string): Use
 
     return () => { cancelled = true }
   }, [inicio, fim])
+
+  // Cadastro de capacidade não é recortado por período (é uma configuração
+  // do profissional, não da agenda de um mês) — busca uma vez, independente
+  // de `inicio`/`fim`.
+  useEffect(() => {
+    let cancelled = false
+    listarCapacidadesProfissionalDia()
+      .then(data => { if (!cancelled) setCapacidades(data) })
+      .catch(() => { /* silencioso: pior caso, cai no fallback "de fábrica" (getSlotCap) */ })
+    return () => { cancelled = true }
+  }, [])
+
+  const capacidadeOverrides = useMemo((): CapacidadeOverrides => {
+    const map: CapacidadeOverrides = {}
+    capacidades.forEach(c => {
+      const k = normTxt(c.profissional_nome)
+      if (!map[k]) map[k] = {}
+      map[k][c.dow] = c.capacidade
+    })
+    return map
+  }, [capacidades])
+
+  async function salvarCapacidadeProfissionalDia(profissionalNome: string, dow: number, capacidade: number) {
+    await definirCapacidadeProfissionalDia(profissionalNome, dow, capacidade)
+    setCapacidades(prev => {
+      const idx = prev.findIndex(c => normTxt(c.profissional_nome) === normTxt(profissionalNome) && c.dow === dow)
+      const linha: CapacidadeProfissionalDiaRow = { profissional_nome: profissionalNome, dow, capacidade }
+      if (idx < 0) return [...prev, linha]
+      const copia = [...prev]
+      copia[idx] = linha
+      return copia
+    })
+  }
 
   const { dadosPorProf, allTerps, allUnits } = useMemo(() => {
     if (!rows.length) return { dadosPorProf: [], allTerps: [], allUnits: [] }
@@ -202,7 +244,7 @@ export function useOcupacaoProf(inicio: string, fim: string, label: string): Use
 
     const dadosPorProf: DadosProfissional[] = Object.keys(allSlots).map(prof => {
       const slotData = allSlots[prof]
-      const ocupacao = calcularOcupacaoSemanal(slotData, prof)
+      const ocupacao = calcularOcupacaoSemanal(slotData, prof, capacidadeOverrides)
 
       ocupacao.slots.forEach(s => { if (s.unidade) unitsSet.add(s.unidade) })
 
@@ -220,7 +262,7 @@ export function useOcupacaoProf(inicio: string, fim: string, label: string): Use
       allTerps: [...terpsSet].sort(),
       allUnits:  [...unitsSet].sort(),
     }
-  }, [rows])
+  }, [rows, capacidadeOverrides])
 
-  return { dadosPorProf, allTerps, allUnits, analMes: label, loading, error }
+  return { dadosPorProf, allTerps, allUnits, analMes: label, loading, error, capacidadeOverrides, salvarCapacidadeProfissionalDia }
 }
