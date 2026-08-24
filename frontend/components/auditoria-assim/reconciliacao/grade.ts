@@ -12,6 +12,29 @@ import { diaDoTimestamp, horaDoTimestamp } from './datas'
 const SEM_HORA = '—'
 
 /**
+ * As situações que são problema independentemente do relógio.
+ *
+ * As que dependem dele — sincronizando, retorno não confirmado — ficam de fora
+ * de propósito: dentro do prazo elas se resolvem sozinhas e não pedem nada, e
+ * quando vencem o `semCobertura` já as promove. É o que evita a tela gritar por
+ * uma solicitação enviada há dez minutos.
+ */
+const SITUACOES_PENDENTES = new Set(['NAO_SOLICITADA', 'SOLICITACAO_CANCELADA', 'GLOSA'])
+
+/**
+ * Este cartão pede trabalho?
+ *
+ * Uma definição só, porque três consomem: o cartão decide se veste a espécie
+ * expandida, o navegador do rodapé decide o que percorrer, e a grade decide onde
+ * pousar o anel. Divergirem faria o rodapé prometer "3 pendências" e a grade
+ * mostrar duas destacadas — que é o gênero de mentira que esta tela caça.
+ */
+export function cartaoPendente(c: CartaoGrade): boolean {
+  if (c.tipo === 'sessao') return c.semCobertura || SITUACOES_PENDENTES.has(c.situacao ?? '')
+  return c.estado === 'sem-vinculo' || c.excedente
+}
+
+/**
  * "14:34" → "14:00". Nula quando não há hora para arredondar.
  *
  * Por fatia de string, como todo horário nesta tela: `hora_inicial` é `time` e
@@ -58,13 +81,25 @@ function faixaDaHora(hora: string): string | null {
  * Duração não é representada porque não existe: `get_auditoria_assim` devolve
  * `hora_inicial` e não devolve hora final. Desenhar um bloco de 40 ou 60 minutos
  * aqui seria afirmar em pixels uma coisa que o dado não diz.
+ *
+ * `marcas` traz as duas espécies de pendência que só existiam como AGREGADO no
+ * placar — "faltando" e "sobrando". Elas chegam decididas de fora, do mesmo
+ * hook que conta as cinco colunas da listagem, e não recalculadas aqui: duas
+ * definições fariam o cartão marcado e o número do topo discordarem sobre a
+ * mesma semana, que é o tipo de divergência que esta tela existe para caçar.
  */
 export function montarGrade(
   sessoes: AuditoriaAssimItem[],
   autorizacoes: AutorizacaoAssimSemana[],
   estadoDaGuia: (guia: string) => EstadoAutorizacao,
   dias: string[],
-  placar: PlacarTuss[]
+  placar: PlacarTuss[],
+  marcas: {
+    /** A sessão já ocorreu e ninguém a liberou. */
+    descoberta: (s: AuditoriaAssimItem) => boolean
+    /** As guias que passaram da cota do TUSS. */
+    excedentes: ReadonlySet<string>
+  }
 ): LinhaGrade[] {
   const diasValidos = new Set(dias)
   const terapiaDoTuss = new Map(placar.map((p) => [p.codigo_tuss, p.terapias]))
@@ -88,6 +123,8 @@ export function montarGrade(
         situacao: s.situacao,
         terapia: s.terapias || nomeDaTerapia(s.codigo_tuss),
         legenda: s.profissionais ?? s.observacao ?? null,
+        semCobertura: marcas.descoberta(s),
+        motivoBruto: s.descricao_erro ?? s.motivo_glosa,
         teve_token: s.teve_token,
         token: s.token,
       },
@@ -111,6 +148,7 @@ export function montarGrade(
         guia: a.guia,
         terapia: nomeDaTerapia(a.codigo_tuss),
         estado,
+        excedente: marcas.excedentes.has(a.guia),
         status: a.status,
         descricao_erro: a.descricao_erro,
         teve_token: a.teve_token,

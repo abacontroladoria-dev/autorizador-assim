@@ -29,6 +29,11 @@ function rotuloColuna(iso: string): { nome: string; data: string } {
  * Célula vazia fica VAZIA. Numa agenda o vazio é a maioria das células, e
  * escrever "sem sessão" em cada uma faz o ruído crescer com o tamanho da tela; o
  * dia inteiro sem nada, esse sim, é dito uma vez no cabeçalho da coluna.
+ *
+ * A altura da célula é do CONTEÚDO desde 2026-08-24. Com o cartão saudável
+ * colapsado em duas linhas, um `min-h` fixo devolveria em espaço vazio toda a
+ * altura que o colapso economizou — e é justamente a diferença de altura entre
+ * as duas espécies que faz a pendência ser achada por silhueta.
  */
 export default function GradeSemana({
   linhas,
@@ -37,6 +42,7 @@ export default function GradeSemana({
   codigosGlosa,
   podeVincular,
   onVincularGuia,
+  chaveDestacada,
 }: {
   linhas: LinhaGrade[]
   dias: string[]
@@ -45,16 +51,25 @@ export default function GradeSemana({
   codigosGlosa: Map<string, string>
   podeVincular: boolean
   onVincularGuia: (guia: string) => void
+  /**
+   * O cartão onde o navegador de pendências pousou. Anel de steel, nunca matiz
+   * semântico: "você está aqui" e "isto é uma glosa" não podem ser a mesma cor.
+   */
+  chaveDestacada: string | null
 }) {
   const diasVazios = new Set(
     dias.filter((dia) => linhas.every((linha) => (linha.celulas[dia] ?? []).length === 0))
   )
 
   return (
-    // `relative` mantém a rolagem lateral aqui dentro: sem contêiner
-    // posicionado, a largura mínima das colunas escapa do `overflow-x-auto` e é
-    // o documento que rola de lado (medido em 390px).
-    <div className="relative overflow-x-auto">
+    // Sem `overflow-x-auto` PRÓPRIO, e isto é deliberado: quem rola nos dois
+    // eixos é o corpo do modal. Um `overflow-x` aqui criaria um scroller
+    // intermediário, e `sticky top-0` no cabeçalho dos dias passaria a resolver
+    // contra ELE — que nunca rola na vertical, porque não tem altura limitada.
+    // O efeito medido era o cabeçalho subir junto com o conteúdo e sumir, e com
+    // ele o nome do dia de cada coluna. O `relative` que impedia a largura
+    // mínima de escapar mudou de endereço junto, para o corpo do modal.
+    <div>
       {/*
         As larguras mínimas das colunas somam ~59,5rem. Abaixo disso a grade
         transborda e o contêiner rola de lado, em vez de espremer os cartões até
@@ -67,8 +82,11 @@ export default function GradeSemana({
         escrito.
       */}
       <div className="grid w-full grid-cols-[4.5rem_repeat(5,minmax(11rem,1fr))]">
-        {/* Cabeçalho */}
-        <div className="sticky left-0 z-20 border-b border-slate-200 bg-white px-3 py-2.5 text-right text-[11px] font-semibold text-slate-500">
+        {/* Cabeçalho. Grudado no topo além de na esquerda: a escala é curta
+            desde que o cartão saudável colapsou, mas uma semana cheia ainda
+            rola, e uma célula sem o nome do dia acima deixa de dizer QUANDO
+            aquele atendimento foi — que é metade do que a grade promete. */}
+        <div className="sticky top-0 left-0 z-30 border-b border-slate-200 bg-white px-3 py-2.5 text-right text-[11px] font-semibold text-slate-500">
           Horário
         </div>
         {dias.map((dia) => {
@@ -77,7 +95,7 @@ export default function GradeSemana({
           return (
             <div
               key={dia}
-              className={`border-b border-l border-slate-200 px-3 py-2.5 text-[11px] font-semibold tracking-wide ${
+              className={`sticky top-0 z-20 border-b border-l border-slate-200 px-3 py-2.5 text-[11px] font-semibold tracking-wide ${
                 ehHoje ? 'bg-brand-surface text-brand-fg' : 'bg-white text-slate-500'
               }`}
             >
@@ -116,14 +134,22 @@ export default function GradeSemana({
                 return (
                   <div
                     key={dia}
-                    className={`min-h-14 border-b border-l border-slate-100 p-2 ${
+                    className={`border-b border-l border-slate-100 p-2 ${
                       dia === hoje ? 'bg-brand-surface/40' : ''
                     }`}
                   >
                     {cartoes.length > 0 && (
                       <div className="flex flex-wrap items-start gap-1.5">
                         {cartoes.map((cartao) => (
-                          <div key={cartao.chave} className="min-w-0 grow basis-34">
+                          <div
+                            key={cartao.chave}
+                            data-chave={cartao.chave}
+                            className={`min-w-0 grow basis-34 rounded-lg ${
+                              cartao.chave === chaveDestacada
+                                ? 'ring-2 ring-brand ring-offset-1'
+                                : ''
+                            }`}
+                          >
                             <CartaoAtendimento
                               cartao={cartao}
                               codigosGlosa={codigosGlosa}

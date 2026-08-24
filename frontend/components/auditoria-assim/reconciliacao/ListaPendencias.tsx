@@ -2,87 +2,14 @@
 
 import { useMemo, useState } from 'react'
 import {
-  AlertOctagon, AlertTriangle, Ban, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Link2,
-  RefreshCw, Search, TrendingDown, TrendingUp, X,
+  AlertTriangle, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, RefreshCw, Search, X,
 } from 'lucide-react'
 import Paginacao from '../Paginacao'
 import type { PacientePendencias, TipoPendencia } from '../types'
+import { PENDENCIAS } from './pendencias'
 import { dataHoraRelativa, formatarDia, normalizar } from './datas'
 
 const PAGE_SIZE = 20
-
-/**
- * A ordem dos chips E a ordem das colunas numéricas — a mesma lista, um lugar
- * só. Elas divergirem faria o número que a pessoa clicou não ser o número que
- * ela lê na linha.
- *
- * Os matizes são os já falados nesta superfície (DESIGN.md, Status Lock Rule):
- * violeta é glosa, cinza é o que acabou sem efeito, âmbar espera alguém olhar,
- * rose é a lacuna mais larga — nada foi autorizado para uma sessão que já
- * aconteceu. Nenhum matiz novo, e nenhum deles decora: cada chip filtra
- * exatamente o estado que nomeia.
- */
-const PENDENCIAS: {
-  chave: TipoPendencia
-  rotulo: string
-  coluna: string
-  Icone: typeof Link2
-  tinta: string
-  ativo: string
-  inativo: string
-  ajuda: string
-}[] = [
-  {
-    chave: 'glosa',
-    rotulo: 'Glosas',
-    coluna: 'Glosas',
-    Icone: AlertOctagon,
-    tinta: 'text-violet-700',
-    ativo: 'border-violet-300 bg-violet-50 text-violet-900',
-    inativo: 'border-slate-200 bg-white text-slate-600 hover:border-violet-300 hover:bg-violet-50',
-    ajuda: 'Guias que a ASSIM recusou neste mês.',
-  },
-  {
-    chave: 'cancelamento',
-    rotulo: 'Cancelamentos',
-    coluna: 'Cancel.',
-    Icone: Ban,
-    tinta: 'text-slate-700',
-    ativo: 'border-slate-400 bg-slate-100 text-slate-800',
-    inativo: 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50',
-    ajuda: 'Autorizações que saíram e foram desfeitas (“Liberado *”). Não consumiram cota.',
-  },
-  {
-    chave: 'sem-vinculo',
-    rotulo: 'Sem vínculo',
-    coluna: 'Sem vínculo',
-    Icone: Link2,
-    tinta: 'text-amber-700',
-    ativo: 'border-amber-300 bg-amber-50 text-amber-900',
-    inativo: 'border-slate-200 bg-white text-slate-600 hover:border-amber-300 hover:bg-amber-50',
-    ajuda: 'Guias liberadas que sobraram do pareamento e esperam alguém dizer que sessão elas cobrem.',
-  },
-  {
-    chave: 'faltando',
-    rotulo: 'Faltando',
-    coluna: 'Faltando',
-    Icone: TrendingDown,
-    tinta: 'text-rose-700',
-    ativo: 'border-rose-300 bg-rose-50 text-rose-900',
-    inativo: 'border-slate-200 bg-white text-slate-600 hover:border-rose-300 hover:bg-rose-50',
-    ajuda: 'Sessões decorridas há mais de 30 minutos sem liberação que as cubra. O que ainda vai acontecer, ou aconteceu há menos de 30 minutos, não conta.',
-  },
-  {
-    chave: 'sobrando',
-    rotulo: 'Sobrando',
-    coluna: 'Sobrando',
-    Icone: TrendingUp,
-    tinta: 'text-amber-700',
-    ativo: 'border-amber-300 bg-amber-50 text-amber-900',
-    inativo: 'border-slate-200 bg-white text-slate-600 hover:border-amber-300 hover:bg-amber-50',
-    ajuda: 'Liberações a mais do que sessões agendadas naquele TUSS — é o que provoca a glosa 1601.',
-  },
-]
 
 /**
  * Número de coluna: zero recua, o resto chama.

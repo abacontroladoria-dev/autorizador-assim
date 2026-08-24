@@ -1,27 +1,26 @@
 'use client'
 
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  AlertOctagon, AlertTriangle, Ban, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, History,
-  Link2, RefreshCw, ShieldCheck, SlidersHorizontal, X,
+  AlertTriangle, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, History, RefreshCw,
+  Target, X,
 } from 'lucide-react'
 import { diasUteisDe, type useAnaliseReincidencia } from '@/hooks/useAnaliseReincidencia'
 import { useModalDialog } from '@/hooks/useModalDialog'
-import type { AutorizacaoAssimSemana } from '../types'
+import type { AutorizacaoAssimSemana, EstadoFiltro } from '../types'
 import ChipTuss from './ChipTuss'
-import FiltrosEstado from './FiltrosEstado'
 import GradeSemana from './GradeSemana'
 import LinhaAutorizacao from './LinhaAutorizacao'
+import { PENDENCIAS } from './pendencias'
 import { diaDoTimestamp, formatarDiaComNome, hojeLocal, rotuloSemana } from './datas'
-import { montarGrade } from './grade'
+import { cartaoPendente, montarGrade } from './grade'
 
 const ID_TITULO = 'titulo-semana-paciente'
 
-const ROTULO_FILTRO: Record<string, string> = {
-  'sem-vinculo': 'sem vínculo',
-  glosa: 'glosas',
-  cancelada: 'canceladas',
+/** "Sem vínculo" a partir de `sem-vinculo` — o nome que a tela já usa em cima. */
+function rotuloDaEspecie(chave: EstadoFiltro): string {
+  return PENDENCIAS.find((p) => p.chave === chave)?.rotulo.toLowerCase() ?? chave
 }
 
 /** Duas letras do nome. Não há foto de paciente no sistema — a inicial é a identidade. */
@@ -32,33 +31,51 @@ function iniciais(nome: string): string {
 }
 
 /**
- * Um dos cinco números do resumo da semana.
+ * Uma das cinco espécies de pendência: contador e filtro no mesmo controle.
  *
- * O matiz só aparece quando o número é maior que zero: uma fileira de cinco
- * cartões coloridos onde três deles dizem "0" gasta a cor em repouso e deixa de
- * apontar para onde há trabalho. Zero recua para branco e cinza.
+ * Antes eram cinco números de outro vocabulário (liberadas, utilizadas, sem
+ * vínculo, glosas, cancelamentos), e dois deles nem eram pendência — gastavam
+ * 40% da faixa mais nobre do modal com totais que não pedem trabalho, enquanto
+ * "faltando" e "sobrando", que a listagem tinha acabado de prometer, não
+ * apareciam em lugar nenhum.
  *
- * `tom` e `bolha` usam só degraus que o shim de tema escuro de globals.css
- * remapeia (-50/-100/-200/-300 e texto -700). `bg-white/70` na bolha, que era o
- * desenho anterior, atravessava claro para o escuro — modificador de opacidade
- * não é remapeado.
+ * Três canais, um significado cada, como nas chips de TUSS:
+ *
+ * - o MATIZ é a espécie, e só acende quando há trabalho dela. Uma fileira de
+ *   cinco cartões coloridos onde três dizem "0" gasta a cor em repouso e deixa
+ *   de apontar para onde há o que fazer.
+ * - o ANEL DE STEEL é a seleção. "Você está aqui" nunca usa matiz semântico.
+ * - o RÓTULO é a palavra, sempre presente: a cor nunca é o único sinal.
+ *
+ * Zero continua clicável e visível — "nenhuma glosa nesta semana" é informação,
+ * e esconder o contador faz a ausência parecer com a tela ainda carregando.
+ *
+ * Só degraus que o shim de tema escuro de globals.css remapeia (-50/-100/-200/
+ * -300 e texto -700). `bg-white/70`, que era o desenho anterior da bolha,
+ * atravessava claro para o escuro: modificador de opacidade não é remapeado.
  */
 function Indicador({
-  valor, rotulo, Icone, tom, bolha, atencao,
+  valor, rotulo, Icone, tom, bolha, ajuda, ativo, onToggle,
 }: {
   valor: number
   rotulo: string
   Icone: typeof CheckCircle2
   tom: string
   bolha: string
-  atencao?: boolean
+  ajuda: string
+  ativo: boolean
+  onToggle: () => void
 }) {
-  const aceso = !!atencao && valor > 0
+  const aceso = valor > 0
   return (
-    <div
-      className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 ${
-        aceso ? tom : 'border-slate-200 bg-white'
-      }`}
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-pressed={ativo}
+      title={ajuda}
+      className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none ${
+        aceso ? tom : 'border-slate-200 bg-white hover:bg-slate-50'
+      } ${ativo ? 'ring-2 ring-brand ring-offset-1' : ''}`}
     >
       <span
         className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
@@ -71,7 +88,7 @@ function Indicador({
         <span className="block text-xl leading-none font-bold tabular-nums text-slate-900">{valor}</span>
         <span className="mt-0.5 block truncate text-[11px] font-medium text-slate-600">{rotulo}</span>
       </span>
-    </div>
+    </button>
   )
 }
 
@@ -97,6 +114,22 @@ type Props = {
  * (ver useAnaliseReincidencia), então o recorte deste paciente é um `useMemo`.
  * É o que garante que os números daqui sejam os MESMOS da linha clicada — não
  * uma segunda contagem que pode divergir.
+ *
+ * ── O que mudou em 2026-08-24 ──────────────────────────────────────────────
+ *
+ * A queixa era que o modal não tinha hierarquia e não dizia QUAL sessão estava
+ * com problema. Três causas, três correções:
+ *
+ * 1. o modal falava outro vocabulário que a linha que o abria. Os cinco
+ *    indicadores agora são as cinco espécies de `PENDENCIAS`, pela mesma
+ *    `contarPendencias` que monta as colunas da listagem;
+ * 2. cada indicador virou o filtro daquela espécie, o que apagou o botão
+ *    "Filtros", a faixa colapsável e o componente `FiltrosEstado` — três
+ *    controles onde bastava um;
+ * 3. "faltando" e "sobrando" deixaram de ser agregados e viraram marcas nos
+ *    cartões (ver `sessaoSemCobertura` e `guiasExcedentes`), e o rodapé ganhou
+ *    um navegador que pula de pendência em pendência — que é também o único
+ *    caminho de teclado até elas.
  */
 export default function ModalSemanaPaciente({
   open, onClose, analise, podeVincular, codigosGlosa, onVincularGuia,
@@ -104,9 +137,82 @@ export default function ModalSemanaPaciente({
   const fechar = useCallback(() => onClose(), [onClose])
   const { refDialogo, propsDialogo } = useModalDialog(open, fechar, ID_TITULO)
 
-  const [mostrarFiltros, setMostrarFiltros] = useState(false)
   const [mostrarHistorico, setMostrarHistorico] = useState(false)
+  // -1 = ninguém navegou ainda. O modal abre neutro: os cartões pendentes já se
+  // destacam sozinhos pela altura, e pôr o anel de seleção em algo que a pessoa
+  // não escolheu faria a tela responder a uma pergunta que ela não fez.
+  const [foco, setFoco] = useState(-1)
   const refHistorico = useRef<HTMLElement>(null)
+  const refRolagem = useRef<HTMLDivElement>(null)
+
+  const dias = useMemo(() => diasUteisDe(analise.semanaInicio), [analise.semanaInicio])
+
+  const linhas = useMemo(
+    () =>
+      montarGrade(
+        analise.sessoesVisiveis,
+        analise.autorizacoesVisiveis,
+        analise.estadoDaGuia,
+        dias,
+        analise.placar,
+        { descoberta: analise.sessaoDescoberta, excedentes: analise.guiasExcedentes }
+      ),
+    [
+      analise.sessoesVisiveis, analise.autorizacoesVisiveis, analise.estadoDaGuia, dias,
+      analise.placar, analise.sessaoDescoberta, analise.guiasExcedentes,
+    ]
+  )
+
+  /**
+   * As pendências da semana, em ordem de leitura: por faixa de horário e, dentro
+   * dela, da segunda para a sexta.
+   *
+   * É a ordem em que a agenda é lida, e não a ordem em que os dados chegaram —
+   * um navegador que pula de sexta para segunda e volta para quarta obriga a
+   * pessoa a se reorientar a cada passo.
+   */
+  const pendencias = useMemo(() => {
+    const achadas: { chave: string; rotulo: string }[] = []
+    for (const linha of linhas) {
+      for (const dia of dias) {
+        for (const c of linha.celulas[dia] ?? []) {
+          if (cartaoPendente(c)) {
+            achadas.push({ chave: c.chave, rotulo: `${formatarDiaComNome(dia)} ${c.hora}` })
+          }
+        }
+      }
+    }
+    return achadas
+  }, [linhas, dias])
+
+  // O foco volta a neutro quando o conjunto muda (trocou a semana, mexeu num
+  // filtro): manter o índice apontaria para outro cartão sem avisar. Ajustado
+  // durante o render, não num efeito — um efeito com setState síncrono aqui
+  // causaria uma renderização em cascata.
+  const assinatura = pendencias.map((p) => p.chave).join('|')
+  const [assinaturaAnterior, setAssinaturaAnterior] = useState(assinatura)
+  if (assinaturaAnterior !== assinatura) {
+    setAssinaturaAnterior(assinatura)
+    setFoco(-1)
+  }
+
+  const alvo = foco >= 0 ? pendencias[foco] ?? null : null
+
+  /**
+   * Traz a pendência em foco para a vista.
+   *
+   * `behavior` respeita `prefers-reduced-motion` — a rolagem suave de uma grade
+   * inteira é justamente o tipo de movimento que a preferência existe para
+   * evitar. `block: 'center'` e não `'start'`: a linha do horário é grudada no
+   * topo, e alinhar pelo topo esconderia o cartão atrás dela.
+   */
+  useEffect(() => {
+    if (!open || !alvo) return
+    const alvoNoDom = refRolagem.current?.querySelector(`[data-chave="${CSS.escape(alvo.chave)}"]`)
+    if (!alvoNoDom) return
+    const suave = !window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    alvoNoDom.scrollIntoView({ behavior: suave ? 'smooth' : 'auto', block: 'center' })
+  }, [open, alvo])
 
   /**
    * Abrir o histórico o traz para a vista.
@@ -122,18 +228,10 @@ export default function ModalSemanaPaciente({
     })
   }, [])
 
-  const dias = useMemo(() => diasUteisDe(analise.semanaInicio), [analise.semanaInicio])
-
-  const linhas = useMemo(
-    () =>
-      montarGrade(
-        analise.sessoesVisiveis,
-        analise.autorizacoesVisiveis,
-        analise.estadoDaGuia,
-        dias,
-        analise.placar
-      ),
-    [analise.sessoesVisiveis, analise.autorizacoesVisiveis, analise.estadoDaGuia, dias, analise.placar]
+  const { estadoFiltro, setEstadoFiltro } = analise
+  const alternarFiltro = useCallback(
+    (chave: EstadoFiltro) => setEstadoFiltro(estadoFiltro === chave ? null : chave),
+    [estadoFiltro, setEstadoFiltro]
   )
 
   const autorizacoesPorDia = useMemo(() => {
@@ -152,6 +250,7 @@ export default function ModalSemanaPaciente({
   const labelSemana = rotuloSemana(analise.semanaInicio, analise.semanaFim)
   const linha = analise.linhaSelecionada
   const totalAutorizacoes = analise.autorizacoesVisiveis.length
+  const { contagem } = analise
 
   return createPortal(
     <div
@@ -165,9 +264,8 @@ export default function ModalSemanaPaciente({
         onClick={(e) => e.stopPropagation()}
       >
         <p className="sr-only" role="status" aria-live="polite">
-          {analise.pacienteNome}, semana de {labelSemana}. {analise.liberadas} autorização(ões)
-          liberada(s), {analise.utilizadas} utilizada(s), {analise.ledger.semVinculo} sem vínculo,{' '}
-          {analise.ledger.glosas} glosa(s), {analise.ledger.canceladas} cancelada(s).
+          {analise.pacienteNome}, semana de {labelSemana}. {contagem.total} pendência(s):{' '}
+          {PENDENCIAS.map((p) => `${contagem[p.chave]} ${p.rotulo.toLowerCase()}`).join(', ')}.
         </p>
 
         {/* ── Identidade + semana ─────────────────────────────────────────── */}
@@ -238,101 +336,46 @@ export default function ModalSemanaPaciente({
 
             <button
               type="button"
-              onClick={() => setMostrarFiltros((v) => !v)}
-              aria-pressed={mostrarFiltros}
-              className={`ml-1 inline-flex h-11 items-center gap-1.5 rounded-lg border px-3 text-[12px] font-semibold transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none ${
-                mostrarFiltros || analise.tussFiltro || analise.estadoFiltro
-                  ? 'border-brand bg-brand-surface text-brand-fg'
-                  : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              <SlidersHorizontal size={13} aria-hidden />
-              Filtros
-              {(analise.tussFiltro || analise.estadoFiltro) && (
-                <span className="rounded-full bg-brand-fg px-1.5 text-[10px] font-bold text-white">
-                  {(analise.tussFiltro ? 1 : 0) + (analise.estadoFiltro ? 1 : 0)}
-                </span>
-              )}
-            </button>
-
-            <button
-              type="button"
               onClick={onClose}
               aria-label="Fechar"
-              className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none"
+              className="ml-1 flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none"
             >
               <X size={20} />
             </button>
           </div>
         </header>
 
-        {/* ── Resumo da semana ────────────────────────────────────────────── */}
+        {/* ── As cinco espécies: contador e filtro no mesmo controle ───────── */}
         <div className="grid grid-cols-2 gap-2 border-b border-slate-100 px-4 py-3 sm:grid-cols-3 sm:px-6 xl:grid-cols-5">
-          <Indicador
-            valor={analise.liberadas}
-            rotulo="Autorizações liberadas"
-            Icone={ShieldCheck}
-            tom="border-slate-200 bg-white"
-            bolha="bg-slate-100"
-          />
-          <Indicador
-            valor={analise.utilizadas}
-            rotulo="Utilizadas"
-            Icone={CheckCircle2}
-            tom="border-emerald-200 bg-emerald-50 text-emerald-700"
-            bolha="bg-emerald-100"
-            atencao
-          />
-          <Indicador
-            valor={analise.ledger.semVinculo}
-            rotulo="Sem vínculo"
-            Icone={Link2}
-            tom="border-amber-300 bg-amber-50 text-amber-700"
-            bolha="bg-amber-100"
-            atencao
-          />
-          <Indicador
-            valor={analise.ledger.glosas}
-            rotulo="Glosas"
-            Icone={AlertOctagon}
-            tom="border-violet-200 bg-violet-50 text-violet-700"
-            bolha="bg-violet-100"
-            atencao
-          />
-          <Indicador
-            valor={analise.ledger.canceladas}
-            rotulo="Cancelamentos"
-            Icone={Ban}
-            tom="border-slate-300 bg-slate-100 text-slate-600"
-            bolha="bg-slate-200"
-            atencao
-          />
+          {PENDENCIAS.map(({ chave, rotulo, Icone, tom, bolha, ajuda }) => (
+            <Indicador
+              key={chave}
+              valor={contagem[chave]}
+              rotulo={rotulo}
+              Icone={Icone}
+              tom={tom}
+              bolha={bolha}
+              ajuda={ajuda}
+              ativo={estadoFiltro === chave}
+              onToggle={() => alternarFiltro(chave)}
+            />
+          ))}
         </div>
 
-        {/* ── Os dois recortes: cota por TUSS e estado da guia ─────────────── */}
-        {mostrarFiltros && analise.placar.length > 0 && (
-          <div className="flex flex-col gap-2.5 border-b border-slate-100 bg-slate-50 px-4 py-3 sm:px-6">
-            <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
-              {analise.placar.map((p) => (
-                <ChipTuss
-                  key={p.codigo_tuss}
-                  item={p}
-                  ativa={analise.tussFiltro === p.codigo_tuss}
-                  onToggle={analise.setTussFiltro}
-                />
-              ))}
-              <span className="shrink-0 pl-2 text-xs text-slate-500">
-                {analise.totalExcedente > 0
-                  ? `${analise.totalExcedente} ${analise.totalExcedente === 1 ? 'autorização' : 'autorizações'} além do agendado`
-                  : 'nenhum excedente na semana'}
-              </span>
-            </div>
-
-            <FiltrosEstado
-              ledger={analise.ledger}
-              valor={analise.estadoFiltro}
-              onEscolher={analise.setEstadoFiltro}
-            />
+        {/* ── A cota por TUSS: outra pergunta, faixa própria ───────────────── */}
+        {/* Só com mais de um TUSS. Com um só, a chip não filtra nada e repete os
+            números que os indicadores já deram — uma faixa inteira de altura
+            para dizer o que já está dito. */}
+        {analise.placar.length > 1 && (
+          <div className="flex items-center gap-2 overflow-x-auto border-b border-slate-100 bg-slate-50 px-4 py-2 sm:px-6">
+            {analise.placar.map((p) => (
+              <ChipTuss
+                key={p.codigo_tuss}
+                item={p}
+                ativa={analise.tussFiltro === p.codigo_tuss}
+                onToggle={analise.setTussFiltro}
+              />
+            ))}
           </div>
         )}
 
@@ -340,7 +383,12 @@ export default function ModalSemanaPaciente({
         {/* Fundo branco no contêiner inteiro, e não só sob a grade: a grade
             raramente chega ao pé do modal, e uma faixa cinza logo abaixo da
             última linha fazia parecer que faltava carregar algo. */}
-        <div className="min-h-0 flex-1 overflow-y-auto bg-white">
+        {/* Um scroller só, nos DOIS eixos, e `relative`. Os dois detalhes são
+            medidos: com um `overflow-x` próprio dentro da grade, o cabeçalho dos
+            dias deixa de grudar (o sticky passa a mirar o contêiner de dentro,
+            que não rola na vertical); sem `relative`, a largura mínima da grade
+            escapa e é o DOCUMENTO que rola de lado a 390px. */}
+        <div ref={refRolagem} className="relative min-h-0 flex-1 overflow-auto bg-white">
           {analise.erro ? (
             <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
               <AlertTriangle size={24} className="text-rose-600" />
@@ -363,13 +411,13 @@ export default function ModalSemanaPaciente({
             <div className="flex flex-col items-center justify-center gap-1 py-24 text-center">
               <CheckCircle2 size={22} className="text-slate-400" />
               <p className="text-sm font-medium text-slate-600">
-                {analise.tussFiltro || analise.estadoFiltro
+                {analise.tussFiltro || estadoFiltro
                   ? 'Nada neste recorte'
                   : 'Nenhum atendimento nem guia nesta semana'}
               </p>
               <p className="max-w-md text-xs text-slate-500">
-                {analise.tussFiltro || analise.estadoFiltro
-                  ? 'Limpe os filtros para ver a semana inteira.'
+                {analise.tussFiltro || estadoFiltro
+                  ? 'Toque no indicador aceso outra vez para ver a semana inteira.'
                   : `Nem a clínica agendou, nem a ASSIM registrou nada de seg a sex para ${analise.pacienteNome}.`}
               </p>
             </div>
@@ -381,6 +429,7 @@ export default function ModalSemanaPaciente({
               codigosGlosa={codigosGlosa}
               podeVincular={podeVincular}
               onVincularGuia={onVincularGuia}
+              chaveDestacada={alvo?.chave ?? null}
             />
           )}
 
@@ -396,8 +445,8 @@ export default function ModalSemanaPaciente({
               <h3 className="mb-2 text-[13px] font-semibold text-brand-fg">
                 Autorizações da semana{' '}
                 <span className="font-normal text-slate-500">
-                  {analise.estadoFiltro
-                    ? `— ${totalAutorizacoes} ${ROTULO_FILTRO[analise.estadoFiltro]}`
+                  {estadoFiltro
+                    ? `— ${totalAutorizacoes} em ${rotuloDaEspecie(estadoFiltro)}`
                     : `— ${totalAutorizacoes} ${totalAutorizacoes === 1 ? 'guia' : 'guias'}`}
                 </span>
               </h3>
@@ -430,22 +479,67 @@ export default function ModalSemanaPaciente({
           )}
         </div>
 
-        {/* ── Rodapé: legenda e saídas ────────────────────────────────────── */}
+        {/* ── Rodapé: o navegador de pendências e as saídas ────────────────── */}
         <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 sm:px-6">
-          <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-600">
-            <li className="flex items-center gap-1.5">
-              <CheckCircle2 size={13} className="text-emerald-700" aria-hidden /> Utilizada
-            </li>
-            <li className="flex items-center gap-1.5">
-              <Link2 size={13} className="text-amber-700" aria-hidden /> Sem vínculo
-            </li>
-            <li className="flex items-center gap-1.5">
-              <AlertOctagon size={13} className="text-violet-700" aria-hidden /> Glosa
-            </li>
-            <li className="flex items-center gap-1.5">
-              <Ban size={13} className="text-slate-500" aria-hidden /> Cancelada
-            </li>
-          </ul>
+          {/*
+            O navegador é o que transforma a grade em fila de trabalho sem
+            deixar de ser grade: ele leva a pessoa até o cartão, no lugar de
+            listá-lo em outro canto e obrigá-la a achá-lo de novo. E é o único
+            caminho de teclado até as pendências — a grade tem cinco colunas de
+            células, e chegar na terceira por Tab é impraticável.
+          */}
+          {pendencias.length > 0 ? (
+            <div className="flex items-center gap-1.5">
+              <Target size={14} className="shrink-0 text-brand-fg" aria-hidden />
+              <button
+                type="button"
+                onClick={() => setFoco((i) => (i <= 0 ? pendencias.length - 1 : i - 1))}
+                aria-label="Pendência anterior"
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none"
+              >
+                <ChevronLeft size={15} />
+              </button>
+              <span className="text-[12px] whitespace-nowrap text-slate-600" role="status" aria-live="polite">
+                {alvo ? (
+                  <>
+                    <span className="font-semibold tabular-nums text-slate-900">
+                      {foco + 1} de {pendencias.length}
+                    </span>
+                    <span className="ml-1.5 tabular-nums">· {alvo.rotulo}</span>
+                  </>
+                ) : (
+                  /*
+                    "a conferir na grade", e não "pendências na semana": este
+                    número conta CARTÕES para percorrer, e os indicadores lá em
+                    cima contam ESPÉCIES. Os dois divergem por construção — um
+                    cancelamento não pede visita, e a glosa aparece uma vez só,
+                    no cartão da sessão que ela recusou, ainda que conte no
+                    indicador de glosas e no de faltando. Chamar os dois de
+                    "pendências" faria a tela parecer errada consigo mesma.
+                  */
+                  <>
+                    <span className="font-semibold tabular-nums text-slate-900">
+                      {pendencias.length}
+                    </span>{' '}
+                    a conferir na grade
+                  </>
+                )}
+              </span>
+              <button
+                type="button"
+                onClick={() => setFoco((i) => (i + 1) % pendencias.length)}
+                aria-label="Próxima pendência"
+                className="flex h-9 w-9 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none"
+              >
+                <ChevronRight size={15} />
+              </button>
+            </div>
+          ) : (
+            <p className="flex items-center gap-1.5 text-[12px] text-slate-600">
+              <CheckCircle2 size={14} className="text-emerald-700" aria-hidden />
+              Nada a conferir nesta semana
+            </p>
+          )}
 
           <div className="flex items-center gap-2">
             <button

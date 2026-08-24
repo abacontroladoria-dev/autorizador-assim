@@ -18,6 +18,11 @@ import type {
   PlacarTuss,
 } from '@/components/auditoria-assim/types'
 import type { EstadoAutorizacao } from '@/components/auditoria-assim/reconciliacao/LinhaAutorizacao'
+import {
+  SITUACOES_SEM_SESSAO,
+  sessaoDecorrida,
+  sessaoSemCobertura,
+} from '@/components/auditoria-assim/reconciliacao/cobertura'
 
 /**
  * Análise de reincidência — a cota do MÊS por TUSS, da clínica inteira.
@@ -67,8 +72,14 @@ import type { EstadoAutorizacao } from '@/components/auditoria-assim/reconciliac
  * `autorizacoesDoMes`.
  */
 
-/** Cota = quantas sessões daquele TUSS o paciente tem no período. Falta não conta. */
-const SITUACOES_SEM_SESSAO = new Set(['FALTA', 'FALTA_TERAPEUTA'])
+/**
+ * A regra de cobertura mora em `reconciliacao/cobertura.ts`, não aqui.
+ *
+ * Ela é dado puro e precisa ser exercitável num teste de nó — este módulo
+ * arrasta os services, e com eles o cliente do Supabase. E é a MESMA regra que
+ * `grade.ts` usa para carimbar o cartão: duas cópias fariam o número do topo do
+ * modal e a marca do cartão discordarem sobre a mesma semana.
+ */
 
 /** Quantos dias buscar em paralelo por vez. Um mês cheio tem ~22 dias úteis —
  *  disparar todos de uma vez seria 44 requisições simultâneas (2 por dia). */
@@ -197,13 +208,6 @@ export function agoraMenos30MinIso(): string {
   return `${ano}-${mes}-${dia}T${hora}:${min}`
 }
 
-/** O instante de uma sessão: "2026-08-24T08:00". Nulo quando falta a hora. */
-function instanteSessao(s: AuditoriaAssimItem): string | null {
-  if (!s.data_atendimento) return null
-  const hora = s.hora_inicial?.slice(0, 5)
-  return hora ? `${s.data_atendimento}T${hora}` : null
-}
-
 /**
  * O placar de um conjunto de sessões contra um conjunto de autorizações.
  *
@@ -219,6 +223,18 @@ function instanteSessao(s: AuditoriaAssimItem): string | null {
  * faltando" uma sessão que ainda vai acontecer — ou que aconteceu há 5
  * minutos — transformaria a tela em ruído. Só sessão realmente decorrida
  * pode estar sem cobertura.
+ *
+ * `faltante` conta SESSÕES, uma a uma, por `sessaoSemCobertura` — não é mais
+ * `decorridas − liberadas`. A troca (2026-08-24) tem um motivo e um efeito:
+ *
+ * - motivo: a subtração diz quantas faltam e não diz QUAIS, então a grade não
+ *   tinha como marcar a sessão problemática. Contando por sessão, cada unidade
+ *   do número é um cartão que a tela consegue apontar.
+ * - efeito: os dois números divergem num caso, e é o caso que importa. Três
+ *   sessões decorridas, três liberações, mas uma delas órfã e uma sessão em
+ *   glosa: a subtração fechava `0` e escondia tudo; a contagem por sessão diz
+ *   `1`, e do lado das guias a órfã aparece como "sem vínculo". Que é
+ *   exatamente o par que esta tela existe para reconciliar.
  */
 export function calcularPlacar(
   sessoes: AuditoriaAssimItem[],
@@ -226,7 +242,6 @@ export function calcularPlacar(
   cutoff: string
 ): PlacarTuss[] {
   const porTuss = new Map<string, PlacarTuss & { terapiasVistas: Set<string> }>()
-  const hoje = cutoff.slice(0, 10)
 
   const entrada = (codigo: string | null) => {
     const chave = codigo ?? '—'
@@ -256,12 +271,8 @@ export function calcularPlacar(
     // dela é justamente um dos jeitos de estourar a cota.
     if (SITUACOES_SEM_SESSAO.has(s.situacao ?? '')) continue
     item.agendadas += 1
-    const instante = instanteSessao(s)
-    // Sem hora, o critério cai para o mesmo corte por dia de antes, mas
-    // estrito: nunca conta o próprio dia, porque não há como saber se os 30
-    // minutos já passaram.
-    const decorrida = instante !== null ? instante <= cutoff : (s.data_atendimento ?? '') < hoje
-    if (decorrida) item.decorridas += 1
+    if (sessaoDecorrida(s, cutoff)) item.decorridas += 1
+    if (sessaoSemCobertura(s, cutoff)) item.faltante += 1
   }
 
   for (const a of autorizacoes) {
@@ -276,7 +287,6 @@ export function calcularPlacar(
       ...item,
       terapias: [...terapiasVistas].join(' | '),
       excedente: item.liberadas - item.agendadas,
-      faltante: Math.max(0, item.decorridas - item.liberadas),
     }))
     .sort((a, b) => b.excedente - a.excedente || a.codigo_tuss.localeCompare(b.codigo_tuss))
 }
@@ -722,10 +732,55 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
     [sessoesPaciente, autorizacoesPaciente, cutoff]
   )
 
-  const sessoesVisiveis = useMemo(
-    () => (tussFiltro ? sessoesPaciente.filter((s) => (s.codigo_tuss ?? '—') === tussFiltro) : sessoesPaciente),
-    [sessoesPaciente, tussFiltro]
+  /** Esta sessão já ocorreu e ninguém a liberou. Fechada sobre o `cutoff` vivo. */
+  const sessaoDescoberta = useCallback(
+    (s: AuditoriaAssimItem) => sessaoSemCobertura(s, cutoff),
+    [cutoff]
   )
+
+  /**
+   * As guias que estouraram a cota — nomeadas, não contadas.
+   *
+   * `excedente` é um número por TUSS ("6 liberadas para 5 sessões"), e um número
+   * não se destaca num cartão. A atribuição é posicional pela `data_execucao`:
+   * dentro do TUSS, as ÚLTIMAS `excedente` liberações são as que passaram do
+   * agendado. É a mesma ordem que o pareamento do banco usa para decidir qual
+   * autorização casa com qual sessão, então isto não inventa critério novo —
+   * lê o mesmo que a ASSIM leu quando recusou a seguinte por reincidência.
+   *
+   * Só liberação entra: recusada não gastou cota, e cancelada foi desfeita.
+   */
+  const guiasExcedentes = useMemo(() => {
+    const marcadas = new Set<string>()
+    for (const p of placar) {
+      if (p.excedente <= 0) continue
+      const doTuss = autorizacoesPaciente
+        .filter((a) => (a.codigo_tuss ?? '—') === p.codigo_tuss && autorizacaoLiberada(a.status))
+        .sort((a, b) => (a.data_execucao ?? '').localeCompare(b.data_execucao ?? ''))
+      for (const a of doTuss.slice(-p.excedente)) marcadas.add(a.guia)
+    }
+    return marcadas
+  }, [placar, autorizacoesPaciente])
+
+  /**
+   * O recorte por espécie de pendência, dos DOIS lados.
+   *
+   * Escolher "faltando" e continuar vendo as guias — ou escolher "sobrando" e
+   * continuar vendo as sessões — deixaria na tela justamente o que a pessoa
+   * mandou tirar. Então cada filtro mostra todos os objetos da espécie que
+   * nomeia, e só eles. Glosa e faltando se sobrepõem de propósito: uma sessão
+   * glosada e decorrida é as duas coisas, que é por que o cartão diz as duas.
+   */
+  const sessoesVisiveis = useMemo(() => {
+    const doTuss = tussFiltro
+      ? sessoesPaciente.filter((s) => (s.codigo_tuss ?? '—') === tussFiltro)
+      : sessoesPaciente
+    if (!estadoFiltro) return doTuss
+    if (estadoFiltro === 'faltando') return doTuss.filter(sessaoDescoberta)
+    if (estadoFiltro === 'glosa') return doTuss.filter((s) => s.situacao === 'GLOSA')
+    if (estadoFiltro === 'cancelamento') return doTuss.filter((s) => s.situacao === 'CANCELADA')
+    return []
+  }, [sessoesPaciente, tussFiltro, estadoFiltro, sessaoDescoberta])
 
   const autorizacoesDoTuss = useMemo(
     () =>
@@ -757,17 +812,30 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
 
   const autorizacoesVisiveis = useMemo(() => {
     if (!estadoFiltro) return autorizacoesDoTuss
+    if (estadoFiltro === 'faltando') return []
     return autorizacoesDoTuss.filter((a) => {
       if (estadoFiltro === 'sem-vinculo') return estadoDaGuia(a.guia) === 'sem-vinculo'
-      if (estadoFiltro === 'cancelada') return autorizacaoCancelada(a.status)
+      if (estadoFiltro === 'cancelamento') return autorizacaoCancelada(a.status)
+      if (estadoFiltro === 'sobrando') return guiasExcedentes.has(a.guia)
       return !autorizacaoLiberada(a.status) && !autorizacaoCancelada(a.status)
     })
-  }, [autorizacoesDoTuss, estadoFiltro, estadoDaGuia])
+  }, [autorizacoesDoTuss, estadoFiltro, estadoDaGuia, guiasExcedentes])
 
   const totalExcedente = useMemo(
     () => placar.reduce((soma, p) => soma + Math.max(0, p.excedente), 0),
     [placar]
   )
+
+  /**
+   * As cinco espécies de pendência da semana aberta.
+   *
+   * Pela MESMA `contarPendencias` que monta as cinco colunas da listagem — não
+   * uma segunda soma. Era daí que vinha a confusão que este trabalho resolve: a
+   * linha prometia "3 pendências" em cinco colunas e o modal abria mostrando
+   * cinco números de outro vocabulário, sem "faltando" nem "sobrando" em lugar
+   * nenhum. Mesma função, mesmas palavras, mesma ordem.
+   */
+  const contagem = useMemo(() => contarPendencias(placar, ledger), [placar, ledger])
 
   return {
     // ── Mês: a listagem ──────────────────────────────────────────────────
@@ -810,6 +878,8 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
     estadoFiltro,
     setEstadoFiltro,
     ledger,
+    /** As cinco espécies de pendência, no mesmo vocabulário da listagem. */
+    contagem,
     liberadas,
     utilizadas,
     placar,
@@ -817,6 +887,10 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
     sessoesVisiveis,
     autorizacoesVisiveis,
     estadoDaGuia,
+    /** Marca a sessão que já ocorreu e ninguém liberou — o "faltando" apontável. */
+    sessaoDescoberta,
+    /** As guias que passaram da cota, nomeadas — o "sobrando" apontável. */
+    guiasExcedentes,
     orfasDaSemana,
     loading: carregandoSemana || carregandoAutorizacoes,
     carregandoSemana,

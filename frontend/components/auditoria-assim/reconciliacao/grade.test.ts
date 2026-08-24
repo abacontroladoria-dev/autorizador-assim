@@ -1,8 +1,12 @@
 import { describe, expect, it } from 'vitest'
-import { montarGrade } from './grade'
+import { cartaoPendente, montarGrade } from './grade'
+import { sessaoSemCobertura } from './cobertura'
 import type { AuditoriaAssimItem, AutorizacaoAssimSemana, PlacarTuss } from '../types'
 
 const DIAS = ['2026-08-17', '2026-08-18', '2026-08-19', '2026-08-20', '2026-08-21']
+
+/** Nada marcado — o cenário dos testes de posicionamento, que não olham marca. */
+const SEM_MARCAS = { descoberta: () => false, excedentes: new Set<string>() }
 
 function sessao(p: Partial<AuditoriaAssimItem>): AuditoriaAssimItem {
   return {
@@ -42,7 +46,7 @@ describe('montarGrade por horário', () => {
         sessao({ bloco_id: 'a', data_atendimento: DIAS[0], hora_inicial: '08:00:00', codigo_tuss: '22070400' }),
         sessao({ bloco_id: 'b', data_atendimento: DIAS[3], hora_inicial: '17:20:00', codigo_tuss: '22070400' }),
       ],
-      [], () => 'fora-da-semana', DIAS, PLACAR
+      [], () => 'fora-da-semana', DIAS, PLACAR, SEM_MARCAS
     )
     expect(linhas.map((l) => l.hora)).toEqual([
       '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00',
@@ -57,7 +61,7 @@ describe('montarGrade por horário', () => {
         sessao({ bloco_id: 'tarde', data_atendimento: DIAS[1], hora_inicial: '14:40:00' }),
         sessao({ bloco_id: 'cedo', data_atendimento: DIAS[1], hora_inicial: '14:00:00' }),
       ],
-      [], () => 'fora-da-semana', DIAS, PLACAR
+      [], () => 'fora-da-semana', DIAS, PLACAR, SEM_MARCAS
     )
     expect(linhas).toHaveLength(1)
     expect(linhas[0].celulas[DIAS[1]].map((c) => c.chave)).toEqual(['cedo', 'tarde'])
@@ -70,7 +74,7 @@ describe('montarGrade por horário', () => {
         sessao({ bloco_id: 'sem', data_atendimento: DIAS[0], hora_inicial: null }),
       ],
       [guia({ guia: '111', data_execucao: `${DIAS[2]}T14:34:00`, codigo_tuss: '22070400' })],
-      () => 'sem-vinculo', DIAS, PLACAR
+      () => 'sem-vinculo', DIAS, PLACAR, SEM_MARCAS
     )
     expect(todos(linhas)).toHaveLength(3)
     expect(linhas[linhas.length - 1].hora).toBe('—')
@@ -85,7 +89,7 @@ describe('montarGrade por horário', () => {
         guia({ guia: 'orfa', data_execucao: `${DIAS[0]}T10:05:00`, codigo_tuss: '22070400' }),
       ],
       (g) => (g === 'pareada' ? 'pareada' : 'sem-vinculo'),
-      DIAS, PLACAR
+      DIAS, PLACAR, SEM_MARCAS
     )
     const cartoes = todos(linhas)
     expect(cartoes).toHaveLength(1)
@@ -96,8 +100,96 @@ describe('montarGrade por horário', () => {
   it('ignora o que cai fora dos dias úteis da semana', () => {
     const linhas = montarGrade(
       [sessao({ bloco_id: 'sabado', data_atendimento: '2026-08-22', hora_inicial: '09:00:00' })],
-      [], () => 'fora-da-semana', DIAS, PLACAR
+      [], () => 'fora-da-semana', DIAS, PLACAR, SEM_MARCAS
     )
     expect(linhas).toEqual([])
+  })
+
+  it('carimba as marcas que a listagem promete: sem cobertura e excedente', () => {
+    const linhas = montarGrade(
+      [
+        sessao({ bloco_id: 'descoberta', data_atendimento: DIAS[0], hora_inicial: '09:00:00' }),
+        sessao({ bloco_id: 'ok', data_atendimento: DIAS[0], hora_inicial: '10:00:00' }),
+      ],
+      [
+        guia({ guia: 'normal', data_execucao: `${DIAS[1]}T09:00:00` }),
+        guia({ guia: 'demais', data_execucao: `${DIAS[1]}T10:00:00` }),
+      ],
+      () => 'fora-da-semana',
+      DIAS,
+      PLACAR,
+      {
+        descoberta: (s) => s.bloco_id === 'descoberta',
+        excedentes: new Set(['demais']),
+      }
+    )
+    const porChave = new Map(todos(linhas).map((c) => [c.chave, c]))
+    expect(porChave.get('descoberta')).toMatchObject({ tipo: 'sessao', semCobertura: true })
+    expect(porChave.get('ok')).toMatchObject({ tipo: 'sessao', semCobertura: false })
+    expect(porChave.get(`guia-demais-${DIAS[1]}T10:00:00`)).toMatchObject({ excedente: true })
+    expect(porChave.get(`guia-normal-${DIAS[1]}T09:00:00`)).toMatchObject({ excedente: false })
+  })
+})
+
+/**
+ * O predicado que decide a silhueta do cartão E o que o navegador do rodapé
+ * percorre. São o mesmo, de propósito: divergirem faria o rodapé prometer "3
+ * pendências" e a grade destacar duas.
+ */
+describe('cartaoPendente', () => {
+  const base = { chave: 'k', hora: '09:00', codigo_tuss: null, terapia: null } as const
+
+  it('promove a sessão descoberta e a que está em glosa, mas não a liberada', () => {
+    const sessaoBase = { ...base, tipo: 'sessao', guia: null, legenda: null, motivoBruto: null, teve_token: null, token: null } as const
+    expect(cartaoPendente({ ...sessaoBase, situacao: 'LIBERADA', semCobertura: false })).toBe(false)
+    expect(cartaoPendente({ ...sessaoBase, situacao: 'GLOSA_RESOLVIDA', semCobertura: false })).toBe(false)
+    expect(cartaoPendente({ ...sessaoBase, situacao: 'GLOSA', semCobertura: false })).toBe(true)
+    // Vencida é pendência mesmo quando a situação, sozinha, não seria.
+    expect(cartaoPendente({ ...sessaoBase, situacao: 'SINCRONIZANDO', semCobertura: false })).toBe(false)
+    expect(cartaoPendente({ ...sessaoBase, situacao: 'SINCRONIZANDO', semCobertura: true })).toBe(true)
+  })
+
+  it('promove a guia órfã e a excedente, e deixa a de outra semana quieta', () => {
+    const guiaBase = { ...base, tipo: 'autorizacao', guia: 'g', status: 'Liberado', descricao_erro: null, teve_token: null, token: null } as const
+    expect(cartaoPendente({ ...guiaBase, estado: 'fora-da-semana', excedente: false })).toBe(false)
+    expect(cartaoPendente({ ...guiaBase, estado: 'sem-vinculo', excedente: false })).toBe(true)
+    expect(cartaoPendente({ ...guiaBase, estado: 'fora-da-semana', excedente: true })).toBe(true)
+  })
+})
+
+/**
+ * A regra que substituiu `decorridas − liberadas`. O caso que importa é o
+ * último: a subtração fechava zero e escondia a sessão descoberta.
+ */
+describe('sessaoSemCobertura', () => {
+  const CUTOFF = '2026-08-19T12:00'
+
+  it('não cobra do que ainda não venceu', () => {
+    const s = sessao({ data_atendimento: DIAS[4], hora_inicial: '09:00:00', situacao: 'NAO_SOLICITADA' })
+    expect(sessaoSemCobertura(s, CUTOFF)).toBe(false)
+  })
+
+  it('não cobra de falta — a sessão não aconteceu', () => {
+    const s = sessao({ data_atendimento: DIAS[0], hora_inicial: '09:00:00', situacao: 'FALTA' })
+    expect(sessaoSemCobertura(s, CUTOFF)).toBe(false)
+  })
+
+  it('não cobra do que já saiu liberado, nem da glosa que o vínculo cobriu', () => {
+    for (const situacao of ['LIBERADA', 'GLOSA_RESOLVIDA']) {
+      const s = sessao({ data_atendimento: DIAS[0], hora_inicial: '09:00:00', situacao })
+      expect(sessaoSemCobertura(s, CUTOFF)).toBe(false)
+    }
+  })
+
+  it('aponta a sessão decorrida que ninguém liberou', () => {
+    const s = sessao({ data_atendimento: DIAS[0], hora_inicial: '09:00:00', situacao: 'GLOSA' })
+    expect(sessaoSemCobertura(s, CUTOFF)).toBe(true)
+  })
+
+  it('sem horário, só conta a partir do dia seguinte', () => {
+    const hoje = sessao({ data_atendimento: CUTOFF.slice(0, 10), hora_inicial: null, situacao: 'GLOSA' })
+    const ontem = sessao({ data_atendimento: DIAS[0], hora_inicial: null, situacao: 'GLOSA' })
+    expect(sessaoSemCobertura(hoje, CUTOFF)).toBe(false)
+    expect(sessaoSemCobertura(ontem, CUTOFF)).toBe(true)
   })
 })

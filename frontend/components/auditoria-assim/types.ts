@@ -119,17 +119,14 @@ export type PlacarTuss = {
   canceladas: number
   /** Positivo = autorização a mais do que sessão agendada. Mede sobre `liberadas`. */
   excedente: number
-  /** Sessão já ocorrida sem liberação que a cubra. Nunca negativo. */
+  /**
+   * Sessão já ocorrida sem liberação que a cubra, contada UMA A UMA por
+   * `sessaoSemCobertura` — não é `decorridas − liberadas`. A diferença é o que
+   * permite a grade apontar o cartão: cada unidade deste número é uma sessão
+   * que existe na tela. Nunca negativo.
+   */
   faltante: number
 }
-
-/**
- * O recorte por estado da guia na coluna de autorizações.
- *
- * São os três estados que a Reconciliação existe para vigiar, e por isso o
- * contador de cada um é o próprio filtro dele. Nulo = todas.
- */
-export type EstadoFiltro = 'sem-vinculo' | 'glosa' | 'cancelada'
 
 /**
  * As cinco espécies de pendência que a listagem mensal indexa.
@@ -140,6 +137,18 @@ export type EstadoFiltro = 'sem-vinculo' | 'glosa' | 'cancelada'
  * ganhar as três formas de uma vez.
  */
 export type TipoPendencia = 'glosa' | 'cancelamento' | 'sem-vinculo' | 'faltando' | 'sobrando'
+
+/**
+ * O recorte por espécie de pendência dentro da semana do paciente.
+ *
+ * Eram TRÊS estados com nomes próprios até 2026-08-24
+ * (`sem-vinculo | glosa | cancelada`), enquanto a listagem contava CINCO com
+ * outros nomes. Era daí que vinha a confusão: "Faltando 3" abria uma tela onde
+ * a palavra não existia. Agora é literalmente `TipoPendencia` — mesmo conjunto,
+ * mesmos nomes, mesma ordem, e um sexto valor tem de nascer nos dois lugares ao
+ * mesmo tempo. Nulo = todas.
+ */
+export type EstadoFiltro = TipoPendencia
 
 /** Os cinco contadores de um paciente no mês, mais o total. */
 export type ContagemPendencias = Record<TipoPendencia, number> & { total: number }
@@ -198,6 +207,19 @@ export type CartaoGrade =
       terapia: string | null
       /** Profissional, ou o motivo quando a linha é uma falta. */
       legenda: string | null
+      /**
+       * A sessão já ocorreu e ninguém a liberou. É o "faltando" da listagem
+       * virado objeto: sem esta marca o número existia e a sessão não, e a
+       * pessoa tinha de adivinhar qual das cinco do dia era a descoberta.
+       */
+      semCobertura: boolean
+      /**
+       * O texto da recusa, ainda cru. Pode vir já decomposto pela RPC
+       * (`descricao_erro`) ou no formato "1601-REINCIDENCIA NO ATEN" cortado em
+       * 25 caracteres (`motivo_glosa`) — quem resolve é `lib/glosa`, no cartão,
+       * porque só lá existe o de-para de códigos.
+       */
+      motivoBruto: string | null
       teve_token: boolean | null
       token: string | null
     }
@@ -216,6 +238,12 @@ export type CartaoGrade =
       terapia: string | null
       /** Ver `EstadoAutorizacao` em reconciliacao/LinhaAutorizacao.tsx. */
       estado: 'sem-vinculo' | 'fora-da-semana'
+      /**
+       * Esta liberação passou da cota do TUSS na semana. O "sobrando" da
+       * listagem virado objeto, por atribuição posicional em `data_execucao` —
+       * ver `guiasExcedentes` em useAnaliseReincidencia.
+       */
+      excedente: boolean
       status: string | null
       descricao_erro: string | null
       teve_token: boolean | null
