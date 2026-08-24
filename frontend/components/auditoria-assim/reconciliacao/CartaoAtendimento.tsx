@@ -97,8 +97,14 @@ function Cabecalho({
         {/* Glifo, e não linha própria: o token é dado de conferência de filipeta,
             um eixo diferente do estado da autorização, e gastava a quinta linha
             do cartão a 10px para dizer o que um ícone com `title` já diz. */}
+        {/* Âmbar, e não slate: a filipeta é o terceiro eixo do vocabulário
+            (DESIGN.md), onde âmbar já significa "a conferir" — e em slate-400 o
+            glifo de 11px sumia dentro do cartão. `-600` e não `-700` porque o
+            que se pediu foi laranja visível, e o degrau -700 lê como ferrugem;
+            como glifo ele responde ao piso de 3:1 de elemento não-textual, não
+            ao de 4,5:1 de texto. */}
         {teveToken && (
-          <KeySquare size={11} className="text-slate-400" aria-label={`filipeta ${token ?? ''}`} />
+          <KeySquare size={12} className="text-amber-600" aria-label={`filipeta ${token ?? ''}`} />
         )}
         <Icone size={13} strokeWidth={2.25} className={tinta} aria-hidden />
       </span>
@@ -109,10 +115,14 @@ function Cabecalho({
 /**
  * A espécie compacta: duas linhas e nada mais.
  *
- * A segunda linha carrega a TERAPIA quando o estado é banal (liberada, resolvida,
- * ainda no prazo) e o RÓTULO quando o estado é a notícia (falta, cancelada, guia
- * de outra semana). Numa falta, "Falta" é a manchete e a terapia é detalhe;
- * numa liberada é o contrário. A que não aparece fica no `title`.
+ * A segunda linha diz as duas coisas de uma vez — a TERAPIA à esquerda e o
+ * RÓTULO do estado à direita, embaixo do ícone que ele repete. O rótulo escrito
+ * é o que a regra do vocabulário exige (cor nunca é o único sinal): um ✓ verde
+ * sozinho pede que a pessoa saiba de cor que verde é "Liberada", e é justamente
+ * a leitura de relance que o cartão compacto existe para servir.
+ *
+ * Antes só uma das duas aparecia, conforme o estado fosse ou não a notícia. Sai
+ * mais barato mostrar as duas: a terapia trunca, o rótulo é curto e não encolhe.
  */
 function Compacto({
   hora,
@@ -123,7 +133,6 @@ function Compacto({
   teveToken,
   token,
   titulo,
-  mostrarRotulo,
 }: {
   hora: string
   terapia: string | null
@@ -133,22 +142,19 @@ function Compacto({
   teveToken: boolean | null
   token: string | null
   titulo: string
-  /** Verdadeiro quando o estado é a notícia, e não a terapia. */
-  mostrarRotulo: boolean
 }) {
   return (
     <div className="w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5" title={titulo}>
       <Cabecalho hora={hora} tinta={tinta} Icone={Icone} teveToken={teveToken} token={token} />
-      {mostrarRotulo ? (
-        <p className={`mt-0.5 truncate text-[11px] leading-tight font-medium ${tinta}`}>{rotulo}</p>
-      ) : (
-        terapia && (
-          <p className="mt-0.5 flex items-start gap-1 text-[11px] leading-tight text-slate-600">
+      <p className="mt-0.5 flex items-start justify-between gap-1.5 text-[11px] leading-tight">
+        {terapia && (
+          <span className="flex min-w-0 items-start gap-1 text-slate-600">
             <IconeDaTerapia terapia={terapia} />
             <span className="truncate">{terapia}</span>
-          </p>
-        )
-      )}
+          </span>
+        )}
+        <span className={`shrink-0 font-semibold ${tinta}`}>{rotulo}</span>
+      </p>
     </div>
   )
 }
@@ -224,10 +230,8 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
       .join(' · ')
 
     if (!pendente) {
-      // Falta e cancelamento não são pendência, mas também não são sucesso: o
-      // rótulo delas é a notícia da célula (é ele que explica por que não há
-      // autorização ali), então sobe para a linha visível.
-      const rotuloEhNoticia = (cartao.situacao ?? '') !== 'LIBERADA' && (cartao.situacao ?? '') !== 'GLOSA_RESOLVIDA'
+      // "Liberada" em esmeralda, "Falta" em stone, "Cancelada" em cinza — todas
+      // escritas, todas no matiz do próprio estado, que sai de SITUACAO_CONFIG.
       return (
         <Compacto
           hora={cartao.hora}
@@ -238,7 +242,6 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
           teveToken={cartao.teve_token}
           token={cartao.token}
           titulo={titulo}
-          mostrarRotulo={rotuloEhNoticia}
         />
       )
     }
@@ -338,7 +341,6 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
         teveToken={cartao.teve_token}
         token={cartao.token}
         titulo={[tituloBase, cartao.terapia, motivo ?? rotulo].filter(Boolean).join(' · ')}
-        mostrarRotulo
       />
     )
   }

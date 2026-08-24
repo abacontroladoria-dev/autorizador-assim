@@ -8,8 +8,7 @@ import {
 } from 'lucide-react'
 import { diasUteisDe, type useAnaliseReincidencia } from '@/hooks/useAnaliseReincidencia'
 import { useModalDialog } from '@/hooks/useModalDialog'
-import type { AutorizacaoAssimSemana, EstadoFiltro } from '../types'
-import ChipTuss from './ChipTuss'
+import type { AutorizacaoAssimSemana } from '../types'
 import GradeSemana from './GradeSemana'
 import LinhaAutorizacao from './LinhaAutorizacao'
 import { PENDENCIAS } from './pendencias'
@@ -18,9 +17,75 @@ import { cartaoPendente, montarGrade } from './grade'
 
 const ID_TITULO = 'titulo-semana-paciente'
 
-/** "Sem vínculo" a partir de `sem-vinculo` — o nome que a tela já usa em cima. */
-function rotuloDaEspecie(chave: EstadoFiltro): string {
-  return PENDENCIAS.find((p) => p.chave === chave)?.rotulo.toLowerCase() ?? chave
+/** "17–21" — a semana em duas datas, sem o mês, que a faixa já diz. */
+function rotuloCurtoSemana(inicio: string, fim: string): string {
+  return `${inicio.slice(8, 10)}–${fim.slice(8, 10)}`
+}
+
+/**
+ * O mês do paciente, semana a semana — a resposta para "onde está a pendência?".
+ *
+ * A listagem é mensal e a grade é semanal, e até 2026-08-24 nada ligava as duas:
+ * o modal abria na semana da última autorização, que não é onde está o trabalho.
+ * Quem clicava numa linha de "Faltando 3" podia cair numa semana limpa e não
+ * tinha como saber para que lado navegar.
+ *
+ * Cada segmento diz quantos cartões marcados aquela semana tem. O ponto no lugar
+ * do número é deliberado: "0" repetido em quatro segmentos vira ruído com peso
+ * de dado, e o que importa ali é só distinguir "tem" de "não tem".
+ *
+ * A semana aberta usa o steel da marca, nunca matiz semântico — é "você está
+ * aqui", não um estado. E o número marcado usa âmbar, o mesmo matiz que essa
+ * tela usa para "esperando alguém olhar".
+ */
+function FaixaDeSemanas({
+  semanas,
+  atual,
+  onEscolher,
+}: {
+  semanas: { inicio: string; fim: string; marcados: number }[]
+  atual: string
+  onEscolher: (inicio: string) => void
+}) {
+  if (semanas.length < 2) return null
+
+  return (
+    <nav
+      aria-label="Semanas do mês"
+      className="flex items-center gap-1 overflow-x-auto border-b border-slate-100 bg-slate-50 px-4 py-1.5 sm:px-6"
+    >
+      {semanas.map(({ inicio, fim, marcados }) => {
+        const aberta = inicio === atual
+        return (
+          <button
+            key={inicio}
+            type="button"
+            onClick={() => onEscolher(inicio)}
+            aria-current={aberta ? 'true' : undefined}
+            aria-label={`Semana de ${rotuloCurtoSemana(inicio, fim)}, ${
+              marcados === 0 ? 'nada a conferir' : `${marcados} a conferir`
+            }`}
+            className={`flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[12px] transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none ${
+              aberta
+                ? 'bg-brand-surface font-semibold text-brand-fg'
+                : 'text-slate-600 hover:bg-white'
+            }`}
+          >
+            <span className="tabular-nums">{rotuloCurtoSemana(inicio, fim)}</span>
+            {marcados > 0 ? (
+              <span className="rounded-full bg-amber-100 px-1.5 text-[11px] font-bold tabular-nums text-amber-800">
+                {marcados}
+              </span>
+            ) : (
+              <span className="text-slate-300" aria-hidden>
+                ·
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </nav>
+  )
 }
 
 /** Duas letras do nome. Não há foto de paciente no sistema — a inicial é a identidade. */
@@ -28,68 +93,6 @@ function iniciais(nome: string): string {
   const partes = nome.trim().split(/\s+/).filter(Boolean)
   if (partes.length === 0) return '?'
   return ((partes[0][0] ?? '') + (partes.length > 1 ? partes[partes.length - 1][0] : '')).toUpperCase()
-}
-
-/**
- * Uma das cinco espécies de pendência: contador e filtro no mesmo controle.
- *
- * Antes eram cinco números de outro vocabulário (liberadas, utilizadas, sem
- * vínculo, glosas, cancelamentos), e dois deles nem eram pendência — gastavam
- * 40% da faixa mais nobre do modal com totais que não pedem trabalho, enquanto
- * "faltando" e "sobrando", que a listagem tinha acabado de prometer, não
- * apareciam em lugar nenhum.
- *
- * Três canais, um significado cada, como nas chips de TUSS:
- *
- * - o MATIZ é a espécie, e só acende quando há trabalho dela. Uma fileira de
- *   cinco cartões coloridos onde três dizem "0" gasta a cor em repouso e deixa
- *   de apontar para onde há o que fazer.
- * - o ANEL DE STEEL é a seleção. "Você está aqui" nunca usa matiz semântico.
- * - o RÓTULO é a palavra, sempre presente: a cor nunca é o único sinal.
- *
- * Zero continua clicável e visível — "nenhuma glosa nesta semana" é informação,
- * e esconder o contador faz a ausência parecer com a tela ainda carregando.
- *
- * Só degraus que o shim de tema escuro de globals.css remapeia (-50/-100/-200/
- * -300 e texto -700). `bg-white/70`, que era o desenho anterior da bolha,
- * atravessava claro para o escuro: modificador de opacidade não é remapeado.
- */
-function Indicador({
-  valor, rotulo, Icone, tom, bolha, ajuda, ativo, onToggle,
-}: {
-  valor: number
-  rotulo: string
-  Icone: typeof CheckCircle2
-  tom: string
-  bolha: string
-  ajuda: string
-  ativo: boolean
-  onToggle: () => void
-}) {
-  const aceso = valor > 0
-  return (
-    <button
-      type="button"
-      onClick={onToggle}
-      aria-pressed={ativo}
-      title={ajuda}
-      className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 text-left transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none ${
-        aceso ? tom : 'border-slate-200 bg-white hover:bg-slate-50'
-      } ${ativo ? 'ring-2 ring-brand ring-offset-1' : ''}`}
-    >
-      <span
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-          aceso ? bolha : 'bg-slate-100'
-        }`}
-      >
-        <Icone size={15} className={aceso ? '' : 'text-slate-500'} aria-hidden />
-      </span>
-      <span className="min-w-0">
-        <span className="block text-xl leading-none font-bold tabular-nums text-slate-900">{valor}</span>
-        <span className="mt-0.5 block truncate text-[11px] font-medium text-slate-600">{rotulo}</span>
-      </span>
-    </button>
-  )
 }
 
 type Props = {
@@ -118,18 +121,22 @@ type Props = {
  * ── O que mudou em 2026-08-24 ──────────────────────────────────────────────
  *
  * A queixa era que o modal não tinha hierarquia e não dizia QUAL sessão estava
- * com problema. Três causas, três correções:
+ * com problema. O que sobrou, depois de o usuário podar o que não queria:
  *
- * 1. o modal falava outro vocabulário que a linha que o abria. Os cinco
- *    indicadores agora são as cinco espécies de `PENDENCIAS`, pela mesma
- *    `contarPendencias` que monta as colunas da listagem;
- * 2. cada indicador virou o filtro daquela espécie, o que apagou o botão
- *    "Filtros", a faixa colapsável e o componente `FiltrosEstado` — três
- *    controles onde bastava um;
- * 3. "faltando" e "sobrando" deixaram de ser agregados e viraram marcas nos
- *    cartões (ver `sessaoSemCobertura` e `guiasExcedentes`), e o rodapé ganhou
- *    um navegador que pula de pendência em pendência — que é também o único
- *    caminho de teclado até elas.
+ * 1. "faltando" e "sobrando" deixaram de ser agregados por TUSS e viraram
+ *    marcas nos cartões (`sessaoSemCobertura`, `guiasExcedentes`) — é o que
+ *    torna a pendência apontável, que era o pedido literal;
+ * 2. o cartão passou a ter duas espécies, e a diferença é de SILHUETA: o
+ *    saudável colapsa em duas linhas, o pendente fica inteiro com barra
+ *    lateral. Com seis matizes a 11px a cor tinha parado de discriminar;
+ * 3. o rodapé ganhou um navegador que pula de cartão marcado em cartão
+ *    marcado — que é também o único caminho de teclado até eles.
+ *
+ * **Não há mais filtro nenhum aqui.** Os indicadores das cinco espécies e as
+ * chips de cota por TUSS foram removidos a pedido, e cada um era o filtro do
+ * que nomeava; o modal mostra a semana inteira, sempre. As cinco contagens
+ * sobrevivem só no resumo `sr-only`, para quem lê por leitor de tela — a
+ * listagem continua sendo onde elas se leem com os olhos.
  */
 export default function ModalSemanaPaciente({
   open, onClose, analise, podeVincular, codigosGlosa, onVincularGuia,
@@ -227,12 +234,6 @@ export default function ModalSemanaPaciente({
       return !v
     })
   }, [])
-
-  const { estadoFiltro, setEstadoFiltro } = analise
-  const alternarFiltro = useCallback(
-    (chave: EstadoFiltro) => setEstadoFiltro(estadoFiltro === chave ? null : chave),
-    [estadoFiltro, setEstadoFiltro]
-  )
 
   const autorizacoesPorDia = useMemo(() => {
     const mapa = new Map<string, AutorizacaoAssimSemana[]>()
@@ -345,39 +346,11 @@ export default function ModalSemanaPaciente({
           </div>
         </header>
 
-        {/* ── As cinco espécies: contador e filtro no mesmo controle ───────── */}
-        <div className="grid grid-cols-2 gap-2 border-b border-slate-100 px-4 py-3 sm:grid-cols-3 sm:px-6 xl:grid-cols-5">
-          {PENDENCIAS.map(({ chave, rotulo, Icone, tom, bolha, ajuda }) => (
-            <Indicador
-              key={chave}
-              valor={contagem[chave]}
-              rotulo={rotulo}
-              Icone={Icone}
-              tom={tom}
-              bolha={bolha}
-              ajuda={ajuda}
-              ativo={estadoFiltro === chave}
-              onToggle={() => alternarFiltro(chave)}
-            />
-          ))}
-        </div>
-
-        {/* ── A cota por TUSS: outra pergunta, faixa própria ───────────────── */}
-        {/* Só com mais de um TUSS. Com um só, a chip não filtra nada e repete os
-            números que os indicadores já deram — uma faixa inteira de altura
-            para dizer o que já está dito. */}
-        {analise.placar.length > 1 && (
-          <div className="flex items-center gap-2 overflow-x-auto border-b border-slate-100 bg-slate-50 px-4 py-2 sm:px-6">
-            {analise.placar.map((p) => (
-              <ChipTuss
-                key={p.codigo_tuss}
-                item={p}
-                ativa={analise.tussFiltro === p.codigo_tuss}
-                onToggle={analise.setTussFiltro}
-              />
-            ))}
-          </div>
-        )}
+        <FaixaDeSemanas
+          semanas={analise.semanasDoMes}
+          atual={analise.semanaInicio}
+          onEscolher={analise.irParaSemanaEm}
+        />
 
         {/* ── A grade ─────────────────────────────────────────────────────── */}
         {/* Fundo branco no contêiner inteiro, e não só sob a grade: a grade
@@ -411,14 +384,11 @@ export default function ModalSemanaPaciente({
             <div className="flex flex-col items-center justify-center gap-1 py-24 text-center">
               <CheckCircle2 size={22} className="text-slate-400" />
               <p className="text-sm font-medium text-slate-600">
-                {analise.tussFiltro || estadoFiltro
-                  ? 'Nada neste recorte'
-                  : 'Nenhum atendimento nem guia nesta semana'}
+                Nenhum atendimento nem guia nesta semana
               </p>
               <p className="max-w-md text-xs text-slate-500">
-                {analise.tussFiltro || estadoFiltro
-                  ? 'Toque no indicador aceso outra vez para ver a semana inteira.'
-                  : `Nem a clínica agendou, nem a ASSIM registrou nada de seg a sex para ${analise.pacienteNome}.`}
+                Nem a clínica agendou, nem a ASSIM registrou nada de seg a sex para{' '}
+                {analise.pacienteNome}.
               </p>
             </div>
           ) : (
@@ -445,9 +415,7 @@ export default function ModalSemanaPaciente({
               <h3 className="mb-2 text-[13px] font-semibold text-brand-fg">
                 Autorizações da semana{' '}
                 <span className="font-normal text-slate-500">
-                  {estadoFiltro
-                    ? `— ${totalAutorizacoes} em ${rotuloDaEspecie(estadoFiltro)}`
-                    : `— ${totalAutorizacoes} ${totalAutorizacoes === 1 ? 'guia' : 'guias'}`}
+                  — {totalAutorizacoes} {totalAutorizacoes === 1 ? 'guia' : 'guias'}
                 </span>
               </h3>
               {totalAutorizacoes === 0 ? (

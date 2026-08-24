@@ -138,18 +138,6 @@ export type PlacarTuss = {
  */
 export type TipoPendencia = 'glosa' | 'cancelamento' | 'sem-vinculo' | 'faltando' | 'sobrando'
 
-/**
- * O recorte por espécie de pendência dentro da semana do paciente.
- *
- * Eram TRÊS estados com nomes próprios até 2026-08-24
- * (`sem-vinculo | glosa | cancelada`), enquanto a listagem contava CINCO com
- * outros nomes. Era daí que vinha a confusão: "Faltando 3" abria uma tela onde
- * a palavra não existia. Agora é literalmente `TipoPendencia` — mesmo conjunto,
- * mesmos nomes, mesma ordem, e um sexto valor tem de nascer nos dois lugares ao
- * mesmo tempo. Nulo = todas.
- */
-export type EstadoFiltro = TipoPendencia
-
 /** Os cinco contadores de um paciente no mês, mais o total. */
 export type ContagemPendencias = Record<TipoPendencia, number> & { total: number }
 

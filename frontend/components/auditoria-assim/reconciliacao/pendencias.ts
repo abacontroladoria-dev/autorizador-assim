@@ -34,10 +34,6 @@ export type EspeciePendencia = {
   Icone: LucideIcon
   /** Tinta do número na coluna da tabela. */
   tinta: string
-  /** Perímetro + fundo + texto quando há trabalho desta espécie. */
-  tom: string
-  /** Fundo da bolha do ícone no indicador do modal. */
-  bolha: string
   /** Chip selecionada na listagem (a listagem não usa anel; o modal usa). */
   ativo: string
   /** Chip em repouso. */
@@ -52,8 +48,6 @@ export const PENDENCIAS: EspeciePendencia[] = [
     coluna: 'Glosas',
     Icone: AlertOctagon,
     tinta: 'text-violet-700',
-    tom: 'border-violet-200 bg-violet-50 text-violet-700',
-    bolha: 'bg-violet-100',
     ativo: 'border-violet-300 bg-violet-50 text-violet-900',
     inativo: 'border-slate-200 bg-white text-slate-600 hover:border-violet-300 hover:bg-violet-50',
     ajuda: 'Guias que a ASSIM recusou neste mês.',
@@ -64,8 +58,6 @@ export const PENDENCIAS: EspeciePendencia[] = [
     coluna: 'Cancel.',
     Icone: Ban,
     tinta: 'text-slate-700',
-    tom: 'border-slate-300 bg-slate-100 text-slate-600',
-    bolha: 'bg-slate-200',
     ativo: 'border-slate-400 bg-slate-100 text-slate-800',
     inativo: 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50',
     ajuda: 'Autorizações que saíram e foram desfeitas (“Liberado *”). Não consumiram cota.',
@@ -76,8 +68,6 @@ export const PENDENCIAS: EspeciePendencia[] = [
     coluna: 'Sem vínculo',
     Icone: Link2,
     tinta: 'text-amber-700',
-    tom: 'border-amber-300 bg-amber-50 text-amber-700',
-    bolha: 'bg-amber-100',
     ativo: 'border-amber-300 bg-amber-50 text-amber-900',
     inativo: 'border-slate-200 bg-white text-slate-600 hover:border-amber-300 hover:bg-amber-50',
     ajuda: 'Guias liberadas que sobraram do pareamento e esperam alguém dizer que sessão elas cobrem.',
@@ -88,8 +78,6 @@ export const PENDENCIAS: EspeciePendencia[] = [
     coluna: 'Faltando',
     Icone: TrendingDown,
     tinta: 'text-rose-700',
-    tom: 'border-rose-200 bg-rose-50 text-rose-700',
-    bolha: 'bg-rose-100',
     ativo: 'border-rose-300 bg-rose-50 text-rose-900',
     inativo: 'border-slate-200 bg-white text-slate-600 hover:border-rose-300 hover:bg-rose-50',
     ajuda: 'Sessões decorridas há mais de 30 minutos sem liberação que as cubra. O que ainda vai acontecer, ou aconteceu há menos de 30 minutos, não conta.',
@@ -100,8 +88,6 @@ export const PENDENCIAS: EspeciePendencia[] = [
     coluna: 'Sobrando',
     Icone: TrendingUp,
     tinta: 'text-amber-700',
-    tom: 'border-amber-300 bg-amber-50 text-amber-700',
-    bolha: 'bg-amber-100',
     ativo: 'border-amber-300 bg-amber-50 text-amber-900',
     inativo: 'border-slate-200 bg-white text-slate-600 hover:border-amber-300 hover:bg-amber-50',
     ajuda: 'Liberações a mais do que sessões agendadas naquele TUSS — é o que provoca a glosa 1601.',
