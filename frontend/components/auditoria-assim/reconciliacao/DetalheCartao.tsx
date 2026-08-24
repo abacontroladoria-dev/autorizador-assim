@@ -5,6 +5,7 @@ import { KeySquare, Link2, X } from 'lucide-react'
 import { autorizacaoCancelada, autorizacaoLiberada } from '@/hooks/useAnaliseReincidencia'
 import { completarMotivoGlosa, lerMotivoGlosa } from '@/lib/glosa'
 import SituacaoBadge from '../SituacaoBadge'
+import type { NotaManual, TokenConferencia } from '@/services/auditoria-assim.service'
 import type { CartaoGrade } from '../types'
 import { dataHoraCurta, formatarDiaComNome } from './datas'
 
@@ -66,12 +67,26 @@ function temAlgum(...valores: unknown[]): boolean {
 export default function DetalheCartao({
   cartao,
   codigosGlosa,
+  conferencia,
+  nota,
   podeVincular,
   onVincular,
   onFechar,
 }: {
   cartao: CartaoGrade
   codigosGlosa: Map<string, string>
+  /**
+   * A conferência da filipeta deste bloco.
+   *
+   * Vem de fora e NÃO de `cartao.origem`: `get_auditoria_assim` não devolve
+   * `token_conferido` embora `AuditoriaAssimItem` o declare — o serviço faz um
+   * cast do retorno da RPC, e o campo chega `undefined`. Ler dali dizia "ainda
+   * não" numa filipeta conferida. A fonte é `auditoria_token_conferencias`,
+   * juntada no cliente (ver `buscarNotasEConferencias`).
+   */
+  conferencia?: TokenConferencia
+  /** A anotação manual deste bloco, de `auditoria_atendimento_notas`. Mesma razão. */
+  nota?: NotaManual
   podeVincular: boolean
   onVincular: (guia: string) => void
   onFechar: () => void
@@ -232,48 +247,48 @@ export default function DetalheCartao({
           {daSessao && (
             <>
               <Campo rotulo="Conferida">
-                {daSessao.origem.token_conferido ? 'sim' : 'ainda não'}
+                {conferencia?.conferido ? (
+                  'sim'
+                ) : (
+                  <span className="font-normal text-amber-700">ainda não</span>
+                )}
               </Campo>
-              <Campo rotulo="Conferida por">{daSessao.origem.token_conferido_por_nome}</Campo>
+              <Campo rotulo="Conferida por">{conferencia?.conferido_por_nome}</Campo>
               <Campo rotulo="Conferida em">
-                {daSessao.origem.token_conferido_em
-                  ? dataHoraCurta(daSessao.origem.token_conferido_em)
-                  : null}
+                {conferencia?.conferido_em ? dataHoraCurta(conferencia.conferido_em) : null}
               </Campo>
             </>
           )}
         </Secao>
       )}
 
-      {daSessao &&
-        temAlgum(daSessao.origem.observacao, daSessao.origem.observacao_manual) && (
-          <Secao titulo="Observações">
-            {daSessao.origem.observacao && (
-              <div className="py-1.5">
-                <p className="text-[11px] text-slate-500">Da agenda</p>
-                <p className="mt-0.5 text-[12px] leading-relaxed text-slate-700">
-                  {daSessao.origem.observacao}
+      {/* A nota manual vem de `nota`, não de `origem.observacao_manual`, pela
+          mesma razão da conferência: a RPC não a devolve. `origem.observacao` é
+          diferente — essa é da agenda e vem na linha. */}
+      {daSessao && temAlgum(daSessao.origem.observacao, nota?.texto) && (
+        <Secao titulo="Observações">
+          {daSessao.origem.observacao && (
+            <div className="py-1.5">
+              <p className="text-[11px] text-slate-500">Da agenda</p>
+              <p className="mt-0.5 text-[12px] leading-relaxed text-slate-700">
+                {daSessao.origem.observacao}
+              </p>
+            </div>
+          )}
+          {nota?.texto && (
+            <div className="py-1.5">
+              <p className="text-[11px] text-slate-500">Anotada na Conferência</p>
+              <p className="mt-0.5 text-[12px] leading-relaxed text-slate-700">{nota.texto}</p>
+              {nota.atualizado_por_nome && (
+                <p className="mt-1 text-[11px] text-slate-500">
+                  {nota.atualizado_por_nome}
+                  {nota.atualizado_em && <> · {dataHoraCurta(nota.atualizado_em)}</>}
                 </p>
-              </div>
-            )}
-            {daSessao.origem.observacao_manual && (
-              <div className="py-1.5">
-                <p className="text-[11px] text-slate-500">Anotada na Conferência</p>
-                <p className="mt-0.5 text-[12px] leading-relaxed text-slate-700">
-                  {daSessao.origem.observacao_manual}
-                </p>
-                {daSessao.origem.observacao_manual_atualizado_por_nome && (
-                  <p className="mt-1 text-[11px] text-slate-500">
-                    {daSessao.origem.observacao_manual_atualizado_por_nome}
-                    {daSessao.origem.observacao_manual_atualizado_em && (
-                      <> · {dataHoraCurta(daSessao.origem.observacao_manual_atualizado_em)}</>
-                    )}
-                  </p>
-                )}
-              </div>
-            )}
-          </Secao>
-        )}
+              )}
+            </div>
+          )}
+        </Secao>
+      )}
 
       {/* A ação mora onde está a evidência. Só a guia que a fila de órfãs
           reconhece a oferece — um controle que não leva a lugar nenhum ensina a

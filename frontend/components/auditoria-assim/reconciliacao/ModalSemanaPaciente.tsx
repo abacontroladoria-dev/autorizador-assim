@@ -372,6 +372,8 @@ export default function ModalSemanaPaciente({
               <DetalheCartao
                 cartao={detalhe}
                 codigosGlosa={codigosGlosa}
+                conferencia={analise.conferenciasPorBloco.get(detalhe.chave)}
+                nota={analise.notasPorBloco.get(detalhe.chave)}
                 podeVincular={podeVincular}
                 onVincular={onVincularGuia}
                 onFechar={() => setDetalhe(null)}

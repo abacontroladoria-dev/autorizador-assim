@@ -1,7 +1,9 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { NotaManual, TokenConferencia } from '@/services/auditoria-assim.service'
 import {
+  buscarNotasEConferencias,
   listarAuditoriaAssim,
   listarAutorizacoesAssimSemana,
   listarFaltasAuditoria,
@@ -682,6 +684,66 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
     return linhas.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
   }, [sessoesDoMes, autorizacoesDoMes, unidades, ehOrfa, cutoff])
 
+  /**
+   * A conferência da filipeta e a nota manual do paciente aberto.
+   *
+   * `get_auditoria_assim` NÃO devolve estes campos, embora `AuditoriaAssimItem`
+   * os declare: eles moram em `auditoria_token_conferencias` e
+   * `auditoria_atendimento_notas`, e quem os junta é o cliente. O serviço faz um
+   * cast do retorno da RPC para o tipo, então os campos chegam `undefined` e
+   * qualquer leitor honesto lê "ainda não conferida" numa filipeta que foi
+   * conferida — foi o que aconteceu no detalhamento (caso Kourtney Savino Lopes,
+   * 05/08 10:00, token 318580).
+   *
+   * A busca é por PACIENTE, não pelo mês inteiro: um mês da clínica passa de
+   * 2.800 blocos e um `.in()` com essa lista estoura o comprimento da URL do
+   * PostgREST. Por paciente são algumas dezenas, numa requisição só, disparada
+   * quando o modal abre. Blocos sintéticos de falta (`falta_…`) ficam de fora —
+   * eles não existem naquelas tabelas e o `bloco_id` lá é uuid.
+   */
+  const [notasPorBloco, setNotasPorBloco] = useState<Map<string, NotaManual>>(() => new Map())
+  const [conferenciasPorBloco, setConferenciasPorBloco] = useState<Map<string, TokenConferencia>>(
+    () => new Map()
+  )
+
+  const blocosDoPaciente = useMemo(() => {
+    if (!selecionado?.nome) return [] as string[]
+    return sessoes
+      .filter((s) => s.paciente_nome === selecionado?.nome)
+      .map((s) => s.bloco_id)
+      .filter((id): id is string => !!id && !id.startsWith('falta_'))
+  }, [sessoes, selecionado?.nome])
+
+  const chaveBlocos = blocosDoPaciente.join(',')
+  useEffect(() => {
+    if (blocosDoPaciente.length === 0) {
+      setNotasPorBloco(new Map())
+      setConferenciasPorBloco(new Map())
+      return
+    }
+    let vivo = true
+    buscarNotasEConferencias(blocosDoPaciente)
+      .then(({ notas, conferencias }) => {
+        if (!vivo) return
+        setNotasPorBloco(notas)
+        setConferenciasPorBloco(conferencias)
+      })
+      .catch(() => {
+        // Silencioso: sem isto a tela ainda diz a verdade sobre a semana, só
+        // deixa de mostrar a conferência. Derrubar o modal por causa dela seria
+        // pior que perdê-la.
+        if (vivo) {
+          setNotasPorBloco(new Map())
+          setConferenciasPorBloco(new Map())
+        }
+      })
+    return () => {
+      vivo = false
+    }
+    // `chaveBlocos` e não o array: ele é recriado a cada render do memo pai.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chaveBlocos])
+
   /** As unidades que o mês de fato tem — a lista do filtro, sem inventar opção. */
   const unidadesDoMes = useMemo(
     () =>
@@ -997,6 +1059,10 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
     sessaoDescoberta,
     /** Marca a sessão que já ocorreu, coberta ou não. */
     sessaoJaDecorrida,
+    /** Conferência da filipeta por bloco — a RPC não a traz, ver a nota acima. */
+    conferenciasPorBloco,
+    /** Nota escrita à mão na Conferência, por bloco. Mesma razão. */
+    notasPorBloco,
     /** As guias que passaram da cota, nomeadas — o "sobrando" apontável. */
     guiasExcedentes,
     orfasDaSemana,

@@ -83,14 +83,14 @@ export async function salvarMotivoGlosa(bloco_id: string, motivo_glosa: string):
   if (error) throw error
 }
 
-type NotaManual = {
+export type NotaManual = {
   bloco_id: string
   texto: string
   atualizado_em: string
   atualizado_por_nome: string | null
 }
 
-type TokenConferencia = {
+export type TokenConferencia = {
   bloco_id: string
   conferido: boolean
   conferido_em: string | null
