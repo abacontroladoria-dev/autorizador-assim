@@ -40,16 +40,59 @@ export function cartaoPendente(c: CartaoGrade): boolean {
   return c.estado === 'sem-vinculo' || c.excedente
 }
 
+/** Quanto dura uma sessão na clínica. É o passo da escala vertical. */
+const DURACAO_SESSAO_MIN = 40
+
 /**
- * "14:34" → "14:00". Nula quando não há hora para arredondar.
+ * A escala de 40 minutos da clínica: manhã 08:00–12:00, tarde 13:00–18:20.
+ *
+ * Declarada aqui e não importada de `lib/cronograma/constants.ts`
+ * (`HORAS_GRID`): aquela lista dirige o ALGORITMO de cronograma e para às
+ * 17:00, enquanto a tarde real vai até uma sessão que começa 17:40. Emprestá-la
+ * jogaria toda sessão das 17:40 numa linha avulsa, e mexer nela para consertar
+ * a exibição mudaria o que o algoritmo pode agendar. Duas listas com dois donos.
+ *
+ * O intervalo do almoço não é uma faixa vazia: ele simplesmente não existe na
+ * escala, e a passagem de 11:20 para 13:00 aparece nos próprios rótulos.
+ */
+const FAIXAS = [
+  '08:00', '08:40', '09:20', '10:00', '10:40', '11:20',
+  '13:00', '13:40', '14:20', '15:00', '15:40', '16:20', '17:00', '17:40',
+]
+
+/**
+ * Minutos desde a meia-noite. Nulo quando não é "HH:MM".
  *
  * Por fatia de string, como todo horário nesta tela: `hora_inicial` é `time` e
  * `data_execucao` é `timestamp without time zone` guardando hora de São Paulo —
  * passar qualquer um dos dois por `new Date()` é o caminho que já fez dois
  * campos da mesma linha discordarem em 3h.
  */
-function faixaDaHora(hora: string): string | null {
+function emMinutos(hora: string): number | null {
   if (!/^\d{2}:\d{2}$/.test(hora)) return null
+  return Number(hora.slice(0, 2)) * 60 + Number(hora.slice(3, 5))
+}
+
+/**
+ * A faixa de 40 minutos que contém este horário.
+ *
+ * Um horário só entra numa faixa se cair DENTRO dela (`[início, início+40)`) —
+ * nunca "a maior faixa menor ou igual". A diferença aparece no almoço: com a
+ * segunda regra, 12:30 cairia em 11:20 e seria lido como uma sessão das 11:20.
+ *
+ * O que não cabe em faixa nenhuma cai na hora cheia. Isso é para AUTORIZAÇÃO,
+ * que é posicionada por `data_execucao` — o instante em que a ASSIM registrou,
+ * que não tem por que respeitar a grade da clínica. Uma linha por minuto exato
+ * encheria a escala de faixas de um cartão só; a hora cheia agrupa e continua
+ * dizendo a verdade, porque nenhuma sessão pode ocupá-la.
+ */
+function faixaDe(hora: string): string {
+  const minuto = emMinutos(hora)
+  if (minuto === null) return SEM_HORA
+  for (const faixa of FAIXAS) {
+    const inicio = emMinutos(faixa)
+    if (inicio !== null && minuto >= inicio && minuto < inicio + DURACAO_SESSAO_MIN) return faixa
+  }
   return `${hora.slice(0, 2)}:00`
 }
 
@@ -61,13 +104,18 @@ function faixaDaHora(hora: string): string | null {
  * foi atendido, e qual é a situação daquela autorização?" — e com o TUSS nas
  * linhas o mesmo dia aparecia repartido em quatro linhas distantes, obrigando a
  * remontar a agenda de cabeça. A cota por TUSS, que era o que a grade antiga
- * mostrava, não se perdeu: ela vive nos chips do painel de filtros, onde
- * `PlacarTuss` já a calculava.
+ * mostrava, chega aqui em `placar` e sai marcada nos cartões (`excedente`) — os
+ * chips que a exibiam como número foram removidos a pedido em 2026-08-24.
  *
- * A escala vertical é CONTÍNUA entre a primeira e a última hora que a semana de
- * fato tem (nunca 00:00–23:00 fixo): uma faixa vazia no meio do dia é
- * informação — mostra o intervalo entre o turno da manhã e o da tarde —, mas
- * faixas vazias além das pontas são só rolagem.
+ * A escala vertical anda de 40 em 40 minutos, que é a duração de uma sessão
+ * (ver `FAIXAS`). Era de hora em hora até 2026-08-24, e isso empilhava na mesma
+ * linha duas sessões que aconteceram em horários diferentes — 09:20 e 09:40
+ * viravam ambas "09:00", e a agenda deixava de dizer a que hora o paciente foi.
+ *
+ * Ela é CONTÍNUA entre a primeira e a última faixa que a semana de fato usa
+ * (nunca a grade inteira fixa): uma faixa vazia no meio é informação — mostra o
+ * buraco onde não houve atendimento —, mas faixas vazias além das pontas são só
+ * rolagem.
  *
  * As duas espécies de cartão convivem de propósito, e não medem a mesma coisa:
  *
@@ -121,7 +169,7 @@ export function montarGrade(
     const hora = s.hora_inicial?.slice(0, 5) ?? SEM_HORA
     lancados.push({
       dia,
-      faixa: faixaDaHora(hora) ?? SEM_HORA,
+      faixa: faixaDe(hora),
       cartao: {
         tipo: 'sessao',
         chave: s.bloco_id ?? `${dia}-${hora}-${s.codigo_tuss}`,
@@ -149,7 +197,7 @@ export function montarGrade(
     const hora = horaDoTimestamp(a.data_execucao)
     lancados.push({
       dia,
-      faixa: faixaDaHora(hora) ?? SEM_HORA,
+      faixa: faixaDe(hora),
       cartao: {
         tipo: 'autorizacao',
         chave: `guia-${a.guia}-${a.data_execucao ?? ''}`,
@@ -176,14 +224,26 @@ export function montarGrade(
   })
 
   const faixas = new Set(lancados.map((l) => l.faixa))
-  const cheias = [...faixas].filter((f) => f !== SEM_HORA).map((f) => Number(f.slice(0, 2)))
 
-  const linhas: LinhaGrade[] = []
-  if (cheias.length > 0) {
-    for (let h = Math.min(...cheias); h <= Math.max(...cheias); h += 1) {
-      linhas.push(criar(`${String(h).padStart(2, '0')}:00`))
-    }
+  // A escala é CONTÍNUA entre a primeira e a última faixa da clínica que a
+  // semana de fato usa — as faixas vazias no meio são informação (o buraco onde
+  // não houve atendimento), as de fora das pontas seriam só rolagem.
+  //
+  // As horas cheias que sobraram (autorização registrada fora da grade da
+  // clínica) entram além dessa faixa, no lugar cronológico delas: elas existem,
+  // e uma delas sumir levaria junto o cartão que a ocupava.
+  const daClinica = FAIXAS.filter((f) => faixas.has(f))
+  const escala = new Set<string>()
+  if (daClinica.length > 0) {
+    const de = FAIXAS.indexOf(daClinica[0])
+    const ate = FAIXAS.indexOf(daClinica[daClinica.length - 1])
+    for (let i = de; i <= ate; i += 1) escala.add(FAIXAS[i])
   }
+  for (const f of faixas) {
+    if (f !== SEM_HORA && !FAIXAS.includes(f)) escala.add(f)
+  }
+
+  const linhas: LinhaGrade[] = [...escala].sort((a, b) => a.localeCompare(b)).map(criar)
   // Atendimento sem horário existe (falta sintetizada, guia com `data_execucao`
   // truncada) e some da tela se não tiver faixa. Vai para o pé da escala, onde
   // não empurra a agenda real para baixo.

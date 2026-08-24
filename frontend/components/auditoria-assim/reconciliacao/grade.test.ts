@@ -40,7 +40,7 @@ const todos = (linhas: ReturnType<typeof montarGrade>) =>
   linhas.flatMap((l) => DIAS.flatMap((d) => l.celulas[d]))
 
 describe('montarGrade por horário', () => {
-  it('agrupa por hora cheia e mantém a escala contínua', () => {
+  it('anda de 40 em 40 min e pula o almoço, que não é faixa', () => {
     const linhas = montarGrade(
       [
         sessao({ bloco_id: 'a', data_atendimento: DIAS[0], hora_inicial: '08:00:00', codigo_tuss: '22070400' }),
@@ -48,14 +48,18 @@ describe('montarGrade por horário', () => {
       ],
       [], () => 'fora-da-semana', DIAS, PLACAR, SEM_MARCAS
     )
+    // 11:20 → 13:00 sem faixa de meio-dia: o intervalo aparece nos rótulos, e
+    // inventar uma linha que nenhuma sessão pode ocupar seria ruído.
     expect(linhas.map((l) => l.hora)).toEqual([
-      '08:00', '09:00', '10:00', '11:00', '12:00', '13:00', '14:00', '15:00', '16:00', '17:00',
+      '08:00', '08:40', '09:20', '10:00', '10:40', '11:20',
+      '13:00', '13:40', '14:20', '15:00', '15:40', '16:20', '17:00',
     ])
     expect(linhas[0].celulas[DIAS[0]]).toHaveLength(1)
-    expect(linhas[9].celulas[DIAS[3]][0].hora).toBe('17:20')
+    // 17:20 cai na faixa das 17:00, e o cartão guarda o horário exato.
+    expect(linhas[12].celulas[DIAS[3]][0].hora).toBe('17:20')
   })
 
-  it('põe dois atendimentos da mesma faixa na mesma célula, em ordem', () => {
+  it('separa 14:00 de 14:40, que a escala de hora cheia empilhava', () => {
     const linhas = montarGrade(
       [
         sessao({ bloco_id: 'tarde', data_atendimento: DIAS[1], hora_inicial: '14:40:00' }),
@@ -63,8 +67,35 @@ describe('montarGrade por horário', () => {
       ],
       [], () => 'fora-da-semana', DIAS, PLACAR, SEM_MARCAS
     )
+    expect(linhas.map((l) => l.hora)).toEqual(['13:40', '14:20'])
+    expect(linhas[0].celulas[DIAS[1]].map((c) => c.chave)).toEqual(['cedo'])
+    expect(linhas[1].celulas[DIAS[1]].map((c) => c.chave)).toEqual(['tarde'])
+  })
+
+  it('ordena dentro da célula quando dois caem na mesma faixa', () => {
+    const linhas = montarGrade(
+      [
+        sessao({ bloco_id: 'tarde', data_atendimento: DIAS[1], hora_inicial: '14:30:00' }),
+        sessao({ bloco_id: 'cedo', data_atendimento: DIAS[1], hora_inicial: '14:20:00' }),
+      ],
+      [], () => 'fora-da-semana', DIAS, PLACAR, SEM_MARCAS
+    )
     expect(linhas).toHaveLength(1)
+    expect(linhas[0].hora).toBe('14:20')
     expect(linhas[0].celulas[DIAS[1]].map((c) => c.chave)).toEqual(['cedo', 'tarde'])
+  })
+
+  it('a autorização registrada fora da grade da clínica ganha a hora cheia', () => {
+    // `data_execucao` é o instante em que a ASSIM registrou — não tem por que
+    // respeitar a grade da clínica. 12:30 cai no almoço: nenhuma faixa o
+    // contém, e cair em 11:20 o faria ser lido como sessão das 11:20.
+    const linhas = montarGrade(
+      [sessao({ bloco_id: 'a', data_atendimento: DIAS[0], hora_inicial: '11:20:00', codigo_tuss: '22070400' })],
+      [guia({ guia: '999', data_execucao: `${DIAS[0]}T12:30:00`, codigo_tuss: '22070400' })],
+      () => 'sem-vinculo', DIAS, PLACAR, SEM_MARCAS
+    )
+    expect(linhas.map((l) => l.hora)).toEqual(['11:20', '12:00'])
+    expect(linhas[1].celulas[DIAS[0]][0].guia).toBe('999')
   })
 
   it('não perde atendimento nenhum e joga o sem-horário para o fim', () => {
