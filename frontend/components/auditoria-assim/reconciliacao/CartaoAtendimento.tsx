@@ -44,8 +44,14 @@ import { distanciaCurta, distanciaPorExtenso, type PapelNaSelecao } from './vinc
  * Nenhum matiz novo entrou, e a manchete de problema é "Sem cobertura" (rose,
  * "a lacuna mais larga" do DESIGN.md — a sessão aconteceu e nada a cobre),
  * exceto onde a ASSIM já respondeu: aí vale o nome do veredito, com o matiz
- * dele — "Glosa" (violeta, recusa que pede tratativa) e "Cancelada" (slate,
- * liberação desfeita, que pede autorização nova). Ver `SITUACOES_COM_VEREDITO`.
+ * dele — "Glosa" (violeta, recusa que pede tratativa) e "Cancelada" (rose um
+ * degrau mais firme, liberação desfeita, que pede autorização nova). Ver
+ * `SITUACOES_COM_VEREDITO`.
+ *
+ * "Cancelada" e "Sem cobertura" saem as duas em rose DE PROPÓSITO: as duas
+ * dizem que nada cobre aquela sessão e pedem a mesma coisa. O que as separa é o
+ * rótulo e o ícone (Ban contra AlertCircle), mais o degrau da superfície —
+ * matizes diferentes afirmariam que pedem respostas diferentes.
  * Por que a sessão está descoberta quando NÃO houve resposta — não solicitada,
  * solicitação cancelada, retorno não confirmado, sincronizando — é pergunta da
  * gaveta, que tem largura para responder; numa célula de 11rem a resposta só
