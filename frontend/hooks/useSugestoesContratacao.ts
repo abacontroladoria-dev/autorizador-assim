@@ -7,7 +7,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { useGradeAgendamentos } from "./useGradeAgendamentos"
 import { useOcupacaoSalas } from "./useOcupacaoSalas"
-import { useConvenioValores } from "./useConvenioValores"
+import { useConvenioValoresCalculo } from "./useConvenioValores"
 import { useFeriados } from "./useFeriados"
 import { listarExclusividadesTerapia } from "@/services/salas.service"
 import type { SalaTerapiaExclusiva } from "@/lib/cronograma/salasTypes"
@@ -55,7 +55,7 @@ export function useSugestoesContratacao(
   const cRows = useMemo(() => filtrarCapacidadeLivreReservada(cRowsBrutos), [cRowsBrutos])
   const { lRows } = useCronogramaData()
   const { salasComOcupacao, loading: loadingSalas, error: errorSalas } = useOcupacaoSalas(refWeek.inicio, refWeek.fim)
-  const { regrasGerais, excecoesPaciente, loading: loadingValores, error: errorValores } = useConvenioValores()
+  const { regrasGerais, excecoesPaciente, loading: loadingValores, error: errorValores } = useConvenioValoresCalculo()
   const { feriados, loading: loadingFeriados } = useFeriados()
 
   const [exclusividades, setExclusividades] = useState<SalaTerapiaExclusiva[]>([])

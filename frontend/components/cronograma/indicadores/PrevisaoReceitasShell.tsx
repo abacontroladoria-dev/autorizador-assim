@@ -27,7 +27,7 @@ import { StatCard } from "@/components/cronograma/ui/StatCard"
 import { SegmentedTabs } from "@/components/cronograma/ui/SegmentedTabs"
 import { SortableTh, ordenarPor, type SortDir } from "@/components/cronograma/ui/SortableTh"
 import { useOcupacaoSalas } from "@/hooks/useOcupacaoSalas"
-import { useConvenioValores } from "@/hooks/useConvenioValores"
+import { useConvenioValoresCalculo } from "@/hooks/useConvenioValores"
 import { useFeriados } from "@/hooks/useFeriados"
 import { useLinhasMesInteiro } from "@/hooks/useLinhasMesInteiro"
 import { usePrevisaoReceitasHistorico } from "@/hooks/usePrevisaoReceitasHistorico"
@@ -592,7 +592,7 @@ export function PrevisaoReceitasShell() {
   const semanaRef = useMemo(() => getRefWeekDoMes(periodo.ano, periodo.mes), [periodo.ano, periodo.mes])
 
   const { linhas, loading: loadingSalas, error: errorSalas } = useOcupacaoSalas(semanaRef.inicio, semanaRef.fim)
-  const { regrasGerais, excecoesPaciente, pacotesAvaliacao, loading: loadingValores, error: errorValores } = useConvenioValores()
+  const { regrasGerais, excecoesPaciente, pacotesAvaliacao, loading: loadingValores, error: errorValores } = useConvenioValoresCalculo()
   const { feriados, loading: loadingFeriados } = useFeriados()
 
   const previsaoBase = useMemo(

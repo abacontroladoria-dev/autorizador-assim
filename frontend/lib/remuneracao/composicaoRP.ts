@@ -116,6 +116,15 @@ export type ComposicaoRP = {
    */
   paDivergente: boolean
 
+  /**
+   * `valorPA` quebrado por função/especialidade do contrato — para quem tem
+   * mais de um PA (ex.: Coordenador de Caso a R$35 e Aplicador ABA (PS) a
+   * R$30), a soma sozinha esconde qual parcela veio de qual contrato. Mesma
+   * partição de `valorPA` (comEvolucao + substituicao), agrupada por
+   * `s.funcaoPA || s.especialidade`. Um item só quando há um único PA.
+   */
+  paPorContrato: { label: string; count: number; rate: number; total: number }[]
+
   // ─── Listas ───────────────────────────────────────────────────────────────
   porBucket: Record<BucketSessao, SessaoComPapel[]>
   /**
@@ -167,8 +176,19 @@ export function composicaoRP(p: ProfRemunReal): ComposicaoRP {
   // PA somado da própria partição: são exatamente os dois ramos em que
   // calculo.ts fez `valorConfirmado += pa` (:1009 evolução própria, :1036
   // substituição realizada), e é o que a tabela do modal mostra por linha.
-  const valorPA = [...porBucket.comEvolucao, ...porBucket.substituicao]
-    .reduce((soma, s) => soma + (s.valorPA ?? 0), 0)
+  const sessoesRemuneradasPA = [...porBucket.comEvolucao, ...porBucket.substituicao]
+  const valorPA = sessoesRemuneradasPA.reduce((soma, s) => soma + (s.valorPA ?? 0), 0)
+
+  const porContratoMap = new Map<string, { label: string; count: number; rate: number; total: number }>()
+  for (const s of sessoesRemuneradasPA) {
+    const label = s.funcaoPA || s.especialidade || "PA"
+    const item = porContratoMap.get(label) ?? { label, count: 0, rate: s.valorPA ?? 0, total: 0 }
+    item.count++
+    item.total += s.valorPA ?? 0
+    item.rate = s.valorPA ?? item.rate
+    porContratoMap.set(label, item)
+  }
+  const paPorContrato = [...porContratoMap.values()]
 
   const emBancoDeHoras = p.modalidade !== "atendimento"
   const soFixo = p.modalidade === "banco_horas"
@@ -182,6 +202,7 @@ export function composicaoRP(p: ProfRemunReal): ComposicaoRP {
     pct: baseRemuneravel > 0 ? (remuneradas / baseRemuneravel) * 100 : 0,
 
     valorPA,
+    paPorContrato,
     ppd: p.diariaPeriodo,
     bonusEta: p.etaBonusPeriodo,
     pe: p.pe,

@@ -26,7 +26,7 @@ export default function OcupacaoSalasPage() {
     return () => setHeader("", "")
   }, [setHeader])
 
-  const { salas, alocacoes, linhas, turnosBloqueioAdmin, exclusividades, salasComOcupacao, loading, error, recarregarSalas, recarregarAlocacoes, encontrarAlocacaoDoProfissional } = useOcupacaoSalas()
+  const { salas, alocacoes, linhas, turnosBloqueioAdmin, exclusividades, profissionaisTodos, terapiasTodas, salasComOcupacao, loading, error, recarregarSalas, recarregarAlocacoes, encontrarAlocacaoDoProfissional } = useOcupacaoSalas()
 
   const [tab, setTab] = useState<ViewTab>("grade")
   const [filtros, setFiltros] = useState<SalasFiltrosState>(SALAS_FILTROS_VAZIO)
@@ -161,7 +161,9 @@ export default function OcupacaoSalasPage() {
       </div>
 
       {tab !== "regularizacoes" && (
-        <SalasFiltros value={filtros} onChange={setFiltros} unidades={unidades} nucleos={nucleos} andares={andares} />
+        <div className="sticky top-0 z-40 -mx-6 -mt-1 bg-background px-6 pt-1 pb-2 shadow-[0_1px_0_theme(colors.border)]">
+          <SalasFiltros value={filtros} onChange={setFiltros} unidades={unidades} nucleos={nucleos} andares={andares} />
+        </div>
       )}
 
       {loading && (
@@ -181,6 +183,10 @@ export default function OcupacaoSalasPage() {
           onRecarregar={recarregarAlocacoes}
           buscaProfissional={filtros.profissional}
           salasComExclusividade={salasComExclusividade}
+          salasTodas={salas}
+          exclusividades={exclusividades}
+          profissionaisTodos={profissionaisTodos}
+          terapiasTodas={terapiasTodas}
         />
       )}
       {!loading && !error && tab === "mapa" && (

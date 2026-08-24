@@ -44,6 +44,43 @@ const MUSICO_CAPAC_POR_DIA: Record<string, Partial<Record<number, number>>> = {
 
 const DOW_ABBR: Record<number, string> = { 1: "Seg", 2: "Ter", 3: "Qua", 4: "Qui", 5: "Sex" }
 
+/**
+ * Cadastro editável de "quantas vagas simultâneas esse profissional atende
+ * nesse dia" — chave normalizada (normTxt) do nome do profissional, valor por
+ * dow (1=Seg…5=Sex). Vem do banco (cronograma_capacidade_profissional_dia,
+ * ver useOcupacaoProf) e é o que a tela "Cadastro de quantidade esperada de
+ * pacientes" (cronograma/indicadores) lê e escreve. Ausência de chave/dow =
+ * sem cadastro ainda → cai no padrão (MUSICO_CAPAC_POR_DIA ou 1).
+ */
+export type CapacidadeOverrides = Record<string, Partial<Record<number, number>>>
+
+/**
+ * Capacidade "de fábrica" — o que valia antes do cadastro editável existir.
+ * Continua servindo de fallback quando não há linha no banco pra aquele
+ * profissional+dia (ex.: cálculo de remuneração em lib/remuneracao/calculo.ts,
+ * que não busca o cadastro do banco — ver comentário em getSlotCap).
+ */
+function capacidadeDeFabrica(prof: string, dow: number): number | undefined {
+  return MUSICO_CAPAC_POR_DIA[normTxt(prof)]?.[dow]
+}
+
+/** Capacidade esperada resolvida (banco > de fábrica > 1) — usada pela tela de cadastro para pré-preencher cada célula. */
+export function capacidadeEsperadaProfissionalDia(
+  prof: string, dow: number, overridesFromDB?: CapacidadeOverrides,
+): number {
+  const viaDB = overridesFromDB?.[normTxt(prof)]?.[dow]
+  if (viaDB !== undefined) return viaDB
+  return capacidadeDeFabrica(prof, dow) ?? 1
+}
+
+/** Dias (1-5) com capacidade explicitamente cadastrada (banco OU de fábrica) para este profissional — usado só para montar o texto "vagas simultâneas por dia". */
+function diasComCapacidadeExplicita(prof: string, overridesFromDB?: CapacidadeOverrides): number[] {
+  const viaDB = overridesFromDB?.[normTxt(prof)] ?? {}
+  const viaHard = MUSICO_CAPAC_POR_DIA[normTxt(prof)] ?? {}
+  const dows = new Set<number>([...Object.keys(viaDB), ...Object.keys(viaHard)].map(Number))
+  return [...dows].sort((a, b) => a - b)
+}
+
 // ─── ACUMULADOR INTERNO ───────────────────────────────────────────────────────
 
 type BaseOcupAcc = BaseOcup & {
@@ -65,10 +102,26 @@ function capacidadePadraoEsp(terapia: string): number {
   return SLOT_CAP_ESP[normTxt(terapia)] ?? 1
 }
 
-export function getSlotCap(prof: string, esp: string, dow?: number): number {
-  if (normTxt(esp) === "musicoterapia" && dow !== undefined) {
-    const capDia = MUSICO_CAPAC_POR_DIA[normTxt(prof)]?.[dow]
-    if (capDia !== undefined) return capDia
+/**
+ * `overridesFromDB` vem do cadastro editável (cronograma_capacidade_profissional_dia,
+ * carregado em useOcupacaoProf) e — diferente do fallback "de fábrica" abaixo —
+ * vale para QUALQUER terapia daquele profissional nesse dia, não só
+ * Musicoterapia: é um cadastro por profissional × dia, não por terapia. Sem
+ * override no banco, cai no comportamento antigo (só Musicoterapia).
+ *
+ * `lib/remuneracao/calculo.ts` chama esta função SEM overridesFromDB de
+ * propósito — é uma função pura sem acesso a banco (ver cabeçalho do
+ * arquivo), então o cálculo de remuneração continua só no fallback "de
+ * fábrica", isolado de edições feitas na tela de indicadores.
+ */
+export function getSlotCap(prof: string, esp: string, dow?: number, overridesFromDB?: CapacidadeOverrides): number {
+  if (dow !== undefined) {
+    const viaDB = overridesFromDB?.[normTxt(prof)]?.[dow]
+    if (viaDB !== undefined) return viaDB
+    if (normTxt(esp) === "musicoterapia") {
+      const capDia = capacidadeDeFabrica(prof, dow)
+      if (capDia !== undefined) return capDia
+    }
   }
   return capacidadePadraoEsp(esp)
 }
@@ -271,19 +324,20 @@ export function resumirJornadaAgenda(slotData: SlotData): string {
 
 // ─── TEXTO DE CAPACIDADE ──────────────────────────────────────────────────────
 
-export function regraMusicoterapiaTexto(prof: string): string {
-  const capDia = MUSICO_CAPAC_POR_DIA[normTxt(prof)]
-  if (!capDia) return "Musicoterapia: capacidade de 1 paciente por sessão."
-  const partes = ([1, 2, 3, 4, 5] as const)
-    .filter(d => capDia[d] !== undefined)
-    .map(d => `${DOW_ABBR[d]}: ${capDia[d]}`)
+export function regraMusicoterapiaTexto(prof: string, overridesFromDB?: CapacidadeOverrides): string {
+  const dows = diasComCapacidadeExplicita(prof, overridesFromDB)
+  if (!dows.length) return "Musicoterapia: capacidade de 1 paciente por sessão."
+  const partes = dows.map(d => `${DOW_ABBR[d]}: ${capacidadeEsperadaProfissionalDia(prof, d, overridesFromDB)}`)
   return `Musicoterapia — vagas simultâneas por dia: ${partes.join(" · ")}.`
 }
 
-export function regrasCapacidadeTexto(d: { terapiaDetails?: { terp: string }[]; prof: string }): string {
+export function regrasCapacidadeTexto(
+  d: { terapiaDetails?: { terp: string }[]; prof: string },
+  overridesFromDB?: CapacidadeOverrides,
+): string {
   const terps = d?.terapiaDetails?.map(t => t.terp) || []
   const partes: string[] = []
-  if (terps.includes("Musicoterapia")) partes.push(regraMusicoterapiaTexto(d.prof))
+  if (terps.includes("Musicoterapia")) partes.push(regraMusicoterapiaTexto(d.prof, overridesFromDB))
   if (terps.some(t => normTxt(t) === "aplicador aba (ef)" || normTxt(t) === "aplicador aba ef")) {
     partes.push("Aplicador ABA EF: capacidade de até 2 pacientes simultâneos por horário, aplicada em todos os horários da agenda.")
   }
@@ -381,13 +435,13 @@ export function filtrarOcupacaoPorUnidade(
 
 // ─── CÁLCULO SEMANAL ─────────────────────────────────────────────────────────
 
-export function calcularOcupacaoSemanal(slotData: SlotData, prof: string): OcupacaoAgregada {
+export function calcularOcupacaoSemanal(slotData: SlotData, prof: string, overridesFromDB?: CapacidadeOverrides): OcupacaoAgregada {
   const rawSlots: SlotNormalizado[] = []
 
   Object.values(slotData?.diasInfo || {}).forEach(di => {
     Object.values(di.slotDetails || {}).forEach(sd => {
       const dur = Math.max(((sd.fim || 0) - (sd.ini || 0)) / 60, 40 / 60)
-      const capPadrao = getSlotCap(prof, sd.terp, sd.dow)
+      const capPadrao = getSlotCap(prof, sd.terp, sd.dow, overridesFromDB)
       const etaAdminUnits = sd.technicalAg || 0
       const temPacienteReal = (sd.realAg || 0) > 0
       const temTecnico = etaAdminUnits > 0

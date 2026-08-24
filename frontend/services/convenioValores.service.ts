@@ -169,3 +169,43 @@ export async function excluirConvenioPacoteAvaliacao(id: string): Promise<void> 
   const { error } = await sb.from(TABLE_PACOTE_AVALIACAO).delete().eq("id", id)
   if (error) throw new Error(error.message)
 }
+
+// ─── LEITURA PARA CÁLCULO (sem exigir acesso a Cadastro de Valores) ──────────
+// As 3 funções acima (listarConvenioValores/ValoresPaciente/PacoteAvaliacao)
+// leem as tabelas cruas, com RLS restrita a admin/diretoria (ver
+// 20260724200000) — correto para a tela de cadastro, mas Simulação e Previsão
+// de Receitas usam esses mesmos valores só para CALCULAR uma projeção, sem
+// exigir acesso à tela de cadastro. As 3 funções abaixo chamam RPCs
+// SECURITY DEFINER (migration 20260824160000) que devolvem só os campos que
+// resolverValorSessao/faturamentoProjecao.ts consomem — sem observações nem
+// timestamps de auditoria — liberadas para quem acessa Simulação
+// (cronograma_solicitacoes) ou Previsão de Receitas
+// (indicadores_previsao_receitas). Os campos omitidos são preenchidos com
+// placeholders (nunca lidos por quem só calcula valor de sessão).
+
+export async function listarConvenioValoresCalculo(): Promise<ConvenioValor[]> {
+  const sb = getSupabaseClient()
+  const { data, error } = await sb.rpc("valores_calculo_convenio")
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Omit<ConvenioValor, "observacoes" | "created_at" | "updated_at">[])
+    .map(r => ({ ...r, observacoes: null, created_at: "", updated_at: "" }))
+}
+
+export async function listarConvenioValoresPacienteCalculo(): Promise<ConvenioValorPaciente[]> {
+  const sb = getSupabaseClient()
+  const { data, error } = await sb.rpc("valores_calculo_convenio_paciente")
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as Omit<ConvenioValorPaciente, "observacoes" | "created_at" | "updated_at">[])
+    .map(r => ({ ...r, observacoes: null, created_at: "", updated_at: "" }))
+}
+
+export async function listarConvenioPacoteAvaliacaoCalculo(): Promise<ConvenioPacoteAvaliacao[]> {
+  const sb = getSupabaseClient()
+  const { data, error } = await sb.rpc("valores_calculo_pacote_avaliacao")
+  if (error) throw new Error(error.message)
+  return ((data ?? []) as { convenio_nome: string; terapia_id: number; valor_a_vista: number }[])
+    .map(r => ({
+      id: "", convenio_nome: r.convenio_nome, terapia_id: r.terapia_id, terapia_nome: "",
+      valor_a_vista: r.valor_a_vista, valor_parcelado: null, observacoes: null, created_at: "", updated_at: "",
+    }))
+}

@@ -1,7 +1,7 @@
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { buscarGrade, fixMojibake } from "@/lib/grade/fonte"
 import { isFakePatient } from "@/lib/remuneracao/pacientes"
-import { PACS_BLOQUEIO_ADMIN } from "@/lib/cronograma/constants"
+import { PACS_BLOQUEIO_ADMIN, normTxt } from "@/lib/cronograma/constants"
 import type { Sala, SalaInput, AgendaSalaRow, AlocacaoSala, AlocacaoInput, SalaStatus, SalaTerapiaExclusiva, SalaTerapiaExclusivaInput } from "@/lib/cronograma/salasTypes"
 import { registrarAuditoriaSala } from "@/services/salasAuditoria.service"
 
@@ -82,13 +82,29 @@ export async function bloquearSala(id: string, bloquear: boolean): Promise<Sala>
  * lista de terapias do modal de alocação ao que essa pessoa realmente faz,
  * em vez de mostrar todas as terapias da clínica.
  */
-export async function buscarTerapiasDoProfissional(profissionalNome: string): Promise<string[]> {
+/** Cache em memória por sessão de página — `csv_grades_profissionais` só muda 1x/dia (sync noturno), então reabrir o modal pro mesmo profissional não precisa repetir a consulta. */
+const cacheTerapiasDoProfissional = new Map<string, Promise<string[]>>()
+
+export function buscarTerapiasDoProfissional(profissionalNome: string, profissionalId?: number | null): Promise<string[]> {
+  const chave = profissionalId != null ? `id:${profissionalId}` : `nome:${normTxt(profissionalNome)}`
+  const cache = cacheTerapiasDoProfissional.get(chave)
+  if (cache) return cache
+  const promessa = buscarTerapiasDoProfissionalSemCache(profissionalNome, profissionalId)
+  cacheTerapiasDoProfissional.set(chave, promessa)
+  promessa.catch(() => cacheTerapiasDoProfissional.delete(chave))
+  return promessa
+}
+
+async function buscarTerapiasDoProfissionalSemCache(profissionalNome: string, profissionalId?: number | null): Promise<string[]> {
   const nome = profissionalNome.trim()
   if (!nome) return []
   const data = await buscarGrade<Record<string, unknown>>({
     campos: "terapia_exibicao_nome, terapia_nome, paciente_nome, paciente_id",
     fonte: "base",
-    refinar: q => q.ilike("profissional_nome", nome),
+    // Filtra por profissional_id quando disponível: usa o índice existente
+    // (profissional_id, data) em vez de um ilike de nome sem índice, que
+    // varre a tabela inteira (~150 mil linhas) a cada seleção de profissional.
+    refinar: q => profissionalId != null ? q.eq("profissional_id", profissionalId) : q.ilike("profissional_nome", nome),
     // Esta é a única consulta da grade sem recorte de data, e o teto de 2.000 só
     // não truncava porque a tabela cobria 3 meses. Com o histórico de Jan–Jun
     // semeado ela passa a truncar — e sem ORDER BY o corte seria arbitrário,

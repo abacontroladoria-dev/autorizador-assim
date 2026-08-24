@@ -14,10 +14,9 @@ import { Loader2, Save, Trash2 } from "lucide-react"
 import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
 import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
 import {
-  criarAlocacao, atualizarAlocacao, excluirAlocacao, listarTodosProfissionaisSalas, buscarTerapiasDoProfissional,
-  listarSalas, listarExclusividadesTerapia, type ProfissionalOpcao,
+  criarAlocacao, atualizarAlocacao, excluirAlocacao, buscarTerapiasDoProfissional,
+  type ProfissionalOpcao,
 } from "@/services/salas.service"
-import { buscarOpcoesFiltro } from "@/services/agenda.service"
 import { normTxt, NOME_PARA_TERAPIA_ID, PACS_ADMIN } from "@/lib/cronograma/constants"
 import { construirIndiceExclusividadeTerapia, verificarExclusividade } from "@/lib/cronograma/exclusividadeTerapia"
 import type { Sala, SalaTerapiaExclusiva } from "@/lib/cronograma/salasTypes"
@@ -48,6 +47,11 @@ interface AlocarSessaoModalProps {
   ) => AlocacaoAtual | null
   onClose: () => void
   onSaved: () => void
+  /** Já carregados pela página (useOcupacaoSalas) — evita refazer essas consultas a cada abertura do modal. */
+  salasTodas: Sala[]
+  exclusividades: SalaTerapiaExclusiva[]
+  profissionaisTodos: ProfissionalOpcao[]
+  terapiasTodas: string[]
 }
 
 const INPUT_CLS = "w-full rounded-lg border border-border bg-card px-2.5 py-1.5 text-sm text-foreground"
@@ -63,16 +67,15 @@ export function AlocarSessaoModal({
   sala, dow, turno, diaLabel, alocacaoId,
   profissionalInicial = "", terapiaInicial = "",
   encontrarAlocacaoDoProfissional, onClose, onSaved,
+  salasTodas, exclusividades, profissionaisTodos, terapiasTodas: terapiasTodasBruto,
 }: AlocarSessaoModalProps) {
   const [profissional, setProfissional] = useState(profissionalInicial)
   const [profissionalId, setProfissionalId] = useState<number | null>(null)
-  const [profissionaisTodos, setProfissionaisTodos] = useState<ProfissionalOpcao[]>([])
   const [profissionalValido, setProfissionalValido] = useState(!!profissionalInicial)
   const [mostrarSugestoesProf, setMostrarSugestoesProf] = useState(false)
-  const [carregandoProf, setCarregandoProf] = useState(true)
 
   const [terapia, setTerapia] = useState(terapiaInicial ?? "")
-  const [terapiasTodas, setTerapiasTodas] = useState<string[]>([])
+  const terapiasTodas = useMemo(() => semTerapiaAdmin(terapiasTodasBruto.filter(Boolean)).sort(), [terapiasTodasBruto])
   const [terapiasDoProfissional, setTerapiasDoProfissional] = useState<string[] | null>(null)
   const [mostrarSugestoesTerapia, setMostrarSugestoesTerapia] = useState(false)
 
@@ -80,18 +83,8 @@ export function AlocarSessaoModal({
   const [error, setError] = useState<string | null>(null)
   const [confirmacao, setConfirmacao] = useState<ConfirmacaoPendente | null>(null)
 
-  useEffect(() => {
-    buscarOpcoesFiltro().then(op => setTerapiasTodas(semTerapiaAdmin(op.terapias.filter(Boolean)).sort()))
-  }, [])
-
   // "Exclusividade de salas com terapias" (ExclusividadeTerapiaModal) — bloqueia
   // ou avisa se a terapia digitada não combina com a sala deste slot.
-  const [exclusividades, setExclusividades] = useState<SalaTerapiaExclusiva[]>([])
-  const [salasTodas, setSalasTodas] = useState<Sala[]>([])
-  useEffect(() => {
-    Promise.all([listarExclusividadesTerapia(), listarSalas()]).then(([e, s]) => { setExclusividades(e); setSalasTodas(s) })
-  }, [])
-
   const indiceExclusividade = useMemo(() => construirIndiceExclusividadeTerapia(exclusividades), [exclusividades])
   const nomeDaSalaPorId = useMemo(() => {
     const mapa = new Map(salasTodas.map(s => [s.id, `${s.unidade_nome} · ${s.nome_exibicao}`]))
@@ -105,15 +98,9 @@ export function AlocarSessaoModal({
     return verificarExclusividade(sala.id, terapiaId, indiceExclusividade, nomeDaSalaPorId)
   }, [terapia, sala.id, indiceExclusividade, nomeDaSalaPorId])
 
-  // Lista completa carregada uma única vez ao abrir o modal — a lista fica
-  // sempre disponível (mesmo campo vazio) e o filtro conforme digita é feito
-  // aqui no cliente, sem round-trip ao banco a cada tecla.
-  useEffect(() => {
-    listarTodosProfissionaisSalas()
-      .then(setProfissionaisTodos)
-      .finally(() => setCarregandoProf(false))
-  }, [])
-
+  // Lista completa já vem carregada pela página (useOcupacaoSalas) — o
+  // filtro conforme digita é feito aqui no cliente, sem round-trip ao banco
+  // a cada tecla nem a cada abertura do modal.
   const profissionalSugestoes = profissional.trim().length
     ? profissionaisTodos.filter(p => normTxt(p.nome).includes(normTxt(profissional)))
     : profissionaisTodos
@@ -138,11 +125,11 @@ export function AlocarSessaoModal({
   useEffect(() => {
     if (!profissionalValido || !profissional.trim()) { setTerapiasDoProfissional(null); return }
     let cancelado = false
-    buscarTerapiasDoProfissional(profissional.trim()).then(lista => {
+    buscarTerapiasDoProfissional(profissional.trim(), profissionalId).then(lista => {
       if (!cancelado) setTerapiasDoProfissional(semTerapiaAdmin(lista))
     })
     return () => { cancelado = true }
-  }, [profissionalValido, profissional])
+  }, [profissionalValido, profissional, profissionalId])
 
   function handleProfissionalChange(valor: string) {
     setProfissional(valor)
@@ -301,15 +288,10 @@ export function AlocarSessaoModal({
           />
           {mostrarSugestoesProf && (
             <div className="absolute top-full z-10 mt-1 max-h-48 w-full overflow-auto rounded-lg border border-border bg-card shadow-lg">
-              {carregandoProf && (
-                <div className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-muted-foreground">
-                  <Loader2 size={12} className="animate-spin" /> Carregando profissionais...
-                </div>
-              )}
-              {!carregandoProf && profissionalSugestoes.length === 0 && (
+              {profissionalSugestoes.length === 0 && (
                 <div className="px-2.5 py-1.5 text-xs text-muted-foreground">Nenhum profissional encontrado.</div>
               )}
-              {!carregandoProf && profissionalSugestoes.slice(0, 30).map(opcao => (
+              {profissionalSugestoes.slice(0, 30).map(opcao => (
                 <button
                   key={opcao.nome}
                   type="button"

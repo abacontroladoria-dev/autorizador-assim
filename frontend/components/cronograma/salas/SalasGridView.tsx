@@ -16,9 +16,10 @@ import { profissionalBateComBusca } from "@/components/cronograma/salas/SalasFil
 import { tCor } from "@/lib/cronograma/constants"
 import { CAPACIDADE_LABEL_CURTO } from "@/lib/cronograma/salasTypes"
 import { useStatusLabels } from "@/hooks/useStatusLabels"
-import type { SalaComOcupacao, SlotOcupacaoSala, Sala } from "@/lib/cronograma/salasTypes"
+import type { SalaComOcupacao, SlotOcupacaoSala, Sala, SalaTerapiaExclusiva } from "@/lib/cronograma/salasTypes"
 import type { AlocacaoAtual } from "@/hooks/useOcupacaoSalas"
 import type { Tone } from "@/components/cronograma/ui/tones"
+import type { ProfissionalOpcao } from "@/services/salas.service"
 
 const DIAS = [
   { dow: 1, label: "Seg" },
@@ -64,9 +65,18 @@ interface SalasGridViewProps {
   buscaProfissional?: string
   /** Ids de sala com pelo menos uma regra em "Exclusividade de salas com terapias" — só pra exibir o selo ao lado do nome da sala. */
   salasComExclusividade: Set<string>
+  /** Cadastro completo de salas e regras de exclusividade — repassados ao AlocarSessaoModal para não recarregar o que a página já tem em memória. */
+  salasTodas: Sala[]
+  exclusividades: SalaTerapiaExclusiva[]
+  /** Profissionais e terapias já carregados pela página — o modal de alocação abre com essas listas prontas, sem round-trip extra. */
+  profissionaisTodos: ProfissionalOpcao[]
+  terapiasTodas: string[]
 }
 
-export function SalasGridView({ salas, onEditarSala, onIsolarSala, salaIsoladaId, encontrarAlocacaoDoProfissional, onRecarregar, buscaProfissional = "", salasComExclusividade }: SalasGridViewProps) {
+export function SalasGridView({
+  salas, onEditarSala, onIsolarSala, salaIsoladaId, encontrarAlocacaoDoProfissional, onRecarregar, buscaProfissional = "", salasComExclusividade,
+  salasTodas, exclusividades, profissionaisTodos, terapiasTodas,
+}: SalasGridViewProps) {
   const [modal, setModal] = useState<ModalState | null>(null)
 
   const salaRowRefs = useRef<Map<string, HTMLTableRowElement>>(new Map())
@@ -99,14 +109,30 @@ export function SalasGridView({ salas, onEditarSala, onIsolarSala, salaIsoladaId
   }
 
   return (
-    <div className="overflow-x-auto rounded-xl border border-border">
-      <table className="w-full border-collapse text-sm">
+    // Cabeçalho fixo (Sala/Turno/Seg.../Sex) via "position: sticky" dentro do
+    // PRÓPRIO scroll da tabela (max-height + overflow-auto aqui), não do
+    // scroll da página. Chegar a isso por tentativa e erro: coordenar dois
+    // sticky independentes — a barra de filtros fixa no topo da página e o
+    // <thead> fixo também no topo da página, com um offset em px medido via
+    // JS para não se sobreporem — quebra visualmente (testado: com
+    // border-collapse + rowSpan no corpo da tabela, o cabeçalho aparece
+    // deslocado por dentro das primeiras linhas em vez de ficar acima delas).
+    // Com o próprio contêiner da tabela definindo o scroll, o <thead> gruda
+    // em `top-0` relativo a ELE MESMO — nenhuma coordenação de altura entre
+    // componentes, nenhum bug de layout. A barra de filtros continua fixa no
+    // topo da página (sticky lá em page.tsx), agora sem relação com isto.
+    <div className="max-h-[65vh] overflow-auto rounded-xl border border-border">
+      <table className="w-full border-separate border-spacing-0 text-sm">
         <thead>
           <tr className="bg-muted/40">
-            <th className="sticky left-0 z-10 bg-muted/40 px-3 py-2 text-left text-xs font-bold uppercase text-muted-foreground">Sala</th>
-            <th className="w-10 border-l border-border bg-muted/40 px-1 py-2 text-center text-[10px] font-bold uppercase text-muted-foreground">Turno</th>
+            <th className="sticky left-0 top-0 z-30 border-b border-border bg-muted px-3 py-2 text-left text-xs font-bold uppercase text-muted-foreground">
+              Sala
+            </th>
+            <th className="sticky top-0 z-20 w-10 border-b border-l border-border bg-muted px-1 py-2 text-center text-[10px] font-bold uppercase text-muted-foreground">
+              Turno
+            </th>
             {DIAS.map(d => (
-              <th key={d.dow} className="border-l border-border px-2 py-2 text-center text-xs font-bold uppercase text-muted-foreground">
+              <th key={d.dow} className="sticky top-0 z-20 border-b border-l border-border bg-muted px-2 py-2 text-center text-xs font-bold uppercase text-muted-foreground">
                 {d.label}
               </th>
             ))}
@@ -209,6 +235,10 @@ export function SalasGridView({ salas, onEditarSala, onIsolarSala, salaIsoladaId
           encontrarAlocacaoDoProfissional={encontrarAlocacaoDoProfissional}
           onClose={() => setModal(null)}
           onSaved={onRecarregar}
+          salasTodas={salasTodas}
+          exclusividades={exclusividades}
+          profissionaisTodos={profissionaisTodos}
+          terapiasTodas={terapiasTodas}
         />
       )}
     </div>

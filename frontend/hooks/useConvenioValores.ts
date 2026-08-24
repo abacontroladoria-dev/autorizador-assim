@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import {
   listarConvenioValores, listarConvenioValoresPaciente, listarConvenioPacoteAvaliacao,
+  listarConvenioValoresCalculo, listarConvenioValoresPacienteCalculo, listarConvenioPacoteAvaliacaoCalculo,
   listarOpcoesAgenda,
   type OpcaoTerapia, type OpcaoPaciente,
 } from "@/services/convenioValores.service"
@@ -70,4 +71,56 @@ export function useConvenioValores(): UseConvenioValoresResult {
     regrasGerais, excecoesPaciente, pacotesAvaliacao, conveniosAgenda, terapiasAgenda, pacientesAgenda,
     loading, error, recarregar: () => setRefreshKey(k => k + 1),
   }
+}
+
+export interface UseConvenioValoresCalculoResult {
+  regrasGerais: ConvenioValor[]
+  excecoesPaciente: ConvenioValorPaciente[]
+  pacotesAvaliacao: ConvenioPacoteAvaliacao[]
+  loading: boolean
+  error: string | null
+}
+
+/**
+ * Mesmos valores de `useConvenioValores`, mas via RPC (`*Calculo`, migration
+ * 20260824160000) em vez da tabela crua — para telas de CÁLCULO (Simulação,
+ * Sugestões de Contratação, Previsão de Receitas) que não devem exigir acesso
+ * a Cadastro de Valores (restrito a admin/diretoria). Sem `conveniosAgenda`/
+ * `terapiasAgenda`/`pacientesAgenda` nem `recarregar`: essas telas só leem,
+ * não alimentam formulário de cadastro.
+ */
+export function useConvenioValoresCalculo(): UseConvenioValoresCalculoResult {
+  const [regrasGerais, setRegrasGerais] = useState<ConvenioValor[]>([])
+  const [excecoesPaciente, setExcecoesPaciente] = useState<ConvenioValorPaciente[]>([])
+  const [pacotesAvaliacao, setPacotesAvaliacao] = useState<ConvenioPacoteAvaliacao[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+
+    Promise.all([
+      listarConvenioValoresCalculo(),
+      listarConvenioValoresPacienteCalculo(),
+      listarConvenioPacoteAvaliacaoCalculo(),
+    ])
+      .then(([gerais, excecoes, pacotes]) => {
+        if (cancelled) return
+        setRegrasGerais(gerais)
+        setExcecoesPaciente(excecoes)
+        setPacotesAvaliacao(pacotes)
+        setLoading(false)
+      })
+      .catch(err => {
+        if (cancelled) return
+        setError(String(err?.message ?? err))
+        setLoading(false)
+      })
+
+    return () => { cancelled = true }
+  }, [])
+
+  return { regrasGerais, excecoesPaciente, pacotesAvaliacao, loading, error }
 }

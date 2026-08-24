@@ -20,10 +20,10 @@ import { DIAS_UTIL, estiloUnidade, unidadeAbrev } from "@/lib/cronograma/constan
 import { diaCurto, filtrarCapacidadeLivreReservada, fmtH, fmtName, fmtReal, pm, turnoFromHora, turnoNome } from "@/lib/cronograma/helpers"
 import { useGradeAgendamentos } from "@/hooks/useGradeAgendamentos"
 import { useOcupacaoSalas } from "@/hooks/useOcupacaoSalas"
-import { useConvenioValores } from "@/hooks/useConvenioValores"
+import { useConvenioValoresCalculo } from "@/hooks/useConvenioValores"
 import { useFeriados } from "@/hooks/useFeriados"
-import { useParametrosGerais } from "@/hooks/useParametrosGerais"
-import { useTaxasEspecialidade } from "@/hooks/useTaxasEspecialidade"
+import { useParametrosGeraisCalculo } from "@/hooks/useParametrosGerais"
+import { useTaxasEspecialidadeCalculo } from "@/hooks/useTaxasEspecialidade"
 import {
   calcularBreakEvenPJ, projetarMargemBreakEvenPJ, calcularBreakEvenAtendimento, projetarMargemBreakEvenAtendimento,
   CENARIOS_PERDA_PCT, ESPECIALIDADES_BREAK_EVEN_PJ, SEMANAS_POR_MES,
@@ -622,13 +622,13 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
   // (ver filtrarCapacidadeLivreReservada em helpers.ts).
   const cRows = useMemo(() => filtrarCapacidadeLivreReservada(cRowsBrutos), [cRowsBrutos])
   const { salasComOcupacao } = useOcupacaoSalas(refWeek.inicio, refWeek.fim)
-  const { regrasGerais, excecoesPaciente } = useConvenioValores()
+  const { regrasGerais, excecoesPaciente } = useConvenioValoresCalculo()
   const { feriados } = useFeriados()
-  const { parametros: parametrosGerais } = useParametrosGerais()
+  const { parametros: parametrosGerais } = useParametrosGeraisCalculo()
   const {
     taxas_pa: taxasPA,
     be_custo_mensal_pj: beCustoMensalPJ, be_capacidade_manha: beCapacidadeManha, be_capacidade_tarde: beCapacidadeTarde,
-  } = useTaxasEspecialidade()
+  } = useTaxasEspecialidadeCalculo()
   const [cenarioPerdaPct, setCenarioPerdaPct] = useState<CenarioPerdaPct>(20)
   // Mesma lista usada pelo painel de sugestões automáticas (useSugestoesContratacao.ts)
   // — sem isso, anexarSala aqui ignorava exclusividade obrigatória/preferencial e
