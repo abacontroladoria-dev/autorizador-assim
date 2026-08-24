@@ -4,9 +4,11 @@ import type {
   CartaoGrade,
   LinhaGrade,
   PlacarTuss,
+  VinculoAutorizacao,
 } from '../types'
-import type { EstadoAutorizacao } from './LinhaAutorizacao'
+import { situacaoComVinculo } from './cobertura'
 import { diaDoTimestamp, horaDoTimestamp } from './datas'
+import type { EstadoAutorizacao } from './vinculo'
 
 /** A faixa dos atendimentos cujo horário a origem não informou. Sempre a última. */
 const SEM_HORA = '—'
@@ -37,6 +39,10 @@ const SITUACOES_PENDENTES = new Set(['GLOSA'])
  */
 export function cartaoPendente(c: CartaoGrade): boolean {
   if (c.tipo === 'sessao') return c.semCobertura || SITUACOES_PENDENTES.has(c.situacao ?? '')
+  // Guia já triada (`vinculada`, `sem-sessao`) não é pendência por definição: a
+  // pergunta que a fila fazia — "que sessão esta guia cobre?" — foi respondida.
+  // Continua marcada quando estourou a cota, que é outro eixo: o excedente
+  // provoca a glosa 1601 esteja a guia triada ou não.
   return c.estado === 'sem-vinculo' || c.excedente
 }
 
@@ -97,6 +103,24 @@ function faixaDe(hora: string): string {
 }
 
 /**
+ * As triagens da Reconciliação, indexadas pelas duas pontas do mesmo fato.
+ *
+ * Dois mapas e não um: a guia precisa saber que sessão cobre, e a sessão precisa
+ * saber que guia a cobriu. Vêm de fora, do mesmo `autorizacoes_vinculos` que
+ * decide o `estado` da guia, para que o rótulo do cartão e a referência que ele
+ * imprime não possam discordar.
+ */
+export type Vinculos = {
+  /** `guia` → a triagem dela. Chave da guia vinculada e da descartada. */
+  porGuia: ReadonlyMap<string, VinculoAutorizacao>
+  /** `bloco_id` → a triagem que cobriu aquela sessão. Só `tipo = 'vinculo'`. */
+  porBloco: ReadonlyMap<string, VinculoAutorizacao>
+}
+
+/** O default: uma grade montada sem saber de triagem nenhuma. */
+export const SEM_VINCULOS: Vinculos = { porGuia: new Map(), porBloco: new Map() }
+
+/**
  * A semana do paciente como agenda: HORÁRIOS nas linhas, dias úteis nas colunas.
  *
  * O eixo vertical era o TUSS até 2026-08-21, e a troca não foi estética. A
@@ -132,6 +156,13 @@ function faixaDe(hora: string): string {
  * que cobriu. Repeti-la faria a mesma autorização aparecer duas vezes na semana
  * e inflaria visualmente uma cota que está correta.
  *
+ * A guia VINCULADA continua virando cartão, e a distinção não é caprichosa: o
+ * pareamento do banco não a moveu para dentro da sessão (a sessão coberta guarda
+ * a guia antiga, a glosada), então suprimi-la aqui faria a autorização que cobre
+ * o atendimento desaparecer da semana — e um vínculo recém-feito pareceria não
+ * ter acontecido. Ela aparece marcada como o que é, apontando a sessão que
+ * cobre; `vinculos` é o que dá ao cartão essa referência.
+ *
  * Duração não é representada porque não existe: `get_auditoria_assim` devolve
  * `hora_inicial` e não devolve hora final. Desenhar um bloco de 40 ou 60 minutos
  * aqui seria afirmar em pixels uma coisa que o dado não diz.
@@ -155,7 +186,8 @@ export function montarGrade(
     decorrida: (s: AuditoriaAssimItem) => boolean
     /** As guias que passaram da cota do TUSS. */
     excedentes: ReadonlySet<string>
-  }
+  },
+  vinculos: Vinculos = SEM_VINCULOS
 ): LinhaGrade[] {
   const diasValidos = new Set(dias)
   const terapiaDoTuss = new Map(placar.map((p) => [p.codigo_tuss, p.terapias]))
@@ -167,6 +199,7 @@ export function montarGrade(
     const dia = s.data_atendimento ?? ''
     if (!diasValidos.has(dia)) continue
     const hora = s.hora_inicial?.slice(0, 5) ?? SEM_HORA
+    const vinculo = vinculos.porBloco.get(s.bloco_id ?? '') ?? null
     lancados.push({
       dia,
       faixa: faixaDe(hora),
@@ -176,7 +209,11 @@ export function montarGrade(
         hora,
         codigo_tuss: s.codigo_tuss,
         guia: s.guia,
-        situacao: s.situacao,
+        // O ÚNICO ponto em que o vínculo entra na situação. Tudo o que o cartão
+        // e a gaveta leem sai daqui — cor, rótulo, ícone, badge, silhueta —, e
+        // por isso nenhum deles precisa saber que houve triagem. O valor cru
+        // fica em `origem.situacao`.
+        situacao: situacaoComVinculo(s.situacao, vinculo),
         terapia: s.terapias || nomeDaTerapia(s.codigo_tuss),
         legenda: s.profissionais ?? s.observacao ?? null,
         semCobertura: marcas.descoberta(s),
@@ -184,6 +221,7 @@ export function montarGrade(
         motivoBruto: s.descricao_erro ?? s.motivo_glosa,
         teve_token: s.teve_token,
         token: s.token,
+        vinculo,
         origem: s,
       },
     })
@@ -206,6 +244,7 @@ export function montarGrade(
         guia: a.guia,
         terapia: nomeDaTerapia(a.codigo_tuss),
         estado,
+        vinculo: vinculos.porGuia.get(a.guia) ?? null,
         excedente: marcas.excedentes.has(a.guia),
         status: a.status,
         descricao_erro: a.descricao_erro,

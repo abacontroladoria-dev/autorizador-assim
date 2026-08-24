@@ -257,6 +257,18 @@ export type CartaoGrade =
       teve_token: boolean | null
       token: string | null
       /**
+       * A guia que passou a cobrir esta sessão por triagem manual. Nula no caso
+       * normal, em que a cobertura saiu do pareamento posicional do banco.
+       *
+       * A RPC já reflete o vínculo na `situacao` (GLOSA_RESOLVIDA quando havia
+       * glosa, LIBERADA quando não havia), mas só isso não basta na grade: o
+       * segundo ramo é indistinguível de uma sessão liberada normalmente, e o
+       * primeiro não diz QUAL guia a cobriu. Sem esta referência a metade de cá
+       * do par ficava muda — a guia dizia que cobria uma sessão e a sessão não
+       * dizia que fora coberta.
+       */
+      vinculo: VinculoAutorizacao | null
+      /**
        * A linha da RPC, inteira, para o detalhamento do cartão.
        *
        * O cartão continua com os campos copiados acima porque é ele quem os
@@ -282,8 +294,14 @@ export type CartaoGrade =
        * fica nula, e o cartão mostra só o código.
        */
       terapia: string | null
-      /** Ver `EstadoAutorizacao` em reconciliacao/LinhaAutorizacao.tsx. */
-      estado: 'sem-vinculo' | 'fora-da-semana'
+      /** Ver `EstadoAutorizacao` em reconciliacao/vinculo.ts. */
+      estado: 'sem-vinculo' | 'vinculada' | 'sem-sessao' | 'fora-da-semana'
+      /**
+       * A triagem desta guia, quando ela já foi triada. É a fonte de `estado`
+       * nos dois desfechos (`vinculada`, `sem-sessao`) e do que o cartão e a
+       * gaveta imprimem sobre ela — a sessão coberta, quem decidiu e quando.
+       */
+      vinculo: VinculoAutorizacao | null
       /**
        * Esta liberação passou da cota do TUSS na semana. O "sobrando" da
        * listagem virado objeto, por atribuição posicional em `data_execucao` —
@@ -366,6 +384,37 @@ export type GuiaOrfa = {
   biofacial: string | null
   ordem_autorizacao: number | null
   sessoes_na_particao: number | null
+}
+
+/**
+ * O desfecho de uma triagem da Reconciliação, como `autorizacoes_vinculos` o
+ * guarda — e o dado que faltava para a tela saber que a ação aconteceu.
+ *
+ * Sem ele a grade lia o depois pelo que NÃO estava mais lá: a guia saía de
+ * `get_guias_orfas` e a tela concluía "não é órfã e não casa com sessão desta
+ * semana", que é literalmente o estado `fora-da-semana` — e o cartão da guia
+ * recém-vinculada aparecia rotulado "Outra semana", afirmando o contrário do que
+ * o operador acabara de fazer. Ausência não é veredito; o veredito mora aqui.
+ *
+ * A tabela é um livro de triagem manual (ordem de dezenas de linhas por mês), e
+ * por isso o cliente carrega as ATIVAS inteiras em vez de recortar por período:
+ * a janela de vínculo é de 7 dias retroativos e atravessa a virada do mês, então
+ * qualquer recorte por data deixaria de fora exatamente o vínculo que cruza a
+ * borda — que é o caso que esta tela existe para tratar.
+ */
+export type VinculoAutorizacao = {
+  id: string
+  /** A guia da ASSIM que foi triada. É a chave da triagem: uma ativa por guia. */
+  guia: string
+  /** `vinculo` = cobre `bloco_id`; `sem_sessao` = autorização extra, sem sessão. */
+  tipo: 'vinculo' | 'sem_sessao'
+  /** A sessão coberta. Sempre nula em `sem_sessao` (a constraint da tabela exige). */
+  bloco_id: string | null
+  /** A guia glosada que esta substituiu, congelada no momento do vínculo. */
+  guia_original: string | null
+  observacao: string | null
+  vinculado_por: string | null
+  vinculado_em: string | null
 }
 
 /** Uma sessão que a guia órfã selecionada poderia estar cobrindo. */

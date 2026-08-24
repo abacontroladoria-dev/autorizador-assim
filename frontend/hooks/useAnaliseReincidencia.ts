@@ -9,7 +9,7 @@ import {
   listarFaltasAuditoria,
   listarUnidadesPorPaciente,
 } from '@/services/auditoria-assim.service'
-import { listarGuiasOrfas } from '@/services/reconciliacao-assim.service'
+import { listarGuiasOrfas, listarVinculosAtivos } from '@/services/reconciliacao-assim.service'
 import type {
   AuditoriaAssimItem,
   AutorizacaoAssimSemana,
@@ -17,14 +17,21 @@ import type {
   GuiaOrfa,
   PacientePendencias,
   PlacarTuss,
+  VinculoAutorizacao,
 } from '@/components/auditoria-assim/types'
-import type { EstadoAutorizacao } from '@/components/auditoria-assim/reconciliacao/LinhaAutorizacao'
 import {
   SITUACOES_SEM_SESSAO,
+  guiasSubstituidas,
   sessaoDecorrida,
   sessaoSemCobertura,
 } from '@/components/auditoria-assim/reconciliacao/cobertura'
-import { cartaoPendente, montarGrade } from '@/components/auditoria-assim/reconciliacao/grade'
+import {
+  cartaoPendente,
+  montarGrade,
+  SEM_VINCULOS,
+  type Vinculos,
+} from '@/components/auditoria-assim/reconciliacao/grade'
+import type { EstadoAutorizacao } from '@/components/auditoria-assim/reconciliacao/vinculo'
 
 /**
  * Análise de reincidência — a cota do MÊS por TUSS, da clínica inteira.
@@ -241,7 +248,9 @@ export function agoraMenos30MinIso(): string {
 export function calcularPlacar(
   sessoes: AuditoriaAssimItem[],
   autorizacoes: AutorizacaoAssimSemana[],
-  cutoff: string
+  cutoff: string,
+  /** As triagens vivas, por bloco — ver `sessaoSemCobertura`. */
+  vinculosPorBloco: ReadonlyMap<string, VinculoAutorizacao> = new Map()
 ): PlacarTuss[] {
   const porTuss = new Map<string, PlacarTuss & { terapiasVistas: Set<string> }>()
 
@@ -274,7 +283,7 @@ export function calcularPlacar(
     if (SITUACOES_SEM_SESSAO.has(s.situacao ?? '')) continue
     item.agendadas += 1
     if (sessaoDecorrida(s, cutoff)) item.decorridas += 1
-    if (sessaoSemCobertura(s, cutoff)) item.faltante += 1
+    if (sessaoSemCobertura(s, cutoff, vinculosPorBloco)) item.faltante += 1
   }
 
   for (const a of autorizacoes) {
@@ -298,16 +307,30 @@ export function calcularPlacar(
  *
  * `ehOrfa` é injetado, e não decidido aqui, pelo motivo do cabeçalho: a
  * definição de órfã mora em `get_guias_orfas`.
+ *
+ * `substituidas` são as guias que uma triagem aposentou: a recusa (ou o
+ * cancelamento) daquela sessão foi coberta por uma autorização externa, e o par
+ * inteiro parou de pedir trabalho. Sem este conjunto, vincular uma guia baixava
+ * "sem vínculo" e "faltando" e deixava "glosas" de pé — a linha continuava na
+ * listagem, com uma pendência que a grade não conseguia mais apontar (a sessão
+ * virou GLOSA_RESOLVIDA e sumiu dos cartões marcados). O número dizia 1 e a
+ * faixa de semanas dizia "·", que é a divergência que esta tela existe para
+ * caçar, virada contra ela mesma.
+ *
+ * A guia substituída NÃO deixa de existir: ela continua no histórico, e a sessão
+ * continua dizendo GLOSA RESOLVIDA. O que ela deixa de ser é fila de trabalho.
  */
 export function calcularLedger(
   autorizacoes: AutorizacaoAssimSemana[],
-  ehOrfa: (guia: string) => boolean
+  ehOrfa: (guia: string) => boolean,
+  substituidas: ReadonlySet<string> = new Set()
 ) {
   let semVinculo = 0
   let glosas = 0
   let canceladas = 0
   for (const a of autorizacoes) {
     if (ehOrfa(a.guia)) semVinculo += 1
+    if (substituidas.has(a.guia)) continue
     if (autorizacaoCancelada(a.status)) canceladas += 1
     else if (!autorizacaoLiberada(a.status)) glosas += 1
   }
@@ -366,6 +389,38 @@ export function excedentesDoPlacar(
 }
 
 /**
+ * O destino de uma autorização, em cinco estados. Ver `EstadoAutorizacao`.
+ *
+ * A ordem é a precedência, e cada degrau existe por um motivo:
+ *
+ * 1. estar na fila de órfãs vence tudo, porque é a única afirmação que autoriza
+ *    ação — e a fila já exclui guia triada, então os dois primeiros degraus não
+ *    podem disputar a mesma guia;
+ * 2. a triagem manual vem antes do pareamento do banco porque ela é justamente
+ *    o que o pareamento NÃO consegue enxergar: vincular não move a guia para
+ *    dentro da sessão (a sessão coberta guarda a guia antiga), então perguntar
+ *    ao pareamento primeiro devolveria "não casa com nada" e a guia acabaria
+ *    rotulada "Outra semana" logo depois de alguém dizer o que ela cobre;
+ * 3. só então se pergunta se a guia encosta em alguma sessão que a pessoa vê.
+ *
+ * Função de módulo, e não um `useCallback` dentro do hook, porque as duas pontas
+ * precisam da MESMA resposta: a semana aberta e a varredura que conta os cartões
+ * de cada semana do mês (`marcadosDaSemana`). Duas cópias fariam a faixa do
+ * cabeçalho prometer um número e a grade desenhar outro.
+ */
+function estadoDeUmaGuia(
+  guia: string,
+  ehOrfa: (guia: string) => boolean,
+  vinculosPorGuia: ReadonlyMap<string, VinculoAutorizacao>,
+  pareadas: ReadonlySet<string>
+): EstadoAutorizacao {
+  if (ehOrfa(guia)) return 'sem-vinculo'
+  const vinculo = vinculosPorGuia.get(guia)
+  if (vinculo) return vinculo.tipo === 'vinculo' ? 'vinculada' : 'sem-sessao'
+  return pareadas.has(guia) ? 'pareada' : 'fora-da-semana'
+}
+
+/**
  * Quantos cartões marcados uma semana teria — montando a grade DE VERDADE.
  *
  * Podia ser uma soma esperta sobre o placar, e não é de propósito: a faixa de
@@ -379,21 +434,23 @@ function marcadosDaSemana(
   autorizacoes: AutorizacaoAssimSemana[],
   dias: string[],
   cutoff: string,
-  ehOrfa: (guia: string) => boolean
+  ehOrfa: (guia: string) => boolean,
+  vinculos: Vinculos
 ): number {
-  const placar = calcularPlacar(sessoes, autorizacoes, cutoff)
+  const placar = calcularPlacar(sessoes, autorizacoes, cutoff, vinculos.porBloco)
   const pareadas = new Set(sessoes.map((s) => s.guia).filter((g): g is string => !!g))
   const linhas = montarGrade(
     sessoes,
     autorizacoes,
-    (guia) => (ehOrfa(guia) ? 'sem-vinculo' : pareadas.has(guia) ? 'pareada' : 'fora-da-semana'),
+    (guia) => estadoDeUmaGuia(guia, ehOrfa, vinculos.porGuia, pareadas),
     dias,
     placar,
     {
-      descoberta: (s) => sessaoSemCobertura(s, cutoff),
+      descoberta: (s) => sessaoSemCobertura(s, cutoff, vinculos.porBloco),
       decorrida: (s) => sessaoDecorrida(s, cutoff),
       excedentes: excedentesDoPlacar(placar, autorizacoes),
-    }
+    },
+    vinculos
   )
   let total = 0
   for (const linha of linhas) {
@@ -425,6 +482,7 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   const [sessoes, setSessoes] = useState<AuditoriaAssimItem[]>([])
   const [autorizacoes, setAutorizacoes] = useState<AutorizacaoAssimSemana[]>([])
   const [orfasDaSemana, setOrfasDaSemana] = useState<Map<string, GuiaOrfa>>(() => new Map())
+  const [triagens, setTriagens] = useState<VinculoAutorizacao[]>([])
   const [unidades, setUnidades] = useState<Map<string, string>>(() => new Map())
   const [carregandoSemana, setCarregandoSemana] = useState(false)
   const [carregandoAutorizacoes, setCarregandoAutorizacoes] = useState(false)
@@ -445,6 +503,20 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
    * listagem que exclui gente de verdade sem dizer.
    */
   const [carregandoOrfas, setCarregandoOrfas] = useState(false)
+  /**
+   * A quarta carga: as triagens vivas da Reconciliação.
+   *
+   * Gateada junto com as outras três pela mesma lição de `carregandoOrfas`: sem
+   * ela a grade pintava a guia recém-vinculada como "Outra semana" e trocava o
+   * rótulo para "Vinculada" segundos depois, na frente de quem estava lendo — e
+   * as contagens saltavam junto, porque a guia substituída só sai do "glosas"
+   * quando esta lista chega.
+   *
+   * Não depende do mês (a tabela vem inteira, ver `listarVinculosAtivos`), então
+   * ela roda uma vez por montagem e nas recargas — navegar mês a mês não a
+   * repete.
+   */
+  const [carregandoVinculos, setCarregandoVinculos] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
   // Cada carga carrega seu número de série: resposta de mês antigo que chega
@@ -452,6 +524,7 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   const geracaoSemana = useRef(0)
   const geracaoAutorizacoes = useRef(0)
   const geracaoOrfas = useRef(0)
+  const geracaoVinculos = useRef(0)
 
   // ── O mês selecionado: fechado (dia 1 ao último) ou vigente (dia 1 a hoje) ─
   const mesFimEfetivo = useMemo(() => fimEfetivoDoMes(mesRef), [mesRef])
@@ -556,6 +629,30 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
     carregarOrfasDoMes()
   }, [carregarOrfasDoMes])
 
+  // ── As triagens vivas: o que já foi decidido sobre as guias ────────────
+  const carregarVinculos = useCallback(async () => {
+    const geracao = ++geracaoVinculos.current
+    setCarregandoVinculos(true)
+    try {
+      const lista = await listarVinculosAtivos()
+      if (geracao !== geracaoVinculos.current) return
+      setTriagens(lista)
+    } catch {
+      // Silencioso pelo mesmo critério das órfãs: sem esta lista a semana ainda
+      // diz a verdade sobre sessões e cota, e derrubar a tela por causa do
+      // rótulo de uma guia seria pior que perdê-lo. O que não se pode é pintar
+      // antes de saber — ver `carregandoVinculos`.
+      if (geracao !== geracaoVinculos.current) return
+      setTriagens([])
+    } finally {
+      if (geracao === geracaoVinculos.current) setCarregandoVinculos(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    carregarVinculos()
+  }, [carregarVinculos])
+
   // ── As autorizações do período, da clínica inteira e sem pareamento ────
   const carregarAutorizacoes = useCallback(async () => {
     const geracao = ++geracaoAutorizacoes.current
@@ -591,6 +688,25 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   }, [])
 
   const ehOrfa = useCallback((guia: string) => orfasDaSemana.has(guia), [orfasDaSemana])
+
+  /**
+   * As triagens indexadas pelas duas pontas do mesmo fato.
+   *
+   * Um mapa por guia (a guia precisa saber que sessão cobre) e um por bloco (a
+   * sessão precisa saber que guia a cobriu). Só `tipo = 'vinculo'` entra no
+   * segundo: a constraint da tabela garante `bloco_id` nulo em `sem_sessao`, e
+   * indexá-lo daria uma chave `''` cobrindo todo bloco sem id.
+   */
+  const vinculos = useMemo<Vinculos>(() => {
+    if (triagens.length === 0) return SEM_VINCULOS
+    const porGuia = new Map<string, VinculoAutorizacao>()
+    const porBloco = new Map<string, VinculoAutorizacao>()
+    for (const v of triagens) {
+      porGuia.set(v.guia, v)
+      if (v.tipo === 'vinculo' && v.bloco_id) porBloco.set(v.bloco_id, v)
+    }
+    return { porGuia, porBloco }
+  }, [triagens])
 
   // ── O recorte ESTRITO do mês, para a listagem (descarta os dias de sobra
   // que só existem para completar as semanas do modal nas pontas) ──────────
@@ -681,8 +797,17 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
 
     const linhas: PacientePendencias[] = []
     for (const item of mapa.values()) {
-      const placar = calcularPlacar(item.sessoes, item.autorizacoes, cutoff)
-      const ledger = calcularLedger(item.autorizacoes, ehOrfa)
+      const placar = calcularPlacar(item.sessoes, item.autorizacoes, cutoff, vinculos.porBloco)
+      // A glosa que um vínculo cobriu sai da conta aqui também, e não só no
+      // modal: a listagem é a fila de trabalho, e uma linha que insiste em "1
+      // glosa" depois de resolvida manda alguém abrir um paciente para não achar
+      // nada — a grade não tem mais o que apontar, porque a sessão virou
+      // GLOSA_RESOLVIDA.
+      const ledger = calcularLedger(
+        item.autorizacoes,
+        ehOrfa,
+        guiasSubstituidas(item.sessoes, vinculos.porBloco)
+      )
       let ultima: string | null = null
       for (const a of item.autorizacoes) {
         if (a.data_execucao && (!ultima || a.data_execucao > ultima)) ultima = a.data_execucao
@@ -703,7 +828,7 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
 
     // Ordem alfabética — o total de pendências deixou de decidir a ordem.
     return linhas.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
-  }, [sessoesDoMes, autorizacoesDoMes, unidades, ehOrfa, cutoff])
+  }, [sessoesDoMes, autorizacoesDoMes, unidades, ehOrfa, cutoff, vinculos])
 
   /**
    * A conferência da filipeta e a nota manual do paciente aberto.
@@ -876,11 +1001,14 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
       semanas.push({
         inicio: ini,
         fim: somarDias(ini, 4),
-        marcados: marcadosDaSemana(s, a, diasUteisDe(ini), cutoff, ehOrfa),
+        marcados: marcadosDaSemana(s, a, diasUteisDe(ini), cutoff, ehOrfa, vinculos),
       })
     }
     return semanas
-  }, [pacienteNome, carteirinhas, semanaMinima, semanaMaxima, recortarSemana, cutoff, ehOrfa])
+  }, [
+    pacienteNome, carteirinhas, semanaMinima, semanaMaxima, recortarSemana, cutoff, ehOrfa,
+    vinculos,
+  ])
 
   /** Vai direto para uma semana do mês, pela faixa do cabeçalho. */
   const irParaSemanaEm = useCallback((inicio: string) => setSemanaInicio(inicio), [])
@@ -911,7 +1039,7 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
       let comMarca: string | null = null
       for (let ini = semanaMinima; ini <= semanaMaxima; ini = somarDias(ini, 7)) {
         const { sessoes: s, autorizacoes: a } = recortarSemana(nome, chaves, ini)
-        if (marcadosDaSemana(s, a, diasUteisDe(ini), cutoff, ehOrfa) > 0) {
+        if (marcadosDaSemana(s, a, diasUteisDe(ini), cutoff, ehOrfa, vinculos) > 0) {
           comMarca = ini
           break
         }
@@ -920,33 +1048,29 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
       const alvo = comMarca ?? (dataReferencia ? segundaDe(dataReferencia.slice(0, 10)) : semanaMinima)
       setSemanaInicio(alvo < semanaMinima ? semanaMinima : alvo > semanaMaxima ? semanaMaxima : alvo)
     },
-    [semanaMinima, semanaMaxima, recortarSemana, cutoff, ehOrfa]
+    [semanaMinima, semanaMaxima, recortarSemana, cutoff, ehOrfa, vinculos]
   )
 
-  /**
-   * O destino de uma autorização, em três estados. Ver `EstadoAutorizacao`.
-   *
-   * A ordem importa: estar na fila de órfãs vence tudo, porque é a única
-   * afirmação que autoriza ação. Só depois se pergunta se a guia encosta em
-   * alguma sessão que a pessoa está vendo.
-   */
+  /** O destino de uma autorização da semana aberta. Ver `estadoDeUmaGuia`. */
   const estadoDaGuia = useCallback(
-    (guia: string): EstadoAutorizacao => {
-      if (orfasDaSemana.has(guia)) return 'sem-vinculo'
-      return guiasPareadas.has(guia) ? 'pareada' : 'fora-da-semana'
-    },
-    [orfasDaSemana, guiasPareadas]
+    (guia: string): EstadoAutorizacao =>
+      estadoDeUmaGuia(guia, ehOrfa, vinculos.porGuia, guiasPareadas),
+    [ehOrfa, vinculos, guiasPareadas]
   )
 
   const placar = useMemo(
-    () => calcularPlacar(sessoesPaciente, autorizacoesPaciente, cutoff),
-    [sessoesPaciente, autorizacoesPaciente, cutoff]
+    () => calcularPlacar(sessoesPaciente, autorizacoesPaciente, cutoff, vinculos.porBloco),
+    [sessoesPaciente, autorizacoesPaciente, cutoff, vinculos]
   )
 
-  /** Esta sessão já ocorreu e ninguém a liberou. Fechada sobre o `cutoff` vivo. */
+  /**
+   * Esta sessão já ocorreu e ninguém a liberou. Fechada sobre o `cutoff` vivo e
+   * sobre as triagens — uma sessão que o operador acabou de cobrir não pode
+   * continuar sendo cobrada enquanto a RPC não concorda (ver `situacaoComVinculo`).
+   */
   const sessaoDescoberta = useCallback(
-    (s: AuditoriaAssimItem) => sessaoSemCobertura(s, cutoff),
-    [cutoff]
+    (s: AuditoriaAssimItem) => sessaoSemCobertura(s, cutoff, vinculos.porBloco),
+    [cutoff, vinculos]
   )
 
   /**
@@ -996,7 +1120,15 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
    * de estado — senão escolher "glosas" zeraria os outros dois contadores e a
    * pessoa perderia a única visão do que mais há para olhar na semana.
    */
-  const ledger = useMemo(() => calcularLedger(autorizacoesPaciente, ehOrfa), [autorizacoesPaciente, ehOrfa])
+  const ledger = useMemo(
+    () =>
+      calcularLedger(
+        autorizacoesPaciente,
+        ehOrfa,
+        guiasSubstituidas(sessoesPaciente, vinculos.porBloco)
+      ),
+    [autorizacoesPaciente, ehOrfa, sessoesPaciente, vinculos]
+  )
 
   /** Guia liberada que casou com sessão da semana — a cobertura que de fato funcionou. */
   const utilizadas = useMemo(
@@ -1088,16 +1220,23 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
     guiasExcedentes,
     orfasDaSemana,
     /**
-     * As TRÊS cargas do mês juntas. Não exponha uma sozinha: gatear numa só foi
-     * exatamente o defeito que fazia a listagem pintar e se corrigir na frente
-     * de quem estava lendo (ver `carregandoOrfas`).
+     * As triagens vivas, indexadas por guia e por bloco. É o que a grade usa
+     * para desenhar as duas pontas do vínculo — ver `Vinculos`.
      */
-    loading: carregandoSemana || carregandoAutorizacoes || carregandoOrfas,
+    vinculos,
+    /**
+     * As QUATRO cargas juntas. Não exponha uma sozinha: gatear numa só foi
+     * exatamente o defeito que fazia a listagem pintar e se corrigir na frente
+     * de quem estava lendo (ver `carregandoOrfas` e `carregandoVinculos`).
+     */
+    loading:
+      carregandoSemana || carregandoAutorizacoes || carregandoOrfas || carregandoVinculos,
     erro,
     recarregar: useCallback(() => {
       carregarMes()
       carregarAutorizacoes()
       carregarOrfasDoMes()
-    }, [carregarMes, carregarAutorizacoes, carregarOrfasDoMes]),
+      carregarVinculos()
+    }, [carregarMes, carregarAutorizacoes, carregarOrfasDoMes, carregarVinculos]),
   }
 }
