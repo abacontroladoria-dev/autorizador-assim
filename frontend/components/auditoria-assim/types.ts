@@ -132,7 +132,7 @@ export type PlacarTuss = {
 export type EstadoFiltro = 'sem-vinculo' | 'glosa' | 'cancelada'
 
 /**
- * As cinco espécies de pendência que a listagem semanal indexa.
+ * As cinco espécies de pendência que a listagem mensal indexa.
  *
  * Três vêm do `ledger` (o estado das guias) e duas do `placar` (a cota por
  * TUSS). Ficam num tipo só porque a listagem as trata igual: cada uma é uma
@@ -141,7 +141,7 @@ export type EstadoFiltro = 'sem-vinculo' | 'glosa' | 'cancelada'
  */
 export type TipoPendencia = 'glosa' | 'cancelamento' | 'sem-vinculo' | 'faltando' | 'sobrando'
 
-/** Os cinco contadores de um paciente numa semana, mais o total. */
+/** Os cinco contadores de um paciente no mês, mais o total. */
 export type ContagemPendencias = Record<TipoPendencia, number> & { total: number }
 
 /**
@@ -150,8 +150,8 @@ export type ContagemPendencias = Record<TipoPendencia, number> & { total: number
  * `carteirinhas` é plural porque a carteirinha, e não o nome, é o que casa com
  * `autorizacoes_assim.matricula` — e um mesmo paciente pode ter mais de uma
  * (dependente que troca de titular, recadastro). Somá-las aqui é o que faz o
- * modal abrir sem buscar nada: ele recorta a semana já carregada por estas
- * chaves.
+ * modal abrir sem buscar nada: ele recorta, dentro do mês já carregado, a
+ * semana a mostrar por estas chaves.
  *
  * `pacienteIds` com mais de um elemento significa homônimos somados na mesma
  * linha — dito em tela, nunca escolhido em silêncio.
@@ -168,7 +168,7 @@ export type PacientePendencias = {
   unidade: string | null
   contagem: ContagemPendencias
   sessoes: number
-  /** Instante da autorização mais recente da semana. Não é a data do atendimento. */
+  /** Instante da autorização mais recente do mês. Não é a data do atendimento. */
   ultimaAutorizacao: string | null
 }
 

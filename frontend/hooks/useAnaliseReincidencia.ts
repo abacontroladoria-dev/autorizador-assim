@@ -20,17 +20,19 @@ import type {
 import type { EstadoAutorizacao } from '@/components/auditoria-assim/reconciliacao/LinhaAutorizacao'
 
 /**
- * Análise de reincidência — a cota semanal por TUSS, da clínica inteira.
+ * Análise de reincidência — a cota do MÊS por TUSS, da clínica inteira.
  *
  * O QUE ESTE HOOK RECONCILIA, e por que não dava para ler de uma tela só:
  *
  * A glosa 1601 ("REINCIDENCIA NO ATENDIMENTO") diz que a autorização daquele
- * TUSS passou da cota semanal. A auditoria não mostra isso por duas razões
- * somadas: ela é diária, e é dirigida pela SESSÃO. `get_auditoria_assim` pareia
- * sessão <-> autorização por (carteirinha, dia, TUSS, ordinal) num LEFT JOIN com
- * a `agenda_tita` à esquerda, então a autorização EXCEDENTE — a de
- * `ordem_autorizacao = 3` onde só existem 2 sessões — não casa com nada e não
- * aparece em tela nenhuma. É exatamente ela que estoura a cota.
+ * TUSS passou da cota semanal (o critério é semanal na ASSIM, a AGREGAÇÃO
+ * aqui é que passou a ser mensal — ver seção abaixo). A auditoria não mostra
+ * isso por duas razões somadas: ela é diária, e é dirigida pela SESSÃO.
+ * `get_auditoria_assim` pareia sessão <-> autorização por (carteirinha, dia,
+ * TUSS, ordinal) num LEFT JOIN com a `agenda_tita` à esquerda, então a
+ * autorização EXCEDENTE — a de `ordem_autorizacao = 3` onde só existem 2
+ * sessões — não casa com nada e não aparece em tela nenhuma. É exatamente ela
+ * que estoura a cota.
  *
  * Daí os dois lados vindo de fontes diferentes: as sessões pela RPC da auditoria
  * (que já traz TUSS pelo mapa único `tuss_da_sessao` e a situação de cada
@@ -39,7 +41,7 @@ import type { EstadoAutorizacao } from '@/components/auditoria-assim/reconciliac
  *
  * O pareamento em si NÃO é reimplementado aqui, em duas camadas:
  *
- * 1. quais guias casaram com sessão desta semana sai das próprias linhas da RPC;
+ * 1. quais guias casaram com sessão deste período sai das próprias linhas da RPC;
  * 2. quais guias PRECISAM de vínculo sai de `get_guias_orfas` — a mesma função
  *    que alimenta a listagem. A diferença entre as duas não é acadêmica: aquela
  *    exclui guia já triada ANTES do `row_number()`, exclui guia capturada pelo
@@ -47,18 +49,30 @@ import type { EstadoAutorizacao } from '@/components/auditoria-assim/reconciliac
  *    faria a tela oferecer vínculo para guia que a Conferência já casou — o erro
  *    que a migration 20260821040000 existe para não deixar acontecer.
  *
- * ── A SEMANA INTEIRA, E NÃO UM PACIENTE ────────────────────────────────────
+ * ── O MÊS INTEIRO NA LISTAGEM, A SEMANA NO MODAL ───────────────────────────
  *
- * As autorizações passaram a ser carregadas para a clínica toda (2026-08-21),
- * não mais por carteirinha. É o que permite a pergunta que a tela agora abre —
- * "quais pacientes precisam da minha atenção nesta semana?" — sem uma requisição
- * por paciente. O recorte de um paciente virou `useMemo` sobre o que já está em
- * memória: abrir alguém na listagem não busca nada, e os números do modal são,
- * por construção, os mesmos da linha que foi clicada.
+ * A listagem (2026-08-24) passou a responder "quem precisa da minha atenção
+ * NESTE MÊS?" — mês fechado é dia 1 ao último dia, mês vigente é dia 1 até
+ * hoje. O modal por paciente (a grade, seg a sex) continua semanal: é o que
+ * cabe numa grade de 5 colunas, e trocar de semana ali é gratuito — os dados
+ * do mês inteiro já estão em memória, então navegar semana dentro do modal
+ * não busca nada.
+ *
+ * Por isso o intervalo BUSCADO (`inicioFetch`/`fimFetch`) é um pouco mais
+ * largo que o mês estrito: da segunda da semana que contém o dia 1 até a
+ * sexta da semana que contém o fim efetivo do mês. É o que evita que a
+ * última (ou primeira) semana do modal apareça com buracos quando ela cruza
+ * a virada do mês. A listagem, por sua vez, filtra de volta para o intervalo
+ * estrito do mês antes de agregar por paciente — ver `sessoesDoMes` /
+ * `autorizacoesDoMes`.
  */
 
-/** Cota = quantas sessões daquele TUSS o paciente tem na semana. Falta não conta. */
+/** Cota = quantas sessões daquele TUSS o paciente tem no período. Falta não conta. */
 const SITUACOES_SEM_SESSAO = new Set(['FALTA', 'FALTA_TERAPEUTA'])
+
+/** Quantos dias buscar em paralelo por vez. Um mês cheio tem ~22 dias úteis —
+ *  disparar todos de uma vez seria 44 requisições simultâneas (2 por dia). */
+const DIAS_POR_LOTE = 6
 
 /**
  * Datas sempre em componentes locais.
@@ -104,6 +118,35 @@ export function somarDias(iso: string, dias: number): string {
   return comoIso(d)
 }
 
+/** Os dias úteis (seg a sex) entre `inicio` e `fimInclusivo`, os dois inclusos. */
+export function diasUteisDoIntervalo(inicio: string, fimInclusivo: string): string[] {
+  const dias: string[] = []
+  let atual = inicio
+  while (atual <= fimInclusivo) {
+    const dow = comoData(atual).getDay()
+    if (dow !== 0 && dow !== 6) dias.push(atual)
+    atual = somarDias(atual, 1)
+  }
+  return dias
+}
+
+/** "2026-08-17" ou "2026-08" → "2026-08-01". O dia 1 do mês de `iso`. */
+export function primeiroDiaDoMes(iso: string): string {
+  return `${iso.slice(0, 7)}-01`
+}
+
+/** O último dia do mês que começa em `mesInicioIso`. */
+export function ultimoDiaDoMes(mesInicioIso: string): string {
+  const [ano, mes] = mesInicioIso.split('-').map(Number)
+  // Dia 0 do mês seguinte é o último dia deste mês.
+  return comoIso(new Date(ano, mes, 0))
+}
+
+function somarMesesIso(mesIso: string, delta: number): string {
+  const [ano, mes] = mesIso.split('-').map(Number)
+  return comoIso(new Date(ano, mes - 1 + delta, 1))
+}
+
 /**
  * Só `Liberado` cru consumiu cota.
  *
@@ -122,31 +165,68 @@ export function autorizacaoCancelada(status: string | null): boolean {
   return (status ?? '').trim() === 'Liberado *'
 }
 
-/** Hoje em componentes locais — o corte de "sessão já decorrida". */
+/** Hoje em componentes locais. */
 function hojeIso(): string {
   return comoIso(new Date())
+}
+
+/** O fim efetivo de um mês: o último dia dele, ou hoje quando o mês é o corrente. */
+function fimEfetivoDoMes(mesIso: string): string {
+  const hoje = hojeIso()
+  return mesIso === primeiroDiaDoMes(hoje) ? hoje : ultimoDiaDoMes(mesIso)
+}
+
+/**
+ * Agora menos 30 minutos, em componentes locais: "2026-08-24T08:12".
+ *
+ * É o corte de "sessão já pendente" — uma sessão só entra na cota de
+ * "faltando" 30 minutos depois do horário marcado, nunca antes. Junto com
+ * `instanteSessao`, isto substitui o corte por DIA que a tela tinha antes:
+ * aquele já dizia "sessão de amanhã não é pendência", mas deixava a sessão de
+ * daqui a 10 minutos, hoje, contar como decorrida — o que este corte por
+ * INSTANTE corrige.
+ */
+export function agoraMenos30MinIso(): string {
+  const d = new Date()
+  d.setMinutes(d.getMinutes() - 30)
+  const ano = d.getFullYear()
+  const mes = String(d.getMonth() + 1).padStart(2, '0')
+  const dia = String(d.getDate()).padStart(2, '0')
+  const hora = String(d.getHours()).padStart(2, '0')
+  const min = String(d.getMinutes()).padStart(2, '0')
+  return `${ano}-${mes}-${dia}T${hora}:${min}`
+}
+
+/** O instante de uma sessão: "2026-08-24T08:00". Nulo quando falta a hora. */
+function instanteSessao(s: AuditoriaAssimItem): string | null {
+  if (!s.data_atendimento) return null
+  const hora = s.hora_inicial?.slice(0, 5)
+  return hora ? `${s.data_atendimento}T${hora}` : null
 }
 
 /**
  * O placar de um conjunto de sessões contra um conjunto de autorizações.
  *
- * Pura de propósito: a listagem chama isto uma vez por paciente da semana e o
- * modal chama de novo para o paciente aberto. Duas implementações fariam a
- * linha da tabela e o card do modal discordarem sobre o mesmo paciente — que é
- * exatamente o tipo de divergência que esta tela existe para caçar.
+ * Pura de propósito: a listagem chama isto uma vez por paciente do período e o
+ * modal chama de novo para o paciente aberto (e para a semana aberta). Duas
+ * implementações fariam a linha da tabela e o card do modal discordarem sobre
+ * o mesmo paciente — que é exatamente o tipo de divergência que esta tela
+ * existe para caçar.
  *
- * `limiteDecorrido` é a data (inclusiva) até a qual uma sessão já aconteceu.
- * Ela separa `agendadas` de `decorridas`, e a diferença não é cosmética: numa
- * segunda-feira, contar como "autorização faltando" tudo que a clínica ainda vai
- * atender de terça a sexta transformaria a semana inteira em pendência e a tela
- * em ruído. Só sessão já ocorrida pode estar sem cobertura.
+ * `cutoff` é o instante (inclusivo) até o qual uma sessão já aconteceu E já
+ * passou dos 30 minutos de tolerância. Ela separa `agendadas` de
+ * `decorridas`, e a diferença não é cosmética: contar como "autorização
+ * faltando" uma sessão que ainda vai acontecer — ou que aconteceu há 5
+ * minutos — transformaria a tela em ruído. Só sessão realmente decorrida
+ * pode estar sem cobertura.
  */
 export function calcularPlacar(
   sessoes: AuditoriaAssimItem[],
   autorizacoes: AutorizacaoAssimSemana[],
-  limiteDecorrido: string
+  cutoff: string
 ): PlacarTuss[] {
   const porTuss = new Map<string, PlacarTuss & { terapiasVistas: Set<string> }>()
+  const hoje = cutoff.slice(0, 10)
 
   const entrada = (codigo: string | null) => {
     const chave = codigo ?? '—'
@@ -173,10 +253,15 @@ export function calcularPlacar(
     const item = entrada(s.codigo_tuss)
     if (s.terapias) item.terapiasVistas.add(s.terapias)
     // Sessão com falta não aconteceu, então não é cota — e autorizar em cima
-    // dela é justamente um dos jeitos de estourar a semana.
+    // dela é justamente um dos jeitos de estourar a cota.
     if (SITUACOES_SEM_SESSAO.has(s.situacao ?? '')) continue
     item.agendadas += 1
-    if ((s.data_atendimento ?? '') <= limiteDecorrido) item.decorridas += 1
+    const instante = instanteSessao(s)
+    // Sem hora, o critério cai para o mesmo corte por dia de antes, mas
+    // estrito: nunca conta o próprio dia, porque não há como saber se os 30
+    // minutos já passaram.
+    const decorrida = instante !== null ? instante <= cutoff : (s.data_atendimento ?? '') < hoje
+    if (decorrida) item.decorridas += 1
   }
 
   for (const a of autorizacoes) {
@@ -217,7 +302,7 @@ export function calcularLedger(
   return { semVinculo, glosas, canceladas }
 }
 
-/** As cinco espécies de pendência, somadas. O total é o que ordena a listagem. */
+/** As cinco espécies de pendência, somadas. */
 export function contarPendencias(
   placar: PlacarTuss[],
   ledger: { semVinculo: number; glosas: number; canceladas: number }
@@ -242,9 +327,11 @@ export function contarPendencias(
 }
 
 export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: string | null) {
+  const [mesRef, setMesRef] = useState(() => primeiroDiaDoMes(dataInicial))
   const [semanaInicio, setSemanaInicio] = useState(() => segundaDe(dataInicial))
   const [tussFiltro, setTussFiltro] = useState<string | null>(null)
   const [estadoFiltro, setEstadoFiltro] = useState<EstadoFiltro | null>(null)
+  const [cutoff, setCutoff] = useState(() => agoraMenos30MinIso())
 
   /**
    * O paciente aberto no modal.
@@ -253,7 +340,7 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
    * a sessão se acha pelo nome (é o que a RPC devolve), e a autorização se acha
    * pela carteirinha (é o que `autorizacoes_assim.matricula` guarda). As
    * carteirinhas vindas de fora são um ponto de partida — o recorte soma a elas
-   * as que a própria semana descobrir.
+   * as que o próprio período descobrir.
    */
   const [selecionado, setSelecionado] = useState<{ nome: string; carteirinhas: string[] } | null>(
     pacienteInicial ? { nome: pacienteInicial, carteirinhas: [] } : null
@@ -267,14 +354,27 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   const [carregandoAutorizacoes, setCarregandoAutorizacoes] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
-  // Cada carga carrega seu número de série: resposta de semana antiga que chega
-  // atrasada não sobrescreve a atual.
+  // Cada carga carrega seu número de série: resposta de mês antigo que chega
+  // atrasada não sobrescreve o atual.
   const geracaoSemana = useRef(0)
   const geracaoAutorizacoes = useRef(0)
   const geracaoOrfas = useRef(0)
 
-  /** Reposiciona a análise — semana, paciente e carteirinha de uma vez. */
+  // ── O mês selecionado: fechado (dia 1 ao último) ou vigente (dia 1 a hoje) ─
+  const mesFimEfetivo = useMemo(() => fimEfetivoDoMes(mesRef), [mesRef])
+  const mesAtual = useMemo(() => primeiroDiaDoMes(hojeIso()), [])
+  const podeAvancarMes = mesRef < mesAtual
+
+  // ── O intervalo BUSCADO: um pouco mais largo que o mês, para o modal poder
+  // navegar semana a semana sem buracos nas pontas. ──────────────────────────
+  const inicioFetch = useMemo(() => segundaDe(mesRef), [mesRef])
+  const fimFetch = useMemo(() => somarDias(segundaDe(mesFimEfetivo), 4), [mesFimEfetivo])
+  const semanaMinima = inicioFetch
+  const semanaMaxima = useMemo(() => segundaDe(fimFetch), [fimFetch])
+
+  /** Reposiciona a análise — mês, semana, paciente e carteirinha de uma vez. */
   const reabrirEm = useCallback((data: string, paciente: string | null, carteirinha: string | null) => {
+    setMesRef(primeiroDiaDoMes(data))
     setSemanaInicio(segundaDe(data))
     setTussFiltro(null)
     setEstadoFiltro(null)
@@ -282,28 +382,64 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
     setSelecionado(paciente ? { nome: paciente, carteirinhas: carteirinha ? [carteirinha] : [] } : null)
   }, [])
 
-  const escolherPaciente = useCallback((nome: string | null, carteirinhas: string[] = []) => {
+  /**
+   * Abre um paciente da listagem mensal no modal.
+   *
+   * `dataReferencia` (tipicamente a última autorização do paciente no mês,
+   * já disponível na linha da listagem) posiciona a semana do modal onde a
+   * pendência de fato está — sem isso, um paciente cuja pendência é da
+   * primeira semana do mês abriria mostrando a semana corrente, vazia, e a
+   * listagem pareceria estar mentindo sobre o que acabou de ser clicado.
+   */
+  const escolherPaciente = useCallback(
+    (nome: string | null, carteirinhas: string[] = [], dataReferencia?: string | null) => {
+      setTussFiltro(null)
+      setEstadoFiltro(null)
+      setSelecionado(nome ? { nome, carteirinhas } : null)
+      if (nome && dataReferencia) {
+        const alvo = segundaDe(dataReferencia.slice(0, 10))
+        setSemanaInicio(alvo < semanaMinima ? semanaMinima : alvo > semanaMaxima ? semanaMaxima : alvo)
+      }
+    },
+    [semanaMinima, semanaMaxima]
+  )
+
+  /** Troca de mês pela listagem — nunca vai além do mês corrente. */
+  const irParaMesRef = useCallback((mesAlvoBruto: string) => {
+    const hoje = hojeIso()
+    const mesAtualIso = primeiroDiaDoMes(hoje)
+    const alvo = mesAlvoBruto > mesAtualIso ? mesAtualIso : mesAlvoBruto
+    setMesRef(alvo)
+    const fim = fimEfetivoDoMes(alvo)
+    // A semana do modal acompanha o mês: a de hoje quando hoje cai dentro
+    // dele, senão a primeira semana do mês.
+    setSemanaInicio(hoje >= alvo && hoje <= fim ? segundaDe(hoje) : segundaDe(alvo))
     setTussFiltro(null)
     setEstadoFiltro(null)
-    setSelecionado(nome ? { nome, carteirinhas } : null)
   }, [])
 
-  // ── As sessões da semana ───────────────────────────────────────────────────
-  // 5 dias em paralelo em vez de uma chamada de `get_auditoria_assim_periodo`
-  // sobre a semana: a semana inteira da clínica encosta no teto de linhas que o
-  // PostgREST aplica por resposta, e um corte ali seria silencioso. Por dia, cada
-  // resposta fica do tamanho que a página já exercita — e as faltas entram, que a
-  // RPC de auditoria não traz e que importam para a contagem da cota.
-  const carregarSemana = useCallback(async () => {
+  // ── As sessões do período ──────────────────────────────────────────────
+  // Por dia, em vez de uma chamada de `get_auditoria_assim_periodo` sobre o
+  // intervalo: um mês inteiro da clínica encosta no teto de linhas que o
+  // PostgREST aplica por resposta, e um corte ali seria silencioso. Em lotes
+  // de `DIAS_POR_LOTE` para não abrir dezenas de requisições simultâneas — e
+  // as faltas entram, que a RPC de auditoria não traz e que importam para a
+  // contagem da cota.
+  const carregarMes = useCallback(async () => {
     const geracao = ++geracaoSemana.current
     setCarregandoSemana(true)
     setErro(null)
     try {
-      const dias = diasUteisDe(semanaInicio)
-      const respostas = await Promise.all(
-        dias.map((dia) => Promise.all([listarAuditoriaAssim(dia), listarFaltasAuditoria(dia)]))
-      )
-      if (geracao !== geracaoSemana.current) return
+      const dias = diasUteisDoIntervalo(inicioFetch, fimFetch)
+      const respostas: [AuditoriaAssimItem[], AuditoriaAssimItem[]][] = []
+      for (let i = 0; i < dias.length; i += DIAS_POR_LOTE) {
+        const fatia = dias.slice(i, i + DIAS_POR_LOTE)
+        const parcial = await Promise.all(
+          fatia.map((dia) => Promise.all([listarAuditoriaAssim(dia), listarFaltasAuditoria(dia)]))
+        )
+        if (geracao !== geracaoSemana.current) return
+        respostas.push(...parcial)
+      }
 
       const vistos = new Set<string | null>()
       const unicos: AuditoriaAssimItem[] = []
@@ -314,23 +450,26 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
         }
       }
       setSessoes(unicos)
+      // Recomputa o corte de 30 min junto com a carga: quem clica "Atualizar"
+      // não deve esperar o próximo tick do relógio para ver o efeito.
+      setCutoff(agoraMenos30MinIso())
     } catch {
       if (geracao !== geracaoSemana.current) return
-      setErro('Não foi possível carregar o cronograma desta semana.')
+      setErro('Não foi possível carregar o cronograma deste mês.')
     } finally {
       if (geracao === geracaoSemana.current) setCarregandoSemana(false)
     }
-  }, [semanaInicio])
+  }, [inicioFetch, fimFetch])
 
   useEffect(() => {
-    carregarSemana()
-  }, [carregarSemana])
+    carregarMes()
+  }, [carregarMes])
 
-  // ── A fila de órfãs recortada nesta semana ─────────────────────────────────
-  const carregarOrfasDaSemana = useCallback(async () => {
+  // ── A fila de órfãs recortada neste período ────────────────────────────
+  const carregarOrfasDoMes = useCallback(async () => {
     const geracao = ++geracaoOrfas.current
     try {
-      const lista = await listarGuiasOrfas(semanaInicio, somarDias(semanaInicio, 4))
+      const lista = await listarGuiasOrfas(inicioFetch, fimFetch)
       if (geracao !== geracaoOrfas.current) return
       setOrfasDaSemana(new Map(lista.map((g) => [g.guia, g])))
     } catch {
@@ -340,49 +479,65 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
       if (geracao !== geracaoOrfas.current) return
       setOrfasDaSemana(new Map())
     }
-  }, [semanaInicio])
+  }, [inicioFetch, fimFetch])
 
   useEffect(() => {
-    carregarOrfasDaSemana()
-  }, [carregarOrfasDaSemana])
+    carregarOrfasDoMes()
+  }, [carregarOrfasDoMes])
 
-  // ── As autorizações da semana, da clínica inteira e sem pareamento ─────────
+  // ── As autorizações do período, da clínica inteira e sem pareamento ────
   const carregarAutorizacoes = useCallback(async () => {
     const geracao = ++geracaoAutorizacoes.current
     setCarregandoAutorizacoes(true)
     try {
-      const fimExclusivo = somarDias(semanaInicio, 5)
+      const fimExclusivo = somarDias(fimFetch, 1)
       const [dados, mapaUnidades] = await Promise.all([
-        listarAutorizacoesAssimSemana(null, semanaInicio, fimExclusivo),
-        listarUnidadesPorPaciente(semanaInicio, somarDias(semanaInicio, 4)),
+        listarAutorizacoesAssimSemana(null, inicioFetch, fimExclusivo),
+        listarUnidadesPorPaciente(inicioFetch, fimFetch),
       ])
       if (geracao !== geracaoAutorizacoes.current) return
       setAutorizacoes(dados)
       setUnidades(mapaUnidades)
     } catch {
       if (geracao !== geracaoAutorizacoes.current) return
-      setErro('Não foi possível carregar as autorizações desta semana.')
+      setErro('Não foi possível carregar as autorizações deste mês.')
     } finally {
       if (geracao === geracaoAutorizacoes.current) setCarregandoAutorizacoes(false)
     }
-  }, [semanaInicio])
+  }, [inicioFetch, fimFetch])
 
   useEffect(() => {
     carregarAutorizacoes()
   }, [carregarAutorizacoes])
 
-  // O corte de "já aconteceu". Fixo por semana, não por render: recalculá-lo a
-  // cada render faria a virada da meia-noite mudar números no meio de uma leitura.
-  const limiteDecorrido = useMemo(() => {
-    const fimDaSemana = somarDias(semanaInicio, 4)
-    const hoje = hojeIso()
-    return hoje < fimDaSemana ? hoje : fimDaSemana
-  }, [semanaInicio])
+  // ── O relógio dos 30 minutos ────────────────────────────────────────────
+  // Puramente local: recalcula sobre o que já está em memória, sem tocar a
+  // rede. É o que faz uma sessão virar "pendente" sozinha enquanto a tela
+  // fica aberta, sem exigir um F5.
+  useEffect(() => {
+    const id = setInterval(() => setCutoff(agoraMenos30MinIso()), 60_000)
+    return () => clearInterval(id)
+  }, [])
 
   const ehOrfa = useCallback((guia: string) => orfasDaSemana.has(guia), [orfasDaSemana])
 
+  // ── O recorte ESTRITO do mês, para a listagem (descarta os dias de sobra
+  // que só existem para completar as semanas do modal nas pontas) ──────────
+  const sessoesDoMes = useMemo(
+    () => sessoes.filter((s) => (s.data_atendimento ?? '') >= mesRef && (s.data_atendimento ?? '') <= mesFimEfetivo),
+    [sessoes, mesRef, mesFimEfetivo]
+  )
+  const autorizacoesDoMes = useMemo(
+    () =>
+      autorizacoes.filter((a) => {
+        const dia = (a.data_execucao ?? '').slice(0, 10)
+        return dia >= mesRef && dia <= mesFimEfetivo
+      }),
+    [autorizacoes, mesRef, mesFimEfetivo]
+  )
+
   // ── A listagem: um paciente por linha, com as cinco pendências ─────────────
-  const pacientesDaSemana = useMemo<PacientePendencias[]>(() => {
+  const pacientesDoMes = useMemo<PacientePendencias[]>(() => {
     type Acumulado = {
       chave: string
       nome: string
@@ -399,7 +554,7 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
     // de faltas não a devolve), então o nome é a ponte — construída a partir das
     // sessões que TÊM carteirinha antes de qualquer agrupamento.
     const carteirinhaPorNome = new Map<string, string>()
-    for (const s of sessoes) {
+    for (const s of sessoesDoMes) {
       if (s.paciente_nome && s.carteirinha && !carteirinhaPorNome.has(s.paciente_nome)) {
         carteirinhaPorNome.set(s.paciente_nome, s.carteirinha)
       }
@@ -423,7 +578,7 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
       return atual
     }
 
-    for (const s of sessoes) {
+    for (const s of sessoesDoMes) {
       const nome = s.paciente_nome ?? '(sem nome)'
       const carteirinha = s.carteirinha ?? carteirinhaPorNome.get(nome) ?? null
       const item = abrir(carteirinha ?? `nome:${nome}`, nome)
@@ -440,8 +595,8 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
       for (const c of item.carteirinhas) porCarteirinha.set(c, item)
     }
 
-    for (const a of autorizacoes) {
-      // Guia de paciente sem sessão nenhuma na semana abre linha própria: é
+    for (const a of autorizacoesDoMes) {
+      // Guia de paciente sem sessão nenhuma no mês abre linha própria: é
       // exatamente o caso de "autorização sobrando" que nenhuma tela mostrava.
       const alvo = a.matricula ? porCarteirinha.get(a.matricula) : undefined
       const item =
@@ -455,7 +610,7 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
 
     const linhas: PacientePendencias[] = []
     for (const item of mapa.values()) {
-      const placar = calcularPlacar(item.sessoes, item.autorizacoes, limiteDecorrido)
+      const placar = calcularPlacar(item.sessoes, item.autorizacoes, cutoff)
       const ledger = calcularLedger(item.autorizacoes, ehOrfa)
       let ultima: string | null = null
       for (const a of item.autorizacoes) {
@@ -475,26 +630,26 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
       })
     }
 
-    return linhas.sort(
-      (a, b) => b.contagem.total - a.contagem.total || a.nome.localeCompare(b.nome, 'pt-BR')
-    )
-  }, [sessoes, autorizacoes, unidades, ehOrfa, limiteDecorrido])
+    // Ordem alfabética — o total de pendências deixou de decidir a ordem.
+    return linhas.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
+  }, [sessoesDoMes, autorizacoesDoMes, unidades, ehOrfa, cutoff])
 
-  /** As unidades que a semana de fato tem — a lista do filtro, sem inventar opção. */
-  const unidadesDaSemana = useMemo(
+  /** As unidades que o mês de fato tem — a lista do filtro, sem inventar opção. */
+  const unidadesDoMes = useMemo(
     () =>
-      [...new Set(pacientesDaSemana.map((p) => p.unidade).filter((u): u is string => !!u))].sort(
+      [...new Set(pacientesDoMes.map((p) => p.unidade).filter((u): u is string => !!u))].sort(
         (a, b) => a.localeCompare(b, 'pt-BR')
       ),
-    [pacientesDaSemana]
+    [pacientesDoMes]
   )
 
-  // ── O recorte do paciente aberto ──────────────────────────────────────────
+  // ── O recorte do paciente aberto, na SEMANA do modal ──────────────────────
   const pacienteNome = selecionado?.nome ?? null
+  const semanaFim = somarDias(semanaInicio, 4)
 
   const linhaSelecionada = useMemo(
-    () => (pacienteNome ? pacientesDaSemana.find((p) => p.nome === pacienteNome) ?? null : null),
-    [pacientesDaSemana, pacienteNome]
+    () => (pacienteNome ? pacientesDoMes.find((p) => p.nome === pacienteNome) ?? null : null),
+    [pacientesDoMes, pacienteNome]
   )
 
   const carteirinhas = useMemo(() => {
@@ -506,21 +661,30 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   const sessoesPaciente = useMemo(() => {
     if (!pacienteNome) return []
     return sessoes
-      .filter((s) => s.paciente_nome === pacienteNome)
+      .filter(
+        (s) =>
+          s.paciente_nome === pacienteNome &&
+          (s.data_atendimento ?? '') >= semanaInicio &&
+          (s.data_atendimento ?? '') <= semanaFim
+      )
       .sort(
         (a, b) =>
           (a.data_atendimento ?? '').localeCompare(b.data_atendimento ?? '') ||
           (a.hora_inicial ?? '').localeCompare(b.hora_inicial ?? '')
       )
-  }, [sessoes, pacienteNome])
+  }, [sessoes, pacienteNome, semanaInicio, semanaFim])
 
   const autorizacoesPaciente = useMemo(() => {
     if (!pacienteNome || carteirinhas.length === 0) return []
     const chaves = new Set(carteirinhas)
     return autorizacoes
-      .filter((a) => !!a.matricula && chaves.has(a.matricula))
+      .filter((a) => {
+        if (!a.matricula || !chaves.has(a.matricula)) return false
+        const dia = (a.data_execucao ?? '').slice(0, 10)
+        return dia >= semanaInicio && dia <= semanaFim
+      })
       .sort((a, b) => (a.data_execucao ?? '').localeCompare(b.data_execucao ?? ''))
-  }, [autorizacoes, pacienteNome, carteirinhas])
+  }, [autorizacoes, pacienteNome, carteirinhas, semanaInicio, semanaFim])
 
   // Nome de paciente é a chave da busca, mas não é identidade. Se duas pessoas
   // dividem o nome, dizer isso é melhor que escolher uma em silêncio.
@@ -554,8 +718,8 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   )
 
   const placar = useMemo(
-    () => calcularPlacar(sessoesPaciente, autorizacoesPaciente, limiteDecorrido),
-    [sessoesPaciente, autorizacoesPaciente, limiteDecorrido]
+    () => calcularPlacar(sessoesPaciente, autorizacoesPaciente, cutoff),
+    [sessoesPaciente, autorizacoesPaciente, cutoff]
   )
 
   const sessoesVisiveis = useMemo(
@@ -606,25 +770,36 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   )
 
   return {
+    // ── Mês: a listagem ──────────────────────────────────────────────────
+    mesRef,
+    mesFimEfetivo,
+    mesAtual,
+    podeAvancarMes,
+    irParaMes: (delta: number) => irParaMesRef(somarMesesIso(mesRef, delta)),
+    irParaMesData: (novoMes: string) => irParaMesRef(primeiroDiaDoMes(novoMes)),
+    pacientesDoMes,
+    unidadesDoMes,
+
+    // ── Semana: o modal do paciente, sem novo fetch ao navegar ────────────
     semanaInicio,
-    semanaFim: somarDias(semanaInicio, 4),
-    irParaSemana: (delta: number) => {
-      setSemanaInicio((atual) => somarDias(atual, delta * 7))
-      setTussFiltro(null)
-      setEstadoFiltro(null)
-    },
-    irParaData: (data: string) => {
-      setSemanaInicio(segundaDe(data))
-      setTussFiltro(null)
-      setEstadoFiltro(null)
-    },
-    /** A semana que contém hoje. Usada pelo botão "hoje" do cabeçalho. */
+    semanaFim,
     semanaAtual: segundaDe(hojeIso()),
+    podeSemanaAnterior: semanaInicio > semanaMinima,
+    podeProximaSemana: semanaInicio < semanaMaxima,
+    irParaSemana: (delta: number) => {
+      setSemanaInicio((atual) => {
+        const proximo = somarDias(atual, delta * 7)
+        if (proximo < semanaMinima) return semanaMinima
+        if (proximo > semanaMaxima) return semanaMaxima
+        return proximo
+      })
+      setTussFiltro(null)
+      setEstadoFiltro(null)
+    },
+
     pacienteNome,
     escolherPaciente,
     reabrirEm,
-    pacientesDaSemana,
-    unidadesDaSemana,
     /** A linha da listagem do paciente aberto — plano, unidade e contagens. */
     linhaSelecionada,
     idsDoPaciente,
@@ -647,9 +822,9 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
     carregandoSemana,
     erro,
     recarregar: useCallback(() => {
-      carregarSemana()
+      carregarMes()
       carregarAutorizacoes()
-      carregarOrfasDaSemana()
-    }, [carregarSemana, carregarAutorizacoes, carregarOrfasDaSemana]),
+      carregarOrfasDoMes()
+    }, [carregarMes, carregarAutorizacoes, carregarOrfasDoMes]),
   }
 }

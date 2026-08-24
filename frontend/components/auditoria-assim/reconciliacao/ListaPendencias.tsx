@@ -5,8 +5,11 @@ import {
   AlertOctagon, AlertTriangle, Ban, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, Link2,
   RefreshCw, Search, TrendingDown, TrendingUp, X,
 } from 'lucide-react'
+import Paginacao from '../Paginacao'
 import type { PacientePendencias, TipoPendencia } from '../types'
-import { dataHoraRelativa, normalizar, rotuloSemana } from './datas'
+import { dataHoraRelativa, formatarDia, normalizar } from './datas'
+
+const PAGE_SIZE = 20
 
 /**
  * A ordem dos chips E a ordem das colunas numéricas — a mesma lista, um lugar
@@ -37,7 +40,7 @@ const PENDENCIAS: {
     tinta: 'text-violet-700',
     ativo: 'border-violet-300 bg-violet-50 text-violet-900',
     inativo: 'border-slate-200 bg-white text-slate-600 hover:border-violet-300 hover:bg-violet-50',
-    ajuda: 'Guias que a ASSIM recusou nesta semana.',
+    ajuda: 'Guias que a ASSIM recusou neste mês.',
   },
   {
     chave: 'cancelamento',
@@ -67,7 +70,7 @@ const PENDENCIAS: {
     tinta: 'text-rose-700',
     ativo: 'border-rose-300 bg-rose-50 text-rose-900',
     inativo: 'border-slate-200 bg-white text-slate-600 hover:border-rose-300 hover:bg-rose-50',
-    ajuda: 'Sessões que já aconteceram sem liberação que as cubra. O que ainda vai acontecer nesta semana não conta.',
+    ajuda: 'Sessões decorridas há mais de 30 minutos sem liberação que as cubra. O que ainda vai acontecer, ou aconteceu há menos de 30 minutos, não conta.',
   },
   {
     chave: 'sobrando',
@@ -103,40 +106,64 @@ function Contagem({ valor, tinta }: { valor: number; tinta: string }) {
 type Props = {
   pacientes: PacientePendencias[]
   unidades: string[]
-  semanaInicio: string
-  semanaFim: string
-  semanaAtual: string
+  mesRef: string
+  mesFimEfetivo: string
+  mesAtual: string
+  podeAvancarMes: boolean
   carregando: boolean
   erro: string | null
-  onSemana: (delta: number) => void
-  onIrParaData: (data: string) => void
+  onMes: (delta: number) => void
+  onIrParaMesData: (mes: string) => void
   onRecarregar: () => void
   onAbrir: (paciente: PacientePendencias) => void
 }
 
+/** "agosto de 2026" a partir de "2026-08-01". */
+function rotuloMesLongo(mesIso: string): string {
+  const [ano, mes] = mesIso.split('-').map(Number)
+  return new Date(ano, (mes ?? 1) - 1, 1).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+}
+
 /**
- * Autorizações com pendências — a fila de trabalho da semana.
+ * Autorizações com pendências — a fila de trabalho do mês.
  *
- * A pergunta que a tela abre deixou de ser "me mostre este paciente" e passou a
- * ser "quem precisa de mim nesta semana?". Por isso a listagem não é um índice
- * de guias soltas (o desenho anterior): é um paciente por linha, com as cinco
- * espécies de pendência lado a lado, e o clique abre a semana inteira dele.
+ * A pergunta que a tela abre é "quem precisa de mim neste mês?" — mês fechado
+ * é dia 1 ao último, mês vigente é dia 1 até hoje (2026-08-24: a listagem era
+ * semanal; a auditoria do mês pedia navegar mês a mês, ordem alfabética e
+ * paginação, não um ranking por volume de pendência). A listagem não é um
+ * índice de guias soltas: é um paciente por linha, ordenado por nome, com as
+ * cinco espécies de pendência lado a lado, e o clique abre a semana dele
+ * dentro do mês carregado (o modal continua semanal — é o que cabe numa
+ * grade de horários × dias).
  *
  * Cada coluna numérica é também um chip no topo, e o chip filtra exatamente a
  * coluna que nomeia — é o que permite ir de "há trabalho" para "qual trabalho"
  * sem sair da tela.
  *
  * A busca atravessa o filtro de pendência de propósito: quem digita um nome
- * está procurando uma pessoa específica, e escondê-la porque a semana dela está
- * limpa seria responder "não existe" a uma pergunta que era "como ela está".
+ * está procurando uma pessoa específica, e escondê-la porque o mês dela está
+ * limpo seria responder "não existe" a uma pergunta que era "como ela está".
  */
 export default function ListaPendencias({
-  pacientes, unidades, semanaInicio, semanaFim, semanaAtual, carregando, erro,
-  onSemana, onIrParaData, onRecarregar, onAbrir,
+  pacientes, unidades, mesRef, mesFimEfetivo, mesAtual, podeAvancarMes, carregando, erro,
+  onMes, onIrParaMesData, onRecarregar, onAbrir,
 }: Props) {
   const [filtro, setFiltro] = useState<TipoPendencia | null>(null)
   const [unidade, setUnidade] = useState<string>('')
   const [busca, setBusca] = useState('')
+  const [pagina, setPagina] = useState(1)
+
+  // Trocar de mês, unidade, busca ou filtro reabre na primeira página — senão
+  // a pessoa pode ficar numa página que não existe mais no recorte novo.
+  // Ajustado durante o render (padrão recomendado pelo React para "resetar
+  // estado quando uma prop muda"), não num efeito: um efeito disparando
+  // setState síncrono aqui causaria uma renderização em cascata.
+  const chaveRecorte = `${mesRef}|${unidade}|${busca}|${filtro ?? ''}`
+  const [chaveRecorteAnterior, setChaveRecorteAnterior] = useState(chaveRecorte)
+  if (chaveRecorteAnterior !== chaveRecorte) {
+    setChaveRecorteAnterior(chaveRecorte)
+    setPagina(1)
+  }
 
   const naUnidade = useMemo(
     () => (unidade ? pacientes.filter((p) => p.unidade === unidade) : pacientes),
@@ -157,7 +184,7 @@ export default function ListaPendencias({
 
   const visiveis = useMemo(() => {
     const termo = normalizar(busca.trim())
-    // Busca preenchida = universo inteiro da semana, inclusive quem está limpo.
+    // Busca preenchida = universo inteiro do mês, inclusive quem está limpo.
     const base = termo ? naUnidade : filtro ? comPendencia.filter((p) => p.contagem[filtro] > 0) : comPendencia
     if (!termo) return base
     return base.filter((p) =>
@@ -165,54 +192,66 @@ export default function ListaPendencias({
     )
   }, [naUnidade, comPendencia, filtro, busca])
 
+  const totalPaginas = Math.max(1, Math.ceil(visiveis.length / PAGE_SIZE))
+  const visiveisPagina = useMemo(
+    () => visiveis.slice((pagina - 1) * PAGE_SIZE, pagina * PAGE_SIZE),
+    [visiveis, pagina]
+  )
+
   const buscando = busca.trim().length > 0
-  const labelSemana = rotuloSemana(semanaInicio, semanaFim)
+  const labelMes = `${formatarDia(mesRef)} a ${formatarDia(mesFimEfetivo)}/${mesFimEfetivo.slice(0, 4)}`
 
   return (
     <div className="flex flex-col gap-3">
-      {/* ── Cabeçalho: semana, unidade, busca ──────────────────────────────── */}
+      {/* ── Cabeçalho: mês, unidade, busca ──────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
         <div className="flex items-center gap-1">
           <button
             type="button"
-            onClick={() => onSemana(-1)}
-            aria-label="Semana anterior"
+            onClick={() => onMes(-1)}
+            aria-label="Mês anterior"
             className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none"
           >
             <ChevronLeft size={16} />
           </button>
 
-          {/* A data é o rótulo E o seletor: o input cobre o texto, então clicar em
-              "20/07 a 24/07" abre o calendário do navegador. Um segundo controle
-              ao lado diria a mesma coisa duas vezes. */}
+          {/* O mês é o rótulo E o seletor: o input cobre o texto, então clicar
+              nele abre o seletor de mês do navegador. Um segundo controle ao
+              lado diria a mesma coisa duas vezes. */}
           <label className="relative flex h-11 items-center gap-2 rounded-lg px-2 transition hover:bg-slate-100">
             <CalendarDays size={15} className="text-slate-400" aria-hidden />
-            <span className="text-sm font-semibold tabular-nums text-slate-700">{labelSemana}</span>
-            <span className="sr-only">Ir para a semana de uma data</span>
+            <span>
+              <span className="block text-sm leading-tight font-semibold text-slate-700 capitalize">
+                {rotuloMesLongo(mesRef)}
+              </span>
+              <span className="block text-[11px] leading-tight tabular-nums text-slate-500">{labelMes}</span>
+            </span>
+            <span className="sr-only">Ir para outro mês</span>
             <input
-              type="date"
-              value={semanaInicio}
-              onChange={(e) => e.target.value && onIrParaData(e.target.value)}
+              type="month"
+              value={mesRef.slice(0, 7)}
+              onChange={(e) => e.target.value && onIrParaMesData(e.target.value)}
               className="absolute inset-0 cursor-pointer opacity-0"
             />
           </label>
 
           <button
             type="button"
-            onClick={() => onSemana(1)}
-            aria-label="Próxima semana"
-            className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none"
+            onClick={() => onMes(1)}
+            disabled={!podeAvancarMes}
+            aria-label="Próximo mês"
+            className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none disabled:opacity-30 disabled:hover:bg-transparent"
           >
             <ChevronRight size={16} />
           </button>
 
-          {semanaInicio !== semanaAtual && (
+          {mesRef !== mesAtual && (
             <button
               type="button"
-              onClick={() => onIrParaData(semanaAtual)}
+              onClick={() => onIrParaMesData(mesAtual)}
               className="ml-1 inline-flex h-11 items-center rounded-lg border border-slate-300 px-3 text-[12px] font-semibold text-slate-600 transition hover:border-brand hover:bg-brand-hover hover:text-brand-fg focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none"
             >
-              Semana atual
+              Mês atual
             </button>
           )}
         </div>
@@ -260,7 +299,7 @@ export default function ListaPendencias({
             type="button"
             onClick={onRecarregar}
             disabled={carregando}
-            aria-label="Atualizar a semana"
+            aria-label="Atualizar o mês"
             className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg border border-slate-300 text-slate-600 transition hover:bg-slate-50 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none disabled:opacity-60"
           >
             <RefreshCw size={15} className={carregando ? 'animate-spin' : ''} aria-hidden />
@@ -294,7 +333,7 @@ export default function ListaPendencias({
               title={ajuda}
               onClick={() => setFiltro(selecionado ? null : chave)}
               aria-pressed={selecionado}
-              // Zero continua visível e clicável: "nenhuma glosa nesta semana" é
+              // Zero continua visível e clicável: "nenhuma glosa neste mês" é
               // informação, e esconder o contador faria a ausência parecer com a
               // tela ainda carregando.
               className={`flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] font-medium transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none ${
@@ -310,7 +349,7 @@ export default function ListaPendencias({
 
         <span className="ml-auto text-[12px] text-slate-500" role="status" aria-live="polite">
           {carregando
-            ? 'carregando a semana…'
+            ? 'carregando o mês…'
             : buscando
               ? `${visiveis.length} ${visiveis.length === 1 ? 'paciente' : 'pacientes'} na busca`
               : `${visiveis.length} de ${comPendencia.length} com pendência`}
@@ -342,17 +381,17 @@ export default function ListaPendencias({
             <CheckCircle2 size={24} className="text-emerald-500" aria-hidden />
             <p className="text-sm font-semibold text-slate-700">
               {buscando
-                ? 'Nenhum paciente com esse nome nesta semana'
+                ? 'Nenhum paciente com esse nome neste mês'
                 : filtro
                   ? 'Nada nesta espécie de pendência'
-                  : 'Semana limpa'}
+                  : 'Mês limpo'}
             </p>
             <p className="max-w-md text-xs text-slate-500">
               {buscando
-                ? 'A busca cobre a semana inteira, não só quem tem pendência.'
+                ? 'A busca cobre o mês inteiro, não só quem tem pendência.'
                 : filtro
-                  ? 'Limpe o filtro para ver as outras pendências da semana.'
-                  : `Nenhum cancelamento, glosa ou divergência de cota entre ${labelSemana}.`}
+                  ? 'Limpe o filtro para ver as outras pendências do mês.'
+                  : `Nenhum cancelamento, glosa ou divergência de cota entre ${labelMes}.`}
             </p>
           </div>
         ) : (
@@ -392,7 +431,7 @@ export default function ListaPendencias({
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {visiveis.map((p) => (
+                {visiveisPagina.map((p) => (
                   <tr
                     key={p.chave}
                     tabIndex={0}
@@ -404,7 +443,7 @@ export default function ListaPendencias({
                         onAbrir(p)
                       }
                     }}
-                    aria-label={`Abrir a semana de ${p.nome}, ${p.contagem.total} pendência(s)`}
+                    aria-label={`Abrir o paciente ${p.nome}, ${p.contagem.total} pendência(s)`}
                     className="group cursor-pointer transition hover:bg-brand-hover focus-visible:bg-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset"
                   >
                     <th
@@ -452,6 +491,14 @@ export default function ListaPendencias({
           </div>
         )}
       </div>
+
+      <Paginacao
+        pagina={pagina}
+        totalPaginas={totalPaginas}
+        totalFiltrados={visiveis.length}
+        onChange={setPagina}
+        rotuloItem={visiveis.length === 1 ? 'paciente' : 'pacientes'}
+      />
     </div>
   )
 }

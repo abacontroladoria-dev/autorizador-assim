@@ -209,7 +209,8 @@ export default function ModalSemanaPaciente({
             <button
               type="button"
               onClick={() => analise.irParaSemana(-1)}
-              className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none"
+              disabled={!analise.podeSemanaAnterior}
+              className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none disabled:opacity-30 disabled:hover:bg-transparent"
               aria-label="Semana anterior"
             >
               <ChevronLeft size={16} />
@@ -228,7 +229,8 @@ export default function ModalSemanaPaciente({
             <button
               type="button"
               onClick={() => analise.irParaSemana(1)}
-              className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none"
+              disabled={!analise.podeProximaSemana}
+              className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none disabled:opacity-30 disabled:hover:bg-transparent"
               aria-label="Próxima semana"
             >
               <ChevronRight size={16} />
