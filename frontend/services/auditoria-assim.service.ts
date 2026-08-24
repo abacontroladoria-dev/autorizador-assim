@@ -1,5 +1,11 @@
 import { getSupabaseClient } from '@/lib/supabase/client'
-import type { AuditoriaAssimItem, KpisAuditoriaAssim, TokenMensalItem } from '@/components/auditoria-assim/types'
+import { UNIDADE_CONSERTAR, mapearUnidade } from '@/lib/cronograma/comparativoSessoes'
+import type {
+  AuditoriaAssimItem,
+  AutorizacaoAssimSemana,
+  KpisAuditoriaAssim,
+  TokenMensalItem,
+} from '@/components/auditoria-assim/types'
 
 const supabase = getSupabaseClient()
 
@@ -31,6 +37,9 @@ export async function listarFaltasAuditoria(data: string): Promise<AuditoriaAssi
       bloco_id,
       paciente_id: String(f.paciente_id),
       paciente_nome: f.paciente_nome,
+      // A RPC de faltas não devolve carteirinha; quem precisa dela (a Análise de
+      // Reincidência) a pega das sessões do próprio paciente, que a têm.
+      carteirinha: null,
       data_atendimento: f.data_atendimento,
       hora_inicial: f.hora_inicial,
       codigo_tuss: f.tuss,
@@ -194,6 +203,158 @@ export async function listarTokensMensal(mes: string): Promise<TokenMensalItem[]
       token_conferido_por_nome: conferencia?.conferido_por_nome ?? null,
     }
   })
+}
+
+/** Teto de linhas que o PostgREST pode aplicar por resposta. */
+const TETO_POSTGREST = 1000
+
+/**
+ * Teto de páginas. 20 × 1000 = 20 mil autorizações numa semana — uma ordem de
+ * grandeza acima do volume medido da clínica inteira. Existir é o que impede
+ * um laço infinito se o servidor passar a devolver página cheia para sempre.
+ */
+const TETO_PAGINAS = 20
+
+const COLUNAS_AUTORIZACAO =
+  'guia, matricula, paciente_nome, data_execucao, status, codigo_tuss, codigo_erro, descricao_erro, teve_token, token'
+
+/**
+ * Todas as autorizações que a ASSIM registrou numa semana — inclusive as que não
+ * casam com sessão nenhuma.
+ *
+ * Por que ler a tabela direto em vez de usar a RPC da auditoria: a auditoria é
+ * dirigida pela sessão (LEFT JOIN com a agenda_tita à esquerda), então a
+ * autorização EXCEDENTE não aparece nela. E é a excedente que estoura a cota
+ * semanal e provoca a glosa 1601. `autorizacoes_assim` tem policy
+ * "authenticated read", então o navegador lê sem RPC nova.
+ *
+ * `carteirinhas = null` traz a semana da clínica inteira. É o modo que a
+ * listagem de pacientes com pendências usa: sem ele, dizer quantas guias cada
+ * paciente tem sobrando exigiria uma requisição por paciente — cem requisições
+ * para desenhar uma tabela. Com ele, a mesma carga serve a listagem e o modal, e
+ * abrir um paciente não busca nada.
+ *
+ * Quatro detalhes que não são estilo:
+ *
+ * - Colunas explícitas, nunca `select('*')`: sob privilégio por coluna o `*`
+ *   responde 403.
+ * - `matricula` guarda a carteirinha pontuada (`empresa.matricula.dep`), que é o
+ *   mesmo texto que a RPC devolve como `carteirinha`.
+ * - `data_execucao` é `timestamp without time zone` guardando hora de São Paulo,
+ *   então os limites vão como texto naive — nada de `toISOString()`, que
+ *   converteria para UTC e deslocaria a janela em 3h.
+ * - Paginação com ordenação total (`data_execucao, matricula, guia`): a guia
+ *   sozinha não é chave — ela recicla —, e uma ordenação instável faria páginas
+ *   consecutivas repetirem e pularem linhas em silêncio.
+ */
+export async function listarAutorizacoesAssimSemana(
+  carteirinhas: string[] | null,
+  inicio: string,
+  fimExclusivo: string
+): Promise<AutorizacaoAssimSemana[]> {
+  if (carteirinhas !== null && carteirinhas.length === 0) return []
+
+  const itens: AutorizacaoAssimSemana[] = []
+
+  for (let pagina = 0; pagina < TETO_PAGINAS; pagina++) {
+    let consulta = supabase
+      .from('autorizacoes_assim')
+      .select(COLUNAS_AUTORIZACAO)
+      .gte('data_execucao', `${inicio}T00:00:00`)
+      .lt('data_execucao', `${fimExclusivo}T00:00:00`)
+      .order('data_execucao')
+      .order('matricula')
+      .order('guia')
+      .range(pagina * TETO_POSTGREST, (pagina + 1) * TETO_POSTGREST - 1)
+
+    if (carteirinhas) consulta = consulta.in('matricula', carteirinhas)
+
+    const { data: result, error } = await consulta
+
+    if (error) {
+      console.error('Erro ao buscar autorizações da semana:', error.message, error.details)
+      throw error
+    }
+
+    const lote = (result ?? []) as AutorizacaoAssimSemana[]
+    itens.push(...lote)
+    // Página incompleta = acabou. É o único sinal confiável: o PostgREST não
+    // devolve o total sem `count`, e pedi-lo custaria um COUNT(*) por semana.
+    if (lote.length < TETO_POSTGREST) return itens
+  }
+
+  console.error(
+    `listarAutorizacoesAssimSemana: teto de ${TETO_PAGINAS} páginas atingido — a semana pode estar incompleta.`
+  )
+  return itens
+}
+
+/**
+ * A unidade clínica de cada paciente na semana, inferida da sala agendada.
+ *
+ * Nem `get_auditoria_assim` nem `autorizacoes_assim` carregam sala ou unidade —
+ * a unidade nunca foi um dado da autorização, é um dado da agenda. Em vez de
+ * alargar a RPC (que é dependência de ESCRITA de `fn_alertas_avaliar_assim`, e
+ * mexer nela muda quais alertas nascem), esta função lê as duas colunas que
+ * faltam direto de `agenda_tita` e reusa o `mapearUnidade` do comparativo de
+ * sessões — o mesmo de-para sala→unidade que o resto do sistema já aplica.
+ *
+ * `ativo = true` não é zelo: sem ele a linha reagendada continua respondendo, e
+ * o paciente aparece em duas unidades ao mesmo tempo.
+ *
+ * Falha em silêncio devolvendo mapa vazio. A unidade é um recorte da listagem,
+ * não a razão dela existir: derrubar a tela inteira porque uma coluna acessória
+ * não veio seria pior que exibir "—" nela.
+ */
+export async function listarUnidadesPorPaciente(
+  inicio: string,
+  fim: string
+): Promise<Map<string, string>> {
+  const contagem = new Map<string, Map<string, number>>()
+
+  try {
+    for (let pagina = 0; pagina < TETO_PAGINAS; pagina++) {
+      const { data, error } = await supabase
+        .from('agenda_tita')
+        .select('paciente_id, sala_nome')
+        .eq('ativo', true)
+        .ilike('convenio_nome', '%assim%')
+        .gte('data_atendimento', inicio)
+        .lte('data_atendimento', fim)
+        .order('paciente_id')
+        .order('sala_nome')
+        .range(pagina * TETO_POSTGREST, (pagina + 1) * TETO_POSTGREST - 1)
+
+      if (error) throw error
+
+      const lote = (data ?? []) as { paciente_id: number | string | null; sala_nome: string | null }[]
+      for (const linha of lote) {
+        if (linha.paciente_id == null) continue
+        const unidade = mapearUnidade(linha.sala_nome)
+        // "Consertar Unidade no Sistema" é falha de cadastro na origem, não uma
+        // unidade: vira ausência, e a listagem mostra "—".
+        if (unidade === UNIDADE_CONSERTAR) continue
+        const chave = String(linha.paciente_id)
+        const porUnidade = contagem.get(chave) ?? new Map<string, number>()
+        porUnidade.set(unidade, (porUnidade.get(unidade) ?? 0) + 1)
+        contagem.set(chave, porUnidade)
+      }
+
+      if (lote.length < TETO_POSTGREST) break
+    }
+  } catch (e) {
+    console.error('Erro ao inferir unidades da semana:', e)
+    return new Map()
+  }
+
+  // Paciente que circula entre unidades fica com a que mais o recebeu na semana
+  // — é a resposta útil para "onde procuro esta pessoa".
+  const resultado = new Map<string, string>()
+  for (const [paciente, porUnidade] of contagem) {
+    const melhor = [...porUnidade.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0]
+    if (melhor) resultado.set(paciente, melhor[0])
+  }
+  return resultado
 }
 
 export async function buscarKpisAuditoriaAssim(data: string): Promise<KpisAuditoriaAssim | null> {

@@ -21,6 +21,7 @@ import ModalDetalhamentoAtendimento from './ModalDetalhamentoAtendimento'
 import { SituacaoBloco } from './SituacaoBadge'
 import { marcarTokenConferido } from '@/services/auditoria-assim.service'
 import { LABEL_ERRO_FACIAL, OBS_CONFIRMADA, erroReconhecimentoFacial } from './formaValidacao'
+import { ehGlosa } from './situacoes'
 
 /**
  * Largura das colunas em um lugar só: o cabeçalho é a régua das linhas, e se as
@@ -60,6 +61,8 @@ type Props = {
   onSort: (key: SortKey) => void
   onPaginaChange: (p: number) => void
   onRefresh: () => void
+  /** Abre a Análise de Reincidência na semana daquele atendimento. */
+  onAnalisarSemana: (item: AuditoriaAssimItem) => void
 }
 
 /**
@@ -84,6 +87,7 @@ export default function TabelaAuditoria({
   onSort,
   onPaginaChange,
   onRefresh,
+  onAnalisarSemana,
 }: Props) {
   const [itemSelecionado, setItemSelecionado] = useState<AuditoriaAssimItem | null>(null)
   const [conferindoBloco, setConferindoBloco] = useState<string | null>(null)
@@ -233,6 +237,10 @@ export default function TabelaAuditoria({
         open={itemSelecionado !== null}
         onClose={() => setItemSelecionado(null)}
         onSalvo={() => { setItemSelecionado(null); onRefresh() }}
+        // Fecha o detalhe antes de abrir a análise: dois diálogos modais
+        // empilhados são dois focus traps, e ao fechar o de cima o foco não
+        // volta para onde saiu.
+        onAnalisarSemana={(item) => { setItemSelecionado(null); onAnalisarSemana(item) }}
       />
     </div>
   )
@@ -363,7 +371,11 @@ function legendaSituacao(item: AuditoriaAssimItem, erroFacial: boolean): string 
   // desta tela. Aqui o rótulo do bloco já diz Glosa, e a legenda tem uma linha
   // truncada: os 7 caracteres do prefixo custariam pedaço do motivo real
   // ("1013 - CADASTRO DO BENEFICIARIO COM PROBLEMAS"), que é o que se lê.
-  if (item.situacao === 'GLOSA' && item.observacao?.startsWith('Glosa: ')) {
+  // `ehGlosa` e não `=== 'GLOSA'`: em GLOSA_RESOLVIDA a observação também vem
+  // prefixada ("Glosa: 1403 - ... · Coberta pela guia 15032 ..."), e ali a linha
+  // truncada é ainda mais disputada — o prefixo custaria justamente o pedaço que
+  // conta qual guia resolveu.
+  if (ehGlosa(item.situacao) && item.observacao?.startsWith('Glosa: ')) {
     return item.observacao.slice('Glosa: '.length)
   }
   return item.observacao ?? item.convenio_nome ?? null

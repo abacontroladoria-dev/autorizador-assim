@@ -6,6 +6,7 @@ import {
   AlertOctagon,
   Calendar,
   CalendarCheck,
+  CalendarSearch,
   Clock,
   CreditCard,
   FileText,
@@ -25,12 +26,15 @@ import { toast } from 'react-hot-toast'
 import { salvarMotivoGlosa, salvarObservacaoManual } from '@/services/auditoria-assim.service'
 import type { AuditoriaAssimItem } from './types'
 import SituacaoBadge, { SITUACAO_CONFIG, SITUACAO_FALLBACK } from './SituacaoBadge'
+import { ehGlosa } from './situacoes'
 
 type Props = {
   item: AuditoriaAssimItem | null
   open: boolean
   onClose: () => void
   onSalvo: () => void
+  /** Leva para a aba Reconciliação, na semana deste paciente. */
+  onAnalisarSemana: (item: AuditoriaAssimItem) => void
 }
 
 function formatarData(data: string | null) {
@@ -108,7 +112,7 @@ function SectionTitle({ children }: { children: React.ReactNode }) {
   )
 }
 
-export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSalvo }: Props) {
+export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSalvo, onAnalisarSemana }: Props) {
   const [motivo, setMotivo] = useState('')
   const [salvandoMotivo, setSalvandoMotivo] = useState(false)
 
@@ -191,7 +195,16 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
   // fato duas vezes, uma delas pela metade. O motivo tem um lugar só no modal,
   // e é o lado onde se age sobre ele. Fora da glosa o rodapé segue intacto —
   // ali ele carrega 'Liberado', o token e a observação, que não repetem nada.
-  const motivoJaMostradoAoLado = item.situacao === 'GLOSA' && respostaAssim !== null
+  // `ehGlosa`: em GLOSA_RESOLVIDA a coluna ao lado continua mostrando a resposta
+  // da ASSIM, então o rodapé repetiria o motivo do mesmo jeito.
+  const motivoJaMostradoAoLado = ehGlosa(item.situacao) && respostaAssim !== null
+
+  // A recusa por cota estourada. O código é o sinal confiável; o texto entra
+  // porque a ASSIM o corta em 25 caracteres ("1601-REINCIDENCIA NO ATEN") e nem
+  // toda linha chega com o código separado.
+  const ehReincidencia =
+    item.codigo_erro === '1601' ||
+    /reincidencia|reincidência/i.test(`${item.descricao_erro ?? ''} ${item.status_assim ?? ''}`)
 
   return (
     <div
@@ -302,8 +315,11 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
           {/* Coluna direita — o que fazer a respeito do atendimento */}
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-4">
 
-            {/* Motivo da glosa — só para linhas GLOSA */}
-            {item.situacao === 'GLOSA' && (
+            {/* Motivo da glosa — em GLOSA e também em GLOSA_RESOLVIDA: o vínculo
+                não apaga a recusa, e é aqui que o motivo é lido e anotado.
+                Esconder a seção depois de resolvida jogaria fora justamente o
+                histórico que o vínculo se comprometeu a preservar. */}
+            {ehGlosa(item.situacao) && (
               <section className="shrink-0 rounded-xl border border-violet-200 bg-violet-50/40 p-3.5">
                 <h3 className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-violet-900">
                   <AlertOctagon size={14} />
@@ -340,6 +356,27 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
                     </p>
                   </div>
                 )}
+
+                {/* A ponte para a única tela que consegue conferir a recusa — a
+                    aba Reconciliação, posicionada na semana deste paciente. Vai
+                    embora desta tela, então o modal fecha antes (quem fecha é a
+                    TabelaAuditoria, ao repassar o callback).
+
+                    Fica em Brand Outline, não em steel cheio: "Salvar motivo" já
+                    é a ação primária desta seção, e conferir a cota é o passo
+                    ANTES de escrever a tratativa — subordinado a ela, não par.
+
+                    Aparece em toda glosa, não só na 1601: a cota da semana é o
+                    contexto que qualquer contestação usa. Quando o código É o da
+                    reincidência, o rótulo diz por quê. */}
+                <button
+                  type="button"
+                  onClick={() => onAnalisarSemana(item)}
+                  className="mb-3 flex w-full items-center justify-center gap-2 rounded-xl border border-brand bg-white px-4 py-2 text-sm font-semibold text-brand-fg transition hover:bg-brand-hover focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none"
+                >
+                  <CalendarSearch size={15} />
+                  {ehReincidencia ? 'Conferir a cota da semana' : 'Analisar cota da semana'}
+                </button>
 
                 {soLeituraGlosa ? (
                   <p className="text-sm whitespace-pre-wrap text-violet-900">{item.motivo_glosa}</p>

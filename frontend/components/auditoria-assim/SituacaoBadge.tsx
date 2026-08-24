@@ -94,6 +94,26 @@ export const SITUACAO_CONFIG: Record<string, SituacaoConfigEntry> = {
     strong: 'text-violet-700',
     icon: XCircle,
   },
+  // prioridade 6 — a ASSIM recusou E uma autorização externa passou a cobrir a
+  // sessão (aba Reconciliação). Não pede nada: existe guia liberada.
+  //
+  // A composição diz as duas coisas de uma vez, e é por isso que ela não é só
+  // "mais um verde": superfície esmeralda porque está resolvido, dot violeta
+  // porque o que foi resolvido foi uma GLOSA. O violeta segue reservado à glosa
+  // (ver a nota do topo) — aqui ele aparece como marca de procedência, não como
+  // o matiz do estado. No SituacaoBloco esse dot vira a barra lateral, e a linha
+  // fica lida como "resolvido, era glosa" sem depender de cor sozinha: o
+  // CheckCircle2 carrega o mesmo significado.
+  //
+  // Degraus -50/-200/-700 e dot -500: os que o shim de tema escuro remapeia.
+  GLOSA_RESOLVIDA: {
+    label: 'Glosa Resolvida',
+    dot: 'bg-violet-500',
+    className: 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200',
+    surface: 'bg-emerald-50 border-emerald-200',
+    strong: 'text-emerald-700',
+    icon: CheckCircle2,
+  },
   // prioridade 3 — enviado, sem resposta da ASSIM
   RETORNO_NAO_CONFIRMADO: {
     label: 'Retorno Não Confirmado',
@@ -167,7 +187,13 @@ export const SITUACAO_FALLBACK: Omit<SituacaoConfigEntry, 'label'> = {
   icon: AlertCircle,
 }
 
-function resolverConfig(situacao: string): SituacaoConfigEntry {
+/**
+ * Exportada porque a grade semanal precisa das MESMAS quatro formas (label,
+ * surface, strong, icon) para vestir um cartão que não é pill nem bloco. Uma
+ * quarta cópia do `?? fallback` é o jeito de um estado novo aparecer certo em
+ * três lugares e cinza no quarto.
+ */
+export function resolverConfig(situacao: string): SituacaoConfigEntry {
   return SITUACAO_CONFIG[situacao] ?? { label: situacao, ...SITUACAO_FALLBACK }
 }
 

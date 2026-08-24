@@ -209,6 +209,13 @@ const unidades = [
   
   const [workerOnline, setWorkerOnline] = useState(false)
 
+  // Confirmação em dois toques para os avisos de ordem/adiantamento: o primeiro
+  // clique arma o card e explica, o segundo (em até 10s) solicita mesmo assim.
+  // Bloquear de vez travaria a recepção nos casos legítimos; não avisar foi o que
+  // deixou a colisão de 21/08 passar calada.
+  const [avisoArmado, setAvisoArmado] =
+    useState<{ chave: string; ate: number } | null>(null)
+
   // Nome de quem está na estação, resolvido uma vez. Serve só para o selo do card
   // aparecer com autor no mesmo instante do clique — quem grava de fato é
   // criarAutorizacao(), que chama resolverNomeUsuario() por conta própria.
@@ -300,32 +307,118 @@ useEffect(() => {
 // PODE SOLICITAR
 // =========================
 
+// A ASSIM mede o intervalo de 30 minutos no RELÓGIO, sobre a identificação do
+// beneficiário (verificarIntervaloAtendimento() do portal), e NÃO sobre o horário
+// agendado da sessão. Duas sessões que distam 40 min no cronograma colidem se
+// forem autorizadas com 4 minutos de diferença — foi o incidente de 21/08/2026.
+//
+// Por isso ultima_autorizacao_anterior (RPC listar_central_autorizacoes) passou a
+// ser a última autorização do paciente NO DIA, em qualquer horário. Antes ela só
+// enxergava sessões mais cedo (fa2.horario < b.horario) e ficava cega justamente
+// quando a recepção autorizava fora de ordem.
+const INTERVALO_ASSIM_MIN = 30
+
+// Tolerância para pedir antes de a sessão começar. A ASSIM confirma a PRESENÇA do
+// beneficiário: pedir muito antes é autorizar quem ainda não chegou — e queima a
+// janela de 30 min da sessão seguinte.
+const TOLERANCIA_ADIANTAMENTO_MIN = 15
+
+// timestamp without time zone chega como "2026-08-21T12:58:00". Fatiar a string em
+// vez de new Date(), que reintroduz o erro de fuso na exibição.
+function horaDoTimestamp(ts: string | null) {
+  return String(ts || '').slice(11, 16)
+}
+
+function hhmm(horario: any) {
+  return String(horario || '').slice(0, 5)
+}
+
+function minutosDesde(ultima: string | null) {
+
+  if (!ultima) return null
+
+  // Aqui o new Date() é proposital: horario_autorizacao é hora de São Paulo e o
+  // navegador da recepção também — o parse local casa, e o que se quer é o
+  // intervalo, não o rótulo.
+  const ultimaData = new Date(ultima)
+
+  if (Number.isNaN(ultimaData.getTime())) return null
+
+  return (Date.now() - ultimaData.getTime()) / 1000 / 60
+}
+
 function podeSolicitar(
-  ultima: string | null,
-  status?: string
+  ultima: string | null
 ) {
 
-  if (status === 'erro') {
+  const diffMin = minutosDesde(ultima)
+
+  if (diffMin === null) {
     return true
   }
 
-  if (!ultima) {
-    return true
+  return diffMin >= INTERVALO_ASSIM_MIN
+}
+
+function inicioDaSessao(p: any): Date | null {
+
+  if (!p?.data_atendimento || !p?.horario) return null
+
+  const [ano, mes, dia] =
+    String(p.data_atendimento).slice(0, 10).split('-').map(Number)
+
+  const [hora, minuto] =
+    String(p.horario).split(':').map(Number)
+
+  if (!ano || !mes || !dia) return null
+
+  return new Date(ano, mes - 1, dia, hora || 0, minuto || 0, 0, 0)
+}
+
+// Minutos que faltam para a sessão começar, só quando passam da tolerância.
+function minutosDeAdiantamento(p: any) {
+
+  const inicio = inicioDaSessao(p)
+
+  if (!inicio) return 0
+
+  const faltam = (inicio.getTime() - Date.now()) / 60000
+
+  return faltam > TOLERANCIA_ADIANTAMENTO_MIN ? Math.round(faltam) : 0
+}
+
+// Sessão mais cedo do mesmo paciente, no mesmo dia, que ninguém pediu ainda.
+// 'pendente'/'processando' já foram pedidas; 'falta'/'cancelado' não serão.
+function sessaoAnteriorSemPedido(p: any, lista: any[]) {
+
+  return lista.find(i =>
+    String(i.paciente_id) === String(p.paciente_id) &&
+    i.data_atendimento === p.data_atendimento &&
+    i.tipo_fluxo === 'autorizacao' &&
+    String(i.horario) < String(p.horario) &&
+    (i.status_final === 'sem_acao' || i.status_final === 'erro')
+  ) || null
+}
+
+// Avisos que NÃO são a regra da ASSIM: valem uma confirmação, não um bloqueio.
+// Fora de ordem vem antes de adiantamento porque é o motivo mais específico.
+function motivoDeAviso(p: any, lista: any[]) {
+
+  const anterior = sessaoAnteriorSemPedido(p, lista)
+
+  if (anterior) {
+    return `A sessão das ${hhmm(anterior.horario)} deste paciente ainda não foi ` +
+      `solicitada. Autorizar fora de ordem queima a janela de 30 min dela.`
   }
 
-  const agora = new Date()
+  const faltam = minutosDeAdiantamento(p)
 
-  const ultimaData =
-    new Date(ultima)
+  if (faltam) {
+    return `Essa sessão só começa às ${hhmm(p.horario)} — faltam ${faltam} min. ` +
+      `A ASSIM confirma a presença do beneficiário na hora do pedido.`
+  }
 
-  const diffMs =
-    agora.getTime() -
-    ultimaData.getTime()
-
-  const diffMin =
-    diffMs / 1000 / 60
-
-  return diffMin >= 30
+  return null
 }
 
   // =========================
@@ -387,7 +480,6 @@ async function handleSolicitarLista(
 
   try {
 
-    const statusAtual = p.status_final
     // evita clique duplo
     if (
       p.status_final === 'processando'
@@ -395,22 +487,10 @@ async function handleSolicitarLista(
       return
     }
 
-    // regra 30 min
-    if (
-      !podeSolicitar(
-        p.ultima_autorizacao_anterior,
-        statusAtual
-      )
-    ) {
-
-      toast.error(
-        'Aguarde 30 minutos desde a última autorização'
-      )
-
-      return
-    }
-
-    // busca existente
+    // A linha que já existe para esta sessão é lida ANTES dos guardas: é ela que
+    // diz se a tentativa anterior quebrou no meio, e o aviso precisa dizer isso
+    // com todas as letras. "Solicitação cancelada" não é "paciente autorizado" —
+    // uma não emitiu guia nenhuma, a outra emitiu.
     const { data: existente } =
       await supabase
         .from('fila_autorizacoes')
@@ -425,6 +505,98 @@ async function handleSolicitarLista(
 		.order('created_at', { ascending: false })
 		.limit(1)
 		.maybeSingle()
+
+    // error_message é escrito pelo robô (robo_concluir_tarefa) com o texto que o
+    // RPA levantou, p.ex. "A janela da ASSIM foi fechada durante a identificação
+    // do beneficiário."
+    const motivoErroAnterior =
+      p.status_final === 'erro'
+        ? String(existente?.error_message || '').trim().replace(/\s+/g, ' ')
+        : ''
+
+    // -- Regra dos 30 min da ASSIM -----------------------------------------
+    // Bloqueio duro só para PEDIDO NOVO. Linha em 'erro' é retomada de uma
+    // tentativa interrompida — a atendente abre, fecha a janela e volta dois
+    // minutos depois — e isso NÃO PODE TRAVAR. Ali o intervalo vira aviso.
+    //
+    // Vale notar que a trava não olha o status da própria linha: a subquery de
+    // ultima_autorizacao_anterior exclui o próprio horário, então uma tentativa
+    // interrompida nunca bloqueia a si mesma. Quem bloquearia é OUTRA sessão do
+    // paciente autorizada há pouco — e mesmo essa, no reprocesso, só avisa.
+    const emErro = p.status_final === 'erro'
+
+    let avisoIntervalo: string | null = null
+
+    if (!podeSolicitar(p.ultima_autorizacao_anterior)) {
+
+      const decorridos = minutosDesde(p.ultima_autorizacao_anterior) ?? 0
+      const faltam = Math.max(1, Math.ceil(INTERVALO_ASSIM_MIN - decorridos))
+
+      // "OUTRA sessão": ultima_autorizacao_anterior exclui o próprio horário por
+      // construção, e dizer só "paciente autorizado" faz a atendente achar que
+      // ESTA sessão já saiu.
+      const recado =
+        `OUTRA sessão deste paciente foi autorizada às ` +
+        `${horaDoTimestamp(p.ultima_autorizacao_anterior)} — faltam ${faltam} min ` +
+        `para os ${INTERVALO_ASSIM_MIN} min que a ASSIM exige entre autorizações ` +
+        `do mesmo beneficiário.`
+
+      if (!emErro) {
+
+        toast.error(recado)
+
+        return
+      }
+
+      avisoIntervalo = recado
+    }
+
+    // -- Avisos: confirmação em dois toques --------------------------------
+    const chaveCard = buildCardKey(p)
+
+    const armado =
+      !!avisoArmado &&
+      avisoArmado.chave === chaveCard &&
+      Date.now() < avisoArmado.ate
+
+    if (!armado) {
+
+      // O intervalo tem precedência: é o que a ASSIM vai reclamar primeiro.
+      const aviso = avisoIntervalo ?? motivoDeAviso(p, listaDia)
+
+      if (aviso) {
+
+        setAvisoArmado({
+          chave: chaveCard,
+          ate: Date.now() + 10000
+        })
+
+        // Abre pelo que aconteceu com a tentativa anterior, e só depois pelo
+        // motivo do aviso. Sem isto o texto começa falando de autorização e a
+        // atendente lê "autorizado" onde houve cancelamento.
+        const preambulo = emErro
+          ? `A solicitação anterior das ${hhmm(p.horario)} foi CANCELADA` +
+            (motivoErroAnterior ? `: ${motivoErroAnterior}` : '.') +
+            `\nNenhuma guia foi emitida para esta sessão.\n\n`
+          : ''
+
+        toast(
+          `${preambulo}${aviso}\n\nClique de novo para solicitar mesmo assim.`,
+          {
+            icon: '⚠️',
+            duration: 10000,
+            // O \n só vira quebra com pre-line; sem isto o aviso e a saída
+            // colam numa linha só e o "clique de novo" some no meio do texto.
+            style: { whiteSpace: 'pre-line', maxWidth: '420px' }
+          }
+        )
+
+        return
+      }
+    }
+
+    setAvisoArmado(null)
+
 		
     // reaproveita
     if (existente) {
