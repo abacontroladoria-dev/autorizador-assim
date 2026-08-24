@@ -5,6 +5,7 @@ import { listarAuditoriaAssim, listarFaltasAuditoria, buscarNotasEConferencias }
 import { getSupabaseClient } from '@/lib/supabase/client'
 import type { AuditoriaAssimItem, AuditoriaFilters, KpisAuditoriaAssim } from '@/components/auditoria-assim/types'
 import { situacaoNoRecorte } from '@/components/auditoria-assim/situacoes'
+import { contarKpis } from '@/components/auditoria-assim/kpisAuditoria'
 
 const PAGE_SIZE       = 30
 const DEBOUNCE_MS     = 800
@@ -139,29 +140,11 @@ export function useAuditoriaAssim() {
       return true
     })
 
-    const registros = dataFiltrada.filter((d) => d.situacao !== 'FALTA' && d.situacao !== 'FALTA_TERAPEUTA')
-    const faltas = dataFiltrada.filter((d) => d.situacao === 'FALTA')
-    const faltasTerapeuta = dataFiltrada.filter((d) => d.situacao === 'FALTA_TERAPEUTA')
-    const comToken = registros.filter((d) => d.teve_token === true).length
-    return {
-      total: registros.length,
-      faltas: faltas.length,
-      faltas_terapeuta: faltasTerapeuta.length,
-      liberadas: registros.filter((d) => d.situacao === 'LIBERADA').length - comToken,
-      // O card conta o grupo: a sessão cuja solicitação quebrou no meio
-      // (SOLICITACAO_CANCELADA) não tem autorização nem resposta da ASSIM, e o
-      // que falta nela é o mesmo que falta na que nunca foi solicitada. Contar
-      // separado criaria um décimo card para dizer duas vezes "solicite isso".
-      nao_solicitadas: registros.filter((d) => situacaoNoRecorte(d.situacao, 'NAO_SOLICITADA')).length,
-      sincronizando: registros.filter((d) => d.situacao === 'SINCRONIZANDO').length,
-      retorno_nao_confirmado: registros.filter((d) => d.situacao === 'RETORNO_NAO_CONFIRMADO' || d.situacao === 'AGUARDANDO_RETORNO').length,
-      canceladas: registros.filter((d) => d.situacao === 'CANCELADA').length,
-      // Comparação exata: GLOSA_RESOLVIDA não entra. Este card é o trabalho a
-      // fazer, e uma glosa já coberta por vínculo não pede tratativa.
-      glosas: registros.filter((d) => d.situacao === 'GLOSA').length,
-      glosas_resolvidas: registros.filter((d) => d.situacao === 'GLOSA_RESOLVIDA').length,
-      tokens: comToken,
-    }
+    // A aritmética dos onze cards mora em `kpisAuditoria`, não aqui: a visão
+    // gerencial soma um resumo pré-agregado com a MESMA regra, e duas cópias
+    // divergiriam no primeiro estado novo que alguém acrescentasse a só uma
+    // delas.
+    return contarKpis(dataFiltrada)
   }, [rawDados, loading, filters.paciente, filters.horario_bloco])
 
   useEffect(() => {

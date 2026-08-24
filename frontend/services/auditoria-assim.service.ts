@@ -4,6 +4,7 @@ import type {
   AuditoriaAssimItem,
   AutorizacaoAssimSemana,
   KpisAuditoriaAssim,
+  ResumoDiarioLinha,
   TokenMensalItem,
 } from '@/components/auditoria-assim/types'
 
@@ -409,6 +410,56 @@ export async function listarUnidadesPorPaciente(
     if (melhor) resultado.set(paciente, melhor[0])
   }
   return resultado
+}
+
+/**
+ * O resumo pré-calculado de um intervalo — a fonte da visão gerencial.
+ *
+ * PAGINADA, e isso não é excesso de zelo: `max_rows = 1000` está em
+ * `supabase/config.toml`, então o PostgREST TRUNCA a resposta em mil linhas
+ * **sem erro nenhum**. O resumo tem da ordem de uma linha por sessão distinta
+ * por dia, então um mês passa folgadamente desse teto — sem paginar, a tela
+ * mostraria um número menor que o real com cara de resposta certa. É o mesmo
+ * defeito que já fez a paginação da fila perder 16% dos registros calada.
+ *
+ * A ordenação total vem de dentro da RPC (todas as colunas da chave), que é o
+ * que impede páginas consecutivas de repetirem e pularem linhas.
+ *
+ * Erro NÃO é engolido. Numa tela de gestão, devolver lista vazia depois de uma
+ * falha desenha "zero glosas no mês" — que é uma resposta, e errada. Quem chama
+ * mostra o estado de erro.
+ */
+export async function listarResumoAuditoriaPeriodo(
+  de: string,
+  ate: string
+): Promise<ResumoDiarioLinha[]> {
+  const linhas: ResumoDiarioLinha[] = []
+
+  for (let pagina = 0; pagina < TETO_PAGINAS; pagina++) {
+    const { data: result, error } = await supabase
+      .rpc('get_auditoria_assim_resumo', { p_de: de, p_ate: ate })
+      .range(pagina * TETO_POSTGREST, (pagina + 1) * TETO_POSTGREST - 1)
+
+    if (error) {
+      console.error('Erro ao buscar resumo da auditoria:', error.message, error.details)
+      throw error
+    }
+
+    const lote = (result || []) as ResumoDiarioLinha[]
+    linhas.push(...lote)
+
+    // Página incompleta = acabou. Único sinal confiável sem pedir `count`,
+    // que custaria um COUNT(*) por página.
+    if (lote.length < TETO_POSTGREST) break
+
+    if (pagina === TETO_PAGINAS - 1) {
+      console.error(
+        `listarResumoAuditoriaPeriodo: teto de ${TETO_PAGINAS} páginas atingido em ${de}–${ate} — o período pode estar incompleto.`
+      )
+    }
+  }
+
+  return linhas
 }
 
 export async function buscarKpisAuditoriaAssim(data: string): Promise<KpisAuditoriaAssim | null> {

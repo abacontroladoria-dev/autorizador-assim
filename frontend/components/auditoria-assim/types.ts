@@ -69,6 +69,42 @@ export type AuditoriaFilters = {
 }
 
 /**
+ * Uma linha do resumo diário pré-calculado — a fonte da visão gerencial.
+ *
+ * É a linha da auditoria **despida de identidade**: em vez de uma sessão de um
+ * paciente, uma combinação de dimensões e quantas sessões caíram nela. Por isso
+ * o modal responde total, evolução e quebra com UMA consulta, e por isso ele
+ * abre instantâneo — a conta cara já rodou no cron.
+ *
+ * `situacao` é **crua**, exatamente como a RPC a devolve. O banco não sabe o que
+ * é um card: quem agrupa situação em KPI é `kpisAuditoria.ts`, o mesmo código
+ * que a tela diária usa. Se o SQL decidisse isso, o número do modal e o número
+ * do card teriam duas definições e divergiriam no primeiro estado novo.
+ *
+ * `sala_nome` é **crua, não a unidade**. O de-para sala→unidade é `mapearUnidade`
+ * e já é aplicado pelo resto do sistema; traduzir no SQL criaria uma segunda
+ * cópia da regra para envelhecer sozinha.
+ *
+ * Os textos anuláveis chegam como `'—'`, nunca `null`: são parte da chave
+ * primária do resumo, e NULL não se compara a NULL.
+ */
+export type ResumoDiarioLinha = {
+  data: string
+  /** Separa homônimos, que existem nesta base. O nome é o que se lê e se busca. */
+  paciente_id: string
+  paciente_nome: string
+  situacao: string
+  teve_token: boolean
+  codigo_tuss: string
+  terapia: string
+  sala_nome: string
+  codigo_glosa: string
+  sessoes: number
+  /** Quando o cron recalculou este dia. Vira o carimbo de frescor da tela. */
+  atualizado_em: string
+}
+
+/**
  * Uma autorização como a ASSIM a registrou, lida direto de `autorizacoes_assim`.
  *
  * Existe separada de `AuditoriaAssimItem` porque a auditoria é dirigida pela

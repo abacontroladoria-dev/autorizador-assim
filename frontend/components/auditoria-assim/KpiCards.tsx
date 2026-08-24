@@ -1,7 +1,8 @@
 'use client'
 
-import { AlertCircle, AlertTriangle, Ban, Calendar, CheckCircle2, RefreshCw, UserMinus, UserX, XCircle, Ticket } from 'lucide-react'
+import { Calendar } from 'lucide-react'
 import type { KpisAuditoriaAssim } from './types'
+import { KPI_VISUAL, ORDEM_KPIS, type VisualKpi } from './kpisVisual'
 
 type Props = {
   kpis: KpisAuditoriaAssim | null
@@ -11,167 +12,24 @@ type Props = {
   onFilter: (situacao: string) => void
 }
 
-type KpiConfig = {
-  key: string
-  title: string
-  hint?: string
-  value: number
-  tone: string
-  iconTone: string
-  barTone: string
-  borderActive: string
-  hoverBorder: string
-  bgActive: string
-  icon: typeof RefreshCw
-  situacao: string
-}
+/** O visual do card mais o número daquele recorte. */
+type KpiConfig = VisualKpi & { value: number }
 
 export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, onFilter }: Props) {
   const total = (kpis?.total ?? 0) + (kpis?.faltas ?? 0) + (kpis?.faltas_terapeuta ?? 0)
 
-  const cards: KpiConfig[] = [
-    {
-      key: 'nao-solicitadas',
-      // O valor 'NAO_SOLICITADA' aqui é o grupo: soma as que nunca foram
-      // enviadas e as que tiveram a solicitação quebrada no meio
-      // (SOLICITACAO_CANCELADA). As duas pedem a mesma coisa — solicitar de
-      // novo — e a régua de agrupamento vive em situacoes.ts, uma só para a
-      // contagem e para o filtro que o clique aplica. O rótulo de cada linha
-      // continua dizendo qual das duas é.
-      situacao: 'NAO_SOLICITADA',
-      title: 'Não Solicitadas',
-      hint: 'inclui canceladas',
-      value: kpis?.nao_solicitadas ?? 0,
-      tone: 'text-rose-700',
-      iconTone: 'bg-rose-50 text-rose-700',
-      barTone: 'bg-rose-500',
-      borderActive: 'border-rose-400',
-      hoverBorder: 'hover:border-rose-300',
-      bgActive: 'bg-rose-50/60',
-      icon: AlertCircle,
-    },
-    {
-      key: 'sincronizando',
-      situacao: 'SINCRONIZANDO',
-      title: 'Sincronizando',
-      hint: 'até 10 min',
-      value: kpis?.sincronizando ?? 0,
-      tone: 'text-sky-700',
-      iconTone: 'bg-sky-50 text-sky-700',
-      barTone: 'bg-sky-500',
-      borderActive: 'border-sky-400',
-      hoverBorder: 'hover:border-sky-300',
-      bgActive: 'bg-sky-50/60',
-      icon: RefreshCw,
-    },
-    {
-      key: 'retorno-nao-confirmado',
-      situacao: 'RETORNO_NAO_CONFIRMADO',
-      title: 'Retorno Não\nConfirmado',
-      hint: 'mais de 10 min',
-      value: kpis?.retorno_nao_confirmado ?? 0,
-      tone: 'text-amber-700',
-      iconTone: 'bg-amber-50 text-amber-700',
-      barTone: 'bg-amber-500',
-      borderActive: 'border-amber-400',
-      hoverBorder: 'hover:border-amber-300',
-      bgActive: 'bg-amber-50/60',
-      icon: AlertTriangle,
-    },
-    {
-      key: 'liberadas',
-      situacao: 'LIBERADA',
-      title: 'Liberadas',
-      value: kpis?.liberadas ?? 0,
-      tone: 'text-emerald-700',
-      iconTone: 'bg-emerald-50 text-emerald-700',
-      barTone: 'bg-emerald-500',
-      borderActive: 'border-emerald-400',
-      hoverBorder: 'hover:border-emerald-300',
-      bgActive: 'bg-emerald-50/60',
-      icon: CheckCircle2,
-    },
-    {
-      // "Com Token" não é uma situação — é um atributo transversal (toda
-      // liberada pode ter filipeta) e o contador da feature que o botão
-      // Conferência de Filipetas abre. Fica no steel da marca, fora da régua de situação,
-      // justamente para não parecer mais um estado do ciclo.
-      key: 'tokens',
-      situacao: 'TOKENS',
-      title: 'Com Token',
-      value: kpis?.tokens ?? 0,
-      tone: 'text-brand-fg',
-      iconTone: 'bg-brand-surface text-brand-fg',
-      barTone: 'bg-brand',
-      borderActive: 'border-brand',
-      hoverBorder: 'hover:border-brand/50',
-      bgActive: 'bg-brand-surface',
-      icon: Ticket,
-    },
-    {
-      key: 'glosas',
-      situacao: 'GLOSA',
-      title: 'Glosas',
-      value: kpis?.glosas ?? 0,
-      // O valor é só o que ainda pede tratativa. As já cobertas por vínculo
-      // aparecem como dica, e não somadas: "houve glosa" continua na tela sem
-      // inflar o número que a operação usa para dimensionar trabalho. Some
-      // quando é zero — dica que diz "0" é ruído.
-      ...(kpis?.glosas_resolvidas
-        ? { hint: `+${kpis.glosas_resolvidas} resolvida${kpis.glosas_resolvidas > 1 ? 's' : ''}` }
-        : {}),
-      tone: 'text-violet-700',
-      iconTone: 'bg-violet-50 text-violet-700',
-      barTone: 'bg-violet-500',
-      borderActive: 'border-violet-400',
-      hoverBorder: 'hover:border-violet-300',
-      bgActive: 'bg-violet-50/60',
-      icon: XCircle,
-    },
-    {
-      key: 'canceladas',
-      situacao: 'CANCELADA',
-      title: 'Canceladas',
-      value: kpis?.canceladas ?? 0,
-      tone: 'text-slate-600',
-      iconTone: 'bg-slate-100 text-slate-600',
-      barTone: 'bg-slate-400',
-      borderActive: 'border-slate-400',
-      hoverBorder: 'hover:border-slate-300',
-      bgActive: 'bg-slate-50/80',
-      icon: Ban,
-    },
-    {
-      // As duas faltas vivem em stone, fora da régua de autorização: sessão que
-      // não aconteceu é outra categoria. Distinguem-se por peso (stone-600 vs
-      // stone-700), ícone e título — não por matiz. Antes, "Faltas Terapeuta"
-      // era red-600, idêntico a "Não Solicitadas".
-      key: 'faltas',
-      situacao: 'FALTA',
-      title: 'Faltas Paciente',
-      value: kpis?.faltas ?? 0,
-      tone: 'text-stone-600',
-      iconTone: 'bg-stone-100 text-stone-600',
-      barTone: 'bg-stone-400',
-      borderActive: 'border-stone-400',
-      hoverBorder: 'hover:border-stone-300',
-      bgActive: 'bg-stone-50',
-      icon: UserX,
-    },
-    {
-      key: 'faltas-terapeuta',
-      situacao: 'FALTA_TERAPEUTA',
-      title: 'Faltas Terapeuta',
-      value: kpis?.faltas_terapeuta ?? 0,
-      tone: 'text-stone-700',
-      iconTone: 'bg-stone-200 text-stone-700',
-      barTone: 'bg-stone-500',
-      borderActive: 'border-stone-500',
-      hoverBorder: 'hover:border-stone-400',
-      bgActive: 'bg-stone-100/80',
-      icon: UserMinus,
-    },
-  ]
+  const cards: KpiConfig[] = ORDEM_KPIS.map((metrica) => {
+    const visual = KPI_VISUAL[metrica]
+    // A dica de Glosas é a única dinâmica: as já cobertas por vínculo aparecem
+    // como dica, e não somadas — "houve glosa" continua na tela sem inflar o
+    // número que a operação usa para dimensionar trabalho. Some quando é zero,
+    // porque dica que diz "0" é ruído.
+    if (metrica === 'glosas' && kpis?.glosas_resolvidas) {
+      const n = kpis.glosas_resolvidas
+      return { ...visual, value: kpis.glosas, hint: `+${n} resolvida${n > 1 ? 's' : ''}` }
+    }
+    return { ...visual, value: kpis?.[metrica] ?? 0 }
+  })
 
   return (
     <section className="flex flex-col gap-2 xl:flex-row pt-0.5">
