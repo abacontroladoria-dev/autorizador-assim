@@ -43,6 +43,11 @@ backup_*.json
 # conferência do /rp (66 MB de agendamento com nome de paciente). O padrão
 # backup_* acima não pega diretório.
 backup_agendamentos/
+# 2026-08-24: dumps de log baixados do painel do Supabase para diagnosticar a
+# lentidão daquele dia. Não trazem token, mas trazem e-mail de funcionária e o
+# UUID de cada usuário autenticado — e este repo é público. Mesmo raciocínio das
+# linhas acima: o conteúdo é útil no disco e nunca no histórico.
+supabase_logs/
 /check_*.py
 /debug_*.py
 /invoke_*.py
