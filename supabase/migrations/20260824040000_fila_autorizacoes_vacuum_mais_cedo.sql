@@ -1,0 +1,53 @@
+-- =============================================================================
+-- fila_autorizacoes passa por vacuum antes de o index-only scan virar mentira
+-- =============================================================================
+-- Medido em 24/08, janela do mês, dentro de get_guias_orfas:
+--
+--   Hash Right Anti Join
+--     ->  Index Only Scan using idx_fila_autorizacoes_guia_horario
+--           (actual rows=20095)   745 ms
+--           Heap Fetches: 7569
+--
+-- O índice criado em 20260824000000 está sendo escolhido — mas um index-only
+-- scan que vai ao heap 7.569 vezes não é index-only. Ele só evita o heap nas
+-- páginas marcadas como all-visible no mapa de visibilidade, e quem marca isso é
+-- o VACUUM. Sem vacuum recente, o mapa está vazio e cada linha custa uma visita
+-- ao heap: 745 ms dos 760 ms daquele nó.
+--
+-- POR QUE O VACUUM NÃO CHEGAVA
+-- Mesmo mecanismo de 20260824030000, do outro lado:
+--
+--     autovacuum_vacuum_threshold + autovacuum_vacuum_scale_factor × n_live_tup
+--     50 + 0,2 × 28.153 ≈ 5.681 tuplas mortas
+--
+-- A tabela tinha 3.665 mortas e último autovacuum em 19/08 — parada logo abaixo
+-- da linha, indefinidamente. Note o contraste com o ANALYZE, que roda o tempo
+-- todo aqui (autoanalyze_count 1.990, último há 2 dias): o gatilho do analyze é
+-- por MODIFICAÇÃO e o robô escreve sem parar, enquanto o do vacuum é por tuplas
+-- MORTAS e updates que cabem na mesma página (HOT) mal o movem. Estatística em
+-- dia e mapa de visibilidade vazio convivem sem contradição.
+--
+-- O NÚMERO NOVO
+--   vacuum:  50 + 0,05 × 28.153 ≈ 1.458 tuplas mortas   (era ≈ 5.681)
+--
+-- Não mexo no analyze desta tabela: 1.990 execuções dizem que ele está bem.
+--
+-- QUEM MAIS GANHA
+-- fila_autorizacoes é lida por praticamente toda a família ASSIM
+-- (get_auditoria_assim_periodo, get_tokens_mensal, vw_central_autorizacoes,
+-- fn_blocos_assim) e tem 13 índices. Mapa de visibilidade em dia é a diferença
+-- entre index-only scan de verdade e uma visita ao heap por linha, em todas elas.
+--
+-- FALTA UM PASSO QUE NÃO CABE AQUI
+-- `VACUUM` não roda dentro de transação, e migration roda em transação. Depois
+-- de aplicar este arquivo, rodar SEPARADAMENTE, sozinho no SQL Editor:
+--
+--     vacuum (analyze) public.fila_autorizacoes;
+--
+-- Sem isso, o limiar novo só age na próxima vez que ele for cruzado, e o mapa
+-- continua vazio até lá. O VACUUM não bloqueia leitura nem escrita.
+-- =============================================================================
+
+alter table public.fila_autorizacoes set (
+  autovacuum_vacuum_scale_factor = 0.05
+);

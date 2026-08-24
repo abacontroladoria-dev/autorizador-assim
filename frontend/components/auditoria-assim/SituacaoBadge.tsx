@@ -30,9 +30,15 @@ import {
  * - Texto em `-700` sobre fundo `-50`, nunca `-600`. A 11px o par -600/-50 fica
  *   entre 3.4:1 e 3.9:1 e reprova no AA (4.5:1). Medidos aqui: rose 6.5:1,
  *   violet 7.5:1, amber 5.5:1, sky 6.3:1, slate 6.9:1, emerald 6.4:1,
- *   stone 7.3:1. SOLICITACAO_CANCELADA é o único par mais escuro
- *   (rose-800/rose-100, 6.7:1) — sobe um degrau para não repetir o par de
- *   NAO_SOLICITADA, e passa no AA pela mesma régua.
+ *   stone 7.3:1. Os dois pares fora dessa régua são da família rose e passam no
+ *   AA pela mesma medida: SOLICITACAO_CANCELADA em rose-800/rose-100 (6.7:1) e
+ *   CANCELADA em rose-700/rose-100 (5.2:1).
+ * - **Rose é a família da AÇÃO "vá buscar autorização"**, e por isso tem três
+ *   entradas onde os outros matizes têm uma. NAO_SOLICITADA nunca começou,
+ *   SOLICITACAO_CANCELADA quebrou no meio, CANCELADA saiu e foi desfeita — o
+ *   enredo é outro, a resposta exigida é a mesma, e pintá-las de matizes
+ *   diferentes afirmaria que pedem coisas diferentes. Dentro da família quem
+ *   separa é o ícone (AlertCircle / AlertOctagon / Ban) e o rótulo.
  * - Violeta é semântico (glosa) e só. Setas de ordenação e focus ring usam o
  *   steel da marca (--color-brand), não violeta — senão o mesmo matiz significa
  *   "glosa" numa célula e "foco" na de cima.
@@ -141,13 +147,24 @@ export const SITUACAO_CONFIG: Record<string, SituacaoConfigEntry> = {
     strong: 'text-sky-700',
     icon: RefreshCw,
   },
-  // prioridade 5 — encerrado sem efeito
+  // prioridade 5 — a ASSIM DESFEZ a liberação (`status = 'Liberado *'`)
+  //
+  // Vivia em slate-100/slate-600 — o par exato de SITUACAO_FALLBACK, que
+  // significa "situação nula ou fora do vocabulário". Um estado real, acionável
+  // e que deixa a sessão descoberta estava pintado como "não sabemos o que é
+  // isto", e slate lê como inerte: quem varria a grade passava por ela.
+  //
+  // Rose, e não um matiz novo, porque rose codifica a AÇÃO e não o enredo:
+  // "nada cobre esta sessão, vá buscar autorização". É a mesma família de
+  // NAO_SOLICITADA (nunca começou) e SOLICITACAO_CANCELADA (quebrou no meio) —
+  // aqui, saiu e foi desfeita. Terceiro par da família, distinto dos dois
+  // (rose-100/rose-700, 5.2:1) e separado deles pelo ícone e pelo rótulo.
   CANCELADA: {
     label: 'Cancelada',
-    dot: 'bg-slate-400',
-    className: 'bg-slate-100 text-slate-600 ring-1 ring-slate-300',
-    surface: 'bg-slate-50 border-slate-200',
-    strong: 'text-slate-600',
+    dot: 'bg-rose-600',
+    className: 'bg-rose-100 text-rose-700 ring-1 ring-rose-300',
+    surface: 'bg-rose-50 border-rose-300',
+    strong: 'text-rose-700',
     icon: Ban,
   },
   // prioridade 6 — autorizado

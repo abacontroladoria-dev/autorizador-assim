@@ -1,7 +1,9 @@
 'use client'
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import type { NotaManual, TokenConferencia } from '@/services/auditoria-assim.service'
 import {
+  buscarNotasEConferencias,
   listarAuditoriaAssim,
   listarAutorizacoesAssimSemana,
   listarFaltasAuditoria,
@@ -12,12 +14,17 @@ import type {
   AuditoriaAssimItem,
   AutorizacaoAssimSemana,
   ContagemPendencias,
-  EstadoFiltro,
   GuiaOrfa,
   PacientePendencias,
   PlacarTuss,
 } from '@/components/auditoria-assim/types'
 import type { EstadoAutorizacao } from '@/components/auditoria-assim/reconciliacao/LinhaAutorizacao'
+import {
+  SITUACOES_SEM_SESSAO,
+  sessaoDecorrida,
+  sessaoSemCobertura,
+} from '@/components/auditoria-assim/reconciliacao/cobertura'
+import { cartaoPendente, montarGrade } from '@/components/auditoria-assim/reconciliacao/grade'
 
 /**
  * Análise de reincidência — a cota do MÊS por TUSS, da clínica inteira.
@@ -67,8 +74,14 @@ import type { EstadoAutorizacao } from '@/components/auditoria-assim/reconciliac
  * `autorizacoesDoMes`.
  */
 
-/** Cota = quantas sessões daquele TUSS o paciente tem no período. Falta não conta. */
-const SITUACOES_SEM_SESSAO = new Set(['FALTA', 'FALTA_TERAPEUTA'])
+/**
+ * A regra de cobertura mora em `reconciliacao/cobertura.ts`, não aqui.
+ *
+ * Ela é dado puro e precisa ser exercitável num teste de nó — este módulo
+ * arrasta os services, e com eles o cliente do Supabase. E é a MESMA regra que
+ * `grade.ts` usa para carimbar o cartão: duas cópias fariam o número do topo do
+ * modal e a marca do cartão discordarem sobre a mesma semana.
+ */
 
 /** Quantos dias buscar em paralelo por vez. Um mês cheio tem ~22 dias úteis —
  *  disparar todos de uma vez seria 44 requisições simultâneas (2 por dia). */
@@ -197,13 +210,6 @@ export function agoraMenos30MinIso(): string {
   return `${ano}-${mes}-${dia}T${hora}:${min}`
 }
 
-/** O instante de uma sessão: "2026-08-24T08:00". Nulo quando falta a hora. */
-function instanteSessao(s: AuditoriaAssimItem): string | null {
-  if (!s.data_atendimento) return null
-  const hora = s.hora_inicial?.slice(0, 5)
-  return hora ? `${s.data_atendimento}T${hora}` : null
-}
-
 /**
  * O placar de um conjunto de sessões contra um conjunto de autorizações.
  *
@@ -219,6 +225,18 @@ function instanteSessao(s: AuditoriaAssimItem): string | null {
  * faltando" uma sessão que ainda vai acontecer — ou que aconteceu há 5
  * minutos — transformaria a tela em ruído. Só sessão realmente decorrida
  * pode estar sem cobertura.
+ *
+ * `faltante` conta SESSÕES, uma a uma, por `sessaoSemCobertura` — não é mais
+ * `decorridas − liberadas`. A troca (2026-08-24) tem um motivo e um efeito:
+ *
+ * - motivo: a subtração diz quantas faltam e não diz QUAIS, então a grade não
+ *   tinha como marcar a sessão problemática. Contando por sessão, cada unidade
+ *   do número é um cartão que a tela consegue apontar.
+ * - efeito: os dois números divergem num caso, e é o caso que importa. Três
+ *   sessões decorridas, três liberações, mas uma delas órfã e uma sessão em
+ *   glosa: a subtração fechava `0` e escondia tudo; a contagem por sessão diz
+ *   `1`, e do lado das guias a órfã aparece como "sem vínculo". Que é
+ *   exatamente o par que esta tela existe para reconciliar.
  */
 export function calcularPlacar(
   sessoes: AuditoriaAssimItem[],
@@ -226,7 +244,6 @@ export function calcularPlacar(
   cutoff: string
 ): PlacarTuss[] {
   const porTuss = new Map<string, PlacarTuss & { terapiasVistas: Set<string> }>()
-  const hoje = cutoff.slice(0, 10)
 
   const entrada = (codigo: string | null) => {
     const chave = codigo ?? '—'
@@ -256,12 +273,8 @@ export function calcularPlacar(
     // dela é justamente um dos jeitos de estourar a cota.
     if (SITUACOES_SEM_SESSAO.has(s.situacao ?? '')) continue
     item.agendadas += 1
-    const instante = instanteSessao(s)
-    // Sem hora, o critério cai para o mesmo corte por dia de antes, mas
-    // estrito: nunca conta o próprio dia, porque não há como saber se os 30
-    // minutos já passaram.
-    const decorrida = instante !== null ? instante <= cutoff : (s.data_atendimento ?? '') < hoje
-    if (decorrida) item.decorridas += 1
+    if (sessaoDecorrida(s, cutoff)) item.decorridas += 1
+    if (sessaoSemCobertura(s, cutoff)) item.faltante += 1
   }
 
   for (const a of autorizacoes) {
@@ -276,7 +289,6 @@ export function calcularPlacar(
       ...item,
       terapias: [...terapiasVistas].join(' | '),
       excedente: item.liberadas - item.agendadas,
-      faltante: Math.max(0, item.decorridas - item.liberadas),
     }))
     .sort((a, b) => b.excedente - a.excedente || a.codigo_tuss.localeCompare(b.codigo_tuss))
 }
@@ -326,11 +338,75 @@ export function contarPendencias(
   return contagem
 }
 
+/**
+ * As guias que estouraram a cota — nomeadas, não contadas.
+ *
+ * `excedente` é um número por TUSS ("6 liberadas para 5 sessões"), e um número
+ * não se destaca num cartão. A atribuição é posicional pela `data_execucao`:
+ * dentro do TUSS, as ÚLTIMAS `excedente` liberações são as que passaram do
+ * agendado. É a mesma ordem que o pareamento do banco usa para decidir qual
+ * autorização casa com qual sessão, então isto não inventa critério novo — lê o
+ * mesmo que a ASSIM leu quando recusou a seguinte por reincidência.
+ *
+ * Só liberação entra: recusada não gastou cota, e cancelada foi desfeita.
+ */
+export function excedentesDoPlacar(
+  placar: PlacarTuss[],
+  autorizacoes: AutorizacaoAssimSemana[]
+): Set<string> {
+  const marcadas = new Set<string>()
+  for (const p of placar) {
+    if (p.excedente <= 0) continue
+    const doTuss = autorizacoes
+      .filter((a) => (a.codigo_tuss ?? '—') === p.codigo_tuss && autorizacaoLiberada(a.status))
+      .sort((a, b) => (a.data_execucao ?? '').localeCompare(b.data_execucao ?? ''))
+    for (const a of doTuss.slice(-p.excedente)) marcadas.add(a.guia)
+  }
+  return marcadas
+}
+
+/**
+ * Quantos cartões marcados uma semana teria — montando a grade DE VERDADE.
+ *
+ * Podia ser uma soma esperta sobre o placar, e não é de propósito: a faixa de
+ * semanas promete "há 4 aqui", e a pessoa clica esperando encontrar 4. Contar
+ * por um caminho e desenhar por outro é como as duas passam a discordar na
+ * primeira regra nova. Custa uma montagem de grade por semana sobre dados que
+ * já estão em memória — cinco semanas de um paciente, não da clínica.
+ */
+function marcadosDaSemana(
+  sessoes: AuditoriaAssimItem[],
+  autorizacoes: AutorizacaoAssimSemana[],
+  dias: string[],
+  cutoff: string,
+  ehOrfa: (guia: string) => boolean
+): number {
+  const placar = calcularPlacar(sessoes, autorizacoes, cutoff)
+  const pareadas = new Set(sessoes.map((s) => s.guia).filter((g): g is string => !!g))
+  const linhas = montarGrade(
+    sessoes,
+    autorizacoes,
+    (guia) => (ehOrfa(guia) ? 'sem-vinculo' : pareadas.has(guia) ? 'pareada' : 'fora-da-semana'),
+    dias,
+    placar,
+    {
+      descoberta: (s) => sessaoSemCobertura(s, cutoff),
+      decorrida: (s) => sessaoDecorrida(s, cutoff),
+      excedentes: excedentesDoPlacar(placar, autorizacoes),
+    }
+  )
+  let total = 0
+  for (const linha of linhas) {
+    for (const dia of dias) {
+      for (const cartao of linha.celulas[dia] ?? []) if (cartaoPendente(cartao)) total += 1
+    }
+  }
+  return total
+}
+
 export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: string | null) {
   const [mesRef, setMesRef] = useState(() => primeiroDiaDoMes(dataInicial))
   const [semanaInicio, setSemanaInicio] = useState(() => segundaDe(dataInicial))
-  const [tussFiltro, setTussFiltro] = useState<string | null>(null)
-  const [estadoFiltro, setEstadoFiltro] = useState<EstadoFiltro | null>(null)
   const [cutoff, setCutoff] = useState(() => agoraMenos30MinIso())
 
   /**
@@ -352,6 +428,23 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   const [unidades, setUnidades] = useState<Map<string, string>>(() => new Map())
   const [carregandoSemana, setCarregandoSemana] = useState(false)
   const [carregandoAutorizacoes, setCarregandoAutorizacoes] = useState(false)
+  /**
+   * A terceira carga do mês, e a única que não tinha porteiro até 2026-08-24.
+   *
+   * As três disparam JUNTAS, em efeitos independentes, mas `loading` só olhava
+   * duas — então a listagem pintava assim que sessões e autorizações chegavam,
+   * com `orfasDaSemana` ainda vazio. Com o mapa vazio `ehOrfa` responde "não"
+   * para toda guia, a coluna "Sem vínculo" nasce zerada, e
+   * `ListaPendencias` descarta quem tem `contagem.total === 0` — ou seja, todo
+   * paciente cuja única pendência era guia sem vínculo SUMIA da listagem. Aí a
+   * resposta de `get_guias_orfas` chegava e a tela se corrigia sozinha: os
+   * números dos chips pulavam, linhas apareciam e a paginação se remontava.
+   *
+   * Gatear aqui não serializa nada — as três já corriam em paralelo, e isto só
+   * adia a primeira pintura até a última terminar. É o preço de não mostrar uma
+   * listagem que exclui gente de verdade sem dizer.
+   */
+  const [carregandoOrfas, setCarregandoOrfas] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
   // Cada carga carrega seu número de série: resposta de mês antigo que chega
@@ -376,33 +469,9 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   const reabrirEm = useCallback((data: string, paciente: string | null, carteirinha: string | null) => {
     setMesRef(primeiroDiaDoMes(data))
     setSemanaInicio(segundaDe(data))
-    setTussFiltro(null)
-    setEstadoFiltro(null)
     setErro(null)
     setSelecionado(paciente ? { nome: paciente, carteirinhas: carteirinha ? [carteirinha] : [] } : null)
   }, [])
-
-  /**
-   * Abre um paciente da listagem mensal no modal.
-   *
-   * `dataReferencia` (tipicamente a última autorização do paciente no mês,
-   * já disponível na linha da listagem) posiciona a semana do modal onde a
-   * pendência de fato está — sem isso, um paciente cuja pendência é da
-   * primeira semana do mês abriria mostrando a semana corrente, vazia, e a
-   * listagem pareceria estar mentindo sobre o que acabou de ser clicado.
-   */
-  const escolherPaciente = useCallback(
-    (nome: string | null, carteirinhas: string[] = [], dataReferencia?: string | null) => {
-      setTussFiltro(null)
-      setEstadoFiltro(null)
-      setSelecionado(nome ? { nome, carteirinhas } : null)
-      if (nome && dataReferencia) {
-        const alvo = segundaDe(dataReferencia.slice(0, 10))
-        setSemanaInicio(alvo < semanaMinima ? semanaMinima : alvo > semanaMaxima ? semanaMaxima : alvo)
-      }
-    },
-    [semanaMinima, semanaMaxima]
-  )
 
   /** Troca de mês pela listagem — nunca vai além do mês corrente. */
   const irParaMesRef = useCallback((mesAlvoBruto: string) => {
@@ -414,8 +483,6 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
     // A semana do modal acompanha o mês: a de hoje quando hoje cai dentro
     // dele, senão a primeira semana do mês.
     setSemanaInicio(hoje >= alvo && hoje <= fim ? segundaDe(hoje) : segundaDe(alvo))
-    setTussFiltro(null)
-    setEstadoFiltro(null)
   }, [])
 
   // ── As sessões do período ──────────────────────────────────────────────
@@ -468,16 +535,20 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   // ── A fila de órfãs recortada neste período ────────────────────────────
   const carregarOrfasDoMes = useCallback(async () => {
     const geracao = ++geracaoOrfas.current
+    setCarregandoOrfas(true)
     try {
       const lista = await listarGuiasOrfas(inicioFetch, fimFetch)
       if (geracao !== geracaoOrfas.current) return
       setOrfasDaSemana(new Map(lista.map((g) => [g.guia, g])))
     } catch {
-      // Silencioso de propósito: sem esta lista a tela ainda diz a verdade sobre
-      // a cota — só deixa de oferecer o atalho de vincular. Derrubar a tela
-      // inteira por causa do atalho seria pior que perdê-lo.
+      // Silencioso de propósito: sem esta lista a cota por TUSS continua certa
+      // (ela sai de sessões e autorizações), e derrubar a tela inteira por causa
+      // da coluna "Sem vínculo" seria pior que perdê-la. O que NÃO se pode fazer
+      // é pintar antes de saber — ver `carregandoOrfas`.
       if (geracao !== geracaoOrfas.current) return
       setOrfasDaSemana(new Map())
+    } finally {
+      if (geracao === geracaoOrfas.current) setCarregandoOrfas(false)
     }
   }, [inicioFetch, fimFetch])
 
@@ -634,6 +705,66 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
     return linhas.sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR'))
   }, [sessoesDoMes, autorizacoesDoMes, unidades, ehOrfa, cutoff])
 
+  /**
+   * A conferência da filipeta e a nota manual do paciente aberto.
+   *
+   * `get_auditoria_assim` NÃO devolve estes campos, embora `AuditoriaAssimItem`
+   * os declare: eles moram em `auditoria_token_conferencias` e
+   * `auditoria_atendimento_notas`, e quem os junta é o cliente. O serviço faz um
+   * cast do retorno da RPC para o tipo, então os campos chegam `undefined` e
+   * qualquer leitor honesto lê "ainda não conferida" numa filipeta que foi
+   * conferida — foi o que aconteceu no detalhamento (caso Kourtney Savino Lopes,
+   * 05/08 10:00, token 318580).
+   *
+   * A busca é por PACIENTE, não pelo mês inteiro: um mês da clínica passa de
+   * 2.800 blocos e um `.in()` com essa lista estoura o comprimento da URL do
+   * PostgREST. Por paciente são algumas dezenas, numa requisição só, disparada
+   * quando o modal abre. Blocos sintéticos de falta (`falta_…`) ficam de fora —
+   * eles não existem naquelas tabelas e o `bloco_id` lá é uuid.
+   */
+  const [notasPorBloco, setNotasPorBloco] = useState<Map<string, NotaManual>>(() => new Map())
+  const [conferenciasPorBloco, setConferenciasPorBloco] = useState<Map<string, TokenConferencia>>(
+    () => new Map()
+  )
+
+  const blocosDoPaciente = useMemo(() => {
+    if (!selecionado?.nome) return [] as string[]
+    return sessoes
+      .filter((s) => s.paciente_nome === selecionado?.nome)
+      .map((s) => s.bloco_id)
+      .filter((id): id is string => !!id && !id.startsWith('falta_'))
+  }, [sessoes, selecionado?.nome])
+
+  const chaveBlocos = blocosDoPaciente.join(',')
+  useEffect(() => {
+    if (blocosDoPaciente.length === 0) {
+      setNotasPorBloco(new Map())
+      setConferenciasPorBloco(new Map())
+      return
+    }
+    let vivo = true
+    buscarNotasEConferencias(blocosDoPaciente)
+      .then(({ notas, conferencias }) => {
+        if (!vivo) return
+        setNotasPorBloco(notas)
+        setConferenciasPorBloco(conferencias)
+      })
+      .catch(() => {
+        // Silencioso: sem isto a tela ainda diz a verdade sobre a semana, só
+        // deixa de mostrar a conferência. Derrubar o modal por causa dela seria
+        // pior que perdê-la.
+        if (vivo) {
+          setNotasPorBloco(new Map())
+          setConferenciasPorBloco(new Map())
+        }
+      })
+    return () => {
+      vivo = false
+    }
+    // `chaveBlocos` e não o array: ele é recriado a cada render do memo pai.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chaveBlocos])
+
   /** As unidades que o mês de fato tem — a lista do filtro, sem inventar opção. */
   const unidadesDoMes = useMemo(
     () =>
@@ -702,6 +833,96 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
     [sessoesPaciente]
   )
 
+  /** O recorte de um paciente numa semana qualquer do mês já carregado. */
+  const recortarSemana = useCallback(
+    (nome: string, chaves: Set<string>, inicio: string) => {
+      const fim = somarDias(inicio, 4)
+      return {
+        sessoes: sessoes.filter(
+          (s) =>
+            s.paciente_nome === nome &&
+            (s.data_atendimento ?? '') >= inicio &&
+            (s.data_atendimento ?? '') <= fim
+        ),
+        autorizacoes: autorizacoes.filter((a) => {
+          if (!a.matricula || !chaves.has(a.matricula)) return false
+          const dia = (a.data_execucao ?? '').slice(0, 10)
+          return dia >= inicio && dia <= fim
+        }),
+      }
+    },
+    [sessoes, autorizacoes]
+  )
+
+  /**
+   * O mês do paciente aberto, semana a semana, com quantos cartões cada uma tem.
+   *
+   * A listagem é MENSAL e o modal é SEMANAL, e até 2026-08-24 nada fazia a ponte:
+   * a semana exibida saía de `ultimaAutorizacao`, que é o instante da última
+   * autorização do mês e não onde está a pendência. Um "faltando" na primeira
+   * semana com uma autorização normal na quarta abria a quarta, limpa — e o
+   * operador não tinha como saber que precisava voltar. Pior no paciente que só
+   * tem falta: `ultimaAutorizacao` nula, e o modal abria na semana de hoje.
+   *
+   * Isto é o índice que faltava. Custa uma montagem de grade por semana sobre
+   * dados de um paciente que já estão em memória — nenhuma requisição.
+   */
+  const semanasDoMes = useMemo(() => {
+    if (!pacienteNome) return []
+    const chaves = new Set(carteirinhas)
+    const semanas: { inicio: string; fim: string; marcados: number }[] = []
+    for (let ini = semanaMinima; ini <= semanaMaxima; ini = somarDias(ini, 7)) {
+      const { sessoes: s, autorizacoes: a } = recortarSemana(pacienteNome, chaves, ini)
+      semanas.push({
+        inicio: ini,
+        fim: somarDias(ini, 4),
+        marcados: marcadosDaSemana(s, a, diasUteisDe(ini), cutoff, ehOrfa),
+      })
+    }
+    return semanas
+  }, [pacienteNome, carteirinhas, semanaMinima, semanaMaxima, recortarSemana, cutoff, ehOrfa])
+
+  /** Vai direto para uma semana do mês, pela faixa do cabeçalho. */
+  const irParaSemanaEm = useCallback((inicio: string) => setSemanaInicio(inicio), [])
+
+  /**
+   * Abre um paciente da listagem mensal no modal, na semana que tem o trabalho.
+   *
+   * A ordem de escolha da semana, e o porquê de cada degrau:
+   *
+   * 1. **a primeira semana do mês com cartão marcado.** É a resposta certa para
+   *    a pergunta que o clique faz ("o que este paciente tem?"), e a única que
+   *    funciona para quem só tem falta — esse paciente não tem autorização
+   *    nenhuma, então nenhuma data derivada de autorização o acha;
+   * 2. `dataReferencia` (a última autorização do mês), que era o critério único
+   *    até 2026-08-24. Serve de rede quando o mês não tem nada marcado: cai onde
+   *    houve movimento, e não numa semana arbitrária;
+   * 3. o começo do mês, quando não há nem uma coisa nem outra.
+   *
+   * A busca varre o mês inteiro, e não só até achar, porque o custo é uma
+   * montagem de grade por semana sobre dados já em memória — nada de rede.
+   */
+  const escolherPaciente = useCallback(
+    (nome: string | null, carteirinhas: string[] = [], dataReferencia?: string | null) => {
+      setSelecionado(nome ? { nome, carteirinhas } : null)
+      if (!nome) return
+
+      const chaves = new Set(carteirinhas)
+      let comMarca: string | null = null
+      for (let ini = semanaMinima; ini <= semanaMaxima; ini = somarDias(ini, 7)) {
+        const { sessoes: s, autorizacoes: a } = recortarSemana(nome, chaves, ini)
+        if (marcadosDaSemana(s, a, diasUteisDe(ini), cutoff, ehOrfa) > 0) {
+          comMarca = ini
+          break
+        }
+      }
+
+      const alvo = comMarca ?? (dataReferencia ? segundaDe(dataReferencia.slice(0, 10)) : semanaMinima)
+      setSemanaInicio(alvo < semanaMinima ? semanaMinima : alvo > semanaMaxima ? semanaMaxima : alvo)
+    },
+    [semanaMinima, semanaMaxima, recortarSemana, cutoff, ehOrfa]
+  )
+
   /**
    * O destino de uma autorização, em três estados. Ver `EstadoAutorizacao`.
    *
@@ -722,52 +943,91 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
     [sessoesPaciente, autorizacoesPaciente, cutoff]
   )
 
-  const sessoesVisiveis = useMemo(
-    () => (tussFiltro ? sessoesPaciente.filter((s) => (s.codigo_tuss ?? '—') === tussFiltro) : sessoesPaciente),
-    [sessoesPaciente, tussFiltro]
+  /** Esta sessão já ocorreu e ninguém a liberou. Fechada sobre o `cutoff` vivo. */
+  const sessaoDescoberta = useCallback(
+    (s: AuditoriaAssimItem) => sessaoSemCobertura(s, cutoff),
+    [cutoff]
   )
 
-  const autorizacoesDoTuss = useMemo(
-    () =>
-      tussFiltro
-        ? autorizacoesPaciente.filter((a) => (a.codigo_tuss ?? '—') === tussFiltro)
-        : autorizacoesPaciente,
-    [autorizacoesPaciente, tussFiltro]
+  /**
+   * Esta sessão já ocorreu — coberta ou não.
+   *
+   * Separada de `sessaoDescoberta` porque o cartão precisa distinguir "ninguém
+   * pediu e a sessão já passou" (problema) de "ninguém pediu ainda porque a
+   * sessão é sexta" (normal). Sem ela as duas chegavam como NAO_SOLICITADA e
+   * saíam vermelhas, e a tela cobrava autorização da agenda que ainda nem
+   * aconteceu.
+   */
+  const sessaoJaDecorrida = useCallback(
+    (s: AuditoriaAssimItem) => sessaoDecorrida(s, cutoff),
+    [cutoff]
   )
+
+  /**
+   * As guias que estouraram a cota — nomeadas, não contadas.
+   *
+   * `excedente` é um número por TUSS ("6 liberadas para 5 sessões"), e um número
+   * não se destaca num cartão. A atribuição é posicional pela `data_execucao`:
+   * dentro do TUSS, as ÚLTIMAS `excedente` liberações são as que passaram do
+   * agendado. É a mesma ordem que o pareamento do banco usa para decidir qual
+   * autorização casa com qual sessão, então isto não inventa critério novo —
+   * lê o mesmo que a ASSIM leu quando recusou a seguinte por reincidência.
+   *
+   * Só liberação entra: recusada não gastou cota, e cancelada foi desfeita.
+   */
+  const guiasExcedentes = useMemo(
+    () => excedentesDoPlacar(placar, autorizacoesPaciente),
+    [placar, autorizacoesPaciente]
+  )
+
+  /**
+   * A semana do paciente, inteira.
+   *
+   * Houve um recorte por espécie de pendência aqui (2026-08-24), acionado pelos
+   * indicadores do modal. Os indicadores saíram a pedido do usuário e nada mais
+   * podia acioná-lo, então o recorte saiu junto: filtro que ninguém alcança é
+   * armadilha para quem ler isto depois. Os dois nomes seguem porque o modal
+   * fala em "visíveis" e um dia pode voltar a recortar.
+   */
+  const sessoesVisiveis = sessoesPaciente
 
   /**
    * Os três estados que esta tela existe para vigiar, contados ANTES do filtro
    * de estado — senão escolher "glosas" zeraria os outros dois contadores e a
    * pessoa perderia a única visão do que mais há para olhar na semana.
    */
-  const ledger = useMemo(() => calcularLedger(autorizacoesDoTuss, ehOrfa), [autorizacoesDoTuss, ehOrfa])
+  const ledger = useMemo(() => calcularLedger(autorizacoesPaciente, ehOrfa), [autorizacoesPaciente, ehOrfa])
 
   /** Guia liberada que casou com sessão da semana — a cobertura que de fato funcionou. */
   const utilizadas = useMemo(
     () =>
-      autorizacoesDoTuss.filter((a) => autorizacaoLiberada(a.status) && estadoDaGuia(a.guia) === 'pareada')
+      autorizacoesPaciente.filter((a) => autorizacaoLiberada(a.status) && estadoDaGuia(a.guia) === 'pareada')
         .length,
-    [autorizacoesDoTuss, estadoDaGuia]
+    [autorizacoesPaciente, estadoDaGuia]
   )
 
   const liberadas = useMemo(
-    () => autorizacoesDoTuss.filter((a) => autorizacaoLiberada(a.status)).length,
-    [autorizacoesDoTuss]
+    () => autorizacoesPaciente.filter((a) => autorizacaoLiberada(a.status)).length,
+    [autorizacoesPaciente]
   )
 
-  const autorizacoesVisiveis = useMemo(() => {
-    if (!estadoFiltro) return autorizacoesDoTuss
-    return autorizacoesDoTuss.filter((a) => {
-      if (estadoFiltro === 'sem-vinculo') return estadoDaGuia(a.guia) === 'sem-vinculo'
-      if (estadoFiltro === 'cancelada') return autorizacaoCancelada(a.status)
-      return !autorizacaoLiberada(a.status) && !autorizacaoCancelada(a.status)
-    })
-  }, [autorizacoesDoTuss, estadoFiltro, estadoDaGuia])
+  const autorizacoesVisiveis = autorizacoesPaciente
 
   const totalExcedente = useMemo(
     () => placar.reduce((soma, p) => soma + Math.max(0, p.excedente), 0),
     [placar]
   )
+
+  /**
+   * As cinco espécies de pendência da semana aberta.
+   *
+   * Pela MESMA `contarPendencias` que monta as cinco colunas da listagem — não
+   * uma segunda soma. Era daí que vinha a confusão que este trabalho resolve: a
+   * linha prometia "3 pendências" em cinco colunas e o modal abria mostrando
+   * cinco números de outro vocabulário, sem "faltando" nem "sobrando" em lugar
+   * nenhum. Mesma função, mesmas palavras, mesma ordem.
+   */
+  const contagem = useMemo(() => contarPendencias(placar, ledger), [placar, ledger])
 
   return {
     // ── Mês: a listagem ──────────────────────────────────────────────────
@@ -793,23 +1053,22 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
         if (proximo > semanaMaxima) return semanaMaxima
         return proximo
       })
-      setTussFiltro(null)
-      setEstadoFiltro(null)
-    },
+        },
 
     pacienteNome,
     escolherPaciente,
+    /** As semanas do mês do paciente aberto, com quantos cartões cada uma tem. */
+    semanasDoMes,
+    irParaSemanaEm,
     reabrirEm,
     /** A linha da listagem do paciente aberto — plano, unidade e contagens. */
     linhaSelecionada,
     idsDoPaciente,
     /** Para o cabeçalho de identidade. Nula até a semana carregar. */
     carteirinhaDoPaciente: carteirinhas[0] ?? null,
-    tussFiltro,
-    setTussFiltro,
-    estadoFiltro,
-    setEstadoFiltro,
     ledger,
+    /** As cinco espécies de pendência, no mesmo vocabulário da listagem. */
+    contagem,
     liberadas,
     utilizadas,
     placar,
@@ -817,9 +1076,23 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
     sessoesVisiveis,
     autorizacoesVisiveis,
     estadoDaGuia,
+    /** Marca a sessão que já ocorreu e ninguém liberou — o "faltando" apontável. */
+    sessaoDescoberta,
+    /** Marca a sessão que já ocorreu, coberta ou não. */
+    sessaoJaDecorrida,
+    /** Conferência da filipeta por bloco — a RPC não a traz, ver a nota acima. */
+    conferenciasPorBloco,
+    /** Nota escrita à mão na Conferência, por bloco. Mesma razão. */
+    notasPorBloco,
+    /** As guias que passaram da cota, nomeadas — o "sobrando" apontável. */
+    guiasExcedentes,
     orfasDaSemana,
-    loading: carregandoSemana || carregandoAutorizacoes,
-    carregandoSemana,
+    /**
+     * As TRÊS cargas do mês juntas. Não exponha uma sozinha: gatear numa só foi
+     * exatamente o defeito que fazia a listagem pintar e se corrigir na frente
+     * de quem estava lendo (ver `carregandoOrfas`).
+     */
+    loading: carregandoSemana || carregandoAutorizacoes || carregandoOrfas,
     erro,
     recarregar: useCallback(() => {
       carregarMes()

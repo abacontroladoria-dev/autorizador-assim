@@ -1,27 +1,280 @@
 'use client'
 
-import { useCallback, useMemo, useRef, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
-  AlertOctagon, AlertTriangle, Ban, CalendarDays, CheckCircle2, ChevronLeft, ChevronRight, History,
-  Link2, RefreshCw, ShieldCheck, SlidersHorizontal, X,
+  AlertTriangle, Ban, CalendarDays, CheckCircle2, Link2, Loader2, RefreshCw, X,
 } from 'lucide-react'
-import { diasUteisDe, type useAnaliseReincidencia } from '@/hooks/useAnaliseReincidencia'
+import { diasUteisDe, segundaDe, type useAnaliseReincidencia } from '@/hooks/useAnaliseReincidencia'
 import { useModalDialog } from '@/hooks/useModalDialog'
-import type { AutorizacaoAssimSemana } from '../types'
-import ChipTuss from './ChipTuss'
-import FiltrosEstado from './FiltrosEstado'
+import type { CandidataVinculo, CartaoGrade, GuiaOrfa } from '../types'
+import DetalheCartao from './DetalheCartao'
 import GradeSemana from './GradeSemana'
-import LinhaAutorizacao from './LinhaAutorizacao'
-import { diaDoTimestamp, formatarDiaComNome, hojeLocal, rotuloSemana } from './datas'
+import { PENDENCIAS } from './pendencias'
+import { dataHoraCurta, formatarDia, formatarDiaComNome, hojeLocal, rotuloSemana } from './datas'
 import { montarGrade } from './grade'
+import { mapearCandidatas, type MapaCandidatas } from './vinculo'
 
 const ID_TITULO = 'titulo-semana-paciente'
 
-const ROTULO_FILTRO: Record<string, string> = {
-  'sem-vinculo': 'sem vínculo',
-  glosa: 'glosas',
-  cancelada: 'canceladas',
+/** "17–21" — a semana em duas datas, sem o mês, que a faixa já diz. */
+function rotuloCurtoSemana(inicio: string, fim: string): string {
+  return `${inicio.slice(8, 10)}–${fim.slice(8, 10)}`
+}
+
+/**
+ * O modo "esta guia cobre qual sessão?", que a grade passou a hospedar.
+ *
+ * Era um modal próprio (`ModalEscolherSessao`, removido em 2026-08-24). Ele
+ * prometia no comentário que "a semana continua atrás" e não continuava: abri-lo
+ * fechava o modal da semana, então tudo o que se sabia sobre a guia — motivo da
+ * recusa, quem solicitou, os vizinhos da agenda — sumia no exato momento de
+ * decidir, e voltava reduzido a uma linha cinza de subtítulo.
+ */
+export type ModoVinculo = {
+  guia: GuiaOrfa
+  candidatas: CandidataVinculo[]
+  carregando: boolean
+  erro: string | null
+  janelaDias: number
+  onEscolher: (candidata: CandidataVinculo) => void
+  onSemSessao: () => void
+  onCancelar: () => void
+}
+
+/**
+ * O mês do paciente, semana a semana — a resposta para "onde está a pendência?".
+ *
+ * A listagem é mensal e a grade é semanal, e até 2026-08-24 nada ligava as duas:
+ * o modal abria na semana da última autorização, que não é onde está o trabalho.
+ * Quem clicava numa linha de "Faltando 3" podia cair numa semana limpa e não
+ * tinha como saber para que lado navegar.
+ *
+ * Cada segmento diz quantos cartões marcados aquela semana tem. O ponto no lugar
+ * do número é deliberado: "0" repetido em quatro segmentos vira ruído com peso
+ * de dado, e o que importa ali é só distinguir "tem" de "não tem".
+ *
+ * A semana aberta usa o steel da marca, nunca matiz semântico — é "você está
+ * aqui", não um estado. E o número marcado usa âmbar, o mesmo matiz que essa
+ * tela usa para "esperando alguém olhar".
+ */
+function FaixaDeSemanas({
+  semanas,
+  atual,
+  onEscolher,
+  tom = 'pendencia',
+}: {
+  semanas: { inicio: string; fim: string; marcados: number }[]
+  atual: string
+  onEscolher: (inicio: string) => void
+  /**
+   * O que o número conta. No modo de vínculo a faixa deixa de contar pendências
+   * e passa a contar CANDIDATAS — a mesma pergunta ("para que lado navegar?")
+   * com outra resposta —, e o distintivo troca de âmbar para steel: ali ele é
+   * seleção, não um estado da semana.
+   */
+  tom?: 'pendencia' | 'candidata'
+}) {
+  if (semanas.length < 2) return null
+  const emVinculo = tom === 'candidata'
+
+  return (
+    <nav
+      aria-label="Semanas do mês"
+      className="flex items-center gap-1 overflow-x-auto border-b border-slate-100 bg-slate-50 px-4 py-1.5 sm:px-6"
+    >
+      {semanas.map(({ inicio, fim, marcados }) => {
+        const aberta = inicio === atual
+        return (
+          <button
+            key={inicio}
+            type="button"
+            onClick={() => onEscolher(inicio)}
+            aria-current={aberta ? 'true' : undefined}
+            aria-label={`Semana de ${rotuloCurtoSemana(inicio, fim)}, ${
+              marcados === 0
+                ? emVinculo
+                  ? 'nenhuma candidata'
+                  : 'nada a conferir'
+                : `${marcados} ${emVinculo ? 'candidata(s)' : 'a conferir'}`
+            }`}
+            className={`flex h-9 shrink-0 items-center gap-1.5 rounded-lg px-2.5 text-[12px] transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none ${
+              aberta
+                ? 'bg-brand-surface font-semibold text-brand-fg'
+                : 'text-slate-600 hover:bg-white'
+            }`}
+          >
+            <span className="tabular-nums">{rotuloCurtoSemana(inicio, fim)}</span>
+            {marcados > 0 ? (
+              <span
+                className={`rounded-full px-1.5 text-[11px] font-bold tabular-nums ${
+                  emVinculo ? 'bg-brand text-white' : 'bg-amber-100 text-amber-800'
+                }`}
+              >
+                {marcados}
+              </span>
+            ) : (
+              <span className="text-slate-300" aria-hidden>
+                ·
+              </span>
+            )}
+          </button>
+        )
+      })}
+    </nav>
+  )
+}
+
+/**
+ * A barra do modo de vínculo: o que se está vinculando, e onde estão as opções.
+ *
+ * A janela de candidatas é de 7 dias RETROATIVOS a partir do instante em que a
+ * ASSIM registrou a guia, e ela atravessa a semana exibida — às vezes o mês. Uma
+ * guia autorizada na segunda procura sessões da quinta anterior, que a grade
+ * aberta não tem onde desenhar. Toda candidata que a semana não mostra sai
+ * escrita aqui, com o gesto que chega até ela: sem isso a tela contaria "3
+ * candidatas" e mostraria uma, calada.
+ *
+ * "É autorização extra" é ação de PRIMEIRA CLASSE e não caso de borda — 39% das
+ * órfãs medidas em produção (2026-08-20) não cobrem sessão nenhuma. No modal
+ * antigo ela era um botão de contorno cinza no rodapé, isto é, o desfecho mais
+ * provável vestido como o controle mais fraco. Quando não há candidata nenhuma,
+ * ela vira o botão preenchido: é literalmente a única coisa a fazer.
+ */
+function BarraVinculo({
+  modo,
+  mapa,
+  semanas,
+  semanaAtual,
+  onIrParaSemana,
+  onIrParaData,
+}: {
+  modo: ModoVinculo
+  mapa: MapaCandidatas
+  semanas: { inicio: string; fim: string }[]
+  semanaAtual: string
+  onIrParaSemana: (inicio: string) => void
+  onIrParaData: (dia: string) => void
+}) {
+  const { guia } = modo
+  const nesta = mapa.porSemana.get(semanaAtual) ?? 0
+  const outras = semanas.filter(
+    (s) => s.inicio !== semanaAtual && (mapa.porSemana.get(s.inicio) ?? 0) > 0
+  )
+  // Uma entrada por DIA, e não por candidata: duas sessões do mesmo dia são um
+  // destino só, e o botão diz a data porque é ela que a pessoa vai reconhecer.
+  const diasForaDoMes = [...new Set(mapa.foraDoMes.map((c) => c.data_atendimento ?? ''))]
+    .filter(Boolean)
+    .sort()
+  const vazio = !modo.carregando && !modo.erro && mapa.totalElegiveis === 0
+
+  return (
+    <div className="flex flex-col gap-2.5 border-b border-slate-200 bg-brand-surface px-4 py-3 sm:px-6 lg:flex-row lg:items-start lg:justify-between lg:gap-6">
+      <div className="min-w-0">
+        <p className="flex items-center gap-1.5 text-[13px] leading-tight font-bold text-brand-fg">
+          <Link2 size={15} aria-hidden />A guia{' '}
+          <span className="font-mono tabular-nums">{guia.guia}</span> cobre qual sessão?
+        </p>
+        <p className="mt-0.5 text-[11px] leading-relaxed text-slate-600">
+          {guia.codigo_tuss && <span className="tabular-nums">TUSS {guia.codigo_tuss} · </span>}
+          autorizada em <span className="tabular-nums">{dataHoraCurta(guia.data_execucao)}</span> ·
+          sessões dos {modo.janelaDias} dias anteriores
+        </p>
+
+        <div className="mt-1.5 text-[12px] leading-relaxed" role="status" aria-live="polite">
+          {modo.carregando ? (
+            <p className="flex items-center gap-1.5 text-slate-600">
+              <Loader2 size={13} className="animate-spin" aria-hidden />
+              Procurando as sessões que esta guia pode cobrir…
+            </p>
+          ) : modo.erro ? (
+            <p className="flex items-start gap-1.5 font-medium text-rose-700">
+              <AlertTriangle size={13} className="mt-0.5 shrink-0" aria-hidden />
+              {modo.erro}
+            </p>
+          ) : vazio ? (
+            <p className="text-slate-700">
+              Nenhuma sessão candidata nos {modo.janelaDias} dias anteriores. Costuma ser
+              autorização extra.
+            </p>
+          ) : (
+            <div className="flex flex-wrap items-center gap-x-2 gap-y-1.5">
+              <span className="font-semibold text-brand-fg">
+                {nesta > 0
+                  ? 'Clique na sessão marcada que ela cobre.'
+                  : 'Nenhuma candidata nesta semana.'}
+              </span>
+              {outras.map((s) => (
+                <button
+                  key={s.inicio}
+                  type="button"
+                  onClick={() => onIrParaSemana(s.inicio)}
+                  className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-brand bg-white px-2 text-[11px] font-semibold text-brand-fg transition hover:bg-brand-hover focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none"
+                >
+                  <span className="tabular-nums">{rotuloCurtoSemana(s.inicio, s.fim)}</span>
+                  <span className="rounded-full bg-brand px-1.5 font-bold tabular-nums text-white">
+                    {mapa.porSemana.get(s.inicio)}
+                  </span>
+                </button>
+              ))}
+              {diasForaDoMes.map((dia) => (
+                <button
+                  key={dia}
+                  type="button"
+                  onClick={() => onIrParaData(dia)}
+                  title="Está fora do mês carregado — abrir o mês dessa sessão"
+                  className="inline-flex h-7 items-center gap-1.5 rounded-lg border border-brand bg-white px-2 text-[11px] font-semibold text-brand-fg transition hover:bg-brand-hover focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none"
+                >
+                  <CalendarDays size={11} aria-hidden />
+                  <span className="tabular-nums">{formatarDia(dia)}</span>
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Não deveria acontecer. Dito em voz alta justamente por isso: uma
+              candidata que cai na semana aberta e mesmo assim não tem cartão
+              sumiria da tela sem deixar rastro, e o total acima ficaria
+              prometendo uma opção que não existe em lugar nenhum. */}
+          {mapa.semCartao.length > 0 && (
+            <p className="mt-1 text-[11px] text-amber-800">
+              {mapa.semCartao.length} candidata(s) desta semana não aparecem na grade:{' '}
+              {mapa.semCartao
+                .map((c) =>
+                  c.data_atendimento
+                    ? `${formatarDiaComNome(c.data_atendimento)} ${(c.hora_inicial ?? '').slice(0, 5)}`.trim()
+                    : 'sem data'
+                )
+                .join(', ')}
+              .
+            </p>
+          )}
+        </div>
+      </div>
+
+      <div className="flex shrink-0 flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={modo.onSemSessao}
+          className={`inline-flex h-9 items-center gap-1.5 rounded-lg px-3 text-[12px] font-semibold transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none ${
+            vazio
+              ? 'bg-brand-fg text-white hover:bg-brand-dark'
+              : 'border border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+          }`}
+        >
+          <Ban size={13} aria-hidden />
+          Nenhuma — é autorização extra
+        </button>
+        <button
+          type="button"
+          onClick={modo.onCancelar}
+          className="inline-flex h-9 items-center rounded-lg px-3 text-[12px] font-medium text-slate-600 transition hover:bg-white focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none"
+        >
+          Cancelar
+        </button>
+      </div>
+    </div>
+  )
 }
 
 /** Duas letras do nome. Não há foto de paciente no sistema — a inicial é a identidade. */
@@ -31,50 +284,6 @@ function iniciais(nome: string): string {
   return ((partes[0][0] ?? '') + (partes.length > 1 ? partes[partes.length - 1][0] : '')).toUpperCase()
 }
 
-/**
- * Um dos cinco números do resumo da semana.
- *
- * O matiz só aparece quando o número é maior que zero: uma fileira de cinco
- * cartões coloridos onde três deles dizem "0" gasta a cor em repouso e deixa de
- * apontar para onde há trabalho. Zero recua para branco e cinza.
- *
- * `tom` e `bolha` usam só degraus que o shim de tema escuro de globals.css
- * remapeia (-50/-100/-200/-300 e texto -700). `bg-white/70` na bolha, que era o
- * desenho anterior, atravessava claro para o escuro — modificador de opacidade
- * não é remapeado.
- */
-function Indicador({
-  valor, rotulo, Icone, tom, bolha, atencao,
-}: {
-  valor: number
-  rotulo: string
-  Icone: typeof CheckCircle2
-  tom: string
-  bolha: string
-  atencao?: boolean
-}) {
-  const aceso = !!atencao && valor > 0
-  return (
-    <div
-      className={`flex items-center gap-2.5 rounded-xl border px-3 py-2.5 ${
-        aceso ? tom : 'border-slate-200 bg-white'
-      }`}
-    >
-      <span
-        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-          aceso ? bolha : 'bg-slate-100'
-        }`}
-      >
-        <Icone size={15} className={aceso ? '' : 'text-slate-500'} aria-hidden />
-      </span>
-      <span className="min-w-0">
-        <span className="block text-xl leading-none font-bold tabular-nums text-slate-900">{valor}</span>
-        <span className="mt-0.5 block truncate text-[11px] font-medium text-slate-600">{rotulo}</span>
-      </span>
-    </div>
-  )
-}
-
 type Props = {
   open: boolean
   onClose: () => void
@@ -82,6 +291,8 @@ type Props = {
   podeVincular: boolean
   codigosGlosa: Map<string, string>
   onVincularGuia: (guia: string) => void
+  /** Ligado = a grade está escolhendo a sessão desta guia. Ver `ModoVinculo`. */
+  vinculo: ModoVinculo | null
 }
 
 /**
@@ -97,30 +308,58 @@ type Props = {
  * (ver useAnaliseReincidencia), então o recorte deste paciente é um `useMemo`.
  * É o que garante que os números daqui sejam os MESMOS da linha clicada — não
  * uma segunda contagem que pode divergir.
+ *
+ * ── O que mudou em 2026-08-24 ──────────────────────────────────────────────
+ *
+ * A queixa era que o modal não tinha hierarquia e não dizia QUAL sessão estava
+ * com problema. O que sobrou, depois de o usuário podar o que não queria:
+ *
+ * 1. "faltando" e "sobrando" deixaram de ser agregados por TUSS e viraram
+ *    marcas nos cartões (`sessaoSemCobertura`, `guiasExcedentes`) — é o que
+ *    torna a pendência apontável, que era o pedido literal;
+ * 2. o cartão passou a ter duas espécies, e a diferença é de SILHUETA: o
+ *    saudável colapsa em duas linhas, o pendente fica inteiro com barra
+ *    lateral. Com seis matizes a 11px a cor tinha parado de discriminar;
+ * 3. todo cartão virou botão e abre uma GAVETA com tudo o que se sabe sobre
+ *    ele — o que aposentou a seção "histórico de autorizações" e, com ela, o
+ *    rodapé inteiro. Ver `DetalheCartao`;
+ * 4. a faixa de semanas do mês tomou o lugar do seletor de semana no cabeçalho,
+ *    e o modal passou a abrir na primeira semana que tem cartão marcado.
+ *
+ * **Não há mais filtro nenhum aqui.** Os indicadores das cinco espécies e as
+ * chips de cota por TUSS foram removidos a pedido, e cada um era o filtro do
+ * que nomeava; o modal mostra a semana inteira, sempre. As cinco contagens
+ * sobrevivem só no resumo `sr-only`, para quem lê por leitor de tela — a
+ * listagem continua sendo onde elas se leem com os olhos.
  */
 export default function ModalSemanaPaciente({
-  open, onClose, analise, podeVincular, codigosGlosa, onVincularGuia,
+  open, onClose, analise, podeVincular, codigosGlosa, onVincularGuia, vinculo,
 }: Props) {
-  const fechar = useCallback(() => onClose(), [onClose])
-  const { refDialogo, propsDialogo } = useModalDialog(open, fechar, ID_TITULO)
-
-  const [mostrarFiltros, setMostrarFiltros] = useState(false)
-  const [mostrarHistorico, setMostrarHistorico] = useState(false)
-  const refHistorico = useRef<HTMLElement>(null)
+  /** O cartão aberto na gaveta lateral. Nulo = só a grade. */
+  const [detalhe, setDetalhe] = useState<CartaoGrade | null>(null)
 
   /**
-   * Abrir o histórico o traz para a vista.
+   * Escape desfaz um estágio por vez: o modo de vínculo, depois a gaveta,
+   * depois o modal.
    *
-   * Ele nasce abaixo da grade, fora da área visível: sem isto, clicar no botão
-   * do rodapé não muda nada na tela e o controle parece quebrado. O scroll roda
-   * no próximo quadro, quando a seção já existe no DOM.
+   * Nem a gaveta nem o modo instalam focus trap próprio, de propósito (ver
+   * `DetalheCartao`), então quem escuta o Escape continua sendo o
+   * `useModalDialog` daqui — em captura no `document`, antes de qualquer handler
+   * do React. Encadear os estágios AQUI é o único ponto onde funciona: um
+   * `onKeyDown` no filho parece resolver e não resolve.
    */
-  const alternarHistorico = useCallback(() => {
-    setMostrarHistorico((v) => {
-      if (!v) requestAnimationFrame(() => refHistorico.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }))
-      return !v
-    })
-  }, [])
+  const fechar = useCallback(() => {
+    if (vinculo) {
+      vinculo.onCancelar()
+      return
+    }
+    if (detalhe) {
+      setDetalhe(null)
+      return
+    }
+    onClose()
+  }, [vinculo, detalhe, onClose])
+  const { refDialogo, propsDialogo } = useModalDialog(open, fechar, ID_TITULO)
 
   const dias = useMemo(() => diasUteisDe(analise.semanaInicio), [analise.semanaInicio])
 
@@ -131,27 +370,83 @@ export default function ModalSemanaPaciente({
         analise.autorizacoesVisiveis,
         analise.estadoDaGuia,
         dias,
-        analise.placar
+        analise.placar,
+        {
+          descoberta: analise.sessaoDescoberta,
+          decorrida: analise.sessaoJaDecorrida,
+          excedentes: analise.guiasExcedentes,
+        }
       ),
-    [analise.sessoesVisiveis, analise.autorizacoesVisiveis, analise.estadoDaGuia, dias, analise.placar]
+    [
+      analise.sessoesVisiveis, analise.autorizacoesVisiveis, analise.estadoDaGuia, dias,
+      analise.placar, analise.sessaoDescoberta, analise.sessaoJaDecorrida,
+      analise.guiasExcedentes,
+    ]
   )
 
-  const autorizacoesPorDia = useMemo(() => {
-    const mapa = new Map<string, AutorizacaoAssimSemana[]>()
-    for (const a of analise.autorizacoesVisiveis) {
-      const dia = diaDoTimestamp(a.data_execucao) ?? '—'
-      const atual = mapa.get(dia)
-      if (atual) atual.push(a)
-      else mapa.set(dia, [a])
+  /**
+   * A junção entre as candidatas da guia e o que a semana aberta desenha.
+   *
+   * Pelas CHAVES dos cartões, e não pelas datas: o `chave` de um cartão de
+   * sessão é o `bloco_id`, que é a mesma coluna que a RPC de candidatas
+   * devolve. Comparar por data e hora seria uma segunda definição de "é a mesma
+   * sessão", e ela divergiria no primeiro atendimento sem `hora_inicial`.
+   */
+  const chavesNaGrade = useMemo(() => {
+    const chaves = new Set<string>()
+    for (const linha of linhas) {
+      for (const dia of dias) {
+        for (const cartao of linha.celulas[dia] ?? []) chaves.add(cartao.chave)
+      }
     }
-    return mapa
-  }, [analise.autorizacoesVisiveis])
+    return chaves
+  }, [linhas, dias])
+
+  const candidatas = vinculo?.candidatas
+  const mapa = useMemo(
+    () =>
+      mapearCandidatas(
+        candidatas ?? [],
+        analise.semanasDoMes,
+        analise.semanaInicio,
+        chavesNaGrade
+      ),
+    [candidatas, analise.semanasDoMes, analise.semanaInicio, chavesNaGrade]
+  )
+
+  /**
+   * A gaveta fecha quando o recorte atrás dela muda — abrir/fechar o modal,
+   * trocar de paciente, trocar de semana, entrar ou sair do modo de vínculo.
+   *
+   * Fechar o modal NÃO desmonta este componente: ele renderiza `null` e a
+   * instância continua viva, com o estado inteiro. Sem esta guarda, abrir a
+   * gaveta, fechar o modal e abrir outro paciente trazia a gaveta já aberta —
+   * mostrando o cartão do paciente anterior. Trocar de semana tinha o mesmo
+   * defeito, com um cartão que não está mais na grade atrás.
+   *
+   * Ajustado durante o render e não num efeito: é o padrão que o React recomenda
+   * para "resetar estado quando uma prop muda", e um efeito com setState
+   * síncrono aqui causaria renderização em cascata.
+   */
+  const recorte = `${open}|${analise.pacienteNome ?? ''}|${analise.semanaInicio}|${
+    vinculo?.guia.guia ?? ''
+  }`
+  const [recorteAnterior, setRecorteAnterior] = useState(recorte)
+  if (recorteAnterior !== recorte) {
+    setRecorteAnterior(recorte)
+    setDetalhe(null)
+  }
 
   if (!open || !analise.pacienteNome) return null
 
   const labelSemana = rotuloSemana(analise.semanaInicio, analise.semanaFim)
   const linha = analise.linhaSelecionada
-  const totalAutorizacoes = analise.autorizacoesVisiveis.length
+  const { contagem } = analise
+  const rotuloMes = new Date(
+    Number(analise.mesRef.slice(0, 4)),
+    Number(analise.mesRef.slice(5, 7)) - 1,
+    1
+  ).toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
 
   return createPortal(
     <div
@@ -164,14 +459,16 @@ export default function ModalSemanaPaciente({
         className="motion-safe:animate-in motion-safe:fade-in motion-safe:zoom-in-95 motion-safe:duration-150 flex h-[95dvh] w-full max-w-460 flex-col overflow-hidden rounded-2xl bg-white shadow-2xl focus:outline-none"
         onClick={(e) => e.stopPropagation()}
       >
+        {/* As cinco contagens não têm mais forma visual neste modal (os
+            indicadores saíram a pedido), mas continuam ditas aqui: para quem lê
+            por leitor de tela, elas são a única síntese da semana. */}
         <p className="sr-only" role="status" aria-live="polite">
-          {analise.pacienteNome}, semana de {labelSemana}. {analise.liberadas} autorização(ões)
-          liberada(s), {analise.utilizadas} utilizada(s), {analise.ledger.semVinculo} sem vínculo,{' '}
-          {analise.ledger.glosas} glosa(s), {analise.ledger.canceladas} cancelada(s).
+          {analise.pacienteNome}, semana de {labelSemana}. {contagem.total} pendência(s):{' '}
+          {PENDENCIAS.map((p) => `${contagem[p.chave]} ${p.rotulo.toLowerCase()}`).join(', ')}.
         </p>
 
-        {/* ── Identidade + semana ─────────────────────────────────────────── */}
-        <header className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3.5 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:gap-6">
+        {/* ── Identidade + as semanas do mês ──────────────────────────────── */}
+        <header className="flex flex-col gap-3 border-b border-slate-100 px-4 py-3 sm:px-6 lg:flex-row lg:items-center lg:justify-between lg:gap-6">
           <div className="flex min-w-0 items-center gap-3">
             <span
               aria-hidden
@@ -205,271 +502,159 @@ export default function ModalSemanaPaciente({
             </div>
           </div>
 
-          <div className="flex shrink-0 flex-wrap items-center gap-1">
-            <button
-              type="button"
-              onClick={() => analise.irParaSemana(-1)}
-              disabled={!analise.podeSemanaAnterior}
-              className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none disabled:opacity-30 disabled:hover:bg-transparent"
-              aria-label="Semana anterior"
-            >
-              <ChevronLeft size={16} />
-            </button>
-            <span className="flex items-center gap-2 px-1 text-center">
-              <CalendarDays size={15} className="text-slate-400" aria-hidden />
-              <span>
-                <span className="block text-sm leading-tight font-semibold tabular-nums text-slate-700">
-                  {labelSemana}
-                </span>
-                <span className="block text-[11px] leading-tight text-slate-500">
-                  {analise.semanaInicio === analise.semanaAtual ? 'semana atual' : 'seg a sex'}
-                </span>
+          {/* A faixa É o seletor de semana — não há mais setas nem rótulo de
+              intervalo ao lado. Duas formas de escolher a mesma coisa custavam
+              a largura do cabeçalho e escondiam, atrás das setas, a informação
+              que a faixa dá de graça: em qual semana está o trabalho. */}
+          <div className="flex min-w-0 items-center gap-2 lg:shrink-0">
+            <span className="hidden shrink-0 items-center gap-1.5 text-slate-500 sm:flex">
+              <CalendarDays size={15} aria-hidden />
+              {/* `capitalize` daria "Agosto De 2026" — ele sobe a inicial de cada
+                  palavra. `first-letter` só pega em caixa de bloco, daí o
+                  `inline-block`. */}
+              <span className="inline-block text-[12px] font-semibold first-letter:uppercase">
+                {rotuloMes}
               </span>
             </span>
-            <button
-              type="button"
-              onClick={() => analise.irParaSemana(1)}
-              disabled={!analise.podeProximaSemana}
-              className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none disabled:opacity-30 disabled:hover:bg-transparent"
-              aria-label="Próxima semana"
-            >
-              <ChevronRight size={16} />
-            </button>
-
-            <button
-              type="button"
-              onClick={() => setMostrarFiltros((v) => !v)}
-              aria-pressed={mostrarFiltros}
-              className={`ml-1 inline-flex h-11 items-center gap-1.5 rounded-lg border px-3 text-[12px] font-semibold transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none ${
-                mostrarFiltros || analise.tussFiltro || analise.estadoFiltro
-                  ? 'border-brand bg-brand-surface text-brand-fg'
-                  : 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
-              }`}
-            >
-              <SlidersHorizontal size={13} aria-hidden />
-              Filtros
-              {(analise.tussFiltro || analise.estadoFiltro) && (
-                <span className="rounded-full bg-brand-fg px-1.5 text-[10px] font-bold text-white">
-                  {(analise.tussFiltro ? 1 : 0) + (analise.estadoFiltro ? 1 : 0)}
-                </span>
-              )}
-            </button>
-
+            <FaixaDeSemanas
+              semanas={
+                vinculo
+                  ? analise.semanasDoMes.map((s) => ({
+                      ...s,
+                      marcados: mapa.porSemana.get(s.inicio) ?? 0,
+                    }))
+                  : analise.semanasDoMes
+              }
+              atual={analise.semanaInicio}
+              onEscolher={analise.irParaSemanaEm}
+              tom={vinculo ? 'candidata' : 'pendencia'}
+            />
             <button
               type="button"
               onClick={onClose}
               aria-label="Fechar"
-              className="flex h-11 w-11 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none"
+              className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-slate-500 transition hover:bg-slate-100 hover:text-slate-800 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none"
             >
               <X size={20} />
             </button>
           </div>
         </header>
 
-        {/* ── Resumo da semana ────────────────────────────────────────────── */}
-        <div className="grid grid-cols-2 gap-2 border-b border-slate-100 px-4 py-3 sm:grid-cols-3 sm:px-6 xl:grid-cols-5">
-          <Indicador
-            valor={analise.liberadas}
-            rotulo="Autorizações liberadas"
-            Icone={ShieldCheck}
-            tom="border-slate-200 bg-white"
-            bolha="bg-slate-100"
+        {vinculo && (
+          <BarraVinculo
+            modo={vinculo}
+            mapa={mapa}
+            semanas={analise.semanasDoMes}
+            semanaAtual={analise.semanaInicio}
+            onIrParaSemana={analise.irParaSemanaEm}
+            onIrParaData={(dia) => {
+              // O mês primeiro, a semana depois: `irParaMesData` também mexe em
+              // `semanaInicio` (leva para a semana de hoje, ou para a primeira
+              // do mês), então a ordem inversa seria sobrescrita. Os dois são
+              // setState do mesmo handler, e o React os aplica em lote.
+              analise.irParaMesData(dia)
+              analise.irParaSemanaEm(segundaDe(dia))
+            }}
           />
-          <Indicador
-            valor={analise.utilizadas}
-            rotulo="Utilizadas"
-            Icone={CheckCircle2}
-            tom="border-emerald-200 bg-emerald-50 text-emerald-700"
-            bolha="bg-emerald-100"
-            atencao
-          />
-          <Indicador
-            valor={analise.ledger.semVinculo}
-            rotulo="Sem vínculo"
-            Icone={Link2}
-            tom="border-amber-300 bg-amber-50 text-amber-700"
-            bolha="bg-amber-100"
-            atencao
-          />
-          <Indicador
-            valor={analise.ledger.glosas}
-            rotulo="Glosas"
-            Icone={AlertOctagon}
-            tom="border-violet-200 bg-violet-50 text-violet-700"
-            bolha="bg-violet-100"
-            atencao
-          />
-          <Indicador
-            valor={analise.ledger.canceladas}
-            rotulo="Cancelamentos"
-            Icone={Ban}
-            tom="border-slate-300 bg-slate-100 text-slate-600"
-            bolha="bg-slate-200"
-            atencao
-          />
-        </div>
-
-        {/* ── Os dois recortes: cota por TUSS e estado da guia ─────────────── */}
-        {mostrarFiltros && analise.placar.length > 0 && (
-          <div className="flex flex-col gap-2.5 border-b border-slate-100 bg-slate-50 px-4 py-3 sm:px-6">
-            <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
-              {analise.placar.map((p) => (
-                <ChipTuss
-                  key={p.codigo_tuss}
-                  item={p}
-                  ativa={analise.tussFiltro === p.codigo_tuss}
-                  onToggle={analise.setTussFiltro}
-                />
-              ))}
-              <span className="shrink-0 pl-2 text-xs text-slate-500">
-                {analise.totalExcedente > 0
-                  ? `${analise.totalExcedente} ${analise.totalExcedente === 1 ? 'autorização' : 'autorizações'} além do agendado`
-                  : 'nenhum excedente na semana'}
-              </span>
-            </div>
-
-            <FiltrosEstado
-              ledger={analise.ledger}
-              valor={analise.estadoFiltro}
-              onEscolher={analise.setEstadoFiltro}
-            />
-          </div>
         )}
 
-        {/* ── A grade ─────────────────────────────────────────────────────── */}
-        {/* Fundo branco no contêiner inteiro, e não só sob a grade: a grade
-            raramente chega ao pé do modal, e uma faixa cinza logo abaixo da
-            última linha fazia parecer que faltava carregar algo. */}
-        <div className="min-h-0 flex-1 overflow-y-auto bg-white">
-          {analise.erro ? (
-            <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
-              <AlertTriangle size={24} className="text-rose-600" />
-              <p className="text-sm font-medium text-slate-700">{analise.erro}</p>
-              <button
-                onClick={analise.recarregar}
-                className="mt-1 inline-flex h-11 items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 text-xs font-semibold text-slate-700 transition hover:border-brand hover:bg-brand-hover hover:text-brand-fg focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none"
-              >
-                <RefreshCw size={13} />
-                Tentar novamente
-              </button>
-            </div>
-          ) : analise.carregandoSemana ? (
-            <div className="space-y-2 p-4 sm:p-6">
-              {Array.from({ length: 4 }).map((_, i) => (
-                <div key={i} className="h-24 animate-pulse rounded-xl bg-slate-100" />
-              ))}
-            </div>
-          ) : linhas.length === 0 ? (
-            <div className="flex flex-col items-center justify-center gap-1 py-24 text-center">
-              <CheckCircle2 size={22} className="text-slate-400" />
-              <p className="text-sm font-medium text-slate-600">
-                {analise.tussFiltro || analise.estadoFiltro
-                  ? 'Nada neste recorte'
-                  : 'Nenhum atendimento nem guia nesta semana'}
-              </p>
-              <p className="max-w-md text-xs text-slate-500">
-                {analise.tussFiltro || analise.estadoFiltro
-                  ? 'Limpe os filtros para ver a semana inteira.'
-                  : `Nem a clínica agendou, nem a ASSIM registrou nada de seg a sex para ${analise.pacienteNome}.`}
-              </p>
-            </div>
-          ) : (
-            <GradeSemana
-              linhas={linhas}
-              dias={dias}
-              hoje={hojeLocal()}
-              codigosGlosa={codigosGlosa}
-              podeVincular={podeVincular}
-              onVincularGuia={onVincularGuia}
-            />
-          )}
-
-          {/* Histórico: a mesma leitura cronológica que a tela sempre teve, com o
-              motivo da recusa por extenso — coisa que não cabe num cartão de
-              célula. Fechado por padrão porque a grade é o assunto. */}
-          {mostrarHistorico && !analise.erro && (
-            <section
-              ref={refHistorico}
-              className="border-t border-slate-200 bg-slate-50 px-4 py-4 sm:px-6"
-              aria-label="Histórico de autorizações"
-            >
-              <h3 className="mb-2 text-[13px] font-semibold text-brand-fg">
-                Autorizações da semana{' '}
-                <span className="font-normal text-slate-500">
-                  {analise.estadoFiltro
-                    ? `— ${totalAutorizacoes} ${ROTULO_FILTRO[analise.estadoFiltro]}`
-                    : `— ${totalAutorizacoes} ${totalAutorizacoes === 1 ? 'guia' : 'guias'}`}
-                </span>
-              </h3>
-              {totalAutorizacoes === 0 ? (
-                <p className="py-6 text-center text-xs text-slate-500">
-                  A ASSIM não registrou nada de seg a sex neste recorte.
+        {/* ── A grade, e a gaveta ao lado dela ────────────────────────────── */}
+        {/* O contêiner externo é `relative` para a gaveta se ancorar nele, e não
+            no scroller: ancorada dentro do scroller, ela subiria junto com a
+            grade ao rolar. */}
+        <div className="relative flex min-h-0 flex-1">
+          {/* Um scroller só, nos DOIS eixos, e `relative`. Os dois detalhes são
+              medidos: com um `overflow-x` próprio dentro da grade, o cabeçalho
+              dos dias deixa de grudar (o sticky passa a mirar o contêiner de
+              dentro, que não rola na vertical); sem `relative`, a largura mínima
+              da grade escapa e é o DOCUMENTO que rola de lado a 390px. */}
+          <div className="relative min-h-0 flex-1 overflow-auto bg-white">
+            {analise.erro ? (
+              <div className="flex flex-col items-center justify-center gap-3 py-20 text-center">
+                <AlertTriangle size={24} className="text-rose-600" />
+                <p className="text-sm font-medium text-slate-700">{analise.erro}</p>
+                <button
+                  onClick={analise.recarregar}
+                  className="mt-1 inline-flex h-11 items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 text-xs font-semibold text-slate-700 transition hover:border-brand hover:bg-brand-hover hover:text-brand-fg focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none"
+                >
+                  <RefreshCw size={13} />
+                  Tentar novamente
+                </button>
+              </div>
+            ) : /* As TRÊS cargas do mês, e não só a das sessões: a grade lê
+                   autorizações (o cartão da guia) e órfãs (o estado
+                   "sem vínculo") tanto quanto lê sessões. Gatear numa só fazia
+                   a semana pintar com guia vestida de "Outra semana" e trocar
+                   para "Sem vínculo" segundos depois. */
+              analise.loading ? (
+              <div className="space-y-2 p-4 sm:p-6">
+                {Array.from({ length: 4 }).map((_, i) => (
+                  <div key={i} className="h-24 animate-pulse rounded-xl bg-slate-100" />
+                ))}
+              </div>
+            ) : linhas.length === 0 ? (
+              <div className="flex flex-col items-center justify-center gap-1 py-24 text-center">
+                <CheckCircle2 size={22} className="text-slate-400" />
+                <p className="text-sm font-medium text-slate-600">
+                  Nenhum atendimento nem guia nesta semana
                 </p>
-              ) : (
-                [...autorizacoesPorDia.entries()].map(([dia, doDia]) => (
-                  <div key={dia}>
-                    <p className="px-1 pt-3 pb-1.5 text-[11px] font-semibold tracking-wide text-slate-500 uppercase">
-                      {dia === '—' ? 'sem data' : formatarDiaComNome(dia)}
-                    </p>
-                    <ul className="space-y-1.5">
-                      {doDia.map((a) => (
-                        <LinhaAutorizacao
-                          key={a.guia}
-                          item={a}
-                          estado={analise.estadoDaGuia(a.guia)}
-                          podeVincular={podeVincular}
-                          codigosGlosa={codigosGlosa}
-                          onVincular={() => onVincularGuia(a.guia)}
-                        />
-                      ))}
-                    </ul>
-                  </div>
-                ))
-              )}
-            </section>
+                <p className="max-w-md text-xs text-slate-500">
+                  Nem a clínica agendou, nem a ASSIM registrou nada de seg a sex para{' '}
+                  {analise.pacienteNome}.
+                </p>
+              </div>
+            ) : (
+              <GradeSemana
+                linhas={linhas}
+                dias={dias}
+                hoje={hojeLocal()}
+                codigosGlosa={codigosGlosa}
+                chaveAberta={detalhe?.chave ?? null}
+                onAbrirDetalhe={setDetalhe}
+                selecao={
+                  vinculo
+                    ? {
+                        porBloco: mapa.naGrade,
+                        guiaEmFoco: vinculo.guia.guia,
+                        onEscolher: vinculo.onEscolher,
+                      }
+                    : undefined
+                }
+              />
+            )}
+          </div>
+
+          {/* A gaveta não convive com o modo de vínculo: o `recorte` acima a
+              fecha ao entrar, e este guarda impede que ela reapareça por cima
+              da escolha se algo abrir um detalhe no meio do caminho. */}
+          {detalhe && !vinculo && (
+            <>
+              {/* O véu é clicável e nomeado: fechar tocando fora da gaveta é o
+                  gesto que se espera, e sem `aria-label` ele seria um botão sem
+                  nome para o leitor de tela.
+
+                  z-40/z-50 e não z-10/z-20: as células grudadas do cabeçalho da
+                  grade são z-30, e `position: relative` sem z-index não abre
+                  contexto de empilhamento — as duas competem no mesmo plano.
+                  Medido a 390px, "Horário" aparecia POR CIMA da gaveta. */}
+              <button
+                type="button"
+                aria-label="Fechar o detalhe"
+                onClick={() => setDetalhe(null)}
+                className="absolute inset-0 z-40 cursor-default bg-slate-900/10"
+              />
+              <DetalheCartao
+                cartao={detalhe}
+                codigosGlosa={codigosGlosa}
+                conferencia={analise.conferenciasPorBloco.get(detalhe.chave)}
+                nota={analise.notasPorBloco.get(detalhe.chave)}
+                podeVincular={podeVincular}
+                onVincular={onVincularGuia}
+                onFechar={() => setDetalhe(null)}
+              />
+            </>
           )}
         </div>
-
-        {/* ── Rodapé: legenda e saídas ────────────────────────────────────── */}
-        <footer className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-100 px-4 py-3 sm:px-6">
-          <ul className="flex flex-wrap items-center gap-x-4 gap-y-1 text-[11px] text-slate-600">
-            <li className="flex items-center gap-1.5">
-              <CheckCircle2 size={13} className="text-emerald-700" aria-hidden /> Utilizada
-            </li>
-            <li className="flex items-center gap-1.5">
-              <Link2 size={13} className="text-amber-700" aria-hidden /> Sem vínculo
-            </li>
-            <li className="flex items-center gap-1.5">
-              <AlertOctagon size={13} className="text-violet-700" aria-hidden /> Glosa
-            </li>
-            <li className="flex items-center gap-1.5">
-              <Ban size={13} className="text-slate-500" aria-hidden /> Cancelada
-            </li>
-          </ul>
-
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={alternarHistorico}
-              aria-pressed={mostrarHistorico}
-              className={`inline-flex h-11 items-center gap-1.5 rounded-xl border px-4 text-[12px] font-semibold transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none ${
-                mostrarHistorico
-                  ? 'border-brand bg-brand-surface text-brand-fg'
-                  : 'border-slate-300 bg-white text-slate-700 hover:border-brand hover:bg-brand-hover hover:text-brand-fg'
-              }`}
-            >
-              <History size={13} aria-hidden />
-              {mostrarHistorico ? 'Ocultar histórico' : 'Ver histórico de autorizações'}
-            </button>
-            <button
-              type="button"
-              onClick={onClose}
-              className="inline-flex h-11 items-center rounded-xl bg-brand-fg px-5 text-[12px] font-semibold text-white transition hover:bg-brand-dark focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none"
-            >
-              Fechar
-            </button>
-          </div>
-        </footer>
       </div>
     </div>,
     document.body

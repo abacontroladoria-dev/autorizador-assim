@@ -22,9 +22,8 @@ const TAB_META: Record<TabKey, { titulo: string; subtitulo: string }> = {
     subtitulo: 'Controle operacional de autorizações e pendências',
   },
   reconciliacao: {
-    titulo: 'Autorizações com pendências',
-    subtitulo:
-      'Pacientes que possuem cancelamentos, glosas ou autorizações faltando/sobrando na semana selecionada.',
+    titulo: 'Autorizações e pendências',
+    subtitulo: 'Autorizações, faltas, cancelamentos e glosas.',
   },
 }
 

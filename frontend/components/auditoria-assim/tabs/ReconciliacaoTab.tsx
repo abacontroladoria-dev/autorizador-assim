@@ -7,7 +7,6 @@ import { useGlosaCodigos } from '@/hooks/useGlosaCodigos'
 import { JANELA_PADRAO, useReconciliacaoAssim } from '@/hooks/useReconciliacaoAssim'
 import ModalConfirmarVinculo from '../ModalConfirmarVinculo'
 import ListaPendencias from '../reconciliacao/ListaPendencias'
-import ModalEscolherSessao from '../reconciliacao/ModalEscolherSessao'
 import ModalSemanaPaciente from '../reconciliacao/ModalSemanaPaciente'
 import { hojeLocal } from '../reconciliacao/datas'
 import type { AlvoAnalise, CandidataVinculo, GuiaOrfa } from '../types'
@@ -18,12 +17,17 @@ const PAPEIS_QUE_VINCULAM = new Set(['admin', 'autorizacao', 'recepcao'])
 /**
  * Os diálogos desta aba, sempre um só de cada vez.
  *
- * `grade` é a semana do paciente; `escolher` é "esta guia cobre qual sessão?";
- * `confirmar` é o aceite. Não empilham porque cada um instala um focus trap
- * próprio, e dois traps ativos ao mesmo tempo brigam pelo Tab e fazem o Escape
- * fechar os dois. A grade volta ao fim do fluxo, já refletindo o vínculo.
+ * `grade` é a semana do paciente e `confirmar` é o aceite. Não empilham porque
+ * cada um instala um focus trap próprio, e dois traps ativos ao mesmo tempo
+ * brigam pelo Tab e fazem o Escape fechar os dois. A grade volta ao fim do
+ * fluxo, já refletindo o vínculo.
+ *
+ * Havia um terceiro, `escolher` ("esta guia cobre qual sessão?"), removido em
+ * 2026-08-24 junto com o `ModalEscolherSessao`. A escolha agora acontece DENTRO
+ * da grade, sobre os cartões da própria semana — ver `ModoVinculo`. Ela não é
+ * uma etapa porque não substitui a grade: ela a veste.
  */
-type Etapa = 'grade' | 'escolher' | 'confirmar'
+type Etapa = 'grade' | 'confirmar'
 
 type Props = {
   /** Alvo vindo da Conferência (linha em glosa). Nulo na navegação normal. */
@@ -65,6 +69,17 @@ export default function ReconciliacaoTab({ alvo, onAlvoConsumido }: Props) {
   const [etapa, setEtapa] = useState<Etapa>('grade')
   const [candidataEscolhida, setCandidataEscolhida] = useState<CandidataVinculo | null>(null)
 
+  /**
+   * A guia em vínculo, guardada em ESTADO e não derivada de `orfasDaSemana`.
+   *
+   * A diferença importa por causa da janela de 7 dias: uma candidata pode cair
+   * no mês anterior, e chegar até ela troca o mês da análise — o que recarrega
+   * `orfasDaSemana` para o novo mês. Uma guia de agosto derivada desse mapa
+   * viraria `null` no instante em que o operador navegasse para julho, e o modo
+   * de vínculo se desmontaria no meio da escolha, sem dizer por quê.
+   */
+  const [guiaEmVinculo, setGuiaEmVinculo] = useState<GuiaOrfa | null>(null)
+
   // Haver paciente escolhido JÁ é "a semana está aberta" — não há um segundo
   // estado dizendo a mesma coisa, que é como as duas versões divergem. Durante a
   // escolha da sessão o paciente continua escolhido e só a `etapa` muda: é para
@@ -84,23 +99,55 @@ export default function ReconciliacaoTab({ alvo, onAlvoConsumido }: Props) {
 
   const fecharSemana = useCallback(() => escolherPaciente(null), [escolherPaciente])
 
-  /** Clique em "sem vínculo": seleciona a guia e troca a grade pela escolha da sessão. */
-  const vincularGuia = useCallback(
-    (guia: string) => {
-      void selecionarGuia(guia)
-      setEtapa('escolher')
-    },
-    [selecionarGuia]
-  )
+  /** Sai do modo de vínculo e larga a guia — usado pelo Cancelar e pelo Escape. */
+  const cancelarVinculo = useCallback(() => {
+    setGuiaEmVinculo(null)
+    void selecionarGuia(null)
+  }, [selecionarGuia])
 
   /**
-   * A guia em foco. Vem do recorte de órfãs da semana exibida — a mesma lista
-   * que classificou o cartão âmbar que foi clicado, então as duas nunca podem
-   * discordar sobre o que precisa de vínculo.
+   * Clique em "sem vínculo": busca as candidatas e liga o modo na própria grade.
+   *
+   * A guia sai de `orfasDaSemana` — a MESMA lista que classificou o cartão âmbar
+   * que foi clicado, então as duas nunca podem discordar sobre o que precisa de
+   * vínculo — e é copiada para o estado no ato, pela razão anotada em
+   * `guiaEmVinculo`.
    */
-  const guiaAtual = useMemo<GuiaOrfa | null>(
-    () => (fila.guiaSelecionada ? analise.orfasDaSemana.get(fila.guiaSelecionada) ?? null : null),
-    [fila.guiaSelecionada, analise.orfasDaSemana]
+  const orfas = analise.orfasDaSemana
+  const vincularGuia = useCallback(
+    (guia: string) => {
+      const orfa = orfas.get(guia)
+      if (!orfa) return
+      setGuiaEmVinculo(orfa)
+      void selecionarGuia(guia)
+    },
+    [orfas, selecionarGuia]
+  )
+
+  const modoVinculo = useMemo(
+    () =>
+      guiaEmVinculo && podeVincular
+        ? {
+            guia: guiaEmVinculo,
+            candidatas: fila.candidatas,
+            carregando: fila.carregandoCandidatas,
+            erro: fila.erroCandidatas,
+            janelaDias: JANELA_PADRAO,
+            onEscolher: (candidata: CandidataVinculo) => {
+              setCandidataEscolhida(candidata)
+              setEtapa('confirmar')
+            },
+            onSemSessao: () => {
+              setCandidataEscolhida(null)
+              setEtapa('confirmar')
+            },
+            onCancelar: cancelarVinculo,
+          }
+        : null,
+    [
+      guiaEmVinculo, podeVincular, fila.candidatas, fila.carregandoCandidatas,
+      fila.erroCandidatas, cancelarVinculo,
+    ]
   )
 
   return (
@@ -138,42 +185,29 @@ export default function ReconciliacaoTab({ alvo, onAlvoConsumido }: Props) {
         podeVincular={podeVincular}
         codigosGlosa={codigosGlosa}
         onVincularGuia={vincularGuia}
+        vinculo={modoVinculo}
       />
 
-      <ModalEscolherSessao
-        open={etapa === 'escolher'}
-        onClose={() => setEtapa('grade')}
-        guia={guiaAtual}
-        candidatas={fila.candidatas}
-        carregando={fila.carregandoCandidatas}
-        erro={fila.erroCandidatas}
-        janelaDias={JANELA_PADRAO}
-        podeVincular={podeVincular}
-        onEscolher={(candidata) => {
-          setCandidataEscolhida(candidata)
-          setEtapa('confirmar')
-        }}
-        onSemSessao={() => {
-          setCandidataEscolhida(null)
-          setEtapa('confirmar')
-        }}
-      />
-
+      {/* O aceite continua sendo modal, e só ele. A escolha virou modo da grade
+          porque o que ela pede é COMPARAR com a semana; a confirmação pede o
+          oposto — uma decisão isolada, com um campo de observação, e nada mais
+          na tela para distrair. */}
       <ModalConfirmarVinculo
         open={etapa === 'confirmar'}
         onClose={() => setEtapa('grade')}
-        guia={guiaAtual}
+        guia={guiaEmVinculo}
         candidata={candidataEscolhida}
         salvando={fila.salvando}
         onConfirmar={async (observacao) => {
-          if (!guiaAtual) return
+          if (!guiaEmVinculo) return
           if (candidataEscolhida) await fila.confirmarVinculo(candidataEscolhida, observacao)
-          else await fila.descartarGuia(guiaAtual.guia, observacao)
+          else await fila.descartarGuia(guiaEmVinculo.guia, observacao)
           // Os dois lados envelhecem juntos: a guia sai da contagem de "sem
           // vínculo" e a sessão vira GLOSA_RESOLVIDA na grade — na mesma tela
           // para onde o fluxo volta.
           recarregarSemana()
           setCandidataEscolhida(null)
+          setGuiaEmVinculo(null)
           setEtapa('grade')
         }}
       />

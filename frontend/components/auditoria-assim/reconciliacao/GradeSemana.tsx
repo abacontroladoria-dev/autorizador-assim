@@ -1,8 +1,18 @@
 'use client'
 
-import type { LinhaGrade } from '../types'
+import type { CandidataVinculo, CartaoGrade, LinhaGrade } from '../types'
 import CartaoAtendimento from './CartaoAtendimento'
 import { formatarDia } from './datas'
+import { candidataElegivel, type PapelNaSelecao } from './vinculo'
+
+/** O modo de vínculo, visto de dentro da grade. Ausente = grade normal. */
+export type SelecaoNaGrade = {
+  /** `bloco_id` → candidata, só as que esta semana desenha. */
+  porBloco: Map<string, CandidataVinculo>
+  /** A guia sendo vinculada, para marcá-la sem torná-la clicável. */
+  guiaEmFoco: string
+  onEscolher: (candidata: CandidataVinculo) => void
+}
 
 const DIA_CURTO = ['DOM', 'SEG', 'TER', 'QUA', 'QUI', 'SEX', 'SÁB']
 
@@ -29,32 +39,55 @@ function rotuloColuna(iso: string): { nome: string; data: string } {
  * Célula vazia fica VAZIA. Numa agenda o vazio é a maioria das células, e
  * escrever "sem sessão" em cada uma faz o ruído crescer com o tamanho da tela; o
  * dia inteiro sem nada, esse sim, é dito uma vez no cabeçalho da coluna.
+ *
+ * A altura da célula é do CONTEÚDO desde 2026-08-24. Com o cartão saudável
+ * colapsado em duas linhas, um `min-h` fixo devolveria em espaço vazio toda a
+ * altura que o colapso economizou — e é justamente a diferença de altura entre
+ * as duas espécies que faz a pendência ser achada por silhueta.
  */
 export default function GradeSemana({
   linhas,
   dias,
   hoje,
   codigosGlosa,
-  podeVincular,
-  onVincularGuia,
+  chaveAberta,
+  onAbrirDetalhe,
+  selecao,
 }: {
   linhas: LinhaGrade[]
   dias: string[]
   /** Data local de hoje, para destacar a coluna do dia. */
   hoje: string
   codigosGlosa: Map<string, string>
-  podeVincular: boolean
-  onVincularGuia: (guia: string) => void
+  /**
+   * O cartão que está aberto na gaveta. Anel de steel, nunca matiz semântico:
+   * "você está aqui" e "isto é uma glosa" não podem ser a mesma cor.
+   */
+  chaveAberta: string | null
+  onAbrirDetalhe: (cartao: CartaoGrade) => void
+  /**
+   * Modo de vínculo: a grade vira o seletor de "esta guia cobre qual sessão?".
+   *
+   * Substituiu um modal próprio em 2026-08-24. Ele desmontava o modal da semana
+   * para abrir, então a evidência que trouxe a pessoa até ali — a agenda do
+   * paciente, com a guia órfã no dia em que foi autorizada — desaparecia
+   * justamente no momento de decidir. Aqui a escolha acontece em cima dela.
+   */
+  selecao?: SelecaoNaGrade
 }) {
   const diasVazios = new Set(
     dias.filter((dia) => linhas.every((linha) => (linha.celulas[dia] ?? []).length === 0))
   )
 
   return (
-    // `relative` mantém a rolagem lateral aqui dentro: sem contêiner
-    // posicionado, a largura mínima das colunas escapa do `overflow-x-auto` e é
-    // o documento que rola de lado (medido em 390px).
-    <div className="relative overflow-x-auto">
+    // Sem `overflow-x-auto` PRÓPRIO, e isto é deliberado: quem rola nos dois
+    // eixos é o corpo do modal. Um `overflow-x` aqui criaria um scroller
+    // intermediário, e `sticky top-0` no cabeçalho dos dias passaria a resolver
+    // contra ELE — que nunca rola na vertical, porque não tem altura limitada.
+    // O efeito medido era o cabeçalho subir junto com o conteúdo e sumir, e com
+    // ele o nome do dia de cada coluna. O `relative` que impedia a largura
+    // mínima de escapar mudou de endereço junto, para o corpo do modal.
+    <div>
       {/*
         As larguras mínimas das colunas somam ~59,5rem. Abaixo disso a grade
         transborda e o contêiner rola de lado, em vez de espremer os cartões até
@@ -67,8 +100,11 @@ export default function GradeSemana({
         escrito.
       */}
       <div className="grid w-full grid-cols-[4.5rem_repeat(5,minmax(11rem,1fr))]">
-        {/* Cabeçalho */}
-        <div className="sticky left-0 z-20 border-b border-slate-200 bg-white px-3 py-2.5 text-right text-[11px] font-semibold text-slate-500">
+        {/* Cabeçalho. Grudado no topo além de na esquerda: a escala é curta
+            desde que o cartão saudável colapsou, mas uma semana cheia ainda
+            rola, e uma célula sem o nome do dia acima deixa de dizer QUANDO
+            aquele atendimento foi — que é metade do que a grade promete. */}
+        <div className="sticky top-0 left-0 z-30 border-b border-slate-200 bg-white px-3 py-2.5 text-right text-[11px] font-semibold text-slate-500">
           Horário
         </div>
         {dias.map((dia) => {
@@ -77,7 +113,7 @@ export default function GradeSemana({
           return (
             <div
               key={dia}
-              className={`border-b border-l border-slate-200 px-3 py-2.5 text-[11px] font-semibold tracking-wide ${
+              className={`sticky top-0 z-20 border-b border-l border-slate-200 px-3 py-2.5 text-[11px] font-semibold tracking-wide ${
                 ehHoje ? 'bg-brand-surface text-brand-fg' : 'bg-white text-slate-500'
               }`}
             >
@@ -116,22 +152,57 @@ export default function GradeSemana({
                 return (
                   <div
                     key={dia}
-                    className={`min-h-14 border-b border-l border-slate-100 p-2 ${
+                    className={`border-b border-l border-slate-100 p-2 ${
                       dia === hoje ? 'bg-brand-surface/40' : ''
                     }`}
                   >
                     {cartoes.length > 0 && (
                       <div className="flex flex-wrap items-start gap-1.5">
-                        {cartoes.map((cartao) => (
-                          <div key={cartao.chave} className="min-w-0 grow basis-34">
-                            <CartaoAtendimento
-                              cartao={cartao}
-                              codigosGlosa={codigosGlosa}
-                              podeVincular={podeVincular}
-                              onVincular={onVincularGuia}
-                            />
-                          </div>
-                        ))}
+                        {cartoes.map((cartao) => {
+                          const candidata = selecao?.porBloco.get(cartao.chave)
+                          const papel: PapelNaSelecao | undefined = !selecao
+                            ? undefined
+                            : candidata
+                              ? candidataElegivel(candidata)
+                                ? 'alvo'
+                                : 'coberta'
+                              : cartao.tipo === 'autorizacao' &&
+                                  cartao.guia === selecao.guiaEmFoco
+                                ? 'foco'
+                                : 'inerte'
+
+                          // Anel CHEIO no que se pode clicar, TRACEJADO na guia
+                          // em foco. Os dois são steel — os dois são "em jogo" —
+                          // e o traço é o que separa "clique aqui" de "é isto
+                          // que estamos vinculando", sem gastar um segundo
+                          // matiz num vocabulário que já tem seis.
+                          const anel =
+                            papel === 'alvo' || cartao.chave === chaveAberta
+                              ? 'ring-2 ring-brand ring-offset-1'
+                              : papel === 'foco'
+                                ? 'outline-2 outline-dashed outline-brand outline-offset-2'
+                                : ''
+
+                          return (
+                            <div
+                              key={cartao.chave}
+                              data-chave={cartao.chave}
+                              className={`min-w-0 grow basis-34 rounded-lg ${anel}`}
+                            >
+                              <CartaoAtendimento
+                                cartao={cartao}
+                                codigosGlosa={codigosGlosa}
+                                onAbrir={
+                                  papel === 'alvo' && candidata
+                                    ? () => selecao?.onEscolher(candidata)
+                                    : onAbrirDetalhe
+                                }
+                                papel={papel}
+                                distanciaSelecao={candidata?.distancia_horas ?? null}
+                              />
+                            </div>
+                          )
+                        })}
                       </div>
                     )}
                   </div>
