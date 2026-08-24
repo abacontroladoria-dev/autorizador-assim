@@ -14,6 +14,19 @@ import type { CandidataVinculo } from '@/components/auditoria-assim/types'
 export const JANELA_PADRAO = 7
 
 /**
+ * Quanto se espera, depois do último evento de realtime, antes de recarregar.
+ *
+ * O sync_assim_results insere em lote e cada linha vira um evento; a rajada
+ * inteira chega em bem menos de 2,5 s, então este valor a colapsa numa recarga
+ * só. Alto o bastante para não ser um por linha, baixo o bastante para quem está
+ * olhando não perceber atraso.
+ */
+const ESPERA_RECARGA_MS = 2_500
+
+/** Teto: mesmo sob gotejar contínuo, recarrega ao menos uma vez a cada 20 s. */
+const TETO_RECARGA_MS = 20_000
+
+/**
  * O ato de vincular uma guia a uma sessão — e só ele.
  *
  * Este hook já teve uma segunda responsabilidade: manter a fila de 30 dias de
@@ -49,17 +62,72 @@ export function useReconciliacaoAssim(aoMudarExternamente?: () => void) {
   const aoMudarRef = useRef(aoMudarExternamente)
   useEffect(() => { aoMudarRef.current = aoMudarExternamente })
 
+  // Estado do debounce de realtime. Em refs, e não em estado, porque nada disto
+  // se pinta: mudar aqui não pode causar render nem reassinar o canal.
+  const timerRecarga = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const tetoRecarga = useRef<ReturnType<typeof setTimeout> | null>(null)
+  /** Houve evento com a aba escondida — recarrega quando ela voltar. */
+  const pendente = useRef(false)
+
   // O robô do relatório importa a cada ~5 min. Sem isto a tela de trabalho fica
   // velha justamente enquanto alguém trabalha nela.
+  //
+  // MAS o evento é por LINHA, e a recarga é cara. `recarregar()` dispara três
+  // cargas (useAnaliseReincidencia:938-942), e `carregarMes` pede um par de
+  // requisições por dia útil do mês: são ~47 chamadas, uma delas o
+  // `get_guias_orfas` do mês inteiro. Ligado cru, um `insert` de 30 linhas do
+  // sync_assim_results virava 30 recargas — 1.410 requisições em rajada contra um
+  // pool de 10 conexões. É isso que travava a aba, e é o mesmo erro que a
+  // central-pacientes já tinha corrigido com debounce.
+  //
+  // O contador de geração de useAnaliseReincidencia protege o DADO (resposta
+  // atrasada não pinta a tela), não a REDE: as 1.410 requisições saíam do mesmo
+  // jeito e só eram descartadas na volta.
   useEffect(() => {
     const supabase = getSupabaseClient()
-    const aoMudar = () => aoMudarRef.current?.()
+
+    const recarregarAgora = () => {
+      timerRecarga.current = null
+      tetoRecarga.current = null
+      pendente.current = false
+      aoMudarRef.current?.()
+    }
+
+    const aoMudar = () => {
+      // Aba escondida não recarrega: ninguém está lendo, e voltar o foco refaz a
+      // carga de qualquer forma. Mesma guarda da Sidebar (Sidebar.tsx:293).
+      if (document.visibilityState !== 'visible') { pendente.current = true; return }
+
+      if (timerRecarga.current) clearTimeout(timerRecarga.current)
+      timerRecarga.current = setTimeout(recarregarAgora, ESPERA_RECARGA_MS)
+
+      // Teto: com o debounce sozinho, um gotejar de eventos mais rápido que a
+      // espera adiaria a recarga para sempre e a tela envelheceria calada.
+      if (!tetoRecarga.current) {
+        tetoRecarga.current = setTimeout(() => {
+          if (timerRecarga.current) clearTimeout(timerRecarga.current)
+          recarregarAgora()
+        }, TETO_RECARGA_MS)
+      }
+    }
+
+    const aoVoltarAba = () => {
+      if (document.visibilityState === 'visible' && pendente.current) aoMudar()
+    }
+
     const canal = supabase
       .channel('reconciliacao-assim')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'autorizacoes_assim' }, aoMudar)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'autorizacoes_vinculos' }, aoMudar)
       .subscribe()
-    return () => { void supabase.removeChannel(canal) }
+
+    document.addEventListener('visibilitychange', aoVoltarAba)
+    return () => {
+      document.removeEventListener('visibilitychange', aoVoltarAba)
+      if (timerRecarga.current) clearTimeout(timerRecarga.current)
+      if (tetoRecarga.current) clearTimeout(tetoRecarga.current)
+      void supabase.removeChannel(canal)
+    }
   }, [])
 
   const selecionarGuia = useCallback(async (guia: string | null) => {
