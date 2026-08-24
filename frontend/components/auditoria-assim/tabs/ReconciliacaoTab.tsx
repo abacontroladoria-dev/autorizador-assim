@@ -112,18 +112,21 @@ export default function ReconciliacaoTab({ alvo, onAlvoConsumido }: Props) {
       )}
 
       <ListaPendencias
-        pacientes={analise.pacientesDaSemana}
-        unidades={analise.unidadesDaSemana}
-        semanaInicio={analise.semanaInicio}
-        semanaFim={analise.semanaFim}
-        semanaAtual={analise.semanaAtual}
+        pacientes={analise.pacientesDoMes}
+        unidades={analise.unidadesDoMes}
+        mesRef={analise.mesRef}
+        mesFimEfetivo={analise.mesFimEfetivo}
+        mesAtual={analise.mesAtual}
+        podeAvancarMes={analise.podeAvancarMes}
         carregando={analise.loading}
         erro={analise.erro}
-        onSemana={analise.irParaSemana}
-        onIrParaData={analise.irParaData}
+        onMes={analise.irParaMes}
+        onIrParaMesData={analise.irParaMesData}
         onRecarregar={recarregarSemana}
         onAbrir={(paciente) => {
-          escolherPaciente(paciente.nome, paciente.carteirinhas)
+          // A última autorização do paciente no mês, quando existe, posiciona
+          // o modal na semana onde a pendência de fato está.
+          escolherPaciente(paciente.nome, paciente.carteirinhas, paciente.ultimaAutorizacao)
           setEtapa('grade')
         }}
       />

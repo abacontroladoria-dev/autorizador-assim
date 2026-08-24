@@ -275,18 +275,39 @@ export default function Sidebar() {
     checkUser()
   }, [])
 
+  // Os dois badges da fila.
+  //
+  // Só com a aba visível, e a cada 60 s. A Sidebar existe em toda tela, então
+  // este par de contagens é multiplicado por aba aberta — em 24/08 os logs do
+  // PostgREST mostram 7 chamadas de cada uma no MESMO segundo, de abas
+  // esquecidas abertas, enquanto o banco já estava sem conexão livre. Não foi a
+  // causa daquele incidente, mas é tráfego que não serve a ninguém: ninguém lê
+  // um badge de aba que não está na frente.
+  //
+  // Ao voltar o foco a contagem é refeita na hora, senão o badge mostraria por
+  // até um minuto um número de antes de a aba ser escondida.
   useEffect(() => {
+    let vivo = true
+
     async function fetchCounts() {
+      if (document.visibilityState !== "visible") return
       const [{ count: cp }, { count: ce }] = await Promise.all([
         supabase.from("fila_autorizacoes").select("*", { count: "exact", head: true }).eq("status", "processando"),
         supabase.from("fila_autorizacoes").select("*", { count: "exact", head: true }).eq("status", "erro"),
       ])
+      if (!vivo) return
       setCountProcessando(cp ?? 0)
       setCountErros(ce ?? 0)
     }
+
     fetchCounts()
-    const interval = setInterval(fetchCounts, 30000)
-    return () => clearInterval(interval)
+    const interval = setInterval(fetchCounts, 60000)
+    document.addEventListener("visibilitychange", fetchCounts)
+    return () => {
+      vivo = false
+      clearInterval(interval)
+      document.removeEventListener("visibilitychange", fetchCounts)
+    }
   }, [])
 
   useEffect(() => {

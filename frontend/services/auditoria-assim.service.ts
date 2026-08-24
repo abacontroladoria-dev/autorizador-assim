@@ -215,6 +215,31 @@ const TETO_POSTGREST = 1000
  */
 const TETO_PAGINAS = 20
 
+/**
+ * Largura de cada consulta ao intervalo, em dias — não o intervalo inteiro
+ * de uma vez.
+ *
+ * Medido em 2026-08-24: pedir o mês inteiro (~26 dias) numa consulta só a
+ * `agenda_tita` (que filtra por `ilike convenio_nome`, sem índice) e a
+ * `autorizacoes_assim` estourou `statement_timeout` (57014) — a listagem
+ * mensal da Reconciliação passou a pedir um intervalo bem maior que a
+ * semana original, que sempre coube dentro do timeout. Em janelas deste
+ * tamanho, sequenciais, cada consulta corre no mesmo orçamento que a semana
+ * original já corria em produção.
+ */
+const JANELA_CONSULTA_DIAS = 6
+
+/** "2026-08-03" + 6 → "2026-08-09". Sem `new Date(string)` sobre o resultado:
+ *  evita a armadilha de fuso já documentada em `lib/cronograma/comparativoSessoes.ts`. */
+function somarDiasIso(iso: string, dias: number): string {
+  const [ano, mes, dia] = iso.slice(0, 10).split('-').map(Number)
+  const d = new Date(ano, (mes ?? 1) - 1, (dia ?? 1) + dias)
+  const a = d.getFullYear()
+  const m = String(d.getMonth() + 1).padStart(2, '0')
+  const dd = String(d.getDate()).padStart(2, '0')
+  return `${a}-${m}-${dd}`
+}
+
 const COLUNAS_AUTORIZACAO =
   'guia, matricula, paciente_nome, data_execucao, status, codigo_tuss, codigo_erro, descricao_erro, teve_token, token'
 
@@ -255,42 +280,58 @@ export async function listarAutorizacoesAssimSemana(
   if (carteirinhas !== null && carteirinhas.length === 0) return []
 
   const itens: AutorizacaoAssimSemana[] = []
+  let janelaInicio = inicio
 
-  for (let pagina = 0; pagina < TETO_PAGINAS; pagina++) {
-    let consulta = supabase
-      .from('autorizacoes_assim')
-      .select(COLUNAS_AUTORIZACAO)
-      .gte('data_execucao', `${inicio}T00:00:00`)
-      .lt('data_execucao', `${fimExclusivo}T00:00:00`)
-      .order('data_execucao')
-      .order('matricula')
-      .order('guia')
-      .range(pagina * TETO_POSTGREST, (pagina + 1) * TETO_POSTGREST - 1)
+  // Uma janela de poucos dias por vez — ver `JANELA_CONSULTA_DIAS`. Sequencial,
+  // não em paralelo: é o mesmo intervalo, só fatiado, então rodar tudo de uma
+  // vez só trocaria uma consulta lenta por várias simultâneas na mesma tabela.
+  while (janelaInicio < fimExclusivo) {
+    const janelaFimExclusivo = (() => {
+      const bruto = somarDiasIso(janelaInicio, JANELA_CONSULTA_DIAS)
+      return bruto < fimExclusivo ? bruto : fimExclusivo
+    })()
 
-    if (carteirinhas) consulta = consulta.in('matricula', carteirinhas)
+    for (let pagina = 0; pagina < TETO_PAGINAS; pagina++) {
+      let consulta = supabase
+        .from('autorizacoes_assim')
+        .select(COLUNAS_AUTORIZACAO)
+        .gte('data_execucao', `${janelaInicio}T00:00:00`)
+        .lt('data_execucao', `${janelaFimExclusivo}T00:00:00`)
+        .order('data_execucao')
+        .order('matricula')
+        .order('guia')
+        .range(pagina * TETO_POSTGREST, (pagina + 1) * TETO_POSTGREST - 1)
 
-    const { data: result, error } = await consulta
+      if (carteirinhas) consulta = consulta.in('matricula', carteirinhas)
 
-    if (error) {
-      console.error('Erro ao buscar autorizações da semana:', error.message, error.details)
-      throw error
+      const { data: result, error } = await consulta
+
+      if (error) {
+        console.error('Erro ao buscar autorizações do período:', error.message, error.details)
+        throw error
+      }
+
+      const lote = (result ?? []) as AutorizacaoAssimSemana[]
+      itens.push(...lote)
+      // Página incompleta = acabou esta janela. É o único sinal confiável: o
+      // PostgREST não devolve o total sem `count`, e pedi-lo custaria um
+      // COUNT(*) por janela.
+      if (lote.length < TETO_POSTGREST) break
+      if (pagina === TETO_PAGINAS - 1) {
+        console.error(
+          `listarAutorizacoesAssimSemana: teto de ${TETO_PAGINAS} páginas atingido em ${janelaInicio}–${janelaFimExclusivo} — o período pode estar incompleto.`
+        )
+      }
     }
 
-    const lote = (result ?? []) as AutorizacaoAssimSemana[]
-    itens.push(...lote)
-    // Página incompleta = acabou. É o único sinal confiável: o PostgREST não
-    // devolve o total sem `count`, e pedi-lo custaria um COUNT(*) por semana.
-    if (lote.length < TETO_POSTGREST) return itens
+    janelaInicio = janelaFimExclusivo
   }
 
-  console.error(
-    `listarAutorizacoesAssimSemana: teto de ${TETO_PAGINAS} páginas atingido — a semana pode estar incompleta.`
-  )
   return itens
 }
 
 /**
- * A unidade clínica de cada paciente na semana, inferida da sala agendada.
+ * A unidade clínica de cada paciente no período, inferida da sala agendada.
  *
  * Nem `get_auditoria_assim` nem `autorizacoes_assim` carregam sala ou unidade —
  * a unidade nunca foi um dado da autorização, é um dado da agenda. Em vez de
@@ -313,37 +354,50 @@ export async function listarUnidadesPorPaciente(
   const contagem = new Map<string, Map<string, number>>()
 
   try {
-    for (let pagina = 0; pagina < TETO_PAGINAS; pagina++) {
-      const { data, error } = await supabase
-        .from('agenda_tita')
-        .select('paciente_id, sala_nome')
-        .eq('ativo', true)
-        .ilike('convenio_nome', '%assim%')
-        .gte('data_atendimento', inicio)
-        .lte('data_atendimento', fim)
-        .order('paciente_id')
-        .order('sala_nome')
-        .range(pagina * TETO_POSTGREST, (pagina + 1) * TETO_POSTGREST - 1)
+    let janelaInicio = inicio
+    // Uma janela de poucos dias por vez — ver `JANELA_CONSULTA_DIAS`. O
+    // `ilike` em `convenio_nome` não tem índice, então pedir o intervalo
+    // inteiro de uma vez é o que estourava `statement_timeout` num mês.
+    while (janelaInicio <= fim) {
+      const janelaFim = (() => {
+        const bruto = somarDiasIso(janelaInicio, JANELA_CONSULTA_DIAS - 1)
+        return bruto > fim ? fim : bruto
+      })()
 
-      if (error) throw error
+      for (let pagina = 0; pagina < TETO_PAGINAS; pagina++) {
+        const { data, error } = await supabase
+          .from('agenda_tita')
+          .select('paciente_id, sala_nome')
+          .eq('ativo', true)
+          .ilike('convenio_nome', '%assim%')
+          .gte('data_atendimento', janelaInicio)
+          .lte('data_atendimento', janelaFim)
+          .order('paciente_id')
+          .order('sala_nome')
+          .range(pagina * TETO_POSTGREST, (pagina + 1) * TETO_POSTGREST - 1)
 
-      const lote = (data ?? []) as { paciente_id: number | string | null; sala_nome: string | null }[]
-      for (const linha of lote) {
-        if (linha.paciente_id == null) continue
-        const unidade = mapearUnidade(linha.sala_nome)
-        // "Consertar Unidade no Sistema" é falha de cadastro na origem, não uma
-        // unidade: vira ausência, e a listagem mostra "—".
-        if (unidade === UNIDADE_CONSERTAR) continue
-        const chave = String(linha.paciente_id)
-        const porUnidade = contagem.get(chave) ?? new Map<string, number>()
-        porUnidade.set(unidade, (porUnidade.get(unidade) ?? 0) + 1)
-        contagem.set(chave, porUnidade)
+        if (error) throw error
+
+        const lote = (data ?? []) as { paciente_id: number | string | null; sala_nome: string | null }[]
+        for (const linha of lote) {
+          if (linha.paciente_id == null) continue
+          const unidade = mapearUnidade(linha.sala_nome)
+          // "Consertar Unidade no Sistema" é falha de cadastro na origem, não uma
+          // unidade: vira ausência, e a listagem mostra "—".
+          if (unidade === UNIDADE_CONSERTAR) continue
+          const chave = String(linha.paciente_id)
+          const porUnidade = contagem.get(chave) ?? new Map<string, number>()
+          porUnidade.set(unidade, (porUnidade.get(unidade) ?? 0) + 1)
+          contagem.set(chave, porUnidade)
+        }
+
+        if (lote.length < TETO_POSTGREST) break
       }
 
-      if (lote.length < TETO_POSTGREST) break
+      janelaInicio = somarDiasIso(janelaFim, 1)
     }
   } catch (e) {
-    console.error('Erro ao inferir unidades da semana:', e)
+    console.error('Erro ao inferir unidades do período:', e)
     return new Map()
   }
 
