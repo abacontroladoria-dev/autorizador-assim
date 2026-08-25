@@ -1,7 +1,7 @@
 'use client'
 
 import { createPortal } from 'react-dom'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { ChartColumn, RefreshCw, Search, X } from 'lucide-react'
 import { useModalDialog } from '@/hooks/useModalDialog'
 import { useResumoGerencial, type FatiaKpis, type MetricaFoco } from '@/hooks/useResumoGerencial'
@@ -108,8 +108,9 @@ export default function ModalVisaoGerencial({ aberto, onClose }: Props) {
           {/* A busca fica na mesma faixa do intervalo porque é do mesmo tipo:
               recorta O QUE está sendo somado. Ela filtra em memória, sobre as
               linhas do período já carregadas — então responde a cada tecla sem
-              ida ao banco, e todo o resto do modal (totais, gráfico e as quatro
-              quebras) passa a falar do paciente buscado. */}
+              ida ao banco, e todo o resto do modal (totais e gráfico) passa a
+              falar do paciente buscado. É também o que ABRE as quatro quebras
+              do rodapé, que não existem enquanto o foco é o período inteiro. */}
           <label className="relative flex-1 sm:max-w-64">
             <span className="sr-only">Buscar paciente pelo nome</span>
             <Search className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -200,53 +201,71 @@ export default function ModalVisaoGerencial({ aberto, onClose }: Props) {
                 serie={r.serie}
                 metrica={r.metrica}
                 diaria={r.serieDiaria}
-                barTone={visual.barTone}
+                tone={visual.tone}
                 titulo={visual.title.replace('\n', ' ')}
               />
 
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4">
-                <Quebra
-                  titulo="Por paciente"
-                  fatias={r.porPaciente}
-                  metrica={r.metrica}
-                  barTone={visual.barTone}
-                  vazio="Nenhum paciente com este indicador no período."
-                />
-                <Quebra
-                  titulo="Por terapia"
-                  fatias={r.porTerapia}
-                  metrica={r.metrica}
-                  barTone={visual.barTone}
-                  vazio="Nenhuma terapia com este indicador no período."
-                />
-                <Quebra
-                  titulo="Por motivo de glosa"
-                  fatias={r.porMotivo.map((f) => ({
-                    ...f,
-                    // O código sozinho ("1013") não diz nada a quem contesta, e
-                    // o texto sozinho não é o que se cita na contestação — os
-                    // dois juntos, então. O extenso vem do de-para que o sistema
-                    // aprende sozinho; enquanto ele não conhece o código, mostra
-                    // o código puro em vez de inventar rótulo.
-                    rotulo:
-                      f.chave === '—'
-                        ? 'Sem código'
-                        : glosaCodigos.get(f.chave)
-                          ? `${f.chave} · ${glosaCodigos.get(f.chave)}`
-                          : f.chave,
-                  }))}
-                  metrica={r.metrica}
-                  barTone={visual.barTone}
-                  vazio="Nenhuma recusa com código no período."
-                />
-                <Quebra
-                  titulo="Por unidade"
-                  fatias={r.porUnidade}
-                  metrica={r.metrica}
-                  barTone={visual.barTone}
-                  vazio="Sem unidade identificada no período."
-                />
-              </div>
+              {/* As quebras são o SEGUNDO passo, e só existem depois da busca.
+
+                  O primeiro passo desta tela é dimensionar — quanto, e quando.
+                  Com o período inteiro em foco, as quatro quebras respondem uma
+                  pergunta que ninguém fez ainda e enchem a dobra de baixo de
+                  listas longas, empurrando o gráfico (que é o passo um) para
+                  fora da tela. Depois que a pessoa nomeia um paciente, elas
+                  passam a responder algo específico: o que está acontecendo com
+                  ELE. */}
+              {r.busca.trim() ? (
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4">
+                  <Quebra
+                    titulo="Por paciente"
+                    fatias={r.porPaciente}
+                    metrica={r.metrica}
+                    barTone={visual.barTone}
+                    vazio="Nenhum paciente com este indicador no período."
+                  />
+                  <Quebra
+                    titulo="Por terapia"
+                    fatias={r.porTerapia}
+                    metrica={r.metrica}
+                    barTone={visual.barTone}
+                    vazio="Nenhuma terapia com este indicador no período."
+                  />
+                  <Quebra
+                    titulo="Por motivo de glosa"
+                    fatias={r.porMotivo.map((f) => ({
+                      ...f,
+                      // O código sozinho ("1013") não diz nada a quem contesta,
+                      // e o texto sozinho não é o que se cita na contestação —
+                      // os dois juntos, então. O extenso vem do de-para que o
+                      // sistema aprende sozinho; enquanto ele não conhece o
+                      // código, mostra o código puro em vez de inventar rótulo.
+                      rotulo:
+                        f.chave === '—'
+                          ? 'Sem código'
+                          : glosaCodigos.get(f.chave)
+                            ? `${f.chave} · ${glosaCodigos.get(f.chave)}`
+                            : f.chave,
+                    }))}
+                    metrica={r.metrica}
+                    barTone={visual.barTone}
+                    vazio="Nenhuma recusa com código no período."
+                  />
+                  <Quebra
+                    titulo="Por unidade"
+                    fatias={r.porUnidade}
+                    metrica={r.metrica}
+                    barTone={visual.barTone}
+                    vazio="Sem unidade identificada no período."
+                  />
+                </div>
+              ) : (
+                // Área que some sem explicação lê-se como tela quebrada. A frase
+                // fica no lugar exato onde as quebras vão aparecer e nomeia a
+                // ação que as traz — o campo está logo acima, na mesma coluna.
+                <p className="rounded-xl border border-dashed border-slate-200 px-4 py-3 text-center text-xs text-slate-500">
+                  Busque um paciente acima para ver o detalhamento por terapia, motivo de glosa e unidade.
+                </p>
+              )}
             </div>
           )}
         </div>
@@ -299,6 +318,18 @@ function CardMetrica({
         {carregando ? '—' : valor}
       </span>
       <div className="mt-1.5 w-full px-1">
+        {/* A mesma pílula da tela diária (`KpiCards.tsx`): o percentual sobre o
+            total de sessões do recorte, no matiz do próprio indicador. Repetir
+            a forma é o ponto — quem lê "18%" em violeta no dia lê o mesmo no
+            período, e a barra logo abaixo deixa de ser a única portadora de uma
+            proporção que ninguém conseguia citar. */}
+        <div className="mb-1.5 flex justify-center">
+          <span
+            className={`inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ${visual.iconTone}`}
+          >
+            {carregando ? '' : `${percent}%`}
+          </span>
+        </div>
         <div className="h-1 overflow-hidden rounded-full bg-slate-100">
           <div
             className={`h-full rounded-full transition-all duration-500 ${visual.barTone}`}
@@ -311,33 +342,102 @@ function CardMetrica({
 }
 
 /**
- * A evolução do indicador em foco, em colunas de HTML.
+ * A evolução do indicador em foco — uma LINHA, não colunas.
  *
- * Não é Recharts de propósito. O shim global de tema escuro remapeia `bg-`,
- * `text-`, `border-` e `ring-`, mas NÃO `fill-` — uma barra de SVG pintada por
- * classe utilitária continuaria clara no escuro, calada. Em HTML a mesma barra
- * usa `bg-*` e acompanha o tema como todo o resto da tela.
+ * Por que linha: o eixo é o tempo, e o que se lê num período é a FORMA — em que
+ * dias a coisa sobe, se vem caindo, se o pico foi um episódio ou um patamar.
+ * Coluna afirma que cada dia é uma categoria independente, que é a leitura certa
+ * para "por paciente" (as quebras abaixo, que seguem em barra) e a errada para
+ * uma série temporal. E colunas somem: num intervalo de 30 ou 60 dias cada barra
+ * ficava com poucos pixels e o gráfico precisava rolar de lado. A linha comporta
+ * o período inteiro na largura que existe.
  *
- * Uma série só, então não há legenda: o título nomeia o que está desenhado. O
- * valor não é impresso em cima de toda coluna — só o maior ganha rótulo, e o
- * resto sai no hover e no `title`.
+ * Continua SEM Recharts, e a razão de antes não mudou: o shim global de tema
+ * escuro remapeia `bg-`, `text-`, `border-` e `ring-`, mas NÃO `fill-` nem
+ * `stroke-` — uma série pintada por classe utilitária de SVG continuaria clara
+ * no escuro, calada. A saída é o SVG não pintar nada por classe própria: traço e
+ * área saem em `currentColor`, herdado do `text-*` que a métrica já usa nos
+ * cards (`visual.tone`), e o ponto usa `bg-current`. A cor entra pelo único
+ * canal que o shim cobre.
+ *
+ * `preserveAspectRatio="none"` estica um viewBox de 0–100 para a caixa real, o
+ * que dispensa medir o contêiner; `vector-effect="non-scaling-stroke"` é o que
+ * impede esse esticamento de deformar a espessura do traço.
+ *
+ * Uma série só, então não há legenda: o título nomeia o que está desenhado. Cada
+ * ponto responde no hover e no `title`; o pico fica marcado o tempo todo, porque
+ * é o número que o cabeçalho cita e ele precisa ter uma data.
  */
 function Evolucao({
-  serie, metrica, diaria, barTone, titulo,
+  serie, metrica, diaria, tone, titulo,
 }: {
   serie: FatiaKpis[]
   metrica: MetricaFoco
   diaria: boolean
-  barTone: string
+  /** Classe `text-*` da métrica. É dela que saem traço, área e ponto. */
+  tone: string
   titulo: string
 }) {
   const maximo = Math.max(1, ...serie.map((f) => f.kpis[metrica]))
-  // Com muitas colunas, rotular todas colide. Um rótulo a cada N mantém o eixo
-  // legível sem esconder a escala.
-  const passo = Math.ceil(serie.length / 12)
+  const n = serie.length
+
+  const rotuloDe = (chave: string) => (diaria ? diaMes(chave) : `sem. ${diaMes(chave)}`)
+
+  // Quantos rótulos de data cabem, medido — não chutado.
+  //
+  // Antes era um a cada `ceil(n/12)`, a 9px e em slate-400: as datas estavam
+  // tecnicamente no eixo e não se liam, que é o mesmo que não estarem. Com a
+  // largura real em mãos dá para mostrar TODAS quando cabem e só ralear quando
+  // não cabem, em 11px (o piso do DESIGN.md §3). O rótulo semanal ("sem. 10/08")
+  // é quase o dobro do diário, e por isso a folga é diferente para cada um.
+  const refPlot = useRef<HTMLDivElement>(null)
+  const [largura, setLargura] = useState(0)
+  useEffect(() => {
+    const el = refPlot.current
+    if (!el) return
+    const observador = new ResizeObserver(([entrada]) => setLargura(entrada.contentRect.width))
+    observador.observe(el)
+    return () => observador.disconnect()
+  }, [])
+  const folgaRotulo = diaria ? 44 : 70
+  const cabem = largura > 0 ? Math.max(2, Math.floor(largura / folgaRotulo)) : 12
+  const passo = Math.max(1, Math.ceil(n / cabem))
+
+  /**
+   * A primeira e a última data aparecem sempre — são elas que dizem qual
+   * período está desenhado. As do meio raleiam. O `>= passo / 2` evita o rótulo
+   * espremido contra o último, que é o que acontece quando `n - 1` não é
+   * múltiplo do passo.
+   */
+  const mostrarRotulo = (i: number) =>
+    i === 0 || i === n - 1 || (i % passo === 0 && n - 1 - i >= passo / 2)
+
+  /**
+   * Teto do traçado, em % da caixa. O gráfico não usa a altura inteira de
+   * propósito: o valor de cada ponto é escrito ACIMA dele no hover, e com o pico
+   * encostado no topo esse número saía da caixa e ia parar em cima do título.
+   * A folga é o espaço reservado para ele.
+   */
+  const TETO = 80
+
+  // Um único ponto não tem "entre": ele fica no meio, sem linha para desenhar.
+  const x = (i: number) => (n <= 1 ? 50 : (i / (n - 1)) * 100)
+  const altura = (valor: number) => (valor / maximo) * TETO
+
+  const pontos = serie.map((fatia, i) => `${x(i)},${100 - altura(fatia.kpis[metrica])}`).join(' ')
+  // A área fecha descendo até a base nas duas pontas. Só existe com 2+ pontos.
+  const area = n > 1 ? `${x(0)},100 ${pontos} ${x(n - 1)},100` : ''
+  // A faixa de hover de cada ponto ladrilha o vão até o vizinho, então qualquer
+  // lugar da coluna responde — mirar um ponto de 8px seria exigir pontaria.
+  const faixa = n <= 1 ? 100 : 100 / (n - 1)
+
+  const iPico = serie.reduce(
+    (melhor, fatia, i) => (fatia.kpis[metrica] > serie[melhor].kpis[metrica] ? i : melhor),
+    0
+  )
 
   return (
-    <section className="rounded-xl border border-slate-200 bg-white p-4">
+    <section className={`rounded-xl border border-slate-200 bg-white p-4 ${tone}`}>
       <div className="mb-3 flex items-baseline justify-between gap-3">
         <h3 className="text-sm font-semibold text-slate-800">
           {titulo} {diaria ? 'por dia' : 'por semana'}
@@ -345,30 +445,88 @@ function Evolucao({
         <span className="text-xs text-slate-500">pico de {maximo}</span>
       </div>
 
-      <div className="flex h-40 items-end gap-1 overflow-x-auto">
-        {serie.map((fatia, i) => {
-          const valor = fatia.kpis[metrica]
-          const altura = (valor / maximo) * 100
-          const rotulo = diaria ? diaMes(fatia.chave) : `sem. ${diaMes(fatia.chave)}`
-          return (
-            <div key={fatia.chave} className="group flex min-w-6 flex-1 flex-col items-center gap-1">
-              <span className="text-[10px] font-semibold text-slate-700 opacity-0 transition group-hover:opacity-100">
-                {valor}
-              </span>
-              <div className="flex h-28 w-full items-end">
+      {n === 0 ? (
+        <p className="py-8 text-center text-xs text-slate-400">Sem dias com movimento no intervalo.</p>
+      ) : (
+        // A folga lateral existe para o primeiro e o último ponto, que caem
+        // exatamente na borda do traçado: sem ela metade do círculo e metade do
+        // rótulo de data ficariam fora da caixa.
+        <div ref={refPlot} className="px-4">
+          <div className="relative h-32">
+            {/* A base do zero. Sem ela um vale não se distingue de "acabou o
+                gráfico" — a linha some no branco. */}
+            <span aria-hidden className="absolute inset-x-0 bottom-0 h-px bg-slate-200" />
+
+            <svg
+              aria-hidden
+              className="absolute inset-0 h-full w-full overflow-visible"
+              viewBox="0 0 100 100"
+              preserveAspectRatio="none"
+            >
+              {area && <polygon points={area} fill="currentColor" fillOpacity={0.1} />}
+              <polyline
+                points={pontos}
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={2}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                vectorEffect="non-scaling-stroke"
+              />
+            </svg>
+
+            {serie.map((fatia, i) => {
+              const valor = fatia.kpis[metrica]
+              const pct = altura(valor)
+              return (
                 <div
-                  className={`w-full rounded-t-lg transition-all ${valor > 0 ? barTone : 'bg-slate-200'}`}
-                  style={{ height: `${valor > 0 ? Math.max(altura, 3) : 2}%` }}
-                  title={`${rotulo}: ${valor}`}
-                />
-              </div>
-              <span className="text-[9px] whitespace-nowrap text-slate-400">
-                {i % passo === 0 ? rotulo : ''}
-              </span>
-            </div>
-          )
-        })}
-      </div>
+                  key={fatia.chave}
+                  title={`${rotuloDe(fatia.chave)}: ${valor}`}
+                  className="group absolute top-0 bottom-0 -translate-x-1/2"
+                  style={{ left: `${x(i)}%`, width: `${faixa}%` }}
+                >
+                  <span
+                    aria-hidden
+                    className={`absolute left-1/2 h-2 w-2 -translate-x-1/2 translate-y-1/2 rounded-full bg-current transition-opacity ${
+                      i === iPico ? '' : 'opacity-0 group-hover:opacity-100'
+                    }`}
+                    style={{ bottom: `${pct}%` }}
+                  />
+                  <span
+                    className="absolute left-1/2 -translate-x-1/2 text-[10px] font-semibold tabular-nums whitespace-nowrap text-slate-700 opacity-0 transition-opacity group-hover:opacity-100"
+                    style={{ bottom: `calc(${pct}% + 9px)` }}
+                  >
+                    {valor}
+                  </span>
+                </div>
+              )
+            })}
+          </div>
+
+          {/* O eixo das datas. As das pontas se alinham PELA BORDA (a primeira
+              pela esquerda, a última pela direita) em vez de centradas no
+              ponto: centradas, metade de cada uma cairia fora da caixa. */}
+          <div className="relative mt-2 h-4">
+            {serie.map((fatia, i) =>
+              mostrarRotulo(i) ? (
+                <span
+                  key={fatia.chave}
+                  className={`absolute text-[11px] whitespace-nowrap tabular-nums text-slate-500 ${
+                    i === 0 && n > 1
+                      ? ''
+                      : i === n - 1 && n > 1
+                        ? '-translate-x-full'
+                        : '-translate-x-1/2'
+                  }`}
+                  style={{ left: `${x(i)}%` }}
+                >
+                  {rotuloDe(fatia.chave)}
+                </span>
+              ) : null
+            )}
+          </div>
+        </div>
+      )}
     </section>
   )
 }
