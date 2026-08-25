@@ -19,6 +19,7 @@ import type { CsvRow } from "@/types/cronograma"
 import type { CsvGradeRow } from "./relatorio"
 import { formatDateBR } from "./datas"
 import { limparPrefixoDesligado } from "./constants"
+import { rotulosDeExecucaoDesconhecidos, veredictoRotuloDesconhecido } from "./rotulosExecucao"
 
 // profissional_id é a chave estável do profissional no TiTa: quando alguém é
 // desligado o nome vira "INATIVO-<nome>" aqui, mas o id continua o mesmo e o
@@ -205,6 +206,20 @@ export interface CoberturaGrade {
    * realizadas escondidas e R$ 490,00 a menos na folha.
    */
   inativasAgendadas: number
+  /**
+   * Rótulos de `Status` que vieram na grade e este código não sabe ler
+   * (amostra: até 5 textos distintos, como a TiTa os escreveu).
+   *
+   * Os dois contadores acima medem AUSÊNCIA de execução. Este mede execução
+   * presente e ilegível, que é pior: ausência aparece como "não evoluída" e
+   * não paga nada, enquanto um rótulo que ninguém entende faz a sessão passar
+   * por realizada — e sessão não realizada tratada como realizada gera diária,
+   * ETA e PA. Ver `cancelado` em calculo.ts e a mudança de 24/08/2026 em
+   * rotulosExecucao.ts.
+   */
+  rotulosDesconhecidos: string[]
+  /** Quantas linhas do período trazem um dos rótulos acima. */
+  linhasRotuloDesconhecido: number
 }
 
 export interface GradeDoBanco extends CoberturaGrade {
@@ -306,6 +321,13 @@ export async function buscarGradeParaRP(de: string, ate: string, hoje = new Date
 
   let agendados = 0
   let semExecucao = 0
+  // Rótulo ilegível é contado em TODA linha do período, sem o recorte
+  // `Agendado`/já ocorrida das duas medidas acima. Aquele recorte existe para
+  // não acusar como falha o que é só sessão futura sem execução; aqui não há
+  // nada de normal a preservar — status_execucao preenchido e ininteligível é
+  // sintoma em qualquer linha, e é o cálculo inteiro que fica sem chão.
+  const rotulosDesconhecidos = new Set<string>()
+  let linhasRotuloDesconhecido = 0
 
   const linhas = brutas.map(r => {
     // Só `Agendado` e só o que já aconteceu. `Livre` não tem evolução por
@@ -314,6 +336,15 @@ export async function buscarGradeParaRP(de: string, ate: string, hoje = new Date
     if (r.status_agendamento === "Agendado" && (r.data as string) <= ultimoDiaMedido) {
       agendados++
       if (r.status_execucao == null) semExecucao++
+    }
+    // Sobre o texto já corrigido (fixMojibake), não o cru: dupla codificação
+    // deixaria 'Não realizado — clínica' irreconhecível e viraria um alarme
+    // falso de vocabulário novo. É o mesmo texto que a coluna "Status" abaixo
+    // entrega a quem classifica.
+    const statusExec = fixMojibake(r.status_execucao as string | null)
+    for (const rotulo of rotulosDeExecucaoDesconhecidos([statusExec])) {
+      linhasRotuloDesconhecido++
+      if (rotulosDesconhecidos.size < 5) rotulosDesconhecidos.add(rotulo)
     }
     return {
       "Data": (r.data as string) ?? "",
@@ -331,8 +362,13 @@ export async function buscarGradeParaRP(de: string, ate: string, hoje = new Date
       "Convênio": fixMojibake(r.convenio_nome as string | null),
       "Status do Agendamento": (r.status_agendamento as string) ?? "",
       "ID Agendamento": r.tita_agendamento_id == null ? "" : String(r.tita_agendamento_id),
-      "Status": (r.status_execucao as string) ?? "",
-      // normKey(justificativa).includes("falta do paciente") define presencaTita.
+      // fixMojibake (aplicado em `statusExec`, acima) deixou de ser zelo: os
+      // rótulos novos de execução ('Não realizado — clínica') têm acento e
+      // travessão, enquanto os antigos ('Cancelado', 'Realizado') eram ASCII
+      // puro e nunca podiam quebrar.
+      "Status": statusExec,
+      // Status + Justificativa juntos definem `cancelado` (isCancelado) e
+      // presencaTita (motivoNaoRealizado) — ver rotulosExecucao.ts.
       "Justificativa": fixMojibake(r.justificativa as string | null),
       "Possui Tratativa": simNao(r.possui_tratativa),
       "Nome Profissional Tratativa": porId(r.tratativa_profissional_id, r.tratativa_profissional_nome),
@@ -351,6 +387,8 @@ export async function buscarGradeParaRP(de: string, ate: string, hoje = new Date
     semExecucao,
     cobertura: agendados === 0 ? 1 : (agendados - semExecucao) / agendados,
     inativasAgendadas: saude.inativasAgendadas,
+    rotulosDesconhecidos: [...rotulosDesconhecidos],
+    linhasRotuloDesconhecido,
   }
 }
 
@@ -425,6 +463,13 @@ export function checarPisoDeExecucao(de: string, contexto: ContextoGrade = "paga
  * ausência: em julho/2026 ela respondeu "98,9%, pode pagar" enquanto 25 sessões
  * realizadas estavam fora da grade, R$ 490,00 a menos. Incompletude bloqueia
  * sem exceção — diferente de execução faltando, ela não se resolve esperando.
+ *
+ * Desde 24/08/2026 há uma pergunta 0, que vem antes das duas: o que está na
+ * grade é LEGÍVEL? Ela existe porque naquele dia a TiTa renomeou os rótulos de
+ * execução ('Cancelado' → 'Não realizado — …'), e um rótulo que este código não
+ * entende não deixa a grade incompleta: deixa-a mentirosa, com sessão não
+ * realizada passando por realizada e gerando diária, ETA e PA. As perguntas 1 e
+ * 2 respondem "quanto falta"; esta responde "dá para acreditar no que veio".
  */
 export function avaliarCoberturaGrade(
   grade: CoberturaGrade,
@@ -434,6 +479,9 @@ export function avaliarCoberturaGrade(
 ): VeredictoGrade {
   const { de, ate } = periodo
   const dePagamento = contexto === "pagamento"
+
+  const veredictoRotulo = veredictoRotuloDesconhecido(grade, contexto)
+  if (veredictoRotulo) return veredictoRotulo
 
   if (grade.inativasAgendadas > 0) {
     const n = grade.inativasAgendadas

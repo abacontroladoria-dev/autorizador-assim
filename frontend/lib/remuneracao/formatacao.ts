@@ -54,8 +54,10 @@ export const isSim = (v: unknown): boolean =>
     String(v || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim()
   )
 
-export const isCancelado = (v: unknown): boolean =>
-  String(v || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim().includes("cancel")
+// `isCancelado` morava aqui. Saiu para lib/remuneracao/rotulosExecucao.ts junto
+// com o resto do vocabulário de execução da TiTa: o que era um `includes` de
+// formatação virou tradução de rótulo externo — versionado, medido e testado —
+// depois que a TiTa renomeou 'Cancelado' em 24/08/2026. Importe de lá.
 
 export const htmlEsc = (v: unknown): string =>
   String(v ?? "").replace(/[&<>"']/g, ch => (

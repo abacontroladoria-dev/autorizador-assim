@@ -1,7 +1,8 @@
 // Migrado de calculadora-remuneracao/src/utils/relatorio.js
 
 import { normKey } from "./constants"
-import { cleanTxt, isSim, isCancelado } from "./formatacao"
+import { cleanTxt, isSim } from "./formatacao"
+import { isCancelado, motivoNaoRealizado } from "./rotulosExecucao"
 import { dataParaISO } from "./datas"
 import type { FeriadoInfo } from "@/types/remuneracao"
 
@@ -315,7 +316,12 @@ export function normalizarGradeParaSessao(rows: CsvGradeRow[], feriados?: Record
     .map((r, idx) => {
       const status = cleanTxt(getCol(r, ["Status"]))
       const justificativa = cleanTxt(getCol(r, ["Justificativa"]))
-      const faltaPaciente = isCancelado(status) && normKey(justificativa).includes("falta do paciente")
+      // Motivo lido das DUAS colunas: 'Falta do Paciente' vinha na
+      // justificativa com Status 'Cancelado'; o rótulo novo da TiTa
+      // ('Não realizado — paciente', a partir de 24/08/2026) pode chegar em
+      // qualquer uma das duas. Ver rotulosExecucao.ts.
+      const naoAconteceu = isCancelado(status)
+      const motivo = motivoNaoRealizado(justificativa, status)
       const id = cleanTxt(getCol(r, ["ID Agendamento"]))
       // Sem ID Agendamento não existe sessão real na grade — não há o que a
       // recepção/TiTa tenham confirmado presença, então não assumimos "Sim"
@@ -330,7 +336,21 @@ export function normalizarGradeParaSessao(rows: CsvGradeRow[], feriados?: Record
         unidade: cleanTxt(getCol(r, ["Nome Unidade"])),
         especialidade: cleanTxt(getCol(r, ["Terapia"])),
         presencaOrbita: id ? "Sim" : "",
-        presencaTita: !id ? "" : (faltaPaciente ? "Não" : "Sim"),
+        // Três respostas, não duas: "Não" quando o paciente é quem faltou, ""
+        // quando a sessão não aconteceu e o motivo é ilegível, "Sim" no resto.
+        //
+        // O "" é novo e não muda nada do que existe: nas 187.079 linhas medidas
+        // em 24/08/2026 não há uma única sessão não realizada sem motivo
+        // declarado. Ele existe para a próxima mudança de vocabulário, quando
+        // dizer "Sim" (o paciente compareceu) seria afirmar sobre a presença de
+        // alguém um fato que a grade não sustenta.
+        // "outro" é justamente o motivo ilegível — cai no "" junto com o null.
+        presencaTita: !id
+          ? ""
+          : !naoAconteceu ? "Sim"
+          : motivo === "paciente" ? "Não"
+          : motivo === "prestador" || motivo === "clinica" || motivo === "ambos" ? "Sim"
+          : "",
         profCsv: cleanTxt(getCol(r, ["Nome Profissional Tratativa"])),
         possuiTratativa: cleanTxt(getCol(r, ["Possui Tratativa"])),
         statusCsv: status,
