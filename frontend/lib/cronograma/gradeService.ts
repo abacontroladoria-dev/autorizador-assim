@@ -3,7 +3,11 @@ import { buscarGrade, fixMojibake } from "@/lib/grade/fonte"
 import type { CsvRow } from "@/types/cronograma"
 import type { GradeComparativoRaw } from "@/lib/cronograma/comparativoSessoes"
 
-const FIELDS = "id, paciente_id, paciente_nome, dia_semana, hora_inicial, hora_final, profissional_nome, terapia_nome, terapia_exibicao_nome, status_agendamento, convenio_nome, sala_nome, data, unidade_nome"
+// profissional_id entra junto de profissional_nome (e não no lugar dele): o nome
+// continua sendo o que a tela mostra e o que o resto do módulo casa, mas o
+// cruzamento com grade_profissionais_tita em gradeTitaOcupacao.ts precisa de uma
+// chave que não sofra com grafia divergente nem com o prefixo "INATIVO-".
+const FIELDS = "id, paciente_id, paciente_nome, dia_semana, hora_inicial, hora_final, profissional_id, profissional_nome, terapia_nome, terapia_exibicao_nome, status_agendamento, convenio_nome, sala_nome, data, unidade_nome"
 
 const FIELDS_COMPARATIVO = "paciente_id, paciente_nome, sala_nome, convenio_nome, status_agendamento, data, hora_inicial, terapia_id, terapia_nome, dia_semana, profissional_id, profissional_nome"
 
@@ -36,6 +40,7 @@ export async function buscarGradeComoCSVRows(dataInicio: string, dataFim: string
     return {
       CsvGradeId:               r.id ?? undefined,
       PacienteId:               r.paciente_id === null || r.paciente_id === undefined ? null : Number(r.paciente_id),
+      ProfissionalId:           r.profissional_id === null || r.profissional_id === undefined ? null : Number(r.profissional_id),
       "Nome Favorecido":        fixMojibake(r.paciente_nome),
       "Dia da Semana":          r.dia_semana            ?? "",
       "Hora Inicial":           hi_str,

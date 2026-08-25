@@ -9,6 +9,7 @@ import { CriarNovoCronogramaPacMode } from "@/components/cronograma/solicitacoes
 import { OrcamentoPacMode } from "@/components/cronograma/solicitacoes/OrcamentoPacMode"
 import { WorkspaceEmptyState } from "@/components/cronograma/ui/CronogramaWorkspace"
 import { buscarGradeComoCSVRows } from "@/lib/cronograma/gradeService"
+import { descartarLivresComprometidos } from "@/lib/cronograma/gradeTitaOcupacao"
 import { getJanelaOcupacaoPaciente } from "@/lib/cronograma/helpers"
 import type { CsvRow } from "@/types/cronograma"
 
@@ -41,7 +42,14 @@ export default function OcupacaoPacientePage() {
     if (fetchedRef.current) return
     fetchedRef.current = true
     const janela = getJanelaOcupacaoPaciente()
+    // A grade da TiTa tem a palavra final sobre slot comprometido — o CSV de
+    // agendamentos sozinho oferecia horário já ocupado (ver o cabeçalho de
+    // gradeTitaOcupacao.ts). Aplicado aqui, na origem da cópia, para valer nas
+    // três modalidades sem alterar assinatura de nenhuma função do módulo — e
+    // sem alcançar a Simulação de Novo Prestador, que lê o cRows do
+    // CronogramaDataProvider, não este.
     buscarGradeComoCSVRows(janela.inicio, janela.fim)
+      .then(rows => descartarLivresComprometidos(rows, janela.inicio))
       .then(setCRows)
       .catch(e => {
         fetchedRef.current = false
