@@ -39,6 +39,21 @@ export type AuditoriaAssimItem = {
   token_conferido: boolean | null
   token_conferido_em: string | null
   token_conferido_por_nome: string | null
+  /**
+   * A guia que a Reconciliação apontou como cobertura desta sessão.
+   *
+   * NÃO vem da RPC, e a distinção é a razão deste campo existir. Vincular não
+   * reescreve o pareamento posicional: `get_auditoria_assim_periodo` reflete o
+   * vínculo na `situacao` (GLOSA_RESOLVIDA, ou LIBERADA quando não houve glosa)
+   * e o narra em prosa no fim de `observacao`, mas a coluna `guia` continua
+   * sendo a ANTIGA — a que a ASSIM recusou. Sem este campo a tela dizia "Glosa
+   * Resolvida" sem dizer o que resolveu: o número só existia no rabo de uma
+   * legenda truncada, e o operador tinha de abrir o detalhamento para descobrir
+   * quem tinha coberto.
+   *
+   * Nulo em toda sessão sem cobertura por vínculo — que é a esmagadora maioria.
+   */
+  vinculo: VinculoCobertura | null
 }
 
 export type KpisAuditoriaAssim = {
@@ -379,6 +394,25 @@ export type VinculoAutorizacao = {
   observacao: string | null
   vinculado_por: string | null
   vinculado_em: string | null
+}
+
+/**
+ * O mesmo vínculo, visto do lado da sessão coberta — o que a aba Auditoria
+ * precisa saber para dizer QUEM resolveu a glosa.
+ *
+ * A diferença para `VinculoAutorizacao` é uma coluna só, e ela vem de outra
+ * tabela: `data_execucao` é o instante em que a ASSIM registrou a guia que
+ * cobriu, e mora em `autorizacoes_assim`. É a metade da resposta que o número
+ * sozinho não dá — "a liberação saiu quando?" costuma ser dias depois da
+ * sessão, e é isso que explica por que o match posicional errou.
+ *
+ * `timestamp without time zone` guardando hora de São Paulo, como toda
+ * `data_execucao` neste módulo: formatar por fatia de string, nunca via
+ * `new Date()`. `vinculado_em` é o oposto — `timestamptz` de verdade, e aí a
+ * conversão do navegador é a certa.
+ */
+export type VinculoCobertura = VinculoAutorizacao & {
+  data_execucao: string | null
 }
 
 /** Uma sessão que a guia órfã selecionada poderia estar cobrindo. */

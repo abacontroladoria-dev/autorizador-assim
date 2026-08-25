@@ -1,7 +1,12 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { listarAuditoriaAssim, listarFaltasAuditoria, buscarNotasEConferencias } from '@/services/auditoria-assim.service'
+import {
+  buscarNotasEConferencias,
+  buscarVinculosDosBlocos,
+  listarAuditoriaAssim,
+  listarFaltasAuditoria,
+} from '@/services/auditoria-assim.service'
 import { getSupabaseClient } from '@/lib/supabase/client'
 import type { AuditoriaAssimItem, AuditoriaFilters, KpisAuditoriaAssim } from '@/components/auditoria-assim/types'
 import { situacaoNoRecorte } from '@/components/auditoria-assim/situacoes'
@@ -91,7 +96,14 @@ export function useAuditoriaAssim() {
       }
 
       const blocoIds = deduplicated.map((item) => item.bloco_id).filter((id): id is string => !!id)
-      const { notas, conferencias } = await buscarNotasEConferencias(blocoIds)
+      // Os três enriquecimentos leem a MESMA lista de blocos e nenhum depende
+      // do outro, então correm juntos. `vinculos` é o que diz qual guia cobriu
+      // a sessão — a RPC devolve o efeito do vínculo na situação, mas guarda a
+      // guia antiga na coluna `guia` (ver `AuditoriaAssimItem.vinculo`).
+      const [{ notas, conferencias }, vinculos] = await Promise.all([
+        buscarNotasEConferencias(blocoIds),
+        buscarVinculosDosBlocos(blocoIds),
+      ])
 
       const enriquecido = deduplicated.map((item) => {
         const nota = item.bloco_id ? notas.get(item.bloco_id) : undefined
@@ -104,6 +116,7 @@ export function useAuditoriaAssim() {
           token_conferido: conferencia?.conferido ?? false,
           token_conferido_em: conferencia?.conferido_em ?? null,
           token_conferido_por_nome: conferencia?.conferido_por_nome ?? null,
+          vinculo: (item.bloco_id ? vinculos.get(item.bloco_id) : undefined) ?? null,
         }
       })
 
@@ -196,6 +209,10 @@ export function useAuditoriaAssim() {
       .channel('auditoria-assim-live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'fila_autorizacoes' }, dispatchReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'autorizacoes_assim' }, dispatchReload)
+      // Vincular na aba Reconciliação muda a situação e a cobertura de uma
+      // sessão desta lista. Sem esta assinatura o operador voltava para cá e
+      // via a glosa ainda de pé, e só um F5 desmentia a tela.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'autorizacoes_vinculos' }, dispatchReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'auditoria_atendimento_notas' }, dispatchReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'auditoria_token_conferencias' }, dispatchReload)
       .subscribe()

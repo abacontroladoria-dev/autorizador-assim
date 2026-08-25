@@ -13,6 +13,7 @@ import {
   Hash,
   KeySquare,
   Layers,
+  Link2,
   Loader2,
   MessageSquare,
   Save,
@@ -47,6 +48,21 @@ function formatarDataHora(data: string | null) {
   if (!data) return null
   const d = new Date(data)
   return `${d.toLocaleDateString('pt-BR')} ${d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`
+}
+
+/**
+ * `autorizacoes_assim.data_execucao` — o instante em que a ASSIM registrou a
+ * guia. É `timestamp without time zone` guardando hora de São Paulo, e chega do
+ * PostgREST sem sufixo de fuso ("2026-08-10T11:23:00"). Passar por `new Date()`
+ * entrega o horário à interpretação do navegador; formatar por fatia é o que
+ * mantém 11:23 sendo 11:23. Mesma disciplina do resto do módulo.
+ */
+function formatarExecucaoAssim(valor: string | null) {
+  if (!valor) return null
+  const [data, hora] = valor.split('T')
+  const [ano, mes, dia] = (data ?? '').split('-')
+  if (!ano || !mes || !dia) return null
+  return `${dia}/${mes}/${ano}${hora ? ` ${hora.slice(0, 5)}` : ''}`
 }
 
 /**
@@ -199,6 +215,16 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
   // da ASSIM, então o rodapé repetiria o motivo do mesmo jeito.
   const motivoJaMostradoAoLado = ehGlosa(item.situacao) && respostaAssim !== null
 
+  // A cobertura vinda da aba Reconciliação. Não sai da RPC: ela reflete o
+  // vínculo na `situacao` e o narra no fim de `observacao`, mas a coluna `guia`
+  // continua sendo a recusada. Ver `AuditoriaAssimItem.vinculo`.
+  const vinculo = item.vinculo
+  // Numa sessão que nunca foi glosada, a observação da RPC é a frase do vínculo
+  // e nada mais ("Autorização confirmada pela ASSIM (guia 118001, vínculo por
+  // Fulano)"). Com a seção estruturada logo abaixo, deixá-la também no rodapé
+  // diria o mesmo fato duas vezes — e a pior das duas seria a prosa.
+  const rodapeSoFalaDoVinculo = vinculo !== null && !item.status_assim && !temErro
+
   // A recusa por cota estourada. O código é o sinal confiável; o texto entra
   // porque a ASSIM o corta em 25 caracteres ("1601-REINCIDENCIA NO ATEN") e nem
   // toda linha chega com o código separado.
@@ -287,7 +313,7 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
                   )}
                 </dl>
 
-                {!motivoJaMostradoAoLado && (item.status_assim || temErro || item.observacao) && (
+                {!motivoJaMostradoAoLado && !rodapeSoFalaDoVinculo && (item.status_assim || temErro || item.observacao) && (
                   <div
                     className={`flex items-start gap-2 border-t px-3 py-2 text-xs ${
                       temErro
@@ -309,6 +335,57 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
                 )}
               </div>
             </section>
+
+            {/* Cobertura por vínculo — a resposta para "quem resolveu isto?"
+
+                Seção própria, e não uma linha dentro do bloco acima, porque é
+                OUTRA autorização: a de cima é a que a ASSIM casou com a sessão
+                (a recusada, quando houve glosa), esta é a que o setor conseguiu
+                por fora e que a Reconciliação apontou. Misturá-las na mesma
+                grade faria parecer que a guia mudou de número — e ela não muda:
+                vincular não reescreve o pareamento posicional.
+
+                Esmeralda porque é o matiz de "coberto" em toda a tela, o mesmo
+                de GLOSA_RESOLVIDA e LIBERADA. A seção de glosa segue violeta
+                logo ao lado, e as duas convivem de propósito: o vínculo não
+                apaga a recusa, e é da recusa que sai o número da contestação. */}
+            {vinculo && (
+              <section>
+                <SectionTitle>Cobertura por vínculo</SectionTitle>
+                <div className="overflow-hidden rounded-xl border border-emerald-200">
+                  <dl className="grid grid-cols-2 gap-1.5 p-1.5">
+                    <Fact icon={Link2} label="Guia que cobriu" value={vinculo.guia} mono state="ok" />
+                    <Fact
+                      icon={CalendarCheck}
+                      label="Autorizada em"
+                      value={formatarExecucaoAssim(vinculo.data_execucao)}
+                      state="ok"
+                    />
+                  </dl>
+
+                  {/* Autoria como frase, no mesmo idioma do "Atualizado por X em
+                      Y" das Observações. Vira rodapé em vez de duas células
+                      porque é uma coisa só — quem decidiu, e quando. */}
+                  <div className="border-t border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs leading-relaxed text-emerald-800">
+                    <p className="wrap-break-word">
+                      {vinculo.guia_original && vinculo.guia_original !== vinculo.guia && (
+                        <>
+                          No lugar da guia{' '}
+                          <span className="font-mono font-semibold tabular-nums">{vinculo.guia_original}</span>
+                          {' · '}
+                        </>
+                      )}
+                      Vinculado por{' '}
+                      <span className="font-semibold">{vinculo.vinculado_por ?? 'Usuário'}</span>
+                      {vinculo.vinculado_em ? ` em ${formatarDataHora(vinculo.vinculado_em)}` : ''}
+                    </p>
+                    {vinculo.observacao && (
+                      <p className="mt-1 wrap-break-word text-emerald-900">“{vinculo.observacao}”</p>
+                    )}
+                  </div>
+                </div>
+              </section>
+            )}
 
           </div>
 

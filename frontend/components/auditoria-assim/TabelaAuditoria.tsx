@@ -9,17 +9,19 @@ import {
   ChevronsUpDown,
   Circle,
   Clock3,
+  CornerDownRight,
   FileText,
   Loader2,
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
-import type { AuditoriaAssimItem } from './types'
+import type { AuditoriaAssimItem, VinculoCobertura } from './types'
 import type { SortDir, SortKey } from '@/hooks/useAuditoriaAssim'
 import ModalDetalhamentoAtendimento from './ModalDetalhamentoAtendimento'
 import Paginacao from './Paginacao'
 import { SituacaoBloco } from './SituacaoBadge'
 import { marcarTokenConferido } from '@/services/auditoria-assim.service'
 import { LABEL_ERRO_FACIAL, OBS_CONFIRMADA, erroReconhecimentoFacial } from './formaValidacao'
+import { semTrechoDeCobertura } from './observacaoVinculo'
 import { ehGlosa } from './situacoes'
 
 /**
@@ -170,19 +172,31 @@ export default function TabelaAuditoria({
                   </p>
                 </div>
 
-                {/* Guia */}
-                <div className={`order-4 flex items-baseline gap-1.5 xl:order-3 xl:block ${COL_GUIA}`}>
+                {/* Guia — e, quando houve reconciliação, as DUAS guias */}
+                <div className={`order-4 flex flex-wrap items-baseline gap-x-1.5 xl:order-3 xl:block ${COL_GUIA}`}>
                   {/* Rótulo inline só onde o cabeçalho não existe. */}
                   <span className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 xl:hidden">
                     Guia
                   </span>
                   {item.guia ? (
-                    <span className="truncate text-[13px] font-semibold tabular-nums text-slate-700" title={item.guia}>
+                    <span
+                      className={`truncate text-[13px] font-semibold tabular-nums ${
+                        // Com cobertura, a guia da coluna é a RECUSADA: continua
+                        // na tela porque é o histórico que a contestação cita,
+                        // mas recua para não disputar com a que vale hoje.
+                        item.vinculo ? 'text-slate-400' : 'text-slate-700'
+                      }`}
+                      title={item.vinculo ? `Guia recusada: ${item.guia}` : item.guia}
+                    >
                       {item.guia}
                     </span>
                   ) : (
-                    <span className="text-[13px] text-slate-300">—</span>
+                    // Sessão nunca solicitada pelo Pulsar e coberta por vínculo:
+                    // não existe guia antiga, e um "—" ao lado do selo diria que
+                    // falta algo. O selo sozinho é a resposta inteira.
+                    !item.vinculo && <span className="text-[13px] text-slate-300">—</span>
                   )}
+                  {item.vinculo && <SeloCobertura vinculo={item.vinculo} />}
                 </div>
 
                 {/* Status — o destaque da linha; leva a legenda e a conferência */}
@@ -242,6 +256,41 @@ export default function TabelaAuditoria({
         onAnalisarSemana={(item) => { setItemSelecionado(null); onAnalisarSemana(item) }}
       />
     </div>
+  )
+}
+
+/**
+ * Qual guia cobriu esta sessão — o fato que a tela dizia sem dizer.
+ *
+ * Mora na coluna Guia porque é sobre a guia, e é o que faz a coluna deixar de
+ * mentir: numa linha reconciliada ela mostrava só a guia RECUSADA, com aparência
+ * de guia válida. Agora conta as duas — a que a ASSIM negou, recuada, e a que
+ * resolveu, em esmeralda. A seta diz a direção sem depender de cor.
+ *
+ * Mesmo desenho do `SeloDoPar` da aba Reconciliação: número monoespaçado, fundo
+ * `emerald-100`, largura previsível. As duas telas falam do mesmo par e falam
+ * igual — foi a lição de 24/08, quando prosa dentro de uma célula estreita
+ * truncava justamente o número.
+ *
+ * Par `emerald-100/emerald-800`: o mesmo que o vocabulário de situação já mede
+ * em ≥5.5:1 a 11px. O `sr-only` carrega a frase inteira; o visível carrega o
+ * número, que é o que se lê de relance.
+ */
+function SeloCobertura({ vinculo }: { vinculo: VinculoCobertura }) {
+  const frase = `Coberta pela guia ${vinculo.guia}${
+    vinculo.vinculado_por ? ` — vínculo por ${vinculo.vinculado_por}` : ''
+  }`
+  return (
+    <span
+      title={frase}
+      className="mt-0.5 inline-flex max-w-full items-center gap-1 rounded bg-emerald-100 px-1.5 py-px text-[11px] font-semibold text-emerald-800"
+    >
+      <span className="sr-only">{frase}</span>
+      <CornerDownRight size={10} className="shrink-0" aria-hidden />
+      <span aria-hidden className="truncate font-mono tabular-nums">
+        {vinculo.guia}
+      </span>
+    </span>
   )
 }
 
@@ -366,16 +415,26 @@ function legendaSituacao(item: AuditoriaAssimItem, erroFacial: boolean): string 
   if (item.observacao === OBS_CONFIRMADA) {
     return erroFacial ? LABEL_ERRO_FACIAL : (item.convenio_nome ?? 'ASSIM')
   }
+  // Sessão que nunca foi glosada e passou a ser coberta por vínculo: a RPC
+  // narra guia e autor em prosa ("Autorização confirmada pela ASSIM (guia
+  // 118001, vínculo por Fulano)"), e o selo da coluna Guia já diz os dois com
+  // mais precisão. Sobra o convênio — o mesmo que toda linha liberada mostra.
+  if (item.vinculo && !ehGlosa(item.situacao)) return item.convenio_nome ?? 'ASSIM'
   // A RPC prefixa a observação de recusa com "Glosa: " para quem a lê fora
   // desta tela. Aqui o rótulo do bloco já diz Glosa, e a legenda tem uma linha
   // truncada: os 7 caracteres do prefixo custariam pedaço do motivo real
   // ("1013 - CADASTRO DO BENEFICIARIO COM PROBLEMAS"), que é o que se lê.
-  // `ehGlosa` e não `=== 'GLOSA'`: em GLOSA_RESOLVIDA a observação também vem
-  // prefixada ("Glosa: 1403 - ... · Coberta pela guia 15032 ..."), e ali a linha
-  // truncada é ainda mais disputada — o prefixo custaria justamente o pedaço que
-  // conta qual guia resolveu.
+  // `ehGlosa` e não `=== 'GLOSA'`: em GLOSA_RESOLVIDA a observação vem
+  // prefixada do mesmo jeito.
   if (ehGlosa(item.situacao) && item.observacao?.startsWith('Glosa: ')) {
-    return item.observacao.slice('Glosa: '.length)
+    const semPrefixo = item.observacao.slice('Glosa: '.length)
+    // E ali a linha era ainda mais disputada: a RPC concatena "· Coberta pela
+    // guia N de ... — vínculo por ..." no fim, e prosa trunca pelo fim. O
+    // resultado era o pior dos dois — o motivo da recusa cortado E o número da
+    // guia invisível. Com o selo carregando o número, o trecho sai daqui e a
+    // legenda volta a ser só o motivo. Sem selo (a carga de vínculos falhou) o
+    // texto fica inteiro: truncado é melhor que ausente.
+    return item.vinculo ? semTrechoDeCobertura(semPrefixo) : semPrefixo
   }
   return item.observacao ?? item.convenio_nome ?? null
 }

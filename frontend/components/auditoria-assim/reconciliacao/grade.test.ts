@@ -25,6 +25,9 @@ function sessao(p: Partial<AuditoriaAssimItem>): AuditoriaAssimItem {
     observacao_manual: null, observacao_manual_atualizado_em: null,
     observacao_manual_atualizado_por_nome: null, token_conferido: null,
     token_conferido_em: null, token_conferido_por_nome: null,
+    // A cobertura é campo da aba Auditoria, que a enriquece por bloco_id. Aqui
+    // o vínculo entra pelos mapas de `montarGrade`, não pela linha.
+    vinculo: null,
     ...p,
   }
 }
