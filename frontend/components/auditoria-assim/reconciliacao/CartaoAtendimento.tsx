@@ -47,21 +47,19 @@ import {
  * `agendadas == autorizadas == liberadas`, então ~85% dos cartões colapsam e os
  * dois ou três que sobram viram os únicos objetos altos da tela.
  *
- * Nenhum matiz novo entrou, e a manchete de problema é "Sem cobertura" (rose,
- * "a lacuna mais larga" do DESIGN.md — a sessão aconteceu e nada a cobre),
- * exceto onde a ASSIM já respondeu: aí vale o nome do veredito, com o matiz
- * dele — "Glosa" (violeta, recusa que pede tratativa) e "Cancelada" (rose um
- * degrau mais firme, liberação desfeita, que pede autorização nova). Ver
+ * Nenhum matiz novo entrou. O cartão sempre diz o NOME da situação, no mesmo
+ * vocabulário da aba Auditoria ("Não Solicitada", "Retorno Não Confirmado",
+ * "Glosa", "Cancelada"), e quem diz que a sessão está descoberta é o rose — "a
+ * lacuna mais larga" do DESIGN.md: a sessão aconteceu e nada a cobre. A exceção
+ * é onde a ASSIM já respondeu, que mantém o matiz do veredito — violeta para
+ * "Glosa" (recusa que pede tratativa) e rose um degrau mais firme para
+ * "Cancelada" (liberação desfeita, que pede autorização nova). Ver
  * `SITUACOES_COM_VEREDITO`.
  *
- * "Cancelada" e "Sem cobertura" saem as duas em rose DE PROPÓSITO: as duas
- * dizem que nada cobre aquela sessão e pedem a mesma coisa. O que as separa é o
- * rótulo e o ícone (Ban contra AlertCircle), mais o degrau da superfície —
- * matizes diferentes afirmariam que pedem respostas diferentes.
- * Por que a sessão está descoberta quando NÃO houve resposta — não solicitada,
- * solicitação cancelada, retorno não confirmado, sincronizando — é pergunta da
- * gaveta, que tem largura para responder; numa célula de 11rem a resposta só
- * cabe truncada.
+ * "Cancelada" e as descobertas saem todas em rose DE PROPÓSITO: dizem que nada
+ * cobre aquela sessão e pedem a mesma coisa. O que as separa é o rótulo e o
+ * ícone (Ban contra AlertCircle), mais o degrau da superfície — matizes
+ * diferentes afirmariam que pedem respostas diferentes.
  *
  * Nada abaixo de 11px, que é o piso do DESIGN.md §3. O rótulo de estado e a
  * linha do token estavam em 10px; o token virou glifo e as linhas que sobravam
@@ -606,27 +604,32 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
     }
 
     /*
-      A manchete é "Sem cobertura", exceto quando a ASSIM já deu um veredito —
-      aí é o nome do veredito ("Glosa", "Cancelada").
+      A manchete é o NOME DA SITUAÇÃO — o mesmo nome da aba Auditoria. A COR é
+      que diz se a sessão está descoberta.
 
-      A frase era composta — "Não Solicitada · sem cobertura", "Glosa · sem
-      cobertura" — e dizia o mesmo fato duas vezes num espaço onde não cabe
-      nem uma. Quem lê a grade precisa saber SE está descoberta; POR QUE (não
-      solicitada, solicitação cancelada, retorno não confirmado, sincronizando)
-      é pergunta da gaveta, que tem largura para responder.
+      Até 2026-08-25 a manchete era a palavra "Sem cobertura" para tudo que não
+      tivesse veredito da ASSIM, e isso custava o nome: a sessão que a
+      Conferência chama de "Não Solicitada" aparecia aqui como "Sem cobertura",
+      e quem vai e volta entre as duas abas lia dois vocabulários para um fato
+      só. Reportado da tela — a reconciliação existe para resolver o que a
+      Conferência aponta, então falar a língua dela não é preferência.
 
-      As situações de `SITUACOES_COM_VEREDITO` são a exceção porque não são
-      variedades de "descoberta": houve resposta da ASSIM, e QUAL foi a resposta
-      decide o próximo passo. Elas mantêm o nome e o matiz próprio.
+      A troca é SÓ da palavra. Rose continua vestindo toda sessão descoberta,
+      seja qual for a situação por baixo — é "a lacuna mais larga" do DESIGN.md
+      e é exatamente isso, a sessão aconteceu e nada a cobre. Assim a coluna do
+      dia segue sendo varrida pela cor (SE está descoberta) e a palavra passa a
+      responder a segunda pergunta (POR QUE: não solicitada, solicitação
+      cancelada, retorno não confirmado, sincronizando), em vez de as duas
+      disputarem o mesmo espaço dizendo o mesmo. O fato que a palavra deixou de
+      carregar continua no `title` e na pílula "Sem cobertura" da gaveta.
 
-      "Sem cobertura" veste ROSE, sempre, seja qual for a situação por baixo.
-      Rose é "a lacuna mais larga" no DESIGN.md e é exatamente isso — a sessão
-      aconteceu e nada a cobre. Sem esse alinhamento a mesma manchete sairia em
-      três matizes conforme o estado que ela acabou de deixar de mostrar.
+      As situações de `SITUACOES_COM_VEREDITO` seguem com o matiz próprio, e não
+      com rose: houve resposta da ASSIM, e QUAL foi a resposta decide o próximo
+      passo — "Glosa" pede tratativa, "Cancelada" pede autorização nova.
     */
     const descoberta =
       cartao.semCobertura && !SITUACOES_COM_VEREDITO.has(cartao.situacao ?? '')
-    const frase = descoberta ? 'Sem cobertura' : config.label
+    const frase = config.label
     const tinta = descoberta ? 'text-rose-700' : config.strong
     const superficie = descoberta ? 'border-rose-200 bg-rose-50' : config.surface
     const dot = descoberta ? 'bg-rose-500' : config.dot
