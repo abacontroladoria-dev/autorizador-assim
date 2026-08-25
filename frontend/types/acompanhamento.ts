@@ -17,6 +17,14 @@ export interface AceiteSessao {
    * as demais terapias resolvem normalmente no servidor.
    */
   terapiaExibicaoOverride?: number
+  /**
+   * id_favorecido (paciente na TiTa) vindo do laudo — único caminho de resolução
+   * pra paciente sem NENHUMA linha "Agendado" ainda em csv_grades_profissionais
+   * (ver resolverIdFavorecido em services/tita/mappings.ts), caso da modalidade
+   * "Criar Novo Cronograma". Ignorado quando o paciente já tem linha Agendado
+   * (o servidor sempre prioriza essa, mais confiável que o laudo).
+   */
+  idFavorecidoFallback?: number
 }
 
 export type SlotStatus = "confirmado" | "recusado" | "inviavel"
