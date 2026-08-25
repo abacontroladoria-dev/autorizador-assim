@@ -12,6 +12,7 @@ import {
   CalendarRange,
   ChevronDown,
   ClipboardList,
+  ClipboardPlus,
   FileText,
   KeyRound,
   LayoutDashboard,
@@ -103,6 +104,10 @@ function labelSetor(role?: string) {
 const MODULE_ICONS: Record<string, React.ElementType> = {
   dashboard: LayoutDashboard,
   atendimentos: PlusCircle,
+  // Mesmo ícone do MenuItem em Sidebar.tsx:514 — não ClipboardList (auditoria_assim)
+  // nem PlusCircle (atendimentos), pra não confundir com os dois vizinhos do
+  // grupo 'Pacientes'.
+  autorizacoes_avulsas: ClipboardPlus,
   gestao: Activity,
   escala_terapeutica: UserRound,
   auditoria_assim: ClipboardList,
