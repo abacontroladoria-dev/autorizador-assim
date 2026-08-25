@@ -1,36 +1,57 @@
 // O vocabulário da TiTa para "o que aconteceu com a sessão", em um só lugar.
 //
 // São as colunas "Status" (status_execucao) e "Justificativa" de
-// csv_grade_profissionais. Elas parecem texto de exibição e não são: `Status` é
-// o que decide se a sessão gera diária (PPD), bônus ETA e PA — ver `cancelado`
-// em calculo.ts. Ler o rótulo errado move dinheiro.
+// csv_grade_profissionais. `Status` é o que decide se a sessão gera diária
+// (PPD), bônus ETA e PA — ver `cancelado` em calculo.ts. `Justificativa` só
+// alimenta a coluna de exibição "Presença TiTa" (ver relatorio.ts) — não move
+// dinheiro, mas mostrar "presente" quem faltou é um erro de exibição sério.
 //
-// ─── As duas gerações de rótulo ───────────────────────────────────────────────
+// ─── A mudança de 24/08/2026, e a correção da correção ───────────────────────
 //
-// Até 21/08/2026 a TiTa dizia:
+// Confirmado pelo usuário em 25/08/2026, contra uma captura de tela da própria
+// TiTa: `Status` PERMANECE "Cancelado" para sempre — não existe e nunca vai
+// existir 'Não realizado' na coluna Status. O que muda é só `Justificativa`,
+// que passa a ter, além das três antigas, estas três novas:
 //
-//   Status         Justificativa
-//   Cancelado      Falta do Paciente | Falta do Profissional | Falta de Ambos
+//   Justificativa (antiga, continua válida)     Justificativa (nova)
+//   Falta do Paciente                           Não realizado — paciente
+//   Falta do Profissional                       Não realizado — prestador
+//   Falta de Ambos                              Não realizado — clínica
 //
-// De 24/08/2026 em diante, os três motivos passaram a ser:
+// NÃO é garantido que sejam a mesma coisa renomeada linha a linha — em
+// particular 'Falta de Ambos' (paciente E profissional faltaram) e 'Não
+// realizado — clínica' (a clínica é quem não realizou) descrevem situações
+// diferentes, e as três novas podem conviver com as três antigas em vez de
+// substituí-las 1 para 1. Por isso as REGRAS abaixo tratam "prestador",
+// "clínica" e "ambos" como motivos DISTINTOS (compatível com o que
+// `isFaltaDoPaciente` já fazia) em vez de forçar uma correspondência que
+// ninguém confirmou.
 //
-//   Não realizado — paciente | Não realizado — prestador | Não realizado — clínica
+// A primeira versão desta correção (mesmo dia, mais cedo) supôs o contrário —
+// que 'Não realizado' pudesse aparecer em `Status` — e construiu a rede de
+// segurança contra rótulo desconhecido observando ESSA coluna
+// (rotulosDeExecucaoDesconhecidos/veredictoRotuloDesconhecido, abaixo). Como
+// `Status` nunca varia, aquela rede nunca dispara: ela vigiava a coluna errada
+// e ficou como reforço morto, não como proteção. A proteção que interessa —
+// `justificativaDesconhecida`/`avisoJustificativaDesconhecida`, mais abaixo —
+// vigia `Justificativa`, que é onde o vocabulário de fato mudou.
 //
-// A base histórica NÃO foi reescrita, então as duas gerações convivem para
-// sempre e as duas continuam válidas. Medido em 2026-08-24 sobre as 187.079
-// linhas da tabela, todo o vocabulário já existente:
+// A base histórica NÃO foi reescrita, então as duas gerações de Justificativa
+// convivem para sempre e as duas continuam válidas. Medido em 2026-08-24 sobre
+// as 187.079 linhas da tabela, todo o vocabulário já existente:
 //
-//   126.313  (null)              — execução ainda não capturada
-//    22.824  Planejado/Pendente
-//    16.984  Em Conflito
-//    15.365  Realizado
-//     5.000  Cancelado + Falta do Paciente
-//       355  Cancelado + Falta do Profissional
-//       238  Cancelado + Falta de Ambos
+//   126.313  Status (null)              — execução ainda não capturada
+//    22.824  Status Planejado/Pendente
+//    16.984  Status Em Conflito
+//    15.365  Status Realizado
+//     5.000  Status Cancelado + Justificativa Falta do Paciente
+//       355  Status Cancelado + Justificativa Falta do Profissional
+//       238  Status Cancelado + Justificativa Falta de Ambos
 //
 // Duas consequências desse levantamento, das quais o resto do arquivo depende:
 // o conjunto de rótulos de `Status` é fechado e pequeno, e 'Cancelado' nunca
-// aparece sem justificativa (não existe linha em que o motivo seja mudo).
+// aparece sem justificativa (não existe linha em que o motivo seja mudo) — até
+// 24/08/2026 nenhuma variação de Justificativa nova havia chegado à produção.
 //
 // ─── Por que um módulo próprio ────────────────────────────────────────────────
 //
@@ -61,9 +82,12 @@ const normRotulo = (v: unknown): string =>
  *
  * "ausente" é vazio/NULL — a captura de execução ainda não alcançou a linha, o
  * que é normal em período recente (ver DIAS_EVOLUCAO_EM_TRANSITO em
- * gradeRemuneracao.ts). "desconhecido" é o caso que interessa: texto presente
- * que este código não sabe ler. Os dois são "não sei", mas só o segundo é
- * sintoma de que a TiTa mudou o vocabulário outra vez.
+ * gradeRemuneracao.ts). "desconhecido" cobre texto presente que este código
+ * não sabe ler — mantido como reforço, mas hoje sem uso prático confirmado:
+ * o levantamento de 2026-08-24/25 não achou (e o usuário confirmou que não
+ * existe) nenhuma variação de `Status` além das cinco listadas acima. A
+ * mudança real de vocabulário está em `Justificativa` — ver
+ * `justificativaDesconhecida` mais abaixo, que é quem de fato vigia isso.
  */
 export type ResultadoExecucao =
   | "realizado"
@@ -88,11 +112,13 @@ export function classificarStatusExecucao(status: unknown): ResultadoExecucao {
 }
 
 /**
- * A sessão não aconteceu.
+ * A sessão não aconteceu, a julgar pelo texto que se dá a ela.
  *
- * Aceita as duas gerações e é indiferente à coluna de origem: o rótulo novo é
- * reconhecido venha ele em `Status` ou em `Justificativa`, porque quem consome
- * não tem como saber onde a TiTa decidiu colocá-lo.
+ * Em uso real recebe sempre o `Status` (nunca a Justificativa — ver o
+ * cabeçalho do arquivo), e ali o único texto que isto precisa reconhecer é
+ * 'Cancelado'. Reconhece também 'Não realizado' por tolerância — não porque
+ * essa variação tenha sido confirmada em `Status` (foi descartada), mas porque
+ * não custa nada aceitar as duas caso a TiTa um dia prove o contrário.
  *
  * Mantém o nome histórico (`isCancelado`) de propósito: é o vocabulário do
  * resto do código e da própria tela, onde a classificação exibida é
@@ -126,14 +152,16 @@ const REGRAS: Array<[MotivoNaoRealizado, RegExp[]]> = [
 /**
  * Quem faltou, lido de todos os textos que podem carregar o motivo.
  *
- * Recebe os pedaços (justificativa, status) e olha o conjunto: no rótulo antigo
- * o motivo estava na justificativa, no novo ele está no próprio status — e pode
- * vir em qualquer dos dois.
+ * Recebe os pedaços (justificativa, status) e olha o conjunto. Na prática o
+ * motivo mora sempre na `Justificativa` — `Status` é só 'Cancelado' — mas a
+ * função não presume isso: aceita o texto em qualquer um dos pedaços, então
+ * continua certa mesmo se um dia a TiTa inverter onde põe o quê.
  *
  * `null` significa "não é uma sessão não realizada". "outro" significa "não
- * aconteceu, mas o motivo não foi reconhecido" — estado que não existe em
- * nenhuma das 187.079 linhas de hoje (toda 'Cancelado' tem justificativa) e que
- * portanto só pode aparecer se a TiTa mudar o vocabulário de novo.
+ * aconteceu (`Status` = Cancelado), mas o motivo em `Justificativa` não bate
+ * com nenhum dos 6 conhecidos" — o sinal de que a TiTa mudou o vocabulário de
+ * novo. Ver `justificativaDesconhecida`, que transforma esse "outro" num
+ * aviso visível em vez de um silêncio.
  */
 export function motivoNaoRealizado(...partes: unknown[]): MotivoNaoRealizado | null {
   const s = normRotulo(partes.filter(p => p !== null && p !== undefined && p !== "").join(" "))
@@ -162,10 +190,12 @@ export const isFaltaDoPaciente = (...partes: unknown[]): boolean =>
  * ordem em que apareceram, no texto original (é o que a pessoa vai procurar na
  * TiTa e o que o time técnico precisa para ensinar o rótulo novo).
  *
- * É a rede que faltava. As funções acima resolvem a mudança de 24/08/2026;
- * esta resolve a PRÓXIMA, que ninguém vai anunciar: rótulo ilegível deixa de
- * ser silêncio (com a sessão passando por realizada e gerando pagamento) e
- * passa a barrar a leitura da grade. Ver avaliarCoberturaGrade em
+ * Reforço, não a proteção principal: o vocabulário de `Status` está confirmado
+ * fechado (`Cancelado`/`Realizado`/`Em Conflito`/`Planejado-Pendente`/vazio) e
+ * não é onde a TiTa mudou nada em 24/08/2026 — quem mudou foi `Justificativa`
+ * (ver `justificativaDesconhecida`, abaixo, que é a proteção que de fato
+ * importa hoje). Isto fica como rede para o dia em que `Status` variar de
+ * verdade — o que ainda não tem precedente. Ver avaliarCoberturaGrade em
  * gradeRemuneracao.ts e parseGradeCsv em uploadParsers.ts.
  */
 export function rotulosDeExecucaoDesconhecidos(valores: Iterable<unknown>): string[] {
@@ -227,9 +257,56 @@ export function veredictoRotuloDesconhecido(
     // Diz também o que NÃO resolve. As outras reprovações oferecem o CSV como
     // saída; aqui ele traz exatamente o mesmo rótulo, e mandar tentar por lá
     // seria empurrar a pessoa para o mesmo erro por um caminho mais longo.
-    dica: "A TiTa mudou o vocabulário da coluna — foi o que aconteceu em 24/08/2026, quando "
-      + "'Cancelado' virou 'Não realizado — paciente/prestador/clínica'. Avise o time técnico: o rótulo "
-      + "novo precisa ser ensinado em lib/remuneracao/rotulosExecucao.ts. Recarregar não resolve, e o CSV "
-      + "exportado da TiTa traz o mesmo rótulo.",
+    dica: "A TiTa mudou o vocabulário da coluna \"Status\", que até aqui só usava "
+      + "Cancelado/Realizado/Em Conflito/Planejado-Pendente. Avise o time técnico: o rótulo novo precisa "
+      + "ser ensinado em lib/remuneracao/rotulosExecucao.ts. Recarregar não resolve, e o CSV exportado da "
+      + "TiTa traz o mesmo rótulo.",
   }
+}
+
+/**
+ * A justificativa de uma sessão `Cancelado` que não bate com nenhum dos 6
+ * motivos conhecidos (os 3 antigos e os 3 de 24/08/2026) — o texto original, ou
+ * `null` quando a linha não se qualifica (não é `Cancelado`, ou a justificativa
+ * está vazia, ou o motivo já é reconhecido).
+ *
+ * É AQUI que a TiTa de fato mudou o vocabulário em 24/08/2026 — não em
+ * `Status` (ver o cabeçalho do arquivo). Diferente de rótulo desconhecido em
+ * `Status`, isto não decide pagamento: `cancelado`/`isCancelado` já depende só
+ * de `Status`, então uma justificativa ilegível não risca diária, ETA nem PA.
+ * O que ela compromete é a coluna de exibição "Presença TiTa" — sem saber quem
+ * faltou, `motivoNaoRealizado` devolve "outro" e presencaTita fica em branco
+ * (correto, não afirma "Sim" para quem talvez tenha faltado) mas sem avisar
+ * ninguém. Ver avisoJustificativaDesconhecida, que dá esse aviso.
+ *
+ * `justificativa` sem `status` não basta: uma linha `Realizado` pode ter
+ * qualquer texto solto em `Justificativa` sem que isso seja sintoma de nada.
+ */
+export function justificativaDesconhecida(justificativa: unknown, status: unknown): string | null {
+  if (!isCancelado(status)) return null
+  const texto = String(justificativa ?? "").trim()
+  if (!texto) return null
+  return motivoNaoRealizado(justificativa, status) === "outro" ? texto : null
+}
+
+/**
+ * Aviso (NÃO bloqueio) para quando `justificativaDesconhecida` encontrou algo.
+ *
+ * Estruturalmente é o texto de um `aviso` de VeredictoGrade — mas ao contrário
+ * de `veredictoRotuloDesconhecido`, esta função nunca reprova a leitura da
+ * grade. A diferença de severidade é proposital: rótulo desconhecido em
+ * `Status` arrisca dinheiro (sessão não realizada paga como se tivesse
+ * ocorrido) e por isso bloqueia; justificativa desconhecida não arrisca
+ * dinheiro (ver o comentário de `justificativaDesconhecida`), só deixa uma
+ * célula de exibição em branco — proporcional é avisar, não travar o
+ * fechamento do mês por causa de uma coluna que ninguém vai pagar por ela.
+ */
+export function avisoJustificativaDesconhecida(quantidade: number, amostra: string[]): string | null {
+  if (quantidade <= 0) return null
+  const n = quantidade
+  const lista = amostra.map(a => `"${a}"`).join(", ")
+  return `${n === 1 ? "Uma sessão cancelada" : `${n} sessões canceladas`} do período ${n === 1 ? "tem" : "têm"} `
+    + `uma Justificativa que o sistema não reconhece: ${lista}. "Presença TiTa" fica em branco para `
+    + "essas linhas — não afeta o pagamento, que já depende só do Status \"Cancelado\". Avise o time "
+    + "técnico: o motivo novo precisa ser ensinado em lib/remuneracao/rotulosExecucao.ts."
 }

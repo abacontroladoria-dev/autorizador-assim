@@ -316,10 +316,10 @@ export function normalizarGradeParaSessao(rows: CsvGradeRow[], feriados?: Record
     .map((r, idx) => {
       const status = cleanTxt(getCol(r, ["Status"]))
       const justificativa = cleanTxt(getCol(r, ["Justificativa"]))
-      // Motivo lido das DUAS colunas: 'Falta do Paciente' vinha na
-      // justificativa com Status 'Cancelado'; o rótulo novo da TiTa
-      // ('Não realizado — paciente', a partir de 24/08/2026) pode chegar em
-      // qualquer uma das duas. Ver rotulosExecucao.ts.
+      // Motivo lido das DUAS colunas por tolerância, embora na prática ele more
+      // sempre em `Justificativa` (Status é só 'Cancelado', antes e depois de
+      // 24/08/2026 — ver rotulosExecucao.ts). 'Falta do Paciente' e o rótulo
+      // novo 'Não realizado — paciente' são lidos da mesma forma.
       const naoAconteceu = isCancelado(status)
       const motivo = motivoNaoRealizado(justificativa, status)
       const id = cleanTxt(getCol(r, ["ID Agendamento"]))

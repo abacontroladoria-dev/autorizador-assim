@@ -19,7 +19,10 @@ import type { CsvRow } from "@/types/cronograma"
 import type { CsvGradeRow } from "./relatorio"
 import { formatDateBR } from "./datas"
 import { limparPrefixoDesligado } from "./constants"
-import { rotulosDeExecucaoDesconhecidos, veredictoRotuloDesconhecido } from "./rotulosExecucao"
+import {
+  rotulosDeExecucaoDesconhecidos, veredictoRotuloDesconhecido,
+  justificativaDesconhecida, avisoJustificativaDesconhecida,
+} from "./rotulosExecucao"
 
 // profissional_id é a chave estável do profissional no TiTa: quando alguém é
 // desligado o nome vira "INATIVO-<nome>" aqui, mas o id continua o mesmo e o
@@ -210,16 +213,30 @@ export interface CoberturaGrade {
    * Rótulos de `Status` que vieram na grade e este código não sabe ler
    * (amostra: até 5 textos distintos, como a TiTa os escreveu).
    *
-   * Os dois contadores acima medem AUSÊNCIA de execução. Este mede execução
-   * presente e ilegível, que é pior: ausência aparece como "não evoluída" e
-   * não paga nada, enquanto um rótulo que ninguém entende faz a sessão passar
-   * por realizada — e sessão não realizada tratada como realizada gera diária,
-   * ETA e PA. Ver `cancelado` em calculo.ts e a mudança de 24/08/2026 em
-   * rotulosExecucao.ts.
+   * Reforço, hoje sem caso conhecido: o vocabulário de `Status` está
+   * confirmado fechado (ver rotulosExecucao.ts) — a mudança real de
+   * 24/08/2026 foi em `Justificativa`, coberta por `justificativasDesconhecidas`
+   * abaixo. Mantido para o dia em que `Status` variar de verdade: um rótulo
+   * ali que ninguém entende faria sessão não realizada passar por realizada, e
+   * isso sim gera diária, ETA e PA indevidos — ver `cancelado` em calculo.ts.
    */
   rotulosDesconhecidos: string[]
   /** Quantas linhas do período trazem um dos rótulos acima. */
   linhasRotuloDesconhecido: number
+  /**
+   * Justificativas de sessão `Cancelado` que não batem com nenhum dos 6
+   * motivos conhecidos (amostra: até 5 textos distintos).
+   *
+   * Esta é a mudança real de 24/08/2026. Ao contrário de `rotulosDesconhecidos`
+   * acima, NÃO arrisca pagamento — `cancelado` depende só de `Status`, que
+   * continua "Cancelado" — mas deixa "Presença TiTa" em branco para essas
+   * linhas sem avisar ninguém, a menos que este contador vire aviso. Ver
+   * `justificativaDesconhecida`/`avisoJustificativaDesconhecida` em
+   * rotulosExecucao.ts.
+   */
+  justificativasDesconhecidas: string[]
+  /** Quantas linhas `Cancelado` do período trazem uma das justificativas acima. */
+  linhasJustificativaDesconhecida: number
 }
 
 export interface GradeDoBanco extends CoberturaGrade {
@@ -328,6 +345,13 @@ export async function buscarGradeParaRP(de: string, ate: string, hoje = new Date
   // sintoma em qualquer linha, e é o cálculo inteiro que fica sem chão.
   const rotulosDesconhecidos = new Set<string>()
   let linhasRotuloDesconhecido = 0
+  // Mesma ideia, mas para `Justificativa` de linha `Cancelado` — é ali, e não em
+  // `Status`, que a TiTa de fato mudou o vocabulário em 24/08/2026 (ver
+  // rotulosExecucao.ts). Guardado por texto exato, sem o dedup por chave
+  // normalizada de `rotulosDesconhecidos` — o volume esperado aqui é baixo
+  // (só sessões canceladas) e não compensa a complexidade extra.
+  const justificativasDesconhecidas = new Set<string>()
+  let linhasJustificativaDesconhecida = 0
 
   const linhas = brutas.map(r => {
     // Só `Agendado` e só o que já aconteceu. `Livre` não tem evolução por
@@ -338,13 +362,19 @@ export async function buscarGradeParaRP(de: string, ate: string, hoje = new Date
       if (r.status_execucao == null) semExecucao++
     }
     // Sobre o texto já corrigido (fixMojibake), não o cru: dupla codificação
-    // deixaria 'Não realizado — clínica' irreconhecível e viraria um alarme
-    // falso de vocabulário novo. É o mesmo texto que a coluna "Status" abaixo
-    // entrega a quem classifica.
+    // deixaria acento e travessão da Justificativa irreconhecíveis e viraria
+    // um alarme falso de vocabulário novo. É o mesmo texto que as colunas
+    // "Status"/"Justificativa" abaixo entregam a quem classifica.
     const statusExec = fixMojibake(r.status_execucao as string | null)
+    const justificativa = fixMojibake(r.justificativa as string | null)
     for (const rotulo of rotulosDeExecucaoDesconhecidos([statusExec])) {
       linhasRotuloDesconhecido++
       if (rotulosDesconhecidos.size < 5) rotulosDesconhecidos.add(rotulo)
+    }
+    const motivoIlegivel = justificativaDesconhecida(justificativa, statusExec)
+    if (motivoIlegivel) {
+      linhasJustificativaDesconhecida++
+      if (justificativasDesconhecidas.size < 5) justificativasDesconhecidas.add(motivoIlegivel)
     }
     return {
       "Data": (r.data as string) ?? "",
@@ -362,14 +392,13 @@ export async function buscarGradeParaRP(de: string, ate: string, hoje = new Date
       "Convênio": fixMojibake(r.convenio_nome as string | null),
       "Status do Agendamento": (r.status_agendamento as string) ?? "",
       "ID Agendamento": r.tita_agendamento_id == null ? "" : String(r.tita_agendamento_id),
-      // fixMojibake (aplicado em `statusExec`, acima) deixou de ser zelo: os
-      // rótulos novos de execução ('Não realizado — clínica') têm acento e
-      // travessão, enquanto os antigos ('Cancelado', 'Realizado') eram ASCII
-      // puro e nunca podiam quebrar.
       "Status": statusExec,
-      // Status + Justificativa juntos definem `cancelado` (isCancelado) e
-      // presencaTita (motivoNaoRealizado) — ver rotulosExecucao.ts.
-      "Justificativa": fixMojibake(r.justificativa as string | null),
+      // fixMojibake (aplicado em `justificativa`, acima) deixou de ser zelo: os
+      // motivos novos ('Não realizado — clínica') têm acento e travessão,
+      // enquanto os antigos ('Falta do Paciente') eram ASCII puro e nunca
+      // podiam quebrar. Status + Justificativa juntos definem `cancelado`
+      // (isCancelado) e presencaTita (motivoNaoRealizado) — ver rotulosExecucao.ts.
+      "Justificativa": justificativa,
       "Possui Tratativa": simNao(r.possui_tratativa),
       "Nome Profissional Tratativa": porId(r.tratativa_profissional_id, r.tratativa_profissional_nome),
       "Criação Tratativa": instanteBR(r.tratativa_criada_em),
@@ -389,6 +418,8 @@ export async function buscarGradeParaRP(de: string, ate: string, hoje = new Date
     inativasAgendadas: saude.inativasAgendadas,
     rotulosDesconhecidos: [...rotulosDesconhecidos],
     linhasRotuloDesconhecido,
+    justificativasDesconhecidas: [...justificativasDesconhecidas],
+    linhasJustificativaDesconhecida,
   }
 }
 
@@ -464,18 +495,24 @@ export function checarPisoDeExecucao(de: string, contexto: ContextoGrade = "paga
  * realizadas estavam fora da grade, R$ 490,00 a menos. Incompletude bloqueia
  * sem exceção — diferente de execução faltando, ela não se resolve esperando.
  *
- * Desde 24/08/2026 há uma pergunta 0, que vem antes das duas: o que está na
- * grade é LEGÍVEL? Ela existe porque naquele dia a TiTa renomeou os rótulos de
- * execução ('Cancelado' → 'Não realizado — …'), e um rótulo que este código não
- * entende não deixa a grade incompleta: deixa-a mentirosa, com sessão não
- * realizada passando por realizada e gerando diária, ETA e PA. As perguntas 1 e
- * 2 respondem "quanto falta"; esta responde "dá para acreditar no que veio".
+ * Há também uma pergunta 0, que vem antes das duas: o que está em `Status` é
+ * LEGÍVEL? Reforço para um vocabulário confirmado fechado (ver
+ * rotulosExecucao.ts) — sem caso conhecido até hoje, mas se um rótulo ali
+ * algum dia não for entendido, ele não deixaria a grade incompleta: deixaria-a
+ * mentirosa, com sessão não realizada passando por realizada e gerando diária,
+ * ETA e PA. As perguntas 1 e 2 respondem "quanto falta"; esta responde "dá
+ * para acreditar no que veio".
+ *
+ * A mudança real de vocabulário de 24/08/2026 — em `Justificativa`, não em
+ * `Status` — entra por um canal separado e mais leve, no fechamento desta
+ * função: um AVISO (nunca reprovação), porque `Justificativa` não decide
+ * pagamento, só a exibição de "Presença TiTa". Ver avisoJustificativaDesconhecida.
  */
-export function avaliarCoberturaGrade(
+function resolverVeredictoDeCobertura(
   grade: CoberturaGrade,
   periodo: { de: string; ate: string },
-  hoje = new Date(),
-  contexto: ContextoGrade = "pagamento",
+  hoje: Date,
+  contexto: ContextoGrade,
 ): VeredictoGrade {
   const { de, ate } = periodo
   const dePagamento = contexto === "pagamento"
@@ -539,4 +576,30 @@ export function avaliarCoberturaGrade(
         ? "Para fechar o pagamento agora, use o CSV exportado da TiTa."
         : "Para auditar esse período agora, use o CSV exportado da TiTa."),
   }
+}
+
+/**
+ * Decide se a grade que voltou serve para pagar — ver resolverVeredictoDeCobertura
+ * para as perguntas que decidem isso.
+ *
+ * Esta função só acrescenta uma coisa ao resultado dela: quando o veredicto é
+ * `ok`, funde o aviso de "Justificativa desconhecida" (se houver) ao aviso que
+ * já existisse. Fica FORA de resolverVeredictoDeCobertura de propósito — aquela
+ * função tem várias saídas antecipadas (`return` cedo em cada guarda), e
+ * calcular a fusão só uma vez aqui, depois de todas elas, é mais simples do que
+ * repetir a fusão em cada retorno.
+ */
+export function avaliarCoberturaGrade(
+  grade: CoberturaGrade,
+  periodo: { de: string; ate: string },
+  hoje = new Date(),
+  contexto: ContextoGrade = "pagamento",
+): VeredictoGrade {
+  const resultado = resolverVeredictoDeCobertura(grade, periodo, hoje, contexto)
+  if (!resultado.ok) return resultado
+
+  const avisoJustif = avisoJustificativaDesconhecida(grade.linhasJustificativaDesconhecida, grade.justificativasDesconhecidas)
+  if (!avisoJustif) return resultado
+
+  return { ok: true, aviso: [resultado.aviso, avisoJustif].filter(Boolean).join("\n\n") }
 }
