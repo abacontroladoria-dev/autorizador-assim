@@ -63,6 +63,17 @@ export function useModalDialog(aberto: boolean, aoFechar: () => void, idTitulo: 
 
     function aoTeclar(e: KeyboardEvent) {
       if (e.key === 'Escape') {
+        // Um widget ABERTO dentro do diálogo consome o Escape primeiro. É o que
+        // a ARIA manda (Escape descarta o popup, não o diálogo que o contém) e
+        // sem isto fechar uma lista de sugestões fecharia o modal junto — o
+        // usuário perderia intervalo, busca e foco por apertar Escape uma vez.
+        //
+        // O teste é genérico de propósito: qualquer elemento focado que declare
+        // `aria-expanded="true"` está dizendo que tem algo aberto para fechar.
+        // Este listener roda em CAPTURA no document, então é o único lugar onde
+        // essa decisão cabe — um handler no próprio campo nunca chegaria antes.
+        const foco = document.activeElement
+        if (foco instanceof HTMLElement && foco.getAttribute('aria-expanded') === 'true') return
         e.stopPropagation()
         aoFechar()
         return
