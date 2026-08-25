@@ -128,6 +128,17 @@ function vozesEmPortugues(todas: SpeechSynthesisVoice[]) {
   return unicas.sort((a, b) => notaVoz(b) - notaVoz(a))
 }
 
+// Default pedido é o Daniel especificamente — não mexe em `notaVoz` (que
+// continua ordenando o seletor do jeito documentado ali) só no que cai sem
+// escolha salva.
+function vozPadrao(disponiveis: SpeechSynthesisVoice[]) {
+  return (
+    disponiveis.find((v) => v.name.toLowerCase().includes('daniel')) ??
+    disponiveis[0] ??
+    null
+  )
+}
+
 // "Microsoft Maria Desktop - Portuguese(Brazil)" não é rótulo pra ninguém ler a
 // 3 m de distância.
 function rotuloVoz(v: SpeechSynthesisVoice) {
@@ -291,7 +302,7 @@ export default function TVPage() {
   // enquanto outra falava de verdade.
   const vozAtiva =
     vozes.find((v) => v.voiceURI === vozEscolhida)?.voiceURI ??
-    vozes[0]?.voiceURI ??
+    vozPadrao(vozes)?.voiceURI ??
     null
 
   // Resolvido na hora de falar, não na render: `getVoices()` costuma vir vazio
@@ -305,8 +316,7 @@ export default function TVPage() {
     // deixaria o navegador escolher sozinho, e o default costuma ser inglês.
     return (
       (salva && disponiveis.find((v) => v.voiceURI === salva)) ||
-      disponiveis[0] ||
-      null
+      vozPadrao(disponiveis)
     )
   }, [])
 
