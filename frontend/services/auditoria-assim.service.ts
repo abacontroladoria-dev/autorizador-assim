@@ -69,6 +69,8 @@ export async function listarFaltasAuditoria(data: string): Promise<AuditoriaAssi
       criado_por: null,
       forma_autorizacao: null,
       horario_autorizacao: null,
+      // Sem guia não há procedência de guia — a linha de falta nunca teve autorização.
+      guia_origem: null,
       observacao_manual: null,
       observacao_manual_atualizado_em: null,
       observacao_manual_atualizado_por_nome: null,

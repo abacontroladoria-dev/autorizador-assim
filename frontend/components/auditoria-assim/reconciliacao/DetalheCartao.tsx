@@ -1,9 +1,10 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { Ban, KeySquare, Link2, X } from 'lucide-react'
+import { Ban, ExternalLink, KeySquare, Link2, X } from 'lucide-react'
 import { autorizacaoCancelada, autorizacaoLiberada } from '@/hooks/useAnaliseReincidencia'
 import { completarMotivoGlosa, lerMotivoGlosa } from '@/lib/glosa'
+import { rotuloOrigemGuia, rotuloSolicitadoPor } from '@/lib/guiaOrigem'
 import SituacaoBadge from '../SituacaoBadge'
 import type { NotaManual, TokenConferencia } from '@/services/auditoria-assim.service'
 import type { CartaoGrade } from '../types'
@@ -129,6 +130,13 @@ export default function DetalheCartao({
   // gaveta não precisa saber de qual lado do par ela veio para exibi-la.
   const vinculo = cartao.vinculo
   const blocoVinculado = sessaoDoBloco(vinculo?.bloco_id ?? null)
+
+  // Procedência da guia da sessão: capturada pelo robô, ou tirada direto no portal.
+  // `null` no cartão de guia (não há linha de fila para consultar) e no histórico
+  // anterior ao registro — nos dois casos a gaveta não mostra o campo.
+  const origemGuia = daSessao
+    ? rotuloOrigemGuia(daSessao.origem.guia_origem, daSessao.origem.guia)
+    : null
 
   const origem = cartao.origem
   const titulo = daSessao
@@ -259,7 +267,26 @@ export default function DetalheCartao({
             <Campo rotulo="Status na ASSIM">{daSessao.origem.status_assim}</Campo>
             <Campo rotulo="Forma de autorização">{daSessao.origem.forma_autorizacao}</Campo>
             <Campo rotulo="Horário da autorização">{daSessao.origem.horario_autorizacao}</Campo>
-            <Campo rotulo="Solicitado por">{daSessao.origem.criado_por}</Campo>
+            {/* Só no ramo da sessão: aqui a procedência vem da RPC, medida na linha da
+                fila. No cartão de guia órfã ela seria dedução de outro mecanismo (o
+                anti-join de `get_guias_orfas`), e afirmar por inferência num campo cuja
+                função é dizer o que foi apurado seria trocar de assunto. */}
+            {origemGuia && (
+              <Campo rotulo="Origem da guia">
+                <span className={origemGuia.chip} title={origemGuia.detalhe}>
+                  {origemGuia.foraDoPulsar && <ExternalLink size={11} className="shrink-0" />}
+                  {origemGuia.texto}
+                </span>
+              </Campo>
+            )}
+            <Campo
+              rotulo={rotuloSolicitadoPor(
+                daSessao.origem.guia_origem,
+                daSessao.origem.guia
+              )}
+            >
+              {daSessao.origem.criado_por}
+            </Campo>
           </>
         ) : (
           <Campo rotulo="Status na ASSIM">{daGuia?.status}</Campo>

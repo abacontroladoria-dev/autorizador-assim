@@ -1,7 +1,7 @@
 'use client'
 
 import { memo, useEffect, useState } from 'react'
-import { Repeat2, ChevronDown, RotateCcw } from 'lucide-react'
+import { Repeat2, ChevronDown, ExternalLink, RotateCcw } from 'lucide-react'
 
 import Timeline from './Timeline'
 import StatusBadge from './StatusBadge'
@@ -15,6 +15,7 @@ import {
   houveSubstituicao,
 } from '@/lib/central/severity'
 import { completarMotivoGlosa, motivoGlosaDaSessao } from '@/lib/glosa'
+import { rotuloOrigemGuia, rotuloSolicitadoPor } from '@/lib/guiaOrigem'
 import { useGlosaCodigos } from '@/hooks/useGlosaCodigos'
 
 interface Props {
@@ -132,6 +133,15 @@ function SidePanel({ atendimento, onReverterFalta }: Props) {
         .join(' · ')
     : null
 
+  // De onde veio a guia: o robô a capturou no recibo, ou ela foi tirada direto no
+  // portal da ASSIM. Nulo quando não há guia (inclusive nas linhas de presença, que
+  // gravam 'N/A') ou quando a sessão é anterior ao registro de procedência — nesses
+  // casos a Row não aparece, em vez de afirmar o que ninguém apurou.
+  const origemGuia = rotuloOrigemGuia(
+    atendimento.numero_autorizacao_origem,
+    atendimento.numero_autorizacao
+  )
+
   const unidade =
     atendimento.unidade?.replace('Unid. ', '')?.split(' - ')[0] ||
     atendimento.sala_nome?.replace('Unid. ', '')?.split(' - ')[0]
@@ -217,6 +227,24 @@ function SidePanel({ atendimento, onReverterFalta }: Props) {
               }
               mono
             />
+            {/* Procedência, logo abaixo da guia que ela descreve — e ANTES de "Coberta
+                pela guia", que é outro número e ganharia a leitura errada se a linha
+                caísse depois dele. `completion_type` no gate porque a Row acima já
+                trocou o valor por 'N/A — fora ASSIM' nesse caso: anotar a origem de uma
+                guia que a tela não está mostrando não diria nada. */}
+            {origemGuia && atendimento.completion_type === 'automated' && (
+              <Row
+                label="Origem da guia"
+                value={
+                  <span className={origemGuia.chip} title={origemGuia.detalhe}>
+                    {origemGuia.foraDoPulsar && (
+                      <ExternalLink className="w-3 h-3 shrink-0" />
+                    )}
+                    {origemGuia.texto}
+                  </span>
+                }
+              />
+            )}
             {vinculo && (
               <Row
                 label="Coberta pela guia"
@@ -234,7 +262,15 @@ function SidePanel({ atendimento, onReverterFalta }: Props) {
                 }
               />
             )}
-            <Row label="Solicitado por" value={atendimento.criado_por} />
+            {/* O rótulo muda quando a guia veio de fora: ali este nome é de quem abriu
+                a solicitação, não de quem conseguiu a autorização. Ver lib/guiaOrigem.ts. */}
+            <Row
+              label={rotuloSolicitadoPor(
+                atendimento.numero_autorizacao_origem,
+                atendimento.numero_autorizacao
+              )}
+              value={atendimento.criado_por}
+            />
             <Row label="Forma" value={atendimento.forma_autorizacao} />
             <Row
               label="Convênio"

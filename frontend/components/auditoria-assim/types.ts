@@ -33,6 +33,19 @@ export type AuditoriaAssimItem = {
   criado_por: string | null
   forma_autorizacao: string | null
   horario_autorizacao: string | null
+  /**
+   * De onde veio a guia acima: `'robo'` (o Pulsar a capturou no recibo),
+   * `'relatorio'` (veio do extrato da ASSIM, logo foi tirada direto no portal),
+   * `'reconciliacao'` (reparo manual, mesmo significado), ou nula.
+   *
+   * Existe porque `criado_por` responde outra pergunta — quem ABRIU a solicitação — e
+   * era lido como autoria da autorização. Traduzir para texto é papel de
+   * `lib/guiaOrigem.ts`; nunca comparar com os literais fora dele.
+   *
+   * Nula em duas situações distintas, ambas sem rótulo na tela: sessão anterior a
+   * 25/08/2026 (a coluna não era escrita) e linha de falta, sintetizada no serviço.
+   */
+  guia_origem: string | null
   observacao_manual: string | null
   observacao_manual_atualizado_em: string | null
   observacao_manual_atualizado_por_nome: string | null

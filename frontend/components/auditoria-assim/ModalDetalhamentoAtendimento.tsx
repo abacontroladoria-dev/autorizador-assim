@@ -4,11 +4,13 @@ import { useCallback, useEffect, useState } from 'react'
 import { useModalDialog } from '@/hooks/useModalDialog'
 import {
   AlertOctagon,
+  Bot,
   Calendar,
   CalendarCheck,
   CalendarSearch,
   Clock,
   CreditCard,
+  ExternalLink,
   FileText,
   Hash,
   KeySquare,
@@ -25,6 +27,7 @@ import {
 } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { salvarMotivoGlosa, salvarObservacaoManual } from '@/services/auditoria-assim.service'
+import { rotuloOrigemGuia, rotuloSolicitadoPor } from '@/lib/guiaOrigem'
 import type { AuditoriaAssimItem } from './types'
 import SituacaoBadge, { SITUACAO_CONFIG, SITUACAO_FALLBACK } from './SituacaoBadge'
 import { ehGlosa } from './situacoes'
@@ -232,6 +235,16 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
     item.codigo_erro === '1601' ||
     /reincidencia|reincidência/i.test(`${item.descricao_erro ?? ''} ${item.status_assim ?? ''}`)
 
+  // De onde veio a guia. Nulo quando não há guia, ou quando a sessão é anterior ao
+  // registro de procedência — nos dois casos a célula não aparece, em vez de afirmar
+  // algo que ninguém apurou.
+  const origemGuia = rotuloOrigemGuia(item.guia_origem, item.guia)
+  // "Solicitado por" vira "Solicitação aberta por" quando a guia veio de fora. É o
+  // conserto direto do engano de 25/08/2026: ali o nome na linha era de quem tentou
+  // solicitar pelo Pulsar, não de quem tirou a guia no portal, e o rótulo antigo
+  // convidava justamente à leitura errada.
+  const rotuloOrigemCriadoPor = rotuloSolicitadoPor(item.guia_origem, item.guia)
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm"
@@ -294,7 +307,27 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
                 <dl className="grid grid-cols-2 gap-1.5 p-1.5">
                   <Fact icon={FileText} label="Guia" value={item.guia} mono />
                   <Fact icon={CreditCard} label="Convênio" value={item.convenio_nome} />
-                  <Fact icon={User} label="Solicitado por" value={item.criado_por} />
+                  {/* Procedência da guia, imediatamente depois dela e ANTES de quem
+                      solicitou. A ordem é o argumento: quem lê de cima para baixo
+                      encontra "Direto na ASSIM" antes de encontrar um nome, e não
+                      depois — foi ler o nome primeiro que produziu o engano de
+                      25/08/2026. Some quando não há procedência conhecida, em vez de
+                      ocupar a grade com um travessão que não diz nada. */}
+                  {origemGuia && (
+                    <Fact
+                      icon={origemGuia.foraDoPulsar ? ExternalLink : Bot}
+                      label="Origem da guia"
+                      value={
+                        <span className={origemGuia.chip} title={origemGuia.detalhe}>
+                          {origemGuia.foraDoPulsar && (
+                            <ExternalLink size={11} className="shrink-0" />
+                          )}
+                          {origemGuia.texto}
+                        </span>
+                      }
+                    />
+                  )}
+                  <Fact icon={User} label={rotuloOrigemCriadoPor} value={item.criado_por} />
                   <Fact icon={Send} label="Forma" value={item.forma_autorizacao} />
                   <Fact icon={Clock} label="Autorizado em" value={formatarDataHora(item.horario_autorizacao)} />
                   <Fact icon={CalendarCheck} label="Executado em" value={formatarDataHora(item.data_execucao)} />
