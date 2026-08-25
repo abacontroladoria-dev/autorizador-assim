@@ -6,7 +6,14 @@ import { acumularKpis, kpisVazios } from '@/components/auditoria-assim/kpisAudit
 import { mapearUnidade, UNIDADE_CONSERTAR } from '@/lib/cronograma/comparativoSessoes'
 import type { KpisAuditoriaAssim, ResumoDiarioLinha } from '@/components/auditoria-assim/types'
 
-/** A métrica que dirige o gráfico e as quebras. */
+/**
+ * A métrica que dirige o gráfico e as quebras.
+ *
+ * `null` é um estado legítimo, e é como o modal ABRE: nenhum indicador em foco.
+ * O painel de baixo é o segundo passo desta tela — o primeiro é o placar dos
+ * nove números. Enquanto o foco era obrigatório, algum card tinha de estar aceso
+ * na abertura, e isso foi lido da tela como "veio filtrado".
+ */
 export type MetricaFoco = keyof KpisAuditoriaAssim
 
 /** Um ponto da série temporal, ou uma fatia de uma quebra. */
@@ -25,8 +32,15 @@ export type FatiaKpis = {
  */
 const DIAS_ATE_SERIE_DIARIA = 45
 
-/** Sem acento e sem caixa, para a busca por nome ser tolerante. */
-function normalizar(texto: string): string {
+/**
+ * Sem acento e sem caixa, para a busca por nome ser tolerante.
+ *
+ * Exportada porque o combobox de sugestões precisa normalizar o que foi
+ * DIGITADO com exatamente a mesma regra que normalizou os nomes — duas cópias
+ * divergiriam no primeiro caractere que só uma delas tratasse, e o sintoma
+ * seria "a sugestão aparece mas a busca não acha".
+ */
+export function normalizarNome(texto: string): string {
   return texto.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase().trim()
 }
 
@@ -89,14 +103,45 @@ function agruparPorChave(
   return [...mapa.values()]
 }
 
+/**
+ * Todas as sessões de uma fatia — a mesma soma do cabeçalho do modal.
+ *
+ * É o denominador do percentual dos cards e, sem métrica em foco, também o que
+ * ordena as sugestões de paciente: "quem teve mais movimento no período" é a
+ * única resposta honesta quando ninguém escolheu um indicador ainda.
+ */
+function sessoesDe(kpis: KpisAuditoriaAssim): number {
+  return kpis.total + kpis.faltas + kpis.faltas_terapeuta
+}
+
+/** Um paciente do período, como a lista de sugestões precisa dele. */
+export type PacienteSugerido = {
+  id: string
+  nome: string
+  /** Pré-calculado: é o que o combobox compara a cada tecla. */
+  normalizado: string
+  /** Quanto ele tem da métrica em foco. Ordena a lista e desempata homônimos. */
+  valor: number
+}
+
 export function useResumoGerencial(aberto: boolean) {
   const [de, setDe] = useState(inicioDoMes)
   const [ate, setAte] = useState(hojeLocal)
   const [linhas, setLinhas] = useState<ResumoDiarioLinha[]>([])
   const [carregando, setCarregando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
-  const [metrica, setMetrica] = useState<MetricaFoco>('glosas')
+  // Nasce sem foco. Ver `MetricaFoco`.
+  const [metrica, setMetrica] = useState<MetricaFoco | null>(null)
   const [busca, setBusca] = useState('')
+  /**
+   * A âncora exata, quando a pessoa escolheu alguém na lista de sugestões.
+   *
+   * Existe por causa de homônimo, que esta base tem: buscar por NOME soma dois
+   * "João Silva" num número só, sem oferecer escolha. Com o id fixado, o
+   * recorte é de uma pessoa. Nulo enquanto a busca for texto livre — que
+   * continua valendo, porque "silva" achar quinze pessoas é uso legítimo.
+   */
+  const [pacienteId, setPacienteId] = useState<string | null>(null)
 
   // Cada carga recebe um número; só a última pode escrever no estado. Sem isso,
   // trocar a data duas vezes rápido deixa a resposta mais LENTA sobrescrever a
@@ -130,19 +175,84 @@ export function useResumoGerencial(aberto: boolean) {
   }, [aberto, de, ate, carregar])
 
   /**
-   * A busca por nome filtra as linhas ANTES de qualquer soma — por isso os
-   * totais, o gráfico e as três quebras passam a falar do paciente buscado sem
-   * nenhum código a mais. É o mesmo motivo de a busca ser client-side: as
-   * linhas do período já estão em memória, então filtrar não custa requisição
-   * nenhuma e responde a cada tecla.
+   * Nome normalizado por paciente, calculado UMA vez por carga.
    *
-   * Sem acento e sem caixa: quem digita "jose" tem de achar "JOSÉ".
+   * A versão anterior chamava `normalizarNome` dentro do filtro, ou seja um
+   * `NFD` + regex Unicode por LINHA a cada TECLA digitada — e um mês de
+   * movimento são milhares de linhas. O trabalho é o mesmo para todas as linhas
+   * do mesmo paciente, então ele cabe num mapa e o filtro vira uma consulta.
+   */
+  const nomeNormalizado = useMemo(() => {
+    const mapa = new Map<string, string>()
+    for (const linha of linhas) {
+      if (!mapa.has(linha.paciente_id)) {
+        mapa.set(linha.paciente_id, normalizarNome(linha.paciente_nome))
+      }
+    }
+    return mapa
+  }, [linhas])
+
+  /**
+   * A busca filtra as linhas ANTES de qualquer soma — por isso os totais, o
+   * gráfico e as quatro quebras passam a falar do paciente buscado sem nenhum
+   * código a mais. É o mesmo motivo de ela ser client-side: as linhas do
+   * período já estão em memória, então filtrar não custa requisição nenhuma e
+   * responde a cada tecla.
+   *
+   * Dois modos, nesta ordem. Com `pacienteId` fixado (a pessoa escolheu na
+   * lista), o recorte é por id — exato, imune a homônimo. Sem ele, é por texto,
+   * sem acento e sem caixa: quem digita "jose" tem de achar "JOSÉ".
    */
   const linhasVisiveis = useMemo(() => {
-    const alvo = normalizar(busca)
+    if (pacienteId) return linhas.filter((l) => l.paciente_id === pacienteId)
+    const alvo = normalizarNome(busca)
     if (!alvo) return linhas
-    return linhas.filter((l) => normalizar(l.paciente_nome).includes(alvo))
-  }, [linhas, busca])
+    return linhas.filter((l) => nomeNormalizado.get(l.paciente_id)?.includes(alvo))
+  }, [linhas, busca, pacienteId, nomeNormalizado])
+
+  /**
+   * Todos os pacientes do período — a fonte das sugestões.
+   *
+   * Deriva de `linhas` CRU, e é essa a diferença que faz a coisa funcionar.
+   * `porPaciente` parece a fonte natural e é uma armadilha: ele já vem filtrado
+   * pela própria busca (circular — a lista se esvaziaria conforme se digita,
+   * justo quando ela mais precisa mostrar a grafia certa) e ainda descarta quem
+   * tem zero na métrica.
+   *
+   * `valor` é a métrica em foco — ou, enquanto não há foco, o total de sessões
+   * da pessoa. Ordena a lista, o que devolve à tela a pergunta "quem são os
+   * maiores?" — e é o que separa dois homônimos.
+   */
+  const pacientesDoPeriodo = useMemo<PacienteSugerido[]>(() => {
+    const fatias = agruparPorChave(linhas, (l) => ({
+      chave: l.paciente_id,
+      rotulo: l.paciente_nome,
+    }))
+    return fatias
+      .map((f) => ({
+        id: f.chave,
+        nome: f.rotulo,
+        normalizado: nomeNormalizado.get(f.chave) ?? normalizarNome(f.rotulo),
+        valor: metrica ? f.kpis[metrica] : sessoesDe(f.kpis),
+      }))
+      .sort((a, b) => b.valor - a.valor || a.nome.localeCompare(b.nome, 'pt-BR'))
+  }, [linhas, metrica, nomeNormalizado])
+
+  /**
+   * Digitar solta a âncora. Quem edita o texto está procurando outra coisa, e
+   * manter o id fixado faria a tela ignorar o que está escrito nela — o tipo de
+   * discordância entre campo e resultado que ninguém consegue diagnosticar.
+   */
+  const definirBusca = useCallback((texto: string) => {
+    setBusca(texto)
+    setPacienteId(null)
+  }, [])
+
+  /** Escolher na lista fixa o id e escreve o nome no campo. */
+  const escolherPaciente = useCallback((paciente: PacienteSugerido) => {
+    setBusca(paciente.nome)
+    setPacienteId(paciente.id)
+  }, [])
 
   const totais = useMemo(() => {
     const acc = kpisVazios()
@@ -167,12 +277,22 @@ export function useResumoGerencial(aberto: boolean) {
     return fatias.sort((a, b) => a.chave.localeCompare(b.chave))
   }, [linhasVisiveis, serieDiaria])
 
-  /** Ordena a quebra pela métrica em foco — o maior ofensor primeiro. */
+  /**
+   * Ordena a quebra pela métrica em foco — o maior ofensor primeiro.
+   *
+   * Sem foco não há quebra: uma lista ordenada por nada não responde pergunta
+   * nenhuma. O painel que as desenha nem existe nesse estado, mas o corte fica
+   * aqui para o dado nunca sair daqui sem significado.
+   */
   const ordenarPorFoco = useCallback(
     (fatias: FatiaKpis[]) =>
-      fatias
-        .filter((f) => f.kpis[metrica] > 0)
-        .sort((a, b) => b.kpis[metrica] - a.kpis[metrica] || a.rotulo.localeCompare(b.rotulo, 'pt-BR')),
+      metrica
+        ? fatias
+            .filter((f) => f.kpis[metrica] > 0)
+            .sort(
+              (a, b) => b.kpis[metrica] - a.kpis[metrica] || a.rotulo.localeCompare(b.rotulo, 'pt-BR')
+            )
+        : [],
     [metrica]
   )
 
@@ -233,7 +353,8 @@ export function useResumoGerencial(aberto: boolean) {
   return {
     de, ate, setDe, setAte,
     metrica, setMetrica,
-    busca, setBusca, pacientesEncontrados,
+    busca, definirBusca, escolherPaciente, pacienteId,
+    pacientesDoPeriodo, pacientesEncontrados,
     linhas: linhasVisiveis, carregando, erro,
     totais, serie, serieDiaria,
     porTerapia, porMotivo, porUnidade, porPaciente,
