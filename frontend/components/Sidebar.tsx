@@ -8,6 +8,7 @@ import {
   FileText,
   ShieldCheck,
   ClipboardList,
+  ClipboardPlus,
   ListChecks,
   Link2,
   CalendarDays,
@@ -68,6 +69,7 @@ type Favorito = { label: string; path: string }
 const pathIconMap: Record<string, any> = {
   "/": LayoutDashboard,
   "/solicitar": PlusCircle,
+  "/autorizacoes-avulsas": ClipboardPlus,
   "/central-pacientes": Activity,
   "/central-terapeutas": UserRound,
   "/auditoria-assim": ClipboardList,
@@ -500,13 +502,16 @@ export default function Sidebar() {
           <hr className="my-2 border-sidebar-border" />
 
           {/* Pacientes */}
-          {(canAccess("/solicitar") || canAccess("/central-pacientes")) && (
+          {(canAccess("/solicitar") || canAccess("/autorizacoes-avulsas") || canAccess("/central-pacientes")) && (
             <SidebarGroup title="Pacientes" icon={Users}>
               {canAccess("/solicitar") && (
                 <MenuItem label="Atendimentos" icon={PlusCircle} path="/solicitar" />
               )}
               {canAccess("/central-pacientes") && (
                 <MenuItem label="Gestão Recepção" icon={Activity} path="/central-pacientes" />
+              )}
+              {canAccess("/autorizacoes-avulsas") && (
+                <MenuItem label="Autorizações Avulsas" icon={ClipboardPlus} path="/autorizacoes-avulsas" />
               )}
             </SidebarGroup>
           )}

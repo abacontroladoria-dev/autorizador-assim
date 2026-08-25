@@ -7,7 +7,7 @@
 // `disponibilidade_terapeuta` não entra aqui: tem fluxo dedicado e rota pública.
 export const roleDefaults: Record<string, string[]> = {
   admin: [
-    'dashboard', 'atendimentos', 'gestao',
+    'dashboard', 'atendimentos', 'autorizacoes_avulsas', 'gestao',
     'escala_terapeutica',
     'auditoria_assim', 'usuarios', 'permissoes', 'cco',
     'autorizacoes', 'preauditoria', 'outros_convenios',
@@ -46,7 +46,7 @@ export const roleDefaults: Record<string, string[]> = {
     'insumos',
   ],
   recepcao: [
-    'dashboard', 'atendimentos', 'gestao', 'auditoria_assim',
+    'dashboard', 'atendimentos', 'autorizacoes_avulsas', 'gestao', 'auditoria_assim',
     'autorizacoes', 'outros_convenios',
   ],
   autorizacao: [
@@ -85,6 +85,11 @@ export function getRoleDefaultPermissions(role: string): string[] {
 export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   dashboard: ['/'],
   atendimentos: ['/solicitar'],
+  // Código próprio, e não uma segunda rota dentro de `atendimentos`: a avulsa é a
+  // única tela que INSERE em fila_autorizacoes sem sessão por trás, e quem pode
+  // fazer isso é decisão de setor. Concedido a admin e recepcao — exatamente os
+  // papéis que têm INSERT na RLS da tabela (20260817120000).
+  autorizacoes_avulsas: ['/autorizacoes-avulsas'],
   gestao: ['/central-pacientes'],
   escala_terapeutica: ['/central-terapeutas'],
   auditoria_assim: ['/auditoria-assim'],

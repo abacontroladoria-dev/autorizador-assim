@@ -7,6 +7,7 @@ import { useGlosaCodigos } from '@/hooks/useGlosaCodigos'
 import { JANELA_PADRAO, useReconciliacaoAssim } from '@/hooks/useReconciliacaoAssim'
 import ModalConfirmarVinculo from '../ModalConfirmarVinculo'
 import ListaPendencias from '../reconciliacao/ListaPendencias'
+import PainelAvulsas from '../reconciliacao/PainelAvulsas'
 import ModalSemanaPaciente from '../reconciliacao/ModalSemanaPaciente'
 import { hojeLocal } from '../reconciliacao/datas'
 import type { AlvoAnalise, CandidataVinculo, GuiaOrfa } from '../types'
@@ -157,6 +158,11 @@ export default function ReconciliacaoTab({ alvo, onAlvoConsumido }: Props) {
           Seu perfil permite consultar a reconciliação, mas não vincular autorizações.
         </p>
       )}
+
+      {/* Acima da listagem porque responde uma pergunta que a listagem provoca
+          ("por que este paciente tem uma autorização a mais?"), e some sozinho
+          quando não há avulsa no mês. */}
+      <PainelAvulsas de={analise.mesRef} ate={analise.mesFimEfetivo} />
 
       <ListaPendencias
         pacientes={analise.pacientesDoMes}

@@ -14,6 +14,13 @@ import { Lock, CheckCircle, Megaphone, XCircle } from 'lucide-react'
 
 import { getMachineId } from '@/lib/machine'
 
+import {
+  INTERVALO_ASSIM_MIN,
+  horaDoTimestamp,
+  minutosDesde,
+  podeSolicitar,
+} from '@/lib/central/intervaloAssim'
+
 
 // =========================
 // TERAPIAS OCULTAS
@@ -307,57 +314,23 @@ useEffect(() => {
 // PODE SOLICITAR
 // =========================
 
-// A ASSIM mede o intervalo de 30 minutos no RELÓGIO, sobre a identificação do
-// beneficiário (verificarIntervaloAtendimento() do portal), e NÃO sobre o horário
-// agendado da sessão. Duas sessões que distam 40 min no cronograma colidem se
-// forem autorizadas com 4 minutos de diferença — foi o incidente de 21/08/2026.
+// A regra dos 30 minutos mora em lib/central/intervaloAssim.ts desde que a página
+// de autorizações avulsas passou a precisar dela: a avulsa é uma identificação do
+// MESMO beneficiário no mesmo portal, então concorre pela mesma janela. Aqui ficam
+// só as regras que são desta tela.
 //
-// Por isso ultima_autorizacao_anterior (RPC listar_central_autorizacoes) passou a
-// ser a última autorização do paciente NO DIA, em qualquer horário. Antes ela só
-// enxergava sessões mais cedo (fa2.horario < b.horario) e ficava cega justamente
-// quando a recepção autorizava fora de ordem.
-const INTERVALO_ASSIM_MIN = 30
+// `ultima_autorizacao_anterior` (RPC listar_central_autorizacoes) é a última
+// autorização do paciente NO DIA, em qualquer horário. Antes ela só enxergava
+// sessões mais cedo (fa2.horario < b.horario) e ficava cega justamente quando a
+// recepção autorizava fora de ordem.
 
 // Tolerância para pedir antes de a sessão começar. A ASSIM confirma a PRESENÇA do
 // beneficiário: pedir muito antes é autorizar quem ainda não chegou — e queima a
 // janela de 30 min da sessão seguinte.
 const TOLERANCIA_ADIANTAMENTO_MIN = 15
 
-// timestamp without time zone chega como "2026-08-21T12:58:00". Fatiar a string em
-// vez de new Date(), que reintroduz o erro de fuso na exibição.
-function horaDoTimestamp(ts: string | null) {
-  return String(ts || '').slice(11, 16)
-}
-
 function hhmm(horario: any) {
   return String(horario || '').slice(0, 5)
-}
-
-function minutosDesde(ultima: string | null) {
-
-  if (!ultima) return null
-
-  // Aqui o new Date() é proposital: horario_autorizacao é hora de São Paulo e o
-  // navegador da recepção também — o parse local casa, e o que se quer é o
-  // intervalo, não o rótulo.
-  const ultimaData = new Date(ultima)
-
-  if (Number.isNaN(ultimaData.getTime())) return null
-
-  return (Date.now() - ultimaData.getTime()) / 1000 / 60
-}
-
-function podeSolicitar(
-  ultima: string | null
-) {
-
-  const diffMin = minutosDesde(ultima)
-
-  if (diffMin === null) {
-    return true
-  }
-
-  return diffMin >= INTERVALO_ASSIM_MIN
 }
 
 function inicioDaSessao(p: any): Date | null {
