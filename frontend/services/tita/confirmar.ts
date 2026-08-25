@@ -21,6 +21,7 @@ export async function prepararAgendamento(
   csvGradeId: string,
   pacienteNome: string,
   terapiaExibicaoOverride?: number,
+  idFavorecidoFallback?: number,
 ): Promise<PreparacaoAgendamento> {
   try {
     const grade = await buscarGradePorId(csvGradeId)
@@ -83,9 +84,9 @@ export async function prepararAgendamento(
     }
 
     // csvGradeId sempre aponta para uma linha "Livre" (sem paciente próprio) — o
-    // id_favorecido vem de uma linha "Agendado" existente do mesmo paciente (ver
-    // resolverIdFavorecido).
-    const idFavorecido = await resolverIdFavorecido(pacienteNome)
+    // id_favorecido vem de uma linha "Agendado" existente do mesmo paciente, ou do
+    // laudo quando o paciente ainda não tem nenhuma (ver resolverIdFavorecido).
+    const idFavorecido = await resolverIdFavorecido(pacienteNome, idFavorecidoFallback)
     if (idFavorecido == null) {
       console.error(
         "[tita:prepararAgendamento] id_favorecido_nao_encontrado — sincronização cancelada",

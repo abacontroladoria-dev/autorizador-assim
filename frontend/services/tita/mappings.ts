@@ -193,11 +193,19 @@ export async function resolverGradeTerapeuta(
  * de produção que paciente_nome mapeia 1:1 para paciente_id (298 pacientes, 298
  * IDs distintos, nenhuma ambiguidade).
  *
- * Retorna null (não lança) quando o paciente não tem nenhuma linha Agendado ainda
- * — caso legítimo para um paciente novo que nunca foi agendado na TiTa.
+ * `idFavorecidoFallback` cobre justamente o paciente que nunca foi agendado: a API
+ * de laudos publica o id_favorecido dele (LaudoApi.id_favorecido), então a
+ * modalidade "Criar Novo Cronograma" — que existe só pra quem tem ZERO linhas
+ * Agendado — envia esse valor junto da sessão. A linha Agendado continua tendo
+ * prioridade quando existe: vem da mesma tabela que o resto do payload, enquanto o
+ * laudo é uma fonte externa que pode estar defasada.
+ *
+ * Retorna null (não lança) quando não há linha Agendado nem fallback — caso em que
+ * o chamador deve bloquear a implantação em vez de adivinhar um paciente.
  */
 export async function resolverIdFavorecido(
   pacienteNome: string,
+  idFavorecidoFallback?: number,
   client?: SupabaseClient,
 ): Promise<number | null> {
   const supabase = client ?? (await createClient())
@@ -219,13 +227,19 @@ export async function resolverIdFavorecido(
   if (error) throw error
 
   const idFavorecido = (rows?.[0]?.paciente_id as number | null | undefined) ?? null
+  if (idFavorecido != null) return idFavorecido
 
-  if (idFavorecido == null) {
-    console.warn(
-      "[tita:resolverIdFavorecido] Paciente sem nenhuma linha Agendado em csv_grades_profissionais",
-      JSON.stringify({ pacienteNome }),
+  if (idFavorecidoFallback != null) {
+    console.log(
+      "[tita:resolverIdFavorecido] sem linha Agendado — usando id_favorecido do laudo",
+      JSON.stringify({ pacienteNome, idFavorecidoFallback }),
     )
+    return idFavorecidoFallback
   }
 
-  return idFavorecido
+  console.warn(
+    "[tita:resolverIdFavorecido] Paciente sem nenhuma linha Agendado em csv_grades_profissionais e sem fallback do laudo",
+    JSON.stringify({ pacienteNome }),
+  )
+  return null
 }
