@@ -6,6 +6,8 @@ import type {
   KpisAuditoriaAssim,
   ResumoDiarioLinha,
   TokenMensalItem,
+  VinculoAutorizacao,
+  VinculoCobertura,
 } from '@/components/auditoria-assim/types'
 
 const supabase = getSupabaseClient()
@@ -73,6 +75,9 @@ export async function listarFaltasAuditoria(data: string): Promise<AuditoriaAssi
       token_conferido: null,
       token_conferido_em: null,
       token_conferido_por_nome: null,
+      // Falta não tem cobertura por definição: a sessão não aconteceu, então
+      // não há o que uma autorização cubra.
+      vinculo: null,
     }
   })
 }
@@ -131,6 +136,83 @@ export async function buscarNotasEConferencias(blocoIds: string[]): Promise<{
   }
 
   return { notas, conferencias }
+}
+
+/** Colunas do vínculo — explícitas, nunca `select('*')`. Ver `COLUNAS_AUTORIZACAO`. */
+const COLUNAS_VINCULO =
+  'id, guia, tipo, bloco_id, guia_original, observacao, vinculado_por, vinculado_em'
+
+/**
+ * Qual guia cobriu cada sessão do dia — o depois da Reconciliação, visto daqui.
+ *
+ * A aba Auditoria já mostrava o EFEITO do vínculo (a situação vira
+ * GLOSA_RESOLVIDA) sem mostrar a CAUSA: a coluna `guia` da RPC continua sendo a
+ * guia recusada, porque vincular não reescreve o pareamento posicional. O
+ * número da guia que resolveu só existia dentro da prosa de `observacao`, no
+ * fim de uma linha que a tela trunca. Esta função é o que traz o fato em forma
+ * de dado.
+ *
+ * Recorta por `bloco_id`, e não por período: os blocos do dia já estão na mão
+ * (é a mesma lista que `buscarNotasEConferencias` usa) e a janela de vínculo é
+ * retroativa de 7 dias, então um recorte por data erraria justamente a guia
+ * tirada dias depois — o caso que a reconciliação existe para tratar.
+ *
+ * Falha em silêncio devolvendo mapa vazio, ao contrário de
+ * `listarVinculosAtivos`: lá o vínculo DECIDE o que a grade pinta, e pintar
+ * antes de saber faz a tela se corrigir na frente de quem lê; aqui ele
+ * acrescenta uma coluna a uma linha que a RPC já classificou certo. Derrubar a
+ * auditoria inteira porque a cobertura não veio seria trocar um dado a menos
+ * por tela nenhuma.
+ */
+export async function buscarVinculosDosBlocos(
+  blocoIds: string[]
+): Promise<Map<string, VinculoCobertura>> {
+  const porBloco = new Map<string, VinculoCobertura>()
+  if (blocoIds.length === 0) return porBloco
+
+  const { data, error } = await supabase
+    .from('autorizacoes_vinculos')
+    .select(COLUNAS_VINCULO)
+    .in('bloco_id', blocoIds)
+    .is('desfeito_em', null)
+    // Só 'vinculo' cobre sessão. 'sem_sessao' é a guia extra que o operador
+    // descartou, e a constraint da tabela garante que ela nem tem bloco_id —
+    // o filtro é redundante de propósito, para o dia em que a constraint mudar.
+    .eq('tipo', 'vinculo')
+
+  if (error) {
+    console.error('Erro ao buscar vínculos da auditoria:', error.message, error.details)
+    return porBloco
+  }
+
+  const vinculos = (data ?? []) as VinculoAutorizacao[]
+  if (vinculos.length === 0) return porBloco
+
+  // `data_execucao` vive em `autorizacoes_assim` e responde "quando a liberação
+  // saiu". Consulta própria em vez de embed pela FK: assim uma falha aqui custa
+  // só a data — o bloco continua dizendo QUAL guia cobriu, que é o fato
+  // principal. São poucas guias (dezenas de triagens por mês), não um lote.
+  const execucaoPorGuia = new Map<string, string | null>()
+  const { data: autorizacoes, error: erroExecucao } = await supabase
+    .from('autorizacoes_assim')
+    .select('guia, data_execucao')
+    .in('guia', vinculos.map((v) => v.guia))
+
+  if (erroExecucao) {
+    console.error('Erro ao buscar a execução das guias vinculadas:', erroExecucao.message)
+  } else {
+    for (const a of autorizacoes ?? []) execucaoPorGuia.set(a.guia, a.data_execucao)
+  }
+
+  for (const vinculo of vinculos) {
+    if (!vinculo.bloco_id) continue
+    porBloco.set(vinculo.bloco_id, {
+      ...vinculo,
+      data_execucao: execucaoPorGuia.get(vinculo.guia) ?? null,
+    })
+  }
+
+  return porBloco
 }
 
 async function nomeUsuarioLogado(): Promise<{ id: string | null; nome: string | null }> {
