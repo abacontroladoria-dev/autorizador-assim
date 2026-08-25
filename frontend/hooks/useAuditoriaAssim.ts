@@ -1,10 +1,16 @@
 'use client'
 
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { listarAuditoriaAssim, listarFaltasAuditoria, buscarNotasEConferencias } from '@/services/auditoria-assim.service'
+import {
+  buscarNotasEConferencias,
+  buscarVinculosDosBlocos,
+  listarAuditoriaAssim,
+  listarFaltasAuditoria,
+} from '@/services/auditoria-assim.service'
 import { getSupabaseClient } from '@/lib/supabase/client'
 import type { AuditoriaAssimItem, AuditoriaFilters, KpisAuditoriaAssim } from '@/components/auditoria-assim/types'
 import { situacaoNoRecorte } from '@/components/auditoria-assim/situacoes'
+import { contarKpis } from '@/components/auditoria-assim/kpisAuditoria'
 
 const PAGE_SIZE       = 30
 const DEBOUNCE_MS     = 800
@@ -91,7 +97,14 @@ export function useAuditoriaAssim() {
       }
 
       const blocoIds = deduplicated.map((item) => item.bloco_id).filter((id): id is string => !!id)
-      const { notas, conferencias } = await buscarNotasEConferencias(blocoIds)
+      // Os três enriquecimentos leem a MESMA lista de blocos e nenhum depende
+      // do outro, então correm juntos. `vinculos` é o que diz qual guia cobriu
+      // a sessão — a RPC devolve o efeito do vínculo na situação, mas guarda a
+      // guia antiga na coluna `guia` (ver `AuditoriaAssimItem.vinculo`).
+      const [{ notas, conferencias }, vinculos] = await Promise.all([
+        buscarNotasEConferencias(blocoIds),
+        buscarVinculosDosBlocos(blocoIds),
+      ])
 
       const enriquecido = deduplicated.map((item) => {
         const nota = item.bloco_id ? notas.get(item.bloco_id) : undefined
@@ -104,6 +117,7 @@ export function useAuditoriaAssim() {
           token_conferido: conferencia?.conferido ?? false,
           token_conferido_em: conferencia?.conferido_em ?? null,
           token_conferido_por_nome: conferencia?.conferido_por_nome ?? null,
+          vinculo: (item.bloco_id ? vinculos.get(item.bloco_id) : undefined) ?? null,
         }
       })
 
@@ -139,29 +153,11 @@ export function useAuditoriaAssim() {
       return true
     })
 
-    const registros = dataFiltrada.filter((d) => d.situacao !== 'FALTA' && d.situacao !== 'FALTA_TERAPEUTA')
-    const faltas = dataFiltrada.filter((d) => d.situacao === 'FALTA')
-    const faltasTerapeuta = dataFiltrada.filter((d) => d.situacao === 'FALTA_TERAPEUTA')
-    const comToken = registros.filter((d) => d.teve_token === true).length
-    return {
-      total: registros.length,
-      faltas: faltas.length,
-      faltas_terapeuta: faltasTerapeuta.length,
-      liberadas: registros.filter((d) => d.situacao === 'LIBERADA').length - comToken,
-      // O card conta o grupo: a sessão cuja solicitação quebrou no meio
-      // (SOLICITACAO_CANCELADA) não tem autorização nem resposta da ASSIM, e o
-      // que falta nela é o mesmo que falta na que nunca foi solicitada. Contar
-      // separado criaria um décimo card para dizer duas vezes "solicite isso".
-      nao_solicitadas: registros.filter((d) => situacaoNoRecorte(d.situacao, 'NAO_SOLICITADA')).length,
-      sincronizando: registros.filter((d) => d.situacao === 'SINCRONIZANDO').length,
-      retorno_nao_confirmado: registros.filter((d) => d.situacao === 'RETORNO_NAO_CONFIRMADO' || d.situacao === 'AGUARDANDO_RETORNO').length,
-      canceladas: registros.filter((d) => d.situacao === 'CANCELADA').length,
-      // Comparação exata: GLOSA_RESOLVIDA não entra. Este card é o trabalho a
-      // fazer, e uma glosa já coberta por vínculo não pede tratativa.
-      glosas: registros.filter((d) => d.situacao === 'GLOSA').length,
-      glosas_resolvidas: registros.filter((d) => d.situacao === 'GLOSA_RESOLVIDA').length,
-      tokens: comToken,
-    }
+    // A aritmética dos onze cards mora em `kpisAuditoria`, não aqui: a visão
+    // gerencial soma um resumo pré-agregado com a MESMA regra, e duas cópias
+    // divergiriam no primeiro estado novo que alguém acrescentasse a só uma
+    // delas.
+    return contarKpis(dataFiltrada)
   }, [rawDados, loading, filters.paciente, filters.horario_bloco])
 
   useEffect(() => {
@@ -196,6 +192,10 @@ export function useAuditoriaAssim() {
       .channel('auditoria-assim-live')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'fila_autorizacoes' }, dispatchReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'autorizacoes_assim' }, dispatchReload)
+      // Vincular na aba Reconciliação muda a situação e a cobertura de uma
+      // sessão desta lista. Sem esta assinatura o operador voltava para cá e
+      // via a glosa ainda de pé, e só um F5 desmentia a tela.
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'autorizacoes_vinculos' }, dispatchReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'auditoria_atendimento_notas' }, dispatchReload)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'auditoria_token_conferencias' }, dispatchReload)
       .subscribe()

@@ -39,6 +39,21 @@ export type AuditoriaAssimItem = {
   token_conferido: boolean | null
   token_conferido_em: string | null
   token_conferido_por_nome: string | null
+  /**
+   * A guia que a Reconciliação apontou como cobertura desta sessão.
+   *
+   * NÃO vem da RPC, e a distinção é a razão deste campo existir. Vincular não
+   * reescreve o pareamento posicional: `get_auditoria_assim_periodo` reflete o
+   * vínculo na `situacao` (GLOSA_RESOLVIDA, ou LIBERADA quando não houve glosa)
+   * e o narra em prosa no fim de `observacao`, mas a coluna `guia` continua
+   * sendo a ANTIGA — a que a ASSIM recusou. Sem este campo a tela dizia "Glosa
+   * Resolvida" sem dizer o que resolveu: o número só existia no rabo de uma
+   * legenda truncada, e o operador tinha de abrir o detalhamento para descobrir
+   * quem tinha coberto.
+   *
+   * Nulo em toda sessão sem cobertura por vínculo — que é a esmagadora maioria.
+   */
+  vinculo: VinculoCobertura | null
 }
 
 export type KpisAuditoriaAssim = {
@@ -66,6 +81,42 @@ export type AuditoriaFilters = {
   situacao: string
   data: string
   horario_bloco: string
+}
+
+/**
+ * Uma linha do resumo diário pré-calculado — a fonte da visão gerencial.
+ *
+ * É a linha da auditoria **despida de identidade**: em vez de uma sessão de um
+ * paciente, uma combinação de dimensões e quantas sessões caíram nela. Por isso
+ * o modal responde total, evolução e quebra com UMA consulta, e por isso ele
+ * abre instantâneo — a conta cara já rodou no cron.
+ *
+ * `situacao` é **crua**, exatamente como a RPC a devolve. O banco não sabe o que
+ * é um card: quem agrupa situação em KPI é `kpisAuditoria.ts`, o mesmo código
+ * que a tela diária usa. Se o SQL decidisse isso, o número do modal e o número
+ * do card teriam duas definições e divergiriam no primeiro estado novo.
+ *
+ * `sala_nome` é **crua, não a unidade**. O de-para sala→unidade é `mapearUnidade`
+ * e já é aplicado pelo resto do sistema; traduzir no SQL criaria uma segunda
+ * cópia da regra para envelhecer sozinha.
+ *
+ * Os textos anuláveis chegam como `'—'`, nunca `null`: são parte da chave
+ * primária do resumo, e NULL não se compara a NULL.
+ */
+export type ResumoDiarioLinha = {
+  data: string
+  /** Separa homônimos, que existem nesta base. O nome é o que se lê e se busca. */
+  paciente_id: string
+  paciente_nome: string
+  situacao: string
+  teve_token: boolean
+  codigo_tuss: string
+  terapia: string
+  sala_nome: string
+  codigo_glosa: string
+  sessoes: number
+  /** Quando o cron recalculou este dia. Vira o carimbo de frescor da tela. */
+  atualizado_em: string
 }
 
 /**
@@ -221,6 +272,18 @@ export type CartaoGrade =
       teve_token: boolean | null
       token: string | null
       /**
+       * A guia que passou a cobrir esta sessão por triagem manual. Nula no caso
+       * normal, em que a cobertura saiu do pareamento posicional do banco.
+       *
+       * A RPC já reflete o vínculo na `situacao` (GLOSA_RESOLVIDA quando havia
+       * glosa, LIBERADA quando não havia), mas só isso não basta na grade: o
+       * segundo ramo é indistinguível de uma sessão liberada normalmente, e o
+       * primeiro não diz QUAL guia a cobriu. Sem esta referência a metade de cá
+       * do par ficava muda — a guia dizia que cobria uma sessão e a sessão não
+       * dizia que fora coberta.
+       */
+      vinculo: VinculoAutorizacao | null
+      /**
        * A linha da RPC, inteira, para o detalhamento do cartão.
        *
        * O cartão continua com os campos copiados acima porque é ele quem os
@@ -246,8 +309,14 @@ export type CartaoGrade =
        * fica nula, e o cartão mostra só o código.
        */
       terapia: string | null
-      /** Ver `EstadoAutorizacao` em reconciliacao/LinhaAutorizacao.tsx. */
-      estado: 'sem-vinculo' | 'fora-da-semana'
+      /** Ver `EstadoAutorizacao` em reconciliacao/vinculo.ts. */
+      estado: 'sem-vinculo' | 'vinculada' | 'sem-sessao' | 'fora-da-semana'
+      /**
+       * A triagem desta guia, quando ela já foi triada. É a fonte de `estado`
+       * nos dois desfechos (`vinculada`, `sem-sessao`) e do que o cartão e a
+       * gaveta imprimem sobre ela — a sessão coberta, quem decidiu e quando.
+       */
+      vinculo: VinculoAutorizacao | null
       /**
        * Esta liberação passou da cota do TUSS na semana. O "sobrando" da
        * listagem virado objeto, por atribuição posicional em `data_execucao` —
@@ -330,6 +399,56 @@ export type GuiaOrfa = {
   biofacial: string | null
   ordem_autorizacao: number | null
   sessoes_na_particao: number | null
+}
+
+/**
+ * O desfecho de uma triagem da Reconciliação, como `autorizacoes_vinculos` o
+ * guarda — e o dado que faltava para a tela saber que a ação aconteceu.
+ *
+ * Sem ele a grade lia o depois pelo que NÃO estava mais lá: a guia saía de
+ * `get_guias_orfas` e a tela concluía "não é órfã e não casa com sessão desta
+ * semana", que é literalmente o estado `fora-da-semana` — e o cartão da guia
+ * recém-vinculada aparecia rotulado "Outra semana", afirmando o contrário do que
+ * o operador acabara de fazer. Ausência não é veredito; o veredito mora aqui.
+ *
+ * A tabela é um livro de triagem manual (ordem de dezenas de linhas por mês), e
+ * por isso o cliente carrega as ATIVAS inteiras em vez de recortar por período:
+ * a janela de vínculo é de 7 dias retroativos e atravessa a virada do mês, então
+ * qualquer recorte por data deixaria de fora exatamente o vínculo que cruza a
+ * borda — que é o caso que esta tela existe para tratar.
+ */
+export type VinculoAutorizacao = {
+  id: string
+  /** A guia da ASSIM que foi triada. É a chave da triagem: uma ativa por guia. */
+  guia: string
+  /** `vinculo` = cobre `bloco_id`; `sem_sessao` = autorização extra, sem sessão. */
+  tipo: 'vinculo' | 'sem_sessao'
+  /** A sessão coberta. Sempre nula em `sem_sessao` (a constraint da tabela exige). */
+  bloco_id: string | null
+  /** A guia glosada que esta substituiu, congelada no momento do vínculo. */
+  guia_original: string | null
+  observacao: string | null
+  vinculado_por: string | null
+  vinculado_em: string | null
+}
+
+/**
+ * O mesmo vínculo, visto do lado da sessão coberta — o que a aba Auditoria
+ * precisa saber para dizer QUEM resolveu a glosa.
+ *
+ * A diferença para `VinculoAutorizacao` é uma coluna só, e ela vem de outra
+ * tabela: `data_execucao` é o instante em que a ASSIM registrou a guia que
+ * cobriu, e mora em `autorizacoes_assim`. É a metade da resposta que o número
+ * sozinho não dá — "a liberação saiu quando?" costuma ser dias depois da
+ * sessão, e é isso que explica por que o match posicional errou.
+ *
+ * `timestamp without time zone` guardando hora de São Paulo, como toda
+ * `data_execucao` neste módulo: formatar por fatia de string, nunca via
+ * `new Date()`. `vinculado_em` é o oposto — `timestamptz` de verdade, e aí a
+ * conversão do navegador é a certa.
+ */
+export type VinculoCobertura = VinculoAutorizacao & {
+  data_execucao: string | null
 }
 
 /** Uma sessão que a guia órfã selecionada poderia estar cobrindo. */

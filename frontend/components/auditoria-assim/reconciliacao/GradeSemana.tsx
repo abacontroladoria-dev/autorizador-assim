@@ -32,9 +32,11 @@ function rotuloColuna(iso: string): { nome: string; data: string } {
  *
  * Largura mínima de 11rem por dia é medida, não estética: abaixo disso o nome da
  * terapia quebra em três linhas e o cartão deixa de ser lido de relance, que é a
- * única razão de ele existir. Onde a coluna é larga (telas grandes), dois
- * atendimentos da mesma faixa cabem lado a lado; onde é estreita, eles
- * empilham — encolher o cartão até caber seria trocar legibilidade por simetria.
+ * única razão de ele existir. Dois atendimentos da mesma faixa EMPILHAM, em
+ * qualquer largura: cada cartão ocupa a coluna inteira e ganha o outro embaixo.
+ * Até 2026-08-24 eles se dividiam quando a coluna era larga, e meia coluna é
+ * exatamente onde o nome da terapia volta a quebrar — a tela grande piorava a
+ * leitura do caso mais denso.
  *
  * Célula vazia fica VAZIA. Numa agenda o vazio é a maioria das células, e
  * escrever "sem sessão" em cada uma faz o ruído crescer com o tamanho da tela; o
@@ -78,6 +80,31 @@ export default function GradeSemana({
   const diasVazios = new Set(
     dias.filter((dia) => linhas.every((linha) => (linha.celulas[dia] ?? []).length === 0))
   )
+
+  /**
+   * Há alguma sessão escolhível desenhada nesta semana?
+   *
+   * Atenuar é um recurso RELATIVO: ele só significa alguma coisa quando existe
+   * um destaque contra o qual recuar. Sem essa guarda o modo de vínculo apagava
+   * a semana INTEIRA, e em dois momentos que não são raros — enquanto as
+   * candidatas carregam (a RPC vai dia a dia e leva segundos, então `candidatas`
+   * fica `[]`) e quando a guia não tem candidata nenhuma, que são 39% das órfãs
+   * medidas em produção.
+   *
+   * O efeito era o oposto do pretendido: a grade abria com tudo a 35% de
+   * opacidade, inclusive a glosa que o operador foi ali justamente ler para
+   * decidir. "Recua para o fundo, sem sumir" virou sumir.
+   */
+  const haAlvo =
+    !!selecao &&
+    linhas.some((linha) =>
+      dias.some((dia) =>
+        (linha.celulas[dia] ?? []).some((cartao) => {
+          const candidata = selecao.porBloco.get(cartao.chave)
+          return !!candidata && candidataElegivel(candidata)
+        })
+      )
+    )
 
   return (
     // Sem `overflow-x-auto` PRÓPRIO, e isto é deliberado: quem rola nos dois
@@ -157,7 +184,15 @@ export default function GradeSemana({
                     }`}
                   >
                     {cartoes.length > 0 && (
-                      <div className="flex flex-wrap items-start gap-1.5">
+                      // Empilhados, SEMPRE — nunca lado a lado, mesmo com a
+                      // coluna larga o bastante para dois. Dois cartões na
+                      // mesma faixa são duas coisas do MESMO horário, e lado a
+                      // lado eles são lidos como colunas: o olho pergunta "qual
+                      // é o de quando?" e não há resposta, porque a resposta é
+                      // "os dois". Um embaixo do outro herda a leitura da
+                      // própria grade — de cima para baixo é o tempo, e dentro
+                      // da célula não há tempo a passar, só uma lista.
+                      <div className="flex flex-col items-stretch gap-1.5">
                         {cartoes.map((cartao) => {
                           const candidata = selecao?.porBloco.get(cartao.chave)
                           const papel: PapelNaSelecao | undefined = !selecao
@@ -187,7 +222,10 @@ export default function GradeSemana({
                             <div
                               key={cartao.chave}
                               data-chave={cartao.chave}
-                              className={`min-w-0 grow basis-34 rounded-lg ${anel}`}
+                              // Sem `grow`/`basis`: no eixo vertical os dois
+                              // passam a falar de ALTURA, e `basis-34` daria
+                              // 8,5rem de cartão vazio a cada um.
+                              className={`min-w-0 rounded-lg ${anel}`}
                             >
                               <CartaoAtendimento
                                 cartao={cartao}
@@ -198,6 +236,7 @@ export default function GradeSemana({
                                     : onAbrirDetalhe
                                 }
                                 papel={papel}
+                                atenuar={haAlvo}
                                 distanciaSelecao={candidata?.distancia_horas ?? null}
                               />
                             </div>

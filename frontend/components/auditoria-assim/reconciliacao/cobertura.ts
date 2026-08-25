@@ -1,4 +1,4 @@
-import type { AuditoriaAssimItem } from '../types'
+import type { AuditoriaAssimItem, VinculoAutorizacao } from '../types'
 
 /**
  * Quando uma sessão conta como coberta — a regra, sem estado nenhum em volta.
@@ -43,6 +43,39 @@ export const SITUACOES_COBERTAS = new Set(['LIBERADA', 'GLOSA_RESOLVIDA'])
  */
 export const SITUACOES_COM_VEREDITO = new Set(['GLOSA', 'CANCELADA'])
 
+/**
+ * A situação da sessão COM o vínculo aplicado — o eco local do que a RPC faz.
+ *
+ * `get_auditoria_assim_periodo` já resolve isto (migration 20260821030000, os
+ * dois ramos no topo do `CASE`): guia vinculada cobrindo o bloco vira
+ * `GLOSA_RESOLVIDA` se havia glosa e `LIBERADA` se não havia. Esta função é a
+ * MESMA regra, do lado de cá, e existe por uma razão só: a tela não pode ficar
+ * dizendo "Glosa · pendência" sobre uma sessão que ela própria acabou de cobrir
+ * só porque a RPC ainda não concorda.
+ *
+ * Ela discorda da RPC em exatamente uma situação — quando aquela migration não
+ * está viva no banco em que a tela está falando. E é uma discordância que erra
+ * para o lado certo: o vínculo está gravado em `autorizacoes_vinculos`, o
+ * cliente o leu, e negá-lo na tela seria mostrar como trabalho a fazer algo que
+ * já foi feito. Com a migration aplicada isto é um no-op — os dois lados dizem
+ * a mesma palavra.
+ *
+ * Aplicada UMA vez, em `montarGrade`, no campo `situacao` do cartão. Todo o
+ * resto (a cor, o rótulo, o badge da gaveta, `cartaoPendente`) lê dali e não
+ * precisa saber que houve vínculo. `origem.situacao` guarda o valor cru.
+ */
+export function situacaoComVinculo(
+  situacao: string | null,
+  vinculo: { tipo: 'vinculo' | 'sem_sessao' } | null | undefined
+): string | null {
+  if (!vinculo || vinculo.tipo !== 'vinculo') return situacao
+  // Falta continua sendo falta: a sessão não aconteceu, e uma guia não a faz
+  // acontecer. Não é caso de borda teórico — `vincular_autorizacao` não impede
+  // vincular a um bloco que virou falta depois.
+  if (SITUACOES_SEM_SESSAO.has(situacao ?? '')) return situacao
+  return situacao === 'GLOSA' ? 'GLOSA_RESOLVIDA' : 'LIBERADA'
+}
+
 /** O instante de uma sessão: "2026-08-24T08:00". Nulo quando falta a hora. */
 function instanteSessao(s: AuditoriaAssimItem): string | null {
   if (!s.data_atendimento) return null
@@ -77,8 +110,55 @@ export function sessaoDecorrida(s: AuditoriaAssimItem, cutoff: string): boolean 
  * Falta não entra: sessão que não aconteceu não podia ser coberta, e cobrar
  * autorização dela é justamente um dos jeitos de estourar a cota.
  */
-export function sessaoSemCobertura(s: AuditoriaAssimItem, cutoff: string): boolean {
+export function sessaoSemCobertura(
+  s: AuditoriaAssimItem,
+  cutoff: string,
+  /**
+   * As triagens vivas, por bloco. Sem elas a conta fica refém de a RPC já ter
+   * aplicado o vínculo — e uma sessão coberta na frente do operador continuaria
+   * contando como "faltando" no cabeçalho e como cartão marcado na faixa de
+   * semanas. Ver `situacaoComVinculo`.
+   */
+  vinculosPorBloco: ReadonlyMap<string, { tipo: 'vinculo' | 'sem_sessao' }> = new Map()
+): boolean {
   if (SITUACOES_SEM_SESSAO.has(s.situacao ?? '')) return false
   if (!sessaoDecorrida(s, cutoff)) return false
-  return !SITUACOES_COBERTAS.has(s.situacao ?? '')
+  const situacao = situacaoComVinculo(s.situacao, vinculosPorBloco.get(s.bloco_id ?? ''))
+  return !SITUACOES_COBERTAS.has(situacao ?? '')
+}
+
+/**
+ * As guias que uma triagem aposentou — a outra metade de "sair da contagem".
+ *
+ * Vincular uma guia externa a uma sessão glosada resolve DUAS pendências de uma
+ * vez, e até 2026-08-24 a tela só baixava uma e meia: a guia saía de "sem
+ * vínculo" (deixa a fila de órfãs) e a sessão saía de "faltando" (vira
+ * GLOSA_RESOLVIDA), mas a GLOSA original continuava contada. Ela é uma linha de
+ * `autorizacoes_assim` com status de recusa, e nada nela muda quando o vínculo é
+ * gravado. O efeito era uma listagem que ficava dizendo "1 glosa" para um
+ * paciente cuja grade não tinha mais um único cartão marcado — o número e os
+ * cartões discordando sobre a mesma semana, que é o defeito que esta tela
+ * inteira existe para caçar, virado contra ela mesma.
+ *
+ * A ponte é a SESSÃO, e não o campo `guia_original` do vínculo: aquele é copiado
+ * de `fila_autorizacoes` no momento da gravação e vem nulo quando a sessão nunca
+ * foi solicitada pelo Pulsar. A sessão coberta continua guardando no campo
+ * `guia` a autorização antiga — o vínculo não a reescreve —, então é dela que se
+ * lê, com certeza, qual guia deixou de pedir tratativa.
+ *
+ * O que sai é a FILA DE TRABALHO, não o histórico: a sessão segue dizendo GLOSA
+ * RESOLVIDA e o motivo da recusa segue por extenso na gaveta. Vale também para a
+ * `CANCELADA` que um vínculo cobriu (aí a sessão vira LIBERADA), pelo mesmo
+ * motivo — a liberação desfeita foi substituída por uma que valeu.
+ */
+export function guiasSubstituidas(
+  sessoes: AuditoriaAssimItem[],
+  vinculosPorBloco: ReadonlyMap<string, VinculoAutorizacao>
+): Set<string> {
+  const substituidas = new Set<string>()
+  if (vinculosPorBloco.size === 0) return substituidas
+  for (const s of sessoes) {
+    if (s.guia && vinculosPorBloco.has(s.bloco_id ?? '')) substituidas.add(s.guia)
+  }
+  return substituidas
 }

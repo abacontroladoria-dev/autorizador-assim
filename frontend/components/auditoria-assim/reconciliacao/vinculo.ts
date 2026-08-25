@@ -30,6 +30,67 @@ import type { CandidataVinculo } from '../types'
 export type SemanaDoMes = { inicio: string; fim: string }
 
 /**
+ * O que se sabe sobre o destino de uma autorização da semana.
+ *
+ * Morava em `LinhaAutorizacao.tsx`, um componente que a grade aposentou em
+ * 2026-08-24 e que ninguém mais importava — o tipo veio para cá, junto do resto
+ * do vocabulário de vínculo, quando ganhou os dois estados de DEPOIS.
+ *
+ * - `sem-vinculo` — a única que autoriza ação, e ela NÃO é calculada no cliente:
+ *   vem de `get_guias_orfas`, a mesma função que alimenta a fila (exclui guia já
+ *   triada antes do `row_number()`, exclui guia capturada pelo próprio Pulsar e
+ *   só considera `status = 'Liberado'`). Uma segunda definição de órfã aqui
+ *   ofereceria vincular guia que a Conferência já considera casada;
+ * - `vinculada` — alguém disse qual sessão ela cobre. Sai de
+ *   `autorizacoes_vinculos`, não da ausência na fila de órfãs;
+ * - `sem-sessao` — alguém disse que ela não cobre sessão nenhuma (autorização
+ *   extra: 39% das órfãs medidas em produção). Mesma fonte;
+ * - `pareada` — o pareamento posicional do banco já a casou com uma sessão da
+ *   semana. Ela não vira cartão próprio: já está impressa no cartão da sessão;
+ * - `fora-da-semana` — o que sobra, e só o que sobra. A guia não encosta em
+ *   nenhuma sessão desta semana e ninguém a triou: pode estar pareada a uma
+ *   sessão da semana vizinha ou ser guia do próprio Pulsar.
+ *
+ * Os dois estados do meio existem porque `fora-da-semana` estava respondendo
+ * por eles. Uma guia recém-vinculada sai da fila de órfãs e continua sem casar
+ * com sessão nenhuma pelo pareamento do banco — a sessão que ela cobre guarda a
+ * guia ANTIGA, a glosada —, então ela caía no `else` e a grade a rotulava
+ * "Outra semana", desmentindo a ação que o operador acabara de tomar.
+ */
+export type EstadoAutorizacao =
+  | 'sem-vinculo'
+  | 'vinculada'
+  | 'sem-sessao'
+  | 'pareada'
+  | 'fora-da-semana'
+
+/**
+ * O dia e a hora que um `bloco_id` já carrega — sem consultar coisa nenhuma.
+ *
+ * `bloco_id` não é um id opaco: é
+ * `concat_ws('_', paciente_id, data_atendimento, codigo_tuss, hora_inicial)`,
+ * montado por `get_auditoria_assim_periodo` e repetido tal e qual em
+ * `fn_blocos_assim` e em `autorizacoes_vinculos.bloco_id` (cujo comentário de
+ * coluna documenta o formato). Nenhum dos quatro pedaços contém `_`.
+ *
+ * Serve à ponta que não tem a sessão em mãos: a guia vinculada pode cobrir uma
+ * sessão de outra semana — às vezes de outro mês —, e nesse caso ela não está
+ * entre as linhas carregadas. Ler o bloco é o que permite ao cartão dizer "cobre
+ * Qui 30/07 14:20" em vez de mostrar um identificador cru.
+ *
+ * Nulo quando o formato não bate, e isso inclui de propósito os blocos
+ * sintéticos de falta (`falta_…`), que nunca recebem vínculo.
+ */
+export function sessaoDoBloco(blocoId: string | null): { dia: string; hora: string } | null {
+  if (!blocoId) return null
+  const partes = blocoId.split('_')
+  if (partes.length !== 4) return null
+  const [, dia, , hora] = partes
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dia) || !/^\d{2}:\d{2}/.test(hora)) return null
+  return { dia, hora: hora.slice(0, 5) }
+}
+
+/**
  * O papel de um cartão enquanto a grade está escolhendo a sessão de uma guia.
  *
  * - `foco` — a própria guia sendo vinculada. Não é alvo de clique: é o sujeito

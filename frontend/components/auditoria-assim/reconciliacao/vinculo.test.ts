@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { candidataElegivel, distanciaCurta, mapearCandidatas } from './vinculo'
+import { candidataElegivel, distanciaCurta, mapearCandidatas, sessaoDoBloco } from './vinculo'
 import type { CandidataVinculo } from '../types'
 
 /** As quatro semanas de agosto/2026 que o mês carregado cobre. */
@@ -115,6 +115,30 @@ describe('mapearCandidatas', () => {
     )
     expect(mapa.totalElegiveis).toBe(0)
     expect(mapa.porSemana.size).toBe(0)
+  })
+})
+
+/**
+ * O `bloco_id` é a única pista que a guia vinculada tem da sessão que cobre: ela
+ * pode estar noutra semana — a janela é de 7 dias retroativos —, e nesse caso a
+ * linha da sessão não está carregada para consultar.
+ */
+describe('sessaoDoBloco', () => {
+  it('lê dia e hora do bloco real da produção', () => {
+    expect(sessaoDoBloco('11649_2026-08-03_22070435_11:20:00')).toEqual({
+      dia: '2026-08-03',
+      hora: '11:20',
+    })
+  })
+
+  it('devolve nulo em vez de adivinhar quando o formato não bate', () => {
+    // Bloco sintético de falta, id vazio, e um bloco com pedaço a menos: nenhum
+    // deles recebe vínculo, e inventar uma data aqui viraria um "cobre Qui
+    // 30/07" que não existe.
+    expect(sessaoDoBloco('falta_abc')).toBeNull()
+    expect(sessaoDoBloco(null)).toBeNull()
+    expect(sessaoDoBloco('11649_2026-08-03_22070435')).toBeNull()
+    expect(sessaoDoBloco('11649_03/08/2026_22070435_11:20:00')).toBeNull()
   })
 })
 
