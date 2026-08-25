@@ -1,16 +1,24 @@
-// Rótulos de execução da TiTa: as duas gerações têm de dar a MESMA resposta, e
-// uma terceira geração tem de PARAR a tela em vez de ser adivinhada.
+// Rótulos de execução da TiTa: as duas gerações de Justificativa têm de dar a
+// MESMA resposta, e uma terceira geração desconhecida tem de AVISAR em vez de
+// ser adivinhada.
 //
 // Até 21/08/2026 uma sessão que não aconteceu chegava como Status 'Cancelado'
 // + Justificativa 'Falta do Paciente' / 'Falta do Profissional' / 'Falta de
 // Ambos'. De 24/08/2026 em diante a TiTa passou a usar 'Não realizado —
-// paciente' / '— prestador' / '— clínica'. A base histórica não foi reescrita,
-// então as duas convivem para sempre — e o teste guarda justamente isso.
+// paciente' / '— prestador' / '— clínica' NA MESMA COLUNA — confirmado pelo
+// usuário em 25/08/2026 contra captura de tela da própria TiTa: `Status`
+// PERMANECE 'Cancelado' para sempre, quem muda é só `Justificativa`. (Uma
+// primeira versão desta correção, mais cedo no mesmo dia, havia suposto o
+// contrário — que o rótulo novo apareceria em `Status` — e foi corrigida
+// aqui.) A base histórica não foi reescrita, então as duas gerações de
+// Justificativa convivem para sempre — e o teste guarda justamente isso.
 //
-// O que está em jogo é dinheiro: `cancelado` (isCancelado) é o que impede
-// diária, ETA e PA de sessão que não ocorreu (ver calculo.ts). Se um rótulo
-// novo passar batido, um dia inteiro de sessões não realizadas volta a gerar
-// diária sem ninguém perceber.
+// O que está em jogo em `Status`/`isCancelado` é dinheiro: é o que impede
+// diária, ETA e PA de sessão que não ocorreu (ver calculo.ts) — mas como
+// `Status` nunca varia, esse risco é hipotético, mantido por tolerância. O que
+// está em jogo em `Justificativa`/`motivoNaoRealizado` é só a coluna de
+// exibição "Presença TiTa" — sem dinheiro envolvido, mas errar quem faltou é
+// grave do mesmo jeito.
 //
 // Roda no `npm test` (vitest), a partir de `frontend/`:
 //
@@ -26,6 +34,7 @@ import assert from "node:assert/strict"
 import {
   classificarStatusExecucao, isCancelado, isFaltaDoPaciente,
   motivoNaoRealizado, rotulosDeExecucaoDesconhecidos, veredictoRotuloDesconhecido,
+  justificativaDesconhecida, avisoJustificativaDesconhecida,
 } from "./rotulosExecucao"
 import { normalizarGradeParaSessao, type CsvGradeRow } from "./relatorio"
 
@@ -33,21 +42,25 @@ import { normalizarGradeParaSessao, type CsvGradeRow } from "./relatorio"
 // propósito, e não por acaso. gradeRemuneracao.ts (onde `avaliarCoberturaGrade`
 // de fato mora) importa @/lib/grade/fonte para falar com o Supabase, e este
 // projeto não tem um vitest.config.ts que resolva o alias "@/…" para os
-// testes. A guarda de rótulo desconhecido foi por isso desenhada para viver
-// aqui como função pura (`veredictoRotuloDesconhecido`) — gradeRemuneracao.ts
-// só a chama; é dela que este arquivo testa a decisão.
+// testes. As guardas de vocabulário foram por isso desenhadas para viver aqui
+// como funções puras (`veredictoRotuloDesconhecido`,
+// `avisoJustificativaDesconhecida`) — gradeRemuneracao.ts só as chama; é delas
+// que este arquivo testa a decisão.
 
-// ─── Vocabulário ─────────────────────────────────────────────────────────────
+// ─── Vocabulário de `Status` ─────────────────────────────────────────────────
 
-// Todo o vocabulário medido na tabela em 24/08/2026 (187.079 linhas) mais os
-// três rótulos novos. A tabela é a especificação: cada linha diz o texto e o
-// que ele significa para o cálculo.
+// O vocabulário de `Status` medido na tabela em 24/08/2026 (187.079 linhas):
+// só 4 rótulos mais vazio, e nenhuma variação além deles até hoje. As linhas
+// com 'Não realizado' NÃO são um caso real confirmado em `Status` — são
+// tolerância: `classificarStatusExecucao` aceita essa variação onde quer que
+// apareça, mesmo sem precedente ali, porque não custa nada aceitar.
 const VOCABULARIO: Array<[string, ReturnType<typeof classificarStatusExecucao>]> = [
   ["Realizado", "realizado"],
   ["Cancelado", "nao_realizado"],
   ["Em Conflito", "conflito"],
   ["Planejado/Pendente", "pendente"],
   ["", "ausente"],
+  // Hipotético — ver o comentário acima.
   ["Não realizado — paciente", "nao_realizado"],
   ["Não realizado — prestador", "nao_realizado"],
   ["Não realizado — clínica", "nao_realizado"],
@@ -154,6 +167,40 @@ test("veredictoRotuloDesconhecido troca o texto por contexto, não a decisão", 
   assert.ok(tratativas.erro.includes("adesão"), tratativas.erro)
 })
 
+// ─── A rede real: `Justificativa` desconhecida numa linha `Cancelado` ────────
+//
+// Esta é a mudança que de fato aconteceu em 24/08/2026. Diferente da rede
+// acima (sobre `Status`), esta NUNCA reprova — vira aviso, porque
+// `Justificativa` não decide pagamento (ver o cabeçalho do arquivo).
+
+test("justificativaDesconhecida só se qualifica numa linha Cancelado com texto ilegível", () => {
+  // Reconhecido — nas duas gerações — não conta como desconhecido.
+  assert.equal(justificativaDesconhecida("Falta do Paciente", "Cancelado"), null)
+  assert.equal(justificativaDesconhecida("Não realizado — prestador", "Cancelado"), null)
+
+  // Sessão que aconteceu: texto solto em Justificativa não é sintoma de nada.
+  assert.equal(justificativaDesconhecida("Qualquer coisa", "Realizado"), null)
+  assert.equal(justificativaDesconhecida("Qualquer coisa", "Planejado/Pendente"), null)
+
+  // Cancelado sem justificativa: vazio não é "desconhecido", é "não informado".
+  assert.equal(justificativaDesconhecida("", "Cancelado"), null)
+  assert.equal(justificativaDesconhecida(null, "Cancelado"), null)
+
+  // O caso real: Cancelado + texto que não bate com nenhum dos 6 motivos.
+  assert.equal(justificativaDesconhecida("Sessão remarcada por engano", "Cancelado"), "Sessão remarcada por engano")
+})
+
+test("avisoJustificativaDesconhecida nunca reprova — é só aviso", () => {
+  assert.equal(avisoJustificativaDesconhecida(0, []), null)
+
+  const aviso = avisoJustificativaDesconhecida(3, ["Sessão remarcada por engano"])
+  assert.ok(aviso)
+  assert.ok(aviso.includes("Sessão remarcada por engano"), aviso)
+  // Precisa deixar claro que pagamento não é afetado — é a diferença de
+  // severidade que justifica não bloquear o fechamento por causa disto.
+  assert.ok(aviso.includes("não afeta o pagamento"), aviso)
+})
+
 // ─── Ponta a ponta, pela normalização da grade ───────────────────────────────
 
 function linha(status: string, justificativa: string | null): CsvGradeRow {
@@ -172,14 +219,17 @@ function linha(status: string, justificativa: string | null): CsvGradeRow {
   }
 }
 
-test("sessão não realizada classifica como Cancelado nas duas gerações", () => {
+test("sessão não realizada classifica como Cancelado com qualquer Justificativa", () => {
   const casos: [string, string | null][] = [
+    // Real: Status sempre 'Cancelado', Justificativa carrega o motivo.
     ["Cancelado", "Falta do Paciente"],
     ["Cancelado", "Falta do Profissional"],
     ["Cancelado", "Falta de Ambos"],
+    ["Cancelado", "Não realizado — paciente"],
+    ["Cancelado", "Não realizado — prestador"],
+    ["Cancelado", "Não realizado — clínica"],
+    // Hipotético (Status variando) — mantido por tolerância, ver VOCABULARIO.
     ["Não realizado — paciente", null],
-    ["Não realizado — prestador", null],
-    ["Não realizado — clínica", null],
   ]
   for (const [status, just] of casos) {
     const [s] = normalizarGradeParaSessao([linha(status, just)])
@@ -188,10 +238,11 @@ test("sessão não realizada classifica como Cancelado nas duas gerações", () 
 })
 
 test("sessão não realizada COM evolução vira inconsistência, não pagamento", () => {
-  // "Cancelado evoluído" é o que segura a sessão para conferência manual. Com o
-  // rótulo novo lido como "realizado", ela cairia em "Evolução normal" e seria
-  // paga direto — o caminho exato pelo qual o dinheiro escaparia.
-  const r = { ...linha("Não realizado — clínica", null), "Possui Tratativa": "Sim", "Nome Profissional Tratativa": "Fulano de Tal" }
+  // "Cancelado evoluído" é o que segura a sessão para conferência manual. Se
+  // 'Cancelado' fosse lido como "realizado" por algum motivo, ela cairia em
+  // "Evolução normal" e seria paga direto — o caminho exato pelo qual o
+  // dinheiro escaparia.
+  const r = { ...linha("Cancelado", "Não realizado — clínica"), "Possui Tratativa": "Sim", "Nome Profissional Tratativa": "Fulano de Tal" }
   const [s] = normalizarGradeParaSessao([r])
   assert.equal(s.classificacao, "Cancelado evoluído")
 })
@@ -199,7 +250,7 @@ test("sessão não realizada COM evolução vira inconsistência, não pagamento
 test("presencaTita = Não só quando o paciente é quem faltou", () => {
   const naoCompareceu: [string, string | null][] = [
     ["Cancelado", "Falta do Paciente"],
-    ["Não realizado — paciente", null],
+    ["Cancelado", "Não realizado — paciente"],
   ]
   for (const [status, just] of naoCompareceu) {
     const [s] = normalizarGradeParaSessao([linha(status, just)])
@@ -212,8 +263,8 @@ test("presencaTita = Não só quando o paciente é quem faltou", () => {
   const compareceu: [string, string | null][] = [
     ["Cancelado", "Falta do Profissional"],
     ["Cancelado", "Falta de Ambos"],
-    ["Não realizado — prestador", null],
-    ["Não realizado — clínica", null],
+    ["Cancelado", "Não realizado — prestador"],
+    ["Cancelado", "Não realizado — clínica"],
     ["Realizado", null],
   ]
   for (const [status, just] of compareceu) {

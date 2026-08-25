@@ -19,16 +19,19 @@ export function parseGradeCsv(file: File): Promise<CsvGradeRow[]> {
           return
         }
         // Duas formas de o arquivo "mudar", e as duas recusam a carga: mudou o
-        // MODELO (coluna que sumiu, acima) ou mudou o VOCABULÁRIO (rótulo de
-        // execução que este código não sabe ler, aqui). A segunda é a mais
-        // perigosa das duas justamente porque o arquivo continua bem formado:
-        // em 24/08/2026 a TiTa renomeou 'Cancelado' para 'Não realizado — …', e
-        // um rótulo ilegível faz sessão não realizada passar por realizada — e
-        // gerar diária, ETA e PA. Ver rotulosExecucao.ts.
+        // MODELO (coluna que sumiu, acima) ou mudou o VOCABULÁRIO de `Status`
+        // (rótulo de execução que este código não sabe ler, aqui). Reforço para
+        // um vocabulário confirmado fechado (ver rotulosExecucao.ts) — sem caso
+        // conhecido até hoje, mas mantido porque, se `Status` algum dia trouxer
+        // algo ilegível, a sessão passaria por realizada e geraria diária, ETA e
+        // PA indevidos.
         //
-        // O caminho do banco tem a mesma guarda em avaliarCoberturaGrade(); o
-        // CSV é a saída de emergência das telas, e uma saída sem a guarda seria
-        // um jeito de contornar a proteção sem perceber.
+        // A mudança real de vocabulário de 24/08/2026 foi em `Justificativa`, não
+        // em `Status` — e não decide pagamento, só a exibição de "Presença
+        // TiTa" (ver justificativaDesconhecida em rotulosExecucao.ts). Por isso
+        // NÃO tem guarda equivalente aqui: recusar o upload inteiro por uma
+        // coluna que não move dinheiro seria desproporcional, e o caminho do
+        // banco já avisa (sem bloquear) via avaliarCoberturaGrade().
         const desconhecidos = rotulosDeExecucaoDesconhecidos(
           data.map(r => getCol(r, ["Status"])),
         ).slice(0, 5)
