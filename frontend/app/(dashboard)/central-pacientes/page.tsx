@@ -8,7 +8,10 @@ import FiltersBar from '@/components/central/FiltersBar'
 import AttendanceList from '@/components/central/AttendanceList'
 import SidePanel from '@/components/central/SidePanel'
 import { useHeader } from '@/contexts/HeaderContext'
-import { listarCentralPacientes } from '@/services/central-pacientes.service'
+import {
+  buscarCoberturaDasGlosas,
+  listarCentralPacientes,
+} from '@/services/central-pacientes.service'
 import { getRowId } from '@/lib/central/rowId'
 import { resolverStatus, houveSubstituicao } from '@/lib/central/severity'
 
@@ -73,7 +76,21 @@ export default function CentralTerapeuticaPage() {
       // Request guard: só a última requisição disparada escreve no estado.
       if (reqId !== reqIdRef.current) return
 
-      const lista = response || []
+      // Qual guia externa cobriu cada glosa (aba Reconciliação). Sem glosa no
+      // dia isto não vai à rede. O vínculo é ANEXADO — `status_operacional`
+      // continua 'glosa', que é o que preserva o motivo da recusa na ficha.
+      const coberturas = await buscarCoberturaDasGlosas(response || [])
+
+      // Segundo guard: houve mais um await desde o primeiro.
+      if (reqId !== reqIdRef.current) return
+
+      const lista = coberturas.size
+        ? (response || []).map((item) => {
+            const vinculo = item?.id ? coberturas.get(String(item.id)) : undefined
+            return vinculo ? { ...item, vinculo } : item
+          })
+        : response || []
+
       setDados(lista)
 
       // Validação 2: seleção órfã. Se o item selecionado sumiu, limpa.
@@ -129,6 +146,21 @@ export default function CentralTerapeuticaPage() {
           }, 400)
         }
       )
+      // Vincular uma guia na aba Reconciliação resolve uma glosa desta lista.
+      // Sem esta assinatura o operador voltava para cá e via a glosa ainda de
+      // pé, e só um F5 desmentia a tela. Sem filtro de data: a tabela é um livro
+      // de triagem manual (dezenas de linhas por mês) e o bloco coberto pode ser
+      // de qualquer dia — a recarga silenciosa custa menos que o filtro errado.
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'autorizacoes_vinculos' },
+        () => {
+          if (debounceRef.current) clearTimeout(debounceRef.current)
+          debounceRef.current = setTimeout(() => {
+            carregar({ silent: true })
+          }, 400)
+        }
+      )
       .subscribe()
 
     return () => {
@@ -171,7 +203,11 @@ export default function CentralTerapeuticaPage() {
         const key = resolverStatus(a).key
 
         if (foco === 'resolvido') {
-          return key === 'autorizado' || key === 'presenca_confirmada'
+          return (
+            key === 'autorizado' ||
+            key === 'presenca_confirmada' ||
+            key === 'glosa_resolvida'
+          )
         }
 
         if (foco === 'andamento') {
@@ -294,13 +330,22 @@ export default function CentralTerapeuticaPage() {
       falta_paciente: 0,
       falta_terapeuta: 0,
       sem_autorizacao: 0,
+      glosa: 0,
       substituicoes: 0,
     }
 
     for (const a of dados) {
       const key = resolverStatus(a).key
 
-      if (key === 'autorizado' || key === 'presenca_confirmada') acc.autorizados++
+      // A glosa coberta soma com os autorizados, e não num chip próprio: existe
+      // guia liberada, o desfecho é o mesmo. O que ela muda é o chip de Glosa,
+      // que desce — é assim que a recuperação aparece como número na tela.
+      if (
+        key === 'autorizado' ||
+        key === 'presenca_confirmada' ||
+        key === 'glosa_resolvida'
+      )
+        acc.autorizados++
       else if (
         key === 'processando' ||
         key === 'pendente' ||
@@ -310,6 +355,7 @@ export default function CentralTerapeuticaPage() {
       else if (key === 'falta_paciente') acc.falta_paciente++
       else if (key === 'falta_terapeuta') acc.falta_terapeuta++
       else if (key === 'erro') acc.sem_autorizacao++
+      else if (key === 'glosa') acc.glosa++
 
       if (houveSubstituicao(a)) acc.substituicoes++
     }

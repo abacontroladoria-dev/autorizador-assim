@@ -1,7 +1,7 @@
 'use client'
 
 import { memo } from 'react'
-import { CheckCircle2, Loader2, UserMinus, UserX, AlertTriangle, Repeat2 } from 'lucide-react'
+import { CheckCircle2, Loader2, UserMinus, UserX, AlertTriangle, Ban, Repeat2 } from 'lucide-react'
 
 export interface Indicadores {
   total: number
@@ -10,6 +10,12 @@ export interface Indicadores {
   falta_paciente: number
   falta_terapeuta: number
   sem_autorizacao: number
+  /**
+   * Recusas da ASSIM ainda de pé. A glosa que um vínculo cobriu NÃO entra aqui —
+   * ela conta em `autorizados`, como a Auditoria faz: este número dimensiona
+   * trabalho a fazer, e ela não pede nada. Ver `severity.ts`.
+   */
+  glosa: number
   substituicoes: number
 }
 
@@ -31,10 +37,14 @@ function DayPulse({ indicadores: i, foco, setFoco }: Props) {
     { key: 'andamento', valor: i.em_processo, cor: 'bg-slate-300' },
     { key: 'falta_paciente', valor: i.falta_paciente, cor: 'bg-amber-400' },
     { key: 'falta_terapeuta', valor: i.falta_terapeuta, cor: 'bg-rose-500' },
+    // Violeta é a família semântica da glosa em todo o sistema (ver a nota do
+    // topo de SituacaoBadge.tsx) e não disputa a barra com nenhum outro estado.
+    { key: 'glosa', valor: i.glosa, cor: 'bg-violet-500' },
     { key: 'erro', valor: i.sem_autorizacao, cor: 'bg-rose-600' },
   ].filter((s) => s.valor > 0)
 
-  const pendencias = i.falta_paciente + i.falta_terapeuta + i.sem_autorizacao
+  const pendencias =
+    i.falta_paciente + i.falta_terapeuta + i.sem_autorizacao + i.glosa
 
   const chips = [
     {
@@ -45,6 +55,19 @@ function DayPulse({ indicadores: i, foco, setFoco }: Props) {
       text: 'text-rose-700',
       dot: 'bg-rose-500',
       ring: 'ring-rose-200 bg-rose-50',
+    },
+    // A glosa era invisível no cabeçalho: não entrava em chip, nem na barra, nem
+    // nas pendências. Uma recusa da ASSIM some do topo da tela é justamente o
+    // tipo de lacuna que esta página existe para não deixar acontecer — e sem
+    // este chip a glosa resolvida não tem de onde descer.
+    {
+      key: 'glosa',
+      label: 'Glosa',
+      valor: i.glosa,
+      icon: Ban,
+      text: 'text-violet-700',
+      dot: 'bg-violet-500',
+      ring: 'ring-violet-200 bg-violet-50',
     },
     {
       key: 'falta_paciente',

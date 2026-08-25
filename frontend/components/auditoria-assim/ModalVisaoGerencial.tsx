@@ -1,10 +1,16 @@
 'use client'
 
 import { createPortal } from 'react-dom'
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { ChartColumn, RefreshCw, Search, X } from 'lucide-react'
 import { useModalDialog } from '@/hooks/useModalDialog'
-import { useResumoGerencial, type FatiaKpis, type MetricaFoco } from '@/hooks/useResumoGerencial'
+import {
+  normalizarNome,
+  useResumoGerencial,
+  type FatiaKpis,
+  type MetricaFoco,
+  type PacienteSugerido,
+} from '@/hooks/useResumoGerencial'
 import { KPI_VISUAL, ORDEM_KPIS, type MetricaKpi } from './kpisVisual'
 import { useGlosaCodigos } from '@/hooks/useGlosaCodigos'
 
@@ -23,17 +29,75 @@ function porExtenso(iso: string): string {
   return `${iso.slice(8, 10)}/${iso.slice(5, 7)}/${iso.slice(0, 4)}`
 }
 
+
 export default function ModalVisaoGerencial({ aberto, onClose }: Props) {
   const { refDialogo, propsDialogo } = useModalDialog(aberto, onClose, 'titulo-visao-gerencial')
   const r = useResumoGerencial(aberto)
   const glosaCodigos = useGlosaCodigos()
-  const [montado, setMontado] = useState(false)
+  const uid = useId()
 
-  useEffect(() => setMontado(true), [])
-  if (!aberto || !montado) return null
+  const { metrica: metricaAtual, setMetrica } = r
 
-  const visual = KPI_VISUAL[r.metrica as MetricaKpi] ?? KPI_VISUAL.glosas
-  const totalNoFoco = r.totais[r.metrica]
+  /**
+   * Navegação por setas na fileira de tabs — requisito do padrão, não extra.
+   *
+   * Com tabindex rotativo (só a selecionada é tabulável), Tab entra e sai da
+   * fileira inteira de uma vez e as setas andam DENTRO dela. Sem isto, chegar
+   * ao gráfico pelo teclado custaria nove Tabs.
+   *
+   * Aceita ←→ e ↑↓ porque a grade quebra em três linhas no celular e em cinco
+   * no tablet: qual seta é "a próxima" muda com a largura, e exigir a certa
+   * seria exigir que a pessoa soubesse o breakpoint. Home/End vão às pontas.
+   * A seleção segue o foco — trocar de métrica é recálculo em memória, não
+   * custa uma ida ao banco que justificasse exigir Enter.
+   *
+   * Com NENHUMA selecionada (o estado inicial), a primeira seta entra na fileira
+   * pela ponta correspondente: → começa no primeiro card, ← no último. Recusar a
+   * tecla nesse estado deixaria o teclado sem caminho para escolher o foco.
+   */
+  const aoTeclarNasTabs = useCallback(
+    (e: React.KeyboardEvent<HTMLDivElement>) => {
+      const atual = metricaAtual ? ORDEM_KPIS.indexOf(metricaAtual as MetricaKpi) : -1
+
+      let alvo: number
+      switch (e.key) {
+        case 'ArrowRight': case 'ArrowDown':
+          alvo = atual < 0 ? 0 : (atual + 1) % ORDEM_KPIS.length
+          break
+        case 'ArrowLeft': case 'ArrowUp':
+          alvo = atual < 0 ? ORDEM_KPIS.length - 1 : (atual - 1 + ORDEM_KPIS.length) % ORDEM_KPIS.length
+          break
+        case 'Home': alvo = 0; break
+        case 'End': alvo = ORDEM_KPIS.length - 1; break
+        default: return
+      }
+
+      e.preventDefault()
+      const proxima = ORDEM_KPIS[alvo]
+      if (!proxima) return
+      setMetrica(proxima)
+      // O foco tem de acompanhar a seleção, senão o tabindex rotativo deixa o
+      // foco numa tab que passou a ser `tabIndex={-1}` e o próximo Tab recomeça
+      // do topo do diálogo. `getElementById` e não `querySelector`: o `useId`
+      // devolve identificadores com dois-pontos, que quebram um seletor CSS.
+      document.getElementById(`${uid}-tab-${proxima}`)?.focus()
+    },
+    [metricaAtual, setMetrica, uid]
+  )
+
+  // `createPortal` precisa de um `document`, que no servidor não existe. Era um
+  // `useState(false)` virado por efeito — o único erro de lint do arquivo
+  // (setState em cascata) e, no fim, um estado a mais para responder uma
+  // pergunta que a própria plataforma responde. Não há risco de divergência de
+  // hidratação: `aberto` nasce de `useState(false)` no FiltrosAuditoria e só
+  // vira true por clique, ou seja, sempre depois da hidratação.
+  if (!aberto || typeof document === 'undefined') return null
+
+  // Numa const local, e não lido de `r.metrica` em cada uso: é o que permite ao
+  // TypeScript estreitar `MetricaFoco | null` para `MetricaFoco` dentro dos
+  // ramos guardados, sem `!` espalhado pelo JSX.
+  const metrica = r.metrica
+  const visual = metrica ? KPI_VISUAL[metrica as MetricaKpi] : null
   const totalSessoes = r.totais.total + r.totais.faltas + r.totais.faltas_terapeuta
 
   return createPortal(
@@ -54,7 +118,9 @@ export default function ModalVisaoGerencial({ aberto, onClose }: Props) {
             ? 'Calculando o resumo do período.'
             : r.erro
               ? r.erro
-              : `${totalNoFoco} em ${visual.title.replace('\n', ' ')} entre ${porExtenso(r.de)} e ${porExtenso(r.ate)}, sobre ${totalSessoes} sessões em ${r.diasComDados} dia(s).`}
+              : metrica && visual
+                ? `${r.totais[metrica]} em ${visual.title.replace('\n', ' ')} entre ${porExtenso(r.de)} e ${porExtenso(r.ate)}, sobre ${totalSessoes} sessões em ${r.diasComDados} dia(s).`
+                : `${totalSessoes} sessões entre ${porExtenso(r.de)} e ${porExtenso(r.ate)}, em ${r.diasComDados} dia(s). Escolha um indicador para ver a evolução.`}
         </p>
 
         {/* ── Cabeçalho ────────────────────────────────────────────────── */}
@@ -111,17 +177,14 @@ export default function ModalVisaoGerencial({ aberto, onClose }: Props) {
               ida ao banco, e todo o resto do modal (totais e gráfico) passa a
               falar do paciente buscado. É também o que ABRE as quatro quebras
               do rodapé, que não existem enquanto o foco é o período inteiro. */}
-          <label className="relative flex-1 sm:max-w-64">
-            <span className="sr-only">Buscar paciente pelo nome</span>
-            <Search className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-slate-400" />
-            <input
-              type="search"
-              value={r.busca}
-              onChange={(e) => r.setBusca(e.target.value)}
-              placeholder="Buscar paciente"
-              className="h-11 w-full rounded-xl border border-slate-200 pr-3 pl-10 text-sm text-slate-800 focus:border-transparent focus:ring-2 focus:ring-brand focus:outline-none"
-            />
-          </label>
+          <BuscaPaciente
+            valor={r.busca}
+            pacientes={r.pacientesDoPeriodo}
+            ancorado={r.pacienteId !== null}
+            metrica={metrica}
+            aoDigitar={r.definirBusca}
+            aoEscolher={r.escolherPaciente}
+          />
 
           <div className="flex flex-1 items-center justify-between gap-3 sm:justify-end">
             <p className="text-xs text-slate-500">
@@ -143,7 +206,10 @@ export default function ModalVisaoGerencial({ aberto, onClose }: Props) {
             <button
               onClick={r.recarregar}
               disabled={r.carregando}
-              className="flex h-9 items-center gap-1.5 rounded-lg px-2.5 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none disabled:opacity-50"
+              // h-11, como todo controle desta tela: o DESIGN.md põe 44px como
+              // piso de alvo de toque "sem exceções", e este botão era a única
+              // exceção do modal.
+              className="flex h-11 shrink-0 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none disabled:opacity-50"
             >
               <RefreshCw size={14} className={r.carregando ? 'animate-spin' : ''} />
               Atualizar
@@ -151,18 +217,43 @@ export default function ModalVisaoGerencial({ aberto, onClose }: Props) {
           </div>
         </div>
 
-        {/* ── Os nove indicadores, que também escolhem o foco ──────────── */}
-        <div className="border-t border-slate-100 px-4 py-3 sm:px-8">
+        {/* ── Os nove indicadores, que também escolhem o foco ───────────────
+
+            São TABS, e nenhuma vem selecionada. Este é o placar: o primeiro
+            passo da tela é ver os nove números do período, e só depois escolher
+            um para abrir a evolução e o detalhamento abaixo — a mesma escada que
+            a busca já faz com as quebras.
+
+            Nascer com uma acesa era o bug de leitura reportado da tela ("ao
+            abrir, o KPI já está vindo selecionado"): com o tingimento da tela
+            diária, onde card aceso significa "filtro aplicado à tabela", o modal
+            prometia um filtro que ninguém tinha ligado e que clique nenhum
+            desligava. Sem seleção inicial não há o que desfazer, e o que a
+            pessoa vê na abertura é o período inteiro.
+
+            Tablist sem tab selecionada é estado previsto no padrão: o `tabIndex`
+            rotativo passa para a PRIMEIRA, para o teclado ter por onde entrar na
+            fileira. */}
+        <div
+          role="tablist"
+          aria-label="Indicador em foco"
+          onKeyDown={aoTeclarNasTabs}
+          className="border-t border-slate-100 px-4 py-3 sm:px-8"
+        >
           <div className="grid grid-cols-3 gap-2 sm:grid-cols-5 lg:grid-cols-9">
-            {ORDEM_KPIS.map((metrica) => (
+            {ORDEM_KPIS.map((kpi, i) => (
               <CardMetrica
-                key={metrica}
-                metrica={metrica}
-                valor={r.totais[metrica]}
+                key={kpi}
+                id={`${uid}-tab-${kpi}`}
+                painelId={`${uid}-painel`}
+                metrica={kpi}
+                valor={r.totais[kpi]}
                 total={totalSessoes}
                 carregando={r.carregando}
-                ativo={r.metrica === metrica}
-                onSelecionar={() => r.setMetrica(metrica)}
+                ativo={metrica === kpi}
+                // Sem seleção, a primeira carrega o tabindex da fileira.
+                tabulavel={metrica ? metrica === kpi : i === 0}
+                onSelecionar={() => r.setMetrica(kpi)}
               />
             ))}
           </div>
@@ -173,7 +264,22 @@ export default function ModalVisaoGerencial({ aberto, onClose }: Props) {
             tema escuro casa com `.dark .bg-slate-50`, e esse seletor NÃO pega a
             classe gerada por `bg-slate-50/60` — a faixa inteira ficava clara no
             escuro, calada. Mesma classe que o ModalTokenMensal usa. */}
-        <div className="flex-1 overflow-y-auto border-t border-slate-100 bg-slate-50 px-4 py-4 sm:px-8">
+        {/* O painel das tabs. `tabIndex={0}` não é só requisito do padrão: esta
+            é a região que rola, e região rolável precisa ser alcançável pelo
+            teclado para poder ser rolada. */}
+        <div
+          id={`${uid}-painel`}
+          role="tabpanel"
+          // Sem tab selecionada não há quem rotule o painel: apontar para uma
+          // tab que não está selecionada faria o leitor de tela anunciar um foco
+          // que a tela não tem.
+          aria-labelledby={metrica ? `${uid}-tab-${metrica}` : undefined}
+          tabIndex={0}
+          // Anel para dentro, não `outline-none` seco: o painel é focável (é ele
+          // que rola), e elemento focável sem indicador visível é armadilha de
+          // teclado — a pessoa perde de vista onde está.
+          className="flex-1 overflow-y-auto border-t border-slate-100 bg-slate-50 px-4 py-4 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset focus-visible:outline-none sm:px-8"
+        >
           {r.erro ? (
             <EstadoVazio
               titulo="Não foi possível carregar o resumo"
@@ -195,11 +301,20 @@ export default function ModalVisaoGerencial({ aberto, onClose }: Props) {
                 detalhe="Não há movimento registrado entre estas datas. Se o período for muito antigo, ele pode ainda não ter sido pré-calculado."
               />
             )
+          ) : !metrica || !visual ? (
+            // O estado de abertura. Não é uma tela vazia por falta de dado — os
+            // nove números estão logo acima, cheios; o que falta é a escolha que
+            // diz o que desenhar aqui. Por isso a frase nomeia a ação e diz onde
+            // ela está, em vez de anunciar ausência.
+            <EstadoVazio
+              titulo="Escolha um indicador acima"
+              detalhe="A evolução no período e o detalhamento por terapia, motivo e unidade seguem o indicador em foco. Os totais de cada um já estão nos cards."
+            />
           ) : (
             <div className="flex flex-col gap-4">
               <Evolucao
                 serie={r.serie}
-                metrica={r.metrica}
+                metrica={metrica}
                 diaria={r.serieDiaria}
                 tone={visual.tone}
                 titulo={visual.title.replace('\n', ' ')}
@@ -219,14 +334,14 @@ export default function ModalVisaoGerencial({ aberto, onClose }: Props) {
                   <Quebra
                     titulo="Por paciente"
                     fatias={r.porPaciente}
-                    metrica={r.metrica}
+                    metrica={metrica}
                     barTone={visual.barTone}
                     vazio="Nenhum paciente com este indicador no período."
                   />
                   <Quebra
                     titulo="Por terapia"
                     fatias={r.porTerapia}
-                    metrica={r.metrica}
+                    metrica={metrica}
                     barTone={visual.barTone}
                     vazio="Nenhuma terapia com este indicador no período."
                   />
@@ -246,14 +361,14 @@ export default function ModalVisaoGerencial({ aberto, onClose }: Props) {
                             ? `${f.chave} · ${glosaCodigos.get(f.chave)}`
                             : f.chave,
                     }))}
-                    metrica={r.metrica}
+                    metrica={metrica}
                     barTone={visual.barTone}
                     vazio="Nenhuma recusa com código no período."
                   />
                   <Quebra
                     titulo="Por unidade"
                     fatias={r.porUnidade}
-                    metrica={r.metrica}
+                    metrica={metrica}
                     barTone={visual.barTone}
                     vazio="Sem unidade identificada no período."
                   />
@@ -275,22 +390,229 @@ export default function ModalVisaoGerencial({ aberto, onClose }: Props) {
   )
 }
 
+/** Quantos pacientes a lista de sugestões oferece de uma vez. */
+const TETO_SUGESTOES = 8
+
 /**
- * O card de um indicador no modal.
+ * A busca por paciente, com sugestões.
  *
- * As classes de cor vêm inteiras de `KPI_VISUAL` — o mesmo mapa que desenha os
- * cards da tela diária. O layout é mais compacto aqui (nove cards convivendo
- * com gráfico e quebras na mesma altura de tela), mas o vocabulário é o mesmo:
- * quem reconhece o violeta de Glosas no dia reconhece no mês.
+ * Era um `<input type="search">` puro, e digitar às cegas custava caro: errar
+ * uma letra devolvia "Nenhum paciente com X no intervalo" sem pista da grafia
+ * certa, dois homônimos viravam um número somado sem oferecer escolha, e — desde
+ * que as quebras passaram a depender da busca — não havia mais como descobrir
+ * QUEM buscar. As sugestões resolvem os três de uma vez.
+ *
+ * **Texto livre continua valendo.** É a diferença para o `SearchCombobox` do
+ * cronograma, que é seleção estrita e marca texto fora da lista como erro: aqui
+ * "silva" achar quinze pessoas é uso legítimo, e o campo não pode chamar isso de
+ * inválido. Escolher na lista é o caminho PRECISO (fixa o `paciente_id`, imune a
+ * homônimo), não o único caminho.
+ *
+ * A gramática de teclado e mouse é a mesma daquele componente, de propósito —
+ * ↓↑ navegam, Enter escolhe, Escape fecha a lista, `onMouseDown` + `preventDefault`
+ * evita o blur comer o clique. O que muda é o vocabulário visual (slate/brand
+ * desta tela, não os tokens do cronograma) e o que faltava lá: `role="combobox"`
+ * e `aria-activedescendant`, sem os quais o leitor de tela não acompanha a
+ * navegação por setas.
+ *
+ * Com o campo vazio a lista mostra os maiores da métrica em foco — ou, na
+ * abertura, quem teve mais sessões no período. Não é enfeite: é o ranking que a
+ * tela perdeu quando as quebras foram para trás da busca.
+ */
+function BuscaPaciente({
+  valor, pacientes, ancorado, metrica, aoDigitar, aoEscolher,
+}: {
+  valor: string
+  pacientes: PacienteSugerido[]
+  /** A busca está presa a um paciente exato (escolhido na lista). */
+  ancorado: boolean
+  /** `null` enquanto nenhum indicador está em foco — a lista então ordena por
+   *  sessões no período, e a frase de "nada encontrado" não cita indicador. */
+  metrica: MetricaFoco | null
+  aoDigitar: (texto: string) => void
+  aoEscolher: (paciente: PacienteSugerido) => void
+}) {
+  const id = useId()
+  const [aberto, setAberto] = useState(false)
+  const [ativo, setAtivo] = useState(-1)
+  const refLista = useRef<HTMLUListElement>(null)
+  // O fechamento adiado do blur, guardado para ser cancelado no desmonte: o
+  // modal pode fechar com o campo em foco, e um timer solto acordaria depois
+  // para mexer em componente que não existe mais.
+  const refFechamento = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => () => { if (refFechamento.current) clearTimeout(refFechamento.current) }, [])
+
+  const sugestoes = useMemo(() => {
+    const alvo = normalizarNome(valor)
+    const base = alvo ? pacientes.filter((p) => p.normalizado.includes(alvo)) : pacientes
+    return base.slice(0, TETO_SUGESTOES)
+  }, [valor, pacientes])
+
+  const rotuloMetrica = metrica ? KPI_VISUAL[metrica as MetricaKpi]?.title.replace('\n', ' ') : null
+  const lista = aberto && sugestoes.length > 0
+
+  function escolher(paciente: PacienteSugerido) {
+    aoEscolher(paciente)
+    setAberto(false)
+    setAtivo(-1)
+  }
+
+  function aoTeclar(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === 'Escape') {
+      // Só fecha a lista. O `useModalDialog` já sabe não fechar o modal
+      // enquanto este campo estiver com `aria-expanded="true"`.
+      if (aberto) { setAberto(false); setAtivo(-1) }
+      return
+    }
+    if (e.key === 'ArrowDown' && !aberto) {
+      e.preventDefault()
+      setAberto(true)
+      setAtivo(0)
+      return
+    }
+    if (!lista) return
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      const proximo = Math.min(ativo + 1, sugestoes.length - 1)
+      setAtivo(proximo)
+      refLista.current?.children[proximo]?.scrollIntoView({ block: 'nearest' })
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      const anterior = Math.max(ativo - 1, 0)
+      setAtivo(anterior)
+      refLista.current?.children[anterior]?.scrollIntoView({ block: 'nearest' })
+    } else if (e.key === 'Enter') {
+      // Com uma sugestão só, Enter escolhe ela mesmo sem navegar — é o atalho
+      // que quem digita o nome inteiro espera.
+      const alvo = ativo >= 0 ? ativo : sugestoes.length === 1 ? 0 : -1
+      if (alvo >= 0 && sugestoes[alvo]) {
+        e.preventDefault()
+        escolher(sugestoes[alvo])
+      }
+    }
+  }
+
+  return (
+    <div className="relative flex-1 sm:max-w-72">
+      <label htmlFor={id} className="sr-only">
+        Buscar paciente pelo nome
+      </label>
+      <Search
+        aria-hidden
+        className="pointer-events-none absolute top-1/2 left-3.5 h-4 w-4 -translate-y-1/2 text-slate-500"
+      />
+      <input
+        id={id}
+        type="search"
+        role="combobox"
+        autoComplete="off"
+        aria-autocomplete="list"
+        aria-expanded={lista}
+        aria-controls={lista ? `${id}-lista` : undefined}
+        aria-activedescendant={lista && ativo >= 0 ? `${id}-opcao-${ativo}` : undefined}
+        aria-describedby={`${id}-dica`}
+        value={valor}
+        onChange={(e) => { aoDigitar(e.target.value); setAberto(true); setAtivo(-1) }}
+        onFocus={() => setAberto(true)}
+        // O atraso deixa o `onMouseDown` da opção chegar antes do fechamento.
+        onBlur={() => {
+          if (refFechamento.current) clearTimeout(refFechamento.current)
+          refFechamento.current = setTimeout(() => { setAberto(false); setAtivo(-1) }, 150)
+        }}
+        onKeyDown={aoTeclar}
+        placeholder="Buscar paciente"
+        className={`h-11 w-full rounded-xl border pr-3 pl-10 text-sm text-slate-800 focus:border-transparent focus:ring-2 focus:ring-brand focus:outline-none ${
+          // Âncora em esmeralda: o campo diz que está preso a UMA pessoa, e não
+          // filtrando por um pedaço de texto que pode casar com várias.
+          ancorado ? 'border-emerald-300 bg-emerald-50/40' : 'border-slate-200'
+        }`}
+      />
+      <span id={`${id}-dica`} className="sr-only">
+        Digite para filtrar, ou use as setas para escolher um paciente da lista.
+        Escolher da lista recorta por pessoa e não por nome, o que separa homônimos.
+      </span>
+
+      {lista && (
+        <ul
+          ref={refLista}
+          id={`${id}-lista`}
+          role="listbox"
+          aria-label="Pacientes do período"
+          // z-20 porque os cards de KPI vêm DEPOIS no DOM e, sem isso, pintam
+          // por cima da lista. `max-h` + rolagem própria para a lista nunca
+          // esbarrar no `overflow-hidden` do modal.
+          className="absolute top-[calc(100%+4px)] right-0 left-0 z-20 max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white py-1 shadow-lg"
+        >
+          {sugestoes.map((paciente, i) => (
+            <li key={paciente.id}>
+              <button
+                type="button"
+                role="option"
+                id={`${id}-opcao-${i}`}
+                aria-selected={i === ativo}
+                onMouseDown={(e) => { e.preventDefault(); escolher(paciente) }}
+                className={`flex w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm transition-colors ${
+                  i === ativo ? 'bg-brand-surface text-brand-fg' : 'text-slate-700 hover:bg-slate-50'
+                }`}
+              >
+                <span className="truncate">{paciente.nome}</span>
+                {/* O número da métrica em foco: ordena a lista, explica a ordem
+                    e é o que separa dois homônimos que, só pelo nome, seriam a
+                    mesma linha duas vezes. */}
+                <span className="shrink-0 text-xs font-semibold tabular-nums text-slate-500">
+                  {paciente.valor}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {aberto && sugestoes.length === 0 && valor.trim() && (
+        <p
+          role="status"
+          className="absolute top-[calc(100%+4px)] right-0 left-0 z-20 rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs text-slate-500 shadow-lg"
+        >
+          Nenhum paciente com esse nome {rotuloMetrica ? `em ${rotuloMetrica.toLowerCase()} ` : ''}no período.
+        </p>
+      )}
+    </div>
+  )
+}
+
+/**
+ * O card de um indicador no modal — uma TAB que troca o que o painel abaixo
+ * mostra.
+ *
+ * O conteúdo vem inteiro de `KPI_VISUAL`, o mesmo mapa da tela diária: quem
+ * reconhece o violeta de Glosas no dia reconhece no mês. **O que NÃO se repete é
+ * o estado ativo**, e essa é a correção. Lá, card aceso significa "filtro
+ * aplicado à tabela", pintado no matiz do próprio status. Repetir esse desenho
+ * aqui — onde aceso significa "é isto que o gráfico está mostrando" — era fazer
+ * o mesmo desenho dizer duas coisas, e foi lido como filtro esquecido.
+ *
+ * A seleção veste o STEEL DA MARCA: borda steel, barra steel no topo e a
+ * elevação. É a Decoration-Free Semantics Rule do DESIGN.md (§242) aplicada ao
+ * pé da letra — matiz que já carrega um status está gasto e não decora, e
+ * indicador de navegação é papel do steel. Sem tingir a superfície, que a One
+ * Steel Rule (§238) reserva: steel é acento, não cor de fundo.
+ *
+ * O matiz da métrica não se perde na ligação card→gráfico: ele continua no
+ * ícone, no número, na pílula e no traço da linha logo abaixo.
  */
 function CardMetrica({
-  metrica, valor, total, carregando, ativo, onSelecionar,
+  id, painelId, metrica, valor, total, carregando, ativo, tabulavel, onSelecionar,
 }: {
+  id: string
+  painelId: string
   metrica: MetricaKpi
   valor: number
   total: number
   carregando: boolean
   ativo: boolean
+  /** Quem carrega o `tabIndex={0}` da fileira. Igual a `ativo`, exceto quando
+   *  nenhuma está selecionada — aí é a primeira. */
+  tabulavel: boolean
   onSelecionar: () => void
 }) {
   const visual = KPI_VISUAL[metrica]
@@ -299,19 +621,38 @@ function CardMetrica({
 
   return (
     <button
+      id={id}
+      role="tab"
+      aria-selected={ativo}
+      aria-controls={painelId}
+      // Tabindex rotativo: só uma da fileira é tabulável, e as setas andam
+      // dentro dela. Ver `aoTeclarNasTabs`.
+      tabIndex={tabulavel ? 0 : -1}
       onClick={onSelecionar}
-      aria-pressed={ativo}
       className={`
-        flex w-full flex-col items-center rounded-xl border-2 p-1.5 text-left shadow-sm transition
-        hover:-translate-y-px hover:shadow-md
-        focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none
-        ${ativo ? `${visual.borderActive} ${visual.bgActive}` : `border-slate-200/80 bg-white ${visual.hoverBorder}`}
+        relative flex w-full flex-col items-center rounded-xl border-2 p-1.5 text-left transition-colors
+        hover:shadow-md motion-safe:transition motion-safe:hover:-translate-y-px
+        focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none
+        ${ativo ? 'border-brand bg-white shadow-md' : `border-slate-200/80 bg-white shadow-sm ${visual.hoverBorder}`}
       `}
     >
+      {/* A barra que liga a tab ao painel. Steel, e a única coisa nova no card:
+          a cor sozinha nunca é o sinal — a borda, a elevação e o `aria-selected`
+          dizem o mesmo. */}
+      {ativo && (
+        <span
+          aria-hidden
+          className="absolute inset-x-4 top-0 h-0.75 rounded-b-full bg-brand"
+        />
+      )}
       <div className={`flex h-7 w-7 items-center justify-center rounded-full ${visual.iconTone}`}>
         <Icon size={13} />
       </div>
-      <p className="mt-1.5 text-center text-[11px] leading-snug font-semibold whitespace-pre-line text-slate-600">
+      <p
+        className={`mt-1.5 text-center text-[11px] leading-snug font-semibold whitespace-pre-line ${
+          ativo ? 'text-slate-900' : 'text-slate-600'
+        }`}
+      >
         {visual.title}
       </p>
       <span className={`mt-1 text-2xl leading-none font-bold ${visual.tone}`}>
@@ -331,8 +672,12 @@ function CardMetrica({
           </span>
         </div>
         <div className="h-1 overflow-hidden rounded-full bg-slate-100">
+          {/* `transition-[width]`, não `transition-all`: só a largura muda, e
+              `all` põe o navegador para vigiar toda propriedade animável do
+              elemento. Sob `prefers-reduced-motion` a barra salta para o valor
+              em vez de correr. */}
           <div
-            className={`h-full rounded-full transition-all duration-500 ${visual.barTone}`}
+            className={`h-full rounded-full motion-safe:transition-[width] motion-safe:duration-500 ${visual.barTone}`}
             style={{ width: `${carregando ? 0 : percent}%` }}
           />
         </div>
@@ -364,9 +709,27 @@ function CardMetrica({
  * que dispensa medir o contêiner; `vector-effect="non-scaling-stroke"` é o que
  * impede esse esticamento de deformar a espessura do traço.
  *
- * Uma série só, então não há legenda: o título nomeia o que está desenhado. Cada
- * ponto responde no hover e no `title`; o pico fica marcado o tempo todo, porque
- * é o número que o cabeçalho cita e ele precisa ter uma data.
+ * Uma série só, então não há legenda: o título nomeia o que está desenhado. O
+ * pico fica marcado o tempo todo, porque é o número que o cabeçalho cita e ele
+ * precisa ter uma data.
+ *
+ * **Ler um ponto não depende de mouse.** A versão anterior punha o valor num
+ * `title` nativo sobre faixas não-focáveis, e isso significava três coisas
+ * ruins: em toque não havia hover, então a série inteira era ilegível num
+ * aparelho — e o PRODUCT.md diz que a ferramenta roda como PWA no celular e
+ * proíbe interação só-por-hover; no teclado não havia como chegar aos pontos; e
+ * `title` não é anunciado de forma confiável por leitor de tela, então o dado
+ * simplesmente não existia para quem usa um.
+ *
+ * A correção é uma superfície ÚNICA de leitura sobre o gráfico, em vez de uma
+ * faixa por ponto. Ela resolve o alvo de toque de raiz: com sessenta faixas cada
+ * uma teria ~10px e nenhuma chegaria perto dos 44px, enquanto uma superfície só
+ * cobre a caixa inteira e o ponto sai da posição do dedo. Teclado entra por ela
+ * (←→, Home/End) e o valor é anunciado por uma região viva no cabeçalho.
+ *
+ * O valor lido mora no CABEÇALHO, não flutuando sobre o ponto. Foi o que
+ * resolveu de vez o rótulo batendo no título do gráfico: no cabeçalho ele tem
+ * lugar fixo, largura previsível e nada para atropelar.
  */
 function Evolucao({
   serie, metrica, diaria, tone, titulo,
@@ -413,12 +776,12 @@ function Evolucao({
     i === 0 || i === n - 1 || (i % passo === 0 && n - 1 - i >= passo / 2)
 
   /**
-   * Teto do traçado, em % da caixa. O gráfico não usa a altura inteira de
-   * propósito: o valor de cada ponto é escrito ACIMA dele no hover, e com o pico
-   * encostado no topo esse número saía da caixa e ia parar em cima do título.
-   * A folga é o espaço reservado para ele.
+   * Teto do traçado, em % da caixa. Uma folga pequena, só para o círculo do pico
+   * não ser cortado pela borda de cima. Era 80 quando o valor era escrito acima
+   * do ponto e precisava de espaço; agora que ele mora no cabeçalho, o traçado
+   * recupera a altura e a variação da série volta a se ler.
    */
-  const TETO = 80
+  const TETO = 92
 
   // Um único ponto não tem "entre": ele fica no meio, sem linha para desenhar.
   const x = (i: number) => (n <= 1 ? 50 : (i / (n - 1)) * 100)
@@ -427,14 +790,45 @@ function Evolucao({
   const pontos = serie.map((fatia, i) => `${x(i)},${100 - altura(fatia.kpis[metrica])}`).join(' ')
   // A área fecha descendo até a base nas duas pontas. Só existe com 2+ pontos.
   const area = n > 1 ? `${x(0)},100 ${pontos} ${x(n - 1)},100` : ''
-  // A faixa de hover de cada ponto ladrilha o vão até o vizinho, então qualquer
-  // lugar da coluna responde — mirar um ponto de 8px seria exigir pontaria.
-  const faixa = n <= 1 ? 100 : 100 / (n - 1)
 
   const iPico = serie.reduce(
     (melhor, fatia, i) => (fatia.kpis[metrica] > serie[melhor].kpis[metrica] ? i : melhor),
     0
   )
+
+  /** O ponto sendo lido — por dedo, por mouse ou por seta. */
+  const [ativo, setAtivo] = useState<number | null>(null)
+  const refCaixa = useRef<HTMLDivElement>(null)
+  const fatiaAtiva = ativo !== null ? serie[ativo] : undefined
+
+  /** O ponto mais próximo do X do ponteiro. Nada de faixa por ponto. */
+  function indiceDoPonteiro(clientX: number): number | null {
+    const caixa = refCaixa.current
+    if (!caixa || n === 0) return null
+    const { left, width } = caixa.getBoundingClientRect()
+    if (width === 0) return null
+    const razao = (clientX - left) / width
+    return Math.min(n - 1, Math.max(0, Math.round(razao * (n - 1))))
+  }
+
+  function aoTeclarNoGrafico(e: React.KeyboardEvent<HTMLDivElement>) {
+    // Escape de propósito NÃO entra aqui: o `useModalDialog` escuta em captura
+    // no document e fecharia o diálogo antes de qualquer coisa. Sair da leitura
+    // é sair do elemento — o blur já limpa.
+    if (e.key === 'ArrowRight') {
+      e.preventDefault()
+      setAtivo((i) => Math.min((i ?? iPico - 1) + 1, n - 1))
+    } else if (e.key === 'ArrowLeft') {
+      e.preventDefault()
+      setAtivo((i) => Math.max((i ?? iPico + 1) - 1, 0))
+    } else if (e.key === 'Home') {
+      e.preventDefault()
+      setAtivo(0)
+    } else if (e.key === 'End') {
+      e.preventDefault()
+      setAtivo(n - 1)
+    }
+  }
 
   return (
     <section className={`rounded-xl border border-slate-200 bg-white p-4 ${tone}`}>
@@ -442,11 +836,26 @@ function Evolucao({
         <h3 className="text-sm font-semibold text-slate-800">
           {titulo} {diaria ? 'por dia' : 'por semana'}
         </h3>
-        <span className="text-xs text-slate-500">pico de {maximo}</span>
+        {/* O mostrador. Região viva porque é ela que anuncia a leitura de cada
+            ponto para quem navega por seta — sem isso, andar pela série com o
+            teclado seria mover um círculo em silêncio. `tabular-nums` para o
+            número não empurrar o texto ao trocar de casa decimal. */}
+        <span
+          role="status"
+          aria-live="polite"
+          className="shrink-0 text-xs tabular-nums text-slate-500"
+        >
+          {fatiaAtiva
+            ? `${rotuloDe(fatiaAtiva.chave)} · ${fatiaAtiva.kpis[metrica]}`
+            : `pico de ${maximo}`}
+        </span>
       </div>
 
       {n === 0 ? (
-        <p className="py-8 text-center text-xs text-slate-400">Sem dias com movimento no intervalo.</p>
+        // slate-500, não slate-400: a 400 dá 2,6:1 sobre branco e reprova nos
+        // 4,5:1 da AA. É texto de estado vazio — justamente o que alguém lê
+        // quando está perdido, e o pior lugar para economizar contraste.
+        <p className="py-8 text-center text-xs text-slate-500">Sem dias com movimento no intervalo.</p>
       ) : (
         // A folga lateral existe para o primeiro e o último ponto, que caem
         // exatamente na borda do traçado: sem ela metade do círculo e metade do
@@ -475,32 +884,52 @@ function Evolucao({
               />
             </svg>
 
-            {serie.map((fatia, i) => {
-              const valor = fatia.kpis[metrica]
-              const pct = altura(valor)
-              return (
-                <div
-                  key={fatia.chave}
-                  title={`${rotuloDe(fatia.chave)}: ${valor}`}
-                  className="group absolute top-0 bottom-0 -translate-x-1/2"
-                  style={{ left: `${x(i)}%`, width: `${faixa}%` }}
-                >
-                  <span
-                    aria-hidden
-                    className={`absolute left-1/2 h-2 w-2 -translate-x-1/2 translate-y-1/2 rounded-full bg-current transition-opacity ${
-                      i === iPico ? '' : 'opacity-0 group-hover:opacity-100'
-                    }`}
-                    style={{ bottom: `${pct}%` }}
-                  />
-                  <span
-                    className="absolute left-1/2 -translate-x-1/2 text-[10px] font-semibold tabular-nums whitespace-nowrap text-slate-700 opacity-0 transition-opacity group-hover:opacity-100"
-                    style={{ bottom: `calc(${pct}% + 9px)` }}
-                  >
-                    {valor}
-                  </span>
-                </div>
-              )
-            })}
+            {/* O pico, marcado o tempo todo: é o número que o cabeçalho cita
+                quando nada está sendo lido, e ele precisa ter uma data. */}
+            <span
+              aria-hidden
+              className="absolute h-2 w-2 -translate-x-1/2 translate-y-1/2 rounded-full bg-current"
+              style={{ left: `${x(iPico)}%`, bottom: `${altura(serie[iPico]?.kpis[metrica] ?? 0)}%` }}
+            />
+
+            {/* O ponto em leitura: anel branco por dentro para se destacar sobre
+                a própria linha, que passa por baixo dele. */}
+            {ativo !== null && fatiaAtiva && (
+              <>
+                <span
+                  aria-hidden
+                  className="absolute inset-y-0 w-px bg-slate-200"
+                  style={{ left: `${x(ativo)}%` }}
+                />
+                <span
+                  aria-hidden
+                  className="absolute h-3 w-3 -translate-x-1/2 translate-y-1/2 rounded-full bg-current ring-2 ring-white"
+                  style={{ left: `${x(ativo)}%`, bottom: `${altura(fatiaAtiva.kpis[metrica])}%` }}
+                />
+              </>
+            )}
+
+            {/* A superfície de leitura — uma só, cobrindo a caixa inteira.
+                `touch-none` impede o navegador de tratar o arrasto como rolagem
+                enquanto se percorre a série com o dedo. */}
+            <div
+              ref={refCaixa}
+              role="group"
+              tabIndex={0}
+              aria-label={`${titulo} ${diaria ? 'por dia' : 'por semana'}. Use as setas para percorrer ${n} ponto${n === 1 ? '' : 's'}.`}
+              onPointerDown={(e) => setAtivo(indiceDoPonteiro(e.clientX))}
+              onPointerMove={(e) => {
+                if (e.pointerType === 'mouse' || e.buttons > 0) setAtivo(indiceDoPonteiro(e.clientX))
+              }}
+              // Só o mouse limpa ao sair. Em toque o `pointerleave` dispara
+              // quando o dedo levanta, e limpar ali apagaria a leitura no
+              // instante em que ela acabou de ser pedida.
+              onPointerLeave={(e) => { if (e.pointerType === 'mouse') setAtivo(null) }}
+              onFocus={() => setAtivo((i) => i ?? iPico)}
+              onBlur={() => setAtivo(null)}
+              onKeyDown={aoTeclarNoGrafico}
+              className="absolute inset-0 touch-none rounded focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none"
+            />
           </div>
 
           {/* O eixo das datas. As das pontas se alinham PELA BORDA (a primeira
@@ -531,6 +960,13 @@ function Evolucao({
   )
 }
 
+/**
+ * Quantas fatias uma quebra mostra. O corte existe para as quatro quebras
+ * caberem lado a lado sem virar quatro listas rolando; o rodapé abaixo é o que
+ * impede o corte de ser silencioso.
+ */
+const TETO_FATIAS = 8
+
 /** Uma quebra do indicador em foco, do maior ofensor para o menor. */
 function Quebra({
   titulo, fatias, metrica, barTone, vazio,
@@ -547,10 +983,12 @@ function Quebra({
     <section className="rounded-xl border border-slate-200 bg-white p-4">
       <h3 className="mb-3 text-sm font-semibold text-slate-800">{titulo}</h3>
       {fatias.length === 0 ? (
-        <p className="text-xs text-slate-400">{vazio}</p>
+        // slate-500 pelo mesmo motivo do estado vazio do gráfico: 400 sobre
+        // branco é 2,6:1 e reprova na AA.
+        <p className="text-xs text-slate-500">{vazio}</p>
       ) : (
         <ul className="flex flex-col gap-2">
-          {fatias.slice(0, 8).map((fatia) => {
+          {fatias.slice(0, TETO_FATIAS).map((fatia) => {
             const valor = fatia.kpis[metrica]
             return (
               <li key={fatia.chave} className="flex flex-col gap-1">
@@ -570,6 +1008,15 @@ function Quebra({
             )
           })}
         </ul>
+      )}
+      {/* O corte, dito em voz alta. Uma lista que para na oitava linha sem
+          avisar deixa quem lê concluir que são oito e pronto — e aqui isso é
+          uma conclusão sobre dinheiro. "Maiores" é literal: `ordenarPorFoco`
+          já entrega a lista em ordem decrescente da métrica em foco. */}
+      {fatias.length > TETO_FATIAS && (
+        <p className="mt-2.5 border-t border-slate-100 pt-2 text-[11px] tabular-nums text-slate-500">
+          Mostrando {TETO_FATIAS} de {fatias.length} — as maiores primeiro.
+        </p>
       )}
     </section>
   )
