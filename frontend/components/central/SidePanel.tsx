@@ -40,6 +40,11 @@ function fraseSituacao(item: any): string {
     // dizer o que fazer a respeito.
     case 'glosa':
       return 'A ASSIM recusou a autorização. Requer contestação.'
+    // A recusa continua sendo verdade — e o motivo dela segue logo abaixo desta
+    // frase. O que mudou é que existe guia liberada cobrindo o atendimento, e
+    // por isso não há o que contestar. A guia sai nomeada na seção Autorização.
+    case 'glosa_resolvida':
+      return 'Glosa coberta por autorização externa. Nenhuma ação necessária.'
     case 'processando':
       return 'Autorização em processamento pelo sistema.'
     case 'concluido_sem_guia':
@@ -105,6 +110,27 @@ function SidePanel({ atendimento, onReverterFalta }: Props) {
   // `status_assim` é 'Liberado' e afins. O de-para entra porque a coluna pode
   // ter vindo do relatório, onde a ASSIM corta o texto em 25 caracteres.
   const motivoGlosa = completarMotivoGlosa(motivoGlosaDaSessao(atendimento), codigosGlosa)
+
+  // A guia que resolveu a glosa (aba Reconciliação). Ela NÃO substitui o campo
+  // Guia: aquele continua sendo a autorização recusada, porque vincular não
+  // reescreve o pareamento. São dois números diferentes contando a mesma
+  // história, e esconder um deles apaga metade dela.
+  const vinculo = atendimento.vinculo
+  const procedenciaVinculo = vinculo
+    ? [
+        vinculo.vinculado_por ? `vínculo por ${vinculo.vinculado_por}` : null,
+        vinculo.data_execucao
+          ? new Date(vinculo.data_execucao).toLocaleString('pt-BR', {
+              day: '2-digit',
+              month: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit',
+            })
+          : null,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : null
 
   const unidade =
     atendimento.unidade?.replace('Unid. ', '')?.split(' - ')[0] ||
@@ -191,6 +217,23 @@ function SidePanel({ atendimento, onReverterFalta }: Props) {
               }
               mono
             />
+            {vinculo && (
+              <Row
+                label="Coberta pela guia"
+                value={
+                  <span className="inline-flex flex-col items-end gap-0.5">
+                    <span className="tabular-nums text-emerald-700">
+                      {vinculo.guia}
+                    </span>
+                    {procedenciaVinculo && (
+                      <span className="text-xs text-slate-400">
+                        {procedenciaVinculo}
+                      </span>
+                    )}
+                  </span>
+                }
+              />
+            )}
             <Row label="Solicitado por" value={atendimento.criado_por} />
             <Row label="Forma" value={atendimento.forma_autorizacao} />
             <Row
