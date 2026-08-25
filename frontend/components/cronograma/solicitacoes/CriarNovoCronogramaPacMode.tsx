@@ -73,6 +73,7 @@ export function CriarNovoCronogramaPacMode({ cRows, lRows }: Props) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [profSelIdx, setProfSelIdx] = useState<Record<string, number>>({})
   const [espSelIdx, setEspSelIdx] = useState<Record<string, number>>({})
+  const [verApenasSelecionados, setVerApenasSelecionados] = useState(false)
 
   // Situação cadastral (Ativo/Inativo) vem da TiTa, não do laudo: o laudo diz o
   // que o paciente PODE receber, não se ele ainda é paciente da clínica. Sem
@@ -188,6 +189,7 @@ export function CriarNovoCronogramaPacMode({ cRows, lRows }: Props) {
     setSelectedIds(new Set())
     setProfSelIdx({})
     setEspSelIdx({})
+    setVerApenasSelecionados(false)
   }
 
   // ── Dados ativos por sugestão (respeitando prof/esp selecionada) ──────────
@@ -474,8 +476,14 @@ export function CriarNovoCronogramaPacMode({ cRows, lRows }: Props) {
   if (lRows.length === 0) faltando.push("Laudos")
   if (cRows.length === 0) faltando.push("Grade")
 
-  // ── Sessões filtradas: no workspace só aparecem as do paciente selecionado ──
-  const sessoesParaWorkspace = sessoesWorkspace
+  // ── Sessões filtradas: no workspace só aparecem as do paciente selecionado,
+  // e opcionalmente só as marcadas (toggle "Ver apenas selecionados") ────────
+  const sessoesParaWorkspace = useMemo(
+    () => verApenasSelecionados
+      ? sessoesWorkspace.filter(s => s.sugestaoId && selectedIds.has(s.sugestaoId))
+      : sessoesWorkspace,
+    [sessoesWorkspace, verApenasSelecionados, selectedIds],
+  )
 
   // Motivo de bloqueio do botão de implantação — feedback para o operador.
   const motivoBloqueio = hasExcesso
@@ -547,7 +555,7 @@ export function CriarNovoCronogramaPacMode({ cRows, lRows }: Props) {
               type="button"
               onClick={handleSelectAll}
               disabled={!result || result.sugestoes.length === 0}
-              style={{ flex: 1, padding: "6px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 600, cursor: (!result || result.sugestoes.length === 0) ? "not-allowed" : "pointer", fontFamily: "inherit", border: "1px solid var(--border)", background: "var(--card)", color: "var(--card-foreground)", whiteSpace: "nowrap", opacity: (!result || result.sugestoes.length === 0) ? 0.5 : 1, transition: "background 150ms ease" }}
+              style={{ flex: 1, padding: "6px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 600, cursor: (!result || result.sugestoes.length === 0) ? "not-allowed" : "pointer", fontFamily: "inherit", border: "1px solid #86efac", background: "#dcfce7", color: "#15803d", whiteSpace: "nowrap", opacity: (!result || result.sugestoes.length === 0) ? 0.5 : 1, transition: "background 150ms ease" }}
             >
               Selecionar tudo
             </button>
@@ -555,9 +563,29 @@ export function CriarNovoCronogramaPacMode({ cRows, lRows }: Props) {
               type="button"
               onClick={handleClearAll}
               disabled={selectedIds.size === 0}
-              style={{ flex: 1, padding: "6px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 600, cursor: selectedIds.size === 0 ? "not-allowed" : "pointer", fontFamily: "inherit", border: "1px solid var(--border)", background: "var(--muted)", color: "var(--muted-foreground)", whiteSpace: "nowrap", opacity: selectedIds.size === 0 ? 0.5 : 1, transition: "background 150ms ease" }}
+              style={{ flex: 1, padding: "6px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 600, cursor: selectedIds.size === 0 ? "not-allowed" : "pointer", fontFamily: "inherit", border: "1px solid #fca5a5", background: "#fee2e2", color: "#dc2626", whiteSpace: "nowrap", opacity: selectedIds.size === 0 ? 0.5 : 1, transition: "background 150ms ease" }}
             >
               Limpar seleção
+            </button>
+            <button
+              type="button"
+              aria-pressed={verApenasSelecionados}
+              onClick={() => setVerApenasSelecionados(v => !v)}
+              className="crono-wb-toggle"
+              style={{
+                width: "100%",
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "6px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 600,
+                cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+                border: verApenasSelecionados ? "1px solid #86efac" : "1px solid var(--border)",
+                background: verApenasSelecionados ? "#dcfce7" : "var(--muted)",
+                color: verApenasSelecionados ? "#15803d" : "var(--muted-foreground)",
+              }}
+            >
+              <span>Ver apenas selecionados</span>
+              <span style={{ fontSize: "9px", fontWeight: 800, letterSpacing: "0.02em" }}>
+                {verApenasSelecionados ? "ON" : "OFF"}
+              </span>
             </button>
           </div>
         </WorkbenchArea>

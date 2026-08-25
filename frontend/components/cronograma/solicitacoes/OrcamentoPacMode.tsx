@@ -66,6 +66,7 @@ export function OrcamentoPacMode({ cRows }: Props) {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [profSelIdx, setProfSelIdx] = useState<Record<string, number>>({})
   const [espSelIdx, setEspSelIdx] = useState<Record<string, number>>({})
+  const [verApenasSelecionados, setVerApenasSelecionados] = useState(false)
 
   const livreSlots = useMemo(() => {
     const profOcupado = construirProfissionaisOcupados(cRows)
@@ -118,6 +119,7 @@ export function OrcamentoPacMode({ cRows }: Props) {
     setSelectedIds(new Set())
     setProfSelIdx({})
     setEspSelIdx({})
+    setVerApenasSelecionados(false)
   }
 
   const getActiveData = useCallback((s: SugestaoManual) => {
@@ -141,19 +143,21 @@ export function OrcamentoPacMode({ cRows }: Props) {
 
   const sessoesWorkspace = useMemo<WorkspaceSessao[]>(() => {
     if (!result) return []
-    return result.sugestoes.map(s => {
-      const d = getActiveData(s)
-      const tE = TERAPIA_TO_ESP[d.tP] && TERAPIA_TO_ESP[d.tP] !== d.tP ? TERAPIA_TO_ESP[d.tP] : undefined
-      return {
-        dia: s.dia, hora: s.hora, tP: d.tP, esp: d.esp, prof: d.prof,
-        unidade: d.unidade,
-        tE,
-        sugestaoId: s.id,
-        origTp: s.tP,
-        origProf: s.prof,
-      }
-    })
-  }, [result, getActiveData])
+    return result.sugestoes
+      .filter(s => !verApenasSelecionados || selectedIds.has(s.id))
+      .map(s => {
+        const d = getActiveData(s)
+        const tE = TERAPIA_TO_ESP[d.tP] && TERAPIA_TO_ESP[d.tP] !== d.tP ? TERAPIA_TO_ESP[d.tP] : undefined
+        return {
+          dia: s.dia, hora: s.hora, tP: d.tP, esp: d.esp, prof: d.prof,
+          unidade: d.unidade,
+          tE,
+          sugestaoId: s.id,
+          origTp: s.tP,
+          origProf: s.prof,
+        }
+      })
+  }, [result, getActiveData, verApenasSelecionados, selectedIds])
 
   // ── Contagem por especialidade (reflete seleção) ──────────────────────────
 
@@ -377,7 +381,7 @@ export function OrcamentoPacMode({ cRows }: Props) {
               type="button"
               onClick={handleSelectAll}
               disabled={!result || result.sugestoes.length === 0}
-              style={{ flex: 1, padding: "6px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 600, cursor: (!result || result.sugestoes.length === 0) ? "not-allowed" : "pointer", fontFamily: "inherit", border: "1px solid var(--border)", background: "var(--card)", color: "var(--card-foreground)", whiteSpace: "nowrap", opacity: (!result || result.sugestoes.length === 0) ? 0.5 : 1, transition: "background 150ms ease" }}
+              style={{ flex: 1, padding: "6px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 600, cursor: (!result || result.sugestoes.length === 0) ? "not-allowed" : "pointer", fontFamily: "inherit", border: "1px solid #86efac", background: "#dcfce7", color: "#15803d", whiteSpace: "nowrap", opacity: (!result || result.sugestoes.length === 0) ? 0.5 : 1, transition: "background 150ms ease" }}
             >
               Selecionar tudo
             </button>
@@ -385,9 +389,29 @@ export function OrcamentoPacMode({ cRows }: Props) {
               type="button"
               onClick={handleClearAll}
               disabled={selectedIds.size === 0}
-              style={{ flex: 1, padding: "6px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 600, cursor: selectedIds.size === 0 ? "not-allowed" : "pointer", fontFamily: "inherit", border: "1px solid var(--border)", background: "var(--muted)", color: "var(--muted-foreground)", whiteSpace: "nowrap", opacity: selectedIds.size === 0 ? 0.5 : 1, transition: "background 150ms ease" }}
+              style={{ flex: 1, padding: "6px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 600, cursor: selectedIds.size === 0 ? "not-allowed" : "pointer", fontFamily: "inherit", border: "1px solid #fca5a5", background: "#fee2e2", color: "#dc2626", whiteSpace: "nowrap", opacity: selectedIds.size === 0 ? 0.5 : 1, transition: "background 150ms ease" }}
             >
               Limpar seleção
+            </button>
+            <button
+              type="button"
+              aria-pressed={verApenasSelecionados}
+              onClick={() => setVerApenasSelecionados(v => !v)}
+              className="crono-wb-toggle"
+              style={{
+                width: "100%",
+                display: "flex", alignItems: "center", justifyContent: "space-between",
+                padding: "6px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 600,
+                cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap",
+                border: verApenasSelecionados ? "1px solid #86efac" : "1px solid var(--border)",
+                background: verApenasSelecionados ? "#dcfce7" : "var(--muted)",
+                color: verApenasSelecionados ? "#15803d" : "var(--muted-foreground)",
+              }}
+            >
+              <span>Ver apenas selecionados</span>
+              <span style={{ fontSize: "9px", fontWeight: 800, letterSpacing: "0.02em" }}>
+                {verApenasSelecionados ? "ON" : "OFF"}
+              </span>
             </button>
           </div>
         </WorkbenchArea>
