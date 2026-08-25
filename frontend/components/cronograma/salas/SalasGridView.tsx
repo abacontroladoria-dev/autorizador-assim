@@ -255,13 +255,25 @@ function SlotCell({
   buscaProfissional?: string
   bordaTopo: boolean
 }) {
-  const { labels: statusLabels } = useStatusLabels()
+  const { labels: statusLabels, loading: statusLabelsLoading } = useStatusLabels()
   const bordaCls = bordaTopo ? "border-t" : ""
 
   if (!slot) return <td className={`border-l border-border px-1 py-2 text-center text-muted-foreground ${bordaCls}`}>—</td>
 
   if (slot.status === "bloqueado" || slot.status === "inativo") {
-    const l = statusLabels[sala.status] ?? { label_curto: sala.status, tone: "slate" as const }
+    const labelReal = statusLabels[sala.status]
+    // Enquanto os rótulos ainda não chegaram do banco, mostrar um placeholder
+    // neutro em vez de cair no fallback cinza — sem isso, um status
+    // configurado como vermelho (ex. "bloqueada") piscava cinza por um
+    // instante toda vez que a página carregava, antes de virar vermelho.
+    if (!labelReal && statusLabelsLoading) {
+      return (
+        <td className={`border-l border-border px-1 py-2 text-center ${bordaCls}`}>
+          <span className="inline-block h-4 w-16 animate-pulse rounded-full bg-muted" />
+        </td>
+      )
+    }
+    const l = labelReal ?? { label_curto: sala.status, tone: "slate" as const }
     return (
       <td className={`border-l border-border px-1 py-2 text-center ${bordaCls}`}>
         <StatusPill tone={l.tone} dense>{l.label_curto}</StatusPill>

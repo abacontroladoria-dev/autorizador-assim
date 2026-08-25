@@ -18,6 +18,8 @@ import { ObservacaoPacienteBox } from "./ObservacaoPacienteBox"
 import type { CsvRow, LaudoRow, CfgState, RecItem, InvItem } from "@/types/cronograma"
 import type { AceiteSessao } from "@/types/acompanhamento"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
+import { reativarRecusaPaciente } from "@/lib/cronograma/reativarRecusaPaciente"
+import { registrarRecusa, registrarReativacao } from "@/services/cronogramaRecusasAuditoria.service"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -2218,6 +2220,8 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
         obs: motivo || undefined,
       }))
       sRec([...recGlobal, ...newItems])
+      for (const s of sessoes)
+        registrarRecusa({ origem: "ocp-paciente", paciente: pac, profissional: s.prof, especialidade: s.tP, unidade: s.unidade, dia: s.dia, hora: s.hora, motivo })
     }
 
     if (status === "inviavel" && sInv && !invGlobal.some(x => x.paciente === pac)) {
@@ -2243,6 +2247,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
         })
         .filter(b => b.sessoes.length > 0)
     )
+    registrarReativacao({ origem: "ocp-paciente", paciente: pac, profissional: prof, especialidade: tP, dia, hora })
   }
 
   const stKey = (sugestao: Sugestao) => `${pac}|||${sugestao.id}`
@@ -3076,6 +3081,25 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
 
       {recusaDetalheAberto && (() => {
         const combos = recusaDetalheAberto.recusas
+        const { dia, hora } = recusaDetalheAberto
+        function reativarCombo(r: { tP: string; prof: string }) {
+          // Precisa limpar as DUAS representações da mesma recusa: o bundle
+          // (pacBundles/slotStatus, que bloqueia a sugestão) E a entrada em
+          // `rec` (RecItem, que é o que a aba Recusados lê pra decidir o que
+          // mostrar) — handleAcaoDireta/handlePacSlotStatus gravam nas duas ao
+          // recusar, então reativar sem limpar `rec` deixava o item aparecendo
+          // ao mesmo tempo em "Recusados" e "Reativados".
+          sRec?.(recGlobal.filter(x =>
+            !(x.paciente === pac && x.dia === dia && x.hora === hora && x.profissional === r.prof)
+          ))
+          persistAceites(prev => reativarRecusaPaciente(prev, { paciente: pac, profissional: r.prof, dia, hora }))
+          registrarReativacao({ origem: "ocp-paciente", paciente: pac, profissional: r.prof, especialidade: r.tP, dia, hora })
+          setRecusaDetalheAberto(prevState => {
+            if (!prevState) return null
+            const restantes = prevState.recusas.filter(x => !(x.tP === r.tP && x.prof === r.prof))
+            return restantes.length ? { ...prevState, recusas: restantes } : null
+          })
+        }
         return (
         <div
           style={{ position: "fixed", inset: 0, zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.4)", padding: "16px" }}
@@ -3117,12 +3141,12 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
                       {o.data}{o.motivo && <span> — "{o.motivo}"</span>}
                     </div>
                   ))}
+                  <button onClick={() => reativarCombo(r)} style={{ marginTop: "6px", width: "100%", padding: "5px 10px", borderRadius: "7px", border: "1px solid #fca5a5", background: "rgba(255,255,255,.7)", color: "#7f1d1d", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: "11.5px" }}>
+                    ↺ Reativar
+                  </button>
                 </div>
                 )
               })}
-            </div>
-            <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginBottom: "14px" }}>
-              Para liberar: <strong>"Reativar sugestão"</strong> em Aceites e Recusas.
             </div>
             <button onClick={() => setRecusaDetalheAberto(null)} style={{ width: "100%", padding: "8px 16px", borderRadius: "10px", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: "13px" }}>
               Fechar

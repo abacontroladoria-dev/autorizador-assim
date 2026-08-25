@@ -38,6 +38,7 @@ import {
   UsersRound,
   Trash2,
   X,
+  XCircle,
   Lock,
 } from 'lucide-react'
 import toast from 'react-hot-toast'
@@ -112,7 +113,7 @@ const MODULE_ICONS: Record<string, React.ElementType> = {
   cronograma_ocupacao_paciente: UserCheck,
   cronograma_ocupacao_salas: DoorOpen,
   cronograma_disponibilidade_interna: UserSearch,
-  ocupacao_clinica: ClipboardList,
+  ocupacao_clinica: XCircle,
   ocupacao_clinica_gaps: BarChart3,
   ocupacao_clinica_inconsistencias: AlertTriangle,
   ocupacao_profissionais: BarChart3,

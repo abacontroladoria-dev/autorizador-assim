@@ -87,6 +87,13 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
   // page.tsx da rota), não o cRows deste layout — o badge "Período" precisa mostrar essa
   // janela aqui, senão mostra a janela errada (getRefWeek()) para a única aba que não a usa.
   const isOcupacaoPacientePage = !!pathname?.includes('/ocupacao-paciente')
+  // "Oportunidades Recusadas" (ex-"Acompanhamento") não consulta grade nem
+  // laudo — é auditoria de recusas (rec/pacBundles/statusMap + tabela de
+  // auditoria própria). Os badges de Grade/Laudos/Período não fazem sentido
+  // aqui; aceita o valor antigo do tab também, pra links salvos antes da
+  // renomeação (2026-08-25) continuarem escondendo o badge certo.
+  const isOportunidadesRecusadasTab = !!pathname?.includes('/ocupacao') && !isOcupacaoPacientePage && !isOcupacaoSalasPage &&
+    (searchParams.get('tab') === 'oportunidades-recusadas' || searchParams.get('tab') === 'acompanhamento')
   const gradeFetchedRef = useRef(false)
   const laudosFetchedRef = useRef(false)
 
@@ -189,7 +196,7 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
   }, [setDispRows])
 
   useEffect(() => {
-    if (isIndicadoresPage || isReposicaoPage) return // página gerencia o próprio rightContent — não interferir
+    if (isIndicadoresPage || isReposicaoPage || isOportunidadesRecusadasTab) return // página gerencia o próprio rightContent — não interferir
     setRightContent(
       <CronogramaUploadBadges
         cRows={cRows}
@@ -210,7 +217,7 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
       />
     )
     return () => setRightContent(null)
-  }, [cRows, lRows, dispRows, uploading, gradeLoading, uploadError, dispUploading, dispError, handleLaudosFile, handleClear, handleDispFile, handleClearDisp, setRightContent, isIndicadoresPage, isOcupacaoSalasPage, isReposicaoPage, isNovoCron, isOcupacaoPacientePage])
+  }, [cRows, lRows, dispRows, uploading, gradeLoading, uploadError, dispUploading, dispError, handleLaudosFile, handleClear, handleDispFile, handleClearDisp, setRightContent, isIndicadoresPage, isOcupacaoSalasPage, isReposicaoPage, isNovoCron, isOcupacaoPacientePage, isOportunidadesRecusadasTab])
 
   return <div>{children}</div>
 }

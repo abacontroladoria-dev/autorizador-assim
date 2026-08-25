@@ -99,9 +99,9 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   cronograma_ocupacao_paciente: ['/cronograma/ocupacao-paciente'],
   cronograma_disponibilidade_interna: ['/relacionamento-prestador/ocupar-profissionais-disponiveis'],
   // Mesmo padrão de Indicadores: /cronograma/ocupacao tem 3 abas
-  // (Aceites e Recusas, Diferença: Laudo e Oferta, Inconsistências e
+  // (Oportunidades Recusadas, Diferença: Laudo e Oferta, Inconsistências e
   // Exceções), cada uma com seu próprio código de permissão.
-  ocupacao_clinica: ['/cronograma/ocupacao?tab=acompanhamento'],
+  ocupacao_clinica: ['/cronograma/ocupacao?tab=oportunidades-recusadas'],
   ocupacao_clinica_gaps: ['/cronograma/ocupacao?tab=gaps'],
   ocupacao_clinica_inconsistencias: ['/cronograma/ocupacao?tab=inconsistencias'],
   // Indicadores: uma rota só (/cronograma/indicadores), abas diferenciadas por

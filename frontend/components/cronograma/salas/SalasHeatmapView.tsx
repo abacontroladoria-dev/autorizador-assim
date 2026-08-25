@@ -178,14 +178,25 @@ export function SalasHeatmapView({ salas, onIsolarSala, salaIsoladaId, salasComE
 }
 
 function HeatCell({ slot, salaStatus, bordaTopo }: { slot: SlotOcupacaoSala | undefined; salaStatus: string; bordaTopo: boolean }) {
-  const { labels: statusLabels } = useStatusLabels()
+  const { labels: statusLabels, loading: statusLabelsLoading } = useStatusLabels()
   const bordaCls = bordaTopo ? "border-t" : ""
 
   if (!slot) {
     return <td className={`border-l border-border bg-muted/30 px-1 py-2 text-center text-[10px] text-muted-foreground ${bordaCls}`}>ADM</td>
   }
   if (slot.status === "bloqueado" || slot.status === "inativo") {
-    const l = statusLabels[salaStatus] ?? { label_curto: salaStatus, tone: "slate" as const }
+    const labelReal = statusLabels[salaStatus]
+    // Mesmo cuidado do SlotCell em SalasGridView.tsx: sem isso, um status
+    // configurado como vermelho (ex. "bloqueada") piscava cinza por um
+    // instante antes dos rótulos reais chegarem do banco.
+    if (!labelReal && statusLabelsLoading) {
+      return (
+        <td className={`border-l border-border px-1 py-2 text-center ${bordaCls}`}>
+          <span className="inline-block h-3 w-full animate-pulse rounded bg-muted" />
+        </td>
+      )
+    }
+    const l = labelReal ?? { label_curto: salaStatus, tone: "slate" as const }
     const tone = TONE_SOLID[l.tone]
     return <td className={`border-l border-border px-1 py-2 text-center text-[10px] font-semibold ${tone.bg} ${tone.text} ${bordaCls}`}>{l.label_curto}</td>
   }

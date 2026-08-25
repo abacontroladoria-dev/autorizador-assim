@@ -53,7 +53,6 @@ const PACIENTES_FICTICIOS = new Set([
 // ─── TIPOS ────────────────────────────────────────────────────────────────────
 
 interface CandidatoSlot { pac: string; esp: string; gap: number; conv: string; prio: 1 | 2 | 3 | 4 | 5 }
-type CandidatoWA = "aguardando" | "recusado" | "inviavel"
 interface ScheduleModalState { slotKey: string; candidato: CandidatoSlot }
 
 interface Props {
@@ -162,7 +161,6 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
   const [modalTabIdx, setModalTabIdx] = useState(0)
   const [slotModal, setSlotModal] = useState<string | null>(null)
   const [scheduleModal, setScheduleModal] = useState<ScheduleModalState | null>(null)
-  const [candidatoWA, setCandidatoWA] = useState<Record<string, CandidatoWA>>({})
   const [estrategiaFiltro, setEstrategiaFiltro] = useState<Set<string>>(new Set())
   const [coberturaFiltro, setCoberturaFiltro] = useState<string | null>(null)
   const [showSS, setShowSS] = useState(true)
@@ -180,7 +178,6 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
     setModalTabIdx(0)
     setSlotModal(null)
     setScheduleModal(null)
-    setCandidatoWA({})
     setEstrategiaFiltro(new Set())
     setCoberturaFiltro(null)
   }
@@ -1714,22 +1711,12 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
               </div>
 
               <div className="overflow-auto p-3 flex flex-col gap-2">
-                {sugestoesPorSlot[slotModal].map((c, i) => {
-                  const cKey = `${slotModal}|||${c.pac}`
-                  const waStatus = candidatoWA[cKey] ?? null
-                  const isDone = waStatus === "recusado" || waStatus === "inviavel"
-
-                  return (
-                    <div key={`${c.pac}-${c.esp}-${i}`} style={{ border: "1px solid var(--border)", borderRadius: "12px", background: isDone ? "var(--muted)" : "var(--muted)", opacity: isDone ? 0.65 : 1, padding: "10px 12px", display: "flex", gap: "10px", alignItems: "flex-start", flexWrap: "wrap" }}>
+                {sugestoesPorSlot[slotModal].map((c, i) => (
+                    <div key={`${c.pac}-${c.esp}-${i}`} style={{ border: "1px solid var(--border)", borderRadius: "12px", background: "var(--muted)", padding: "10px 12px", display: "flex", gap: "10px", alignItems: "flex-start", flexWrap: "wrap" }}>
                       <div style={{ flex: "1 1 240px", minWidth: 0 }}>
                         <div style={{ fontWeight: 800, color: "var(--card-foreground)", fontSize: "13px" }}>{c.pac}</div>
                         <div style={{ fontSize: "11px", color: "var(--muted-foreground)", marginTop: "3px" }}>
                           {c.esp} · {c.conv || "—"} · P{c.prio}
-                        </div>
-                        <div style={{ display: "flex", gap: "4px", marginTop: "6px", flexWrap: "wrap" }}>
-                          {waStatus === "aguardando" && <span style={{ fontSize: "10px", background: B.blueLt, color: B.blue, borderRadius: "5px", padding: "2px 6px", fontWeight: 700 }}>Aguardando Resposta</span>}
-                          {waStatus === "recusado" && <span style={{ fontSize: "10px", background: "#fef2f2", color: "#dc2626", borderRadius: "5px", padding: "2px 6px", fontWeight: 700 }}>Recusou</span>}
-                          {waStatus === "inviavel" && <span style={{ fontSize: "10px", background: "var(--muted)", color: "var(--muted-foreground)", borderRadius: "5px", padding: "2px 6px", fontWeight: 700 }}>Inviável</span>}
                         </div>
                       </div>
 
@@ -1740,25 +1727,9 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
                         >
                           🗓 Ver
                         </button>
-                        {!waStatus && (
-                          <>
-                            <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "aguardando" }))} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "9px", background: "#f0fdf4", color: "#16a34a", border: "1px solid #86efac", cursor: "pointer", fontWeight: 700 }}>Aceitar (→ Acompanhamento)</button>
-                            <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "inviavel" }))} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "9px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}>⛔ Inviável</button>
-                          </>
-                        )}
-                        {waStatus === "aguardando" && (
-                          <>
-                            <button onClick={() => setCandidatoWA(p => ({ ...p, [cKey]: "inviavel" }))} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "9px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}>⛔ Inviável</button>
-                            <button onClick={() => setCandidatoWA(p => { const n = { ...p }; delete n[cKey]; return n })} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "9px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}>Cancelar</button>
-                          </>
-                        )}
-                        {isDone && (
-                          <button onClick={() => setCandidatoWA(p => { const n = { ...p }; delete n[cKey]; return n })} style={{ fontSize: "12px", padding: "10px 14px", minHeight: "44px", borderRadius: "9px", background: "var(--muted)", color: "var(--muted-foreground)", border: "1px solid var(--border)", cursor: "pointer" }}>Resetar</button>
-                        )}
                       </div>
                     </div>
-                  )
-                })}
+                  ))}
               </div>
             </div>
           </div>
