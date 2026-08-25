@@ -4,6 +4,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  Bell,
   Check,
   Cloud,
   CloudLightning,
@@ -50,6 +51,17 @@ const WATCHDOG_FALA_MS = 15000
 // enganosa: você escolhe uma voz e ouve outra na hora do aperto.
 const FALA_RATE = 0.95
 const FALA_PITCH = 1.1
+
+// Teto de segurança pro sino: se `beep.mp3` falhar em carregar/tocar (arquivo
+// ausente, áudio bloqueado), o evento `ended` nunca chega e a fala ficaria
+// esperando pra sempre. 1800ms é folga generosa pra um beep curto.
+const SINO_MAX_MS = 1800
+
+// Quanto tempo o nome fica em destaque na tela central antes de descer
+// sozinho pra lateral — não espera a próxima chamada pra abrir espaço.
+// 10s (primeira versão) sumia rápido demais: mal dava o sino+fala e o nome já
+// tinha ido pra lateral, sem sobrar tempo de leitura pra quem chega olhando.
+const DESTAQUE_MS = 25000
 
 // Qual voz usar é escolha da máquina, não do build: cada PC de recepção tem um
 // conjunto diferente instalado. Guardado por voiceURI (mais estável que o nome)
@@ -265,12 +277,43 @@ export default function TVPage() {
   const [chamadas, setChamadas] = useState<Chamada[]>([])
   const [temperatura, setTemperatura] = useState<number | null>(null)
   const [codigoClima, setCodigoClima] = useState<number | null>(null)
-  const [animando, setAnimando] = useState(false)
+  // Verdadeiro do início do sino até o fim da fala — a janela inteira em que
+  // o pai precisa olhar pra tela, não só o segundo do "ding".
+  const [chamando, setChamando] = useState(false)
   const [audioLiberado, setAudioLiberado] = useState(false)
   const [online, setOnline] = useState(true)
 
-  const atual = useMemo(() => chamadas[0] ?? null, [chamadas])
-  const historico = useMemo(() => chamadas.slice(1), [chamadas])
+  // Quem está em destaque no centro da tela — some sozinho depois de
+  // DESTAQUE_MS mesmo sem chamada nova (efeito abaixo).
+  const [destacadoId, setDestacadoId] = useState<string | null>(null)
+  const primeiroId = chamadas[0]?.id ?? null
+
+  useEffect(() => {
+    if (!primeiroId) {
+      setDestacadoId(null)
+      return
+    }
+
+    setDestacadoId(primeiroId)
+
+    const t = setTimeout(() => {
+      // só limpa se ainda for este: uma chamada nova já reagendou o timer dela
+      setDestacadoId((atual) => (atual === primeiroId ? null : atual))
+    }, DESTAQUE_MS)
+
+    return () => clearTimeout(t)
+  }, [primeiroId])
+
+  const atual = useMemo(
+    () => (destacadoId ? chamadas.find((c) => c.id === destacadoId) ?? null : null),
+    [chamadas, destacadoId]
+  )
+  // Sem destaque, todo mundo (inclusive quem acabou de sair do centro) mora na
+  // lateral — não é mais só "o resto da lista".
+  const historico = useMemo(
+    () => (destacadoId ? chamadas.filter((c) => c.id !== destacadoId) : chamadas),
+    [chamadas, destacadoId]
+  )
   // Se a idade não vier (resposta antiga em cache, rota fora do ar), a tela não
   // inventa: fica sem o selo de tempo em vez de escrever "há NaN min".
   const idade =
@@ -372,6 +415,7 @@ export default function TVPage() {
     if (!c) return
 
     falando.current = true
+    setChamando(true)
 
     const nome = c.nome || 'Paciente'
     const msg = new SpeechSynthesisUtterance(
@@ -390,27 +434,39 @@ export default function TVPage() {
       msg.lang = normalizarLang(voz.lang)
     }
 
-    let encerrada = false
-    const liberar = () => {
-      if (encerrada) return
-      encerrada = true
-      clearTimeout(watchdog)
-      falando.current = false
-      processarFila()
+    // 🔔 sino sozinho primeiro. A fala (e o watchdog dela) só começa quando ele
+    // termina — por `ended` ou, se o áudio falhar, pelo teto de SINO_MAX_MS.
+    // `iniciarFala` roda uma vez só: `ended` e o teto podem disparar os dois.
+    // `chamando` continua true até a fala acabar — o pulso/laranja cobre a
+    // janela inteira do anúncio, não só o "ding" do sino.
+    let sinoConcluido = false
+    const iniciarFala = () => {
+      if (sinoConcluido) return
+      sinoConcluido = true
+      clearTimeout(prazoSino)
+
+      let falaEncerrada = false
+      const liberar = () => {
+        if (falaEncerrada) return
+        falaEncerrada = true
+        clearTimeout(watchdog)
+        setChamando(false)
+        falando.current = false
+        processarFila()
+      }
+
+      msg.onend = liberar
+      msg.onerror = liberar
+      const watchdog = setTimeout(liberar, WATCHDOG_FALA_MS)
+
+      window.speechSynthesis.speak(msg)
     }
 
-    msg.onend = liberar
-    msg.onerror = liberar
-
-    const watchdog = setTimeout(liberar, WATCHDOG_FALA_MS)
-
-    // 🔔 beep antes da fala (independente: se falhar, a fala segue)
     const beep = new Audio('/beep.mp3')
-    beep.play().catch(() => {})
+    beep.addEventListener('ended', iniciarFala)
+    beep.play().catch(iniciarFala)
 
-    setTimeout(() => {
-      window.speechSynthesis.speak(msg)
-    }, 400)
+    const prazoSino = setTimeout(iniciarFala, SINO_MAX_MS)
   }, [resolverVoz])
 
   // carregar voz — no Chrome getVoices() só popula depois deste evento
@@ -470,11 +526,6 @@ export default function TVPage() {
           // anunciado de novo.
           primeiraCarga.current = false
         } else if (novas.length > 0) {
-          setAnimando(true)
-          setTimeout(() => {
-            if (vivo) setAnimando(false)
-          }, 1500)
-
           // A lista vem da mais recente pra mais antiga; falar na ordem em que
           // foram chamadas.
           for (const c of [...novas].reverse()) filaAudio.current.push(c)
@@ -718,10 +769,49 @@ export default function TVPage() {
         <main
           aria-live="polite"
           aria-atomic="true"
-          className="h-full flex items-center justify-center min-w-0"
+          className="relative h-full flex items-center justify-center min-w-0"
         >
+          {/* 🟠 pulso da chamada — auréola + três anéis ecoando pra fora do
+              card, como o nome da marca sugere (Pulsar). Laranja
+              (--color-tv-signal), não o azul do resto da tela: é a única cor
+              nova, usada só aqui, só enquanto `chamando` é true — contraste
+              de matiz chama mais atenção de longe que só mais brilho no
+              mesmo azul de sempre. Não é strobe: não pisca ligado/desligado,
+              cresce e esmaece — sala de espera de clínica ABA tem gente
+              sensível a luz piscando. Some junto com o card quando a fala
+              termina. z-index do card (abaixo) fica acima disto tudo: a
+              auréola/anéis existem pra sangrar ao REDOR do card, não por
+              cima do nome. */}
+          {chamando && (
+            <>
+              <div
+                aria-hidden="true"
+                className="absolute -inset-16 rounded-[64px] pointer-events-none blur-3xl tv-aura"
+                style={{
+                  background:
+                    'radial-gradient(closest-side, rgba(194,65,12,0.65), rgba(194,65,12,0) 72%)',
+                }}
+              />
+              <span
+                aria-hidden="true"
+                className="absolute inset-0 rounded-[36px] border-8 border-tv-signal pointer-events-none tv-pulse-ring"
+              />
+              <span
+                aria-hidden="true"
+                className="absolute inset-0 rounded-[36px] border-8 border-tv-signal pointer-events-none tv-pulse-ring"
+                style={{ animationDelay: '0.43s' }}
+              />
+              <span
+                aria-hidden="true"
+                className="absolute inset-0 rounded-[36px] border-8 border-tv-signal pointer-events-none tv-pulse-ring"
+                style={{ animationDelay: '0.86s' }}
+              />
+            </>
+          )}
+
           <div
             className={`
+			  relative z-10
 			  w-full h-full rounded-[36px]
 			  bg-[linear-gradient(135deg,var(--color-tv-card),var(--color-tv-card-edge))]
 			  flex flex-col items-center justify-center text-center
@@ -730,12 +820,25 @@ export default function TVPage() {
 			  transition-[transform,box-shadow,border-color] duration-500 ease-out
 			  ${/* largura fixa em 2px: só a cor muda, senão a troca de estado
 			       empurraria o layout 1px */ ''}
-			  border-2 ${agora ? 'border-tv-accent' : 'border-tv-border'}
-			  ${animando ? 'scale-[1.03] shadow-[0_0_80px_rgba(37,99,235,0.35)]' : ''}
+			  border-2 ${chamando ? 'border-tv-signal' : agora ? 'border-tv-accent' : 'border-tv-border'}
+			  ${chamando ? 'tv-heartbeat' : ''}
 			`}
           >
             {atual ? (
               <>
+                {/* Selo textual, não só cor — "não confiar só na cor" vale
+                    pro sinal mais importante da tela. Pop de entrada único
+                    (não repete): quem já olhou não precisa de mais um
+                    estímulo, o pulso ao redor do card segue sozinho. */}
+                {chamando && (
+                  <div className="mb-6 inline-flex items-center gap-2.5 rounded-full bg-tv-signal px-6 py-2.5 text-white tv-badge-pop">
+                    <Bell className="w-[1.1em] h-[1.1em]" strokeWidth={2.25} />
+                    <span className="text-[clamp(15px,1.3vw,22px)] font-semibold tracking-wide">
+                      Chamando agora
+                    </span>
+                  </div>
+                )}
+
                 {/* caixa alta + tracking-widest saíram: era eyebrow, e a linha
                     importa — é ela que diz que o nome é do paciente, não de
                     quem está sendo chamado. `text-bold` não existe no Tailwind
@@ -758,7 +861,11 @@ export default function TVPage() {
                 <div className="mt-12 flex flex-col items-center gap-3">
                   <div
                     className={`flex items-center gap-6 transition-colors duration-500 ${
-                      agora ? 'text-tv-accent-fg' : 'text-tv-ink-muted'
+                      chamando
+                        ? 'text-tv-signal'
+                        : agora
+                          ? 'text-tv-accent-fg'
+                          : 'text-tv-ink-muted'
                     }`}
                   >
                     {/* réguas neutras: eram accent, ou seja accent gasto em

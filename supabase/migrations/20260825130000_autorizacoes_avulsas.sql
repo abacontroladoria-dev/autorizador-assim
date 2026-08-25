@@ -196,8 +196,14 @@ GRANT EXECUTE ON FUNCTION public.listar_pacientes_assim() TO authenticated;
 -- frontend/lib/permissions/routes.ts: é por esse código que `usuarios_permissoes`
 -- casa o override com a rota. Um hífen aqui e um underscore lá dariam uma
 -- permissão que aparece em /admin/permissoes e não abre porta nenhuma.
+--
+-- `grupo = 'Pacientes'` para bater com o SidebarGroup onde a rota mora
+-- (frontend/components/Sidebar.tsx:505-517, junto de 'atendimentos' e 'gestao',
+-- os dois outros códigos que já usam esse mesmo grupo) — não um grupo 'Atendimentos'
+-- que não existe em nenhum outro lugar do catálogo nem em GROUP_ORDER/GROUP_ICONS
+-- de PermissoesPageShell.tsx, o que faria a aba cair sem ícone, no fim da lista.
 INSERT INTO public.permissoes (codigo, nome, rota, grupo, descricao) VALUES
-  ('autorizacoes_avulsas', 'Autorizacoes Avulsas', '/autorizacoes-avulsas', 'Atendimentos',
+  ('autorizacoes_avulsas', 'Autorizações Avulsas', '/autorizacoes-avulsas', 'Pacientes',
    'Solicitar ao robo autorizacoes que nao correspondem a nenhuma sessao da agenda')
 ON CONFLICT (codigo) DO NOTHING;
 

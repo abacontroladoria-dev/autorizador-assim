@@ -481,7 +481,7 @@ export default function AutorizacoesAvulsasPage() {
               }}
             >
               <Send size={14} />
-              {enviando ? 'Enviando...' : 'Pedir ao robô'}
+              {enviando ? 'Enviando...' : 'Solicitar avulsa'}
             </button>
           </div>
         </div>
