@@ -444,6 +444,10 @@ export default function TVPage() {
   // acertar.
   const [mostrarVozes, setMostrarVozes] = useState(false)
 
+  // Painel de voz do rodapé — a via de acesso depois que o modal de ativação já
+  // foi dispensado pelo quiosque.
+  const [painelVozAberto, setPainelVozAberto] = useState(false)
+
   // Precisa repetir a cadeia de fallback de `resolverVoz`: se destacasse
   // `vozEscolhida` cru, uma voz desinstalada apareceria marcada na tela
   // enquanto outra falava de verdade.
@@ -739,6 +743,107 @@ export default function TVPage() {
     setAudioLiberado(true)
   }
 
+  // O seletor precisou sair de dentro do modal de ativação. Ele vivia só ali,
+  // e o quiosque dispensa esse modal em 20 segundos com um `xdotool key Return`
+  // — então a única superfície onde dava pra escolher a voz durava 20s, uma vez
+  // por boot. Pior: o Chrome inicializa o speech-dispatcher preguiçosamente, e
+  // as vozes locais podem chegar (via `voiceschanged`) DEPOIS que o modal já
+  // morreu; a lista atualizava e ninguém mais podia vê-la.
+  //
+  // Agora o mesmo bloco é renderizado nos dois lugares: no modal, para quem
+  // estiver na frente da TV quando ela liga, e no painel do rodapé, alcançável
+  // a qualquer momento.
+  const blocoVozes =
+    vozes.length === 0 ? null : (
+      <div className="w-full max-w-[560px] flex flex-col gap-2">
+        <div className="flex items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium uppercase tracking-wide text-tv-ink-muted">
+              Voz das chamadas
+            </p>
+            <p className="truncate text-base text-tv-ink">
+              {vozAtivaVoz ? rotuloVoz(vozAtivaVoz) : '—'}
+            </p>
+          </div>
+
+          {vozes.length > 1 && (
+            <button
+              type="button"
+              onClick={() => setMostrarVozes((v) => !v)}
+              aria-expanded={mostrarVozes}
+              className="min-h-[48px] shrink-0 rounded-xl bg-tv-ground px-4 text-base text-tv-ink-muted transition hover:text-tv-ink hover:brightness-110 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tv-accent/40"
+            >
+              {mostrarVozes ? 'Fechar' : 'Trocar'}
+            </button>
+          )}
+        </div>
+
+        {/* rolável mesmo com o teto de LIMITE_SELETOR: em tela de 768px 38vh já
+            corta o oitavo item, e o diálogo não pode passar da altura da tela */}
+        {mostrarVozes && (
+          <ul className="flex flex-col gap-2 max-h-[38vh] overflow-y-auto">
+            {vozesVisiveis.map((v) => {
+              const ativa = v.voiceURI === vozAtiva
+
+              return (
+                <li key={v.voiceURI} className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => escolherVoz(v)}
+                    aria-pressed={ativa}
+                    className={`flex-1 min-h-[48px] px-4 rounded-xl flex items-center gap-3 text-left text-base transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tv-accent/40 ${
+                      ativa
+                        ? 'bg-tv-accent text-white'
+                        : 'bg-tv-ground text-tv-ink hover:brightness-110'
+                    }`}
+                  >
+                    {/* o check some por opacidade, não por condicional: assim o
+                        texto não dança de posição ao trocar */}
+                    <Check
+                      className={`w-5 h-5 shrink-0 ${ativa ? 'opacity-100' : 'opacity-0'}`}
+                      strokeWidth={2.5}
+                    />
+                    <span className="truncate">{rotuloVoz(v)}</span>
+                    <span
+                      className={`ml-auto shrink-0 text-xs tabular-nums ${
+                        ativa ? 'text-white/70' : 'text-tv-ink-muted'
+                      }`}
+                    >
+                      {normalizarLang(v.lang)}
+                    </span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => ouvirAmostra(v)}
+                    aria-label={`Ouvir amostra da voz ${rotuloVoz(v)}`}
+                    className="min-h-[48px] w-[48px] shrink-0 rounded-xl bg-tv-ground text-tv-ink-muted flex items-center justify-center transition hover:text-tv-ink hover:brightness-110 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tv-accent/40"
+                  >
+                    <Play className="w-5 h-5" strokeWidth={2} />
+                  </button>
+                </li>
+              )
+            })}
+          </ul>
+        )}
+
+        {/* A contagem é diagnóstico, não enfeite: é ela que diz se o navegador
+            está vendo as vozes locais da máquina ou só a voz de rede. Sem isso,
+            "a TV fala com voz de mulher" e "o Chrome não conversa com o
+            speech-dispatcher" são o mesmo sintoma, e a busca vai pro lugar
+            errado. Aparece sempre que houver voz — inclusive com UMA, que é
+            justamente o caso que revela o problema. */}
+        <p className="text-xs text-tv-ink-muted">
+          {vozes.length === 1
+            ? '1 voz em português nesta máquina'
+            : `${vozes.length} vozes em português nesta máquina` +
+              (vozes.length > vozesVisiveis.length
+                ? ` — mostrando as ${vozesVisiveis.length} melhores`
+                : '')}
+        </p>
+      </div>
+    )
+
   return (
     <div className="w-screen h-screen flex flex-col bg-tv-ground text-tv-ink overflow-hidden">
       {!audioLiberado && (
@@ -763,109 +868,7 @@ export default function TVPage() {
               Toque na tela para ativar as chamadas sonoras
             </p>
 
-            {/* O seletor mora aqui porque este diálogo já é o momento de setup:
-                alguém encosta na tela toda vez que a TV liga. Um seletor
-                permanente no painel seria ruído numa tela que ninguém opera.
-
-                A linha com a voz atual aparece a partir de UMA voz. Esconder o
-                caso de voz única parecia certo ("não há decisão a tomar"), mas
-                escondia justamente a informação que faltou quando a TV falou com
-                a voz errada — QUAL voz o navegador achou.
-
-                A LISTA, porém, nasce fechada, e isso não é preferência estética:
-                o quiosque dispara um toque sintético (xdotool) pra destravar o
-                áudio sem ninguém encostar na tela. Lista aberta empurra o "Ativar
-                som" umas centenas de pixels pra baixo — o toque acerta um item da
-                lista, troca a voz, toca a amostra e NÃO fecha o modal. A TV fica
-                presa aqui, muda, com um sintoma que não aponta pra causa. Fechada,
-                a altura do diálogo não depende de quantas vozes a máquina tem. */}
-            {vozes.length > 0 && (
-              <div className="w-full max-w-[560px] flex flex-col gap-2">
-                <div className="flex items-center gap-3">
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium uppercase tracking-wide text-tv-ink-muted">
-                      Voz das chamadas
-                    </p>
-                    <p className="truncate text-base text-tv-ink">
-                      {vozAtivaVoz ? rotuloVoz(vozAtivaVoz) : '—'}
-                    </p>
-                  </div>
-
-                  {vozes.length > 1 && (
-                    <button
-                      type="button"
-                      onClick={() => setMostrarVozes((v) => !v)}
-                      aria-expanded={mostrarVozes}
-                      className="min-h-[48px] shrink-0 rounded-xl bg-tv-ground px-4 text-base text-tv-ink-muted transition hover:text-tv-ink hover:brightness-110 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tv-accent/40"
-                    >
-                      {mostrarVozes ? 'Fechar' : 'Trocar'}
-                    </button>
-                  )}
-                </div>
-
-                {/* rolável mesmo com o teto de LIMITE_SELETOR: em tela de 768px
-                    38vh já corta o oitavo item, e o modal não pode passar da
-                    altura da tela */}
-                {mostrarVozes && (
-                <ul className="flex flex-col gap-2 max-h-[38vh] overflow-y-auto">
-                  {vozesVisiveis.map((v) => {
-                    const ativa = v.voiceURI === vozAtiva
-
-                    return (
-                      <li key={v.voiceURI} className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          onClick={() => escolherVoz(v)}
-                          aria-pressed={ativa}
-                          className={`flex-1 min-h-[48px] px-4 rounded-xl flex items-center gap-3 text-left text-base transition focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tv-accent/40 ${
-                            ativa
-                              ? 'bg-tv-accent text-white'
-                              : 'bg-tv-ground text-tv-ink hover:brightness-110'
-                          }`}
-                        >
-                          {/* o check some por opacidade, não por condicional:
-                              assim o texto não dança de posição ao trocar */}
-                          <Check
-                            className={`w-5 h-5 shrink-0 ${ativa ? 'opacity-100' : 'opacity-0'}`}
-                            strokeWidth={2.5}
-                          />
-                          <span className="truncate">{rotuloVoz(v)}</span>
-                          <span
-                            className={`ml-auto shrink-0 text-xs tabular-nums ${
-                              ativa ? 'text-white/70' : 'text-tv-ink-muted'
-                            }`}
-                          >
-                            {normalizarLang(v.lang)}
-                          </span>
-                        </button>
-
-                        <button
-                          type="button"
-                          onClick={() => ouvirAmostra(v)}
-                          aria-label={`Ouvir amostra da voz ${rotuloVoz(v)}`}
-                          className="min-h-[48px] w-[48px] shrink-0 rounded-xl bg-tv-ground text-tv-ink-muted flex items-center justify-center transition hover:text-tv-ink hover:brightness-110 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tv-accent/40"
-                        >
-                          <Play className="w-5 h-5" strokeWidth={2} />
-                        </button>
-                      </li>
-                    )
-                  })}
-                </ul>
-                )}
-
-                {/* Não é enfeite: o espeak-ng publica 110 variantes em pt-BR, e
-                    sem esta linha quem monta a TV concluiria que a máquina tem 8
-                    vozes — e iria procurar no lugar errado se a que ele quer não
-                    estiver entre elas. O corte é por `notaVoz`, então o que
-                    sobrou de fora está abaixo do que está dentro. */}
-                {mostrarVozes && vozes.length > vozesVisiveis.length && (
-                  <p className="text-xs text-tv-ink-muted">
-                    {vozesVisiveis.length} de {vozes.length} vozes em português —
-                    as melhores classificadas
-                  </p>
-                )}
-              </div>
-            )}
+            {blocoVozes}
 
             {/* Espera a enumeração terminar pra não piscar em toda carga. Vale
                 mostrar porque transforma um problema silencioso de pronúncia em
@@ -887,6 +890,38 @@ export default function TVPage() {
               className="mt-2 min-h-[56px] px-8 rounded-xl bg-tv-accent text-white text-lg font-medium hover:bg-tv-accent-dark focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tv-accent/40 transition"
             >
               Ativar som
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 🔊 painel de voz — a via de acesso ao seletor depois que o quiosque já
+          dispensou o modal de ativação. Some por completo quando fechado: numa
+          tela de saguão, controle visível é convite pra criança mexer. */}
+      {painelVozAberto && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="tv-voz-titulo"
+          className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50"
+        >
+          <div className="bg-tv-card rounded-2xl shadow-2xl p-8 flex flex-col items-center gap-4">
+            <h2 id="tv-voz-titulo" className="text-2xl font-semibold text-tv-ink">
+              Voz das chamadas
+            </h2>
+
+            {blocoVozes ?? (
+              <p className="max-w-[460px] text-center text-sm text-tv-ink-muted">
+                Nenhuma voz em português nesta máquina.
+              </p>
+            )}
+
+            <button
+              onClick={() => setPainelVozAberto(false)}
+              autoFocus
+              className="mt-2 min-h-[56px] px-8 rounded-xl bg-tv-accent text-white text-lg font-medium hover:bg-tv-accent-dark focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tv-accent/40 transition"
+            >
+              Concluir
             </button>
           </div>
         </div>
@@ -1100,6 +1135,25 @@ export default function TVPage() {
         />
 
         <div className="flex items-center gap-6 text-[clamp(16px,1.2vw,22px)] text-tv-bar-muted">
+          {/* Único controle da tela, e de propósito no canto mais discreto: a
+              recepção não opera esta TV, mas quem a monta precisa alcançar a
+              escolha de voz sem depender dos 20 segundos do modal de ativação.
+              Só existe depois do áudio liberado — antes disso o próprio modal
+              já mostra o seletor. */}
+          {audioLiberado && vozes.length > 0 && (
+            <button
+              type="button"
+              onClick={() => {
+                setMostrarVozes(vozes.length > 1)
+                setPainelVozAberto(true)
+              }}
+              aria-label="Configurar a voz das chamadas"
+              className="min-h-[44px] min-w-[44px] rounded-lg flex items-center justify-center text-tv-bar-muted transition hover:text-white focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tv-accent/40"
+            >
+              <Volume2 className="w-[1.15em] h-[1.15em]" strokeWidth={2} />
+            </button>
+          )}
+
           {/* sinal discreto: ninguém fica olhando o console de uma TV. Ícone +
               texto + cor: o ponto pulsante saiu, era movimento decorativo numa
               tela pública e a informação já estava nos outros dois canais */}
