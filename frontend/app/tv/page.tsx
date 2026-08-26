@@ -449,23 +449,31 @@ export default function TVPage() {
   // Quem está em destaque no centro da tela — some sozinho depois de
   // DESTAQUE_MS mesmo sem chamada nova (efeito abaixo).
   const [destacadoId, setDestacadoId] = useState<string | null>(null)
-  const primeiroId = chamadas[0]?.id ?? null
 
+  // Qual chamada MERECE o centro da tela: preenchido pelo poll só quando a
+  // chamada é genuinamente nova (ver o efeito abaixo).
+  const [idParaDestacar, setIdParaDestacar] = useState<string | null>(null)
+  // Quem entra no card central é decidido pelo poll, e NÃO por "quem está em
+  // primeiro na lista".
+  //
+  // Era `chamadas[0]`, e isso tinha o mesmo defeito do anúncio por id inédito:
+  // quando a primeira chamada era escondida, a seguinte assumia o topo e
+  // aparecia no centro em 96px sob "Responsável pelo paciente" — visualmente
+  // indistinguível de estar sendo chamada agora. Sintoma relatado: "quando uma
+  // chamada sai da coluna à direita, ele puxa a que estava atrás e chama de
+  // novo". Silenciar o sino consertava só a metade audível disso.
   useEffect(() => {
-    if (!primeiroId) {
-      setDestacadoId(null)
-      return
-    }
+    if (!idParaDestacar) return
 
-    setDestacadoId(primeiroId)
+    setDestacadoId(idParaDestacar)
 
     const t = setTimeout(() => {
       // só limpa se ainda for este: uma chamada nova já reagendou o timer dela
-      setDestacadoId((atual) => (atual === primeiroId ? null : atual))
+      setDestacadoId((atual) => (atual === idParaDestacar ? null : atual))
     }, DESTAQUE_MS)
 
     return () => clearTimeout(t)
-  }, [primeiroId])
+  }, [idParaDestacar])
 
   const atual = useMemo(
     () => (destacadoId ? chamadas.find((c) => c.id === destacadoId) ?? null : null),
@@ -746,12 +754,24 @@ export default function TVPage() {
           // Ao abrir/recarregar a TV o que já passou aparece na tela, mas não é
           // anunciado de novo.
           primeiraCarga.current = false
+
+          // O centro só recebe a mais recente se ela ainda for recente de fato.
+          // A TV reinicia no meio do dia, e destacar em 96px um nome chamado há
+          // duas horas manda a pessoa errada ao balcão.
+          const topo = lista[0]
+          if (topo && topo.idade_segundos <= SEGUNDOS_AGORA) {
+            setIdParaDestacar(topo.id)
+          }
         } else if (novas.length > 0) {
           // A lista vem da mais recente pra mais antiga; falar na ordem em que
           // foram chamadas.
           for (const c of [...novas].reverse()) filaAudio.current.push(c)
 
           processarFila()
+
+          // Mesma decisão do anúncio governa o destaque: `novas[0]` é a mais
+          // recente das genuinamente novas.
+          setIdParaDestacar(novas[0].id)
         }
       } catch {
         if (vivo) setOnline(false)
