@@ -46,7 +46,10 @@ const MAX_IDADE_ANUNCIO_S = 300
 // RLS de chamada_paciente só responde a `authenticated` — o realtime como anon
 // nunca entregava nada. Quem lê é /api/tv/chamadas, no servidor. 3s é imperceptível
 // numa sala de espera e o poll dá de graça o estado inicial ao (re)abrir a TV.
-const POLL_CHAMADAS_MS = 3000
+// 3s eram imperceptíveis para LER a tela, mas entram inteiros no tempo até a
+// FALA: o anúncio não começa antes do poll descobrir a chamada. 1,5s corta metade
+// disso. Não desce mais que isto porque cada ciclo custa duas consultas ao banco.
+const POLL_CHAMADAS_MS = 1500
 const POLL_CLIMA_MS = 600000
 
 // Chrome às vezes engole o `onend` da fala numa aba aberta há horas; sem isso a
@@ -59,10 +62,16 @@ const WATCHDOG_FALA_MS = 15000
 const FALA_RATE = 0.95
 const FALA_PITCH = 1.1
 
-// Teto de segurança pro sino: se `beep.mp3` falhar em carregar/tocar (arquivo
-// ausente, áudio bloqueado), o evento `ended` nunca chega e a fala ficaria
-// esperando pra sempre. 1800ms é folga generosa pra um beep curto.
-const SINO_MAX_MS = 1800
+// Quanto do sino toca ANTES da fala começar, e por que não é "o sino inteiro":
+// `beep.mp3` tem 5,25s. Esperar o `ended` atrasaria o anúncio em cinco segundos,
+// e o código antigo, que esperava 1,8s e não parava o áudio, era pior — a fala
+// começava com o sino ainda tocando por cima dela por mais 3,4s. 800ms é o que
+// um sinal de atenção precisa para registrar.
+const SINO_MS = 800
+
+// Desvanecer em vez de cortar seco: um sino de 5s interrompido no meio faz um
+// clique audível. A cauda do fade cobre justamente a latência da voz de rede.
+const SINO_FADE_MS = 200
 
 // Quanto tempo o nome fica em destaque na tela central antes de descer
 // sozinho pra lateral — não espera a próxima chamada pra abrir espaço.
@@ -623,9 +632,8 @@ export default function TVPage() {
       msg.lang = normalizarLang(voz.lang)
     }
 
-    // 🔔 sino sozinho primeiro. A fala (e o watchdog dela) só começa quando ele
-    // termina — por `ended` ou, se o áudio falhar, pelo teto de SINO_MAX_MS.
-    // `iniciarFala` roda uma vez só: `ended` e o teto podem disparar os dois.
+    // 🔔 sino primeiro, mas só um trecho dele. `iniciarFala` roda uma vez só:
+    // o `ended` (arquivo curto) e o prazo de SINO_MS podem disparar os dois.
     // `chamando` continua true até a fala acabar — o pulso/laranja cobre a
     // janela inteira do anúncio, não só o "ding" do sino.
     let sinoConcluido = false
@@ -633,6 +641,7 @@ export default function TVPage() {
       if (sinoConcluido) return
       sinoConcluido = true
       clearTimeout(prazoSino)
+      silenciarSino()
 
       let falaEncerrada = false
       const liberar = () => {
@@ -652,10 +661,31 @@ export default function TVPage() {
     }
 
     const beep = new Audio('/beep.mp3')
+
+    // Declarado antes do `play()` porque `iniciarFala` o chama, e o `.catch()`
+    // do play pode disparar `iniciarFala` no mesmo tick.
+    function silenciarSino() {
+      if (beep.paused) return
+
+      const passo = 25
+      const queda = passo / SINO_FADE_MS
+
+      const fade = setInterval(() => {
+        beep.volume = Math.max(0, beep.volume - queda)
+
+        if (beep.volume <= 0.02) {
+          clearInterval(fade)
+          beep.pause()
+        }
+      }, passo)
+    }
+
+    // Mantido para o caso de o arquivo ser trocado por um curto: aí o `ended`
+    // chega antes de SINO_MS e a fala não espera à toa.
     beep.addEventListener('ended', iniciarFala)
     beep.play().catch(iniciarFala)
 
-    const prazoSino = setTimeout(iniciarFala, SINO_MAX_MS)
+    const prazoSino = setTimeout(iniciarFala, SINO_MS)
   }, [resolverVoz])
 
   // carregar voz — no Chrome getVoices() só popula depois deste evento
