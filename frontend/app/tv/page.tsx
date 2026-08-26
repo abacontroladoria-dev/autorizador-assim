@@ -115,6 +115,37 @@ const VOZES_PT_MASCULINAS = [
   'male3',
 ]
 
+// O espeak-ng publica CADA variante como uma voz: no mini PC da recepção são 110
+// em pt-BR e outras 110 em pt-PT. Boa parte é caricatura ou robô de brinquedo —
+// nada que possa chamar o responsável de um paciente num saguão de clínica.
+// Estas saem da lista antes de qualquer classificação. Substring basta aqui
+// (`robosoft` pega Robosoft2..8, `klatt` pega klatt2..6, `whisper` pega também
+// female_whisper) e nenhum destes tokens é pedaço de nome legítimo.
+const VOZES_NOVIDADE = [
+  'robosoft',
+  'klatt',
+  'whisper',
+  'croak',
+  'demonic',
+  'universalrobot',
+  'anikarobot',
+  'half-life',
+  'ricishaymax',
+  'tweaky',
+  'storm',
+  'mr_serious',
+  'fast_test',
+  'grandpa',
+  'grandma',
+  'anxiousandy',
+]
+
+// Teto do que o seletor mostra. Não é sobre performance: é que rolar 220 itens
+// com o dedo, numa TV que alguém toca uma vez por dia, não é escolher — é
+// procurar. A lista já vem ordenada por `notaVoz`, então o corte descarta o
+// pior, não o desconhecido.
+const LIMITE_SELETOR = 8
+
 // `includes` não serve aqui: "male" é substring de "female", então
 // `'female2'.includes('male')` é true e classificaria toda voz feminina do
 // speech-dispatcher como masculina — exatamente o erro que este código existe
@@ -174,7 +205,34 @@ function vozesEmPortugues(todas: SpeechSynthesisVoice[]) {
     ...new Map(todas.filter(ehPortugues).map((v) => [v.voiceURI, v])).values(),
   ]
 
-  return unicas.sort((a, b) => notaVoz(b) - notaVoz(a))
+  const uteis = unicas.filter(
+    (v) => !VOZES_NOVIDADE.some((n) => v.name.toLowerCase().includes(n))
+  )
+
+  // O descarte só vale se sobrar alguém: numa máquina cujas únicas vozes em
+  // português fossem as de brinquedo, calar a TV seria pior que falar feio.
+  return (uteis.length > 0 ? uteis : unicas).sort((a, b) => notaVoz(b) - notaVoz(a))
+}
+
+const ehMasculina = (v: SpeechSynthesisVoice) =>
+  temNome(v.name.toLowerCase(), VOZES_PT_MASCULINAS)
+
+// Recorte que o seletor mostra, a partir da lista já ordenada.
+function vozesDoSeletor(ordenadas: SpeechSynthesisVoice[]) {
+  const topo = ordenadas.slice(0, LIMITE_SELETOR)
+
+  // No mini PC da recepção o espeak-ng empata NOVE variantes masculinas no topo
+  // da nota, e o corte de 8 engolia a única voz natural da máquina — a de rede
+  // do Google, feminina. Quem achasse o timbre sintético do espeak ruim demais
+  // para um saguão não teria como voltar, porque a alternativa não estaria na
+  // tela. Preferir masculina é ordenar, não amputar: a melhor voz do outro
+  // timbre sempre ganha um lugar.
+  if (topo.length > 0 && topo.every(ehMasculina)) {
+    const alternativa = ordenadas.find((v) => !ehMasculina(v))
+    if (alternativa) topo.push(alternativa)
+  }
+
+  return topo
 }
 
 // Sem escolha salva, cai na primeira da lista — que já vem ordenada por
@@ -194,6 +252,12 @@ function rotuloVoz(v: SpeechSynthesisVoice) {
     .replace(/\s+(desktop|online|mobile)\b/gi, '')
     .replace(/\s*[-–(]\s*portugu.*$/i, '')
     .replace(/\s*\(natural\)/gi, '')
+    // O espeak-ng nomeia "Portuguese (Brazil)+male1". O idioma já aparece na
+    // própria linha do seletor, então repetir "Portuguese (Brazil)" em 110
+    // linhas só empurra a parte que distingue uma voz da outra para fora do
+    // `truncate`. Só corta havendo variante depois do `+` — a voz base fica
+    // com o nome inteiro, senão sobraria rótulo vazio.
+    .replace(/^portugu[eê]s[e]?\s*\([^)]*\)\s*\+/i, '')
     .trim()
 
   return limpo || v.name
@@ -375,13 +439,20 @@ export default function TVPage() {
   // separa os dois casos.
   const [enumeracaoConcluida, setEnumeracaoConcluida] = useState(false)
 
+  // A lista de vozes fica fechada por padrão — ver o comentário no diálogo:
+  // aberta, ela desloca o botão que o toque sintético do quiosque precisa
+  // acertar.
+  const [mostrarVozes, setMostrarVozes] = useState(false)
+
   // Precisa repetir a cadeia de fallback de `resolverVoz`: se destacasse
   // `vozEscolhida` cru, uma voz desinstalada apareceria marcada na tela
   // enquanto outra falava de verdade.
-  const vozAtiva =
-    vozes.find((v) => v.voiceURI === vozEscolhida)?.voiceURI ??
-    vozPadrao(vozes)?.voiceURI ??
-    null
+  const vozAtivaVoz =
+    vozes.find((v) => v.voiceURI === vozEscolhida) ?? vozPadrao(vozes)
+
+  const vozAtiva = vozAtivaVoz?.voiceURI ?? null
+
+  const vozesVisiveis = useMemo(() => vozesDoSeletor(vozes), [vozes])
 
   // Resolvido na hora de falar, não na render: `getVoices()` costuma vir vazio
   // no primeiro paint e só popula depois do evento `voiceschanged`.
@@ -696,22 +767,48 @@ export default function TVPage() {
                 alguém encosta na tela toda vez que a TV liga. Um seletor
                 permanente no painel seria ruído numa tela que ninguém opera.
 
-                Aparece a partir de UMA voz, e não de duas: esconder o caso de
-                voz única parecia certo ("não há decisão a tomar") mas escondia
-                justamente a informação que faltava quando a TV falou com a voz
-                errada — QUAL voz o navegador achou. Com a lista à mostra, quem
-                monta a TV vê num relance se o sistema enxerga só a voz de rede
-                do Google ou se as vozes locais entraram, sem abrir console. */}
+                A linha com a voz atual aparece a partir de UMA voz. Esconder o
+                caso de voz única parecia certo ("não há decisão a tomar"), mas
+                escondia justamente a informação que faltou quando a TV falou com
+                a voz errada — QUAL voz o navegador achou.
+
+                A LISTA, porém, nasce fechada, e isso não é preferência estética:
+                o quiosque dispara um toque sintético (xdotool) pra destravar o
+                áudio sem ninguém encostar na tela. Lista aberta empurra o "Ativar
+                som" umas centenas de pixels pra baixo — o toque acerta um item da
+                lista, troca a voz, toca a amostra e NÃO fecha o modal. A TV fica
+                presa aqui, muda, com um sintoma que não aponta pra causa. Fechada,
+                a altura do diálogo não depende de quantas vozes a máquina tem. */}
             {vozes.length > 0 && (
               <div className="w-full max-w-[560px] flex flex-col gap-2">
-                <p className="text-sm font-medium uppercase tracking-wide text-tv-ink-muted">
-                  Voz das chamadas
-                </p>
+                <div className="flex items-center gap-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium uppercase tracking-wide text-tv-ink-muted">
+                      Voz das chamadas
+                    </p>
+                    <p className="truncate text-base text-tv-ink">
+                      {vozAtivaVoz ? rotuloVoz(vozAtivaVoz) : '—'}
+                    </p>
+                  </div>
 
-                {/* rolável: há máquina com 6+ vozes em português e o modal não
-                    pode passar da altura da tela */}
+                  {vozes.length > 1 && (
+                    <button
+                      type="button"
+                      onClick={() => setMostrarVozes((v) => !v)}
+                      aria-expanded={mostrarVozes}
+                      className="min-h-[48px] shrink-0 rounded-xl bg-tv-ground px-4 text-base text-tv-ink-muted transition hover:text-tv-ink hover:brightness-110 focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-tv-accent/40"
+                    >
+                      {mostrarVozes ? 'Fechar' : 'Trocar'}
+                    </button>
+                  )}
+                </div>
+
+                {/* rolável mesmo com o teto de LIMITE_SELETOR: em tela de 768px
+                    38vh já corta o oitavo item, e o modal não pode passar da
+                    altura da tela */}
+                {mostrarVozes && (
                 <ul className="flex flex-col gap-2 max-h-[38vh] overflow-y-auto">
-                  {vozes.map((v) => {
+                  {vozesVisiveis.map((v) => {
                     const ativa = v.voiceURI === vozAtiva
 
                     return (
@@ -754,6 +851,19 @@ export default function TVPage() {
                     )
                   })}
                 </ul>
+                )}
+
+                {/* Não é enfeite: o espeak-ng publica 110 variantes em pt-BR, e
+                    sem esta linha quem monta a TV concluiria que a máquina tem 8
+                    vozes — e iria procurar no lugar errado se a que ele quer não
+                    estiver entre elas. O corte é por `notaVoz`, então o que
+                    sobrou de fora está abaixo do que está dentro. */}
+                {mostrarVozes && vozes.length > vozesVisiveis.length && (
+                  <p className="text-xs text-tv-ink-muted">
+                    {vozesVisiveis.length} de {vozes.length} vozes em português —
+                    as melhores classificadas
+                  </p>
+                )}
               </div>
             )}
 
