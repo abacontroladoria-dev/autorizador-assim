@@ -77,9 +77,13 @@ const FRASE_AMOSTRA =
   'Teste de som. Responsável pelo paciente Ana Paula, dirija-se à recepção'
 
 // `SpeechSynthesisVoice` não expõe gênero — só nome e lang. Então a única forma
-// de não cair numa voz masculina é reconhecer os nomes que os sistemas usam.
-// A lista não precisa ser exaustiva: nome desconhecido fica no meio da
-// classificação, entre a feminina reconhecida e a masculina reconhecida.
+// de escolher pelo timbre é reconhecer os nomes que os sistemas usam. A lista
+// não precisa ser exaustiva: nome desconhecido fica no meio da classificação,
+// entre a masculina reconhecida e a feminina reconhecida.
+//
+// Além dos nomes do Windows, entram aqui os rótulos que aparecem no Linux: o
+// speech-dispatcher nomeia por tipo ("male1", "female2") e as vozes Piper por
+// nome de modelo ("faber" é a masculina pt-BR).
 const VOZES_PT_FEMININAS = [
   'maria',
   'francisca',
@@ -89,9 +93,37 @@ const VOZES_PT_FEMININAS = [
   'helena',
   'joana',
   'catarina',
+  'leticia',
+  'letícia',
+  'female',
+  'female1',
+  'female2',
+  'female3',
 ]
 
-const VOZES_PT_MASCULINAS = ['daniel', 'antonio', 'antônio', 'felipe', 'ricardo']
+const VOZES_PT_MASCULINAS = [
+  'daniel',
+  'antonio',
+  'antônio',
+  'felipe',
+  'ricardo',
+  'faber',
+  'edresson',
+  'male',
+  'male1',
+  'male2',
+  'male3',
+]
+
+// `includes` não serve aqui: "male" é substring de "female", então
+// `'female2'.includes('male')` é true e classificaria toda voz feminina do
+// speech-dispatcher como masculina — exatamente o erro que este código existe
+// pra evitar. O casamento é por limite de palavra.
+function temNome(nome: string, tokens: string[]) {
+  return tokens.some((t) =>
+    new RegExp(`(^|[^a-z])${t}([^a-z]|$)`).test(nome)
+  )
+}
 
 // Parte dos motores (Android, algumas builds SAPI) reporta `pt_BR` em vez de
 // `pt-BR`. Escrever isso cru no `utterance.lang` monta uma tag malformada, e aí
@@ -107,8 +139,13 @@ function ehPortugues(v: SpeechSynthesisVoice) {
 }
 
 // A nota só ORDENA e escolhe o default — não esconde ninguém do seletor. Se a
-// máquina só tiver Daniel, é o Daniel que fala: voz masculina em português é
-// melhor que voz feminina lendo "Responsável" em inglês.
+// máquina só tiver voz feminina, é ela que fala: idioma pesa muito mais que
+// timbre, e voz feminina em português é melhor que masculina lendo
+// "Responsável" em inglês.
+//
+// A preferência é por voz MASCULINA (pedido do usuário em 2026-08-26; antes era
+// o contrário). Note que a margem é menor que a de idioma de propósito: o
+// timbre é desempate, não critério.
 function notaVoz(v: SpeechSynthesisVoice) {
   const nome = v.name.toLowerCase()
   const lang = normalizarLang(v.lang).toLowerCase()
@@ -118,8 +155,8 @@ function notaVoz(v: SpeechSynthesisVoice) {
   if (lang.startsWith('pt-br')) nota += 100
   else if (lang.startsWith('pt')) nota += 40 // pt-PT: sotaque errado, mas português
 
-  if (VOZES_PT_FEMININAS.some((f) => nome.includes(f))) nota += 20
-  if (VOZES_PT_MASCULINAS.some((m) => nome.includes(m))) nota -= 25
+  if (temNome(nome, VOZES_PT_MASCULINAS)) nota += 25
+  if (temNome(nome, VOZES_PT_FEMININAS)) nota -= 20
 
   // A voz do Google tem dicção bem melhor que as SAPI da Microsoft. Ela depende
   // de rede, mas isso não é risco aqui: sem rede o poll não traz chamada
@@ -140,15 +177,13 @@ function vozesEmPortugues(todas: SpeechSynthesisVoice[]) {
   return unicas.sort((a, b) => notaVoz(b) - notaVoz(a))
 }
 
-// Default pedido é o Daniel especificamente — não mexe em `notaVoz` (que
-// continua ordenando o seletor do jeito documentado ali) só no que cai sem
-// escolha salva.
+// Sem escolha salva, cai na primeira da lista — que já vem ordenada por
+// `notaVoz`. O pin explícito no "Daniel" saiu junto com a inversão da
+// preferência: ele existia pra contornar uma nota que penalizava voz masculina,
+// e agora a nota já prefere. Continua sendo o Daniel que ganha num Windows
+// (única masculina pt-BR das SAPI), só que por regra e não por exceção.
 function vozPadrao(disponiveis: SpeechSynthesisVoice[]) {
-  return (
-    disponiveis.find((v) => v.name.toLowerCase().includes('daniel')) ??
-    disponiveis[0] ??
-    null
-  )
+  return disponiveis[0] ?? null
 }
 
 // "Microsoft Maria Desktop - Portuguese(Brazil)" não é rótulo pra ninguém ler a
@@ -660,9 +695,14 @@ export default function TVPage() {
             {/* O seletor mora aqui porque este diálogo já é o momento de setup:
                 alguém encosta na tela toda vez que a TV liga. Um seletor
                 permanente no painel seria ruído numa tela que ninguém opera.
-                Só aparece havendo escolha real — com uma voz só não há decisão
-                a tomar. */}
-            {vozes.length > 1 && (
+
+                Aparece a partir de UMA voz, e não de duas: esconder o caso de
+                voz única parecia certo ("não há decisão a tomar") mas escondia
+                justamente a informação que faltava quando a TV falou com a voz
+                errada — QUAL voz o navegador achou. Com a lista à mostra, quem
+                monta a TV vê num relance se o sistema enxerga só a voz de rede
+                do Google ou se as vozes locais entraram, sem abrir console. */}
+            {vozes.length > 0 && (
               <div className="w-full max-w-[560px] flex flex-col gap-2">
                 <p className="text-sm font-medium uppercase tracking-wide text-tv-ink-muted">
                   Voz das chamadas
@@ -723,8 +763,9 @@ export default function TVPage() {
             {enumeracaoConcluida && vozes.length === 0 && (
               <p className="max-w-[460px] text-center text-sm text-tv-ink-muted">
                 Nenhuma voz em português instalada nesta máquina — as chamadas
-                vão sair com pronúncia de outro idioma. Instale uma voz pt-BR em
-                Configurações do Windows → Hora e idioma → Fala.
+                vão sair com pronúncia de outro idioma. No Windows: Configurações
+                → Hora e idioma → Fala. No Linux: instale
+                speech-dispatcher-espeak-ng.
               </p>
             )}
 
