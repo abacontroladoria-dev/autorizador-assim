@@ -10,7 +10,7 @@ export const roleDefaults: Record<string, string[]> = {
     'dashboard', 'atendimentos', 'autorizacoes_avulsas', 'gestao',
     'escala_terapeutica',
     'auditoria_assim', 'usuarios', 'permissoes', 'cco',
-    'autorizacoes', 'preauditoria', 'outros_convenios',
+    'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
     'cronograma_disponibilidade_interna',
     'ocupacao_clinica', 'ocupacao_clinica_gaps', 'ocupacao_clinica_inconsistencias',
@@ -47,11 +47,11 @@ export const roleDefaults: Record<string, string[]> = {
   ],
   recepcao: [
     'dashboard', 'atendimentos', 'autorizacoes_avulsas', 'gestao', 'auditoria_assim',
-    'autorizacoes', 'outros_convenios',
+    'outros_convenios',
   ],
   autorizacao: [
     'dashboard', 'auditoria_assim',
-    'autorizacoes', 'preauditoria',
+    'preauditoria',
   ],
   terapeutico: ['dashboard', 'escala_terapeutica', 'analise_tratativas'],
   // O setor que opera o controle de insumos, junto com admin e diretoria
@@ -96,7 +96,10 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   usuarios: ['/admin'],
   permissoes: ['/admin/permissoes'],
   cco: ['/cco'],
-  autorizacoes: ['/autorizacoes'],
+  // `autorizacoes` (a rota /autorizacoes) saiu em 2026-08-26: a tela foi
+  // descontinuada e quem chama o responsável agora é a /solicitar. O código
+  // pode continuar existindo em permissões já gravadas de usuários — sem
+  // entrada aqui, `codigosToRotas` simplesmente o ignora (`?? []`).
   preauditoria: ['/preauditoria'],
   outros_convenios: ['/outros-convenios'],
   cronograma_solicitacoes: ['/relacionamento-prestador/solicitacoes'],

@@ -238,13 +238,24 @@ const unidades = [
 
   const chamarResponsavel = async (paciente: any) => {
     try {
+      // A tupla da sessão é o que permite a TV tirar o nome da tela sozinha
+      // quando a autorização encerra. Não dá para gravar o id da fila aqui: no
+      // instante do "Chamar" ela normalmente ainda não existe — o responsável
+      // está sendo chamado justamente para que a autorização seja feita.
+      //
+      // paciente_id vai como texto porque é assim que fila_autorizacoes o
+      // guarda; casar sem cast é o que mantém `unique_fila_agendamento` em uso.
       const { error } = await supabase
         .from('chamada_paciente')
         .insert([
           {
             nome: paciente.paciente_nome,
             sala:  'Recepção 1',
-			agenda_id: null
+            paciente_id: paciente.paciente_id != null
+              ? String(paciente.paciente_id)
+              : null,
+            data_atendimento: paciente.data_atendimento ?? null,
+            horario: paciente.horario ?? null,
           }
         ])
   
