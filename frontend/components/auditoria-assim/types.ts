@@ -188,8 +188,23 @@ export type PlacarTuss = {
    * `sessaoSemCobertura` — não é `decorridas − liberadas`. A diferença é o que
    * permite a grade apontar o cartão: cada unidade deste número é uma sessão
    * que existe na tela. Nunca negativo.
+   *
+   * Mede COBERTURA, e por isso inclui a sessão glosada: a recusa não cobriu
+   * nada. Para CONTAR ESPÉCIES na listagem é `naoSolicitada` que serve — ver
+   * abaixo.
    */
   faltante: number
+  /**
+   * Das `faltante`, as que ninguém sequer respondeu — sem a glosada e sem a
+   * cancelada, que outra espécie da listagem já conta.
+   *
+   * Existe por um defeito real (Yure Bernardo, agosto/2026): a linha somava
+   * "5 glosas + 9 não solicitadas" = 14 sobre nove sessões, porque as cinco
+   * recusas entravam nas duas espécies. `faltante` continua sendo o número
+   * certo para a pergunta "esta sessão está coberta?" — e este é o certo para
+   * "quantas pendências distintas este paciente tem?". Ver `sessaoNaoSolicitada`.
+   */
+  naoSolicitada: number
 }
 
 /**

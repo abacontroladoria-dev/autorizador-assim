@@ -57,7 +57,7 @@ const VINCULO: VinculoAutorizacao = {
 }
 
 const PLACAR: PlacarTuss[] = [
-  { codigo_tuss: '22070400', terapias: 'Terapia Ocupacional', agendadas: 0, decorridas: 0, autorizadas: 0, liberadas: 0, canceladas: 0, excedente: 0, faltante: 0 },
+  { codigo_tuss: '22070400', terapias: 'Terapia Ocupacional', agendadas: 0, decorridas: 0, autorizadas: 0, liberadas: 0, canceladas: 0, excedente: 0, faltante: 0, naoSolicitada: 0 },
 ]
 
 const todos = (linhas: ReturnType<typeof montarGrade>) =>

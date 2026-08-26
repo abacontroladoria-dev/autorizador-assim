@@ -81,6 +81,7 @@ describe('contarPendencias — total', () => {
         canceladas: 0,
         excedente: 0,
         faltante: 3,
+        naoSolicitada: 3,
       },
     ]
     const c = contarPendencias(
@@ -97,13 +98,30 @@ describe('contarPendencias — total', () => {
     expect(c.total).toBe(7)
   })
 
-  it('faltando vem da soma de `faltante` por TUSS', () => {
+  it('faltando vem da soma de `naoSolicitada` por TUSS', () => {
     const placar: PlacarTuss[] = [
-      { codigo_tuss: '2250', terapias: 'Fono', agendadas: 2, decorridas: 2, autorizadas: 0, liberadas: 0, canceladas: 0, excedente: 0, faltante: 2 },
-      { codigo_tuss: '2251', terapias: 'TO', agendadas: 1, decorridas: 1, autorizadas: 0, liberadas: 0, canceladas: 0, excedente: 0, faltante: 1 },
+      { codigo_tuss: '2250', terapias: 'Fono', agendadas: 2, decorridas: 2, autorizadas: 0, liberadas: 0, canceladas: 0, excedente: 0, faltante: 2, naoSolicitada: 2 },
+      { codigo_tuss: '2251', terapias: 'TO', agendadas: 1, decorridas: 1, autorizadas: 0, liberadas: 0, canceladas: 0, excedente: 0, faltante: 1, naoSolicitada: 1 },
     ]
     const c = contarPendencias(placar, LEDGER_LIMPO, new Set())
     expect(c.faltando).toBe(3)
     expect(c.total).toBe(3)
+  })
+
+  /**
+   * O caso Yure Bernardo (agosto/2026), que motivou a separação.
+   *
+   * Nove sessões descobertas: cinco glosadas em 03/08 e quatro nunca
+   * solicitadas em 07/08. `faltante` vale 9 (nenhuma delas foi coberta) e
+   * `naoSolicitada` vale 4. A linha dizia 5 + 9 = 14.
+   */
+  it('não conta a sessão glosada duas vezes (glosa + não solicitada)', () => {
+    const placar: PlacarTuss[] = [
+      { codigo_tuss: '2250', terapias: 'Fono', agendadas: 9, decorridas: 9, autorizadas: 5, liberadas: 0, canceladas: 0, excedente: 0, faltante: 9, naoSolicitada: 4 },
+    ]
+    const c = contarPendencias(placar, { ...LEDGER_LIMPO, glosas: 5 }, new Set())
+    expect(c.glosa).toBe(5)
+    expect(c.faltando).toBe(4)
+    expect(c.total).toBe(9) // e não 14
   })
 })

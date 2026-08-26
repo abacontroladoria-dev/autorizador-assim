@@ -128,6 +128,41 @@ export function sessaoSemCobertura(
 }
 
 /**
+ * Esta sessão está descoberta E ninguém respondeu por ela — a espécie "Não
+ * solicitada" da listagem, sem a parte que outra espécie já conta.
+ *
+ * `sessaoSemCobertura` responde "alguém cobriu?", e a recusa não cobre nada:
+ * a sessão glosada responde "não" e é, corretamente, um cartão marcado na
+ * grade. Mas a listagem conta espécies, e ali a MESMA recusa já entra como
+ * `glosa` pelo lado da autorização — então somar as duas contava o mesmo fato
+ * duas vezes.
+ *
+ * O caso que revelou isto (Yure Bernardo, agosto/2026): cinco recusas em 03/08
+ * e quatro sessões nunca solicitadas em 07/08 saíam como "5 glosas + 9 não
+ * solicitadas", total 14, quando o trabalho real é 9. As cinco apareciam nas
+ * duas espécies. A grade nunca errou — `cartaoPendente` é `semCobertura ||
+ * GLOSA` sobre UM cartão, e um `||` não duplica; quem somava era a aritmética.
+ *
+ * `SITUACOES_COM_VEREDITO` é exatamente o conjunto certo para descontar, e não
+ * uma lista nova: ele já existe para separar "a ASSIM respondeu" de "não há
+ * resposta", que é a mesma fronteira. GLOSA sai porque vira `glosa`; CANCELADA
+ * sai porque a autorização desfeita já entra como `cancelamento`.
+ *
+ * A sessão descontada NÃO deixa de pedir trabalho — ela continua marcada na
+ * grade e continua contada, pela espécie que a nomeia melhor. O que ela deixa
+ * de ser é uma segunda unidade no `total`.
+ */
+export function sessaoNaoSolicitada(
+  s: AuditoriaAssimItem,
+  cutoff: string,
+  vinculosPorBloco: ReadonlyMap<string, { tipo: 'vinculo' | 'sem_sessao' }> = new Map()
+): boolean {
+  if (!sessaoSemCobertura(s, cutoff, vinculosPorBloco)) return false
+  const situacao = situacaoComVinculo(s.situacao, vinculosPorBloco.get(s.bloco_id ?? ''))
+  return !SITUACOES_COM_VEREDITO.has(situacao ?? '')
+}
+
+/**
  * As guias que uma triagem aposentou — a outra metade de "sair da contagem".
  *
  * Vincular uma guia externa a uma sessão glosada resolve DUAS pendências de uma

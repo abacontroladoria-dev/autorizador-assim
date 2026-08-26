@@ -89,6 +89,12 @@ export function calcularLedger(
  * `excedentes` vem de `excedentesDoPlacar`, que já resolve o saldo por TUSS de
  * volta para guias nomeadas. É por existir esse de-para que a união é possível:
  * sem ele, "sobrando" seria um número solto, sem identidade para deduplicar.
+ *
+ * `faltando` lê `naoSolicitada`, e NÃO `faltante`, pelo mesmo princípio uma
+ * camada adiante: a sessão glosada está descoberta (logo entra em `faltante`),
+ * mas a recusa que a descobriu já é contada aqui como `glosa`. Somar as duas
+ * dava "5 glosas + 9 não solicitadas" para nove sessões — ver
+ * `sessaoNaoSolicitada`, que carrega o caso.
  */
 export function contarPendencias(
   placar: PlacarTuss[],
@@ -96,7 +102,7 @@ export function contarPendencias(
   excedentes: ReadonlySet<string>
 ): ContagemPendencias {
   let faltando = 0
-  for (const p of placar) faltando += p.faltante
+  for (const p of placar) faltando += p.naoSolicitada
 
   const aMais = new Set(ledger.orfas)
   for (const guia of excedentes) aMais.add(guia)

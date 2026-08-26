@@ -22,6 +22,7 @@ import {
   SITUACOES_SEM_SESSAO,
   guiasSubstituidas,
   sessaoDecorrida,
+  sessaoNaoSolicitada,
   sessaoSemCobertura,
 } from '@/components/auditoria-assim/reconciliacao/cobertura'
 import {
@@ -241,6 +242,7 @@ export function calcularPlacar(
         canceladas: 0,
         excedente: 0,
         faltante: 0,
+        naoSolicitada: 0,
         terapiasVistas: new Set<string>(),
       }
       porTuss.set(chave, atual)
@@ -257,6 +259,7 @@ export function calcularPlacar(
     item.agendadas += 1
     if (sessaoDecorrida(s, cutoff)) item.decorridas += 1
     if (sessaoSemCobertura(s, cutoff, vinculosPorBloco)) item.faltante += 1
+    if (sessaoNaoSolicitada(s, cutoff, vinculosPorBloco)) item.naoSolicitada += 1
   }
 
   for (const a of autorizacoes) {
