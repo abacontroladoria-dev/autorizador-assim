@@ -27,6 +27,19 @@
 --     pedido, só que cedo demais: se a autorização daquela sessão JÁ terminou,
 --     o nome nasce filtrado e ninguém nunca o vê.
 
+-- ATUALIZADO depois do diagnóstico de 26/08. A resposta foi a terceira
+-- hipótese: em 10 de 11 chamadas com sessão a fila JÁ estava resolvida no
+-- instante do "Chamar" (autorização tirada mais cedo, ou de véspera, pelo
+-- robô). O nome nascia filtrado e ninguém nunca o via.
+--
+-- A regra deixou de ser "a autorização está resolvida" e passou a ser "a
+-- autorização foi resolvida DEPOIS da chamada" — só isso sustenta a inferência
+-- de que o responsável passou pela recepção. O veredito abaixo acompanha.
+--
+-- `completed_at` e `updated_at` são `timestamp without time zone` guardando
+-- UTC; `chamado_em` é `timestamptz`. O `at time zone 'UTC'` é o que põe os dois
+-- na mesma régua — sem ele a comparação erra pelo offset do servidor, calada.
+
 select
   c.chamado_em,
   c.nome,
@@ -35,6 +48,7 @@ select
   c.data_atendimento,
   c.horario,
   f.status                as status_da_fila,
+  coalesce(f.completed_at, f.updated_at) at time zone 'UTC' as resolvida_em,
   case
     when c.paciente_id is null
       or c.data_atendimento is null
@@ -42,7 +56,13 @@ select
     when f.status is null            then 'aparece (fila ainda não existe)'
     when f.status in ('pendente','processando','executando','erro')
                                      then 'aparece (fila em andamento)'
-    else                                  'ESCONDIDA pelo filtro da TV'
+    when coalesce(f.completed_at, f.updated_at) is null
+                                     then 'aparece (sem carimbo de resolução)'
+    when (coalesce(f.completed_at, f.updated_at) at time zone 'UTC') <= c.chamado_em
+                                     then 'aparece (resolvida ANTES da chamada)'
+    when c.chamado_em > now() - interval '1 minute'
+                                     then 'aparece (piso de 60s)'
+    else                                  'ESCONDIDA (resolvida após a chamada)'
   end                     as veredito,
   c.chamado_em > now() - interval '6 hours' as dentro_da_janela
 from public.chamada_paciente c
