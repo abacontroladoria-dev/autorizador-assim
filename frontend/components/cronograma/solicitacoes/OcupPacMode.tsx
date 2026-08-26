@@ -8,7 +8,7 @@ import {
   HORAS_GRID, PACS_ADMIN, TERAPIA_TO_ESP, TODAS_ESP, isProfBloqueadoTemp, normTxt,
 } from "@/lib/cronograma/constants"
 import {
-  buildCronoUnitMeta, espRealPorExibicao, fm, fmtName, isLaudoComAlta, pm,
+  buildCronoUnitMeta, ceilOcupacaoAba, espParaOcupacaoPac, espRealPorExibicao, fm, fmtName, isLaudoComAlta, pesoOcupacaoAba, pm,
   shouldShowSessionUnit, unidadeBadgeText,
 } from "@/lib/cronograma/helpers"
 import { UnitHeaderBadges, CronoGlobalUnitBadge } from "@/components/cronograma/ui/UnitBadges"
@@ -264,11 +264,27 @@ function buildSugestoes(
   const clinTurno: "manhã" | "tarde" | null =
     manhaCt + tardeCt === 0 ? null : manhaCt >= tardeCt ? "manhã" : "tarde"
 
+  // ABA em Ambiente Natural (Aplicador ABA Casa/Escola) ocupa o TURNO inteiro do
+  // paciente, não só o dia/hora exato da sessão — pedido explícito do usuário
+  // (2026-08-25): se o paciente tem Escola SEG/QUA/SEX de manhã, TER/QUI de manhã
+  // também ficam bloqueados pra novas ofertas, mesmo sem sessão de Escola nesses
+  // dias. `agend` (não `agendClin`/`pacClinRows`, que já descartam Ambiente
+  // Natural via EXCLUIR_GAPS) é a única fonte com essas linhas.
+  const turnosAmbNat = new Set<"manhã" | "tarde">()
+  for (const r of agend) {
+    if (r["Nome Favorecido"] !== pac || !ABA_EXT_NAMES.has(r.Terapia)) continue
+    const h = pm(hiStr(r)) ?? hiMin(r)
+    if (!h && h !== 0) continue
+    turnosAmbNat.add(h < 720 ? "manhã" : "tarde")
+  }
+
   function hMin(r: CsvRow): number { return pm(hiStr(r)) ?? hiMin(r) }
 
   function isTurnoOk(hMinVal: number): boolean {
+    const turnoDoSlot = hMinVal < 720 ? "manhã" : "tarde"
+    if (turnosAmbNat.has(turnoDoSlot)) return false
     if (clinTurno === null) return true
-    return clinTurno === "manhã" ? hMinVal < 720 : hMinVal >= 720
+    return clinTurno === turnoDoSlot
   }
 
   // Todas as sessões do paciente — usado para evitar sugerir slot já ocupado
@@ -962,7 +978,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     const ADMIN_WARN = new Set(["Triagem", "Avaliação Neuropsicológica", "Visita Guiada"])
     const res: { dia: string; hora: string; tP: string; tE?: string; prof: string; unidade: string; tipo: "exist" | "adminSuperv" | "adminWarn" }[] = []
     for (const r of cRows) {
-      if (r["Nome Favorecido"] !== pac || ABA_EXT_NAMES.has(r.Terapia)) continue
+      if (r["Nome Favorecido"] !== pac) continue
       const hm = pm(hiStr(r)) ?? Number(r.HI || 0)
       const hora = fm(hm) || hiStr(r)
       const k = `${r["Dia da Semana"]}|||${hm}|||${r.Terapia}|||${r.Profissional}`
@@ -2319,9 +2335,9 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     const seenOf = new Set<string>()
     for (const r of agend) {
       const rawP = r["Nome Favorecido"]
-      if (!rawP || PACS_ADMIN_OCUP_PAC.has(rawP) || EXCLUIR_GAPS.has(r.Terapia)) continue
+      if (!rawP || PACS_ADMIN_OCUP_PAC.has(rawP)) continue
       const p = agendMergeMap.get(rawP) ?? rawP
-      const espPadrao = TERAPIA_TO_ESP[r.Terapia]
+      const espPadrao = espParaOcupacaoPac(r.Terapia, TERAPIA_TO_ESP)
       if (!espPadrao) continue
       const terapiaExib = String(r["Terapia Exibição"] || r["Terapia Exibicao"] || "").trim()
       const esp = espRealPorExibicao(r.Terapia, terapiaExib, espPadrao)
@@ -2329,7 +2345,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       const dk = `${p}|||${r["Dia da Semana"]}|||${hm}|||${r.Terapia}|||${r.Profissional}`
       if (seenOf.has(dk)) continue
       seenOf.add(dk)
-      qtdOf[`${p}|||${esp}`] = (qtdOf[`${p}|||${esp}`] || 0) + 1
+      qtdOf[`${p}|||${esp}`] = (qtdOf[`${p}|||${esp}`] || 0) + pesoOcupacaoAba(r.Terapia)
     }
     // Reservas confirmadas também ocupam a vaga — sem isso o motor de sugestões
     // (buildSugestoes) continuaria ofertando sessões além do que resta de autorização.
@@ -2339,15 +2355,14 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       if (b.status !== "confirmado") continue
       if (PACS_ADMIN_OCUP_PAC.has(b.pac)) continue
       for (const s of b.sessoes) {
-        if (EXCLUIR_GAPS.has(s.tP)) continue
-        const esp = TERAPIA_TO_ESP[s.tP]
+        const esp = espParaOcupacaoPac(s.tP, TERAPIA_TO_ESP)
         if (!esp) continue
         const hm = pm(s.hora)
         if (hm === null) continue
         const dk = `${b.pac}|||${s.dia}|||${hm}|||${s.tP}|||${s.prof}`
         if (seenOf.has(dk)) continue
         seenOf.add(dk)
-        qtdOf[`${b.pac}|||${esp}`] = (qtdOf[`${b.pac}|||${esp}`] || 0) + 1
+        qtdOf[`${b.pac}|||${esp}`] = (qtdOf[`${b.pac}|||${esp}`] || 0) + pesoOcupacaoAba(s.tP)
       }
     }
     const qtdAut: Record<string, number> = {}
@@ -2366,7 +2381,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     for (const k of altaSet) delete qtdAut[k]
     const result: Record<string, { dif: number; aut: number; of: number }> = {}
     for (const [k, aut] of Object.entries(qtdAut)) {
-      const of_ = qtdOf[k] || 0
+      const of_ = ceilOcupacaoAba(qtdOf[k] || 0)
       const dif = Math.round((aut - of_) * 10) / 10
       result[k] = { dif, aut, of: of_ }
     }
@@ -2546,9 +2561,9 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     const seenOf = new Set<string>()
     for (const r of agend) {
       const rawP = r["Nome Favorecido"]
-      if (!rawP || EXCLUIR_GAPS.has(r.Terapia)) continue
+      if (!rawP) continue
       if ((agendMergeMap.get(rawP) ?? rawP) !== pac) continue
-      const espPadrao = TERAPIA_TO_ESP[r.Terapia]
+      const espPadrao = espParaOcupacaoPac(r.Terapia, TERAPIA_TO_ESP)
       if (!espPadrao) continue
       const terapiaExib = String(r["Terapia Exibição"] || r["Terapia Exibicao"] || "").trim()
       const esp = espRealPorExibicao(r.Terapia, terapiaExib, espPadrao)
@@ -2556,7 +2571,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       const dk = `${r["Dia da Semana"]}|||${hm}|||${r.Terapia}|||${r.Profissional}`
       if (seenOf.has(dk)) continue
       seenOf.add(dk)
-      qtdOf[esp] = (qtdOf[esp] || 0) + 1
+      qtdOf[esp] = (qtdOf[esp] || 0) + pesoOcupacaoAba(r.Terapia)
     }
     // Sprint 4: implantação na TiTa é imediata e definitiva — reservas confirmadas
     // contam junto com o que já veio de `agend`, num único total (sem "+N" separado
@@ -2566,15 +2581,14 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     for (const b of aceites) {
       if (b.pac !== pac || b.status !== "confirmado") continue
       for (const s of b.sessoes) {
-        if (EXCLUIR_GAPS.has(s.tP)) continue
-        const esp = TERAPIA_TO_ESP[s.tP]
+        const esp = espParaOcupacaoPac(s.tP, TERAPIA_TO_ESP)
         if (!esp) continue
         const hm = pm(s.hora)
         if (hm === null) continue
         const dk = `${s.dia}|||${hm}|||${s.tP}|||${s.prof}`
         if (seenOf.has(dk)) continue
         seenOf.add(dk)
-        qtdOf[esp] = (qtdOf[esp] || 0) + 1
+        qtdOf[esp] = (qtdOf[esp] || 0) + pesoOcupacaoAba(s.tP)
       }
     }
     const qtdAut: Record<string, number> = {}
@@ -2592,7 +2606,10 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     }
     for (const esp of altaSet) delete qtdAut[esp]
     return Object.entries(qtdAut)
-      .map(([esp, aut]) => ({ esp, aut, of: qtdOf[esp] || 0, dif: Math.round((aut - (qtdOf[esp] || 0)) * 10) / 10 }))
+      .map(([esp, aut]) => {
+        const of_ = ceilOcupacaoAba(qtdOf[esp] || 0)
+        return { esp, aut, of: of_, dif: Math.round((aut - of_) * 10) / 10 }
+      })
       .sort((a, b) => b.dif - a.dif)
   }, [pac, agend, lRows, agendIdMap, agendMergeMap, aceites])
 

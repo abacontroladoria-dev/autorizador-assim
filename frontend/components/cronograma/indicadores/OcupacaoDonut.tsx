@@ -51,11 +51,6 @@ export function OcupacaoDonut({ item, size = 150, centerFillClassName, ringStrok
       <div className="mt-1 text-center text-[11px] leading-snug text-muted-foreground">
         <strong className="text-foreground">CH total:</strong> {fmtH(totalHoras)}
       </div>
-      {oc.capacidadeMultipla && (
-        <div className="mt-2 rounded-lg bg-violet-50 px-2 py-1 text-center text-[11px] text-violet-700 dark:bg-violet-950/30 dark:text-violet-400">
-          Capacidade: {oc.baseTexto}
-        </div>
-      )}
     </div>
   )
 }
