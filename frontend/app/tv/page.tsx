@@ -95,6 +95,14 @@ const VOZES_PT_FEMININAS = [
   'catarina',
   'leticia',
   'letícia',
+  // Neurais da Azure em pt-BR/pt-PT, expostas pelo Edge
+  'brenda',
+  'elza',
+  'giovanna',
+  'leila',
+  'manuela',
+  'yara',
+  'raquel',
   'female',
   'female1',
   'female2',
@@ -109,6 +117,17 @@ const VOZES_PT_MASCULINAS = [
   'ricardo',
   'faber',
   'edresson',
+  // Neurais da Azure em pt-BR/pt-PT, expostas pelo Edge
+  'donato',
+  'fabio',
+  'fábio',
+  'humberto',
+  'julio',
+  'júlio',
+  'nicolau',
+  'valerio',
+  'valério',
+  'duarte',
   'male',
   'male1',
   'male2',
@@ -188,6 +207,20 @@ function notaVoz(v: SpeechSynthesisVoice) {
 
   if (temNome(nome, VOZES_PT_MASCULINAS)) nota += 25
   if (temNome(nome, VOZES_PT_FEMININAS)) nota -= 20
+
+  // Salto de tecnologia, não de gosto: "natural"/"neural" no nome marca as vozes
+  // neurais (as da Azure expostas pelo Edge). O espeak-ng sintetiza por
+  // formantes — tecnologia dos anos 80 — e nenhuma das 110 variantes dele soa
+  // humana; trocar de variante só muda o timbre do robô. Sem este peso, uma
+  // `male3` do espeak empata em 125 com o "Antonio (Natural)" e o desempate
+  // vira a ordem de enumeração, ou seja, sorte.
+  //
+  // Ordem que os pesos produzem, e é deliberada: masculina natural (155) >
+  // masculina sintética (125) > feminina natural (110) > feminina sintética
+  // (80). Timbre continua pesando mais que naturalidade porque foi o pedido
+  // explícito; a melhor voz do outro timbre segue no seletor via
+  // `vozesDoSeletor`.
+  if (/natural|neural/.test(nome)) nota += 30
 
   // A voz do Google tem dicção bem melhor que as SAPI da Microsoft. Ela depende
   // de rede, mas isso não é risco aqui: sem rede o poll não traz chamada
@@ -804,12 +837,18 @@ export default function TVPage() {
                       strokeWidth={2.5}
                     />
                     <span className="truncate">{rotuloVoz(v)}</span>
+                    {/* O "· natural" não é adorno: o espeak-ng publica uma
+                        variante chamada Antonio e a Azure publica um Antonio
+                        neural, e os dois viram o rótulo "Antonio" depois da
+                        limpeza. Sem esta marca o seletor mostra duas linhas
+                        idênticas, uma robótica e uma humana. */}
                     <span
-                      className={`ml-auto shrink-0 text-xs tabular-nums ${
+                      className={`ml-auto shrink-0 text-xs ${
                         ativa ? 'text-white/70' : 'text-tv-ink-muted'
                       }`}
                     >
-                      {normalizarLang(v.lang)}
+                      <span className="tabular-nums">{normalizarLang(v.lang)}</span>
+                      {/natural|neural/i.test(v.name) && ' · natural'}
                     </span>
                   </button>
 
