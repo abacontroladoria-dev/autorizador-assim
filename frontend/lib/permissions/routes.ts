@@ -19,6 +19,7 @@ export const roleDefaults: Record<string, string[]> = {
     'indicadores_comparativo_sessoes',
     'reposicao_faltas', 'cronograma_ocupacao_salas',
     'cronograma_valores_convenio', 'cadastros_feriados', 'cadastros_contratos', 'cadastros_taxas',
+    'cadastros_convenios',
     'analise_tratativas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
     'relacionamento_prestador_individual',
@@ -38,6 +39,7 @@ export const roleDefaults: Record<string, string[]> = {
     'indicadores_comparativo_sessoes',
     'reposicao_faltas', 'cronograma_ocupacao_salas',
     'cronograma_valores_convenio', 'cadastros_feriados', 'cadastros_contratos', 'cadastros_taxas',
+    'cadastros_convenios',
     'analise_tratativas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
     'relacionamento_prestador_individual',
@@ -125,6 +127,10 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   cadastros_feriados: ['/cadastros/feriados'],
   cadastros_contratos: ['/cadastros/contratos'],
   cadastros_taxas: ['/cadastros/taxas-e-parametros'],
+  // Cadastro nativo de Convênios + Planos de Saúde, fonte do select "Plano de
+  // saúde" na Ficha Médica do Cadastro de Pacientes — ver
+  // supabase/migrations/20260826110000_create_convenios_planos_saude.sql.
+  cadastros_convenios: ['/cadastros/convenios'],
   analise_tratativas: ['/analise-tratativas'],
   relacionamento_prestador_analise: ['/relacionamento-prestador/analise'],
   relacionamento_prestador_rp: ['/relacionamento-prestador/rp'],
@@ -133,6 +139,9 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   relacionamento_prestador_pep_historico: ['/relacionamento-prestador/pep-historico'],
   // Sistema próprio de agendamentos/grade (nativo, substituindo gradualmente
   // o TiTa Therapy) — ver supabase/migrations/20260812140000_create_reboot_pacientes.sql.
+  // Responsável não tem rota própria: é controlado dentro do cadastro do
+  // paciente ("Filiação e responsáveis"), e a RLS de public.responsaveis já é
+  // gated por esta mesma permissão (20260826100200).
   cadastros_pacientes: ['/cadastros/pacientes'],
   cadastros_profissionais: ['/cadastros/profissionais'],
   cronograma_por_paciente: ['/cronograma/por-paciente'],

@@ -72,6 +72,7 @@ const pathIconMap: Record<string, any> = {
   "/autorizacoes-avulsas": ClipboardPlus,
   "/central-pacientes": Activity,
   "/central-terapeutas": UserRound,
+  "/cadastros/pacientes": UserRound,
   "/auditoria-assim": ClipboardList,
   "/auditoria-assim?tab=auditoria": ClipboardList,
   "/auditoria-assim?tab=pendencias": ListChecks,
@@ -84,6 +85,7 @@ const pathIconMap: Record<string, any> = {
   "/relacionamento-prestador/solicitacoes?tab=banco": Database,
   "/relacionamento-prestador/ocupacao-salas": DoorOpen,
   "/cadastros/cadastro-valores": Tag,
+  "/cadastros/convenios": Building2,
   "/cadastros/feriados": Calendar,
   "/cadastros/contratos": FileSignature,
   "/cadastros/taxas-e-parametros": Percent,
@@ -607,8 +609,11 @@ export default function Sidebar() {
 
           {/* Cadastros */}
           {(canAccess("/cadastros/cadastro-valores") || canAccess("/cadastros/feriados") ||
-            canAccess("/cadastros/contratos") || canAccess("/cadastros/taxas-e-parametros")) && (
+            canAccess("/cadastros/contratos") || canAccess("/cadastros/taxas-e-parametros") ||
+            canAccess("/cadastros/pacientes") || canAccess("/cadastros/convenios")) && (
             <SidebarGroup title="Cadastros" icon={Database}>
+              {canAccess("/cadastros/pacientes") && <MenuItem label="Pacientes" icon={UserRound} path="/cadastros/pacientes" />}
+              {canAccess("/cadastros/convenios") && <MenuItem label="Convênios" icon={Building2} path="/cadastros/convenios" />}
               {canAccess("/cadastros/cadastro-valores") && <MenuItem label="Cadastro de Valores" icon={Tag} path="/cadastros/cadastro-valores" />}
               {canAccess("/cadastros/feriados") && <MenuItem label="Feriados" icon={Calendar} path="/cadastros/feriados" />}
               {canAccess("/cadastros/taxas-e-parametros") && <MenuItem label="Variáveis & Taxas" icon={Percent} path="/cadastros/taxas-e-parametros" />}
