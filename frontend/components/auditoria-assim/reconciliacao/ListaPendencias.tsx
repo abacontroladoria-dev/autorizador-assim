@@ -7,26 +7,166 @@ import {
 import Paginacao from '../Paginacao'
 import type { PacientePendencias, TipoPendencia } from '../types'
 import { PENDENCIAS } from './pendencias'
-import { dataHoraRelativa, formatarDia, normalizar } from './datas'
+import { formatarDia, normalizar } from './datas'
 
 const PAGE_SIZE = 20
 
 /**
- * Número de coluna: zero recua, o resto chama.
+ * Um badge da linha: o número e a palavra, nesta ordem.
  *
- * O recuo é por PESO e matiz, não por apagamento. `text-slate-300` era o desenho
- * anterior e mede 1,49:1 sobre branco — um zero que reprova em AA por sete
- * vezes, e "nenhuma glosa nesta semana" é informação, não enfeite. Em
- * `slate-500` regular ele mede 4,76:1 e continua três degraus atrás do número
- * que pede trabalho.
+ * O número vem PRIMEIRO, como no chip logo acima ("3 Glosas"): as duas fileiras
+ * dizem a mesma coisa, e invertê-las obrigaria o olho a ler cada badge em duas
+ * direções conforme a altura da tela. Com o número à esquerda ele cai sempre na
+ * borda do badge, que é o que permite varrer a coluna pelos algarismos em vez de
+ * ler cada rótulo.
+ *
+ * A palavra é a do chip, nunca uma abreviação: a tabela anterior escrevia
+ * "Cancel." no cabeçalho e "Cancelamentos" no chip que filtrava aquela mesma
+ * coluna, duas palavras para uma espécie na mesma tela.
+ *
+ * A base traz só a LARGURA da borda; a cor vem inteira de `tom`, porque duas
+ * classes de `border-color` no mesmo elemento se decidem pela ordem do CSS
+ * gerado, não pela ordem no `className` — ver a nota em `pendencias.ts`.
  */
-function Contagem({ valor, tinta }: { valor: number; tinta: string }) {
+function Badge({ rotulo, valor, tom, ajuda }: {
+  rotulo: string
+  valor: number
+  tom: string
+  ajuda?: string
+}) {
   return (
     <span
-      className={`text-sm tabular-nums ${valor > 0 ? `font-semibold ${tinta}` : 'font-normal text-slate-500'}`}
+      title={ajuda}
+      className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-xs leading-4 font-medium ${tom}`}
     >
-      {valor}
+      <span className="font-semibold tabular-nums">{valor}</span>
+      {rotulo}
     </span>
+  )
+}
+
+/**
+ * Uma linha da listagem — um paciente, três zonas, uma faixa só.
+ *
+ * A linha era uma `<tr>` de nove colunas, cinco delas ocupadas por um número
+ * que na esmagadora maioria das vezes era zero. O olho varria 180 células para
+ * achar as poucas com valor, e a tela lia planilha. Aqui a ausência não ocupa
+ * espaço: só a espécie que tem valor ganha um badge, e a linha vazia de
+ * pendência diz isso por extenso em vez de alinhar cinco zeros.
+ *
+ * Tudo mora numa faixa horizontal: nome e matrícula lado a lado, plano e
+ * unidade lado a lado, badges. Empilhar matrícula sob o nome dobrava a altura
+ * de toda linha para caber um dado que quase nunca é lido — e com a identidade
+ * numa linha só, deixar plano/unidade em duas deixaria a zona da esquerda
+ * flutuando no meio de um bloco alto. Uma faixa, um ritmo.
+ *
+ * A altura NÃO cai junto: `py-3` sobre uma faixa de 20px mantém o alvo de
+ * clique nos 44px que o DESIGN.md exige de tudo que se toca. O que se ganha é
+ * densidade real (mais pacientes por tela), não linhas finas demais para o dedo.
+ *
+ * As zonas seguem a prioridade da leitura, não a ordem dos dados — nome,
+ * pendência, plano/unidade —, e é essa ordem que a grade reproduz quando quebra
+ * no celular.
+ *
+ * O total é a única pílula CONTORNADA da linha, e a distinção é por silhueta de
+ * propósito: pintá-la de rose (o desenho de referência) faria "8 Pendências" e
+ * "4 Não solicitada" usarem o mesmo matiz, e aí não há como saber se o 4 está
+ * dentro do 8 — que é justamente o que ele está. Contorno = soma, preenchido =
+ * espécie. Aparece só quando há duas espécies ou mais: com uma só, o total É
+ * aquele número, e repeti-lo seria ruído.
+ */
+function LinhaPaciente({ paciente, onAbrir }: {
+  paciente: PacientePendencias
+  onAbrir: (paciente: PacientePendencias) => void
+}) {
+  const especies = PENDENCIAS.filter((e) => paciente.contagem[e.chave] > 0)
+  const carteirinha = paciente.carteirinhas[0] ?? 'sem carteirinha'
+  const extras = paciente.carteirinhas.length - 1
+
+  return (
+    <li>
+      <button
+        type="button"
+        onClick={() => onAbrir(paciente)}
+        aria-label={`${paciente.nome} — ${paciente.contagem.total} ${
+          paciente.contagem.total === 1 ? 'pendência' : 'pendências'
+        }. Abrir a semana.`}
+        // A faixa de plano/unidade tem largura FIXA, e é ela que mantém a
+        // listagem alinhada sem voltar a ser tabela: cada linha é uma grade
+        // independente, então uma coluna em `fr` ou `auto` se resolve pelo
+        // conteúdo DAQUELA linha — medido, o plano dançava 24px de uma linha
+        // para a outra conforme o vizinho fosse mais curto ou mais longo. Com
+        // ela fixa, o resto que sobra é o mesmo em toda linha e as duas colunas
+        // em `fr` caem no mesmo lugar.
+        className="group grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 px-4 py-3 text-left transition hover:bg-brand-hover focus-visible:bg-brand-hover focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset focus-visible:outline-none md:grid-cols-[minmax(0,1.5fr)_11rem_minmax(0,1.6fr)_auto]"
+      >
+        {/* Identidade — nome e matrícula na mesma linha, separados por peso e
+            tamanho em vez de por quebra. `baseline` para que os dois assentem
+            sobre a mesma reta apesar dos 3px de diferença de corpo.
+            A matrícula é `shrink-0`: um número de carteirinha cortado no meio
+            não identifica ninguém, então quem cede é o nome — que ao menos
+            continua reconhecível truncado, e chega inteiro pelo `title` e pelo
+            rótulo do botão. É por isso que a coluna do nome é a mais larga da
+            grade: é ela que paga essa conta. */}
+        <span className="col-start-1 row-start-1 flex min-w-0 items-baseline gap-2">
+          <span className="truncate text-md leading-tight font-semibold text-slate-900" title={paciente.nome}>
+            {paciente.nome}
+          </span>
+          <span className="shrink-0 text-xs leading-tight tabular-nums text-slate-500">
+            {carteirinha}
+            {extras > 0 && ` +${extras}`}
+          </span>
+        </span>
+
+        {/* Pendências — a segunda leitura, e no celular a segunda linha. */}
+        <span className="col-span-2 col-start-1 row-start-2 flex min-w-0 flex-wrap items-center gap-1 md:col-span-1 md:col-start-3 md:row-start-1">
+          {especies.length === 0 ? (
+            <span className="text-xs text-slate-500">sem pendências</span>
+          ) : (
+            <>
+              {especies.length > 1 && (
+                <Badge
+                  rotulo="Pendências"
+                  valor={paciente.contagem.total}
+                  tom="border-slate-300 bg-white text-slate-700 [&>span]:text-slate-900"
+                  ajuda="A soma das espécies desta linha."
+                />
+              )}
+              {especies.map((e) => (
+                <Badge
+                  key={e.chave}
+                  rotulo={e.rotulo}
+                  valor={paciente.contagem[e.chave]}
+                  tom={e.badge}
+                  ajuda={e.ajuda}
+                />
+              ))}
+            </>
+          )}
+        </span>
+
+        {/* Plano e unidade — a informação de menor prioridade, logo a última a
+            aparecer quando a linha quebra. Um ponto médio os separa, como no
+            resto da superfície. */}
+        <span className="col-span-2 col-start-1 row-start-3 flex min-w-0 items-center gap-1.5 text-sm leading-tight md:col-span-1 md:col-start-2 md:row-start-1">
+          <span className="truncate text-slate-600">{paciente.plano ?? '—'}</span>
+          {/* `slate-300` mede 1,49:1 sobre branco — o mesmo valor que já havia
+              sido recusado nesta tela para o número zero. Separador é enfeite
+              para o leitor de tela (`aria-hidden`), mas para o olho ele tem uma
+              tarefa, e a 1,49:1 ele não a cumpre. `slate-400` mede 2,6:1:
+              visível, e ainda dois degraus atrás do texto que separa. */}
+          <span className="shrink-0 text-slate-400" aria-hidden>·</span>
+          <span className="truncate text-slate-500">{paciente.unidade ?? '—'}</span>
+        </span>
+
+        {/* A seta: o único sinal de que a linha vai a algum lugar. */}
+        <ChevronRight
+          size={16}
+          aria-hidden
+          className="col-start-2 row-start-1 shrink-0 justify-self-end text-slate-300 transition group-hover:text-brand-fg md:col-start-4"
+        />
+      </button>
+    </li>
   )
 }
 
@@ -59,13 +199,18 @@ function rotuloMesLongo(mesIso: string): string {
  * semanal; a auditoria do mês pedia navegar mês a mês, ordem alfabética e
  * paginação, não um ranking por volume de pendência). A listagem não é um
  * índice de guias soltas: é um paciente por linha, ordenado por nome, com as
- * cinco espécies de pendência lado a lado, e o clique abre a semana dele
- * dentro do mês carregado (o modal continua semanal — é o que cabe numa
- * grade de horários × dias).
+ * espécies de pendência que ele TEM ditas por extenso, e o clique abre a
+ * semana dele dentro do mês carregado (o modal continua semanal — é o que cabe
+ * numa grade de horários × dias).
  *
- * Cada coluna numérica é também um chip no topo, e o chip filtra exatamente a
- * coluna que nomeia — é o que permite ir de "há trabalho" para "qual trabalho"
- * sem sair da tela.
+ * Foi uma tabela de nove colunas até 2026-08-26, e cinco delas eram um número
+ * que quase sempre valia zero: a tela lia planilha, e achar as poucas células
+ * com valor era varrer uma malha. Agora a ausência não ocupa lugar — ver
+ * `LinhaPaciente`.
+ *
+ * Cada espécie é também um chip no topo, e o chip filtra exatamente a espécie
+ * que nomeia, pela MESMA palavra que o badge da linha usa — é o que permite ir
+ * de "há trabalho" para "qual trabalho" sem sair da tela.
  *
  * A busca atravessa o filtro de pendência de propósito: quem digita um nome
  * está procurando uma pessoa específica, e escondê-la porque o mês dela está
@@ -132,7 +277,11 @@ export default function ListaPendencias({
     <div className="flex flex-col gap-3">
       {/* ── Cabeçalho: mês, unidade, busca ──────────────────────────────────── */}
       <div className="flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-slate-200 bg-white px-3 py-2.5">
-        <div className="flex items-center gap-1">
+        {/* `flex-wrap`: o botão "Mês atual" é `shrink-0` e o período é
+            `nowrap`, então numa faixa rígida os dois somavam 369px numa tela de
+            360 e era a PÁGINA que rolava de lado (medido em 320/344/360).
+            Quebrando aqui, o botão desce sozinho e nada estoura. */}
+        <div className="flex flex-wrap items-center gap-1">
           <button
             type="button"
             onClick={() => onMes(-1)}
@@ -148,10 +297,18 @@ export default function ListaPendencias({
           <label className="relative flex h-11 items-center gap-2 rounded-lg px-2 transition hover:bg-slate-100">
             <CalendarDays size={15} className="text-slate-400" aria-hidden />
             <span>
-              <span className="block text-sm leading-tight font-semibold text-slate-700 capitalize">
+              {/* `capitalize` sobe a inicial de CADA palavra e escrevia "Agosto
+                  De 2026". `first-letter` só pega em caixa de bloco — e esta
+                  span já é `block`, então dispensa o `inline-block` que o mesmo
+                  conserto exigiu em ModalSemanaPaciente. */}
+              <span className="block text-sm leading-tight font-semibold text-slate-700 first-letter:uppercase">
                 {rotuloMesLongo(mesRef)}
               </span>
-              <span className="block text-[11px] leading-tight tabular-nums text-slate-500">{labelMes}</span>
+              {/* `nowrap`: em 390px "01/08 a 26/08/2026" quebrava em duas
+                  linhas e empurrava a barra inteira para baixo. */}
+              <span className="block text-xs leading-tight tabular-nums whitespace-nowrap text-slate-500">
+                {labelMes}
+              </span>
             </span>
             <span className="sr-only">Ir para outro mês</span>
             <input
@@ -176,7 +333,7 @@ export default function ListaPendencias({
             <button
               type="button"
               onClick={() => onIrParaMesData(mesAtual)}
-              className="ml-1 inline-flex h-11 items-center rounded-lg border border-slate-300 px-3 text-[12px] font-semibold text-slate-600 transition hover:border-brand hover:bg-brand-hover hover:text-brand-fg focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none"
+              className="inline-flex h-11 shrink-0 items-center rounded-lg border border-slate-300 px-3 text-sm font-semibold whitespace-nowrap text-slate-600 transition hover:border-brand hover:bg-brand-hover hover:text-brand-fg focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none"
             >
               Mês atual
             </button>
@@ -192,7 +349,7 @@ export default function ListaPendencias({
             <select
               value={unidade}
               onChange={(e) => setUnidade(e.target.value)}
-              className="h-11 rounded-lg border border-slate-300 bg-white px-2.5 text-[13px] text-slate-700 focus:border-brand focus:ring-2 focus:ring-brand/20 focus:outline-none"
+              className="h-11 rounded-lg border border-slate-300 bg-white px-2.5 text-md text-slate-700 focus:border-brand focus:ring-2 focus:ring-brand/20 focus:outline-none"
             >
               <option value="">Todas as unidades</option>
               {unidades.map((u) => (
@@ -208,14 +365,17 @@ export default function ListaPendencias({
               onChange={(e) => setBusca(e.target.value)}
               placeholder="Buscar paciente…"
               aria-label="Buscar paciente por nome ou carteirinha"
-              className="h-11 w-full rounded-lg border border-slate-300 pr-10 pl-9 text-[13px] text-slate-700 placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-brand/20 focus:outline-none"
+              className="h-11 w-full rounded-lg border border-slate-300 pr-11 pl-9 text-md text-slate-700 placeholder:text-slate-400 focus:border-brand focus:ring-2 focus:ring-brand/20 focus:outline-none"
             />
             {busca && (
               <button
                 type="button"
                 onClick={() => setBusca('')}
                 aria-label="Limpar a busca"
-                className="absolute top-1/2 right-1 flex h-9 w-9 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:text-slate-700"
+                // 44x44 encostado na borda, e o `pr-11` do input reserva
+                // exatamente esta largura: o texto digitado para onde o botão
+                // começa. Era 36x36 com `right-1`, abaixo do piso de toque.
+                className="absolute top-1/2 right-0 flex h-11 w-11 -translate-y-1/2 items-center justify-center rounded-lg text-slate-400 transition hover:text-slate-700"
               >
                 <X size={14} />
               </button>
@@ -240,7 +400,7 @@ export default function ListaPendencias({
           type="button"
           onClick={() => setFiltro(null)}
           aria-pressed={filtro === null}
-          className={`flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] font-medium transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none ${
+          className={`flex h-11 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none ${
             filtro === null
               ? 'border-brand bg-brand-surface text-brand-fg'
               : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
@@ -263,7 +423,7 @@ export default function ListaPendencias({
               // Zero continua visível e clicável: "nenhuma glosa neste mês" é
               // informação, e esconder o contador faria a ausência parecer com a
               // tela ainda carregando.
-              className={`flex h-9 items-center gap-1.5 rounded-lg border px-2.5 text-[12px] font-medium transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none ${
+              className={`flex h-11 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none ${
                 selecionado ? ativo : inativo
               } ${n === 0 && !selecionado ? 'opacity-60' : ''}`}
             >
@@ -274,7 +434,7 @@ export default function ListaPendencias({
           )
         })}
 
-        <span className="ml-auto text-[12px] text-slate-500" role="status" aria-live="polite">
+        <span className="ml-auto text-sm text-slate-500" role="status" aria-live="polite">
           {carregando
             ? 'carregando o mês…'
             : buscando
@@ -322,100 +482,17 @@ export default function ListaPendencias({
             </p>
           </div>
         ) : (
-          // `relative` não é decoração: medido em 390px, sem ele a largura
-          // intrínseca da tabela escapa do `overflow-x-auto` e é a PÁGINA que
-          // passa a rolar de lado (590px de vazio à direita) — o mesmo defeito
-          // que a fila antiga já teve. Com o contêiner posicionado a rolagem
-          // fica onde deve, e a coluna grudada tem contra o que se grudar.
-          <div className="relative overflow-x-auto">
-            <table className="w-full min-w-248 border-collapse text-left">
-              <thead>
-                <tr className="border-b border-slate-200 bg-slate-50">
-                  <th scope="col" className="sticky left-0 z-10 bg-slate-50 px-4 py-2.5 text-[11px] font-semibold text-slate-500">
-                    Paciente
-                  </th>
-                  <th scope="col" className="px-3 py-2.5 text-[11px] font-semibold text-slate-500">Plano</th>
-                  <th scope="col" className="px-3 py-2.5 text-[11px] font-semibold text-slate-500">Unidade</th>
-                  <th scope="col" className="px-3 py-2.5 text-right text-[11px] font-semibold text-slate-500">
-                    Pendências
-                  </th>
-                  {PENDENCIAS.map(({ chave, coluna, ajuda }) => (
-                    <th
-                      key={chave}
-                      scope="col"
-                      title={ajuda}
-                      className="px-3 py-2.5 text-right text-[11px] font-semibold text-slate-500"
-                    >
-                      {coluna}
-                    </th>
-                  ))}
-                  <th scope="col" className="px-3 py-2.5 text-[11px] font-semibold text-slate-500">
-                    Última atualização
-                  </th>
-                  <th scope="col" className="px-3 py-2.5">
-                    <span className="sr-only">Ações</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100">
-                {visiveisPagina.map((p) => (
-                  <tr
-                    key={p.chave}
-                    tabIndex={0}
-                    role="button"
-                    onClick={() => onAbrir(p)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' || e.key === ' ') {
-                        e.preventDefault()
-                        onAbrir(p)
-                      }
-                    }}
-                    aria-label={`Abrir o paciente ${p.nome}, ${p.contagem.total} pendência(s)`}
-                    className="group cursor-pointer transition hover:bg-brand-hover focus-visible:bg-brand-hover focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-inset"
-                  >
-                    <th
-                      scope="row"
-                      className="sticky left-0 z-10 bg-white px-4 py-2.5 text-left font-normal transition group-hover:bg-brand-hover group-focus-visible:bg-brand-hover"
-                    >
-                      <p className="truncate text-[13px] font-semibold text-slate-800" title={p.nome}>
-                        {p.nome}
-                      </p>
-                      <p className="truncate text-[11px] tabular-nums text-slate-500">
-                        {p.carteirinhas[0] ?? 'sem carteirinha'}
-                        {p.carteirinhas.length > 1 && ` +${p.carteirinhas.length - 1}`}
-                      </p>
-                    </th>
-                    <td className="px-3 py-2.5 text-[12px] text-slate-600">{p.plano ?? '—'}</td>
-                    <td className="px-3 py-2.5 text-[12px] text-slate-600">{p.unidade ?? '—'}</td>
-                    <td className="px-3 py-2.5 text-right">
-                      {p.contagem.total > 0 ? (
-                        <span className="inline-flex min-w-7 justify-center rounded-full bg-rose-50 px-2 py-0.5 text-[13px] font-bold tabular-nums text-rose-700 ring-1 ring-rose-200">
-                          {p.contagem.total}
-                        </span>
-                      ) : (
-                        <span className="text-sm font-normal tabular-nums text-slate-500">0</span>
-                      )}
-                    </td>
-                    {PENDENCIAS.map(({ chave, tinta }) => (
-                      <td key={chave} className="px-3 py-2.5 text-right">
-                        <Contagem valor={p.contagem[chave]} tinta={tinta} />
-                      </td>
-                    ))}
-                    <td className="px-3 py-2.5 text-[12px] tabular-nums whitespace-nowrap text-slate-500">
-                      {dataHoraRelativa(p.ultimaAutorizacao)}
-                    </td>
-                    <td className="px-3 py-2.5 text-right">
-                      <ChevronRight
-                        size={16}
-                        aria-hidden
-                        className="ml-auto text-slate-300 transition group-hover:text-brand-fg"
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          // Lista, não tabela — e por isso sem `overflow-x-auto` nenhum. A
+          // tabela anterior tinha nove colunas e um `min-w-248` que, medido em
+          // 390px, escapava do contêiner e fazia a PÁGINA rolar de lado; a
+          // defesa era um `relative` e uma primeira coluna grudada. Uma linha
+          // que reflui não precisa de nenhum dos três: nada aqui tem largura
+          // mínima maior que a tela.
+          <ul className="divide-y divide-slate-100">
+            {visiveisPagina.map((p) => (
+              <LinhaPaciente key={p.chave} paciente={p} onAbrir={onAbrir} />
+            ))}
+          </ul>
         )}
       </div>
 

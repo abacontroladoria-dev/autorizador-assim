@@ -1,5 +1,69 @@
 const DIA_CURTO = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb']
 
+/**
+ * Datas sempre em componentes LOCAIS.
+ *
+ * `new Date('2026-08-17')` é interpretado como UTC e, em UTC-3, `.getDay()`
+ * devolve o dia ANTERIOR — a armadilha documentada em
+ * `lib/cronograma/comparativoSessoes.ts`. Construir com (ano, mês-1, dia) e
+ * formatar com padding manual mantém tudo no fuso do navegador.
+ */
+export function comoData(iso: string): Date {
+  const [ano, mes, dia] = iso.split('-').map(Number)
+  return new Date(ano, (mes ?? 1) - 1, dia ?? 1)
+}
+
+export function comoIso(d: Date): string {
+  const ano = d.getFullYear()
+  const mes = String(d.getMonth() + 1).padStart(2, '0')
+  const dia = String(d.getDate()).padStart(2, '0')
+  return `${ano}-${mes}-${dia}`
+}
+
+/** A segunda-feira da semana que contém `iso`. Domingo recua 6 dias, não avança. */
+export function segundaDe(iso: string): string {
+  const d = comoData(iso)
+  const dow = d.getDay() // 0 = domingo
+  d.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1))
+  return comoIso(d)
+}
+
+export function somarDias(iso: string, dias: number): string {
+  const d = comoData(iso)
+  d.setDate(d.getDate() + dias)
+  return comoIso(d)
+}
+
+/** Os 5 dias úteis a partir de uma segunda. */
+export function diasUteisDe(segunda: string): string[] {
+  const base = comoData(segunda)
+  return Array.from({ length: 5 }, (_, i) => {
+    const d = new Date(base)
+    d.setDate(d.getDate() + i)
+    return comoIso(d)
+  })
+}
+
+/**
+ * A segunda da primeira semana que ENCOSTA no mês — não a segunda do dia 1.
+ *
+ * `segundaDe(primeiroDiaDoMes)` parece a mesma coisa e não é. Quando o dia 1 cai
+ * num sábado ou domingo, a segunda daquela semana fica no mês anterior e os
+ * cinco dias úteis dela também: para agosto/2026 (dia 1 é sábado) dava
+ * 27/07–31/07, uma semana sem UM dia de agosto. A faixa de semanas do modal
+ * oferecia essa semana para clicar, sempre vazia. Não é raro — em 2026 acontece
+ * em fevereiro, março, agosto e novembro.
+ *
+ * Aqui a semana só entra se algum dia útil dela cair dentro do mês, que é a
+ * pergunta que a faixa realmente faz.
+ */
+export function primeiraSegundaDoMes(mesIso: string): string {
+  const primeiroDia = `${mesIso.slice(0, 7)}-01`
+  const segunda = segundaDe(primeiroDia)
+  const encosta = diasUteisDe(segunda).some((d) => d >= primeiroDia)
+  return encosta ? segunda : somarDias(segunda, 7)
+}
+
 /** "2026-08-17" → "17/08". Fatia de string: nada de `new Date`, nada de fuso. */
 export function formatarDia(iso: string | null): string {
   if (!iso) return '—'
@@ -74,20 +138,11 @@ export function rotuloSemana(inicio: string, fim: string): string {
     : `${formatarDia(inicio)}/${anoInicio} a ${formatarDia(fim)}/${anoFim}`
 }
 
-/**
- * "Hoje 09:42" ou "20/07 09:42" — a coluna "última atualização" da listagem.
- *
- * A comparação com hoje é textual e no fuso do navegador, que é o mesmo fuso em
- * que `data_execucao` guarda a hora (São Paulo, sem sufixo). Converter por
- * `new Date()` é o caminho que já fez "Autorizado em" e "Executado em"
- * discordarem em 3h.
- */
-export function dataHoraRelativa(valor: string | null): string {
-  if (!valor) return '—'
-  const dia = valor.slice(0, 10)
-  const hora = horaDoTimestamp(valor)
-  return dia === hojeLocal() ? `Hoje ${hora}` : `${formatarDia(dia)} ${hora}`
-}
+/* `dataHoraRelativa` ("Hoje 09:42") morava aqui e formatava a coluna "última
+   atualização" da listagem. A coluna saiu em 2026-08-26 e ela ficou sem nenhum
+   consumidor — removida junto, para não virar utilitário órfão que o próximo
+   leitor tenta adivinhar onde é usado. O carimbo em si não se perdeu: continua
+   no detalhamento do cartão, por `dataHoraCurta`. */
 
 /** Sem acento e sem caixa: "joao" acha "João". */
 export function normalizar(valor: string): string {

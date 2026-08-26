@@ -193,16 +193,34 @@ export type PlacarTuss = {
 }
 
 /**
- * As cinco espécies de pendência que a listagem mensal indexa.
+ * As quatro espécies de pendência que a listagem mensal indexa.
  *
- * Três vêm do `ledger` (o estado das guias) e duas do `placar` (a cota por
- * TUSS). Ficam num tipo só porque a listagem as trata igual: cada uma é uma
- * coluna, um contador e um filtro — e um sexto valor entrando aqui tem de
- * ganhar as três formas de uma vez.
+ * Ficam num tipo só porque a listagem as trata igual: cada uma é um badge, um
+ * contador e um filtro — e um quinto valor entrando aqui tem de ganhar as três
+ * formas de uma vez.
+ *
+ * Eram CINCO até 2026-08-26, e duas delas — `sem-vinculo` e `sobrando` — eram o
+ * mesmo fato contado por dois caminhos: a primeira nomeava as guias que
+ * sobraram do pareamento (`get_guias_orfas`), a segunda media o saldo
+ * `liberadas − agendadas` por TUSS. Uma guia que sobrou do pareamento é, quase
+ * sempre, exatamente a que estourou a cota — e `contarPendencias` SOMAVA as
+ * duas, então essa guia entrava duas vezes no total que a operação usa para
+ * dimensionar trabalho. Na tela eram dois badges do mesmo âmbar, lado a lado,
+ * dizendo a mesma coisa.
+ *
+ * A grade nunca acreditou nessa separação: `cartaoPendente` sempre foi
+ * `estado === 'sem-vinculo' || excedente` — uma união. Agora a contagem faz o
+ * mesmo, e por isso `autorizacao-a-mais` conta GUIAS DISTINTAS, não a soma de
+ * dois números (ver `contarPendencias`).
+ *
+ * Cuidado ao ler o repositório: `'sem-vinculo'` continua existindo como
+ * `EstadoAutorizacao` em `reconciliacao/vinculo.ts`, que é outro tipo e outra
+ * pergunta — lá é o estado de UMA guia na grade, aqui é uma espécie de
+ * pendência de um paciente no mês.
  */
-export type TipoPendencia = 'glosa' | 'cancelamento' | 'sem-vinculo' | 'faltando' | 'sobrando'
+export type TipoPendencia = 'glosa' | 'cancelamento' | 'autorizacao-a-mais' | 'faltando'
 
-/** Os cinco contadores de um paciente no mês, mais o total. */
+/** Os quatro contadores de um paciente no mês, mais o total. */
 export type ContagemPendencias = Record<TipoPendencia, number> & { total: number }
 
 /**
