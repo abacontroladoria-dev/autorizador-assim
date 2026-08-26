@@ -6,6 +6,8 @@ import { useEffect, useState, useMemo } from 'react'
 
 import { getSupabaseClient } from '@/lib/supabase/client'
 
+import { descreverErro, ehMigrationPendente } from '@/lib/supabase/erro'
+
 import { criarAutorizacao, resolverNomeUsuario } from '@/services/autorizacoes.service'
 
 import toast from 'react-hot-toast'
@@ -260,13 +262,27 @@ const unidades = [
         ])
   
       if (error) {
-        console.error(error)
-        toast.error('Erro ao chamar paciente')
+        // `console.error(error)` sozinho imprimia `{}` — PostgrestError não
+        // sobrevive à serialização do console. E o toast dizia só "Erro ao
+        // chamar paciente", que não distingue permissão de coluna inexistente.
+        console.error('chamarResponsavel:', descreverErro(error))
+
+        toast.error(
+          ehMigrationPendente(error)
+            ? 'Erro ao chamar: falta migration nesta base (chamada_paciente)'
+            : `Erro ao chamar paciente: ${descreverErro(error)}`
+        )
         return
       }
-  
-      } catch (err) {
+
+      // O sucesso precisa dizer algo. Sem isto o botão não confirma nada, e a
+      // única prova de que funcionou era o nome surgir na TV — que fica noutra
+      // sala. Quando a TV parou de mostrar, o sintoma na recepção foi "aperto e
+      // nada acontece", indistinguível de insert falhando.
+      toast.success(`${paciente.paciente_nome} chamado na TV`)
+    } catch (err) {
       console.error(err)
+      toast.error('Erro ao chamar paciente')
     }
   }
 
