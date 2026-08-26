@@ -35,6 +35,13 @@ type Chamada = {
 // atrás com a mesma cara de uma chamada que acabou de sair.
 const SEGUNDOS_AGORA = 120
 
+// Teto de idade para ANUNCIAR (sino + voz). Uma chamada mais velha que isto
+// aparece na tela, mas não fala: numa sala de espera, ouvir o nome de alguém
+// chamado há muito tempo manda a pessoa errada ao balcão. Maior que
+// SEGUNDOS_AGORA de propósito — o rótulo "agora" é sobre leitura, este é sobre
+// deixar de anunciar por causa de uma queda de rede momentânea.
+const MAX_IDADE_ANUNCIO_S = 300
+
 // A tela não usa o client do Supabase de propósito: /tv roda sem conta logada e a
 // RLS de chamada_paciente só responde a `authenticated` — o realtime como anon
 // nunca entregava nada. Quem lê é /api/tv/chamadas, no servidor. 3s é imperceptível
@@ -479,6 +486,9 @@ export default function TVPage() {
   const filaAudio = useRef<Chamada[]>([])
   const falando = useRef(false)
   const anunciados = useRef<Set<string>>(new Set())
+
+  // Maior `chamado_em` já visto (ms). Só cresce — ver o comentário no poll.
+  const marcaDagua = useRef(0)
   const primeiraCarga = useRef(true)
   const audioLiberadoRef = useRef(false)
 
@@ -695,8 +705,42 @@ export default function TVPage() {
         setOnline(true)
         setChamadas((prev) => (mesmaLista(prev, lista) ? prev : lista))
 
-        const novas = lista.filter((c) => !anunciados.current.has(c.id))
+        // "Id que eu ainda não vi" NÃO é o mesmo que "chamada nova", e tratar os
+        // dois como sinônimo fazia a TV chamar paciente sozinha:
+        //
+        //   * `LIMITE` é 6. Quando uma chamada recente sai da lista, uma antiga
+        //     ENTRA no lugar — id inédito para esta aba, e a TV anunciava, com
+        //     sino e voz, alguém chamado horas antes.
+        //   * Qualquer mudança no filtro do servidor tem o mesmo efeito de uma
+        //     vez só: ao subir a correção que desescondeu as chamadas resolvidas
+        //     antes do "Chamar", a TV aberta anunciou o lote inteiro em
+        //     sequência.
+        //
+        // A marca d'água resolve pela raiz: só é nova a chamada cujo
+        // `chamado_em` supera o maior já visto. Como ela só cresce, nenhuma
+        // reorganização da lista pode ressuscitar um anúncio.
+        const instante = (c: Chamada) => new Date(c.chamado_em).getTime()
+
+        const novas = lista.filter(
+          (c) =>
+            !anunciados.current.has(c.id) &&
+            instante(c) > marcaDagua.current &&
+            // Segunda linha de defesa, para o caso da TV voltar de uma queda de
+            // rede: sem isto, chamadas acumuladas durante a queda sairiam todas
+            // de enfiada. Folgado de propósito em relação ao rótulo "agora" da
+            // tela (SEGUNDOS_AGORA) — deixar de anunciar uma chamada legítima é
+            // pior que anunciar uma de 4 minutos.
+            c.idade_segundos <= MAX_IDADE_ANUNCIO_S
+        )
+
         for (const c of lista) anunciados.current.add(c.id)
+
+        // Fora do `if`: a marca sobe mesmo na primeira carga e mesmo quando nada
+        // é anunciado — é ela que impede a lista antiga de virar anúncio depois.
+        for (const c of lista) {
+          const t = instante(c)
+          if (!Number.isNaN(t) && t > marcaDagua.current) marcaDagua.current = t
+        }
 
         if (primeiraCarga.current) {
           // Ao abrir/recarregar a TV o que já passou aparece na tela, mas não é
