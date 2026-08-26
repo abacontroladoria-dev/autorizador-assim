@@ -208,19 +208,9 @@ function notaVoz(v: SpeechSynthesisVoice) {
   if (temNome(nome, VOZES_PT_MASCULINAS)) nota += 25
   if (temNome(nome, VOZES_PT_FEMININAS)) nota -= 20
 
-  // Salto de tecnologia, não de gosto: "natural"/"neural" no nome marca as vozes
-  // neurais (as da Azure expostas pelo Edge). O espeak-ng sintetiza por
-  // formantes — tecnologia dos anos 80 — e nenhuma das 110 variantes dele soa
-  // humana; trocar de variante só muda o timbre do robô. Sem este peso, uma
-  // `male3` do espeak empata em 125 com o "Antonio (Natural)" e o desempate
-  // vira a ordem de enumeração, ou seja, sorte.
-  //
-  // Ordem que os pesos produzem, e é deliberada: masculina natural (155) >
-  // masculina sintética (125) > feminina natural (110) > feminina sintética
-  // (80). Timbre continua pesando mais que naturalidade porque foi o pedido
-  // explícito; a melhor voz do outro timbre segue no seletor via
-  // `vozesDoSeletor`.
-  if (/natural|neural/.test(nome)) nota += 30
+  // Naturalidade NÃO entra na nota. Ela virou filtro em `classificarVozes` — ver
+  // o comentário lá. Como o filtro é tudo-ou-nada, um peso aqui seria letra
+  // morta: ou toda a lista é natural, ou nenhuma é.
 
   // A voz do Google tem dicção bem melhor que as SAPI da Microsoft. Ela depende
   // de rede, mas isso não é risco aqui: sem rede o poll não traz chamada
@@ -230,7 +220,10 @@ function notaVoz(v: SpeechSynthesisVoice) {
   return nota
 }
 
-function vozesEmPortugues(todas: SpeechSynthesisVoice[]) {
+const ehNatural = (v: SpeechSynthesisVoice) => /natural|neural/i.test(v.name)
+
+// Toda voz em português que faz sentido oferecer, antes do corte por tecnologia.
+function candidatasEmPortugues(todas: SpeechSynthesisVoice[]) {
   // Chrome no Windows às vezes lista a mesma voz duas vezes, e lá o `voiceURI` é
   // o próprio nome — o que daria key repetida no React e duas linhas marcadas
   // como ativas ao mesmo tempo. Fora que voz repetida no seletor é ruim de ler.
@@ -244,7 +237,38 @@ function vozesEmPortugues(todas: SpeechSynthesisVoice[]) {
 
   // O descarte só vale se sobrar alguém: numa máquina cujas únicas vozes em
   // português fossem as de brinquedo, calar a TV seria pior que falar feio.
-  return (uteis.length > 0 ? uteis : unicas).sort((a, b) => notaVoz(b) - notaVoz(a))
+  return uteis.length > 0 ? uteis : unicas
+}
+
+// Havendo voz natural na máquina, o resto não é opção — é ruído.
+//
+// A regra não é "esconder o espeak-ng": é preferir a tecnologia. O espeak
+// sintetiza por formantes e nenhuma das 110 variantes dele soa humana (trocar de
+// variante só muda o timbre do robô), então oferecê-las ao lado de uma voz
+// neural é oferecer 110 respostas erradas junto com a certa. E o filtro conserta
+// de graça uma inversão que um peso na nota não conseguia: com naturalidade
+// valendo pontos, uma masculina sintética passava na frente de uma feminina
+// natural, porque timbre pesa mais. Filtrando, essa comparação nem acontece.
+//
+// Tudo-ou-nada de propósito: numa máquina SEM nenhuma natural — um PC de
+// recepção com as SAPI antigas do Windows — esconder as sintéticas deixaria a TV
+// muda. Ali elas voltam a ser a resposta certa.
+function classificarVozes(todas: SpeechSynthesisVoice[]) {
+  const candidatas = candidatasEmPortugues(todas)
+  const naturais = candidatas.filter(ehNatural)
+  const escolhidas = naturais.length > 0 ? naturais : candidatas
+
+  return {
+    vozes: [...escolhidas].sort((a, b) => notaVoz(b) - notaVoz(a)),
+    // Quantas ficaram de fora por serem sintéticas. Vai para a contagem no
+    // seletor: sem isso, "a máquina tem 19 vozes" seria mentira por omissão, e
+    // quem procurasse uma voz específica iria procurar no lugar errado.
+    ocultas: candidatas.length - escolhidas.length,
+  }
+}
+
+function vozesEmPortugues(todas: SpeechSynthesisVoice[]) {
+  return classificarVozes(todas).vozes
 }
 
 const ehMasculina = (v: SpeechSynthesisVoice) =>
@@ -462,6 +486,10 @@ export default function TVPage() {
   // mostra. O ref espelha a escolha porque `processarFila` é um callback
   // estável e leria um valor congelado se dependesse do state.
   const [vozes, setVozes] = useState<SpeechSynthesisVoice[]>([])
+
+  // Quantas vozes sintéticas o filtro de `classificarVozes` deixou de fora.
+  // Só serve para a contagem no seletor não mentir por omissão.
+  const [vozesOcultas, setVozesOcultas] = useState(0)
   const [vozEscolhida, setVozEscolhida] = useState<string | null>(null)
   const vozEscolhidaRef = useRef<string | null>(null)
 
@@ -627,8 +655,14 @@ export default function TVPage() {
     // Antes o retorno era jogado fora: chamar `getVoices()` só pra provocar o
     // populamento não deixava a lista em lugar nenhum, então não havia como
     // montar o seletor.
-    const carregarVozes = () =>
-      setVozes(vozesEmPortugues(window.speechSynthesis.getVoices()))
+    const carregarVozes = () => {
+      const { vozes, ocultas } = classificarVozes(
+        window.speechSynthesis.getVoices()
+      )
+
+      setVozes(vozes)
+      setVozesOcultas(ocultas)
+    }
 
     carregarVozes()
     window.speechSynthesis.addEventListener('voiceschanged', carregarVozes)
@@ -837,11 +871,12 @@ export default function TVPage() {
                       strokeWidth={2.5}
                     />
                     <span className="truncate">{rotuloVoz(v)}</span>
-                    {/* O "· natural" não é adorno: o espeak-ng publica uma
-                        variante chamada Antonio e a Azure publica um Antonio
-                        neural, e os dois viram o rótulo "Antonio" depois da
-                        limpeza. Sem esta marca o seletor mostra duas linhas
-                        idênticas, uma robótica e uma humana. */}
+                    {/* Com o filtro de `classificarVozes` a lista é toda natural
+                        ou toda sintética, então esta marca não distingue linhas
+                        entre si — ela diz em qual dos dois mundos a máquina caiu.
+                        Vale manter justamente pelo caso ruim: numa máquina sem
+                        voz neural, a ausência da marca em TODAS as linhas é o
+                        aviso de que a TV vai falar com voz de robô. */}
                     <span
                       className={`ml-auto shrink-0 text-xs ${
                         ativa ? 'text-white/70' : 'text-tv-ink-muted'
@@ -875,10 +910,12 @@ export default function TVPage() {
         <p className="text-xs text-tv-ink-muted">
           {vozes.length === 1
             ? '1 voz em português nesta máquina'
-            : `${vozes.length} vozes em português nesta máquina` +
-              (vozes.length > vozesVisiveis.length
-                ? ` — mostrando as ${vozesVisiveis.length} melhores`
-                : '')}
+            : `${vozes.length} vozes em português nesta máquina`}
+          {vozes.length > vozesVisiveis.length &&
+            ` — mostrando as ${vozesVisiveis.length} melhores`}
+          {/* "não naturais" e não "do espeak-ng": a voz de rede do Google
+              também cai fora daqui, porque não se declara natural no nome. */}
+          {vozesOcultas > 0 && ` · ${vozesOcultas} não naturais ocultas`}
         </p>
       </div>
     )
