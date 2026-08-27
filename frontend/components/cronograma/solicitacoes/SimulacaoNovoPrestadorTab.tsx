@@ -78,6 +78,60 @@ function periodosEnriquecidosParaSimulado(periodos: SugestaoContratacao[]): Peri
   })
 }
 
+/** Converte os períodos simulados no formato SugestaoContratacao (1 turno por
+ *  período) que os estágios de enriquecimento esperam — cada período vira uma
+ *  "sugestão" só pra reaproveitar o mesmo pipeline do painel de sugestões
+ *  automáticas (useSugestoesContratacao.ts).
+ *
+ *  Uma definição só, compartilhada por comRemanejamento (a unidade em exibição)
+ *  e por vagasLiquidasPorUnidade (as três unidades das barras): se cada um
+ *  montasse a própria base, a barra e a projeção financeira podiam discordar —
+ *  que é exatamente o defeito que vagasLiquidasPorUnidade existe pra fechar. */
+function periodosComoSugestoes(periodos: PeriodoSimulado[], especialidade: string): SugestaoContratacao[] {
+  return periodos.map((p, i) => ({
+    id: `periodo-${i}`,
+    unidade: p.unidade,
+    especialidade,
+    dia: p.dia,
+    turnos: [p.turno],
+    pctOcupacaoPrevista: 0,
+    faixaCascata: 50,
+    candidatos: p.slots.flatMap(s => s.candidatos.map(c => ({
+      paciente: c.pac, gap: c.gap, aut: c.aut, of: c.of, turno: p.turno, hora: s.hora,
+      modalidade: "adjacente" as const, valorSessaoProjetado: null, ordemNaVaga: 1,
+    }))),
+    modalidadeDominante: "adjacente" as const,
+    salaVinculada: null,
+    projecaoRemuneracao: null,
+  }))
+}
+
+/** Reinsere, como período VAZIO, cada dia+turno que o usuário marcou em "Dias
+ *  e turnos" mas que perdeu todos os candidatos no caminho (nenhum paciente
+ *  elegível, ou todos absorvidos pela capacidade interna). dividirPorDisponibi-
+ *  lidadeInterna descarta o período inteiro quando ele fica sem candidato
+ *  (`if (candidatosRestantes.length)`, sugestaoContratacao.ts) — correto pro
+ *  painel de sugestões automáticas, onde sugestão vazia não deve aparecer, mas
+ *  aqui o dia/turno foi escolhido À MÃO pelo usuário: sumir da grade em
+ *  silêncio faz parecer que a seleção não foi aplicada.
+ *
+ *  Caso real (27/08/2026): com manhã e tarde marcadas nos 5 dias, Padre Miguel
+ *  desenhava só "TERÇA / tarde" — as manhãs sem candidato não viravam nem
+ *  linha vazia, e a leitura era "o sistema ignorou a manhã que eu marquei" em
+ *  vez de "a manhã que você marcou não tem candidato".
+ *
+ *  Só completa a agenda do profissional hipotético, nunca a "já coberta": ali
+ *  período vazio é ausência de cobertura, não vaga ociosa a mostrar. */
+function completarPeriodosSelecionados(
+  periodos: PeriodoSimulado[], selecionados: PeriodoSimulado[],
+): PeriodoSimulado[] {
+  const presentes = new Set(periodos.map(p => `${p.dia}|||${p.turno}`))
+  const vazios = selecionados
+    .filter(p => !presentes.has(`${p.dia}|||${p.turno}`))
+    .map(p => ({ ...p, slots: [], nPacientes: 0, totalSessoes: 0 }))
+  return vazios.length ? [...periodos, ...vazios] : periodos
+}
+
 // ─── InfoTip ────────────────────────────────────────────────────────────────
 // Fino wrapper sobre o InfoTooltip padrão (clique, painel via portal) — mantém
 // os vários pontos desta tela consistentes, mas deixa cada um formatar o
@@ -723,6 +777,37 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
 
   const vagasDaUnidade = (u: { periodos: PeriodoSimulado[] }) => u.periodos.reduce((soma, p) => soma + p.slots.length, 0)
 
+  // Das vagas BRUTAS acima, quantas exigiriam DE FATO a contratação — o resto
+  // já é coberto por profissional contratado com horário Livre no mesmo slot,
+  // então contratar não abre aquelas sessões. Sem essa distinção a tela
+  // afirmava "4 vaga(s)" ao lado de uma projeção de R$ 0,00, sem nada
+  // explicando a contradição (caso real Padre Miguel/Fonoaudiologia,
+  // 27/08/2026 — a leitura foi "o Break Even parou de funcionar").
+  //
+  // Vem de periodosEnriquecidos, que é EXATAMENTE a fonte da projeção
+  // financeira — então os dois números nunca podem discordar. Duas
+  // alternativas foram medidas e descartadas:
+  //
+  //   • recalcular por uma conta paralela sobre capacidadeDiretaRestante é
+  //     mais barato, mas ERRADO: a divisão real também consome a capacidade
+  //     livre sobrante nos candidatos de remanejamento (capacidadeLivrePorGrupo,
+  //     ver dividirPorDisponibilidadeInterna). Dava "2 exigem contratação"
+  //     onde o pipeline real dá 0 — reproduzindo, menor, a mesma contradição.
+  //
+  //   • rodar o pipeline completo para as TRÊS unidades dá o número certo em
+  //     todas as barras, mas custa 2–3 s de trabalho bloqueante por render
+  //     (medido nos dados de produção; ficou mais caro ainda depois de laudo
+  //     vencido passar a contar). Caro demais para um rótulo.
+  //
+  // Por isso o número líquido só aparece onde é gratuito: na unidade em
+  // exibição e no plano recomendado. As outras barras seguem mostrando o bruto
+  // sem afirmar nada sobre cobertura — melhor não dizer do que dizer errado.
+  //
+  // Conta VAGAS distintas (dia+hora), não candidatos: duas pessoas disputando
+  // o mesmo horário são uma vaga só, igual ao que a barra mostra no bruto.
+  // Declarado adiante, junto de nPacientesExibidos — depende de
+  // periodosEnriquecidos, que só existe depois do pipeline de enriquecimento.
+
   const periodosExibidos = useMemo((): PeriodoSimulado[] => {
     if (!podeSimular) return []
     const bruto = unidadeFixada
@@ -763,22 +848,7 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
   // disponibilidade interna, senão os dois lados poderiam divergir.
   const comRemanejamento = useMemo((): SugestaoContratacao[] => {
     if (!podeSimular) return []
-    const base: SugestaoContratacao[] = periodosExibidos.map((p, i) => ({
-      id: `periodo-${i}`,
-      unidade: p.unidade,
-      especialidade,
-      dia: p.dia,
-      turnos: [p.turno],
-      pctOcupacaoPrevista: 0,
-      faixaCascata: 50,
-      candidatos: p.slots.flatMap(s => s.candidatos.map(c => ({
-        paciente: c.pac, gap: c.gap, aut: c.aut, of: c.of, turno: p.turno, hora: s.hora,
-        modalidade: "adjacente" as const, valorSessaoProjetado: null, ordemNaVaga: 1,
-      }))),
-      modalidadeDominante: "adjacente",
-      salaVinculada: null,
-      projecaoRemuneracao: null,
-    }))
+    const base = periodosComoSugestoes(periodosExibidos, especialidade)
     return anexarModalidadeERemanejamento(base, cRows, gapMap)
   }, [podeSimular, periodosExibidos, especialidade, cRows, gapMap])
 
@@ -788,6 +858,37 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
     const comSala = anexarSala(comDisponibilidade, salasComOcupacao, exclusividades)
     return anexarRemuneracaoEOrdenar(comSala, cRows, regrasGerais, excecoesPaciente, mesReferencia, feriados)
   }, [podeSimular, comRemanejamento, cRows, gapMap, salasComOcupacao, exclusividades, regrasGerais, excecoesPaciente, mesReferencia, feriados])
+
+  // Vagas/pacientes do PLANO RECOMENDADO já descontados da cobertura interna —
+  // o card do plano mostrava o bruto (`planoStats`) enquanto o Detalhamento, a
+  // agenda e a projeção financeira logo abaixo mostravam o líquido, então a
+  // mesma unidade aparecia com dois pares de números na mesma tela ("38 vagas ·
+  // 50 pacientes" no card contra "40 pacientes · 32 vagas" no Detalhamento —
+  // reportado em 27/08/2026 como número errado, e é só bruto vs. líquido).
+  //
+  // Quando nenhuma unidade está fixada o plano É a seleção em exibição, então
+  // periodosEnriquecidos já é exatamente este cálculo e reusá-lo custa zero.
+  // Com uma unidade fixada o plano sai de exibição e não há como reaproveitar:
+  // aí paga um enriquecimento próprio (~0,7-1,0 s medido nos dados de
+  // produção). Só um plano, nunca as três unidades — é a diferença entre este
+  // custo e o que descartei em vagasLiquidasEmExibicao. Roda dentro do
+  // startTransition de setUnidadeFixada, então não bloqueia a interação.
+  const planoEnriquecido = useMemo((): SugestaoContratacao[] => {
+    if (!podeSimular) return []
+    if (!unidadeFixada) return periodosEnriquecidos
+    const comRem = anexarModalidadeERemanejamento(periodosComoSugestoes(planoRecomendado, especialidade), cRows, gapMap)
+    return filtrarPorDisponibilidadeInterna(comRem, cRows, gapMap)
+  }, [podeSimular, unidadeFixada, periodosEnriquecidos, planoRecomendado, especialidade, cRows, gapMap])
+
+  const planoStatsLiquidas = useMemo(() => ({
+    vagas: new Set(planoEnriquecido.flatMap(s => s.candidatos.map(c => `${s.dia}|||${c.hora}`))).size,
+    nPacientes: new Set(planoEnriquecido.flatMap(s => s.candidatos.map(c => c.paciente))).size,
+  }), [planoEnriquecido])
+
+  // Clampado em 0 pelo mesmo motivo de cobertasInternamente nas barras: o
+  // líquido pode passar do bruto, porque anexarModalidadeERemanejamento cria
+  // candidatos que avaliarPeriodo não tinha.
+  const planoCobertasInternamente = Math.max(0, planoStats.totalVagas - planoStatsLiquidas.vagas)
 
   // Candidatos que a capacidade interna JÁ cobre sozinha (ver
   // separarCobertosPorDisponibilidadeInterna) — contratando ou não, essa vaga
@@ -859,8 +960,12 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
   // disponibilidade interna), então uma vaga preenchida por remanejamento
   // aparecia como "livre/ociosa" aqui mesmo já tendo receita projetada.
   const agendaNovoProf = useMemo(() =>
-    podeSimular ? construirAgendaNovoProfissional(periodosEnriquecidosParaSimulado(periodosEnriquecidos)) : null,
-    [podeSimular, periodosEnriquecidos],
+    podeSimular
+      ? construirAgendaNovoProfissional(completarPeriodosSelecionados(
+          periodosEnriquecidosParaSimulado(periodosEnriquecidos), periodosExibidos,
+        ))
+      : null,
+    [podeSimular, periodosEnriquecidos, periodosExibidos],
   )
 
   // Espelha agendaNovoProf, só que pro lado "já coberto internamente" — usada
@@ -889,6 +994,14 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
 
   const nPacientesExibidos = useMemo(
     () => new Set(periodosEnriquecidos.flatMap(s => s.candidatos.map(c => c.paciente))).size,
+    [periodosEnriquecidos],
+  )
+
+  /** Vagas que exigiriam de fato a contratação na seleção em exibição — ver o
+   *  bloco de comentário em vagasDaUnidade acima. Mesma fonte da projeção
+   *  financeira, então os dois números nunca discordam. */
+  const vagasLiquidasEmExibicao = useMemo(
+    () => new Set(periodosEnriquecidos.flatMap(s => s.candidatos.map(c => `${s.dia}|||${c.hora}`))).size,
     [periodosEnriquecidos],
   )
 
@@ -1349,22 +1462,29 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                 </div>
                 {planoHomogeneo ? (
                   <div className="mb-2 flex items-baseline gap-1.5">
-                    <span className={`text-2xl font-black tabular-nums ${estiloUnidade(planoHomogeneo).text}`}>{planoStats.totalVagas}</span>
+                    <span className={`text-2xl font-black tabular-nums ${estiloUnidade(planoHomogeneo).text}`}>{planoStatsLiquidas.vagas}</span>
                     <span className="text-[12px] font-semibold text-muted-foreground">
-                      vaga(s) em <strong className={estiloUnidade(planoHomogeneo).text}>{planoHomogeneo}</strong> · {planoStats.nPacientes} paciente(s) disputando
+                      vaga(s) que exigem contratação em <strong className={estiloUnidade(planoHomogeneo).text}>{planoHomogeneo}</strong> · {planoStatsLiquidas.nPacientes} paciente(s) disputando
                     </span>
                     <InfoTip ariaLabel="O que essa estimativa considera">
-                      <p>Estimativa do plano antes de resolver <strong className="text-foreground">remanejamento</strong>, <strong className="text-foreground">disponibilidade interna</strong> e <strong className="text-foreground">sala</strong>.</p>
-                      <p className="mt-2">O número final de vagas confirmadas aparece em <strong className="text-foreground">"Detalhamento"</strong> logo abaixo.</p>
+                      <p>Vagas que <strong className="text-foreground">só a contratação resolve</strong>, já descontado o que a agenda atual cobre sozinha — mesmo número que o <strong className="text-foreground">Detalhamento</strong> e a <strong className="text-foreground">projeção financeira</strong> usam logo abaixo.</p>
+                      <p className="mt-2">No bruto, antes desse desconto, o plano tem <strong className="text-foreground">{planoStats.totalVagas}</strong> vaga(s) e <strong className="text-foreground">{planoStats.nPacientes}</strong> paciente(s).</p>
+                      <p className="mt-2">Ainda antes de resolver <strong className="text-foreground">sala</strong>: uma vaga sem sala livre não vira contratação.</p>
                     </InfoTip>
                   </div>
                 ) : (
                   <div className="mb-2 flex items-center gap-1 text-[11px] text-muted-foreground">
-                    <strong className="text-foreground">{planoStats.nPacientes} paciente(s)</strong> disputando {planoStats.totalVagas} vaga(s) de horário
+                    <strong className="text-foreground">{planoStatsLiquidas.nPacientes} paciente(s)</strong> disputando {planoStatsLiquidas.vagas} vaga(s) que exigem contratação
                     <InfoTip ariaLabel="O que essa estimativa considera">
-                      <p>Estimativa do plano antes de resolver <strong className="text-foreground">remanejamento</strong>, <strong className="text-foreground">disponibilidade interna</strong> e <strong className="text-foreground">sala</strong>.</p>
-                      <p className="mt-2">O número final de vagas confirmadas aparece em <strong className="text-foreground">"Detalhamento"</strong> logo abaixo.</p>
+                      <p>Vagas que <strong className="text-foreground">só a contratação resolve</strong>, já descontado o que a agenda atual cobre sozinha — mesmo número que o <strong className="text-foreground">Detalhamento</strong> e a <strong className="text-foreground">projeção financeira</strong> usam logo abaixo.</p>
+                      <p className="mt-2">No bruto, antes desse desconto, o plano tem <strong className="text-foreground">{planoStats.totalVagas}</strong> vaga(s) e <strong className="text-foreground">{planoStats.nPacientes}</strong> paciente(s).</p>
+                      <p className="mt-2">Ainda antes de resolver <strong className="text-foreground">sala</strong>: uma vaga sem sala livre não vira contratação.</p>
                     </InfoTip>
+                  </div>
+                )}
+                {planoCobertasInternamente > 0 && (
+                  <div className="mb-2 text-[10.5px] font-bold leading-tight text-amber-700 dark:text-amber-400">
+                    + {planoCobertasInternamente} vaga(s) que a agenda atual já pode cobrir internamente
                   </div>
                 )}
                 <PlanoGradeSemanal periodos={planoRecomendado} />
@@ -1376,6 +1496,8 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                     Ou fixe numa unidade única
                     <InfoTip ariaLabel="Como ler as barras de unidade">
                       <p>Cada barra mostra quantas <strong className="text-foreground">vagas de horário</strong> você teria se contratasse o novo profissional só para essa unidade, nos mesmos dias/turnos escolhidos.</p>
+                      <p className="mt-2">Ao <strong className="text-foreground">clicar numa unidade</strong>, o total dela se abre nas duas parcelas que decidem a contratação: <strong className="text-foreground">exige contratação</strong> (só um profissional novo resolve) e <strong className="text-foreground">já pode cobrir internamente</strong> (existe profissional contratado com horário <strong className="text-foreground">Livre</strong> nesse mesmo slot, então essas sessões seriam preenchidas de qualquer jeito). As demais unidades mostram só o total, sem separar.</p>
+                      <p className="mt-2">Uma unidade em que <strong className="text-foreground">tudo</strong> cai em já pode cobrir internamente é a que aparece com <strong className="text-foreground">margem R$ 0,00</strong> na projeção financeira: tem candidato, mas não tem receita nova.</p>
                       <p className="mt-2">A <strong className="text-foreground">marca vertical</strong> indica o total do plano recomendado (misto).</p>
                     </InfoTip>
                   </div>
@@ -1389,9 +1511,23 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                     const vagasUnidade = vagasDaUnidade(u)
                     const largura = (vagasUnidade / escalaComparativo) * 100
                     const referencia = (planoStats.totalVagas / escalaComparativo) * 100
-                    const delta = vagasUnidade - planoStats.totalVagas
                     const ativo = unidadeFixada === u.unidade
                     const semVagas = vagasUnidade === 0
+                    // O número líquido só é conhecido de graça para a unidade
+                    // FIXADA (é o periodosEnriquecidos em exibição). Nas outras
+                    // barras não afirmamos nada sobre cobertura — ver o bloco
+                    // de comentário em vagasDaUnidade.
+                    const liquidoConhecido = ativo && !!unidadeFixada
+                    const vagasLiquidas = liquidoConhecido ? vagasLiquidasEmExibicao : null
+                    // Resto do bruto que a capacidade já contratada resolve
+                    // sozinha. Clampado em 0 porque o líquido PODE passar do
+                    // bruto: anexarModalidadeERemanejamento cria candidatos que
+                    // avaliarPeriodo não tinha (medido: Realengo/Musicoterapia
+                    // bruto=30, líquido=31) — não é subconjunto.
+                    const cobertasInternamente = vagasLiquidas === null ? 0 : Math.max(0, vagasUnidade - vagasLiquidas)
+                    // Tem candidato, mas contratar ali não abre sessão nenhuma:
+                    // é a unidade cuja projeção financeira dá R$ 0,00.
+                    const todasCobertas = !semVagas && vagasLiquidas === 0
                     const ehRecomendada = !unidadeFixada && planoHomogeneo === u.unidade
                     return (
                       <button
@@ -1410,22 +1546,51 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                           {ehRecomendada && <Star size={10} className="shrink-0 text-sky-600 dark:text-sky-400" />}
                           {u.unidade}
                         </span>
-                        <span className="relative h-3 w-24 shrink-0 rounded-full bg-muted">
-                          {!semVagas && <span className={`absolute inset-y-0 left-0 rounded-full transition-[width] ${cor.bar}`} style={{ width: `${largura}%` }} />}
+                        {/* Barra segue medindo o BRUTO — é o que dá para saber
+                            das três unidades sem pagar o pipeline completo, e
+                            mantém as barras comparáveis entre si. A distinção
+                            bruto × exige-contratação aparece no número à
+                            direita, para a unidade fixada. */}
+                        <span
+                          className="relative h-3 w-24 shrink-0 rounded-full bg-muted"
+                          title={
+                            semVagas ? undefined
+                              : vagasLiquidas === null ? `${vagasUnidade} vaga(s) no total`
+                              : `${vagasUnidade} vaga(s) no total · ${vagasLiquidas} exigiria(m) contratação`
+                          }
+                        >
+                          {!semVagas && <span className={`absolute inset-y-0 left-0 rounded-full transition-[width] ${cor.bar} ${todasCobertas ? "opacity-30" : ""}`} style={{ width: `${largura}%` }} />}
                           <span className="absolute -top-1 -bottom-1 w-[2px] bg-foreground/60" style={{ left: `${referencia}%` }} />
                         </span>
                         <span className="flex-1" />
-                        <span className="w-[100px] shrink-0 text-right">
+                        {/* Quando o líquido é conhecido, o total bruto sai de
+                            cena e a coluna mostra as duas parcelas que o
+                            usuário precisa decidir: o que só a contratação
+                            resolve e o que já dá pra cobrir com quem está aqui.
+                            O bruto vira só o title da barra — como número
+                            solto ele era o que contradizia a projeção
+                            financeira. */}
+                        <span className="w-[150px] shrink-0 text-right">
                           {semVagas ? (
                             <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9.5px] font-bold ${TONE_SOFT.slate.bg} ${TONE_SOFT.slate.text}`}>
                               Sem vagas
                             </span>
+                          ) : vagasLiquidas === null ? (
+                            <span className="block text-[12px] font-black tabular-nums text-foreground">{vagasUnidade} vaga(s)</span>
                           ) : (
                             <>
-                              <span className="block text-[12px] font-black tabular-nums text-foreground">{vagasUnidade} vaga(s)</span>
-                              <span className={`block text-[9.5px] font-bold ${delta < 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>
-                                {delta === 0 ? "igual ao plano" : `${delta} vs. plano`}
-                              </span>
+                              {vagasLiquidas > 0 && (
+                                <span className="block text-[9.5px] font-bold leading-tight text-foreground">
+                                  <strong className="text-[12px] font-black tabular-nums">{vagasLiquidas}</strong>
+                                  {" "}exige contratação
+                                </span>
+                              )}
+                              {cobertasInternamente > 0 && (
+                                <span className="block text-[9.5px] font-bold leading-tight text-amber-700 dark:text-amber-400">
+                                  <strong className="text-[12px] font-black tabular-nums">{cobertasInternamente}</strong>
+                                  {" "}já pode cobrir internamente
+                                </span>
+                              )}
                             </>
                           )}
                         </span>
@@ -1791,11 +1956,29 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                             {diasAgendas.map(dia => {
                               const unidade = agendaNovoProf?.grade[`${dia}|||${horasTurno[0]}`]?.unidade
                                 ?? agendaJaCoberta?.grade[`${dia}|||${horasTurno[0]}`]?.unidade
+                              // Turno que o usuário marcou, foi avaliado (por isso
+                              // tem unidade) e não rendeu candidato nenhum em hora
+                              // alguma. Antes esse turno desaparecia da grade e a
+                              // leitura era "minha seleção foi ignorada" — ver
+                              // completarPeriodosSelecionados.
+                              const semCandidato = !!unidade && horasTurno.every(h => {
+                                const chave = `${dia}|||${h}`
+                                return !(agendaNovoProf?.grade[chave]?.candidatos.length)
+                                  && !(agendaJaCoberta?.grade[chave]?.candidatos.length)
+                              })
                               return (
                                 <td key={dia} className="px-0.5 pb-0.5">
                                   {unidade && (
-                                    <div className={`rounded-md py-0.5 text-center text-[9px] font-black uppercase tracking-wide text-white ${estiloUnidade(unidade).bar}`}>
+                                    <div className={`rounded-md py-0.5 text-center text-[9px] font-black uppercase tracking-wide text-white ${estiloUnidade(unidade).bar} ${semCandidato ? "opacity-40" : ""}`}>
                                       {unidade}
+                                    </div>
+                                  )}
+                                  {semCandidato && (
+                                    <div
+                                      className="mt-0.5 text-center text-[8.5px] font-bold uppercase tracking-wide text-muted-foreground"
+                                      title={`${turnoNome[turno]} de ${diaCurto(dia)} foi simulada, mas nenhum paciente com sessão pendente é elegível nesses horários`}
+                                    >
+                                      sem candidato
                                     </div>
                                   )}
                                 </td>

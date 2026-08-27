@@ -471,21 +471,33 @@ export function SaidaProfMode({ cRows, lRows, cfg, statusMap, persistStatus }: P
       offered[`${pac}|||${esp}`] = (offered[`${pac}|||${esp}`] ?? 0) + 1
     }
 
-    const candidatos: CandidatoSlot[] = []
-    const seenKey = new Set<string>()
+    // "Situação" (Vigente/Vencido) NÃO recorta nada aqui — mesma regra de
+    // calcularGaps (simulacaoNovoPrestador.ts), pelo mesmo motivo: a renovação
+    // de laudo é um controle administrativo PARALELO, o paciente segue sendo
+    // atendido com laudo vencido enquanto a renovação tramita, então a demanda
+    // é real e a vaga existe.
+    //
+    // Agrega por MAIOR "Qtd autorizada" em vez de aceitar a primeira linha de
+    // cada pac|||esp: com vencido e vigente na mesma lista, o primeiro-ganha
+    // deixava um laudo antigo de quantidade menor mascarar o atual (mesmo
+    // critério de max já usado em calcularGaps).
+    const autPorChave = new Map<string, { aut: number; conv: string }>()
     for (const l of lRows) {
       const pac = String(l["Paciente"] || "").trim()
       const esp = String(l["Especialidade"] || "").trim()
-      const sit = String(l["Situação"] || "")
       const aut = parseFloat(String(l["Qtd autorizada"] || "0")) || 0
-      if (!pac || !esp || !aut || sit.toLowerCase() !== "vigente") continue
+      if (!pac || !esp || !aut) continue
       if (!especialidades.has(esp)) continue
       const k = `${pac}|||${esp}`
-      if (seenKey.has(k)) continue
-      seenKey.add(k)
+      const atual = autPorChave.get(k)
+      if (!atual || aut > atual.aut) autPorChave.set(k, { aut, conv: String(l["Plano"] || planoPorPac[pac] || "") })
+    }
+
+    const candidatos: CandidatoSlot[] = []
+    for (const [k, { aut, conv }] of autPorChave) {
       const gap = Math.round((aut - (offered[k] ?? 0)) * 10) / 10
       if (gap <= 0) continue
-      const conv = String(l["Plano"] || planoPorPac[pac] || "")
+      const [pac, esp] = k.split("|||")
       candidatos.push({ pac, esp, gap, conv, prio: gPrio(pac, planoPorPac, cfg.judicialMap || {}) })
     }
     candidatos.sort((a, b) => a.prio - b.prio || b.gap - a.gap || a.pac.localeCompare(b.pac))
