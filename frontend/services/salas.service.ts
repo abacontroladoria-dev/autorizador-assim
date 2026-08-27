@@ -120,10 +120,11 @@ export async function bloquearSala(id: string, bloquear: boolean): Promise<Sala>
 }
 
 /**
- * Terapias que um profissional específico de fato realiza, segundo o
- * histórico real de `csv_grades_profissionais` — usado para restringir a
- * lista de terapias do modal de alocação ao que essa pessoa realmente faz,
- * em vez de mostrar todas as terapias da clínica.
+ * Terapias que um profissional específico de fato realiza — do histórico real
+ * de atendimento (`csv_grades_profissionais` via vw_grade_base) mais os slots
+ * 'Livre' que a agenda já reservou pra ele, mesmo sem atendimento algum ainda.
+ * Usado para restringir a lista de terapias do modal de alocação ao que essa
+ * pessoa realmente faz, em vez de mostrar todas as terapias da clínica.
  */
 /** Cache em memória por sessão de página — `csv_grades_profissionais` só muda 1x/dia (sync noturno), então reabrir o modal pro mesmo profissional não precisa repetir a consulta. */
 const cacheTerapiasDoProfissional = new Map<string, Promise<string[]>>()
@@ -142,7 +143,7 @@ async function buscarTerapiasDoProfissionalSemCache(profissionalNome: string, pr
   const nome = profissionalNome.trim()
   if (!nome) return []
   const data = await buscarGrade<Record<string, unknown>>({
-    campos: "terapia_exibicao_nome, terapia_nome, paciente_nome, paciente_id",
+    campos: "terapia_exibicao_nome, terapia_nome, paciente_nome, paciente_id, status_agendamento",
     fonte: "base",
     // Filtra por profissional_id quando disponível: usa o índice existente
     // (profissional_id, data) em vez de um ilike de nome sem índice, que
@@ -163,13 +164,28 @@ async function buscarTerapiasDoProfissionalSemCache(profissionalNome: string, pr
     ordem: [{ coluna: "data", desc: true }, { coluna: "id" }],
     limite: 2000,
   })
+  // 'Livre' (slot aberto, sem paciente marcado ainda) é o único status cujo
+  // paciente_nome SEMPRE vem como o placeholder "Ainda não selecionado" —
+  // medido em produção: as 10.879 linhas 'Livre' da grade, sem exceção. Não é
+  // ruído: é um profissional real com um horário aberto numa terapia real,
+  // exatamente o caso da Andréa Aparecida Borges de Oliveira (2026-08-27) — só
+  // tinha slots 'Livre', nenhum atendimento no histórico ainda, e por isso
+  // sumia inteira do filtro abaixo, fazendo o modal cair pra lista completa da
+  // clínica em vez de mostrar só "Terapia Ocupacional".
+  //
+  // Sessão de paciente fictício/administrativo de verdade (Horário
+  // Administrativo, Notificação Prévia, blocos de Supervisor etc. — mesmo
+  // isFakePatient já usado em buscarLinhasAgendaParaSalas) tem status
+  // diferente de 'Livre', e aí sim precisa continuar fora: o campo de terapia
+  // dela não é uma terapia real ("Operações Clínicas", "Apoio Operacional").
   const nomes = data
-    // Sessões de paciente fictício/administrativo (Ainda não selecionado,
-    // Horário Administrativo, etc. — mesmo isFakePatient já usado em
-    // buscarLinhasAgendaParaSalas) têm o mesmo texto placeholder no campo de
-    // terapia — não é uma terapia real que o profissional realiza.
-    .filter(r => !isFakePatient(r.paciente_nome as string | null, r.paciente_id !== null ? String(r.paciente_id) : null))
-    .map(r => fixMojibake((r.terapia_exibicao_nome as string | null) || (r.terapia_nome as string | null)))
+    .filter(r => r.status_agendamento === "Livre" || !isFakePatient(r.paciente_nome as string | null, r.paciente_id !== null ? String(r.paciente_id) : null))
+    // terapia_exibicao_nome só é preenchida quando existe paciente confirmado
+    // (a "exibição" reflete o atendimento marcado) — numa linha 'Livre' ela
+    // também vem como o placeholder "Ainda não selecionado", igual ao
+    // paciente. terapia_nome é o que a sala/agenda reserva pra aquele slot e
+    // está sempre presente, então é ele que carrega o sinal aqui.
+    .map(r => fixMojibake(r.status_agendamento === "Livre" ? (r.terapia_nome as string | null) : (r.terapia_exibicao_nome as string | null) || (r.terapia_nome as string | null)))
     .map(t => t.trim())
     .filter(Boolean)
   return [...new Set(nomes)].sort()
