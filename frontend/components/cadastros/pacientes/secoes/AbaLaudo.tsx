@@ -137,7 +137,9 @@ export function AbaLaudo({ pacienteId, pacienteNome }: Props) {
           {laudos.map((laudo) => (
             <li
               key={laudo.id_laudo}
-              className="flex h-full flex-col rounded-lg border border-border bg-card px-4 py-4"
+              className={`flex h-full flex-col rounded-lg border border-border bg-card px-4 py-4 ${
+                laudo.ativo ? "" : "opacity-60"
+              }`}
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
                 {/* ── Info principal ── */}
@@ -157,6 +159,11 @@ export function AbaLaudo({ pacienteId, pacienteNome }: Props) {
                         {laudo.em_uso && (
                           <span className="rounded-md bg-blue-100 px-1.5 py-0.5 text-[10px] font-semibold text-blue-700 dark:bg-blue-950/50 dark:text-blue-400">
                             Em uso
+                          </span>
+                        )}
+                        {!laudo.ativo && (
+                          <span className="rounded-md bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 dark:bg-rose-950/50 dark:text-rose-400">
+                            Excluído
                           </span>
                         )}
                       </div>
@@ -195,27 +202,33 @@ export function AbaLaudo({ pacienteId, pacienteNome }: Props) {
                       )}
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => abrirEdicao(laudo)}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    title="Editar laudo"
-                  >
-                    <Edit2 className="h-3.5 w-3.5" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void confirmarExclusao(laudo)}
-                    disabled={excluindo === laudo.id_laudo}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    title="Excluir laudo"
-                  >
-                    {excluindo === laudo.id_laudo ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-3.5 w-3.5" />
-                    )}
-                  </button>
+                  {/* Editar/excluir só fazem sentido em laudo ativo — um
+                      excluído já está no estado final. */}
+                  {laudo.ativo && (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => abrirEdicao(laudo)}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        title="Editar laudo"
+                      >
+                        <Edit2 className="h-3.5 w-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void confirmarExclusao(laudo)}
+                        disabled={excluindo === laudo.id_laudo}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        title="Excluir laudo"
+                      >
+                        {excluindo === laudo.id_laudo ? (
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        ) : (
+                          <Trash2 className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+                    </>
+                  )}
                 </div>
               </div>
 

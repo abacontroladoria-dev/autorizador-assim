@@ -63,9 +63,11 @@ comment on table public.cadastros_pacientes_laudos is
 comment on table public.cadastros_pacientes_altas is
   'Altas do paciente, 1:N — uma por especialidade. O mesmo paciente pode receber alta de Fonoaudiologia e seguir em Terapia Ocupacional. NÃO É APAGÁVEL: "excluir" na tela grava ativo = false, e o privilégio de DELETE é revogado (20260827100000).';
 
--- ===== 4. A view só mostra laudo ativo =====
--- Mesma definição de 20260826140400 + o filtro. `create or replace` serve aqui:
--- nenhuma coluna muda de nome nem sai.
+-- ===== 4. A view ganha a coluna `ativo` =====
+-- SEM filtrar por ela: "excluído" continua visível (marcado), a decisão de
+-- esconder ou não é da tela, não da consulta — mesmo raciocínio do frontend
+-- (ver services/pacienteLaudos.service.ts). `create or replace` serve aqui:
+-- nenhuma coluna muda de nome, só entra uma no fim.
 create or replace view public.vw_paciente_laudos_flat as
 select
   pl.id_laudo,
@@ -88,10 +90,10 @@ select
   ple.qt_autorizacao,
   pl.alta,
   pl.data_alta,
-  pl.em_uso
+  pl.em_uso,
+  pl.ativo
 from public.cadastros_pacientes_laudos pl
 join public.pacientes p
   on p.id_paciente = pl.id_paciente_pulsar
 left join public.cadastros_pacientes_laudo_especialidades ple
-  on ple.id_laudo = pl.id_laudo
-where pl.ativo;
+  on ple.id_laudo = pl.id_laudo;

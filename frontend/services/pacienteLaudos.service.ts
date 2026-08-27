@@ -82,10 +82,10 @@ export async function getLaudosDoPaciente(
   const { data: laudos, error } = await supabase
     .from(TB_LAUDOS)
     .select("*")
-    // Laudo "excluído" continua no banco (soft-delete, 20260827100000) e é
-    // filtrado aqui — a aba mostra só os ativos.
+    // Laudo "excluído" continua no banco (soft-delete, 20260827100000) e
+    // CONTINUA na lista — só marcado. A tela é quem decide como mostrar
+    // (badge "Excluído"), não a query.
     .eq("id_paciente_pulsar", pacienteId)
-    .eq("ativo", true)
     .order("data_laudo", { ascending: false })
 
   if (error) return { data: [], error: error.message }
