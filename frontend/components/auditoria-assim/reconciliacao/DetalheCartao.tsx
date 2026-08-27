@@ -205,8 +205,11 @@ export default function DetalheCartao({
         {/* Os dois desfechos da triagem também são estado, e por isso ficam na
             mesma fileira de pílulas: quem abre a gaveta de uma guia decidida
             precisa ler o veredito antes de qualquer campo. */}
+        {/* Violeta, como a barra e o selo do cartão na grade: a pílula diz que
+            houve SUBSTITUIÇÃO, não que a guia é uma liberação de rotina. Ver
+            `cobertaPorAvulsa`. */}
         {daGuia?.estado === 'vinculada' && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
+          <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700 ring-1 ring-violet-200">
             <Link2 size={11} aria-hidden />
             Vinculada
           </span>
@@ -217,10 +220,14 @@ export default function DetalheCartao({
             Autorização extra
           </span>
         )}
+        {/* Mesma razão, do outro lado do par: a pílula de estado acima já diz
+            "Glosa Resolvida"/"Liberada" em esmeralda, e esta acrescenta de onde a
+            cobertura veio. Duas esmeraldas em fila diriam a mesma coisa duas
+            vezes e perderiam exatamente o que distingue avulsa de rotina. */}
         {daSessao?.vinculo && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-1 text-[11px] font-semibold text-emerald-700 ring-1 ring-emerald-200">
+          <span className="inline-flex items-center gap-1 rounded-full bg-violet-50 px-2.5 py-1 text-[11px] font-semibold text-violet-700 ring-1 ring-violet-200">
             <Link2 size={11} aria-hidden />
-            Coberta por vínculo
+            Coberta por avulsa
           </span>
         )}
         {daGuia?.excedente && (

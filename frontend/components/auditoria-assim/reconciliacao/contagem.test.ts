@@ -115,7 +115,36 @@ describe('contarPendencias — total', () => {
       'autorizacao-a-mais': 1,
       faltando: 3,
     })
-    expect(c.total).toBe(7)
+    // 2 glosas + 1 a-mais + 3 não solicitadas = 6. O cancelamento é contado e
+    // exibido, mas NÃO entra no total — ver a nota em `contarPendencias`.
+    expect(c.total).toBe(6)
+  })
+
+  it('o cancelamento é contado e NÃO entra no total', () => {
+    // Reportado da tela (2026-08-27): "o cancelamento está contando na página
+    // principal como pendência, tire ele da contagem". A autorização desfeita não
+    // consumiu cota e não pede nada — somá-la inflava a fila de trabalho com
+    // linhas em que não havia o que fazer.
+    const c = contarPendencias([], { orfas: new Set(), glosas: 0, canceladas: 4 }, new Set())
+    expect(c.cancelamento).toBe(4)
+    expect(c.total).toBe(0)
+  })
+
+  it('paciente cujo único fato é cancelamento sai da fila', () => {
+    // A consequência na listagem, que filtra `total > 0`: um mês em que só houve
+    // cancelamento não tem pendência nenhuma, e a linha não aparece. É o desfecho
+    // pretendido, não um efeito colateral.
+    const c = contarPendencias([], { orfas: new Set(), glosas: 0, canceladas: 1 }, new Set())
+    expect(c.total).toBe(0)
+
+    // Mas ele volta assim que existe trabalho de verdade ao lado.
+    const comGlosa = contarPendencias(
+      [],
+      { orfas: new Set(), glosas: 1, canceladas: 1 },
+      new Set()
+    )
+    expect(comGlosa.total).toBe(1)
+    expect(comGlosa.cancelamento).toBe(1)
   })
 
   it('faltando vem da soma de `naoSolicitada` por TUSS', () => {

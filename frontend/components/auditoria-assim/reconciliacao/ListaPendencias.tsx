@@ -80,6 +80,17 @@ function LinhaPaciente({ paciente, onAbrir }: {
   onAbrir: (paciente: PacientePendencias) => void
 }) {
   const especies = PENDENCIAS.filter((e) => paciente.contagem[e.chave] > 0)
+  /*
+    O total é a soma das espécies que PEDEM trabalho, e o cancelamento não é uma
+    delas (ver `contarPendencias`). Então a pílula do total só aparece quando há
+    duas ou mais espécies contadas — senão a linha de um paciente com 1 glosa e 1
+    cancelamento diria "1 Pendências · 1 Glosas · 1 Cancelamentos", e o total
+    pareceria errado por não somar o que está ao lado dele.
+
+    Com uma espécie contada só, o total É aquele número e repeti-lo seria ruído —
+    a mesma regra que já valia antes, agora medida sobre o conjunto certo.
+  */
+  const contadas = especies.filter((e) => e.chave !== 'cancelamento')
   const carteirinha = paciente.carteirinhas[0] ?? 'sem carteirinha'
   const extras = paciente.carteirinhas.length - 1
 
@@ -124,12 +135,12 @@ function LinhaPaciente({ paciente, onAbrir }: {
             <span className="text-xs text-slate-500">sem pendências</span>
           ) : (
             <>
-              {especies.length > 1 && (
+              {contadas.length > 1 && (
                 <Badge
                   rotulo="Pendências"
                   valor={paciente.contagem.total}
                   tom="border-slate-300 bg-white text-slate-700 [&>span]:text-slate-900"
-                  ajuda="A soma das espécies desta linha."
+                  ajuda="A soma das espécies que pedem trabalho. Cancelamento não entra."
                 />
               )}
               {especies.map((e) => (
@@ -395,6 +406,12 @@ export default function ListaPendencias({
       </div>
 
       {/* ── Chips: quantos pacientes têm cada espécie de pendência ─────────── */}
+      {/* Os contadores das chips vivem FORA do ramo do esqueleto, então eles
+          pintavam número parcial mesmo com o esqueleto na tela — a outra metade
+          do defeito relatado ("pisca e traz os valores reais"). Enquanto carrega
+          eles mostram "—": o traço não é ausência de dado, é a recusa de afirmar
+          um número que vai mudar. A largura da chip fica estável e nada salta
+          quando o valor chega. */}
       <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
@@ -406,7 +423,9 @@ export default function ListaPendencias({
               : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
           }`}
         >
-          <span className="font-semibold tabular-nums">{comPendencia.length}</span>
+          <span className="font-semibold tabular-nums">
+            {carregando ? '—' : comPendencia.length}
+          </span>
           Todas
         </button>
 
@@ -422,13 +441,15 @@ export default function ListaPendencias({
               aria-pressed={selecionado}
               // Zero continua visível e clicável: "nenhuma glosa neste mês" é
               // informação, e esconder o contador faria a ausência parecer com a
-              // tela ainda carregando.
+              // tela ainda carregando. O atenuado do zero também espera o
+              // carregamento — atenuar por um zero que ainda vai mudar diria
+              // "não há nada aqui" antes de a tela saber.
               className={`flex h-11 items-center gap-1.5 rounded-lg border px-3 text-sm font-medium transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none ${
                 selecionado ? ativo : inativo
-              } ${n === 0 && !selecionado ? 'opacity-60' : ''}`}
+              } ${!carregando && n === 0 && !selecionado ? 'opacity-60' : ''}`}
             >
               <Icone size={13} aria-hidden />
-              <span className="font-semibold tabular-nums">{n}</span>
+              <span className="font-semibold tabular-nums">{carregando ? '—' : n}</span>
               {rotulo}
             </button>
           )
@@ -457,7 +478,26 @@ export default function ListaPendencias({
               Tentar novamente
             </button>
           </div>
-        ) : carregando && pacientes.length === 0 ? (
+        ) : /*
+             Gate SÓ em `carregando` (2026-08-27, reportado da tela).
+
+             Havia um `&& pacientes.length === 0` aqui, e ele produzia o defeito
+             relatado: "a página renderiza os pacientes com valores totais, depois
+             pisca e traz os valores reais". As quatro cargas do mês correm em
+             paralelo e `pacientesDoMes` fica não-vazio assim que UMA chega — as
+             autorizações vêm numa requisição, as sessões em lotes de 6 dias. Com
+             a lista já não-vazia o esqueleto saía de cena e a tela pintava com
+             `agendadas = 0`, o que faz toda guia liberada parecer excedente, zera
+             "Não solicitada" e não desconta a glosa que um vínculo cobriu. Depois
+             as sessões chegavam e cada número se corrigia na frente de quem lia.
+
+             A metade `pacientes.length === 0` existia por um motivo real: as
+             quatro flags nasciam `false`, então no primeiro render `loading` era
+             falso e o esqueleto não aparecia na abertura. Isso foi corrigido na
+             origem — elas nascem `true` (ver `useAnaliseReincidencia`) —, e o
+             gate volta a ser o que a nota de `loading` sempre descreveu.
+           */
+        carregando ? (
           <div className="space-y-2 p-3">
             {Array.from({ length: 8 }).map((_, i) => (
               <div key={i} className="h-14 animate-pulse rounded-xl bg-slate-100" />

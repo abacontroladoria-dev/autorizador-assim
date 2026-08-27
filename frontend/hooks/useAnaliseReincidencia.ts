@@ -376,8 +376,31 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   const [orfasDaSemana, setOrfasDaSemana] = useState<Map<string, GuiaOrfa>>(() => new Map())
   const [triagens, setTriagens] = useState<VinculoAutorizacao[]>([])
   const [unidades, setUnidades] = useState<Map<string, string>>(() => new Map())
-  const [carregandoSemana, setCarregandoSemana] = useState(false)
-  const [carregandoAutorizacoes, setCarregandoAutorizacoes] = useState(false)
+  /*
+    AS QUATRO NASCEM `true`, e não `false` (2026-08-27, reportado da tela).
+
+    Cada uma sobe no `useCallback` da própria carga e desce no `finally`. Mas o
+    efeito que dispara a carga roda DEPOIS da primeira pintura, então com elas
+    nascendo `false` havia um render — o primeiro — em que `loading` era `false`
+    e nenhum dado tinha chegado. Era esse render que obrigava `ListaPendencias` a
+    gatear por `carregando && pacientes.length === 0`: sem a segunda metade, o
+    esqueleto não aparecia na abertura.
+
+    E foi essa segunda metade que produziu o defeito relatado. `pacientesDoMes`
+    fica não-vazio assim que UMA das quatro chega (as autorizações chegam numa
+    requisição; as sessões vêm em lotes de 6 dias, ~44 requisições no mês), e com
+    a lista já não-vazia o esqueleto saía de cena: a tela pintava linhas com
+    `agendadas = 0`, o que faz TODA guia liberada parecer excedente, zera "Não
+    solicitada" e deixa de descontar a glosa que um vínculo já cobriu. Depois as
+    sessões chegavam e cada número se corrigia na frente de quem estava lendo.
+
+    Nascendo `true`, `loading` é verdadeiro desde o primeiro render e o
+    componente pode gatear só nele — que é o contrato que a nota de `loading`
+    sempre descreveu. Nenhuma carga foi serializada: as quatro seguem em
+    paralelo, só a primeira pintura é que espera a última.
+  */
+  const [carregandoSemana, setCarregandoSemana] = useState(true)
+  const [carregandoAutorizacoes, setCarregandoAutorizacoes] = useState(true)
   /**
    * A terceira carga do mês, e a única que não tinha porteiro até 2026-08-24.
    *

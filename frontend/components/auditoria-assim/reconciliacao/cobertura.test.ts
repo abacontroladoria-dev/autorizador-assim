@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest'
-import { sessaoNaoSolicitada, sessaoSemCobertura } from './cobertura'
+import {
+  cobertaPorAvulsa,
+  sessaoNaoSolicitada,
+  sessaoSemCobertura,
+  situacaoComVinculo,
+  SITUACOES_COBERTAS,
+} from './cobertura'
 import type { AuditoriaAssimItem } from '../types'
 
 /**
@@ -94,5 +100,97 @@ describe('sessaoNaoSolicitada', () => {
     const vinculos = new Map([['b1', { tipo: 'vinculo' as const }]])
     expect(sessaoSemCobertura(s, CUTOFF, vinculos)).toBe(false)
     expect(sessaoNaoSolicitada(s, CUTOFF, vinculos)).toBe(false)
+  })
+})
+
+/**
+ * A pergunta que a COR da grade faz: esta cobertura veio de uma avulsa?
+ *
+ * `situacaoComVinculo` manda toda sessão coberta por triagem para
+ * GLOSA_RESOLVIDA ou LIBERADA, e as duas são esmeralda — as mesmas de uma
+ * liberação que o robô tirou na hora. Reportado da tela: a glosa substituída
+ * "não pode ficar verdinha também, porque confunde com uma liberada comum".
+ * Quem separa é a procedência, e é esta função que a decide.
+ */
+describe('cobertaPorAvulsa', () => {
+  it('a glosa substituída é marcada — é o caso reportado', () => {
+    expect(cobertaPorAvulsa('GLOSA', { tipo: 'vinculo' })).toBe(true)
+  })
+
+  it('a não solicitada coberta por avulsa também — ela vira LIBERADA', () => {
+    // O caso mais grave dos dois: aqui `situacaoComVinculo` não deixa nem o
+    // rótulo "Glosa Resolvida" para trás, então sem esta marca a substituição
+    // fica indistinguível de uma liberação de rotina.
+    for (const situacao of ['NAO_SOLICITADA', 'CANCELADA', 'SOLICITACAO_CANCELADA']) {
+      expect(cobertaPorAvulsa(situacao, { tipo: 'vinculo' }), situacao).toBe(true)
+    }
+  })
+
+  it('sem vínculo não há procedência a marcar', () => {
+    expect(cobertaPorAvulsa('LIBERADA', null)).toBe(false)
+    expect(cobertaPorAvulsa('GLOSA', undefined)).toBe(false)
+  })
+
+  it('a triagem "autorização extra" não cobre sessão nenhuma', () => {
+    expect(cobertaPorAvulsa('GLOSA', { tipo: 'sem_sessao' })).toBe(false)
+  })
+
+  it('falta não entra: uma guia não faz a sessão acontecer', () => {
+    // Mesma fronteira que `situacaoComVinculo` respeita — falta continua falta
+    // depois do vínculo, então não há cobertura cuja procedência marcar.
+    for (const situacao of ['FALTA', 'FALTA_TERAPEUTA']) {
+      expect(cobertaPorAvulsa(situacao, { tipo: 'vinculo' }), situacao).toBe(false)
+    }
+  })
+
+  it('situacaoComVinculo é IDEMPOTENTE — o defeito da "Glosa Coberta" que não aparecia', () => {
+    /*
+      O caso reportado (Kourtney Savino Lopes, 03–07/08). Esta função é o eco de
+      um CASE que a RPC já resolve, logo ela recebe de volta a própria saída: com
+      a migration viva, `get_auditoria_assim` devolve GLOSA_RESOLVIDA. Sem a
+      guarda, `'GLOSA_RESOLVIDA' !== 'GLOSA'` caía no `else` e rebaixava para
+      LIBERADA — e o cartão escrevia "Coberta" onde devia escrever "Glosa
+      Coberta", perdendo a distinção entre "havia recusa e ela foi coberta" e
+      "ninguém tinha pedido".
+    */
+    expect(situacaoComVinculo('GLOSA_RESOLVIDA', { tipo: 'vinculo' })).toBe('GLOSA_RESOLVIDA')
+    expect(situacaoComVinculo('LIBERADA', { tipo: 'vinculo' })).toBe('LIBERADA')
+
+    // A propriedade, e não só os dois casos: aplicar duas vezes é aplicar uma.
+    for (const crua of ['GLOSA', 'NAO_SOLICITADA', 'CANCELADA', 'SOLICITACAO_CANCELADA', 'FALTA']) {
+      const uma = situacaoComVinculo(crua, { tipo: 'vinculo' })
+      expect(situacaoComVinculo(uma, { tipo: 'vinculo' }), crua).toBe(uma)
+    }
+  })
+
+  it('o par (crua, resolvida) decide as duas palavras que o cartão escreve', () => {
+    // O caso reportado (Kourtney Savino Lopes, 03–07/08): uma glosa vinculada.
+    // A situação resolvida é que escolhe entre as duas palavras — "Glosa
+    // Coberta" quando havia recusa para cobrir, "Coberta" quando não havia —, e
+    // a crua é que diz se alguma delas se aplica. As duas em violeta, porque
+    // esmeralda ficou só para a liberação de rotina.
+    const glosa = { crua: 'GLOSA', resolvida: situacaoComVinculo('GLOSA', { tipo: 'vinculo' }) }
+    expect(cobertaPorAvulsa(glosa.crua, { tipo: 'vinculo' })).toBe(true)
+    expect(glosa.resolvida).toBe('GLOSA_RESOLVIDA')
+
+    const nunca = situacaoComVinculo('NAO_SOLICITADA', { tipo: 'vinculo' })
+    expect(cobertaPorAvulsa('NAO_SOLICITADA', { tipo: 'vinculo' })).toBe(true)
+    expect(nunca).toBe('LIBERADA')
+
+    // E a liberação de rotina não é nenhuma das duas: sem vínculo, nada a marcar.
+    expect(cobertaPorAvulsa('LIBERADA', null)).toBe(false)
+  })
+
+  it('decide pela situação CRUA, não pela já resolvida', () => {
+    // O contrato da função, e a razão de ela receber `situacaoCrua`: depois de
+    // `situacaoComVinculo` as duas viram esmeralda e a origem se perde. Se
+    // alguém lhe passar o valor resolvido, a resposta continua "sim" — o que
+    // não pode acontecer é a chamada perder a distinção antes de chegar aqui.
+    expect(situacaoComVinculo('GLOSA', { tipo: 'vinculo' })).toBe('GLOSA_RESOLVIDA')
+    expect(situacaoComVinculo('NAO_SOLICITADA', { tipo: 'vinculo' })).toBe('LIBERADA')
+    // …e as duas são cobertura, portanto esmeralda na grade.
+    for (const s of ['GLOSA_RESOLVIDA', 'LIBERADA']) {
+      expect(SITUACOES_COBERTAS.has(s), s).toBe(true)
+    }
   })
 })

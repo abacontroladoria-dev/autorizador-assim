@@ -82,10 +82,30 @@ export const PENDENCIAS: EspeciePendencia[] = [
     chave: 'cancelamento',
     rotulo: 'Cancelamentos',
     Icone: Ban,
-    badge: 'border-transparent bg-slate-100 text-slate-700',
+    /*
+      O único badge HACHURADO, e o único que não entra no total.
+
+      As duas coisas são a mesma decisão, tomada em 2026-08-27 e reportada da
+      tela: o cancelamento não pede trabalho — `autorizacaoCancelada` já diz que
+      a autorização "saiu e foi desfeita, não consumiu cota e não pede nada" —,
+      então somá-lo em `contagem.total` inflava a fila com linhas em que não há
+      nada a fazer (ver `contarPendencias`).
+
+      Ele continua contado e continua visível, porque o fato existe e a grade
+      segue desenhando a guia cancelada. O que a hachura acrescenta é a leitura
+      que o número sozinho não dava: este é um registro encerrado, não uma tarefa.
+      Slate preservado — a hachura risca, não pinta (ver `.rachurado`).
+
+      FORTE, e não a base (ajuste em tela): a mesma opacidade mede mais fraca em
+      slate do que nos matizes mais saturados que a hachura também marca, porque
+      o slate já parte de menos contraste contra o fundo quase branco. Ver
+      `.rachurado-forte`.
+    */
+    badge: 'rachurado-forte border-transparent bg-slate-100 text-slate-700',
     ativo: 'border-slate-400 bg-slate-100 text-slate-800',
     inativo: 'border-slate-200 bg-white text-slate-600 hover:border-slate-300 hover:bg-slate-50',
-    ajuda: 'Autorizações que saíram e foram desfeitas (“Liberado *”). Não consumiram cota.',
+    ajuda:
+      'Autorizações que saíram e foram desfeitas (“Liberado *”). Não consumiram cota e não entram no total de pendências.',
   },
   {
     chave: 'autorizacao-a-mais',

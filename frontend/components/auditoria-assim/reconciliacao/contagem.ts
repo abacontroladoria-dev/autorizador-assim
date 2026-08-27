@@ -159,8 +159,27 @@ export function contarPendencias(
     faltando,
     total: 0,
   }
-  contagem.total =
-    contagem.glosa + contagem.cancelamento + contagem['autorizacao-a-mais'] + faltando
+  /*
+    O CANCELAMENTO NÃO ENTRA NO TOTAL (2026-08-27, reportado da tela).
+
+    `total` é o número que a operação lê para dimensionar trabalho — é ele que a
+    linha imprime como "8 Pendências" e é por ele que a listagem ordena e filtra.
+    O cancelamento não é trabalho: `autorizacaoCancelada` já registra o que ele é
+    ("a autorização saiu e foi desfeita — não consumiu cota e não pede nada"), e a
+    própria ajuda da espécie diz isso ao usuário. Somá-lo inflava a fila com
+    linhas em que não havia nada a fazer.
+
+    Ele continua CONTADO e continua VISÍVEL na linha, com a pílula slate e a
+    hachura de "encerrado" (ver `.rachurado`): o fato existe, a auditoria precisa
+    dele, e esconder o número faria a listagem discordar da grade — onde a guia
+    cancelada segue desenhada. O que ele deixa de ser é uma unidade de fila.
+
+    Se ele fosse a ÚNICA espécie do paciente, a linha sairia da listagem (o filtro
+    é `total > 0`), e é o desfecho certo: um mês em que só houve cancelamento não
+    tem pendência nenhuma. Ver a nota em `ListaPendencias`, onde a mesma decisão
+    aparece do lado da tela.
+  */
+  contagem.total = contagem.glosa + contagem['autorizacao-a-mais'] + faltando
   return contagem
 }
 

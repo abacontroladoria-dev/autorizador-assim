@@ -10,7 +10,12 @@ import { iconeTerapia } from '@/lib/cronograma/iconeTerapia'
 import { completarMotivoGlosa, lerMotivoGlosa } from '@/lib/glosa'
 import { resolverConfig } from '../SituacaoBadge'
 import type { CartaoGrade, VinculoAutorizacao } from '../types'
-import { SITUACOES_COBERTAS, SITUACOES_COM_VEREDITO, SITUACOES_SEM_SESSAO } from './cobertura'
+import {
+  cobertaPorAvulsa,
+  SITUACOES_COBERTAS,
+  SITUACOES_COM_VEREDITO,
+  SITUACOES_SEM_SESSAO,
+} from './cobertura'
 import { dataHoraDeTimestamptz, formatarDia, formatarDiaComNome } from './datas'
 import { cartaoPendente } from './grade'
 import {
@@ -91,10 +96,17 @@ import {
  * único fato que selo nenhum carrega — QUAL sessão —, e esse fica no rodapé da
  * guia, em rótulo/valor (`ReferenciaDaSessao`), que não trunca.
  *
- * A guia vinculada veste esmeralda — o matiz que esta tela já usa para "está
- * coberto", o mesmo de GLOSA_RESOLVIDA e LIBERADA —, e a descartada ("é
- * autorização extra") veste slate, que é o que acabou sem efeito. Nenhum matiz
- * novo.
+ * Os dois lados do par triado vestem VIOLETA — rótulo, selo e borda —, e a
+ * descartada ("é autorização extra") veste slate, que é o que acabou sem efeito.
+ * Nenhum matiz novo: violeta é o que `SITUACAO_CONFIG.GLOSA_RESOLVIDA` já
+ * reserva para "o que foi resolvido foi uma glosa".
+ *
+ * Esmeralda ficou reservada à liberação de ROTINA, e essa exclusividade é o
+ * ponto. Enquanto a sessão substituída também saía verde ela se lia como uma
+ * liberada comum — reportado da tela duas vezes, a segunda depois de o selo
+ * violeta não ter bastado: *"não pode ser em verde pra não confundir
+ * visualmente com Liberada"*. O que muda é o CANAL do rótulo e da borda, não o
+ * do fundo: o compacto segue branco, então nada afirma que há trabalho ali.
  */
 
 /**
@@ -312,15 +324,29 @@ function Tarja({ papel, distancia }: { papel: PapelNaSelecao; distancia: number 
  *
  * Sem o nome do dia: "Seg 03/08 11:20" não cabe, e a data já é inequívoca. Onde
  * há largura para o dia por extenso é no `title` e na gaveta.
+ *
+ * "Autorização Substituta" (ajuste em tela, era "cobre"): a guia e a borda do
+ * cartão voltaram a esmeralda, e este rodapé passou a ser onde a procedência —
+ * "isto substituiu outra coisa" — fica escrita por extenso, já que a cor não a
+ * carrega mais aqui. Esmeralda, acompanhando o resto do cartão.
+ *
+ * O rótulo agora é quem QUEBRA, e o valor é quem fica `shrink-0`. Antes o
+ * inverso: "cobre" era uma palavra só e cabia sozinha, sobrando a faixa toda
+ * para a data. Com três palavras ("Autorização Substituta") e os dois lados
+ * `shrink-0`, os 144px não tinham como acomodar as duas — medido em tela: a
+ * data, que é o único fato novo desta linha, saía cortada em "0". Invertendo
+ * quem cede, ela nunca mais é cortada; o rótulo é redundante com o cabeçalho
+ * do cartão (a borda e a hora já dizem "isto está coberto por avulsa"), então
+ * é ele quem pode gastar uma segunda linha.
  */
 function ReferenciaDaSessao({ valor, titulo }: { valor: string; titulo: string }) {
   return (
     <p
       title={titulo}
-      className="mt-1.5 flex items-baseline justify-between gap-1.5 border-t border-emerald-200 pt-1 text-[11px] leading-tight"
+      className="mt-1.5 flex items-start justify-between gap-2 border-t border-emerald-200 pt-1 text-[11px] leading-tight"
     >
-      <span className="shrink-0 text-slate-500">cobre</span>
-      <span className="truncate font-semibold tabular-nums text-emerald-700">{valor}</span>
+      <span className="min-w-0 text-slate-500">Autorização Substituta</span>
+      <span className="shrink-0 pt-px font-semibold tabular-nums text-emerald-700">{valor}</span>
     </p>
   )
 }
@@ -351,6 +377,8 @@ function Compacto({
   inerte,
   selo,
   tarja,
+  contorno,
+  rachurado,
 }: {
   hora: string
   terapia: string | null
@@ -368,6 +396,43 @@ function Compacto({
   /** O selo do par, no cabeçalho, no lugar do ícone de estado. */
   selo?: ReactNode
   tarja?: ReactNode
+  /**
+   * A cor da borda, quando o compacto precisa de uma silhueta própria.
+   *
+   * Os DOIS lados do par triado a usam — a sessão coberta por avulsa e a guia
+   * que a cobriu —, e é ela a única marca que a caixa inteira carrega. O
+   * compacto é branco de fundo por princípio ("uma sessão que está certa não
+   * precisa ser lida"), e era isso que deixava a procedência sem lugar: sobravam
+   * o rótulo e o selo, os dois pequenos, num cartão de 144px numa grade de ~55
+   * células. A borda veste o MESMO matiz do rótulo e o fundo segue branco, então
+   * nada afirma que há trabalho pendente. Ausente, a borda é a slate de sempre.
+   *
+   * Não é barra lateral (`Espinha`) DE PROPÓSITO, embora tenha sido a primeira
+   * tentativa nos dois lados. A barra é o dispositivo da espécie PENDENTE, e em
+   * `SITUACAO_CONFIG` a barra violeta já significa "isto é uma glosa, trate" —
+   * reusá-la para "procedência: veio de avulsa" dava dois significados ao mesmo
+   * matiz na mesma tela, que é o que o vocabulário proíbe. A borda não tem esse
+   * problema: ela é o contorno da caixa, não um acento dentro dela. Medido em
+   * tela, a barra ainda comia 2px do nome da terapia.
+   *
+   * Quando há contorno o `hover` não repinta a borda: trocá-la por slate ao
+   * passar o mouse apagaria justamente a marca sob o cursor.
+   */
+  contorno?: string
+  /**
+   * A hachura de "encerrado" — ver `.rachurado`/`.rachurado-forte` em globals.css.
+   *
+   * Responde a pergunta que a cor não responde: o item saiu da fila. Os cinco
+   * matizes semânticos já estão todos ocupados, e "encerrado" não é um sexto
+   * estado — é uma qualificação sobre o estado que já está escrito. Textura é o
+   * canal livre, e a listra nasce de `currentColor`, então ela sai no matiz do
+   * próprio cartão em vez de introduzir cor nova.
+   *
+   * `true` usa a opacidade base; `'forte'` é para o slate do cancelamento, onde a
+   * mesma opacidade mede mais fraca por partir de menos contraste — ver a nota em
+   * `.rachurado-forte`.
+   */
+  rachurado?: boolean | 'forte'
 }) {
   return (
     <button
@@ -375,9 +440,13 @@ function Compacto({
       onClick={onAbrir}
       disabled={desabilitado}
       title={titulo}
-      className={`w-full min-w-0 rounded-lg border border-slate-200 bg-white px-2 py-1.5 text-left transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none ${
+      className={`relative w-full min-w-0 rounded-lg border bg-white py-1.5 pr-2 pl-2 text-left transition focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-1 focus-visible:outline-none ${
+        contorno ?? 'border-slate-200'
+      } ${rachurado === 'forte' ? 'rachurado-forte' : rachurado ? 'rachurado' : ''} ${
         inerte ? 'opacity-60' : ''
-      } ${desabilitado ? '' : 'hover:border-slate-300 hover:bg-slate-50'}`}
+      } ${
+        desabilitado ? '' : contorno ? 'hover:bg-slate-50' : 'hover:border-slate-300 hover:bg-slate-50'
+      }`}
     >
       <Cabecalho
         hora={hora}
@@ -394,7 +463,28 @@ function Compacto({
             <span className="truncate">{terapia}</span>
           </span>
         )}
-        <span className={`shrink-0 font-semibold ${tinta}`}>{rotulo}</span>
+        {/* O rótulo pode QUEBRAR em vez de empurrar a terapia, e `min-w-min` é o
+            piso que permite isso sem cortar palavra: o mínimo de um texto é a
+            palavra mais longa dele. Medido em tela: com "Glosa Coberta" e
+            `shrink-0`, numa faixa de 144px sobrava "Fon…" onde o cartão vizinho
+            mostrava "Fonoaudio…" — o cartão distinguido saía menos legível que o
+            comum, que é o contrário do que a distinção existe para fazer.
+
+            Quebrar só ajuda quando a palavra mais longa do rótulo é CURTA. Em
+            "Glosa Coberta" ela é "Coberta" e a terapia recupera a linha inteira;
+            em "Autorização extra" ela é "Autorização", que já é a largura toda —
+            ali a quebra gastava uma segunda linha e a terapia continuava em
+            "Fonoa…". Por isso o piso é medido, não aplicado a todos: `nowrap`
+            acima de 10 caracteres na palavra mais longa. Os rótulos de uma
+            palavra ("Liberada", "Cancelada", "Vinculada") nunca quebraram —
+            para eles o mínimo já é a largura inteira. */}
+        <span
+          className={`min-w-min text-right font-semibold ${
+            palavraMaisLonga(rotulo) > 10 ? 'whitespace-nowrap' : ''
+          } ${tinta}`}
+        >
+          {rotulo}
+        </span>
       </p>
       {tarja}
     </button>
@@ -454,6 +544,17 @@ function CorpoPendente({
       )}
     </>
   )
+}
+
+/**
+ * O tamanho da palavra mais longa de um rótulo — o que decide se ele pode quebrar.
+ *
+ * Ver a nota no rótulo de `Compacto`. Quebrar um rótulo de duas palavras devolve
+ * largura à terapia só quando a palavra mais longa é curta; quando ela já ocupa
+ * a faixa inteira ("Autorização"), a quebra gasta uma linha e não devolve nada.
+ */
+function palavraMaisLonga(texto: string): number {
+  return texto.split(/\s+/).reduce((maior, p) => Math.max(maior, p.length), 0)
 }
 
 /** A barra lateral de 3px — o mesmo dispositivo que `SituacaoBloco` já usa. */
@@ -544,11 +645,45 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
       O selo responde as duas coisas de uma vez e é o mesmo que o cartão da guia
       carrega: é assim que os dois se acham na grade. Ver `SeloDoPar`.
     */
+    /*
+      Coberta por AVULSA, e não pelo pareamento normal — a distinção que a cor
+      não fazia.
+
+      `situacaoComVinculo` deixa esta sessão em GLOSA_RESOLVIDA ou LIBERADA, e as
+      duas são esmeralda: na grade ela ficava idêntica a uma sessão que o robô
+      liberou na hora. Reportado da tela — "não pode ficar verdinha também,
+      porque confunde com uma liberada comum".
+
+      A resposta NÃO é trocar o matiz do estado: a sessão está coberta, e
+      esmeralda é o que diz isso — pintá-la de outra cor afirmaria que ainda há
+      trabalho. É acrescentar a PROCEDÊNCIA, no violeta que
+      `SITUACAO_CONFIG.GLOSA_RESOLVIDA` já reserva para ela ("dot violeta porque
+      o que foi resolvido foi uma GLOSA"). Essa marca existia no vocabulário e
+      não era desenhada em lugar nenhum desta grade: o `dot` só aparece no pill e
+      no bloco da listagem, e a sessão coberta nunca é pendente, então ela caía
+      sempre no compacto — que não tem barra lateral.
+
+      Quem a carrega aqui é o SELO, não uma barra. A barra violeta já significa
+      "isto é uma glosa, trate" na espécie pendente, e dar-lhe um segundo
+      significado no mesmo modal é o que o vocabulário proíbe; o selo, ao
+      contrário, só existe em par triado — não há como confundi-lo com estado.
+
+      Quem decide é o VÍNCULO, e a situação entra só para excluir a falta — ver
+      `cobertaPorAvulsa`. `origem.situacao` não é crua na prática: com a migration
+      viva a RPC já devolve GLOSA_RESOLVIDA na linha que `montarGrade` guarda em
+      `origem`.
+    */
+    const porAvulsa = cobertaPorAvulsa(cartao.origem.situacao, cartao.vinculo)
+
+    // Violeta sempre que houver selo, sem ramo de esmeralda: selo só existe onde
+    // houve triagem, e o único vínculo que `porAvulsa` recusa é o de uma FALTA —
+    // sessão que não aconteceu, cuja cobertura não é substituição de nada. Ali o
+    // slate diz o que é: um vínculo que não surtiu efeito.
     const selo = cartao.vinculo ? (
       <SeloDoPar
         guia={cartao.vinculo.guia}
         Icone={Link2}
-        tom="bg-emerald-100 text-emerald-800"
+        tom={porAvulsa ? 'bg-violet-100 text-violet-800' : 'bg-slate-200 text-slate-700'}
         titulo={`Coberta pela guia ${cartao.vinculo.guia}${autoriaDaTriagem(cartao.vinculo)}`}
       />
     ) : undefined
@@ -584,12 +719,44 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
         !SITUACOES_COM_VEREDITO.has(cartao.situacao ?? '') &&
         !SITUACOES_COBERTAS.has(cartao.situacao ?? '')
 
+      /*
+        A sessão que uma AVULSA cobriu não diz "Liberada" — e não diz em verde.
+
+        Duas coisas foram reprovadas em tela, uma depois da outra. Primeiro o
+        rótulo: `situacaoComVinculo` manda para LIBERADA toda sessão coberta por
+        triagem que não vinha de glosa (a NAO_SOLICITADA e a CANCELADA que
+        alguém acabou de cobrir), e ali o cartão saía com a palavra exata de uma
+        liberação de rotina. Depois o MATIZ: mesmo escrito "Glosa Resolvida", o
+        rótulo continuava em `config.strong`, que é esmeralda, e o selo violeta
+        no cabeçalho não bastava — *"não pode ser em verde pra não confundir
+        visualmente com Liberada"*.
+
+        A troca é do CANAL do rótulo, não do estado. A palavra e a BORDA do
+        cartão passam a violeta — o matiz que `SITUACAO_CONFIG.GLOSA_RESOLVIDA`
+        já reserva para "o que foi resolvido foi uma glosa" —, e a borda existe
+        porque o compacto tem fundo branco: sem ela a procedência ficava só em
+        dois glifos pequenos, que a 144px numa grade de ~55 células não separam
+        nada. O fundo segue branco como todo compacto, então nada afirma que há
+        trabalho pendente aqui.
+
+        Os dois ramos dizem "Glosa Coberta" e "Coberta": o que muda é se havia
+        recusa para cobrir. "Coberta" é a palavra que a gaveta já usa na pílula
+        — nenhum vocabulário novo.
+      */
+      const rotuloCoberta = porAvulsa
+        ? cartao.situacao === 'GLOSA_RESOLVIDA'
+          ? 'Glosa Coberta'
+          : 'Coberta'
+        : config.label
+
       return (
         <Compacto
           hora={cartao.hora}
           terapia={cartao.terapia}
-          rotulo={aguardando ? 'Agendada' : config.label}
-          tinta={aguardando ? 'text-slate-500' : config.strong}
+          rotulo={aguardando ? 'Agendada' : rotuloCoberta}
+          tinta={
+            aguardando ? 'text-slate-500' : porAvulsa ? 'text-violet-700' : config.strong
+          }
           Icone={aguardando ? CalendarClock : config.icon}
           teveToken={cartao.teve_token}
           token={cartao.token}
@@ -599,6 +766,19 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
           inerte={inerte}
           selo={selo}
           tarja={tarjaSelecao}
+          // A borda no MESMO violeta do rótulo. É o que dá ao cartão coberto por
+          // avulsa uma silhueta própria na grade, em vez de deixar a procedência
+          // dependendo de dois glifos de 11px.
+          contorno={porAvulsa && !aguardando ? 'border-violet-300' : undefined}
+          // E a hachura, que diz a coisa que a cor não diz: este item foi
+          // ENCERRADO. A glosa existiu, alguém a cobriu, e não há mais nada a
+          // fazer aqui — ver `.rachurado-forte` em globals.css. Ela risca sem
+          // pintar, então o violeta segue sendo procedência e a textura passa a
+          // ser "fechado", que é o canal que estava livre. FORTE, na mesma
+          // intensidade do cancelamento (ajuste em tela) — as duas marcam
+          // "encerrado", e a base ficava sutil demais para ler de relance numa
+          // grade de ~55 células.
+          rachurado={porAvulsa && !aguardando ? 'forte' : false}
         />
       )
     }
@@ -699,26 +879,26 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
   // (DESIGN.md, o terceiro eixo): âmbar significa "esperando alguém olhar" nos
   // três eixos desta tela, e o excedente é exatamente isso.
   //
-  // A guia VINCULADA veste esmeralda, o mesmo matiz que GLOSA_RESOLVIDA e
-  // LIBERADA já usam aqui para "está coberto" — nenhum matiz novo entra, e a
-  // guia sai lida no mesmo tom da sessão que ela cobre. A DESCARTADA veste
-  // slate, que nesta tela é o que acabou sem efeito: ela não cobre sessão
-  // nenhuma, e é isso que o operador afirmou sobre ela.
+  // A guia VINCULADA veste ESMERALDA (ajuste em tela, revertendo o violeta): ela
+  // cobriu uma sessão, e esmeralda é o que esta tela usa para "está coberto". A
+  // procedência ("é a avulsa que substituiu, não o pareamento normal") continua
+  // marcada — pela hachura FORTE do lado da sessão e pelo rótulo "Autorização
+  // Substituta" no rodapé —, então a cor volta a responder só a pergunta que
+  // sempre respondeu aqui: este item está coberto?
+  //
+  // A DESCARTADA veste slate, que nesta tela é o que acabou sem efeito: ela não
+  // cobre sessão nenhuma, e é isso que o operador afirmou sobre ela.
   const tom = pendente
     ? 'border-amber-300 bg-amber-50'
-    : vinculada
-      ? 'border-emerald-200 bg-emerald-50'
-      : semSessao || cancelada || liberada
-        ? 'border-slate-200 bg-slate-50'
-        : 'border-violet-200 bg-violet-50'
+    : semSessao || cancelada || liberada
+      ? 'border-slate-200 bg-slate-50'
+      : 'border-emerald-200 bg-emerald-50'
   const tinta = pendente
     ? 'text-amber-700'
-    : vinculada
-      ? 'text-emerald-700'
-      : semSessao || cancelada || liberada
-        ? 'text-slate-600'
-        : 'text-violet-700'
-  const dot = pendente ? 'bg-amber-500' : vinculada ? 'bg-emerald-500' : 'bg-violet-500'
+    : semSessao || cancelada || liberada
+      ? 'text-slate-600'
+      : 'text-emerald-700'
+  const dot = pendente ? 'bg-amber-500' : 'bg-emerald-500'
   // Link2 tanto na órfã quanto na vinculada de propósito: é o mesmo eixo — o do
   // vínculo — em dois momentos, e quem separa os dois é o matiz mais o rótulo,
   // que vem escrito. Ban na descartada porque é o ícone do botão que a produziu
@@ -774,6 +954,11 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
       <SeloDoPar
         guia={cartao.guia}
         Icone={vinculada ? Link2 : Ban}
+        // Esmeralda na vinculada (ajuste em tela) — acompanha a borda e a hora
+        // do próprio cartão, que voltaram a esmeralda. O par com a sessão do
+        // outro lado (que segue violeta) não se acha mais pela cor do selo — o
+        // número da guia é idêntico nos dois, e é ele quem faz o par se achar.
+        // Ver `SeloDoPar`.
         tom={vinculada ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-200 text-slate-700'}
         titulo={
           vinculada
@@ -827,6 +1012,21 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
         inerte={inerte}
         selo={selo}
         tarja={tarja}
+        // Esmeralda, acompanhando a borda e a hora (ajuste em tela): esta guia
+        // está coberta — cobriu uma sessão —, e esmeralda é o que a tela usa
+        // para isso. Só a borda, e não a barra lateral: a barra é o dispositivo
+        // da espécie PENDENTE (`Espinha`), e repeti-la aqui empresta peso de
+        // pendência a uma guia que já cumpriu o papel dela.
+        contorno={vinculada ? 'border-emerald-300' : undefined}
+        // A VINCULADA não hachura (ajuste em tela): ela é o lado que COBRIU —
+        // continua fazendo o trabalho de apontar a sessão, e o par se acha na
+        // grade pelo selo e pela borda violeta idênticos. Hachurados os dois
+        // desfechos que ENCERRARAM sem virar cobertura de nada: a guia triada
+        // como autorização extra, e a que a ASSIM desfez ("Liberado *"). A
+        // cancelada usa a hachura FORTE (ajuste em tela) — é a mesma marca que o
+        // cancelamento leva na listagem, onde ele também saiu do total pelo
+        // mesmo motivo (ver `contarPendencias`).
+        rachurado={cancelada ? 'forte' : semSessao}
       />
     )
   }
