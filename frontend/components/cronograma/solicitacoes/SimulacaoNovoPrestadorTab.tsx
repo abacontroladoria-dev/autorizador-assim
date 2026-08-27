@@ -1460,8 +1460,8 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                     Ou fixe numa unidade única
                     <InfoTip ariaLabel="Como ler as barras de unidade">
                       <p>Cada barra mostra quantas <strong className="text-foreground">vagas de horário</strong> você teria se contratasse o novo profissional só para essa unidade, nos mesmos dias/turnos escolhidos.</p>
-                      <p className="mt-2">O número grande é o total <strong className="text-foreground">bruto</strong>. Ao <strong className="text-foreground">clicar numa unidade</strong>, ela passa a mostrar também quantas dessas vagas exigiriam <strong className="text-foreground">de fato a contratação</strong> — a diferença já é coberta por profissional contratado com horário <strong className="text-foreground">Livre</strong> no mesmo slot, e contratar não abriria essas sessões.</p>
-                      <p className="mt-2">A unidade marcada <strong className="text-foreground">já cobertas sem contratar</strong> é a que aparece com <strong className="text-foreground">margem R$ 0,00</strong> na projeção financeira: tem candidato, mas não tem receita nova.</p>
+                      <p className="mt-2">Ao <strong className="text-foreground">clicar numa unidade</strong>, o total dela se abre nas duas parcelas que decidem a contratação: <strong className="text-foreground">exige contratação</strong> (só um profissional novo resolve) e <strong className="text-foreground">já pode cobrir internamente</strong> (existe profissional contratado com horário <strong className="text-foreground">Livre</strong> nesse mesmo slot, então essas sessões seriam preenchidas de qualquer jeito). As demais unidades mostram só o total, sem separar.</p>
+                      <p className="mt-2">Uma unidade em que <strong className="text-foreground">tudo</strong> cai em já pode cobrir internamente é a que aparece com <strong className="text-foreground">margem R$ 0,00</strong> na projeção financeira: tem candidato, mas não tem receita nova.</p>
                       <p className="mt-2">A <strong className="text-foreground">marca vertical</strong> indica o total do plano recomendado (misto).</p>
                     </InfoTip>
                   </div>
@@ -1475,7 +1475,6 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                     const vagasUnidade = vagasDaUnidade(u)
                     const largura = (vagasUnidade / escalaComparativo) * 100
                     const referencia = (planoStats.totalVagas / escalaComparativo) * 100
-                    const delta = vagasUnidade - planoStats.totalVagas
                     const ativo = unidadeFixada === u.unidade
                     const semVagas = vagasUnidade === 0
                     // O número líquido só é conhecido de graça para a unidade
@@ -1484,6 +1483,12 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                     // de comentário em vagasDaUnidade.
                     const liquidoConhecido = ativo && !!unidadeFixada
                     const vagasLiquidas = liquidoConhecido ? vagasLiquidasEmExibicao : null
+                    // Resto do bruto que a capacidade já contratada resolve
+                    // sozinha. Clampado em 0 porque o líquido PODE passar do
+                    // bruto: anexarModalidadeERemanejamento cria candidatos que
+                    // avaliarPeriodo não tinha (medido: Realengo/Musicoterapia
+                    // bruto=30, líquido=31) — não é subconjunto.
+                    const cobertasInternamente = vagasLiquidas === null ? 0 : Math.max(0, vagasUnidade - vagasLiquidas)
                     // Tem candidato, mas contratar ali não abre sessão nenhuma:
                     // é a unidade cuja projeção financeira dá R$ 0,00.
                     const todasCobertas = !semVagas && vagasLiquidas === 0
@@ -1522,29 +1527,33 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                           <span className="absolute -top-1 -bottom-1 w-[2px] bg-foreground/60" style={{ left: `${referencia}%` }} />
                         </span>
                         <span className="flex-1" />
-                        <span className="w-[124px] shrink-0 text-right">
+                        {/* Quando o líquido é conhecido, o total bruto sai de
+                            cena e a coluna mostra as duas parcelas que o
+                            usuário precisa decidir: o que só a contratação
+                            resolve e o que já dá pra cobrir com quem está aqui.
+                            O bruto vira só o title da barra — como número
+                            solto ele era o que contradizia a projeção
+                            financeira. */}
+                        <span className="w-[150px] shrink-0 text-right">
                           {semVagas ? (
                             <span className={`inline-flex items-center rounded-full px-1.5 py-0.5 text-[9.5px] font-bold ${TONE_SOFT.slate.bg} ${TONE_SOFT.slate.text}`}>
                               Sem vagas
                             </span>
+                          ) : vagasLiquidas === null ? (
+                            <span className="block text-[12px] font-black tabular-nums text-foreground">{vagasUnidade} vaga(s)</span>
                           ) : (
                             <>
-                              <span className="block text-[12px] font-black tabular-nums text-foreground">{vagasUnidade} vaga(s)</span>
-                              {todasCobertas ? (
-                                <span className={`mt-0.5 inline-flex items-center rounded-full px-1.5 py-0.5 text-[9.5px] font-bold ${TONE_SOFT.amber.bg} ${TONE_SOFT.amber.text}`}>
-                                  já cobertas sem contratar
+                              {vagasLiquidas > 0 && (
+                                <span className="block text-[9.5px] font-bold leading-tight text-foreground">
+                                  <strong className="text-[12px] font-black tabular-nums">{vagasLiquidas}</strong>
+                                  {" "}exige contratação
                                 </span>
-                              ) : (
-                                <>
-                                  {vagasLiquidas !== null && vagasLiquidas !== vagasUnidade && (
-                                    <span className="block text-[9.5px] font-bold text-amber-700 dark:text-amber-400">
-                                      {vagasLiquidas} exige(m) contratação
-                                    </span>
-                                  )}
-                                  <span className={`block text-[9.5px] font-bold ${delta < 0 ? "text-rose-600 dark:text-rose-400" : "text-muted-foreground"}`}>
-                                    {delta === 0 ? "igual ao plano" : `${delta} vs. plano`}
-                                  </span>
-                                </>
+                              )}
+                              {cobertasInternamente > 0 && (
+                                <span className="block text-[9.5px] font-bold leading-tight text-amber-700 dark:text-amber-400">
+                                  <strong className="text-[12px] font-black tabular-nums">{cobertasInternamente}</strong>
+                                  {" "}já pode cobrir internamente
+                                </span>
                               )}
                             </>
                           )}
