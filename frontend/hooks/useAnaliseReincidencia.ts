@@ -43,6 +43,7 @@ import {
 import {
   autorizacaoCancelada,
   autorizacaoLiberada,
+  autorizacaoReincidencia,
   calcularLedger,
   contarPendencias,
   excedentesDoPlacar,
@@ -61,6 +62,7 @@ import {
 export {
   autorizacaoCancelada,
   autorizacaoLiberada,
+  autorizacaoReincidencia,
   calcularLedger,
   contarPendencias,
   diasUteisDe,

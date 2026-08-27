@@ -36,6 +36,33 @@ export function autorizacaoCancelada(status: string | null): boolean {
 }
 
 /**
+ * A recusa por REINCIDÊNCIA — o pedido duplicado, não uma glosa.
+ *
+ * A ASSIM devolve `1601-REINCIDENCIA NO ATEN` (cortado em 25 caracteres, como
+ * todo rótulo dela) quando já existe autorização para aquele TUSS naquele dia.
+ * É a recusa do SEGUNDO pedido, e o primeiro saiu `Liberado` — a sessão está
+ * coberta, ninguém precisa fazer nada por ela.
+ *
+ * Reportado da tela (Theo Meneses, 26/08): a linha mostrava "1 glosa" num dia
+ * em que as seis sessões estavam LIBERADA, cada uma com sua guia. A glosa não
+ * existia. O que existia era a guia 405760, tirada 16 minutos depois da 405507
+ * para o mesmo TUSS 22070400, e recusada por ser a segunda.
+ *
+ * `calcularLedger` classificava por eliminação — o que não é `Liberado` nem
+ * `Liberado *` virava glosa —, e o 1601 caía nesse `else`. A distinção importa
+ * porque as duas palavras mandam fazer coisas opostas: glosa pede tratativa
+ * com a ASSIM, reincidência pede que ninguém peça de novo. Medido em produção
+ * (agosto/2026): 3 das 33 autorizações não-liberadas, em 3 pacientes.
+ *
+ * Por PREFIXO, e não comparação exata, pelo motivo que a Conferência de
+ * Filipetas já documenta: o rótulo vem cortado em 25 caracteres e o de-para
+ * completa o resto. `1601` é o código, e é ele que identifica o motivo.
+ */
+export function autorizacaoReincidencia(status: string | null): boolean {
+  return (status ?? '').trim().startsWith('1601')
+}
+
+/**
  * Os três estados de guia que esta tela existe para vigiar.
  *
  * `ehOrfa` é injetado, e não decidido aqui, pelo motivo do cabeçalho: a
@@ -52,6 +79,10 @@ export function autorizacaoCancelada(status: string | null): boolean {
  *
  * A guia substituída NÃO deixa de existir: ela continua no histórico, e a sessão
  * continua dizendo GLOSA RESOLVIDA. O que ela deixa de ser é fila de trabalho.
+ *
+ * `reincidentes` sai à parte de `glosas` porque não é glosa: é o pedido
+ * duplicado, e ele pertence a `autorizacao-a-mais` — a espécie que já nomeia
+ * "autorização além do que as sessões justificam". Ver `autorizacaoReincidencia`.
  */
 export function calcularLedger(
   autorizacoes: AutorizacaoAssimSemana[],
@@ -59,15 +90,17 @@ export function calcularLedger(
   substituidas: ReadonlySet<string> = new Set()
 ) {
   const orfas = new Set<string>()
+  const reincidentes = new Set<string>()
   let glosas = 0
   let canceladas = 0
   for (const a of autorizacoes) {
     if (ehOrfa(a.guia)) orfas.add(a.guia)
     if (substituidas.has(a.guia)) continue
     if (autorizacaoCancelada(a.status)) canceladas += 1
+    else if (autorizacaoReincidencia(a.status)) reincidentes.add(a.guia)
     else if (!autorizacaoLiberada(a.status)) glosas += 1
   }
-  return { orfas, glosas, canceladas }
+  return { orfas, reincidentes, glosas, canceladas }
 }
 
 /**
@@ -98,7 +131,13 @@ export function calcularLedger(
  */
 export function contarPendencias(
   placar: PlacarTuss[],
-  ledger: { orfas: ReadonlySet<string>; glosas: number; canceladas: number },
+  ledger: {
+    orfas: ReadonlySet<string>
+    glosas: number
+    canceladas: number
+    /** As recusadas por reincidência — ver `autorizacaoReincidencia`. */
+    reincidentes?: ReadonlySet<string>
+  },
   excedentes: ReadonlySet<string>
 ): ContagemPendencias {
   let faltando = 0
@@ -106,6 +145,12 @@ export function contarPendencias(
 
   const aMais = new Set(ledger.orfas)
   for (const guia of excedentes) aMais.add(guia)
+  // A reincidente entra na MESMA união, e não numa soma à parte: a guia
+  // recusada por duplicidade costuma ser exatamente a que o placar já contou
+  // como excedente (o TUSS tem uma liberação a mais do que sessão). Somar
+  // contaria o mesmo pedido duas vezes — foi assim que o caso Theo Meneses
+  // virou "2 pendências" para uma guia só.
+  for (const guia of ledger.reincidentes ?? []) aMais.add(guia)
 
   const contagem: ContagemPendencias = {
     glosa: ledger.glosas,
