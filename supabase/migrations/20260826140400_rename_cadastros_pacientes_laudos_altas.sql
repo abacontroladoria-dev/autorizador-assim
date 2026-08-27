@@ -126,7 +126,13 @@ begin
 end $$;
 
 -- ===== 5. View =====
-create or replace view public.vw_paciente_laudos_flat as
+-- DROP + CREATE, não CREATE OR REPLACE: a view antiga tem a coluna chamada
+-- `id_paciente`, e queremos que ela passe a se chamar `id_paciente_pulsar`
+-- (o mesmo nome da coluna real, agora renomeada). CREATE OR REPLACE VIEW não
+-- aceita renomear coluna existente (só acrescentar no fim) — erro 42P16.
+-- Nada mais depende desta view, então dropar é seguro.
+drop view if exists public.vw_paciente_laudos_flat;
+create view public.vw_paciente_laudos_flat as
 select
   pl.id_laudo,
   pl.id_paciente_pulsar,

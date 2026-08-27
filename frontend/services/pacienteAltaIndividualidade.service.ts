@@ -43,7 +43,10 @@ export async function getAltasDoPaciente(
   const { data, error } = await supabase
     .from(TB_ALTAS)
     .select("*")
+    // Alta "excluída" continua no banco (soft-delete, 20260827100000) e é
+    // filtrada aqui — a aba mostra só as ativas.
     .eq("id_paciente_pulsar", pacienteId)
+    .eq("ativo", true)
     .order("data_alta", { ascending: false })
 
   if (error) return { data: [], error: error.message }
@@ -139,6 +142,14 @@ export async function criarAlta(
   return { error: null }
 }
 
+/**
+ * "Exclui" a alta marcando ativo = false. A linha NUNCA é apagada.
+ *
+ * Alta é registro clínico: decisão do usuário em 2026-08-27 de que nada de
+ * laudo/alta sai do banco. O privilégio de DELETE está revogado no próprio
+ * banco (20260827100000) — isto aqui é a interface para essa regra, não a
+ * única barreira.
+ */
 export async function excluirAlta(
   pacienteId: number,
   pacienteNome: string,
@@ -148,7 +159,7 @@ export async function excluirAlta(
 
   const { error } = await supabase
     .from(TB_ALTAS)
-    .delete()
+    .update({ ativo: false })
     .eq("id_alta", alta.id_alta)
 
   if (error) return { error: error.message }

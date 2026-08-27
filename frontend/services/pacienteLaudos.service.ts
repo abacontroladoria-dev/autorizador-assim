@@ -82,7 +82,10 @@ export async function getLaudosDoPaciente(
   const { data: laudos, error } = await supabase
     .from(TB_LAUDOS)
     .select("*")
+    // Laudo "excluído" continua no banco (soft-delete, 20260827100000) e é
+    // filtrado aqui — a aba mostra só os ativos.
     .eq("id_paciente_pulsar", pacienteId)
+    .eq("ativo", true)
     .order("data_laudo", { ascending: false })
 
   if (error) return { data: [], error: error.message }
@@ -237,15 +240,29 @@ export async function editarLaudo(
   return { error: null }
 }
 
-// ─── DELETE ───────────────────────────────────────────────────────────────────
+// ─── EXCLUSÃO (soft-delete) ───────────────────────────────────────────────────
 
+/**
+ * "Exclui" o laudo marcando ativo = false. A linha NUNCA é apagada.
+ *
+ * Laudo é registro clínico: decisão do usuário em 2026-08-27 de que nada de
+ * laudo/alta sai do banco. O privilégio de DELETE está revogado no próprio
+ * banco (20260827100000), então nem uma chamada direta à API consegue apagar —
+ * isto aqui não é a única barreira, é a interface para ela.
+ *
+ * Um laudo "excluído" que estava em_uso deixa de estar: senão o paciente fica
+ * com um laudo de referência que não aparece em lugar nenhum da tela.
+ */
 export async function excluirLaudo(
   laudo: PacienteLaudo,
   pacienteNome: string
 ): Promise<{ error: string | null }> {
   const supabase = getSupabaseClient()
 
-  const { error } = await supabase.from(TB_LAUDOS).delete().eq("id_laudo", laudo.id_laudo)
+  const { error } = await supabase
+    .from(TB_LAUDOS)
+    .update({ ativo: false, em_uso: false })
+    .eq("id_laudo", laudo.id_laudo)
 
   if (error) return { error: error.message }
 
