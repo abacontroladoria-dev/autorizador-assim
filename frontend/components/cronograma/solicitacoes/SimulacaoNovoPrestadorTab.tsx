@@ -1922,7 +1922,12 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                       </span>
                     </div>
                   </div>
-                  <div className="mb-1 text-[10px] font-bold text-muted-foreground sm:hidden">deslize para o lado →</div>
+                  {/* Antes só aparecia sm:hidden (mobile) — em telas de notebook
+                      (~1366-1440px), Carga semanal + Ocupação por dia ao lado já
+                      ocupam quase todo o card, então a grade de 5 dias também
+                      precisa rolar, e sem esse aviso a Sexta cortada parecia bug
+                      em vez de "role para o lado" (2026-08-27). */}
+                  <div className="mb-1 text-[10px] font-bold text-muted-foreground">role para o lado →</div>
                   <div className="overflow-x-auto">
                     {/* border-spacing-y sutil (0.5 = 2px) — um respiro mínimo
                         entre sessões e entre a barra de unidade e a 1ª sessão
@@ -2071,11 +2076,16 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                   </div>
                 </div>
 
-                  {/* Carga semanal */}
-                  <div className="w-full xl:w-[300px] shrink-0 rounded-xl bg-muted/40 p-4">
+                  {/* Carga semanal — largura reduzida de 300 para 220px
+                      (2026-08-27, pedido do usuário): com Ocupação por dia
+                      fixa ao lado, 300px sobrava pouco espaço pra "Agenda do
+                      novo profissional" numa tela de notebook (~1366-1440px),
+                      cortando a Sexta-feira da grade. O donut (170px) cabe
+                      inteiro nos 220px - 32px de padding = 188px. */}
+                  <div className="w-full xl:w-[220px] shrink-0 rounded-xl bg-muted/40 p-4">
                     <div className="text-sm font-extrabold text-foreground">Carga semanal</div>
                     <div className="mb-3 text-[11px] text-muted-foreground">Novo profissional hipotético</div>
-                    <div className="relative mx-auto aspect-square w-[170px] sm:w-[210px]">
+                    <div className="relative mx-auto aspect-square w-[170px]">
                     <ResponsiveContainer width="100%" height="100%">
                       <PieChart>
                         <Pie
