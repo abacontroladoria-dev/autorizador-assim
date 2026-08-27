@@ -125,7 +125,9 @@ export function pacientesDaUnidadeNoDia(dia: string, unidade: string, cRows: Csv
   return pacientesQueFrequentamUnidade(dia, unidade, agendaClinica(cRows))
 }
 
-/** Calcula, por paciente+especialidade, quantas sessões faltam (autorizado − ofertado). */
+/** Calcula, por paciente+especialidade, quantas sessões faltam (autorizado −
+ *  ofertado). Conta laudo VENCIDO junto com vigente — ver o comentário sobre
+ *  "Situação" no laço de qtdAutorizada. Só "Alta" exclui. */
 export function calcularGaps(lRows: LaudoRow[], cRows: CsvRow[]): GapItem[] {
   if (!cRows.length || !lRows.length) return []
 
@@ -153,8 +155,20 @@ export function calcularGaps(lRows: LaudoRow[], cRows: CsvRow[]): GapItem[] {
       comAlta.add(`${pac}|||${esp}`)
       continue
     }
-    const situacao = String(l["Situação"] || "").trim()
-    if (situacao && situacao.toLowerCase() !== "vigente") continue
+    // "Situação" (Vigente/Vencido) NÃO recorta nada aqui, de propósito. A
+    // renovação de laudo é um controle administrativo PARALELO: na prática o
+    // paciente segue sendo atendido com laudo vencido enquanto a renovação
+    // tramita, então a demanda dele é real e a vaga existe. Filtrar por
+    // "vigente" fazia esta tela esconder mais da metade da demanda —
+    // 1000 das 1845 linhas do relatório de laudos em uso estavam "Vencido"
+    // (27/08/2026), e em Musicoterapia eram 90 pacientes vencidos contra 87
+    // vigentes — apagando oportunidades de contratação reais sem nenhum aviso
+    // (caso real: Pedro Henrique Machado de Azeredo, laudo 582 Musicoterapia
+    // aut=1, validade 10/04/2026, não aparecia em Padre Miguel Terça 09:20 nem
+    // Sexta 10:00 por causa deste filtro).
+    //
+    // "Alta" continua excluindo acima: alta é fim de tratamento, não pendência
+    // de papelada — ali não há vaga a preencher.
     const aut = parseFloat(String(l["Qtd autorizada"] || "0").replace(",", ".")) || 0
     if (aut <= 0) continue
     const k = `${pac}|||${esp}`
