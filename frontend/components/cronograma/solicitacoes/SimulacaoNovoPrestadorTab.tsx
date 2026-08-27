@@ -859,6 +859,37 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
     return anexarRemuneracaoEOrdenar(comSala, cRows, regrasGerais, excecoesPaciente, mesReferencia, feriados)
   }, [podeSimular, comRemanejamento, cRows, gapMap, salasComOcupacao, exclusividades, regrasGerais, excecoesPaciente, mesReferencia, feriados])
 
+  // Vagas/pacientes do PLANO RECOMENDADO já descontados da cobertura interna —
+  // o card do plano mostrava o bruto (`planoStats`) enquanto o Detalhamento, a
+  // agenda e a projeção financeira logo abaixo mostravam o líquido, então a
+  // mesma unidade aparecia com dois pares de números na mesma tela ("38 vagas ·
+  // 50 pacientes" no card contra "40 pacientes · 32 vagas" no Detalhamento —
+  // reportado em 27/08/2026 como número errado, e é só bruto vs. líquido).
+  //
+  // Quando nenhuma unidade está fixada o plano É a seleção em exibição, então
+  // periodosEnriquecidos já é exatamente este cálculo e reusá-lo custa zero.
+  // Com uma unidade fixada o plano sai de exibição e não há como reaproveitar:
+  // aí paga um enriquecimento próprio (~0,7-1,0 s medido nos dados de
+  // produção). Só um plano, nunca as três unidades — é a diferença entre este
+  // custo e o que descartei em vagasLiquidasEmExibicao. Roda dentro do
+  // startTransition de setUnidadeFixada, então não bloqueia a interação.
+  const planoEnriquecido = useMemo((): SugestaoContratacao[] => {
+    if (!podeSimular) return []
+    if (!unidadeFixada) return periodosEnriquecidos
+    const comRem = anexarModalidadeERemanejamento(periodosComoSugestoes(planoRecomendado, especialidade), cRows, gapMap)
+    return filtrarPorDisponibilidadeInterna(comRem, cRows, gapMap)
+  }, [podeSimular, unidadeFixada, periodosEnriquecidos, planoRecomendado, especialidade, cRows, gapMap])
+
+  const planoStatsLiquidas = useMemo(() => ({
+    vagas: new Set(planoEnriquecido.flatMap(s => s.candidatos.map(c => `${s.dia}|||${c.hora}`))).size,
+    nPacientes: new Set(planoEnriquecido.flatMap(s => s.candidatos.map(c => c.paciente))).size,
+  }), [planoEnriquecido])
+
+  // Clampado em 0 pelo mesmo motivo de cobertasInternamente nas barras: o
+  // líquido pode passar do bruto, porque anexarModalidadeERemanejamento cria
+  // candidatos que avaliarPeriodo não tinha.
+  const planoCobertasInternamente = Math.max(0, planoStats.totalVagas - planoStatsLiquidas.vagas)
+
   // Candidatos que a capacidade interna JÁ cobre sozinha (ver
   // separarCobertosPorDisponibilidadeInterna) — contratando ou não, essa vaga
   // vai ser preenchida por quem já está na clínica, então não entram em
@@ -1431,24 +1462,29 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                 </div>
                 {planoHomogeneo ? (
                   <div className="mb-2 flex items-baseline gap-1.5">
-                    <span className={`text-2xl font-black tabular-nums ${estiloUnidade(planoHomogeneo).text}`}>{planoStats.totalVagas}</span>
+                    <span className={`text-2xl font-black tabular-nums ${estiloUnidade(planoHomogeneo).text}`}>{planoStatsLiquidas.vagas}</span>
                     <span className="text-[12px] font-semibold text-muted-foreground">
-                      vaga(s) em <strong className={estiloUnidade(planoHomogeneo).text}>{planoHomogeneo}</strong> · {planoStats.nPacientes} paciente(s) disputando
+                      vaga(s) que exigem contratação em <strong className={estiloUnidade(planoHomogeneo).text}>{planoHomogeneo}</strong> · {planoStatsLiquidas.nPacientes} paciente(s) disputando
                     </span>
                     <InfoTip ariaLabel="O que essa estimativa considera">
-                      <p>Total <strong className="text-foreground">bruto</strong> de vagas, antes de resolver <strong className="text-foreground">remanejamento</strong>, <strong className="text-foreground">disponibilidade interna</strong> e <strong className="text-foreground">sala</strong>.</p>
-                      <p className="mt-2">Dessas, <strong className="text-foreground">{vagasLiquidasEmExibicao}</strong> exigiria(m) de fato a contratação — o resto já é coberto por profissional contratado com horário <strong className="text-foreground">Livre</strong> no mesmo slot, e é esse número menor que a <strong className="text-foreground">projeção financeira</strong> usa.</p>
-                      <p className="mt-2">O detalhe vaga por vaga aparece em <strong className="text-foreground">"Detalhamento"</strong> logo abaixo.</p>
+                      <p>Vagas que <strong className="text-foreground">só a contratação resolve</strong>, já descontado o que a agenda atual cobre sozinha — mesmo número que o <strong className="text-foreground">Detalhamento</strong> e a <strong className="text-foreground">projeção financeira</strong> usam logo abaixo.</p>
+                      <p className="mt-2">No bruto, antes desse desconto, o plano tem <strong className="text-foreground">{planoStats.totalVagas}</strong> vaga(s) e <strong className="text-foreground">{planoStats.nPacientes}</strong> paciente(s).</p>
+                      <p className="mt-2">Ainda antes de resolver <strong className="text-foreground">sala</strong>: uma vaga sem sala livre não vira contratação.</p>
                     </InfoTip>
                   </div>
                 ) : (
                   <div className="mb-2 flex items-center gap-1 text-[11px] text-muted-foreground">
-                    <strong className="text-foreground">{planoStats.nPacientes} paciente(s)</strong> disputando {planoStats.totalVagas} vaga(s) de horário
+                    <strong className="text-foreground">{planoStatsLiquidas.nPacientes} paciente(s)</strong> disputando {planoStatsLiquidas.vagas} vaga(s) que exigem contratação
                     <InfoTip ariaLabel="O que essa estimativa considera">
-                      <p>Total <strong className="text-foreground">bruto</strong> de vagas, antes de resolver <strong className="text-foreground">remanejamento</strong>, <strong className="text-foreground">disponibilidade interna</strong> e <strong className="text-foreground">sala</strong>.</p>
-                      <p className="mt-2">Dessas, <strong className="text-foreground">{vagasLiquidasEmExibicao}</strong> exigiria(m) de fato a contratação — o resto já é coberto por profissional contratado com horário <strong className="text-foreground">Livre</strong> no mesmo slot, e é esse número menor que a <strong className="text-foreground">projeção financeira</strong> usa.</p>
-                      <p className="mt-2">O detalhe vaga por vaga aparece em <strong className="text-foreground">"Detalhamento"</strong> logo abaixo.</p>
+                      <p>Vagas que <strong className="text-foreground">só a contratação resolve</strong>, já descontado o que a agenda atual cobre sozinha — mesmo número que o <strong className="text-foreground">Detalhamento</strong> e a <strong className="text-foreground">projeção financeira</strong> usam logo abaixo.</p>
+                      <p className="mt-2">No bruto, antes desse desconto, o plano tem <strong className="text-foreground">{planoStats.totalVagas}</strong> vaga(s) e <strong className="text-foreground">{planoStats.nPacientes}</strong> paciente(s).</p>
+                      <p className="mt-2">Ainda antes de resolver <strong className="text-foreground">sala</strong>: uma vaga sem sala livre não vira contratação.</p>
                     </InfoTip>
+                  </div>
+                )}
+                {planoCobertasInternamente > 0 && (
+                  <div className="mb-2 text-[10.5px] font-bold leading-tight text-amber-700 dark:text-amber-400">
+                    + {planoCobertasInternamente} vaga(s) que a agenda atual já pode cobrir internamente
                   </div>
                 )}
                 <PlanoGradeSemanal periodos={planoRecomendado} />
