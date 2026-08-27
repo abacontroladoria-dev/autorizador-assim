@@ -142,7 +142,15 @@ export interface AlocacaoCardSlot {
   /** capacidade em nº de blocos de 40min do turno (6 manhã / 7 tarde) — janela pessoal do profissional alocado */
   sessoesCapacidadeTurno: number
   pctOcupacao: number | null
-  /** true se não há nenhuma sessão real batendo (alocação puramente planejada, sem cruzamento no CSV) */
+  /**
+   * true se o profissional não tem NENHUM registro na agenda real da TiTa
+   * (nem sessão "Agendado", nem horário 'Livre' reservado) nesse dia/turno/
+   * unidade — alocação puramente planejada, sem cruzamento nenhum no CSV.
+   * Continua false quando o profissional tem 'Livre' mas ainda 0 sessão
+   * "Agendado" (agenda aberta esperando paciente, não é pendência) — nesse
+   * caso `sessoesReais` é 0 mesmo assim, já que a proporção "X/Y com
+   * paciente" conta só atendimento real.
+   */
   semCruzamentoCsv: boolean
   /**
    * Preenchido quando esta alocação fere uma regra cadastrada em

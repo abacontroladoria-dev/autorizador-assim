@@ -534,10 +534,28 @@ export async function buscarLinhasAgendaParaSalas(dataInicio: string, dataFim: s
       terapia_exibicao_nome: fixMojibake(r.terapia_exibicao_nome),
     }))
     // Pacientes fictícios/administrativos (Horário Administrativo, Notificação
-    // Prévia, Ainda não selecionado, Supervisor(a), etc. — ver isFakePatient em
+    // Prévia, Supervisor(a), etc. — ver isFakePatient em
     // lib/remuneracao/pacientes.ts) não são atendimento real e não devem contar
     // como ocupação de sala nem aparecer em "Terapias mais frequentes".
-    .filter(r => !isFakePatient(r.paciente_nome, r.paciente_id !== null ? String(r.paciente_id) : null))
+    //
+    // 'Livre' é a exceção: TODO slot 'Livre' tem paciente_nome = "Ainda não
+    // selecionado" por design (agenda aberta, sem paciente marcado ainda) —
+    // não é ruído, é o profissional real com um horário real reservado. Barrar
+    // esse status aqui também apagava a linha antes mesmo dela chegar em
+    // calcularSlotsDaSala, que já sabe separar "tem Livre" de "tem Agendado"
+    // (ver semCruzamentoCsv/livrePorProfissionalId em lib/cronograma/salas.ts)
+    // — sem isso o card ficava preso em "Alocação sem sessão"/"sem cruzamento
+    // no CSV" mesmo pro profissional com agenda aberta de verdade (caso da
+    // Andréa Aparecida Borges de Oliveira, 2026-08-27).
+    //
+    // Os dois outros consumidores desta função (calcularDashboardPacientes via
+    // isAgendadoAtivo, enriquecerComDeducaoFalta/calcularSessoesMensaisPorConvenio
+    // também via isAgendadoAtivo) já reaplicam o próprio filtro de
+    // status_agendamento="agendado" antes de contar qualquer coisa — não
+    // dependem deste filtro pra excluir 'Livre', então soltar essa exceção
+    // aqui não vaza slot aberto pra "Terapias mais frequentes" nem pra Previsão
+    // de Receitas.
+    .filter(r => r.status_agendamento === "Livre" || !isFakePatient(r.paciente_nome, r.paciente_id !== null ? String(r.paciente_id) : null))
 }
 
 /**
