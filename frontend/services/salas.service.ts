@@ -8,6 +8,45 @@ import { registrarAuditoriaSala } from "@/services/salasAuditoria.service"
 const TABLE = "cronograma_salas"
 const ALOCACOES_TABLE = "cronograma_salas_alocacoes"
 
+/**
+ * Traduz o que a RLS devolve quando NEGA uma escrita — porque o que chega aqui
+ * não fala de permissão nenhuma.
+ *
+ * Policy que não autoriza UPDATE/DELETE não levanta exceção: a linha deixa de
+ * casar o filtro e a operação "termina bem" tendo afetado 0 linhas. Com
+ * `.select().single()` em cima, quem reclama é o PostgREST, e sobre o FORMATO da
+ * resposta — PGRST116, "Cannot coerce the result to a single JSON object". Era
+ * exatamente essa a mensagem que aparecia no rodapé dos modais desta tela
+ * (relatado em 2026-08-27 por uma usuária de papel 'rp', com leitura liberada e
+ * escrita não). Em DELETE é ainda mais silencioso: não há erro algum, o registro
+ * só não desaparece.
+ *
+ * INSERT é o único caso em que o Postgres fala: WITH CHECK reprovado vira 42501.
+ *
+ * Isto continua valendo depois da correção de RLS de 20260827120100: Núcleos,
+ * Status e Exclusividade de terapia seguem restritos a admin/diretoria por
+ * decisão de produto, então esse caminho é alcançável por quem tem a tela.
+ */
+const CODIGOS_ESCRITA_NEGADA = new Set(["PGRST116", "42501"])
+
+/**
+ * `antes` é o registro lido imediatamente antes da escrita — todas as funções de
+ * update/delete daqui já o buscam para a trilha de auditoria. Ele é o que evita
+ * chutar o diagnóstico: se a leitura passou e a escrita casou 0 linhas, é
+ * permissão. Se nem ele veio, o registro pode ter sumido no meio do caminho.
+ */
+function erroDeEscritaNegada(acao: string, antes: unknown): Error {
+  return antes != null
+    ? new Error(`Você não tem permissão para ${acao}. Peça a um administrador para liberar esse acesso.`)
+    : new Error(`Não foi possível ${acao}: o registro não existe mais (pode ter sido alterado por outra pessoa) ou você não tem permissão para isso.`)
+}
+
+/** Relança o erro de uma escrita já traduzido quando ele é de permissão, e cru quando é qualquer outra coisa. */
+function lancarErroDeEscrita(error: { code?: string; message: string }, acao: string, antes?: unknown): never {
+  if (error.code && CODIGOS_ESCRITA_NEGADA.has(error.code)) throw erroDeEscritaNegada(acao, antes)
+  throw new Error(error.message)
+}
+
 export async function listarSalas(): Promise<Sala[]> {
   const sb = getSupabaseClient()
   const { data, error } = await sb
@@ -31,7 +70,7 @@ export async function criarSala(input: SalaInput): Promise<Sala> {
     .select("*")
     .single()
 
-  if (error) throw new Error(error.message)
+  if (error) lancarErroDeEscrita(error, "cadastrar salas")
   const sala = data as Sala
   await registrarAuditoriaSala({
     tabela: "sala", registroId: sala.id, acao: "criar",
@@ -50,7 +89,7 @@ export async function atualizarSala(id: string, input: Partial<SalaInput>): Prom
     .select("*")
     .single()
 
-  if (error) throw new Error(error.message)
+  if (error) lancarErroDeEscrita(error, "editar esta sala", antes)
   const sala = data as Sala
   await registrarAuditoriaSala({
     tabela: "sala", registroId: sala.id, acao: "editar",
@@ -62,8 +101,12 @@ export async function atualizarSala(id: string, input: Partial<SalaInput>): Prom
 export async function arquivarSala(id: string): Promise<void> {
   const sb = getSupabaseClient()
   const { data: antes } = await sb.from(TABLE).select("*").eq("id", id).maybeSingle()
-  const { error } = await sb.from(TABLE).delete().eq("id", id)
-  if (error) throw new Error(error.message)
+  // `.select("id")` não é enfeite: sem ele um DELETE barrado pela RLS não
+  // devolve erro nem linha, e a tela recarregaria com a sala ainda lá, sem
+  // dizer nada a quem clicou em Excluir.
+  const { data: apagadas, error } = await sb.from(TABLE).delete().eq("id", id).select("id")
+  if (error) lancarErroDeEscrita(error, "excluir esta sala", antes)
+  if ((apagadas ?? []).length === 0) throw erroDeEscritaNegada("excluir esta sala", antes)
   await registrarAuditoriaSala({
     tabela: "sala", registroId: id, acao: "excluir",
     unidadeNome: (antes as Sala | null)?.unidade_nome ?? null,
@@ -77,10 +120,11 @@ export async function bloquearSala(id: string, bloquear: boolean): Promise<Sala>
 }
 
 /**
- * Terapias que um profissional específico de fato realiza, segundo o
- * histórico real de `csv_grades_profissionais` — usado para restringir a
- * lista de terapias do modal de alocação ao que essa pessoa realmente faz,
- * em vez de mostrar todas as terapias da clínica.
+ * Terapias que um profissional específico de fato realiza — do histórico real
+ * de atendimento (`csv_grades_profissionais` via vw_grade_base) mais os slots
+ * 'Livre' que a agenda já reservou pra ele, mesmo sem atendimento algum ainda.
+ * Usado para restringir a lista de terapias do modal de alocação ao que essa
+ * pessoa realmente faz, em vez de mostrar todas as terapias da clínica.
  */
 /** Cache em memória por sessão de página — `csv_grades_profissionais` só muda 1x/dia (sync noturno), então reabrir o modal pro mesmo profissional não precisa repetir a consulta. */
 const cacheTerapiasDoProfissional = new Map<string, Promise<string[]>>()
@@ -99,7 +143,7 @@ async function buscarTerapiasDoProfissionalSemCache(profissionalNome: string, pr
   const nome = profissionalNome.trim()
   if (!nome) return []
   const data = await buscarGrade<Record<string, unknown>>({
-    campos: "terapia_exibicao_nome, terapia_nome, paciente_nome, paciente_id",
+    campos: "terapia_exibicao_nome, terapia_nome, paciente_nome, paciente_id, status_agendamento",
     fonte: "base",
     // Filtra por profissional_id quando disponível: usa o índice existente
     // (profissional_id, data) em vez de um ilike de nome sem índice, que
@@ -120,13 +164,28 @@ async function buscarTerapiasDoProfissionalSemCache(profissionalNome: string, pr
     ordem: [{ coluna: "data", desc: true }, { coluna: "id" }],
     limite: 2000,
   })
+  // 'Livre' (slot aberto, sem paciente marcado ainda) é o único status cujo
+  // paciente_nome SEMPRE vem como o placeholder "Ainda não selecionado" —
+  // medido em produção: as 10.879 linhas 'Livre' da grade, sem exceção. Não é
+  // ruído: é um profissional real com um horário aberto numa terapia real,
+  // exatamente o caso da Andréa Aparecida Borges de Oliveira (2026-08-27) — só
+  // tinha slots 'Livre', nenhum atendimento no histórico ainda, e por isso
+  // sumia inteira do filtro abaixo, fazendo o modal cair pra lista completa da
+  // clínica em vez de mostrar só "Terapia Ocupacional".
+  //
+  // Sessão de paciente fictício/administrativo de verdade (Horário
+  // Administrativo, Notificação Prévia, blocos de Supervisor etc. — mesmo
+  // isFakePatient já usado em buscarLinhasAgendaParaSalas) tem status
+  // diferente de 'Livre', e aí sim precisa continuar fora: o campo de terapia
+  // dela não é uma terapia real ("Operações Clínicas", "Apoio Operacional").
   const nomes = data
-    // Sessões de paciente fictício/administrativo (Ainda não selecionado,
-    // Horário Administrativo, etc. — mesmo isFakePatient já usado em
-    // buscarLinhasAgendaParaSalas) têm o mesmo texto placeholder no campo de
-    // terapia — não é uma terapia real que o profissional realiza.
-    .filter(r => !isFakePatient(r.paciente_nome as string | null, r.paciente_id !== null ? String(r.paciente_id) : null))
-    .map(r => fixMojibake((r.terapia_exibicao_nome as string | null) || (r.terapia_nome as string | null)))
+    .filter(r => r.status_agendamento === "Livre" || !isFakePatient(r.paciente_nome as string | null, r.paciente_id !== null ? String(r.paciente_id) : null))
+    // terapia_exibicao_nome só é preenchida quando existe paciente confirmado
+    // (a "exibição" reflete o atendimento marcado) — numa linha 'Livre' ela
+    // também vem como o placeholder "Ainda não selecionado", igual ao
+    // paciente. terapia_nome é o que a sala/agenda reserva pra aquele slot e
+    // está sempre presente, então é ele que carrega o sinal aqui.
+    .map(r => fixMojibake(r.status_agendamento === "Livre" ? (r.terapia_nome as string | null) : (r.terapia_exibicao_nome as string | null) || (r.terapia_nome as string | null)))
     .map(t => t.trim())
     .filter(Boolean)
   return [...new Set(nomes)].sort()
@@ -150,7 +209,7 @@ export async function listarNucleos(): Promise<NucleoCadastrado[]> {
 export async function criarNucleo(nome: string): Promise<NucleoCadastrado> {
   const sb = getSupabaseClient()
   const { data, error } = await sb.from(NUCLEOS_TABLE).insert({ nome: nome.trim() }).select("id, nome").single()
-  if (error) throw new Error(error.message)
+  if (error) lancarErroDeEscrita(error, "criar núcleos")
   const nucleo = data as NucleoCadastrado
   await registrarAuditoriaSala({ tabela: "nucleo", registroId: nucleo.id, acao: "criar", nucleoNome: nucleo.nome, depois: nucleo })
   return nucleo
@@ -161,7 +220,7 @@ export async function renomearNucleo(id: string, nome: string): Promise<NucleoCa
   const sb = getSupabaseClient()
   const { data: antes } = await sb.from(NUCLEOS_TABLE).select("id, nome").eq("id", id).maybeSingle()
   const { data, error } = await sb.from(NUCLEOS_TABLE).update({ nome: nome.trim() }).eq("id", id).select("id, nome").single()
-  if (error) throw new Error(error.message)
+  if (error) lancarErroDeEscrita(error, "renomear núcleos", antes)
   const nucleo = data as NucleoCadastrado
   await registrarAuditoriaSala({ tabela: "nucleo", registroId: nucleo.id, acao: "editar", nucleoNome: nucleo.nome, antes: antes ?? null, depois: nucleo })
   return nucleo
@@ -171,11 +230,12 @@ export async function renomearNucleo(id: string, nome: string): Promise<NucleoCa
 export async function excluirNucleo(id: string): Promise<void> {
   const sb = getSupabaseClient()
   const { data: antes } = await sb.from(NUCLEOS_TABLE).select("id, nome").eq("id", id).maybeSingle()
-  const { error } = await sb.from(NUCLEOS_TABLE).delete().eq("id", id)
+  const { data: apagados, error } = await sb.from(NUCLEOS_TABLE).delete().eq("id", id).select("id")
   if (error) {
     if (error.code === "23503") throw new Error("EM_USO")
-    throw new Error(error.message)
+    lancarErroDeEscrita(error, "excluir núcleos", antes)
   }
+  if ((apagados ?? []).length === 0) throw erroDeEscritaNegada("excluir núcleos", antes)
   await registrarAuditoriaSala({
     tabela: "nucleo", registroId: id, acao: "excluir",
     nucleoNome: (antes as NucleoCadastrado | null)?.nome ?? null, antes: antes ?? null,
@@ -244,7 +304,7 @@ export async function criarStatusLabel(input: { label: string; label_curto: stri
     .insert({ codigo, label: input.label.trim(), label_curto: input.label_curto.trim(), tone: input.tone })
     .select("codigo, label, label_curto, tone")
     .single()
-  if (error) throw new Error(error.message)
+  if (error) lancarErroDeEscrita(error, "criar status de sala")
   const statusLabel = data as StatusLabel
   await registrarAuditoriaSala({ tabela: "status_label", registroId: codigo, acao: "criar", depois: statusLabel })
   return statusLabel
@@ -257,11 +317,12 @@ export async function excluirStatusLabel(codigo: SalaStatus): Promise<void> {
   }
   const sb = getSupabaseClient()
   const { data: antes } = await sb.from(STATUS_LABELS_TABLE).select("codigo, label, label_curto, tone").eq("codigo", codigo).maybeSingle()
-  const { error } = await sb.from(STATUS_LABELS_TABLE).delete().eq("codigo", codigo)
+  const { data: apagados, error } = await sb.from(STATUS_LABELS_TABLE).delete().eq("codigo", codigo).select("codigo")
   if (error) {
     if (error.code === "23503") throw new Error("EM_USO")
-    throw new Error(error.message)
+    lancarErroDeEscrita(error, "excluir status de sala", antes)
   }
+  if ((apagados ?? []).length === 0) throw erroDeEscritaNegada("excluir status de sala", antes)
   await registrarAuditoriaSala({ tabela: "status_label", registroId: codigo, acao: "excluir", antes: antes ?? null })
 }
 
@@ -287,7 +348,7 @@ export async function atualizarStatusLabel(codigo: SalaStatus, input: { label: s
     .eq("codigo", codigo)
     .select("codigo, label, label_curto, tone")
     .single()
-  if (error) throw new Error(error.message)
+  if (error) lancarErroDeEscrita(error, "editar status de sala", antes)
   const statusLabel = data as StatusLabel
   await registrarAuditoriaSala({ tabela: "status_label", registroId: codigo, acao: "editar", antes: antes ?? null, depois: statusLabel })
   return statusLabel
@@ -312,7 +373,7 @@ async function nomeDaSala(salaId: string): Promise<string | null> {
 export async function criarAlocacao(input: AlocacaoInput): Promise<AlocacaoSala> {
   const sb = getSupabaseClient()
   const { data, error } = await sb.from(ALOCACOES_TABLE).insert(input).select("*").single()
-  if (error) throw new Error(error.message)
+  if (error) lancarErroDeEscrita(error, "alocar sessões nesta tela")
   const alocacao = data as AlocacaoSala
   await registrarAuditoriaSala({
     tabela: "alocacao", registroId: alocacao.id, acao: "criar",
@@ -327,7 +388,7 @@ export async function atualizarAlocacao(id: string, input: Partial<AlocacaoInput
   const sb = getSupabaseClient()
   const { data: antes } = await sb.from(ALOCACOES_TABLE).select("*").eq("id", id).maybeSingle()
   const { data, error } = await sb.from(ALOCACOES_TABLE).update(input).eq("id", id).select("*").single()
-  if (error) throw new Error(error.message)
+  if (error) lancarErroDeEscrita(error, "editar ou mover esta alocação", antes)
   const alocacao = data as AlocacaoSala
   await registrarAuditoriaSala({
     tabela: "alocacao", registroId: alocacao.id, acao: "editar",
@@ -341,8 +402,9 @@ export async function atualizarAlocacao(id: string, input: Partial<AlocacaoInput
 export async function excluirAlocacao(id: string): Promise<void> {
   const sb = getSupabaseClient()
   const { data: antes } = await sb.from(ALOCACOES_TABLE).select("*").eq("id", id).maybeSingle()
-  const { error } = await sb.from(ALOCACOES_TABLE).delete().eq("id", id)
-  if (error) throw new Error(error.message)
+  const { data: apagadas, error } = await sb.from(ALOCACOES_TABLE).delete().eq("id", id).select("id")
+  if (error) lancarErroDeEscrita(error, "excluir esta alocação", antes)
+  if ((apagadas ?? []).length === 0) throw erroDeEscritaNegada("excluir esta alocação", antes)
   const alocacaoAntes = antes as AlocacaoSala | null
   await registrarAuditoriaSala({
     tabela: "alocacao", registroId: id, acao: "excluir",
@@ -366,7 +428,7 @@ export async function listarExclusividadesTerapia(): Promise<SalaTerapiaExclusiv
 export async function criarExclusividadeTerapia(input: SalaTerapiaExclusivaInput): Promise<SalaTerapiaExclusiva> {
   const sb = getSupabaseClient()
   const { data, error } = await sb.from(EXCLUSIVIDADE_TERAPIA_TABLE).insert(input).select("*").single()
-  if (error) throw new Error(error.message)
+  if (error) lancarErroDeEscrita(error, "criar exclusividades de terapia")
   const exclusividade = data as SalaTerapiaExclusiva
   await registrarAuditoriaSala({
     tabela: "exclusividade_terapia", registroId: exclusividade.id, acao: "criar",
@@ -380,7 +442,7 @@ export async function atualizarModoExclusividadeTerapia(id: string, modo: SalaTe
   const sb = getSupabaseClient()
   const { data: antes } = await sb.from(EXCLUSIVIDADE_TERAPIA_TABLE).select("*").eq("id", id).maybeSingle()
   const { data, error } = await sb.from(EXCLUSIVIDADE_TERAPIA_TABLE).update({ modo }).eq("id", id).select("*").single()
-  if (error) throw new Error(error.message)
+  if (error) lancarErroDeEscrita(error, "editar exclusividades de terapia", antes)
   const exclusividade = data as SalaTerapiaExclusiva
   await registrarAuditoriaSala({
     tabela: "exclusividade_terapia", registroId: exclusividade.id, acao: "editar",
@@ -393,8 +455,9 @@ export async function atualizarModoExclusividadeTerapia(id: string, modo: SalaTe
 export async function excluirExclusividadeTerapia(id: string): Promise<void> {
   const sb = getSupabaseClient()
   const { data: antes } = await sb.from(EXCLUSIVIDADE_TERAPIA_TABLE).select("*").eq("id", id).maybeSingle()
-  const { error } = await sb.from(EXCLUSIVIDADE_TERAPIA_TABLE).delete().eq("id", id)
-  if (error) throw new Error(error.message)
+  const { data: apagadas, error } = await sb.from(EXCLUSIVIDADE_TERAPIA_TABLE).delete().eq("id", id).select("id")
+  if (error) lancarErroDeEscrita(error, "excluir exclusividades de terapia", antes)
+  if ((apagadas ?? []).length === 0) throw erroDeEscritaNegada("excluir exclusividades de terapia", antes)
   const exclusividadeAntes = antes as SalaTerapiaExclusiva | null
   await registrarAuditoriaSala({
     tabela: "exclusividade_terapia", registroId: id, acao: "excluir",
