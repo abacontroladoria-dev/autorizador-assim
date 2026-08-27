@@ -23,7 +23,11 @@ function notify(state: PacientesState) {
 
 function fetchPacientes(): Promise<void> {
   if (inflightFetch) return inflightFetch
-  inflightFetch = getPacientes()
+  // Traz TUDO (fictícios e inativos inclusos) — o único consumidor hoje
+  // (PacientesCadastro) decide o que mostrar com o filtro de Situação. Buscar
+  // tudo uma vez é mais barato que refazer a requisição a cada combinação do
+  // filtro.
+  inflightFetch = getPacientes({ incluirFicticios: true, incluirInativos: true })
     .then(({ data, error }) => notify({ pacientes: data, loading: false, error }))
     .finally(() => {
       inflightFetch = null

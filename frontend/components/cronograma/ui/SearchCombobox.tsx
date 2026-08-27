@@ -102,7 +102,7 @@ export function SearchCombobox({
         placeholder={placeholder}
         className={ocup
           ? "w-full placeholder:text-muted-foreground disabled:opacity-60"
-          : `w-full rounded-lg border px-2.5 py-2 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring ${valida ? "border-border bg-card" : "border-rose-300 dark:border-rose-800 bg-rose-50/50 dark:bg-rose-950/20"}`}
+          : `w-full rounded-lg border px-2.5 py-2 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring ${!mostrarInvalido ? "border-border bg-card" : "border-rose-300 dark:border-rose-800 bg-rose-50/50 dark:bg-rose-950/20"}`}
         style={ocup ? {
           boxSizing: "border-box",
           border: `1px solid ${mostrarInvalido ? "#fca5a5" : "var(--border)"}`,

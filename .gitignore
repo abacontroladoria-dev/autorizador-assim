@@ -53,3 +53,10 @@ supabase_logs/
 /invoke_*.py
 /run_fase2b_tests.*
 /final_r3_summary.py
+
+# 2026-08-26: exports da TiTa em CSV (relatorio_situacao_favorecido e afins).
+# Trazem nome, CPF, endereço, telefone e plano de saúde de paciente — e ESTE
+# REPOSITÓRIO É PÚBLICO. Mesmo raciocínio de *.xlsx acima: o arquivo é útil no
+# disco durante a importação (scripts/importar-favorecidos-tita.js) e nunca no
+# histórico. Apague do disco quando a importação terminar.
+*.csv
