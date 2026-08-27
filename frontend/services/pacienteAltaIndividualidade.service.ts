@@ -43,10 +43,10 @@ export async function getAltasDoPaciente(
   const { data, error } = await supabase
     .from(TB_ALTAS)
     .select("*")
-    // Alta "excluída" continua no banco (soft-delete, 20260827100000) e é
-    // filtrada aqui — a aba mostra só as ativas.
+    // Alta "excluída" continua no banco (soft-delete, 20260827100000) e
+    // CONTINUA na lista — só marcada. A tela é quem decide como mostrar
+    // (badge "Excluída"), não a query.
     .eq("id_paciente_pulsar", pacienteId)
-    .eq("ativo", true)
     .order("data_alta", { ascending: false })
 
   if (error) return { data: [], error: error.message }

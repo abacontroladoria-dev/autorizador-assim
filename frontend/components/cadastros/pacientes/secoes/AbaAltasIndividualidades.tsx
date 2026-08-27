@@ -231,15 +231,24 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
             {altas.map((alta) => (
               <li
                 key={alta.id_alta}
-                className="flex h-full flex-col rounded-lg border border-border bg-card px-4 py-4 shadow-sm"
+                className={`flex h-full flex-col rounded-lg border border-border bg-card px-4 py-4 shadow-sm ${
+                  alta.ativo ? "" : "opacity-60"
+                }`}
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div className="flex items-center gap-3">
                     <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
                     <div>
-                      <p className="text-sm font-semibold text-foreground">
-                        Alta em {alta.especialidade_alta}
-                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-semibold text-foreground">
+                          Alta em {alta.especialidade_alta}
+                        </p>
+                        {!alta.ativo && (
+                          <span className="rounded-md bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 dark:bg-rose-950/50 dark:text-rose-400">
+                            Excluída
+                          </span>
+                        )}
+                      </div>
                       <p className="text-xs text-muted-foreground">
                         Data da alta: {dataBR(alta.data_alta)}
                       </p>
@@ -262,23 +271,25 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
                       )}
                     </button>
                   )}
-                  <button
-                    type="button"
-                    onClick={() => void confirmarExclusao(alta)}
-                    disabled={excluindo === alta.id_alta}
-                    className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                    title="Excluir alta"
-                  >
-                    {excluindo === alta.id_alta ? (
-                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                    ) : (
-                      <Trash2 className="h-3.5 w-3.5" />
-                    )}
-                  </button>
+                  {/* Excluir só faz sentido em alta ativa — uma já excluída
+                      está no estado final. */}
+                  {alta.ativo && (
+                    <button
+                      type="button"
+                      onClick={() => void confirmarExclusao(alta)}
+                      disabled={excluindo === alta.id_alta}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      title="Excluir alta"
+                    >
+                      {excluindo === alta.id_alta ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  )}
                 </div>
               </div>
-              
-              {/* Other content if any */}
               </li>
             ))}
           </ul>
@@ -289,7 +300,9 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
         <AltaFormModal 
           pacienteId={pacienteId}
           pacienteNome={pacienteNome}
-          altasUsadas={altas.map(a => a.especialidade_alta)}
+          // Só a especialidade de alta ATIVA bloqueia repetição — uma alta
+          // excluída não deve impedir registrar outra na mesma especialidade.
+          altasUsadas={altas.filter(a => a.ativo).map(a => a.especialidade_alta)}
           onClose={() => setModalAberto(false)}
           onSalvo={() => {
             setModalAberto(false)
