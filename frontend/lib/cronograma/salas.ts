@@ -164,20 +164,38 @@ export function calcularSlotsDaSala(
   // de verdade é profissional + dia + turno + unidade, não o número da sala.
   const sessoesPorProfissionalId = new Map<string, number>()
   const sessoesPorProfissional = new Map<string, number>()
+  // Mesmo agrupamento (profissional + dow + turno, sem exigir sala exata), mas
+  // pra 'Livre' — a TiTa reserva um horário de agenda ABERTO pro profissional
+  // (sem paciente marcado ainda), não é sessão real, então não conta pro "X/Y
+  // com paciente". Existe só pra alimentar `temAgendaTita` abaixo: sem isto,
+  // profissional recém-cadastrado que só tem horário 'Livre' (nenhum
+  // atendimento no histórico ainda, caso da Andréa Aparecida Borges de
+  // Oliveira, 2026-08-27) fica indistinguível de alocação puramente
+  // fantasiosa, sem NENHUM vínculo com a agenda real — os dois caíam no mesmo
+  // "sem cruzamento no CSV"/"Alocação sem sessão", quando só o segundo é de
+  // fato uma pendência de planejamento.
+  const livrePorProfissionalId = new Set<string>()
+  const livrePorProfissional = new Set<string>()
   linhasUnidade.forEach(r => {
     const dow = dowDeDiaSemana(r.dia_semana)
     if (!dow) return
-    if (!normTxt(r.status_agendamento).includes("agendado")) return
+    const statusNorm = normTxt(r.status_agendamento)
+    const ehAgendado = statusNorm.includes("agendado")
+    const ehLivre = !ehAgendado && statusNorm.includes("livre")
+    if (!ehAgendado && !ehLivre) return
     const minutos = pm(r.hora_inicial)
     if (minutos === null) return
     const turno = turnoDoHorario(minutos)
     const prof = cleanTxt(r.profissional_nome)
     if (!prof) return
     const key = `${dow}|${turno}|${normTxt(prof)}`
-    sessoesPorProfissional.set(key, (sessoesPorProfissional.get(key) ?? 0) + 1)
-    if (r.profissional_id !== null && r.profissional_id !== undefined) {
-      const keyId = `${dow}|${turno}|${r.profissional_id}`
-      sessoesPorProfissionalId.set(keyId, (sessoesPorProfissionalId.get(keyId) ?? 0) + 1)
+    const keyId = r.profissional_id !== null && r.profissional_id !== undefined ? `${dow}|${turno}|${r.profissional_id}` : null
+    if (ehAgendado) {
+      sessoesPorProfissional.set(key, (sessoesPorProfissional.get(key) ?? 0) + 1)
+      if (keyId) sessoesPorProfissionalId.set(keyId, (sessoesPorProfissionalId.get(keyId) ?? 0) + 1)
+    } else {
+      livrePorProfissional.add(key)
+      if (keyId) livrePorProfissionalId.add(keyId)
     }
   })
 
@@ -232,6 +250,12 @@ export function calcularSlotsDaSala(
           ?? sessoesPorProfissional.get(`${dow}|${turno}|${normTxt(a.profissional_nome)}`)
           ?? 0
         const sessoesLimitadas = Math.min(sessoesReais, capacidadeBloco)
+        // "Tem agenda na TiTa" é mais amplo que "tem sessão real": inclui
+        // horário 'Livre' reservado pro profissional, mesmo sem paciente
+        // marcado ainda — ver comentário de livrePorProfissionalId acima.
+        const temAgendaTita = sessoesReais > 0
+          || (a.profissional_id !== null && livrePorProfissionalId.has(`${dow}|${turno}|${a.profissional_id}`))
+          || livrePorProfissional.has(`${dow}|${turno}|${normTxt(a.profissional_nome)}`)
         const verificacao = verificarExclusividade(sala.id, a.terapia_id, indiceExclusividade, nomeDaSalaPorId)
         return {
           alocacaoId: a.id,
@@ -240,7 +264,7 @@ export function calcularSlotsDaSala(
           sessoesReais: sessoesLimitadas,
           sessoesCapacidadeTurno: capacidadeBloco,
           pctOcupacao: capacidadeBloco > 0 ? sessoesLimitadas / capacidadeBloco : null,
-          semCruzamentoCsv: sessoesReais === 0,
+          semCruzamentoCsv: !temAgendaTita,
           violacaoExclusividade: verificacao.status === "bloqueado" ? { direcao: verificacao.direcao, motivo: verificacao.motivo } : null,
         }
       })
