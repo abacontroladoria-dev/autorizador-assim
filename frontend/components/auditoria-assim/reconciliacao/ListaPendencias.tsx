@@ -68,29 +68,18 @@ function Badge({ rotulo, valor, tom, ajuda }: {
  * pendência, plano/unidade —, e é essa ordem que a grade reproduz quando quebra
  * no celular.
  *
- * O total é a única pílula CONTORNADA da linha, e a distinção é por silhueta de
- * propósito: pintá-la de rose (o desenho de referência) faria "8 Pendências" e
- * "4 Não solicitada" usarem o mesmo matiz, e aí não há como saber se o 4 está
- * dentro do 8 — que é justamente o que ele está. Contorno = soma, preenchido =
- * espécie. Aparece só quando há duas espécies ou mais: com uma só, o total É
- * aquele número, e repeti-lo seria ruído.
+ * Sem pílula de total (2026-08-27, revertido — chegou a existir uma pílula
+ * contornada somando as espécies). Reportado da tela: o número não batia com o
+ * que estava ao lado dele, porque `total` deliberadamente não soma cancelamento
+ * (ver `contarPendencias`) — "2 Pendências · 1 Glosas · 1 Cancelamentos" lia
+ * como conta errada. Cada espécie diz o próprio número; a soma não aparece em
+ * nenhum paciente.
  */
 function LinhaPaciente({ paciente, onAbrir }: {
   paciente: PacientePendencias
   onAbrir: (paciente: PacientePendencias) => void
 }) {
   const especies = PENDENCIAS.filter((e) => paciente.contagem[e.chave] > 0)
-  /*
-    O total é a soma das espécies que PEDEM trabalho, e o cancelamento não é uma
-    delas (ver `contarPendencias`). Então a pílula do total só aparece quando há
-    duas ou mais espécies contadas — senão a linha de um paciente com 1 glosa e 1
-    cancelamento diria "1 Pendências · 1 Glosas · 1 Cancelamentos", e o total
-    pareceria errado por não somar o que está ao lado dele.
-
-    Com uma espécie contada só, o total É aquele número e repeti-lo seria ruído —
-    a mesma regra que já valia antes, agora medida sobre o conjunto certo.
-  */
-  const contadas = especies.filter((e) => e.chave !== 'cancelamento')
   const carteirinha = paciente.carteirinhas[0] ?? 'sem carteirinha'
   const extras = paciente.carteirinhas.length - 1
 
@@ -129,30 +118,28 @@ function LinhaPaciente({ paciente, onAbrir }: {
           </span>
         </span>
 
-        {/* Pendências — a segunda leitura, e no celular a segunda linha. */}
+        {/* Pendências — a segunda leitura, e no celular a segunda linha.
+
+            SEM a pílula de total (2026-08-27, reportado da tela: "não quero
+            esse badge de total... em nenhum paciente"). Cada espécie já diz o
+            próprio número, e a soma era uma quinta leitura que ninguém pediu
+            — inclusive porque `total` deliberadamente NÃO soma cancelamento
+            (ver `contarPendencias`), então "2 Pendências" ao lado de "1
+            Glosas · 1 Cancelamentos" já tinha gerado a pergunta de "por que
+            não bate". Tirar a soma tira a pergunta. */}
         <span className="col-span-2 col-start-1 row-start-2 flex min-w-0 flex-wrap items-center gap-1 md:col-span-1 md:col-start-3 md:row-start-1">
           {especies.length === 0 ? (
             <span className="text-xs text-slate-500">sem pendências</span>
           ) : (
-            <>
-              {contadas.length > 1 && (
-                <Badge
-                  rotulo="Pendências"
-                  valor={paciente.contagem.total}
-                  tom="border-slate-300 bg-white text-slate-700 [&>span]:text-slate-900"
-                  ajuda="A soma das espécies que pedem trabalho. Cancelamento não entra."
-                />
-              )}
-              {especies.map((e) => (
-                <Badge
-                  key={e.chave}
-                  rotulo={e.rotulo}
-                  valor={paciente.contagem[e.chave]}
-                  tom={e.badge}
-                  ajuda={e.ajuda}
-                />
-              ))}
-            </>
+            especies.map((e) => (
+              <Badge
+                key={e.chave}
+                rotulo={e.rotulo}
+                valor={paciente.contagem[e.chave]}
+                tom={e.badge}
+                ajuda={e.ajuda}
+              />
+            ))
           )}
         </span>
 

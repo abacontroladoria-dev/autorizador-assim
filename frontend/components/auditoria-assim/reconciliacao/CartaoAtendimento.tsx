@@ -875,43 +875,67 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
         completarMotivoGlosa(lerMotivoGlosa(cartao.status), codigosGlosa)?.descricao ??
         null)
 
-  // Cota divergente é âmbar pelo mesmo motivo que a chip do placar é âmbar
-  // (DESIGN.md, o terceiro eixo): âmbar significa "esperando alguém olhar" nos
-  // três eixos desta tela, e o excedente é exatamente isso.
+  // A guia RECUSADA (nem liberada, nem cancelada, nem triada) é a que sobrava
+  // no `else` até 2026-08-27, e caía em esmeralda por eliminação — reportado da
+  // tela: a 405760 (Theo Meneses, 1601-REINCIDENCIA) aparecia "verde como se
+  // fosse liberada". Ela nunca cobriu sessão nenhuma; é a MESMA glosa que o
+  // outro lado do par mostra em violeta (lilás) — mesmo vocabulário, mesmo
+  // matiz.
   //
-  // A guia VINCULADA veste ESMERALDA (ajuste em tela, revertendo o violeta): ela
-  // cobriu uma sessão, e esmeralda é o que esta tela usa para "está coberto". A
-  // procedência ("é a avulsa que substituiu, não o pareamento normal") continua
-  // marcada — pela hachura FORTE do lado da sessão e pelo rótulo "Autorização
-  // Substituta" no rodapé —, então a cor volta a responder só a pergunta que
-  // sempre respondeu aqui: este item está coberto?
+  // Checada ANTES de `pendente` na cor, embora `pendente` (`cartaoPendente`,
+  // grade.ts) TAMBÉM seja `true` para ela agora: a guia recusada precisa da
+  // silhueta expandida (não pode ficar sem destaque, é uma glosa esquecida),
+  // mas o MOTIVO da pendência não é o mesmo da que espera triagem. Âmbar
+  // continua reservado a "esperando alguém decidir o vínculo"
+  // (`semVinculo`/excedente); a recusa já tem veredito — é violeta, igual a
+  // toda glosa nesta tela. Sem checar antes, `pendente` capturava a recusada e
+  // ela saía laranja — reportado da tela.
+  const recusada = !semSessao && !cancelada && !liberada && !vinculada
+
+  // A guia VINCULADA veste ESMERALDA: ela cobriu uma sessão, e esmeralda é o
+  // que esta tela usa para "está coberto". A procedência ("é a avulsa que
+  // substituiu, não o pareamento normal") continua marcada — pela hachura
+  // FORTE do lado da sessão e pelo rótulo "Autorização Substituta" no rodapé —,
+  // então a cor volta a responder só a pergunta que sempre respondeu aqui: este
+  // item está coberto?
   //
   // A DESCARTADA veste slate, que nesta tela é o que acabou sem efeito: ela não
-  // cobre sessão nenhuma, e é isso que o operador afirmou sobre ela.
-  const tom = pendente
-    ? 'border-amber-300 bg-amber-50'
-    : semSessao || cancelada || liberada
-      ? 'border-slate-200 bg-slate-50'
-      : 'border-emerald-200 bg-emerald-50'
-  const tinta = pendente
-    ? 'text-amber-700'
-    : semSessao || cancelada || liberada
-      ? 'text-slate-600'
-      : 'text-emerald-700'
-  const dot = pendente ? 'bg-amber-500' : 'bg-emerald-500'
-  // Link2 tanto na órfã quanto na vinculada de propósito: é o mesmo eixo — o do
-  // vínculo — em dois momentos, e quem separa os dois é o matiz mais o rótulo,
-  // que vem escrito. Ban na descartada porque é o ícone do botão que a produziu
-  // ("Nenhuma — é autorização extra").
-  const Icone = pendente
-    ? Link2
+  // cobre sessão nenhuma, e é isso que o operador afirmou sobre ela. "Outra
+  // semana" (liberada, mas sem casar com nada aqui) também é slate — ela pode
+  // estar cobrindo uma sessão de fora da janela, então afirmar "descoberto" ou
+  // "coberto" aqui seria adivinhar. Cota divergente (`semVinculo`/excedente,
+  // sem ser recusa) é âmbar pelo mesmo motivo que a chip do placar é âmbar
+  // (DESIGN.md, o terceiro eixo): "esperando alguém olhar".
+  const tom = recusada
+    ? 'border-violet-200 bg-violet-50'
+    : vinculada
+      ? 'border-emerald-200 bg-emerald-50'
+      : pendente
+        ? 'border-amber-300 bg-amber-50'
+        : 'border-slate-200 bg-slate-50'
+  const tinta = recusada
+    ? 'text-violet-700'
+    : vinculada
+      ? 'text-emerald-700'
+      : pendente
+        ? 'text-amber-700'
+        : 'text-slate-600'
+  const dot = recusada ? 'bg-violet-500' : vinculada ? 'bg-emerald-500' : pendente ? 'bg-amber-500' : 'bg-slate-400'
+  // AlertOctagon na recusada, checado ANTES de `pendente` pela mesma razão da
+  // cor: `pendente` também é `true` aqui, e o glifo de vínculo (`Link2`) não
+  // pode representar uma glosa. Link2 tanto na órfã quanto na vinculada de
+  // propósito: é o mesmo eixo — o do vínculo — em dois momentos, e quem separa
+  // os dois é o matiz mais o rótulo, que vem escrito. Ban na descartada porque
+  // é o ícone do botão que a produziu ("Nenhuma — é autorização extra").
+  const Icone = recusada
+    ? AlertOctagon
     : vinculada
       ? Link2
-      : semSessao || cancelada
-        ? Ban
-        : liberada
-          ? CheckCircle2
-          : AlertOctagon
+      : pendente
+        ? Link2
+        : semSessao || cancelada
+          ? Ban
+          : CheckCircle2
 
   const rotulo = semVinculo
     ? 'Sem vínculo'

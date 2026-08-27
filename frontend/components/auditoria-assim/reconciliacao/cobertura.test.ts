@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest'
 import {
   cobertaPorAvulsa,
+  guiasSubstituidas,
   sessaoNaoSolicitada,
   sessaoSemCobertura,
   situacaoComVinculo,
   SITUACOES_COBERTAS,
 } from './cobertura'
-import type { AuditoriaAssimItem } from '../types'
+import type { AuditoriaAssimItem, VinculoAutorizacao } from '../types'
 
 /**
  * As duas perguntas que a tela faz sobre uma sessão descoberta, e por que elas
@@ -192,5 +193,46 @@ describe('cobertaPorAvulsa', () => {
     for (const s of ['GLOSA_RESOLVIDA', 'LIBERADA']) {
       expect(SITUACOES_COBERTAS.has(s), s).toBe(true)
     }
+  })
+})
+
+function vinculo(p: Partial<VinculoAutorizacao> & { guia: string; tipo: 'vinculo' | 'sem_sessao' }): VinculoAutorizacao {
+  return {
+    id: 'v', bloco_id: null, guia_original: null, observacao: null,
+    vinculado_por: null, vinculado_em: null,
+    ...p,
+  }
+}
+
+describe('guiasSubstituidas', () => {
+  it('tipo "vinculo" aposenta a guia da sessão que ele cobre', () => {
+    const s = sessao({ bloco_id: 'b1', guia: 'G-GLOSADA' })
+    const mapa = new Map([['b1', vinculo({ guia: '15032', tipo: 'vinculo' })]])
+    expect([...guiasSubstituidas([s], mapa)]).toEqual(['G-GLOSADA'])
+  })
+
+  it('tipo "sem_sessao" NÃO aposenta guia nenhuma', () => {
+    /*
+      A metade do defeito do caso Saory que não dependia da ordem em
+      `calcularLedger`: `sem_sessao` é "esta guia é autorização extra", e sempre
+      tem `bloco_id: null` (constraint da tabela). Sem este filtro,
+      `vinculosPorBloco.has(s.bloco_id ?? '')` batia contra QUALQUER sessão cujo
+      `bloco_id` também fosse nulo — as faltas sintetizadas no serviço —,
+      aposentando a guia glosada de uma falta por uma triagem que não a cobre.
+    */
+    const semBloco = sessao({ bloco_id: null, guia: 'G-FALTA' })
+    const mapa = new Map([['', vinculo({ guia: '15032', tipo: 'sem_sessao' })]])
+    expect(guiasSubstituidas([semBloco], mapa).size).toBe(0)
+  })
+
+  it('sem vínculo para o bloco, a guia continua na fila', () => {
+    const s = sessao({ bloco_id: 'b1', guia: 'G1' })
+    expect(guiasSubstituidas([s], new Map()).size).toBe(0)
+  })
+
+  it('sessão sem guia não entra no conjunto', () => {
+    const s = sessao({ bloco_id: 'b1', guia: null })
+    const mapa = new Map([['b1', vinculo({ guia: '15032', tipo: 'vinculo' })]])
+    expect(guiasSubstituidas([s], mapa).size).toBe(0)
   })
 })

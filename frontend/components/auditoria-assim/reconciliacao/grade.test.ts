@@ -268,6 +268,42 @@ describe('cartaoPendente', () => {
     expect(cartaoPendente({ ...guiaBase, estado: 'fora-da-semana', excedente: true })).toBe(true)
   })
 
+  /**
+   * O caso Theo Meneses (27/08): a guia 405760, recusada por
+   * `1601-REINCIDENCIA`, contava como "1 Glosa" na listagem mas o cartão dela
+   * na grade — `estado: 'fora-da-semana'`, sem triagem, fora da fila de órfãs
+   * — não era `cartaoPendente`, então nem o header da semana a somava nem ela
+   * vestia o matiz de glosa (caía no `else` de `CartaoAtendimento` e saía
+   * esmeralda, "como se fosse liberada").
+   */
+  it('promove a guia RECUSADA que não é liberada, cancelada, órfã nem triada', () => {
+    const recusada = {
+      ...base, tipo: 'autorizacao', guia: 'g', status: '1601-REINCIDENCIA NO ATEN',
+      descricao_erro: null, teve_token: null, token: null, vinculo: null,
+      origem: guia({ guia: 'g', status: '1601-REINCIDENCIA NO ATEN' }),
+    } as const
+    expect(cartaoPendente({ ...recusada, estado: 'fora-da-semana', excedente: false })).toBe(true)
+    // Cancelada e liberada continuam quietas nesse mesmo estado — só a
+    // recusada de verdade é que precisava da rede.
+    expect(
+      cartaoPendente({
+        ...recusada, estado: 'fora-da-semana', excedente: false,
+        status: 'Liberado *',
+        origem: guia({ guia: 'g', status: 'Liberado *' }),
+      })
+    ).toBe(false)
+    expect(
+      cartaoPendente({
+        ...recusada, estado: 'fora-da-semana', excedente: false,
+        status: 'Liberado',
+        origem: guia({ guia: 'g', status: 'Liberado' }),
+      })
+    ).toBe(false)
+    // Já órfã (`sem-vinculo`) ou já triada continuam pela regra própria delas
+    // — esta é só a rede para quando nenhuma das duas ainda pegou a guia.
+    expect(cartaoPendente({ ...recusada, estado: 'sem-vinculo', excedente: false })).toBe(true)
+  })
+
   it('aposenta a guia já triada — vinculada ou descartada não é fila de trabalho', () => {
     // O depois da ação: a pergunta "que sessão esta guia cobre?" foi respondida,
     // e a guia não pode continuar contando como cartão marcado. Se contasse, a

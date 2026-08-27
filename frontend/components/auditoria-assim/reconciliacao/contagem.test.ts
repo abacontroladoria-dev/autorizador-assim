@@ -28,7 +28,6 @@ const SEM_FALTA: PlacarTuss[] = []
 
 const LEDGER_LIMPO = {
   orfas: new Set<string>(),
-  reincidentes: new Set<string>(),
   glosas: 0,
   canceladas: 0,
 }
@@ -165,12 +164,21 @@ describe('contarPendencias — total', () => {
    * `naoSolicitada` vale 4. A linha dizia 5 + 9 = 14.
    */
   /**
-   * O caso Theo Meneses (26/08), reportado da tela: "aparece uma glosa que não
-   * existe". As seis sessões do dia estavam LIBERADA, cada uma com sua guia. O
-   * que havia era a guia 405760, tirada 16 min depois da 405507 para o mesmo
-   * TUSS, e recusada com `1601-REINCIDENCIA NO ATEN`.
+   * O caso Saory Araujo Oliveira (27/08), reportado da tela: "tem uma glosa,
+   * mas a página diz que é '1 autorização a mais'" — e depois, explícito:
+   * "ali na página deve constar como glosa, 'Autorização a mais' [é] da outra
+   * ideia". A guia real era 329215, recusada `1601-REINCIDENCIA NO ATEN`.
+   *
+   * Entre 08-26 e 08-27 a reincidência teve uma vida curta como espécie
+   * própria — o caso Theo Meneses (26/08) pedia isso: seis sessões LIBERADA,
+   * cada uma com sua guia, e uma recusa por pedido duplicado que a tela lia
+   * como "1 glosa" numa semana sem uma única sessão descoberta. A separação
+   * resolvia aquilo, mas criava o problema oposto: uma recusa de verdade que
+   * some de "Glosas" e reaparece em "Autorização a mais", categoria que para
+   * quem audita significa outra coisa (excedente de cota, guia órfã). Toda
+   * recusa é glosa de novo, ponto — `1601` incluído.
    */
-  it('a recusa por reincidência NÃO é glosa', () => {
+  it('a recusa por reincidência TAMBÉM é glosa (revertido em 27/08)', () => {
     const ledger = calcularLedger(
       [
         autorizacao({ guia: '405507', status: 'Liberado' }),
@@ -178,24 +186,11 @@ describe('contarPendencias — total', () => {
       ],
       NUNCA_ORFA
     )
-    expect(ledger.glosas).toBe(0)
-    expect([...ledger.reincidentes]).toEqual(['405760'])
+    expect(ledger.glosas).toBe(1)
 
     const c = contarPendencias(SEM_FALTA, ledger, new Set())
-    expect(c.glosa).toBe(0)
-    expect(c['autorizacao-a-mais']).toBe(1)
-    expect(c.total).toBe(1)
-  })
-
-  it('a reincidente que o placar já achou excedente conta UMA vez', () => {
-    // O motivo de ela entrar na união e não numa soma: o pedido duplicado é,
-    // com frequência, o mesmo que estourou a cota do TUSS.
-    const ledger = calcularLedger(
-      [autorizacao({ guia: 'G1', status: '1601-REINCIDENCIA NO ATEN' })],
-      NUNCA_ORFA
-    )
-    const c = contarPendencias(SEM_FALTA, ledger, new Set(['G1']))
-    expect(c['autorizacao-a-mais']).toBe(1)
+    expect(c.glosa).toBe(1)
+    expect(c['autorizacao-a-mais']).toBe(0)
     expect(c.total).toBe(1)
   })
 
@@ -206,7 +201,44 @@ describe('contarPendencias — total', () => {
       NUNCA_ORFA
     )
     expect(ledger.glosas).toBe(1)
-    expect(ledger.reincidentes.size).toBe(0)
+  })
+
+  /**
+   * Um defeito distinto, encontrado ao investigar o caso Saory (mas não a causa
+   * real dela — a real era a reincidência, ver acima): `ehOrfa` marcava `orfas`
+   * numa linha ANTES do `continue` de `substituidas`, e o `continue` só pulava
+   * os ramos de status — não desfazia a marca que já tinha sido escrita. Uma
+   * guia órfã E substituída saía com `glosas` correto (zero, o `continue` a
+   * tirou de lá) mas sobrevivia em `orfas`, que `contarPendencias` soma em
+   * `autorizacao-a-mais`. A glosa não sumia: trocava de espécie na tela.
+   */
+  it('a guia glosada, órfã E substituída não vira "autorização a mais"', () => {
+    const ledger = calcularLedger(
+      [autorizacao({ guia: 'G-SUBSTITUIDA', status: '1013-CADASTRO DO BENEFICI' })],
+      () => true, // órfã: também está em `get_guias_orfas`
+      new Set(['G-SUBSTITUIDA']) // e foi substituída por um vínculo
+    )
+    // A guia substituída sai de TUDO — não fica em `orfas` para reaparecer como
+    // excedente do outro lado da união.
+    expect(ledger.glosas).toBe(0)
+    expect(ledger.orfas.size).toBe(0)
+
+    const c = contarPendencias(SEM_FALTA, ledger, new Set())
+    expect(c['autorizacao-a-mais']).toBe(0)
+    expect(c.total).toBe(0)
+  })
+
+  it('a guia glosada e órfã, mas NÃO substituída, continua contando como órfã', () => {
+    // Sem vínculo nenhum, a ordem não muda o resultado: órfã genuína continua
+    // órfã. Este teste existe para que esse fix não vire "órfã nunca conta"
+    // por engano.
+    const ledger = calcularLedger(
+      [autorizacao({ guia: 'G-OUTRA', status: '1013-CADASTRO DO BENEFICI' })],
+      () => true,
+      new Set()
+    )
+    expect(ledger.glosas).toBe(1)
+    expect([...ledger.orfas]).toEqual(['G-OUTRA'])
   })
 
   it('reconhece o 1601 pelo prefixo — o rótulo vem cortado em 25 caracteres', () => {

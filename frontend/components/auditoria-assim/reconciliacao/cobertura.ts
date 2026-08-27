@@ -247,6 +247,14 @@ export function sessaoNaoSolicitada(
  * RESOLVIDA e o motivo da recusa segue por extenso na gaveta. Vale também para a
  * `CANCELADA` que um vínculo cobriu (aí a sessão vira LIBERADA), pelo mesmo
  * motivo — a liberação desfeita foi substituída por uma que valeu.
+ *
+ * SÓ `tipo === 'vinculo'` aposenta guia (2026-08-27). `sem_sessao` é o outro
+ * desfecho da triagem — "esta guia é autorização extra, não cobre sessão
+ * nenhuma" — e sempre tem `bloco_id: null` (a constraint da tabela exige). Sem
+ * este filtro, `vinculosPorBloco.has(s.bloco_id ?? '')` bateria também num
+ * `sem_sessao` cujo mapa foi indexado com a chave `''`, contra qualquer sessão
+ * cujo `bloco_id` também for nulo — as linhas de falta sintetizadas no serviço
+ * — aposentando a guia glosada de uma falta por uma triagem que não a cobre.
  */
 export function guiasSubstituidas(
   sessoes: AuditoriaAssimItem[],
@@ -255,7 +263,8 @@ export function guiasSubstituidas(
   const substituidas = new Set<string>()
   if (vinculosPorBloco.size === 0) return substituidas
   for (const s of sessoes) {
-    if (s.guia && vinculosPorBloco.has(s.bloco_id ?? '')) substituidas.add(s.guia)
+    const vinculo = s.bloco_id ? vinculosPorBloco.get(s.bloco_id) : undefined
+    if (s.guia && vinculo?.tipo === 'vinculo') substituidas.add(s.guia)
   }
   return substituidas
 }
