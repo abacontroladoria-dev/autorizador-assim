@@ -42,6 +42,11 @@ export type PacienteLaudo = {
   arquivo_path: string | null
   observacoes: string | null
   em_uso?: boolean
+  /**
+   * false = "excluído" pela tela. Laudo nunca sai do banco — o DELETE é
+   * revogado na RLS (20260827100000). A aba lista apenas os ativos.
+   */
+  ativo: boolean
   criado_em: string
   atualizado_em: string
   /** Populado pelo service, vazio se não selecionado. */
@@ -91,6 +96,11 @@ export type PacienteAlta = {
   data_alta: string
   especialidade_alta: string
   arquivo_alta_path: string | null
+  /**
+   * false = "excluída" pela tela. Alta nunca sai do banco — o DELETE é
+   * revogado na RLS (20260827100000). A aba lista apenas as ativas.
+   */
+  ativo: boolean
 }
 
-export type PacienteAltaForm = Omit<PacienteAlta, "id_alta" | "id_paciente_pulsar">
+export type PacienteAltaForm = Omit<PacienteAlta, "id_alta" | "id_paciente_pulsar" | "ativo">

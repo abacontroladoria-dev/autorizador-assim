@@ -106,7 +106,7 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
   }
 
   async function confirmarExclusao(alta: PacienteAlta) {
-    if (!window.confirm("Deseja realmente excluir esta alta? Esta ação não pode ser desfeita.")) {
+    if (!window.confirm("Excluir esta alta? Ela sai da lista, mas o registro é preservado e a ação fica no histórico.")) {
       return
     }
     setExcluindo(alta.id_alta)
@@ -116,7 +116,7 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
       toast.error(`Erro ao excluir: ${error}`)
       return
     }
-    toast.success("Alta excluída com sucesso.")
+    toast.success("Alta excluída. O registro ficou no histórico.")
     void carregar()
   }
 
