@@ -9,7 +9,7 @@ import { getVinculosDoPaciente } from "@/services/responsaveis.service"
 import { TIPOS_VINCULO } from "@/types/responsavel"
 import type { VinculoResponsavel, VinculoResponsavelEdit } from "@/types/responsavel"
 import type { Paciente } from "@/types/paciente"
-import { formatarMatricula } from "@/types/paciente"
+import { idExibicao } from "@/types/paciente"
 import { campo, foco } from "./ui/campos"
 
 // "Copiar de outro paciente": o atalho para cadastrar o segundo irmão sem
@@ -143,7 +143,7 @@ export function CopiarResponsaveisModal({
                       >
                         <span className="truncate font-medium text-foreground">{p.nome}</span>
                         <span className="shrink-0 text-xs text-muted-foreground">
-                          {p.cpf ? maskCpfCnpj(p.cpf) : `ID ${formatarMatricula(p.matricula)}`}
+                          {p.cpf ? maskCpfCnpj(p.cpf) : `ID ${idExibicao(p)}`}
                         </span>
                       </button>
                     </li>

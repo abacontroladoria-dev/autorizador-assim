@@ -21,7 +21,7 @@ import { HistoricoCadastrosModal } from "@/components/cadastros/historico/Histor
 import { getTomAvatar, iniciaisDe } from "@/lib/cadastros/avatarPastel"
 import { usePacientes } from "@/hooks/usePacientes"
 import { maskCpfCnpj, onlyDigits } from "@/lib/remuneracao/formatacao"
-import { formatarMatricula } from "@/types/paciente"
+import { idExibicao } from "@/types/paciente"
 import type { Paciente } from "@/types/paciente"
 import { NovoPacienteModal } from "./pacientes/NovoPacienteModal"
 import { campo, foco } from "./pacientes/ui/campos"
@@ -96,9 +96,10 @@ export function PacientesCadastro() {
       if (p.nome_civil && norm(p.nome_civil).includes(termo)) return true
       if (!digitos) return false
       if (p.cpf && onlyDigits(p.cpf).includes(digitos)) return true
-      // Casa tanto "42" quanto "00042" — o usuário lê a matrícula formatada na
-      // tela, mas digita o número curto.
-      return p.matricula !== null && formatarMatricula(p.matricula).includes(digitos)
+      // Busca pelo MESMO número que o cartão exibe. Antes casava contra a
+      // matrícula formatada, que não era o que estava escrito na tela — digitar
+      // o ID lido no cartão não achava o paciente.
+      return idExibicao(p).includes(digitos)
     })
   }, [pacientes, busca, situacoes])
 
@@ -248,6 +249,7 @@ export function PacientesCadastro() {
             "responsavel",
             "ficha_medica",
             "laudo",
+            "alta",
             "alta_individualidade",
           ]}
           onClose={() => setVerHistorico(false)}
@@ -348,7 +350,7 @@ function CardPaciente({ paciente }: { paciente: Paciente }) {
       >
         <div className="flex items-start justify-between gap-2">
           <span className="text-xs text-muted-foreground">
-            ID <span className="font-semibold text-foreground">{formatarMatricula(paciente.matricula)}</span>
+            ID <span className="font-semibold text-foreground">{idExibicao(paciente)}</span>
           </span>
           <div className="flex flex-wrap justify-end gap-1">
             <Situacao paciente={paciente} />

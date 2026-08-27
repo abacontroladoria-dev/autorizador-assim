@@ -150,6 +150,19 @@ export function maskCpfCnpj(raw: string): string {
     .replace(/(\d{4})(\d{1,2})$/, "$1-$2")
 }
 
+// CPF puro — para campos que NUNCA aceitam CNPJ (pessoa física: paciente,
+// responsável). Trunca em 11 dígitos, então não há como o texto formatado
+// escorregar para o padrão de CNPJ (00.000.000/0000-00) no meio da digitação.
+// maskCpfCnpj continua existindo à parte para os campos que são
+// legitimamente PF-ou-PJ (profissional, contrato).
+export function maskCpf(raw: string): string {
+  const d = onlyDigits(raw).slice(0, 11)
+  return d
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d{1,2})$/, "$1-$2")
+}
+
 // Documento único → cpf/cnpj separados pelo nº de dígitos, pra gravar nas duas
 // colunas que o banco ainda mantém. 11 dígitos vira CPF, 14 vira CNPJ — a
 // coluna que não bateu sempre volta null, nunca as duas preenchidas juntas.

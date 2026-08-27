@@ -9,12 +9,18 @@ import type {
   LaudoEspecialidadeForm,
 } from "@/types/laudos"
 
+// Tabelas cadastros_pacientes_laudos / _laudo_especialidades.
+// Ver supabase/migrations/20260826140000 e o rename em 20260826140400.
+
+const TB_LAUDOS = "cadastros_pacientes_laudos"
+const TB_ESPECIALIDADES = "cadastros_pacientes_laudo_especialidades"
+
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
-/** Constrói o payload INSERT/UPDATE para paciente_laudos a partir do formulário. */
+/** Constrói o payload INSERT/UPDATE do laudo a partir do formulário. */
 function formParaPayload(pacienteId: number, form: LaudoForm) {
   return {
-    paciente_id: pacienteId,
+    id_paciente_pulsar: pacienteId,
     data_laudo: form.data_laudo,
     validade: form.validade || null,
     autorizado_em: form.autorizado_em || null,
@@ -33,7 +39,7 @@ function formParaPayload(pacienteId: number, form: LaudoForm) {
 
 function espFormaParaPayload(laudoId: number, e: LaudoEspecialidadeForm) {
   return {
-    laudo_id: laudoId,
+    id_laudo: laudoId,
     especialidade: e.especialidade,
     qt_laudo: e.qt_laudo ? Number(e.qt_laudo) : null,
     qt_autorizacao: e.qt_autorizacao ? Number(e.qt_autorizacao) : null,
@@ -43,18 +49,18 @@ function espFormaParaPayload(laudoId: number, e: LaudoEspecialidadeForm) {
 async function desmarcarOutrosLaudos(pacienteId: number, laudoId: number, pacienteNome: string) {
   const supabase = getSupabaseClient()
   const { data: outros } = await supabase
-    .from("paciente_laudos")
-    .select("id")
-    .eq("paciente_id", pacienteId)
+    .from(TB_LAUDOS)
+    .select("id_laudo")
+    .eq("id_paciente_pulsar", pacienteId)
     .eq("em_uso", true)
-    .neq("id", laudoId)
+    .neq("id_laudo", laudoId)
 
   if (outros && outros.length > 0) {
     for (const outro of outros) {
-      await supabase.from("paciente_laudos").update({ em_uso: false }).eq("id", outro.id)
+      await supabase.from(TB_LAUDOS).update({ em_uso: false }).eq("id_laudo", outro.id_laudo)
       void registrarAuditoria({
         tabela: "laudo",
-        registroId: outro.id,
+        registroId: outro.id_laudo,
         acao: "editar",
         pacienteId,
         pacienteNome,
@@ -74,31 +80,31 @@ export async function getLaudosDoPaciente(
   const supabase = getSupabaseClient()
 
   const { data: laudos, error } = await supabase
-    .from("paciente_laudos")
+    .from(TB_LAUDOS)
     .select("*")
-    .eq("paciente_id", pacienteId)
+    .eq("id_paciente_pulsar", pacienteId)
     .order("data_laudo", { ascending: false })
 
   if (error) return { data: [], error: error.message }
 
   // Busca especialidades de todos os laudos de uma vez
-  const laudoIds = (laudos ?? []).map((l) => l.id as number)
+  const laudoIds = (laudos ?? []).map((l) => l.id_laudo as number)
   let especialidades: LaudoEspecialidade[] = []
 
   if (laudoIds.length > 0) {
     const { data: esps } = await supabase
-      .from("paciente_laudo_especialidades")
+      .from(TB_ESPECIALIDADES)
       .select("*")
-      .in("laudo_id", laudoIds)
-      .order("id", { ascending: true })
+      .in("id_laudo", laudoIds)
+      .order("id_laudo_especialidade", { ascending: true })
     especialidades = (esps ?? []) as LaudoEspecialidade[]
   }
 
   const espPorLaudo = new Map<number, LaudoEspecialidade[]>()
   for (const e of especialidades) {
-    const arr = espPorLaudo.get(e.laudo_id) ?? []
+    const arr = espPorLaudo.get(e.id_laudo) ?? []
     arr.push(e)
-    espPorLaudo.set(e.laudo_id, arr)
+    espPorLaudo.set(e.id_laudo, arr)
   }
 
   const hoje = new Date()
@@ -109,7 +115,7 @@ export async function getLaudosDoPaciente(
     const dataBase = l.validade
       ? new Date(l.validade + "T12:00:00")
       : new Date(l.data_laudo + "T12:00:00")
-    
+
     if (!l.validade) {
       dataBase.setMonth(dataBase.getMonth() + 6)
     }
@@ -120,7 +126,7 @@ export async function getLaudosDoPaciente(
     return {
       ...(l as Omit<PacienteLaudo, "especialidades" | "situacao">),
       situacao,
-      especialidades: espPorLaudo.get(l.id as number) ?? [],
+      especialidades: espPorLaudo.get(l.id_laudo as number) ?? [],
     }
   })
 
@@ -137,14 +143,14 @@ export async function criarLaudo(
   const supabase = getSupabaseClient()
 
   const { data: novo, error } = await supabase
-    .from("paciente_laudos")
+    .from(TB_LAUDOS)
     .insert(formParaPayload(pacienteId, form))
-    .select("id")
+    .select("id_laudo")
     .single()
 
   if (error) return { id: null, error: error.message }
 
-  const laudoId = (novo as { id: number }).id
+  const laudoId = (novo as { id_laudo: number }).id_laudo
 
   // Insere especialidades
   if (form.especialidades.length > 0) {
@@ -153,9 +159,7 @@ export async function criarLaudo(
       .map((e) => espFormaParaPayload(laudoId, e))
 
     if (esps.length > 0) {
-      const { error: errEsp } = await supabase
-        .from("paciente_laudo_especialidades")
-        .insert(esps)
+      const { error: errEsp } = await supabase.from(TB_ESPECIALIDADES).insert(esps)
       if (errEsp) console.error("Erro ao inserir especialidades do laudo:", errEsp)
     }
   }
@@ -185,34 +189,29 @@ export async function editarLaudo(
 ): Promise<{ error: string | null }> {
   const supabase = getSupabaseClient()
 
-  const payload = formParaPayload(laudo.paciente_id, form)
+  const payload = formParaPayload(laudo.id_paciente_pulsar, form)
 
   const { error } = await supabase
-    .from("paciente_laudos")
+    .from(TB_LAUDOS)
     .update(payload)
-    .eq("id", laudo.id)
+    .eq("id_laudo", laudo.id_laudo)
 
   if (error) return { error: error.message }
 
   // Recria especialidades: exclui as antigas e insere as novas
-  await supabase
-    .from("paciente_laudo_especialidades")
-    .delete()
-    .eq("laudo_id", laudo.id)
+  await supabase.from(TB_ESPECIALIDADES).delete().eq("id_laudo", laudo.id_laudo)
 
   const esps = form.especialidades
     .filter((e) => e.especialidade.trim())
-    .map((e) => espFormaParaPayload(laudo.id, e))
+    .map((e) => espFormaParaPayload(laudo.id_laudo, e))
 
   if (esps.length > 0) {
-    const { error: errEsp } = await supabase
-      .from("paciente_laudo_especialidades")
-      .insert(esps)
+    const { error: errEsp } = await supabase.from(TB_ESPECIALIDADES).insert(esps)
     if (errEsp) console.error("Erro ao atualizar especialidades do laudo:", errEsp)
   }
 
   if (form.em_uso) {
-    await desmarcarOutrosLaudos(laudo.paciente_id, laudo.id, pacienteNome)
+    await desmarcarOutrosLaudos(laudo.id_paciente_pulsar, laudo.id_laudo, pacienteNome)
   }
 
   // Captura snapshot "antes" sem especialidades para o diff do histórico
@@ -227,9 +226,9 @@ export async function editarLaudo(
 
   void registrarAuditoria({
     tabela: "laudo",
-    registroId: laudo.id,
+    registroId: laudo.id_laudo,
     acao: "editar",
-    pacienteId: laudo.paciente_id,
+    pacienteId: laudo.id_paciente_pulsar,
     pacienteNome,
     antes,
     depois: payload,
@@ -246,18 +245,15 @@ export async function excluirLaudo(
 ): Promise<{ error: string | null }> {
   const supabase = getSupabaseClient()
 
-  const { error } = await supabase
-    .from("paciente_laudos")
-    .delete()
-    .eq("id", laudo.id)
+  const { error } = await supabase.from(TB_LAUDOS).delete().eq("id_laudo", laudo.id_laudo)
 
   if (error) return { error: error.message }
 
   void registrarAuditoria({
     tabela: "laudo",
-    registroId: laudo.id,
+    registroId: laudo.id_laudo,
     acao: "excluir",
-    pacienteId: laudo.paciente_id,
+    pacienteId: laudo.id_paciente_pulsar,
     pacienteNome,
     antes: {
       data_laudo: laudo.data_laudo,
@@ -288,13 +284,13 @@ export async function uploadArquivoLaudo(
   return { path, error: null }
 }
 
-/** Gera URL assinada temporária (1h) para arquivo de laudo. */
+/** Gera URL assinada temporária para arquivo de laudo. */
 export async function getUrlAssinadaLaudo(path: string): Promise<string | null> {
   const supabase = getSupabaseClient()
   const { data, error } = await supabase.storage
     .from("laudos-pacientes")
     .createSignedUrl(path, 900) // 15 minutos de validade
-  
+
   if (error || !data?.signedUrl) {
     console.error("Erro ao gerar URL do laudo:", error)
     return null

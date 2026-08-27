@@ -109,7 +109,7 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
     if (!window.confirm("Deseja realmente excluir esta alta? Esta ação não pode ser desfeita.")) {
       return
     }
-    setExcluindo(alta.id)
+    setExcluindo(alta.id_alta)
     const { error } = await excluirAlta(pacienteId, pacienteNome, alta)
     setExcluindo(null)
     if (error) {
@@ -122,7 +122,7 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
 
   async function abrirArquivo(alta: PacienteAlta) {
     if (!alta.arquivo_alta_path) return
-    setAbrindoLink(alta.id)
+    setAbrindoLink(alta.id_alta)
     const url = await getUrlAssinadaAlta(alta.arquivo_alta_path)
     setAbrindoLink(null)
     if (url) {
@@ -230,7 +230,7 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
           <ul className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             {altas.map((alta) => (
               <li
-                key={alta.id}
+                key={alta.id_alta}
                 className="flex h-full flex-col rounded-lg border border-border bg-card px-4 py-4 shadow-sm"
               >
                 <div className="flex flex-wrap items-start justify-between gap-2">
@@ -251,11 +251,11 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
                     <button
                       type="button"
                       onClick={() => void abrirArquivo(alta)}
-                      disabled={abrindoLink === alta.id}
+                      disabled={abrindoLink === alta.id_alta}
                       className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                       title="Ver arquivo da alta"
                     >
-                      {abrindoLink === alta.id ? (
+                      {abrindoLink === alta.id_alta ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       ) : (
                         <ExternalLink className="h-3.5 w-3.5" />
@@ -265,11 +265,11 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
                   <button
                     type="button"
                     onClick={() => void confirmarExclusao(alta)}
-                    disabled={excluindo === alta.id}
+                    disabled={excluindo === alta.id_alta}
                     className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     title="Excluir alta"
                   >
-                    {excluindo === alta.id ? (
+                    {excluindo === alta.id_alta ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     ) : (
                       <Trash2 className="h-3.5 w-3.5" />

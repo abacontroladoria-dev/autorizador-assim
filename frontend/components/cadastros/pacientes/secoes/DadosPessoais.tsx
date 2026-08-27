@@ -1,12 +1,11 @@
 "use client"
 
-import { maskCpfCnpj } from "@/lib/remuneracao/formatacao"
-import { formatarMatricula } from "@/types/paciente"
+import { maskCpf } from "@/lib/remuneracao/formatacao"
+import { idExibicao } from "@/types/paciente"
 import type { CorRaca, EstadoCivil, Paciente, SexoPaciente } from "@/types/paciente"
 import type { PacienteForm } from "@/hooks/usePacienteDetalhe"
 import {
   Campo,
-  CampoCheckbox,
   CampoSelect,
   CampoSomenteLeitura,
   CampoToggleSimNao,
@@ -52,14 +51,6 @@ export function DadosPessoais({
 }) {
   return (
     <Secao titulo="Dados pessoais" descricao="Informações básicas do paciente">
-      <CampoCheckbox
-        label="Possui diferença entre Nome Social e Nome Civil?"
-        checked={form.tem_nome_civil ?? false}
-        onChange={(v) => set({ tem_nome_civil: v, nome_civil: v ? form.nome_civil : null })}
-        disabled={disabled}
-        dica="O campo Nome continua sendo o nome de tratamento — o que aparece na agenda e nos relatórios."
-      />
-
       <Campo
         label="Nome"
         value={form.nome}
@@ -68,23 +59,17 @@ export function DadosPessoais({
       />
       <CampoSomenteLeitura
         label="ID"
-        value={formatarMatricula(paciente.matricula)}
-        dica={
-          paciente.matricula === null
-            ? "Sem ID: paciente sincronizado do TiTa."
-            : "Gerado pelo sistema."
-        }
+        value={idExibicao(paciente)}
+        acima={paciente.origem_cadastro === "tita" ? "Origem: TiTa" : "Origem: Pulsar"}
       />
 
-      {form.tem_nome_civil && (
-        <Campo
-          label="Nome civil"
-          value={form.nome_civil ?? ""}
-          onChange={(v) => set({ nome_civil: v || null })}
-          disabled={disabled}
-          largo
-        />
-      )}
+      <Campo
+        label="Nome civil (opcional)"
+        value={form.nome_civil ?? ""}
+        onChange={(v) => set({ nome_civil: v || null, tem_nome_civil: Boolean(v) })}
+        disabled={disabled}
+        largo
+      />
 
       <CampoSelect
         label="Sexo"
@@ -118,7 +103,7 @@ export function DadosPessoais({
 
       <Campo
         label="CPF"
-        value={form.cpf ? maskCpfCnpj(form.cpf) : ""}
+        value={form.cpf ? maskCpf(form.cpf) : ""}
         // Grava só dígitos: a string mascarada no banco quebraria qualquer
         // cruzamento por documento.
         onChange={(v) => set({ cpf: v.replace(/\D/g, "") || null })}
@@ -179,12 +164,11 @@ export function DadosPessoais({
         largo
       />
 
-      <CampoCheckbox
+      <CampoToggleSimNao
         label="Paciente falecido"
-        checked={form.falecido}
+        value={form.falecido}
         onChange={(v) => set({ falecido: v })}
         disabled={disabled}
-        dica="Independente da situação do cadastro — um paciente pode estar inativo por alta e continuar vivo."
       />
 
       <CampoToggleSimNao
@@ -192,7 +176,6 @@ export function DadosPessoais({
         value={form.ficticio}
         onChange={(v) => set({ ficticio: v })}
         disabled={disabled}
-        dica="Ex.: Horário Administrativo, Notificação Prévia, pacientes de teste — não é uma pessoa real. Fica fora das listas por padrão."
       />
     </Secao>
   )

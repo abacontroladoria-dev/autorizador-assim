@@ -1,6 +1,12 @@
 // Trilha de auditoria dos cadastros.
 // Ver supabase/migrations/20260826120000_create_cadastros_auditoria.sql.
 
+// `alta` e `alta_individualidade` são entidades distintas porque são TABELAS
+// distintas — cadastros_pacientes_altas (1:N, uma alta por especialidade) e
+// cadastros_pacientes_altas_individualidades (0-ou-1 por paciente) —, cada uma
+// com sua própria sequência de id. Até 20260826140300 as duas gravavam sob
+// `alta_individualidade`, e o filtro por (tabela, registro_id) misturava a
+// trilha de uma com a da outra.
 export type EntidadeAuditada =
   | "paciente"
   | "responsavel"
@@ -8,6 +14,7 @@ export type EntidadeAuditada =
   | "convenio"
   | "plano_saude"
   | "laudo"
+  | "alta"
   | "alta_individualidade"
 
 export type AcaoAuditada = "criar" | "editar" | "excluir" | "inativar" | "reativar"
@@ -56,7 +63,8 @@ export const ENTIDADE_LABEL: Record<EntidadeAuditada, string> = {
   convenio: "Convênio",
   plano_saude: "Plano de saúde",
   laudo: "Laudo",
-  alta_individualidade: "Altas e Individualidades",
+  alta: "Alta",
+  alta_individualidade: "Individualidades",
 }
 
 export const ACAO_LABEL: Record<AcaoAuditada, string> = {

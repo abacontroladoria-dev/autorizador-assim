@@ -1,7 +1,7 @@
 "use client"
 
 import { Pencil, X, History, UserMinus, UserCheck } from "lucide-react"
-import { formatarMatricula } from "@/types/paciente"
+import { idExibicao } from "@/types/paciente"
 import type { Paciente } from "@/types/paciente"
 import { SalvarTudoBar } from "@/components/cadastros/shared/SalvarTudoBar"
 import { FotoPacienteUpload } from "./FotoPacienteUpload"
@@ -46,7 +46,7 @@ export function PacienteHeaderCard({
           <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
             <span>
               <span className="text-xs uppercase tracking-wide">ID</span>{" "}
-              <span className="font-mono">{formatarMatricula(paciente.matricula)}</span>
+              <span className="font-mono">{idExibicao(paciente)}</span>
             </span>
             {paciente.falecido && (
               <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">

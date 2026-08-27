@@ -226,7 +226,7 @@ export function PacienteDetalhe({ idPaciente }: { idPaciente: number }) {
         <HistoricoCadastrosModal
           titulo={`Histórico — ${paciente.nome}`}
           subtitulo="Alterações no cadastro, responsáveis, ficha médica, laudos e altas/individualidades deste paciente."
-          entidades={["paciente", "responsavel", "ficha_medica", "laudo", "alta_individualidade"]}
+          entidades={["paciente", "responsavel", "ficha_medica", "laudo", "alta", "alta_individualidade"]}
           pacienteId={idPaciente}
           onClose={() => setVerHistorico(false)}
         />

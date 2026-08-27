@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import toast from "react-hot-toast"
 import { X, Loader2, AlertTriangle } from "lucide-react"
-import { maskCpfCnpj, onlyDigits, validarCpf } from "@/lib/remuneracao/formatacao"
+import { maskCpf, onlyDigits, validarCpf } from "@/lib/remuneracao/formatacao"
 import { UFS } from "@/lib/cadastros/ufs"
 import {
   upsertResponsavel,
@@ -259,7 +259,7 @@ export function ResponsavelFormModal({
 
           <Campo
             label="CPF"
-            value={form.cpf ? maskCpfCnpj(form.cpf) : ""}
+            value={form.cpf ? maskCpf(form.cpf) : ""}
             onChange={(v) => {
               set({ cpf: v.replace(/\D/g, "") || null })
               setDuplicadoIgnorado(false)

@@ -98,10 +98,21 @@ export function CampoSomenteLeitura({
   value,
   largo,
   dica,
-}: CampoBaseProps & { value: string }) {
+  acima,
+}: CampoBaseProps & {
+  value: string
+  /**
+   * Contexto curto ao lado do rótulo — mesma linha, para não empurrar a caixa
+   * para baixo e desalinhar a grade com o campo vizinho.
+   */
+  acima?: string
+}) {
   return (
     <div className={largo ? "sm:col-span-2" : undefined}>
-      <label className={rotulo}>{label}</label>
+      <div className="flex items-baseline justify-between gap-2">
+        <label className={rotulo}>{label}</label>
+        {acima && <span className="text-xs text-muted-foreground">{acima}</span>}
+      </div>
       <p className="mt-1 rounded-md border border-dashed border-border bg-muted/30 px-2 py-1.5 text-sm text-muted-foreground">
         {value || "—"}
       </p>

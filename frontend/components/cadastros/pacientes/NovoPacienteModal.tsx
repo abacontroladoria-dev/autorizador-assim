@@ -4,7 +4,7 @@ import { useState } from "react"
 import { useRouter } from "next/navigation"
 import toast from "react-hot-toast"
 import { X, Loader2 } from "lucide-react"
-import { maskCpfCnpj, validarCpfCnpj } from "@/lib/remuneracao/formatacao"
+import { maskCpf, validarCpfCnpj } from "@/lib/remuneracao/formatacao"
 import { upsertPaciente } from "@/services/pacientes.service"
 import { refetchPacientes } from "@/hooks/usePacientes"
 import type { SexoPaciente } from "@/types/paciente"
@@ -127,7 +127,7 @@ export function NovoPacienteModal({ onFechar }: { onFechar: () => void }) {
           />
           <Campo
             label="CPF"
-            value={cpf ? maskCpfCnpj(cpf) : ""}
+            value={cpf ? maskCpf(cpf) : ""}
             onChange={(v) => setCpf(v.replace(/\D/g, "") || null)}
             disabled={salvando}
             inputMode="numeric"

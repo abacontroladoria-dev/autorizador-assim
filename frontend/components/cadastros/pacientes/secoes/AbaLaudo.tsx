@@ -46,7 +46,7 @@ export function AbaLaudo({ pacienteId, pacienteNome }: Props) {
 
   async function abrirArquivo(laudo: PacienteLaudo) {
     if (!laudo.arquivo_path) return
-    setAbrindoLink(laudo.id)
+    setAbrindoLink(laudo.id_laudo)
     const url = await getUrlAssinadaLaudo(laudo.arquivo_path)
     setAbrindoLink(null)
     
@@ -65,7 +65,7 @@ export function AbaLaudo({ pacienteId, pacienteNome }: Props) {
     )
       return
 
-    setExcluindo(laudo.id)
+    setExcluindo(laudo.id_laudo)
     const { error } = await excluirLaudo(laudo, pacienteNome)
     setExcluindo(null)
 
@@ -136,7 +136,7 @@ export function AbaLaudo({ pacienteId, pacienteNome }: Props) {
         <ul className="grid grid-cols-1 gap-4 lg:grid-cols-2">
           {laudos.map((laudo) => (
             <li
-              key={laudo.id}
+              key={laudo.id_laudo}
               className="flex h-full flex-col rounded-lg border border-border bg-card px-4 py-4"
             >
               <div className="flex flex-wrap items-start justify-between gap-2">
@@ -184,11 +184,11 @@ export function AbaLaudo({ pacienteId, pacienteNome }: Props) {
                     <button
                       type="button"
                       onClick={() => void abrirArquivo(laudo)}
-                      disabled={abrindoLink === laudo.id}
+                      disabled={abrindoLink === laudo.id_laudo}
                       className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
                       title="Ver arquivo do laudo"
                     >
-                      {abrindoLink === laudo.id ? (
+                      {abrindoLink === laudo.id_laudo ? (
                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                       ) : (
                         <ExternalLink className="h-3.5 w-3.5" />
@@ -206,11 +206,11 @@ export function AbaLaudo({ pacienteId, pacienteNome }: Props) {
                   <button
                     type="button"
                     onClick={() => void confirmarExclusao(laudo)}
-                    disabled={excluindo === laudo.id}
+                    disabled={excluindo === laudo.id_laudo}
                     className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                     title="Excluir laudo"
                   >
-                    {excluindo === laudo.id ? (
+                    {excluindo === laudo.id_laudo ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />
                     ) : (
                       <Trash2 className="h-3.5 w-3.5" />
@@ -232,7 +232,7 @@ export function AbaLaudo({ pacienteId, pacienteNome }: Props) {
                     </thead>
                     <tbody>
                       {laudo.especialidades.map((e) => (
-                        <tr key={e.id} className="border-b border-border/50 last:border-0">
+                        <tr key={e.id_laudo_especialidade} className="border-b border-border/50 last:border-0">
                           <td className="py-1 pr-4 text-foreground">{e.especialidade}</td>
                           <td className="py-1 pr-4 text-foreground">
                             {e.qt_laudo ?? "—"}

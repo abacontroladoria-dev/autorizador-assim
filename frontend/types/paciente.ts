@@ -210,3 +210,35 @@ export function formatarMatricula(matricula: number | null): string {
   if (matricula === null) return "—"
   return String(matricula).padStart(5, "0")
 }
+
+/**
+ * O ID do paciente como ele deve aparecer na tela.
+ *
+ * Existem TRÊS números que passam por "ID do paciente", e até 2026-08-26 a tela
+ * mostrava o errado (`matricula`, uma sequência interna do cadastro que não
+ * significa nada fora dele):
+ *
+ *   - `tita_paciente_id`  o número que o TiTa conhece. É por ele que a recepção,
+ *                         a agenda e os relatórios do TiTa chamam o paciente —
+ *                         é o único que alguém consegue conferir do lado de lá.
+ *   - `id_paciente`       PK interna do Pulsar. Existe em toda linha, mas só é
+ *                         o identificador "público" de quem nasceu aqui.
+ *   - `matricula`         sequência do cadastro. Mantida no banco por ora, fora
+ *                         da tela desde já.
+ *
+ * A regra segue a ORIGEM, não a presença do valor: paciente vindo do TiTa
+ * mostra o id do TiTa mesmo tendo id_paciente; paciente nativo mostra
+ * id_paciente, e aí tita_paciente_id é nulo. As duas faixas são disjuntas por
+ * construção — ver a constraint pacientes_id_fora_da_faixa_tita
+ * (20260826140500) —, então o número exibido nunca é ambíguo.
+ */
+export function idExibicao(
+  paciente: Pick<Paciente, "origem_cadastro" | "id_paciente" | "tita_paciente_id">
+): string {
+  if (paciente.origem_cadastro === "tita") {
+    // Origem 'tita' sem tita_paciente_id é linha inconsistente, não caso de uso:
+    // cai no id interno em vez de mostrar "—" e deixar a linha sem identificação.
+    return String(paciente.tita_paciente_id ?? paciente.id_paciente)
+  }
+  return String(paciente.id_paciente)
+}

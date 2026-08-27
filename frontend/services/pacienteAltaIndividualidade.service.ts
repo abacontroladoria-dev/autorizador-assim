@@ -4,6 +4,18 @@ import { getSupabaseClient } from "@/lib/supabase/client"
 import { registrarAuditoria } from "@/services/cadastrosAuditoria.service"
 import type { AltaIndividualidade, AltaIndividualidadeForm, PacienteAlta, PacienteAltaForm } from "@/types/laudos"
 
+// Tabelas cadastros_pacientes_altas (1:N) e
+// cadastros_pacientes_altas_individualidades (0-ou-1 por paciente).
+// Ver supabase/migrations/20260826140000, 140100 e o rename em 140400.
+//
+// São tabelas DIFERENTES, com sequências de id próprias — e por isso entidades
+// de auditoria diferentes (`alta` e `alta_individualidade`). Gravar as duas sob
+// o mesmo rótulo, como se fazia até 20260826140300, misturava a trilha da alta
+// nº 3 com a da individualidade nº 3.
+
+const TB_ALTAS = "cadastros_pacientes_altas"
+const TB_INDIVIDUALIDADES = "cadastros_pacientes_altas_individualidades"
+
 // ─── READ ─────────────────────────────────────────────────────────────────────
 
 /** Busca os dados de individualidades de um paciente (0 ou 1 registro). */
@@ -13,9 +25,9 @@ export async function getAltaIndividualidade(
   const supabase = getSupabaseClient()
 
   const { data, error } = await supabase
-    .from("paciente_altas_individualidades")
+    .from(TB_INDIVIDUALIDADES)
     .select("*")
-    .eq("paciente_id", pacienteId)
+    .eq("id_paciente_pulsar", pacienteId)
     .maybeSingle()
 
   if (error) return { data: null, error: error.message }
@@ -29,9 +41,9 @@ export async function getAltasDoPaciente(
   const supabase = getSupabaseClient()
 
   const { data, error } = await supabase
-    .from("paciente_altas")
+    .from(TB_ALTAS)
     .select("*")
-    .eq("paciente_id", pacienteId)
+    .eq("id_paciente_pulsar", pacienteId)
     .order("data_alta", { ascending: false })
 
   if (error) return { data: [], error: error.message }
@@ -50,7 +62,7 @@ export async function salvarAltaIndividualidade(
   const supabase = getSupabaseClient()
 
   const payload = {
-    paciente_id: pacienteId,
+    id_paciente_pulsar: pacienteId,
     comp_agressivo: form.comp_agressivo,
     paciente_verbal: form.paciente_verbal,
     ambiente_natural: form.ambiente_natural,
@@ -58,14 +70,14 @@ export async function salvarAltaIndividualidade(
   }
 
   const { data: salvo, error } = await supabase
-    .from("paciente_altas_individualidades")
-    .upsert(payload, { onConflict: "paciente_id" })
-    .select("id")
+    .from(TB_INDIVIDUALIDADES)
+    .upsert(payload, { onConflict: "id_paciente_pulsar" })
+    .select("id_individualidade")
     .single()
 
   if (error) return { error: error.message }
 
-  const registroId = (salvo as { id: number }).id
+  const registroId = (salvo as { id_individualidade: number }).id_individualidade
 
   const acao = registroAnterior ? "editar" : "criar"
   const antes = registroAnterior
@@ -100,23 +112,23 @@ export async function criarAlta(
   const supabase = getSupabaseClient()
 
   const payload = {
-    paciente_id: pacienteId,
+    id_paciente_pulsar: pacienteId,
     data_alta: form.data_alta,
     especialidade_alta: form.especialidade_alta,
     arquivo_alta_path: form.arquivo_alta_path,
   }
 
   const { data, error } = await supabase
-    .from("paciente_altas")
+    .from(TB_ALTAS)
     .insert([payload])
-    .select("id")
+    .select("id_alta")
     .single()
 
   if (error) return { error: error.message }
 
   void registrarAuditoria({
-    tabela: "alta_individualidade",
-    registroId: data.id,
+    tabela: "alta",
+    registroId: data.id_alta,
     acao: "criar",
     pacienteId,
     pacienteNome,
@@ -135,15 +147,15 @@ export async function excluirAlta(
   const supabase = getSupabaseClient()
 
   const { error } = await supabase
-    .from("paciente_altas")
+    .from(TB_ALTAS)
     .delete()
-    .eq("id", alta.id)
+    .eq("id_alta", alta.id_alta)
 
   if (error) return { error: error.message }
 
   void registrarAuditoria({
-    tabela: "alta_individualidade",
-    registroId: alta.id,
+    tabela: "alta",
+    registroId: alta.id_alta,
     acao: "excluir",
     pacienteId,
     pacienteNome,
@@ -179,7 +191,7 @@ export async function getUrlAssinadaAlta(path: string): Promise<string | null> {
   const { data, error } = await supabase.storage
     .from("laudos-pacientes")
     .createSignedUrl(path, 900) // 15 minutos de validade
-    
+
   if (error || !data?.signedUrl) {
     console.error("Erro ao gerar URL da alta:", error)
     return null

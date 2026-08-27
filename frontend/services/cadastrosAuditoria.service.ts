@@ -1,3 +1,5 @@
+import toast from "react-hot-toast"
+
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { getUsuarioAtual } from "@/lib/supabase/usuarioAtual"
 import { camposAlterados, resumoAlteracao } from "@/lib/cadastros/auditoriaFormat"
@@ -31,12 +33,33 @@ const COLUNAS = [
 ].join(",")
 
 /**
+ * Avisa que a trilha falhou, sem derrubar a ação.
+ *
+ * Existe por causa de um bug de semanas: o CHECK de `tabela` em produção não
+ * conhecia 'laudo' nem 'alta_individualidade' (a migration que os acrescentava
+ * nunca foi aplicada), então TODO insert de trilha vindo das abas Laudo e Altas
+ * era rejeitado pelo banco — e morria aqui, em console.error, sem ninguém ver.
+ * Descoberto só quando o usuário estranhou uma exclusão de alta que não
+ * aparecia no histórico. Ver 20260826140300.
+ *
+ * O toast é discreto e não bloqueia: a ação principal DEU CERTO, o que falhou
+ * foi o registro dela. Mas silêncio total já provou que esconde regressão.
+ */
+function avisarFalhaDeTrilha(detalhe: unknown): void {
+  console.error("Erro ao registrar auditoria de cadastro:", detalhe)
+  toast(
+    "A alteração foi salva, mas não entrou no histórico. Avise o suporte.",
+    { icon: "⚠️", duration: 6000, id: "falha-trilha-cadastros" }
+  )
+}
+
+/**
  * Registra uma entrada na trilha.
  *
  * NUNCA lança e nunca devolve erro: auditoria não pode derrubar a ação
  * principal. Se o paciente foi salvo e a trilha falhou, o certo é o paciente
- * continuar salvo — o erro vai para o console, não para a cara do usuário.
- * Mesma decisão de salasAuditoria.service.ts.
+ * continuar salvo. Mesma decisão de salasAuditoria.service.ts — mas, diferente
+ * de antes, a falha agora aparece (ver avisarFalhaDeTrilha).
  */
 export async function registrarAuditoria(entrada: EntradaAuditoria): Promise<void> {
   try {
@@ -70,9 +93,9 @@ export async function registrarAuditoria(entrada: EntradaAuditoria): Promise<voi
       usuario_nome: usuario.nome,
     })
 
-    if (error) console.error("Erro ao registrar auditoria de cadastro:", error)
+    if (error) avisarFalhaDeTrilha(error)
   } catch (e) {
-    console.error("Erro ao registrar auditoria de cadastro:", e)
+    avisarFalhaDeTrilha(e)
   }
 }
 

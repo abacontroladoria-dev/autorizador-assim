@@ -11,6 +11,13 @@ import type { EntidadeAuditada, EntradaAuditoria, RegistroAuditoria } from "@/ty
 const CAMPOS_IGNORADOS = new Set([
   "id",
   "id_paciente",
+  // Chaves das tabelas de laudos/altas depois do rename de 20260826140400 —
+  // vêm dentro dos payloads de auditoria e não dizem nada ao usuário.
+  "id_paciente_pulsar",
+  "id_laudo",
+  "id_alta",
+  "id_individualidade",
+  "id_laudo_especialidade",
   "criado_em",
   "atualizado_em",
   "id_usuario",
@@ -24,7 +31,10 @@ const LABEL_POR_ENTIDADE: Record<EntidadeAuditada, Record<string, string>> = {
     nome: "Nome",
     nome_civil: "Nome civil",
     tem_nome_civil: "Usa nome social",
-    matricula: "ID",
+    // Deixou de ser "ID" em 2026-08-26: o identificador visível passou a ser
+    // id_paciente_tita ou id_paciente_pulsar conforme a origem (idExibicao, em
+    // types/paciente.ts). `matricula` continua existindo, só não é mais o ID.
+    matricula: "Matrícula (legado)",
     cpf: "CPF",
     data_nascimento: "Data de nascimento",
     sexo: "Sexo",
@@ -120,14 +130,16 @@ const LABEL_POR_ENTIDADE: Record<EntidadeAuditada, Record<string, string>> = {
     qt_laudo: "Qt. laudo",
     qt_autorizacao: "Qt. autorização",
   },
+  alta: {
+    data_alta: "Data da alta",
+    especialidade_alta: "Especialidade da alta",
+    arquivo_alta_path: "Anexo da alta",
+  },
   alta_individualidade: {
     comp_agressivo: "Comp. agressivo",
     paciente_verbal: "Paciente verbal",
     ambiente_natural: "Autorização de ambiente natural",
     nivel_suporte: "Nível de suporte clínico",
-    data_alta: "Data da alta",
-    especialidade_alta: "Especialidade da alta",
-    arquivo_alta_path: "Anexo da alta",
   },
 }
 

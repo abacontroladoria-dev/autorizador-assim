@@ -51,7 +51,7 @@ function formDeEdicao(laudo: PacienteLaudo): LaudoForm {
     observacoes: laudo.observacoes ?? "",
     em_uso: laudo.em_uso ?? false,
     especialidades: laudo.especialidades.map((e) => ({
-      id: e.id,
+      id_laudo_especialidade: e.id_laudo_especialidade,
       especialidade: e.especialidade,
       qt_laudo: e.qt_laudo !== null ? String(e.qt_laudo) : "",
       qt_autorizacao: e.qt_autorizacao !== null ? String(e.qt_autorizacao) : "",
