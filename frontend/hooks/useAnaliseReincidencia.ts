@@ -340,7 +340,7 @@ function marcadosDaSemana(
     {
       descoberta: (s) => sessaoSemCobertura(s, cutoff, vinculos.porBloco),
       decorrida: (s) => sessaoDecorrida(s, cutoff),
-      excedentes: excedentesDoPlacar(placar, autorizacoes),
+      excedentes: excedentesDoPlacar(placar, autorizacoes, pareadas),
     },
     vinculos
   )
@@ -709,6 +709,12 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
       for (const a of item.autorizacoes) {
         if (a.data_execucao && (!ultima || a.data_execucao > ultima)) ultima = a.data_execucao
       }
+      // O pareamento do banco, emprestado — a mesma leitura que o modal faz por
+      // `guiasPareadas`. É ele que diz QUAL guia sobrou, e sem ele a atribuição
+      // do excedente cai no desempate por data e costuma acusar a guia errada.
+      const pareadasDoItem = new Set(
+        item.sessoes.map((s) => s.guia).filter((g): g is string => !!g)
+      )
       const pacienteIds = [...item.pacienteIds]
       linhas.push({
         chave: item.chave,
@@ -720,7 +726,7 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
         contagem: contarPendencias(
           placar,
           ledger,
-          excedentesDoPlacar(placar, item.autorizacoes)
+          excedentesDoPlacar(placar, item.autorizacoes, pareadasDoItem)
         ),
         sessoes: item.sessoes.length,
         ultimaAutorizacao: ultima,
@@ -989,20 +995,15 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   )
 
   /**
-   * As guias que estouraram a cota — nomeadas, não contadas.
+   * As guias que estouraram a cota — nomeadas, não contadas. Ver
+   * `excedentesDoPlacar`, que carrega o critério e o defeito que o trocou.
    *
-   * `excedente` é um número por TUSS ("6 liberadas para 5 sessões"), e um número
-   * não se destaca num cartão. A atribuição é posicional pela `data_execucao`:
-   * dentro do TUSS, as ÚLTIMAS `excedente` liberações são as que passaram do
-   * agendado. É a mesma ordem que o pareamento do banco usa para decidir qual
-   * autorização casa com qual sessão, então isto não inventa critério novo —
-   * lê o mesmo que a ASSIM leu quando recusou a seguinte por reincidência.
-   *
-   * Só liberação entra: recusada não gastou cota, e cancelada foi desfeita.
+   * `guiasPareadas` é o argumento que faz a escolha ser um fato e não um chute:
+   * a guia marcada é a que não casou com sessão nenhuma.
    */
   const guiasExcedentes = useMemo(
-    () => excedentesDoPlacar(placar, autorizacoesPaciente),
-    [placar, autorizacoesPaciente]
+    () => excedentesDoPlacar(placar, autorizacoesPaciente, guiasPareadas),
+    [placar, autorizacoesPaciente, guiasPareadas]
   )
 
   /**

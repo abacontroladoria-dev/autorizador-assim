@@ -168,17 +168,37 @@ export function contarPendencias(
  * As guias que estouraram a cota — nomeadas, não contadas.
  *
  * `excedente` é um número por TUSS ("6 liberadas para 5 sessões"), e um número
- * não se destaca num cartão. A atribuição é posicional pela `data_execucao`:
- * dentro do TUSS, as ÚLTIMAS `excedente` liberações são as que passaram do
- * agendado. É a mesma ordem que o pareamento do banco usa para decidir qual
- * autorização casa com qual sessão, então isto não inventa critério novo — lê o
- * mesmo que a ASSIM leu quando recusou a seguinte por reincidência.
+ * não se destaca num cartão. Esta função escolhe QUAIS guias vestem esse número.
+ *
+ * O critério é a guia que NÃO casou com sessão nenhuma — `pareadas` traz as que
+ * a RPC já encaixou. Isso não é heurística: é a leitura direta do fato que o
+ * excedente mede. Sobrou liberação porque alguma delas não tem sessão embaixo,
+ * e é essa que a grade precisa apontar.
+ *
+ * Era posicional até 2026-08-27 — "as ÚLTIMAS `excedente` liberações por
+ * `data_execucao`" —, e a justificativa registrada era que o banco pareia
+ * posicionalmente. Ele não pareia: medido em produção, cada sessão carrega a
+ * guia autorizada NAQUELE DIA (Theo Meneses, TUSS 22070400, as sete sessões de
+ * agosto). Com isso a regra antiga errava o alvo em 2 dos 3 excedentes do mês, e
+ * errava para o pior lado — marcava uma guia que TEM sessão e deixava a órfã
+ * sem marca. No caso do Theo acusava a 405507 (26/08, pareada com a sessão das
+ * 08:00) enquanto a 51500 (05/08, sem sessão nenhuma) passava batida; no do Davi
+ * Yuri, acusava a 368385 (24/08) em vez da 13846 (03/08).
+ *
+ * A ordem por `data_execucao` sobrevive como DESEMPATE, para o caso de sobrarem
+ * mais guias sem par do que o excedente comporta: aí as mais recentes são as que
+ * passaram do agendado. E se nada ficou sem par (o excedente veio de sessão
+ * cancelada, não de guia solta), o desempate responde sozinho — sem ele a grade
+ * ficaria com um número no topo e nenhum cartão marcado, que é justamente a
+ * divergência que esta tela existe para caçar.
  *
  * Só liberação entra: recusada não gastou cota, e cancelada foi desfeita.
  */
 export function excedentesDoPlacar(
   placar: PlacarTuss[],
-  autorizacoes: AutorizacaoAssimSemana[]
+  autorizacoes: AutorizacaoAssimSemana[],
+  /** As guias que a RPC já casou com uma sessão. Vazio = cai no desempate. */
+  pareadas: ReadonlySet<string> = new Set()
 ): Set<string> {
   const marcadas = new Set<string>()
   for (const p of placar) {
@@ -186,7 +206,22 @@ export function excedentesDoPlacar(
     const doTuss = autorizacoes
       .filter((a) => (a.codigo_tuss ?? '—') === p.codigo_tuss && autorizacaoLiberada(a.status))
       .sort((a, b) => (a.data_execucao ?? '').localeCompare(b.data_execucao ?? ''))
-    for (const a of doTuss.slice(-p.excedente)) marcadas.add(a.guia)
+
+    // Primeiro as que não casaram com sessão — as mais recentes entre elas, se
+    // forem mais do que o excedente. Depois, se ainda faltar marca, completa
+    // pelo fim da fila: o excedente é um fato do placar e precisa de dono.
+    //
+    // O orçamento é contado NESTE TUSS (`deste`), e não em `marcadas`: aquele
+    // acumula o mês inteiro, e compará-lo com `p.excedente` faria o segundo TUSS
+    // nascer "já cheio" e não marcar nada.
+    const deste = new Set<string>()
+    const semPar = doTuss.filter((a) => !pareadas.has(a.guia))
+    for (const a of semPar.slice(-p.excedente)) deste.add(a.guia)
+    for (const a of doTuss.slice(-p.excedente)) {
+      if (deste.size >= p.excedente) break
+      deste.add(a.guia)
+    }
+    for (const guia of deste) marcadas.add(guia)
   }
   return marcadas
 }

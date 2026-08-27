@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest'
-import { autorizacaoReincidencia, calcularLedger, contarPendencias } from './contagem'
+import {
+  autorizacaoReincidencia,
+  calcularLedger,
+  contarPendencias,
+  excedentesDoPlacar,
+} from './contagem'
 import type { AutorizacaoAssimSemana, PlacarTuss } from '../types'
 
 /**
@@ -193,5 +198,93 @@ describe('contarPendencias — total', () => {
     expect(c.glosa).toBe(5)
     expect(c.faltando).toBe(4)
     expect(c.total).toBe(9) // e não 14
+  })
+})
+
+/**
+ * QUAL guia veste o número do excedente.
+ *
+ * A regra era posicional ("as últimas `excedente` liberações por
+ * `data_execucao`"), justificada por um pareamento posicional do banco que
+ * medição em produção mostrou não existir: cada sessão carrega a guia
+ * autorizada NAQUELE DIA. O efeito era marcar uma guia que TEM sessão e deixar
+ * a órfã sem marca — errado nos dois sentidos ao mesmo tempo, em 2 dos 3
+ * excedentes de agosto/2026.
+ */
+describe('excedentesDoPlacar', () => {
+  const placar = (excedente: number): PlacarTuss[] => [
+    {
+      codigo_tuss: '22070400', terapias: 'Psicomotricidade', agendadas: 7, decorridas: 7,
+      autorizadas: 8, liberadas: 8, canceladas: 0, excedente, faltante: 0, naoSolicitada: 0,
+    },
+  ]
+
+  /** O caso Theo Meneses, TUSS 22070400: a 51500 (05/08) é a que não tem sessão. */
+  const DO_THEO = [
+    autorizacao({ guia: '26824', codigo_tuss: '22070400', data_execucao: '2026-08-04T08:48:00' }),
+    autorizacao({ guia: '51500', codigo_tuss: '22070400', data_execucao: '2026-08-05T07:57:00' }),
+    autorizacao({ guia: '380679', codigo_tuss: '22070400', data_execucao: '2026-08-25T08:47:00' }),
+    autorizacao({ guia: '405507', codigo_tuss: '22070400', data_execucao: '2026-08-26T08:57:00' }),
+  ]
+  const PAREADAS_DO_THEO = new Set(['26824', '380679', '405507'])
+
+  it('marca a guia SEM sessão, não a mais recente', () => {
+    const exc = excedentesDoPlacar(placar(1), DO_THEO, PAREADAS_DO_THEO)
+    expect([...exc]).toEqual(['51500'])
+  })
+
+  it('nunca marca uma guia que já tem sessão', () => {
+    const exc = excedentesDoPlacar(placar(1), DO_THEO, PAREADAS_DO_THEO)
+    for (const guia of exc) expect(PAREADAS_DO_THEO.has(guia), guia).toBe(false)
+  })
+
+  it('recusada não entra: não gastou cota', () => {
+    const com1601 = [
+      ...DO_THEO,
+      autorizacao({
+        guia: '405760', codigo_tuss: '22070400',
+        status: '1601-REINCIDENCIA NO ATEN', data_execucao: '2026-08-26T09:13:00',
+      }),
+    ]
+    expect([...excedentesDoPlacar(placar(1), com1601, PAREADAS_DO_THEO)]).toEqual(['51500'])
+  })
+
+  it('sobrando mais sem-par que o excedente, fica com as mais recentes', () => {
+    const pareadas = new Set(['26824'])
+    // 51500, 380679 e 405507 estão sem par; o excedente é 2.
+    const exc = excedentesDoPlacar(placar(2), DO_THEO, pareadas)
+    expect([...exc].sort()).toEqual(['380679', '405507'])
+  })
+
+  it('sem nenhuma guia solta, o desempate por data responde', () => {
+    // O excedente veio de outro lugar (sessão cancelada, por exemplo). O número
+    // existe no placar e precisa de dono, senão a grade fica com um número no
+    // topo e nenhum cartão marcado.
+    const todasPareadas = new Set(['26824', '51500', '380679', '405507'])
+    const exc = excedentesDoPlacar(placar(1), DO_THEO, todasPareadas)
+    expect([...exc]).toEqual(['405507'])
+  })
+
+  it('o orçamento é por TUSS — o segundo não nasce cheio', () => {
+    // `marcadas` acumula o mês inteiro; contar o orçamento nele faria o segundo
+    // TUSS não marcar nada.
+    const doisTuss: PlacarTuss[] = [
+      { codigo_tuss: 'A', terapias: 'x', agendadas: 1, decorridas: 1, autorizadas: 2, liberadas: 2, canceladas: 0, excedente: 1, faltante: 0, naoSolicitada: 0 },
+      { codigo_tuss: 'B', terapias: 'y', agendadas: 1, decorridas: 1, autorizadas: 2, liberadas: 2, canceladas: 0, excedente: 1, faltante: 0, naoSolicitada: 0 },
+    ]
+    const autz = [
+      autorizacao({ guia: 'A1', codigo_tuss: 'A', data_execucao: '2026-08-01T08:00:00' }),
+      autorizacao({ guia: 'A2', codigo_tuss: 'A', data_execucao: '2026-08-02T08:00:00' }),
+      autorizacao({ guia: 'B1', codigo_tuss: 'B', data_execucao: '2026-08-01T09:00:00' }),
+      autorizacao({ guia: 'B2', codigo_tuss: 'B', data_execucao: '2026-08-02T09:00:00' }),
+    ]
+    const exc = excedentesDoPlacar(doisTuss, autz, new Set(['A1', 'B1']))
+    expect([...exc].sort()).toEqual(['A2', 'B2'])
+  })
+
+  it('sem `pareadas`, cai no comportamento antigo em vez de marcar tudo', () => {
+    // Compatibilidade: o parâmetro é opcional e um chamador que não o passe não
+    // pode ver o mês inteiro marcado.
+    expect([...excedentesDoPlacar(placar(1), DO_THEO)]).toEqual(['405507'])
   })
 })
