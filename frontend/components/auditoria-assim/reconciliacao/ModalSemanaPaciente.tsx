@@ -289,8 +289,11 @@ type Props = {
   onClose: () => void
   analise: ReturnType<typeof useAnaliseReincidencia>
   podeVincular: boolean
+  /** `admin`/`autorizacao`. Mais estreito que `podeVincular` — ver a RPC. */
+  podeReclassificar: boolean
   codigosGlosa: Map<string, string>
   onVincularGuia: (guia: string) => void
+  onReclassificar: (cartao: CartaoGrade) => void
   /** Ligado = a grade está escolhendo a sessão desta guia. Ver `ModoVinculo`. */
   vinculo: ModoVinculo | null
 }
@@ -333,7 +336,8 @@ type Props = {
  * listagem continua sendo onde elas se leem com os olhos.
  */
 export default function ModalSemanaPaciente({
-  open, onClose, analise, podeVincular, codigosGlosa, onVincularGuia, vinculo,
+  open, onClose, analise, podeVincular, podeReclassificar, codigosGlosa,
+  onVincularGuia, onReclassificar, vinculo,
 }: Props) {
   /** O cartão aberto na gaveta lateral. Nulo = só a grade. */
   const [detalhe, setDetalhe] = useState<CartaoGrade | null>(null)
@@ -650,8 +654,11 @@ export default function ModalSemanaPaciente({
                 codigosGlosa={codigosGlosa}
                 conferencia={analise.conferenciasPorBloco.get(detalhe.chave)}
                 nota={analise.notasPorBloco.get(detalhe.chave)}
+                reclassificacao={analise.reclassificacoesPorBloco.get(detalhe.chave)}
                 podeVincular={podeVincular}
+                podeReclassificar={podeReclassificar}
                 onVincular={onVincularGuia}
+                onReclassificar={onReclassificar}
                 onFechar={() => setDetalhe(null)}
               />
             </>

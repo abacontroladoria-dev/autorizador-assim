@@ -497,6 +497,53 @@ export type VinculoCobertura = VinculoAutorizacao & {
   data_execucao: string | null
 }
 
+/**
+ * As situações para as quais uma sessão pode ser reclassificada à mão.
+ *
+ * Espelha a constraint `auditoria_situacao_overrides_nova_ck` — e a ordem é a
+ * mesma em que os botões aparecem, do desfecho mais comum para o mais raro.
+ *
+ * `LIBERADA` e `GLOSA_RESOLVIDA` estão FORA, e não por esquecimento: afirmar
+ * cobertura exige uma guia, e o caminho para isso é o vínculo desta mesma aba.
+ * O banco recusa esses dois valores; esta lista existe para que a tela nem os
+ * ofereça.
+ */
+export const SITUACOES_RECLASSIFICAVEIS = [
+  'FALTA',
+  'FALTA_TERAPEUTA',
+  'CANCELADA',
+  'NAO_SOLICITADA',
+] as const
+
+export type SituacaoReclassificavel = (typeof SITUACOES_RECLASSIFICAVEIS)[number]
+
+/**
+ * Uma reclassificação manual de situação, como `auditoria_situacao_overrides` a
+ * guarda — o log de quem sobrepôs a derivação automática, e por quê.
+ *
+ * `situacao_anterior` é congelada no instante da decisão, nunca relida: é o "de"
+ * do log, e ele tem de continuar dizendo o que a pessoa viu quando decidiu. A
+ * derivação pode mudar depois (o relatório da ASSIM chega, o robô conclui a
+ * linha), e um "de" relido contaria a história de agora em vez da história da
+ * decisão.
+ *
+ * Uma sessão tem no máximo UMA ativa (`desfeito_em is null`), garantida por
+ * unique parcial. As desfeitas continuam na tabela e aparecem no histórico —
+ * desfazer preserva o rastro, não o apaga.
+ */
+export type ReclassificacaoSituacao = {
+  id: string
+  bloco_id: string
+  situacao_anterior: string
+  situacao_nova: string
+  justificativa: string
+  reclassificado_por: string
+  reclassificado_em: string
+  desfeito_por: string | null
+  desfeito_em: string | null
+  desfeito_motivo: string | null
+}
+
 /** Uma sessão que a guia órfã selecionada poderia estar cobrindo. */
 export type CandidataVinculo = {
   bloco_id: string

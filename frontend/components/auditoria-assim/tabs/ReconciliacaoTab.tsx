@@ -6,14 +6,33 @@ import { useAnaliseReincidencia } from '@/hooks/useAnaliseReincidencia'
 import { useGlosaCodigos } from '@/hooks/useGlosaCodigos'
 import { JANELA_PADRAO, useReconciliacaoAssim } from '@/hooks/useReconciliacaoAssim'
 import ModalConfirmarVinculo from '../ModalConfirmarVinculo'
+import ModalReclassificarSituacao from '../ModalReclassificarSituacao'
 import ListaPendencias from '../reconciliacao/ListaPendencias'
 import PainelAvulsas from '../reconciliacao/PainelAvulsas'
 import ModalSemanaPaciente from '../reconciliacao/ModalSemanaPaciente'
 import { hojeLocal } from '../reconciliacao/datas'
-import type { AlvoAnalise, CandidataVinculo, GuiaOrfa } from '../types'
+import {
+  desfazerReclassificacao,
+  reclassificarSituacao,
+} from '@/services/reconciliacao-assim.service'
+import type {
+  AlvoAnalise, CandidataVinculo, CartaoGrade, GuiaOrfa, SituacaoReclassificavel,
+} from '../types'
 
 /** Os papéis que a RPC aceita para escrever. `diretoria` vê, mas não vincula. */
 const PAPEIS_QUE_VINCULAM = new Set(['admin', 'autorizacao', 'recepcao'])
+
+/**
+ * Quem pode sobrepor a situação de uma sessão — mais estreito que quem vincula,
+ * e a diferença é deliberada (espelha as RPCs `reclassificar_situacao` e
+ * `desfazer_reclassificacao`).
+ *
+ * Vincular guia é apontar uma evidência que existe na ASSIM e que qualquer um
+ * pode conferir. Reclassificar é sobrepor um julgamento à evidência, e muda o
+ * que o faturamento considera pendente. Quem responde por isso é o setor de
+ * Autorização — `recepcao` fica de fora.
+ */
+const PAPEIS_QUE_RECLASSIFICAM = new Set(['admin', 'autorizacao'])
 
 /**
  * Os diálogos desta aba, sempre um só de cada vez.
@@ -59,6 +78,7 @@ type Props = {
 export default function ReconciliacaoTab({ alvo, onAlvoConsumido }: Props) {
   const { effectiveRole } = useImpersonation()
   const podeVincular = PAPEIS_QUE_VINCULAM.has(effectiveRole ?? '')
+  const podeReclassificar = PAPEIS_QUE_RECLASSIFICAM.has(effectiveRole ?? '')
   const codigosGlosa = useGlosaCodigos()
 
   const analise = useAnaliseReincidencia(alvo?.data ?? hojeLocal(), alvo?.pacienteNome ?? null)
@@ -80,6 +100,18 @@ export default function ReconciliacaoTab({ alvo, onAlvoConsumido }: Props) {
    * de vínculo se desmontaria no meio da escolha, sem dizer por quê.
    */
   const [guiaEmVinculo, setGuiaEmVinculo] = useState<GuiaOrfa | null>(null)
+
+  /**
+   * A sessão cuja situação está sendo reclassificada. Nula = o modal está fechado.
+   *
+   * Não entra em `Etapa`: as etapas são estágios de UM fluxo (escolher a sessão
+   * de uma guia, depois confirmar), e a reclassificação não é estágio de nada —
+   * ela abre e fecha sobre a grade, que continua atrás. Fazê-la uma etapa
+   * obrigaria a grade a fechar para ela abrir, que é exatamente o defeito que
+   * aposentou o `ModalEscolherSessao`.
+   */
+  const [cartaoEmReclassificacao, setCartaoEmReclassificacao] = useState<CartaoGrade | null>(null)
+  const [salvandoReclassificacao, setSalvandoReclassificacao] = useState(false)
 
   // Haver paciente escolhido JÁ é "a semana está aberta" — não há um segundo
   // estado dizendo a mesma coisa, que é como as duas versões divergem. Durante a
@@ -125,6 +157,69 @@ export default function ReconciliacaoTab({ alvo, onAlvoConsumido }: Props) {
     [orfas, selecionarGuia]
   )
 
+  /**
+   * A reclassificação ativa da sessão aberta no modal — o que decide se ele
+   * pergunta "para o quê?" ou oferece o desfazer.
+   *
+   * Lida do mapa a cada render, e não copiada para o estado junto com o cartão:
+   * depois de confirmar, `recarregarSemana()` traz o mapa novo e o modal precisa
+   * refletir a decisão que acabou de ser tomada. Uma cópia congelada mostraria o
+   * estado anterior até alguém fechar e reabrir.
+   */
+  const reclassificacaoAberta = cartaoEmReclassificacao
+    ? (analise.reclassificacoesPorBloco.get(cartaoEmReclassificacao.chave) ?? null)
+    : null
+
+  const fecharReclassificacao = useCallback(() => setCartaoEmReclassificacao(null), [])
+
+  /**
+   * Confirma a reclassificação e recarrega — as CINCO cargas, pelo mesmo motivo
+   * que o vínculo recarrega as quatro.
+   *
+   * Aqui a recarga não é opcional nem cosmética: a `situacao` reclassificada vem
+   * da RPC da Conferência, então sem ela o cartão continuaria mostrando GLOSA
+   * depois de o banco já ter aceitado a mudança — e o contador do cabeçalho
+   * continuaria contando aquela glosa. Os dois lados envelhecem juntos.
+   *
+   * O erro NÃO é engolido: sobe para o modal, que o mostra ao lado do botão. As
+   * mensagens da RPC são escritas para serem lidas ("Sessão X está coberta por
+   * uma guia vinculada"), e um `catch` aqui as trocaria por um fechamento
+   * silencioso que parece sucesso.
+   */
+  const confirmarReclassificacao = useCallback(
+    async (situacao: SituacaoReclassificavel, justificativa: string) => {
+      if (!cartaoEmReclassificacao) return
+      setSalvandoReclassificacao(true)
+      try {
+        await reclassificarSituacao({
+          blocoId: cartaoEmReclassificacao.chave,
+          situacaoNova: situacao,
+          justificativa,
+        })
+        recarregarSemana()
+        setCartaoEmReclassificacao(null)
+      } finally {
+        setSalvandoReclassificacao(false)
+      }
+    },
+    [cartaoEmReclassificacao, recarregarSemana]
+  )
+
+  const confirmarDesfazer = useCallback(
+    async (motivo: string) => {
+      if (!reclassificacaoAberta) return
+      setSalvandoReclassificacao(true)
+      try {
+        await desfazerReclassificacao(reclassificacaoAberta.id, motivo)
+        recarregarSemana()
+        setCartaoEmReclassificacao(null)
+      } finally {
+        setSalvandoReclassificacao(false)
+      }
+    },
+    [reclassificacaoAberta, recarregarSemana]
+  )
+
   const modoVinculo = useMemo(
     () =>
       guiaEmVinculo && podeVincular
@@ -155,7 +250,17 @@ export default function ReconciliacaoTab({ alvo, onAlvoConsumido }: Props) {
     <div className="flex flex-col gap-4">
       {!podeVincular && (
         <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-600">
-          Seu perfil permite consultar a reconciliação, mas não vincular autorizações.
+          Seu perfil permite consultar a reconciliação, mas não vincular autorizações
+          {!podeReclassificar && ' nem reclassificar situações'}.
+        </p>
+      )}
+      {/* O caso do meio: `recepcao` vincula mas não reclassifica. Sem esta linha
+          o botão da gaveta aparece desabilitado sem que nada na tela tenha dito
+          por quê — e o `title` dele só é lido por quem tem mouse. */}
+      {podeVincular && !podeReclassificar && (
+        <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-[12px] text-slate-600">
+          Seu perfil permite vincular autorizações, mas não reclassificar a situação de
+          uma sessão — isso é do setor de Autorização.
         </p>
       )}
 
@@ -189,9 +294,24 @@ export default function ReconciliacaoTab({ alvo, onAlvoConsumido }: Props) {
         onClose={fecharSemana}
         analise={analise}
         podeVincular={podeVincular}
+        podeReclassificar={podeReclassificar}
         codigosGlosa={codigosGlosa}
         onVincularGuia={vincularGuia}
+        onReclassificar={setCartaoEmReclassificacao}
         vinculo={modoVinculo}
+      />
+
+      {/* Por cima da grade, que continua atrás — a semana é o contexto que
+          torna a decisão possível ("esta é mesmo a sessão em que ele faltou?").
+          Não é uma `etapa` pelo motivo anotado em `cartaoEmReclassificacao`. */}
+      <ModalReclassificarSituacao
+        open={cartaoEmReclassificacao !== null}
+        onClose={fecharReclassificacao}
+        cartao={cartaoEmReclassificacao}
+        reclassificacao={reclassificacaoAberta}
+        salvando={salvandoReclassificacao}
+        onReclassificar={confirmarReclassificacao}
+        onDesfazer={confirmarDesfazer}
       />
 
       {/* O aceite continua sendo modal, e só ele. A escolha virou modo da grade
