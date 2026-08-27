@@ -456,7 +456,7 @@ export default function TVPage() {
   const [online, setOnline] = useState(true)
 
   // Quem está em destaque no centro da tela — some sozinho depois de
-  // DESTAQUE_MS mesmo sem chamada nova (efeito abaixo).
+  // DESTAQUE_MS mesmo sem chamada nova (`destacar`, abaixo).
   const [destacadoId, setDestacadoId] = useState<string | null>(null)
 
   // Qual chamada MERECE o centro da tela: preenchido pelo poll só quando a
@@ -780,9 +780,21 @@ export default function TVPage() {
           if (!Number.isNaN(t) && t > marcaDagua.current) marcaDagua.current = t
         }
 
+        // Quem está no centro saiu da lista (autorização concluída, ou caiu da
+        // janela): limpa o destaque em vez de deixar um nome resolvido em 96px.
+        // Sem isto o card ficaria preso até o fim do DESTAQUE_MS.
+        //
+        // Zera também o `idParaDestacar`, senão o efeito acima fica com um id
+        // que não existe mais na lista e um reagendamento futuro do MESMO id
+        // (chamada repetida do mesmo responsável) não dispararia — o state não
+        // teria mudado de valor.
+        const ids = new Set(lista.map((c) => c.id))
+        setDestacadoId((atual) => (atual && !ids.has(atual) ? null : atual))
+        setIdParaDestacar((atual) => (atual && !ids.has(atual) ? null : atual))
+
         if (primeiraCarga.current) {
           // Ao abrir/recarregar a TV o que já passou aparece na tela, mas não é
-          // anunciado de novo.
+          // anunciado de novo — nem destacado: nada aqui é evento desta sessão.
           primeiraCarga.current = false
 
           // O centro só recebe a mais recente se ela ainda for recente de fato.
@@ -800,7 +812,8 @@ export default function TVPage() {
           processarFila()
 
           // Mesma decisão do anúncio governa o destaque: `novas[0]` é a mais
-          // recente das genuinamente novas.
+          // recente das genuinamente novas — as outras (raro: duas no mesmo
+          // ciclo de 3s) entram no histórico e ainda são faladas.
           setIdParaDestacar(novas[0].id)
         }
       } catch {
@@ -1251,12 +1264,220 @@ export default function TVPage() {
                 </div>
               </>
             ) : (
-              // Espera não pode gritar como chamada: antes "Aguardando
-              // chamada..." ocupava o slot do nome em 96px extrabold, do mesmo
-              // tamanho de um evento real.
-              <p className="text-[clamp(28px,3vw,52px)] font-medium text-tv-ink-muted">
-                Aguardando chamada
-              </p>
+              // 🟩 ESPERA — estado institucional. Espera não pode gritar como
+              // chamada: nada aqui usa o tamanho do nome (96px) nem a cor de
+              // sinal, que só significa "é agora". A ilustração é decorativa e
+              // fica atrás de aria-hidden — a informação toda está no texto,
+              // que é o que o aria-live do <main> anuncia.
+              //
+              // -mx-10 desfaz o px-10 do card só nesta linha: a ilustração
+              // precisa da largura toda pra respirar, e a chamada continua com
+              // o padding original intacto.
+              <div className="-mx-10 w-full flex flex-col lg:flex-row items-center justify-center gap-8 lg:gap-4 px-8">
+                {/* 🪑 ilustração — SVG inline, sem requisição: a TV é quiosque
+                    e um asset que falha deixaria buraco no layout pro dia
+                    inteiro.
+
+                    Cor vem do logo da clínica (tokens tv-brand-*, amostrados do
+                    PNG — ver globals.css). Cada cor cai onde ela significa algo,
+                    não em rodízio decorativo: verde na planta (literal), azul no
+                    cenário — que é o papel do azul no próprio logo, onde ele
+                    desenha o sol, o arbusto e o horizonte —, roxo apoiando na
+                    mobília. Coral e rosa do logo ficam de fora: coral divide o
+                    hue exato do laranja de "chamando agora". */}
+                <div
+                  aria-hidden="true"
+                  className="shrink-0 w-[min(38%,420px)] max-w-[420px]"
+                >
+                  <svg
+                    viewBox="0 0 320 260"
+                    fill="none"
+                    className="w-full h-auto"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    {/* manchas de fundo — os dois hues dominantes do logo, bem
+                        lavados: dão profundidade sem virar bloco de cor. Ficam
+                        DE PROPÓSITO mais fracas que a mobília: quando estavam
+                        na mesma faixa de intensidade, a mancha azul competia
+                        com o sofá e ajudava a "apagá-lo". */}
+                    <circle cx="232" cy="74" r="62" fill="var(--color-tv-brand-blue)" opacity="0.08" />
+                    <circle cx="70" cy="150" r="46" fill="var(--color-tv-brand-purple)" opacity="0.07" />
+
+                    {/* grade de pontos, canto superior esquerdo */}
+                    <g fill="var(--color-tv-brand-blue)" opacity="0.4">
+                      {[0, 1, 2, 3].map((linha) =>
+                        [0, 1, 2, 3].map((coluna) => (
+                          <circle
+                            key={`${linha}-${coluna}`}
+                            cx={14 + coluna * 11}
+                            cy={92 + linha * 11}
+                            r="1.6"
+                          />
+                        )),
+                      )}
+                    </g>
+
+                    {/* luminária pendente — azul, como o traço do "universo".
+                        Sem opacidade de grupo: a 0.72 o traço dava 2.33:1 sobre
+                        o card e simplesmente desaparecia numa TV a 4 m. Cheio
+                        dá 3.37:1, e o strokeWidth subiu junto (2.4 -> 3) porque
+                        traço fino perde contraste aparente com a distância. */}
+                    <g stroke="var(--color-tv-brand-blue)" strokeWidth="3">
+                      <path d="M84 0 L84 58" />
+                      <path
+                        d="M62 84 Q84 52 106 84 Z"
+                        fill="var(--color-tv-brand-blue)"
+                        fillOpacity="0.14"
+                      />
+                    </g>
+
+                    {/* poltrona — roxo é o secundário: a maior massa da cena,
+                        então fica no hue de apoio e não no dominante. Mesma
+                        correção da luminária: estava em opacity 0.78 (2.88:1,
+                        abaixo do piso de 3:1 pra elemento gráfico) e o sofá
+                        "sumia" de longe. Cheio dá 4.14:1. */}
+                    <g stroke="var(--color-tv-brand-purple)" strokeWidth="3">
+                      <path
+                        d="M112 172 L112 138 Q112 126 124 126 L214 126 Q226 126 226 138 L226 172"
+                        fill="var(--color-tv-brand-purple)"
+                        fillOpacity="0.12"
+                      />
+                      <path
+                        d="M104 172 Q96 172 96 182 L96 206 Q96 214 104 214 L234 214 Q242 214 242 206 L242 182 Q242 172 234 172 Z"
+                        fill="var(--color-tv-brand-purple)"
+                        fillOpacity="0.16"
+                      />
+                      <path d="M118 214 L118 232 M220 214 L220 232" />
+                      <path d="M112 172 L226 172" />
+                    </g>
+
+                    {/* planta — verde do logo. É o único lugar onde a cor é
+                        literal, então é o único verde da tela. O vaso recua pro
+                        contorno neutro com um véu de roxo: cheio de roxo (como
+                        estava) ele empastava com a folha e disputava a atenção
+                        dela — cerâmica é fundo, folha é o assunto.
+
+                        NOTA: aqui só entram tokens que existem em RUNTIME.
+                        --color-tv-ink-muted vive apenas no `@theme inline` e
+                        resolve VAZIO num atributo de SVG (a forma desaparece);
+                        --color-tv-border e as --color-tv-brand-* são emitidas
+                        de verdade. Conferido no CSS servido. */}
+                    <g strokeWidth="3">
+                      <path
+                        d="M40 200 L46 232 Q46 238 52 238 L74 238 Q80 238 80 232 L86 200 Z"
+                        stroke="var(--color-tv-brand-purple)"
+                        strokeOpacity="0.55"
+                        fill="var(--color-tv-brand-purple)"
+                        fillOpacity="0.08"
+                      />
+                      {/* contorno no verde ESCURO (4.6:1) e preenchimento no
+                          verde claro do logo: o verde do logo sozinho dava
+                          1.36:1 de traço, ou seja folha invisível de longe */}
+                      <g stroke="var(--color-tv-brand-green-ink)">
+                        <path d="M63 200 L63 158" />
+                        <path
+                          d="M63 176 Q40 170 42 148 Q62 150 63 176"
+                          fill="var(--color-tv-brand-green)"
+                          fillOpacity="0.55"
+                        />
+                        <path
+                          d="M63 168 Q86 160 88 140 Q66 144 63 168"
+                          fill="var(--color-tv-brand-green)"
+                          fillOpacity="0.55"
+                        />
+                      </g>
+                    </g>
+
+                    {/* chão — neutro de propósito: linha de base não é marca */}
+                    <path d="M12 238 L308 238" stroke="var(--color-tv-border)" strokeWidth="2.2" />
+
+                    {/* cruzetas — as fagulhas do logo, em azul */}
+                    <g stroke="var(--color-tv-brand-blue)" strokeWidth="2.6" opacity="0.62">
+                      <path d="M264 118 L264 130 M258 124 L270 124" />
+                      <path d="M150 96 L150 106 M145 101 L155 101" />
+                    </g>
+                  </svg>
+                </div>
+
+                {/* 📅 selo calendário+relógio — "atendimento acontecendo
+                    agora". Fica junto da ilustração, como no layout aprovado. */}
+                <div
+                  aria-hidden="true"
+                  className="shrink-0 flex items-center justify-center"
+                >
+                  {/* o azul dominante do logo carrega o selo: é o elemento mais
+                      "marca" da composição. O anel tracejado herda o mesmo hue
+                      via currentColor em vez do cinza de borda. */}
+                  <div className="relative flex items-center justify-center w-[clamp(84px,9vw,132px)] h-[clamp(84px,9vw,132px)] rounded-full bg-(--color-tv-brand-blue-soft) text-(--color-tv-brand-blue)">
+                    <span className="absolute inset-[-10px] rounded-full border-2 border-dashed border-current opacity-40" />
+                    <svg
+                      viewBox="0 0 48 48"
+                      fill="none"
+                      className="w-[58%] h-[58%]"
+                      stroke="currentColor"
+                      strokeWidth="2.6"
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                    >
+                      <rect x="7" y="10" width="34" height="31" rx="5" />
+                      <path d="M7 19 L41 19" />
+                      <path d="M16 10 L16 5 M32 10 L32 5" />
+                      <circle cx="24" cy="30" r="7.5" />
+                      <path d="M24 26.5 L24 30 L27 32" />
+                    </svg>
+                  </div>
+                </div>
+
+                {/* 📝 bloco de texto — centro/direita */}
+                <div className="min-w-0 flex-1 flex flex-col items-center text-center lg:pl-4">
+                  {/* mesmo <p> e não <h1>: o h1 da página segue sendo o nome da
+                      clínica. 52px é o teto de propósito — abaixo dos 96px do
+                      nome, pra espera nunca competir com chamada. */}
+                  <p className="text-[clamp(34px,4vw,64px)] font-extrabold leading-[1.02] text-tv-ink text-balance">
+                    Atendimento
+                    <br />
+                    em andamento
+                  </p>
+
+                  {/* a régua é o único traço de marca no bloco de texto — dá o
+                      aceno de cor sem tingir palavra nenhuma */}
+                  <div className="mt-6 h-[3px] w-24 rounded-full bg-(--color-tv-brand-blue) opacity-60" />
+
+                  <p className="mt-6 max-w-[22ch] text-[clamp(20px,1.8vw,32px)] font-medium leading-snug text-tv-ink-muted text-balance">
+                    Chamaremos você quando for necessária uma autorização.
+                  </p>
+
+                  {/* pílula informativa: o pedido de ação concreto. Superfície
+                      tingida no AZUL do logo, não no verde: verde-limão sobre
+                      texto escuro lê como faixa de ADVERTÊNCIA, e isto é uma
+                      instrução permanente e calma — além de roubar o olho do
+                      título, que é quem deve liderar a tela. Azul é o hue
+                      ambiente daqui, então a pílula assenta em vez de gritar.
+                      O verde do logo fica onde é literal: a planta.
+
+                      O texto NÃO acompanha a cor — fica em tv-ink e
+                      tv-ink-muted, porque cinza claro sobre fundo tingido é
+                      justamente o que não se lê a 4 m. O sino é dourado (a
+                      pedido) e decorativo — aria-hidden, porque a frase ao lado
+                      já diz tudo; o dourado não é cor de estado nesta tela. */}
+                  <div className="mt-9 inline-flex items-center gap-4 rounded-full bg-(--color-tv-brand-blue-soft) border border-[color-mix(in_oklch,var(--color-tv-brand-blue)_35%,transparent)] px-7 py-4 text-left text-balance">
+                    <Bell
+                      aria-hidden="true"
+                      className="shrink-0 w-[clamp(24px,2.2vw,38px)] h-[clamp(24px,2.2vw,38px)] text-(--color-tv-brand-gold)"
+                      strokeWidth={2.1}
+                    />
+                    <span className="min-w-0">
+                      <span className="block text-[clamp(17px,1.5vw,26px)] font-semibold text-tv-ink">
+                        Por favor, permaneça na recepção.
+                      </span>
+                      <span className="block text-[clamp(15px,1.25vw,22px)] text-tv-ink-muted">
+                        Você será chamado(a) quando necessário.
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         </main>

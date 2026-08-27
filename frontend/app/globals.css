@@ -150,6 +150,40 @@
        caiu") pra não ler como alerta de erro.
        Branco sobre signal: 5.2:1 (AA folgado pro selo "Chamando agora"). */
     --color-tv-signal: #C2410C;
+
+    /* 🎨 PALETA DA MARCA — amostrada do logo-universo-aba.png (contagem de
+       pixels saturados, não a olho):
+         azul  #2C90BC  oklch(0.617 0.111 232)  48012 px  "universo", cenário, o A
+         coral #E47450  oklch(0.682 0.148 38)   32896 px  o B
+         roxo  #9068A8  oklch(0.583 0.105 312)  18736 px  o primeiro A
+         rosa  #DC8CB8  oklch(0.735 0.111 346)   6120 px  tarja direita
+         verde #D0DC9C  oklch(0.870 0.085 117)   5943 px  tarja esquerda
+
+       Usadas SÓ no estado de espera, e só na camada decorativa (ilustração +
+       ambiente). Três motivos pra não ir além disso:
+
+       1. Nenhuma passa 4.5:1 sobre o card (azul 3.52, coral 2.96, roxo 4.33,
+          rosa 2.41, verde 1.42) — nenhuma pode carregar texto. O texto segue
+          em tv-ink (15.33:1). Estas são cor de ilustração, não de conteúdo.
+       2. O coral do logo está em hue 38.4 — o MESMO hue do --color-tv-signal
+          (#C2410C, 38.4). Um segundo laranja na tela competiria com o único
+          significado que laranja tem aqui: "estão te chamando agora". Coral e
+          rosa ficam de fora do ambiente por isso.
+       3. Dosagem 60/30/10 sobre os elementos colorIDOS: azul domina (é o maior
+          share do logo e o hue mais perto do azul-ardósia da tela), roxo
+          apoia, verde aparece só na planta — onde a cor é literal.
+
+       Só o -soft entra em área grande; os cheios são traço fino de ilustração,
+       que não exige contraste de texto (decoração, WCAG 1.4.11 não se aplica).
+       Prefixo tv-brand pra deixar explícito que não são cor de estado: quem
+       mexer no card de chamada não alcança estas.
+
+       Declaradas em :root e não aqui no @theme, pela mesma razão das --bloco-*
+       acima: `@theme inline` substitui o valor direto no utilitário e NÃO emite
+       a custom property, então `fill="var(--color-tv-brand-blue)"` num atributo
+       de SVG não resolve nada e a forma some. Verificado no build: a ilustração
+       inteira renderizou vazia. Como estas cores são consumidas por atributo de
+       SVG (fill/stroke), elas precisam existir em tempo de execução. */
 }
 
 :root {
@@ -217,6 +251,31 @@
     --bloco-cap: oklch(0.932 0.032 255.585);
     --bloco-cap-borda: oklch(0.900 0.045 255);
     --bloco-borda: oklch(0.865 0.055 255);
+
+    /* 🎨 paleta do logo da clínica, usada só no estado de espera da /tv — o
+       porquê de cada cor e as medidas de contraste estão no @theme acima, junto
+       das outras --color-tv-*. Aqui em :root porque são consumidas como var()
+       crua em atributo de SVG, que o @theme inline não alcança. */
+    --color-tv-brand-blue:   oklch(0.617 0.111 232);
+    --color-tv-brand-purple: oklch(0.583 0.105 312);
+    --color-tv-brand-green:  oklch(0.870 0.085 117);
+    /* versões lavadas pro fundo/ambiente: chroma baixo, L alto — o mesmo hue
+       do logo sem virar bloco de cor atrás de texto */
+    --color-tv-brand-blue-soft:  oklch(0.955 0.024 232);
+    --color-tv-brand-green-soft: oklch(0.962 0.030 117);
+    /* O verde do logo (L 0.87) dá 1.36:1 sobre o card — invisível como TRAÇO.
+       Esta é a mesma folha, escurecida só o bastante pro contorno aparecer a 4 m
+       (3.41:1, acima do piso de 3:1); o verde claro do logo continua sendo o
+       PREENCHIMENTO da folha. */
+    --color-tv-brand-green-ink: oklch(0.620 0.105 128);
+
+    /* Dourado do sino da pílula (pedido do usuário). NÃO é o --color-tv-warn
+       (hue 78, "conexão caiu") nem o --color-tv-signal (hue 38, "chamando
+       agora"): fica em 85, entre os dois, e aparece num único lugar da tela —
+       um ícone decorativo (aria-hidden) dentro de instrução permanente. Como o
+       sino é só ornamento ao lado de uma frase que já diz tudo, ele não precisa
+       passar 3:1; medido, dá 2.36:1 sobre a pílula azul (#C59720). */
+    --color-tv-brand-gold: oklch(0.700 0.135 85);
 
     --sidebar: #F8FAFC;
     --sidebar-foreground: #334155;
