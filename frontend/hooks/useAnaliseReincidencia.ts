@@ -13,7 +13,6 @@ import { listarGuiasOrfas, listarVinculosAtivos } from '@/services/reconciliacao
 import type {
   AuditoriaAssimItem,
   AutorizacaoAssimSemana,
-  ContagemPendencias,
   GuiaOrfa,
   PacientePendencias,
   PlacarTuss,
@@ -23,6 +22,7 @@ import {
   SITUACOES_SEM_SESSAO,
   guiasSubstituidas,
   sessaoDecorrida,
+  sessaoNaoSolicitada,
   sessaoSemCobertura,
 } from '@/components/auditoria-assim/reconciliacao/cobertura'
 import {
@@ -32,6 +32,44 @@ import {
   type Vinculos,
 } from '@/components/auditoria-assim/reconciliacao/grade'
 import type { EstadoAutorizacao } from '@/components/auditoria-assim/reconciliacao/vinculo'
+import {
+  comoData,
+  comoIso,
+  diasUteisDe,
+  primeiraSegundaDoMes,
+  segundaDe,
+  somarDias,
+} from '@/components/auditoria-assim/reconciliacao/datas'
+import {
+  autorizacaoCancelada,
+  autorizacaoLiberada,
+  autorizacaoReincidencia,
+  calcularLedger,
+  contarPendencias,
+  excedentesDoPlacar,
+} from '@/components/auditoria-assim/reconciliacao/contagem'
+
+/**
+ * O cálculo puro — datas e aritmética — mora em `reconciliacao/`, não aqui.
+ *
+ * Saiu deste arquivo em 2026-08-26 pelo mesmo motivo que `guiasSubstituidas`
+ * tinha saído antes: este módulo importa os services, e com eles o cliente do
+ * Supabase, então qualquer teste que tocasse uma soma acabava construindo um
+ * cliente HTTP. Reexportado daqui porque era daqui que todo mundo importava, e
+ * mudar o arquivo de casa não é razão para mexer no import de quem só quer
+ * somar uma coluna ou achar uma segunda-feira.
+ */
+export {
+  autorizacaoCancelada,
+  autorizacaoLiberada,
+  autorizacaoReincidencia,
+  calcularLedger,
+  contarPendencias,
+  diasUteisDe,
+  excedentesDoPlacar,
+  segundaDe,
+  somarDias,
+}
 
 /**
  * Análise de reincidência — a cota do MÊS por TUSS, da clínica inteira.
@@ -94,50 +132,6 @@ import type { EstadoAutorizacao } from '@/components/auditoria-assim/reconciliac
  *  disparar todos de uma vez seria 44 requisições simultâneas (2 por dia). */
 const DIAS_POR_LOTE = 6
 
-/**
- * Datas sempre em componentes locais.
- *
- * `new Date('2026-08-17')` é interpretado como UTC e, em UTC-3, `.getDay()`
- * devolve o dia ANTERIOR — a armadilha documentada em
- * `lib/cronograma/comparativoSessoes.ts`. Construir com (ano, mês-1, dia) e
- * formatar com padding manual mantém tudo no fuso do navegador.
- */
-function comoData(iso: string): Date {
-  const [ano, mes, dia] = iso.split('-').map(Number)
-  return new Date(ano, (mes ?? 1) - 1, dia ?? 1)
-}
-
-function comoIso(d: Date): string {
-  const ano = d.getFullYear()
-  const mes = String(d.getMonth() + 1).padStart(2, '0')
-  const dia = String(d.getDate()).padStart(2, '0')
-  return `${ano}-${mes}-${dia}`
-}
-
-/** A segunda-feira da semana que contém `iso`. Domingo recua 6 dias, não avança. */
-export function segundaDe(iso: string): string {
-  const d = comoData(iso)
-  const dow = d.getDay() // 0 = domingo
-  d.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1))
-  return comoIso(d)
-}
-
-/** Os 5 dias úteis a partir de uma segunda. */
-export function diasUteisDe(segunda: string): string[] {
-  const base = comoData(segunda)
-  return Array.from({ length: 5 }, (_, i) => {
-    const d = new Date(base)
-    d.setDate(d.getDate() + i)
-    return comoIso(d)
-  })
-}
-
-export function somarDias(iso: string, dias: number): string {
-  const d = comoData(iso)
-  d.setDate(d.getDate() + dias)
-  return comoIso(d)
-}
-
 /** Os dias úteis (seg a sex) entre `inicio` e `fimInclusivo`, os dois inclusos. */
 export function diasUteisDoIntervalo(inicio: string, fimInclusivo: string): string[] {
   const dias: string[] = []
@@ -165,24 +159,6 @@ export function ultimoDiaDoMes(mesInicioIso: string): string {
 function somarMesesIso(mesIso: string, delta: number): string {
   const [ano, mes] = mesIso.split('-').map(Number)
   return comoIso(new Date(ano, mes - 1 + delta, 1))
-}
-
-/**
- * Só `Liberado` cru consumiu cota.
- *
- * Comparação EXATA, e não por prefixo: `Liberado *` é o rótulo que a ASSIM usa
- * para autorização **cancelada** — é assim que a migration 20260528120000 a
- * traduz para a situação CANCELADA, e é por isso que `get_guias_orfas` filtra
- * `status = 'Liberado'` e não `like 'Liberado%'`. Casar por prefixo contava
- * cancelada como cota gasta e inventava excedente onde não havia.
- */
-export function autorizacaoLiberada(status: string | null): boolean {
-  return (status ?? '').trim() === 'Liberado'
-}
-
-/** A autorização saiu e foi desfeita. Não consumiu cota e não pede nada. */
-export function autorizacaoCancelada(status: string | null): boolean {
-  return (status ?? '').trim() === 'Liberado *'
 }
 
 /** Hoje em componentes locais. */
@@ -268,6 +244,7 @@ export function calcularPlacar(
         canceladas: 0,
         excedente: 0,
         faltante: 0,
+        naoSolicitada: 0,
         terapiasVistas: new Set<string>(),
       }
       porTuss.set(chave, atual)
@@ -284,6 +261,7 @@ export function calcularPlacar(
     item.agendadas += 1
     if (sessaoDecorrida(s, cutoff)) item.decorridas += 1
     if (sessaoSemCobertura(s, cutoff, vinculosPorBloco)) item.faltante += 1
+    if (sessaoNaoSolicitada(s, cutoff, vinculosPorBloco)) item.naoSolicitada += 1
   }
 
   for (const a of autorizacoes) {
@@ -300,92 +278,6 @@ export function calcularPlacar(
       excedente: item.liberadas - item.agendadas,
     }))
     .sort((a, b) => b.excedente - a.excedente || a.codigo_tuss.localeCompare(b.codigo_tuss))
-}
-
-/**
- * Os três estados de guia que esta tela existe para vigiar.
- *
- * `ehOrfa` é injetado, e não decidido aqui, pelo motivo do cabeçalho: a
- * definição de órfã mora em `get_guias_orfas`.
- *
- * `substituidas` são as guias que uma triagem aposentou: a recusa (ou o
- * cancelamento) daquela sessão foi coberta por uma autorização externa, e o par
- * inteiro parou de pedir trabalho. Sem este conjunto, vincular uma guia baixava
- * "sem vínculo" e "faltando" e deixava "glosas" de pé — a linha continuava na
- * listagem, com uma pendência que a grade não conseguia mais apontar (a sessão
- * virou GLOSA_RESOLVIDA e sumiu dos cartões marcados). O número dizia 1 e a
- * faixa de semanas dizia "·", que é a divergência que esta tela existe para
- * caçar, virada contra ela mesma.
- *
- * A guia substituída NÃO deixa de existir: ela continua no histórico, e a sessão
- * continua dizendo GLOSA RESOLVIDA. O que ela deixa de ser é fila de trabalho.
- */
-export function calcularLedger(
-  autorizacoes: AutorizacaoAssimSemana[],
-  ehOrfa: (guia: string) => boolean,
-  substituidas: ReadonlySet<string> = new Set()
-) {
-  let semVinculo = 0
-  let glosas = 0
-  let canceladas = 0
-  for (const a of autorizacoes) {
-    if (ehOrfa(a.guia)) semVinculo += 1
-    if (substituidas.has(a.guia)) continue
-    if (autorizacaoCancelada(a.status)) canceladas += 1
-    else if (!autorizacaoLiberada(a.status)) glosas += 1
-  }
-  return { semVinculo, glosas, canceladas }
-}
-
-/** As cinco espécies de pendência, somadas. */
-export function contarPendencias(
-  placar: PlacarTuss[],
-  ledger: { semVinculo: number; glosas: number; canceladas: number }
-): ContagemPendencias {
-  let sobrando = 0
-  let faltando = 0
-  for (const p of placar) {
-    sobrando += Math.max(0, p.excedente)
-    faltando += p.faltante
-  }
-  const contagem: ContagemPendencias = {
-    glosa: ledger.glosas,
-    cancelamento: ledger.canceladas,
-    'sem-vinculo': ledger.semVinculo,
-    faltando,
-    sobrando,
-    total: 0,
-  }
-  contagem.total =
-    contagem.glosa + contagem.cancelamento + contagem['sem-vinculo'] + faltando + sobrando
-  return contagem
-}
-
-/**
- * As guias que estouraram a cota — nomeadas, não contadas.
- *
- * `excedente` é um número por TUSS ("6 liberadas para 5 sessões"), e um número
- * não se destaca num cartão. A atribuição é posicional pela `data_execucao`:
- * dentro do TUSS, as ÚLTIMAS `excedente` liberações são as que passaram do
- * agendado. É a mesma ordem que o pareamento do banco usa para decidir qual
- * autorização casa com qual sessão, então isto não inventa critério novo — lê o
- * mesmo que a ASSIM leu quando recusou a seguinte por reincidência.
- *
- * Só liberação entra: recusada não gastou cota, e cancelada foi desfeita.
- */
-export function excedentesDoPlacar(
-  placar: PlacarTuss[],
-  autorizacoes: AutorizacaoAssimSemana[]
-): Set<string> {
-  const marcadas = new Set<string>()
-  for (const p of placar) {
-    if (p.excedente <= 0) continue
-    const doTuss = autorizacoes
-      .filter((a) => (a.codigo_tuss ?? '—') === p.codigo_tuss && autorizacaoLiberada(a.status))
-      .sort((a, b) => (a.data_execucao ?? '').localeCompare(b.data_execucao ?? ''))
-    for (const a of doTuss.slice(-p.excedente)) marcadas.add(a.guia)
-  }
-  return marcadas
 }
 
 /**
@@ -448,7 +340,7 @@ function marcadosDaSemana(
     {
       descoberta: (s) => sessaoSemCobertura(s, cutoff, vinculos.porBloco),
       decorrida: (s) => sessaoDecorrida(s, cutoff),
-      excedentes: excedentesDoPlacar(placar, autorizacoes),
+      excedentes: excedentesDoPlacar(placar, autorizacoes, pareadas),
     },
     vinculos
   )
@@ -484,8 +376,31 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   const [orfasDaSemana, setOrfasDaSemana] = useState<Map<string, GuiaOrfa>>(() => new Map())
   const [triagens, setTriagens] = useState<VinculoAutorizacao[]>([])
   const [unidades, setUnidades] = useState<Map<string, string>>(() => new Map())
-  const [carregandoSemana, setCarregandoSemana] = useState(false)
-  const [carregandoAutorizacoes, setCarregandoAutorizacoes] = useState(false)
+  /*
+    AS QUATRO NASCEM `true`, e não `false` (2026-08-27, reportado da tela).
+
+    Cada uma sobe no `useCallback` da própria carga e desce no `finally`. Mas o
+    efeito que dispara a carga roda DEPOIS da primeira pintura, então com elas
+    nascendo `false` havia um render — o primeiro — em que `loading` era `false`
+    e nenhum dado tinha chegado. Era esse render que obrigava `ListaPendencias` a
+    gatear por `carregando && pacientes.length === 0`: sem a segunda metade, o
+    esqueleto não aparecia na abertura.
+
+    E foi essa segunda metade que produziu o defeito relatado. `pacientesDoMes`
+    fica não-vazio assim que UMA das quatro chega (as autorizações chegam numa
+    requisição; as sessões vêm em lotes de 6 dias, ~44 requisições no mês), e com
+    a lista já não-vazia o esqueleto saía de cena: a tela pintava linhas com
+    `agendadas = 0`, o que faz TODA guia liberada parecer excedente, zera "Não
+    solicitada" e deixa de descontar a glosa que um vínculo já cobriu. Depois as
+    sessões chegavam e cada número se corrigia na frente de quem estava lendo.
+
+    Nascendo `true`, `loading` é verdadeiro desde o primeiro render e o
+    componente pode gatear só nele — que é o contrato que a nota de `loading`
+    sempre descreveu. Nenhuma carga foi serializada: as quatro seguem em
+    paralelo, só a primeira pintura é que espera a última.
+  */
+  const [carregandoSemana, setCarregandoSemana] = useState(true)
+  const [carregandoAutorizacoes, setCarregandoAutorizacoes] = useState(true)
   /**
    * A terceira carga do mês, e a única que não tinha porteiro até 2026-08-24.
    *
@@ -533,7 +448,12 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
 
   // ── O intervalo BUSCADO: um pouco mais largo que o mês, para o modal poder
   // navegar semana a semana sem buracos nas pontas. ──────────────────────────
-  const inicioFetch = useMemo(() => segundaDe(mesRef), [mesRef])
+  // `primeiraSegundaDoMes`, e não `segundaDe(mesRef)`: quando o dia 1 cai num
+  // sábado ou domingo, a segunda daquela semana e os cinco dias úteis dela ficam
+  // TODOS no mês anterior — agosto/2026 abria a faixa oferecendo 27/07–31/07,
+  // uma semana sem um único dia de agosto, sempre vazia ao clicar. Acontece em
+  // 4 dos 12 meses de 2026. Ver a nota em `datas.ts`.
+  const inicioFetch = useMemo(() => primeiraSegundaDoMes(mesRef), [mesRef])
   const fimFetch = useMemo(() => somarDias(segundaDe(mesFimEfetivo), 4), [mesFimEfetivo])
   const semanaMinima = inicioFetch
   const semanaMaxima = useMemo(() => segundaDe(fimFetch), [fimFetch])
@@ -812,6 +732,12 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
       for (const a of item.autorizacoes) {
         if (a.data_execucao && (!ultima || a.data_execucao > ultima)) ultima = a.data_execucao
       }
+      // O pareamento do banco, emprestado — a mesma leitura que o modal faz por
+      // `guiasPareadas`. É ele que diz QUAL guia sobrou, e sem ele a atribuição
+      // do excedente cai no desempate por data e costuma acusar a guia errada.
+      const pareadasDoItem = new Set(
+        item.sessoes.map((s) => s.guia).filter((g): g is string => !!g)
+      )
       const pacienteIds = [...item.pacienteIds]
       linhas.push({
         chave: item.chave,
@@ -820,7 +746,11 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
         pacienteIds,
         plano: item.plano,
         unidade: pacienteIds.map((id) => unidades.get(id)).find(Boolean) ?? null,
-        contagem: contarPendencias(placar, ledger),
+        contagem: contarPendencias(
+          placar,
+          ledger,
+          excedentesDoPlacar(placar, item.autorizacoes, pareadasDoItem)
+        ),
         sessoes: item.sessoes.length,
         ultimaAutorizacao: ultima,
       })
@@ -1088,20 +1018,15 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   )
 
   /**
-   * As guias que estouraram a cota — nomeadas, não contadas.
+   * As guias que estouraram a cota — nomeadas, não contadas. Ver
+   * `excedentesDoPlacar`, que carrega o critério e o defeito que o trocou.
    *
-   * `excedente` é um número por TUSS ("6 liberadas para 5 sessões"), e um número
-   * não se destaca num cartão. A atribuição é posicional pela `data_execucao`:
-   * dentro do TUSS, as ÚLTIMAS `excedente` liberações são as que passaram do
-   * agendado. É a mesma ordem que o pareamento do banco usa para decidir qual
-   * autorização casa com qual sessão, então isto não inventa critério novo —
-   * lê o mesmo que a ASSIM leu quando recusou a seguinte por reincidência.
-   *
-   * Só liberação entra: recusada não gastou cota, e cancelada foi desfeita.
+   * `guiasPareadas` é o argumento que faz a escolha ser um fato e não um chute:
+   * a guia marcada é a que não casou com sessão nenhuma.
    */
   const guiasExcedentes = useMemo(
-    () => excedentesDoPlacar(placar, autorizacoesPaciente),
-    [placar, autorizacoesPaciente]
+    () => excedentesDoPlacar(placar, autorizacoesPaciente, guiasPareadas),
+    [placar, autorizacoesPaciente, guiasPareadas]
   )
 
   /**
@@ -1151,15 +1076,17 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   )
 
   /**
-   * As cinco espécies de pendência da semana aberta.
+   * As quatro espécies de pendência da semana aberta.
    *
-   * Pela MESMA `contarPendencias` que monta as cinco colunas da listagem — não
-   * uma segunda soma. Era daí que vinha a confusão que este trabalho resolve: a
-   * linha prometia "3 pendências" em cinco colunas e o modal abria mostrando
-   * cinco números de outro vocabulário, sem "faltando" nem "sobrando" em lugar
-   * nenhum. Mesma função, mesmas palavras, mesma ordem.
+   * Pela MESMA `contarPendencias` que monta os badges da listagem — não uma
+   * segunda soma. Era daí que vinha a confusão que este trabalho resolve: a
+   * linha prometia "3 pendências" e o modal abria mostrando números de outro
+   * vocabulário. Mesma função, mesmas palavras, mesma ordem.
    */
-  const contagem = useMemo(() => contarPendencias(placar, ledger), [placar, ledger])
+  const contagem = useMemo(
+    () => contarPendencias(placar, ledger, guiasExcedentes),
+    [placar, ledger, guiasExcedentes]
+  )
 
   return {
     // ── Mês: a listagem ──────────────────────────────────────────────────

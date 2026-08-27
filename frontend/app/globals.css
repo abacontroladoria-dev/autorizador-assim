@@ -862,6 +862,57 @@ html {
 .dark [data-kpi="rose"]   { --kpi-icon-bg: oklch(0.22 0.04  10); --kpi-chip-bg: oklch(0.20 0.025  10); --kpi-chip-border: oklch(0.55 0.10  10 / 0.25); --kpi-card-border: oklch(0.55 0.10  10 / 0.30); }
 
 /* ══════════════════════════════════════════════════════════════════════════
+   .rachurado — "isto foi encerrado", em textura e não em cor
+   ══════════════════════════════════════════════════════════════════════════
+
+   Hachura diagonal levíssima sobre a superfície do elemento. Ela responde a uma
+   pergunta que cor nenhuma responde nesta superfície: os cinco matizes
+   semânticos já estão todos falando (violeta = glosa, rose = descoberta, âmbar =
+   a conferir, esmeralda = liberada, slate = sem efeito), e "este item saiu da
+   fila" não é um sexto estado — é uma qualificação sobre o estado que já está
+   escrito. Textura é o canal livre.
+
+   Usos, todos "encerrado sem pedir mais nada": a sessão cuja glosa foi coberta
+   por uma avulsa, a guia triada como autorização extra, e a autorização
+   cancelada. Cada um conserva o próprio matiz — a hachura não pinta, ela risca.
+
+   `.rachurado-forte` é o mesmo dispositivo, só que mais VISÍVEL — 8% em vez de
+   4%. Existe porque a mesma opacidade não mede igual em toda cor: o slate do
+   cancelamento é ele próprio um cinza sobre fundo quase branco, e 4% de
+   `currentColor` cinza sobre esse fundo lê muito mais fraco do que 4% de violeta
+   sobre fundo branco (mais contraste de partida). Ajustado em tela — reportado
+   como "pode ser um pouco mais forte" — e reservado a essa combinação; os demais
+   usos continuam na opacidade base.
+
+   `currentColor` na cor da listra é o que faz um utilitário servir aos dois:
+   a listra nasce do texto do elemento, então no cartão violeta ela sai violeta e
+   na pílula slate sai slate, sem uma segunda classe e sem entrar no shim escuro
+   (que remapeia cores nomeadas, e aqui não há nenhuma). 4% de opacidade num
+   passo de 6px é o que mede "leve": visível de perto num cartão de 144px, e
+   invisível quando a grade é varrida de cima a baixo — se a textura competisse
+   com a cor, ela teria virado um sexto estado, que é o oposto do que se quer.
+
+   No pseudo-elemento, e não em `background-image` do próprio elemento: os dois
+   usos têm fundo próprio (branco no cartão, `bg-slate-100` na pílula), e um
+   `background-image` substituiria o `background-color` que o Tailwind põe ali.
+   `inherit` no raio para a hachura não vazar dos cantos arredondados. */
+.rachurado, .rachurado-forte { position: relative; }
+.rachurado::after, .rachurado-forte::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    currentColor 0 1px,
+    transparent 1px 6px
+  );
+}
+.rachurado::after       { opacity: 0.04; }
+.rachurado-forte::after { opacity: 0.08; }
+
+/* ══════════════════════════════════════════════════════════════════════════
    FullCalendar — dark mode
    ══════════════════════════════════════════════════════════════════════════ */
 .dark .agenda-calendar .fc-scrollgrid td,

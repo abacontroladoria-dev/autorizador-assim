@@ -7,6 +7,7 @@ import type {
   VinculoAutorizacao,
 } from '../types'
 import { situacaoComVinculo } from './cobertura'
+import { autorizacaoCancelada, autorizacaoLiberada } from './contagem'
 import { diaDoTimestamp, horaDoTimestamp } from './datas'
 import type { EstadoAutorizacao } from './vinculo'
 
@@ -43,7 +44,22 @@ export function cartaoPendente(c: CartaoGrade): boolean {
   // pergunta que a fila fazia — "que sessão esta guia cobre?" — foi respondida.
   // Continua marcada quando estourou a cota, que é outro eixo: o excedente
   // provoca a glosa 1601 esteja a guia triada ou não.
-  return c.estado === 'sem-vinculo' || c.excedente
+  //
+  // A guia RECUSADA (nem liberada, nem cancelada, nem triada, nem órfã) também
+  // é pendência — reportado da tela (Theo Meneses, 27/08): a listagem contava
+  // "1 Glosa" mas o header da semana não marcava nada e o cartão da 405760
+  // (recusada por 1601) não somava ao total de cartões marcados. `ehOrfa`
+  // (`get_guias_orfas`) normalmente já pegaria toda recusa não-triada — é a
+  // regra que faz a fila de trabalho apontar pra ela —, então este ramo é a
+  // rede: cobre o caso em que a guia não está (ainda) na fila de órfãs mas já
+  // é, por definição, uma glosa que a listagem está contando.
+  const recusada =
+    c.estado !== 'vinculada' &&
+    c.estado !== 'sem-sessao' &&
+    c.estado !== 'sem-vinculo' &&
+    !autorizacaoLiberada(c.status) &&
+    !autorizacaoCancelada(c.status)
+  return c.estado === 'sem-vinculo' || c.excedente || recusada
 }
 
 /** Quanto dura uma sessão na clínica. É o passo da escala vertical. */

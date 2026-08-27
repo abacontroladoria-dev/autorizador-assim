@@ -73,7 +73,69 @@ export function situacaoComVinculo(
   // acontecer. Não é caso de borda teórico — `vincular_autorizacao` não impede
   // vincular a um bloco que virou falta depois.
   if (SITUACOES_SEM_SESSAO.has(situacao ?? '')) return situacao
+  /*
+    IDEMPOTÊNCIA — e o defeito que a falta dela causava (2026-08-27).
+
+    Esta função é o eco local de um `CASE` que a RPC já resolve, então ela recebe
+    de volta a PRÓPRIA saída: com a migration viva (hoje
+    `20260825010000_origem_da_guia_nas_leituras.sql`), `get_auditoria_assim`
+    devolve `situacao = 'GLOSA_RESOLVIDA'` para a glosa vinculada. Sem esta
+    linha, `'GLOSA_RESOLVIDA' !== 'GLOSA'` caía no `else` e a função REBAIXAVA a
+    situação para `LIBERADA` — o mapa `GLOSA → GLOSA_RESOLVIDA → LIBERADA` não
+    fechava em si mesmo.
+
+    O efeito na tela (Kourtney Savino Lopes, 03–07/08): o cartão da glosa coberta
+    saía com a palavra "Coberta" em vez de "Glosa Coberta", porque o rótulo
+    pergunta `situacao === 'GLOSA_RESOLVIDA'` e a resposta já havia sido perdida.
+    A cor e a borda violeta apareciam (elas dependem de `cobertaPorAvulsa`, que lê
+    a situação crua), então o cartão ficava certo de cor e errado de palavra — e a
+    distinção entre "havia uma recusa e ela foi coberta" e "ninguém tinha pedido"
+    desaparecia de toda leitura que depende de `situacao`.
+
+    O docblock acima sempre afirmou que isto é um no-op com a migration aplicada.
+    Passa a ser verdade: o que já é cobertura volta como está.
+  */
+  if (SITUACOES_COBERTAS.has(situacao ?? '')) return situacao
   return situacao === 'GLOSA' ? 'GLOSA_RESOLVIDA' : 'LIBERADA'
+}
+
+/**
+ * A sessão foi coberta por uma AVULSA, e não pelo pareamento normal do banco?
+ *
+ * O fato que a cor da grade precisava e não tinha. `situacaoComVinculo` põe a
+ * sessão coberta por triagem em `GLOSA_RESOLVIDA` ou `LIBERADA`, e os dois são
+ * esmeralda — o mesmo matiz de uma liberação que o robô tirou na hora, sem
+ * ninguém precisar decidir nada. Reportado da tela: uma glosa substituída por
+ * avulsa *"não pode ficar verdinha também, porque confunde com uma liberada
+ * comum"*.
+ *
+ * O matiz continua esmeralda — a sessão ESTÁ coberta, e afirmar o contrário
+ * seria pior. Quem separa é a PROCEDÊNCIA, que já existe no vocabulário:
+ * `SITUACAO_CONFIG.GLOSA_RESOLVIDA` carrega `dot: bg-violet-500` justamente
+ * para isso ("superfície esmeralda porque está resolvido, dot violeta porque o
+ * que foi resolvido foi uma GLOSA"). O `dot` era desenhado no pill e no bloco da
+ * listagem, e em lugar nenhum da grade: o cartão compacto não tem barra lateral,
+ * e a sessão coberta nunca é pendente, então ela caía sempre no compacto. A marca
+ * de procedência existia e não chegava à tela onde a substituição acontece.
+ *
+ * QUEM decide é o VÍNCULO, não a situação — e é isso que torna esta função
+ * robusta ao fato medido em produção: `origem.situacao` NÃO é crua. Com a
+ * migration viva, `get_auditoria_assim` já devolve GLOSA_RESOLVIDA na linha, e
+ * `montarGrade` guarda essa linha inteira em `origem`. A pergunta que importa
+ * ("houve triagem manual cobrindo esta sessão?") só o vínculo responde, e a
+ * situação entra apenas para excluir a falta — uma guia não faz a sessão
+ * acontecer (ver `situacaoComVinculo`), então ali não há cobertura a marcar.
+ *
+ * O parâmetro segue nomeado `situacaoCrua` porque é isso que o chamador deve
+ * passar: o campo que não passou pelo eco local. Se um dia a migration sair do
+ * banco, ele volta a chegar cru e a função continua respondendo o mesmo.
+ */
+export function cobertaPorAvulsa(
+  situacaoCrua: string | null,
+  vinculo: { tipo: 'vinculo' | 'sem_sessao' } | null | undefined
+): boolean {
+  if (!vinculo || vinculo.tipo !== 'vinculo') return false
+  return !SITUACOES_SEM_SESSAO.has(situacaoCrua ?? '')
 }
 
 /** O instante de uma sessão: "2026-08-24T08:00". Nulo quando falta a hora. */
@@ -128,6 +190,41 @@ export function sessaoSemCobertura(
 }
 
 /**
+ * Esta sessão está descoberta E ninguém respondeu por ela — a espécie "Não
+ * solicitada" da listagem, sem a parte que outra espécie já conta.
+ *
+ * `sessaoSemCobertura` responde "alguém cobriu?", e a recusa não cobre nada:
+ * a sessão glosada responde "não" e é, corretamente, um cartão marcado na
+ * grade. Mas a listagem conta espécies, e ali a MESMA recusa já entra como
+ * `glosa` pelo lado da autorização — então somar as duas contava o mesmo fato
+ * duas vezes.
+ *
+ * O caso que revelou isto (Yure Bernardo, agosto/2026): cinco recusas em 03/08
+ * e quatro sessões nunca solicitadas em 07/08 saíam como "5 glosas + 9 não
+ * solicitadas", total 14, quando o trabalho real é 9. As cinco apareciam nas
+ * duas espécies. A grade nunca errou — `cartaoPendente` é `semCobertura ||
+ * GLOSA` sobre UM cartão, e um `||` não duplica; quem somava era a aritmética.
+ *
+ * `SITUACOES_COM_VEREDITO` é exatamente o conjunto certo para descontar, e não
+ * uma lista nova: ele já existe para separar "a ASSIM respondeu" de "não há
+ * resposta", que é a mesma fronteira. GLOSA sai porque vira `glosa`; CANCELADA
+ * sai porque a autorização desfeita já entra como `cancelamento`.
+ *
+ * A sessão descontada NÃO deixa de pedir trabalho — ela continua marcada na
+ * grade e continua contada, pela espécie que a nomeia melhor. O que ela deixa
+ * de ser é uma segunda unidade no `total`.
+ */
+export function sessaoNaoSolicitada(
+  s: AuditoriaAssimItem,
+  cutoff: string,
+  vinculosPorBloco: ReadonlyMap<string, { tipo: 'vinculo' | 'sem_sessao' }> = new Map()
+): boolean {
+  if (!sessaoSemCobertura(s, cutoff, vinculosPorBloco)) return false
+  const situacao = situacaoComVinculo(s.situacao, vinculosPorBloco.get(s.bloco_id ?? ''))
+  return !SITUACOES_COM_VEREDITO.has(situacao ?? '')
+}
+
+/**
  * As guias que uma triagem aposentou — a outra metade de "sair da contagem".
  *
  * Vincular uma guia externa a uma sessão glosada resolve DUAS pendências de uma
@@ -150,6 +247,14 @@ export function sessaoSemCobertura(
  * RESOLVIDA e o motivo da recusa segue por extenso na gaveta. Vale também para a
  * `CANCELADA` que um vínculo cobriu (aí a sessão vira LIBERADA), pelo mesmo
  * motivo — a liberação desfeita foi substituída por uma que valeu.
+ *
+ * SÓ `tipo === 'vinculo'` aposenta guia (2026-08-27). `sem_sessao` é o outro
+ * desfecho da triagem — "esta guia é autorização extra, não cobre sessão
+ * nenhuma" — e sempre tem `bloco_id: null` (a constraint da tabela exige). Sem
+ * este filtro, `vinculosPorBloco.has(s.bloco_id ?? '')` bateria também num
+ * `sem_sessao` cujo mapa foi indexado com a chave `''`, contra qualquer sessão
+ * cujo `bloco_id` também for nulo — as linhas de falta sintetizadas no serviço
+ * — aposentando a guia glosada de uma falta por uma triagem que não a cobre.
  */
 export function guiasSubstituidas(
   sessoes: AuditoriaAssimItem[],
@@ -158,7 +263,8 @@ export function guiasSubstituidas(
   const substituidas = new Set<string>()
   if (vinculosPorBloco.size === 0) return substituidas
   for (const s of sessoes) {
-    if (s.guia && vinculosPorBloco.has(s.bloco_id ?? '')) substituidas.add(s.guia)
+    const vinculo = s.bloco_id ? vinculosPorBloco.get(s.bloco_id) : undefined
+    if (s.guia && vinculo?.tipo === 'vinculo') substituidas.add(s.guia)
   }
   return substituidas
 }
