@@ -9,13 +9,18 @@ import {
   listarFaltasAuditoria,
   listarUnidadesPorPaciente,
 } from '@/services/auditoria-assim.service'
-import { listarGuiasOrfas, listarVinculosAtivos } from '@/services/reconciliacao-assim.service'
+import {
+  listarGuiasOrfas,
+  listarReclassificacoesAtivas,
+  listarVinculosAtivos,
+} from '@/services/reconciliacao-assim.service'
 import type {
   AuditoriaAssimItem,
   AutorizacaoAssimSemana,
   GuiaOrfa,
   PacientePendencias,
   PlacarTuss,
+  ReclassificacaoSituacao,
   VinculoAutorizacao,
 } from '@/components/auditoria-assim/types'
 import {
@@ -375,6 +380,7 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   const [autorizacoes, setAutorizacoes] = useState<AutorizacaoAssimSemana[]>([])
   const [orfasDaSemana, setOrfasDaSemana] = useState<Map<string, GuiaOrfa>>(() => new Map())
   const [triagens, setTriagens] = useState<VinculoAutorizacao[]>([])
+  const [reclassificacoes, setReclassificacoes] = useState<ReclassificacaoSituacao[]>([])
   const [unidades, setUnidades] = useState<Map<string, string>>(() => new Map())
   /*
     AS QUATRO NASCEM `true`, e não `false` (2026-08-27, reportado da tela).
@@ -432,6 +438,23 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
    * repete.
    */
   const [carregandoVinculos, setCarregandoVinculos] = useState(false)
+  /**
+   * A quinta carga: as reclassificações manuais de situação.
+   *
+   * A ÚNICA das cinco que NÃO entra em `loading`, e a diferença é real, não
+   * economia. As outras quatro mudam o que a tela conclui — sem as órfãs a
+   * coluna "sem vínculo" nasce zerada e some com pacientes; sem as triagens a
+   * guia recém-vinculada aparece como "Outra semana". Esta não muda conclusão
+   * nenhuma: a `situacao` que a RPC devolve JÁ vem reclassificada (migration
+   * 20260827000001), então a sessão já chega pintada de FALTA com ou sem esta
+   * lista. O que ela acrescenta é a AUTORIA — quem decidiu, quando, por quê —,
+   * que aparece na gaveta e em nenhum número.
+   *
+   * Gatear a primeira pintura nela atrasaria a tela inteira por um dado que só
+   * se lê ao abrir um cartão. O estado de carregamento existe assim mesmo, para
+   * a gaveta poder dizer "carregando" em vez de "não há" enquanto espera.
+   */
+  const [carregandoReclassificacoes, setCarregandoReclassificacoes] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
 
   // Cada carga carrega seu número de série: resposta de mês antigo que chega
@@ -440,6 +463,7 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
   const geracaoAutorizacoes = useRef(0)
   const geracaoOrfas = useRef(0)
   const geracaoVinculos = useRef(0)
+  const geracaoReclassificacoes = useRef(0)
 
   // ── O mês selecionado: fechado (dia 1 ao último) ou vigente (dia 1 a hoje) ─
   const mesFimEfetivo = useMemo(() => fimEfetivoDoMes(mesRef), [mesRef])
@@ -573,6 +597,29 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
     carregarVinculos()
   }, [carregarVinculos])
 
+  // ── As reclassificações vivas: quem sobrepôs a situação, e por quê ──────
+  const carregarReclassificacoes = useCallback(async () => {
+    const geracao = ++geracaoReclassificacoes.current
+    setCarregandoReclassificacoes(true)
+    try {
+      const lista = await listarReclassificacoesAtivas()
+      if (geracao !== geracaoReclassificacoes.current) return
+      setReclassificacoes(lista)
+    } catch {
+      // Silencioso, e aqui com menos consequência que nas outras cargas: a
+      // `situacao` já vem reclassificada da RPC, então perder esta lista custa a
+      // autoria na gaveta — não a correção do estado na tela.
+      if (geracao !== geracaoReclassificacoes.current) return
+      setReclassificacoes([])
+    } finally {
+      if (geracao === geracaoReclassificacoes.current) setCarregandoReclassificacoes(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    carregarReclassificacoes()
+  }, [carregarReclassificacoes])
+
   // ── As autorizações do período, da clínica inteira e sem pareamento ────
   const carregarAutorizacoes = useCallback(async () => {
     const geracao = ++geracaoAutorizacoes.current
@@ -627,6 +674,20 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
     }
     return { porGuia, porBloco }
   }, [triagens])
+
+  /**
+   * As reclassificações ativas indexadas pelo bloco — a única ponta que existe.
+   *
+   * Diferente de `vinculos`, que precisa de dois mapas porque o vínculo é um
+   * fato sobre um PAR (uma guia e a sessão que ela cobre). A reclassificação é
+   * um fato sobre uma sessão só: não há segunda ponta a indexar.
+   */
+  const reclassificacoesPorBloco = useMemo(() => {
+    if (reclassificacoes.length === 0) return new Map<string, ReclassificacaoSituacao>()
+    const mapa = new Map<string, ReclassificacaoSituacao>()
+    for (const r of reclassificacoes) mapa.set(r.bloco_id, r)
+    return mapa
+  }, [reclassificacoes])
 
   // ── O recorte ESTRITO do mês, para a listagem (descarta os dias de sobra
   // que só existem para completar as semanas do modal nas pontas) ──────────
@@ -1152,9 +1213,21 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
      */
     vinculos,
     /**
-     * As QUATRO cargas juntas. Não exponha uma sozinha: gatear numa só foi
-     * exatamente o defeito que fazia a listagem pintar e se corrigir na frente
-     * de quem estava lendo (ver `carregandoOrfas` e `carregandoVinculos`).
+     * As reclassificações ativas por bloco — a autoria de quem sobrepôs a
+     * situação. Não muda o que a tela conclui (a RPC já devolve a situação
+     * reclassificada); diz QUEM decidiu. Ver `carregandoReclassificacoes`.
+     */
+    reclassificacoesPorBloco,
+    carregandoReclassificacoes,
+    /**
+     * As QUATRO cargas que gateiam a pintura. Não exponha uma sozinha: gatear
+     * numa só foi exatamente o defeito que fazia a listagem pintar e se corrigir
+     * na frente de quem estava lendo (ver `carregandoOrfas` e
+     * `carregandoVinculos`).
+     *
+     * A quinta carga (reclassificações) fica FORA de propósito — ela não muda
+     * conclusão nenhuma da tela, só acrescenta autoria à gaveta. A nota em
+     * `carregandoReclassificacoes` tem o porquê.
      */
     loading:
       carregandoSemana || carregandoAutorizacoes || carregandoOrfas || carregandoVinculos,
@@ -1164,6 +1237,10 @@ export function useAnaliseReincidencia(dataInicial: string, pacienteInicial: str
       carregarAutorizacoes()
       carregarOrfasDoMes()
       carregarVinculos()
-    }, [carregarMes, carregarAutorizacoes, carregarOrfasDoMes, carregarVinculos]),
+      carregarReclassificacoes()
+    }, [
+      carregarMes, carregarAutorizacoes, carregarOrfasDoMes, carregarVinculos,
+      carregarReclassificacoes,
+    ]),
   }
 }

@@ -1,13 +1,13 @@
 'use client'
 
 import type { ReactNode } from 'react'
-import { Ban, ExternalLink, KeySquare, Link2, X } from 'lucide-react'
+import { Ban, ExternalLink, KeySquare, Link2, ShieldAlert, X } from 'lucide-react'
 import { autorizacaoCancelada, autorizacaoLiberada } from '@/hooks/useAnaliseReincidencia'
 import { completarMotivoGlosa, lerMotivoGlosa } from '@/lib/glosa'
 import { rotuloOrigemGuia, rotuloSolicitadoPor } from '@/lib/guiaOrigem'
 import SituacaoBadge from '../SituacaoBadge'
 import type { NotaManual, TokenConferencia } from '@/services/auditoria-assim.service'
-import type { CartaoGrade } from '../types'
+import type { CartaoGrade, ReclassificacaoSituacao } from '../types'
 import { dataHoraCurta, dataHoraDeTimestamptz, formatarDiaComNome } from './datas'
 import { sessaoDoBloco } from './vinculo'
 
@@ -71,8 +71,11 @@ export default function DetalheCartao({
   codigosGlosa,
   conferencia,
   nota,
+  reclassificacao,
   podeVincular,
+  podeReclassificar,
   onVincular,
+  onReclassificar,
   onFechar,
 }: {
   cartao: CartaoGrade
@@ -89,8 +92,21 @@ export default function DetalheCartao({
   conferencia?: TokenConferencia
   /** A anotação manual deste bloco, de `auditoria_atendimento_notas`. Mesma razão. */
   nota?: NotaManual
+  /**
+   * A reclassificação ATIVA desta sessão, quando há uma.
+   *
+   * Vem de fora pelo mesmo motivo da nota e da conferência — a RPC não a devolve
+   * como objeto. Mas a diferença em relação às duas é importante: a `situacao`
+   * que o cartão já mostra JÁ está reclassificada. Esta prop não corrige o
+   * estado; ela diz QUEM o mudou. Sem ela o cartão apareceria "Falta" sobre uma
+   * sessão que a ASSIM glosou, sem nada explicando a discrepância.
+   */
+  reclassificacao?: ReclassificacaoSituacao
   podeVincular: boolean
+  /** `admin`/`autorizacao`. Mais estreito que `podeVincular` — ver a RPC. */
+  podeReclassificar: boolean
   onVincular: (guia: string) => void
+  onReclassificar: (cartao: CartaoGrade) => void
   onFechar: () => void
 }) {
   // Estreitar pelo discriminante em duas variáveis, e não por um booleano: um
@@ -235,6 +251,17 @@ export default function DetalheCartao({
             Além do agendado
           </span>
         )}
+        {/* A pílula de estado acima já mostra a situação NOVA — a RPC a devolve
+            reclassificada. Esta diz que aquele estado foi decidido por uma
+            pessoa, e não derivado da resposta da ASSIM. Sem ela a linha
+            afirmaria "Falta" sobre uma sessão glosada sem nada explicando a
+            diferença, que é a única leitura que esta feature não pode produzir. */}
+        {reclassificacao && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2.5 py-1 text-[11px] font-semibold text-amber-800 ring-1 ring-amber-300">
+            <ShieldAlert size={11} aria-hidden />
+            Reclassificada
+          </span>
+        )}
       </div>
 
       {daSessao && (
@@ -361,6 +388,37 @@ export default function DetalheCartao({
         </Secao>
       )}
 
+      {/* ── A reclassificação, quando houve ────────────────────────────────
+          No mesmo lugar do vínculo e pela mesma razão: é ela que explica por
+          que a situação da linha não é a que a ASSIM respondeu. Vem ANTES do
+          motivo da recusa, que continua logo abaixo por extenso — a
+          reclassificação não apaga a glosa, e a gaveta é onde isso fica
+          provado. */}
+      {reclassificacao && (
+        <Secao titulo="Reclassificação">
+          <Campo rotulo="Era">
+            <SituacaoBadge situacao={reclassificacao.situacao_anterior} />
+          </Campo>
+          <Campo rotulo="Passou a ser">
+            <SituacaoBadge situacao={reclassificacao.situacao_nova} />
+          </Campo>
+          <Campo rotulo="Decidido por">{reclassificacao.reclassificado_por}</Campo>
+          <Campo rotulo="Decidido em">
+            {/* `reclassificado_em` é timestamptz de verdade — a conversão do
+                navegador é a certa aqui, ao contrário de `data_execucao`. */}
+            {reclassificacao.reclassificado_em
+              ? dataHoraDeTimestamptz(reclassificacao.reclassificado_em)
+              : null}
+          </Campo>
+          <div className="py-1.5">
+            <p className="text-[11px] text-slate-500">Justificativa</p>
+            <p className="mt-0.5 text-[12px] leading-relaxed text-slate-700">
+              {reclassificacao.justificativa}
+            </p>
+          </div>
+        </Secao>
+      )}
+
       {motivo && (
         <Secao titulo="Motivo da recusa">
           <div className="py-1.5">
@@ -468,6 +526,30 @@ export default function DetalheCartao({
           >
             <Link2 size={14} aria-hidden />
             Ver as sessões que esta guia pode cobrir
+          </button>
+        </div>
+      )}
+
+      {/* A reclassificação é ação de SESSÃO, não de guia — uma guia não tem
+          situação para sobrepor. Fica no rodapé, junto do outro gesto de
+          escrita da gaveta, e é o botão mais fraco dos dois de propósito:
+          vincular resolve com evidência, reclassificar resolve com julgamento.
+          A ordem visual diz qual tentar primeiro. */}
+      {daSessao && (
+        <div className="mt-auto border-t border-slate-100 px-4 py-3 sm:px-5">
+          <button
+            type="button"
+            onClick={() => onReclassificar(cartao)}
+            disabled={!podeReclassificar}
+            title={
+              podeReclassificar
+                ? undefined
+                : 'Seu perfil não permite reclassificar situações'
+            }
+            className="inline-flex h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-white px-4 text-[12px] font-semibold text-slate-700 transition hover:border-amber-300 hover:bg-amber-50 hover:text-amber-800 focus-visible:ring-2 focus-visible:ring-brand focus-visible:ring-offset-2 focus-visible:outline-none disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            <ShieldAlert size={14} aria-hidden />
+            {reclassificacao ? 'Desfazer a reclassificação' : 'Reclassificar a situação'}
           </button>
         </div>
       )}

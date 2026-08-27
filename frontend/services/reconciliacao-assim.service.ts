@@ -2,6 +2,8 @@ import { getSupabaseClient } from '@/lib/supabase/client'
 import type {
   CandidataVinculo,
   GuiaOrfa,
+  ReclassificacaoSituacao,
+  SituacaoReclassificavel,
   VinculoAutorizacao,
 } from '@/components/auditoria-assim/types'
 
@@ -161,4 +163,101 @@ export async function desvincularAutorizacao(
   })
 
   if (error) throw error
+}
+
+/**
+ * Sobrepõe a situação derivada de uma sessão — a glosa que na verdade foi falta.
+ *
+ * Nenhuma validação aqui, pelo mesmo motivo de `vincularAutorizacao`: permissão,
+ * conjunto de destinos permitidos, tamanho da justificativa e a checagem contra
+ * a situação vigente vivem todos dentro da RPC. Isto muda o que o faturamento
+ * considera pendente (é a `situacao` que `fn_alertas_avaliar_assim` lê), então a
+ * regra tem de estar onde o cliente não alcança.
+ *
+ * O que a tela ganha por chamar a RPC em vez de escrever na tabela: a mensagem
+ * de erro do Postgres já vem pronta para ser lida por quem está na tela — "Sessão
+ * X está coberta por uma guia vinculada", "Justificativa muito curta" —, e não
+ * precisa ser reconstruída aqui a partir de um código.
+ */
+export async function reclassificarSituacao(params: {
+  blocoId: string
+  situacaoNova: SituacaoReclassificavel
+  justificativa: string
+}): Promise<string> {
+  const { data, error } = await supabase.rpc('reclassificar_situacao', {
+    p_bloco_id: params.blocoId,
+    p_situacao_nova: params.situacaoNova,
+    p_justificativa: params.justificativa,
+  })
+
+  if (error) throw error
+  return data as string
+}
+
+/** Desfaz por soft delete: a sessão volta a valer a situação derivada pela RPC. */
+export async function desfazerReclassificacao(
+  overrideId: string,
+  motivo?: string | null
+): Promise<void> {
+  const { error } = await supabase.rpc('desfazer_reclassificacao', {
+    p_override_id: overrideId,
+    p_motivo: motivo ?? null,
+  })
+
+  if (error) throw error
+}
+
+/**
+ * O histórico COMPLETO de reclassificações de uma sessão, desfeitas inclusive.
+ *
+ * A ativa a tela já recebe pela carga de `listarReclassificacoesAtivas`; o que só
+ * existe aqui é a SEQUÊNCIA — quem reclassificou, quem desfez, e por quê. Por
+ * isso é buscado sob demanda, ao abrir o log de um bloco, e não junto com a
+ * semana: é a leitura rara.
+ */
+export async function listarReclassificacoesBloco(
+  blocoId: string
+): Promise<ReclassificacaoSituacao[]> {
+  const { data, error } = await supabase.rpc('get_reclassificacoes_bloco', {
+    p_bloco_id: blocoId,
+  })
+
+  if (error) {
+    console.error('Erro ao buscar histórico de reclassificações:', error.message, error.details)
+    throw error
+  }
+  return (data || []) as ReclassificacaoSituacao[]
+}
+
+/**
+ * As reclassificações vivas — o que a grade precisa para desenhar o DEPOIS.
+ *
+ * Sem período, pelo mesmo motivo de `listarVinculosAtivos`: é um livro de
+ * decisões manuais (ordem de dezenas de linhas), e carregá-lo inteiro é mais
+ * barato que qualquer recorte que precise estar certo nas bordas. Aqui há um
+ * motivo adicional — a chave é o `bloco_id`, que embute a data da sessão, então
+ * recortar por `reclassificado_em` (quando alguém decidiu) deixaria de fora
+ * exatamente a correção feita hoje sobre uma sessão do mês passado, que é o caso
+ * mais comum: ninguém reclassifica uma sessão no mesmo dia em que ela acontece.
+ *
+ * A `situacao` da RPC JÁ reflete a reclassificação — a grade não depende desta
+ * carga para mostrar o estado certo. O que ela acrescenta é a AUTORIA: quem
+ * decidiu, quando, e com que justificativa. Sem isso o cartão mudaria de cor sem
+ * dizer quem o mudou, que é o oposto do que esta feature promete.
+ */
+export async function listarReclassificacoesAtivas(): Promise<ReclassificacaoSituacao[]> {
+  const { data, error } = await supabase
+    .from('auditoria_situacao_overrides')
+    .select(
+      'id, bloco_id, situacao_anterior, situacao_nova, justificativa, reclassificado_por, reclassificado_em, desfeito_por, desfeito_em, desfeito_motivo'
+    )
+    .is('desfeito_em', null)
+    .order('reclassificado_em', { ascending: false })
+    .limit(TETO_VINCULOS)
+
+  if (error) {
+    console.error('Erro ao buscar reclassificações ativas:', error.message, error.details)
+    throw error
+  }
+  return (data || []) as ReclassificacaoSituacao[]
 }
