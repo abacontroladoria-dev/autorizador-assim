@@ -32,6 +32,7 @@ import { getSupabaseClient } from '@/lib/supabase/client'
 
 const supabase = getSupabaseClient()
 
+const POR_PAGINA = 25
 
 function getHojeLocal() {
   const hoje = new Date()
@@ -68,8 +69,10 @@ export default function ControleTerapeuticoPage() {
 
   const [dados, setDados] = useState<ControleTerapeuticoItem[]>([])
   const [loading, setLoading] = useState(true)
+  const [erro, setErro] = useState<string | null>(null)
   const [sincronizando, setSincronizando] = useState(false)
   const [grupoCobertura, setGrupoCobertura] = useState<GrupoTerapeutaMobile | null>(null)
+  const [pagina, setPagina] = useState(0)
 
   const [filters, setFilters] = useState<ControleFilters>({
     data: hoje,
@@ -94,6 +97,14 @@ export default function ControleTerapeuticoPage() {
     try {
       const response = await listarCentralTerapeutica(filters.data)
       setDados(response || [])
+      setErro(null)
+    } catch (e) {
+      console.error('Erro ao carregar central terapêutica:', e)
+      // Só bloqueia a tela com o estado de erro no carregamento em primeiro
+      // plano. Falha em refresh de fundo (realtime) mantém os dados na tela.
+      if (showLoading) {
+        setErro('Não foi possível carregar os atendimentos. Verifique sua conexão e tente novamente.')
+      }
     } finally {
       if (showLoading) setLoading(false)
     }
@@ -196,37 +207,29 @@ export default function ControleTerapeuticoPage() {
   }, [dados])
 
   const filtrados = useMemo(() => {
-    return dados
-      .filter(terapiaDeveAparecer)
-      .filter((item) => !getTerapeuta(item).toLowerCase().includes('teste'))
-      .filter((item) => {
-        if (!deferredBusca) return true
-        const q = deferredBusca.toLowerCase()
-        return (
-          getTerapeuta(item).toLowerCase().includes(q) ||
-          getPaciente(item).toLowerCase().includes(q)
-        )
-      })
-      .filter((item) => {
-        if (!filters.horario) return true
-        return getHorarioInicial(item) === filters.horario
-      })
-      .filter((item) => {
-        if (!filters.unidade) return true
-        return getUnidade(item)
-          .toLowerCase()
-          .includes(filters.unidade.toLowerCase())
-      })
-      .filter((item) => {
-        if (!filters.terapia) return true
+    const q = deferredBusca.toLowerCase()
+    const unidadeLower = filters.unidade.toLowerCase()
+    const result: ControleTerapeuticoItem[] = []
+
+    for (const item of dados) {
+      if (!terapiaDeveAparecer(item)) continue
+      const terapeuta = getTerapeuta(item)
+      if (terapeuta.toLowerCase().includes('teste')) continue
+      if (q && !terapeuta.toLowerCase().includes(q) && !getPaciente(item).toLowerCase().includes(q)) continue
+      if (filters.horario && getHorarioInicial(item) !== filters.horario) continue
+      if (unidadeLower && !getUnidade(item).toLowerCase().includes(unidadeLower)) continue
+      if (filters.terapia) {
         const t = item.terapia_exibicao || item.terapia_exibicao_nome || getTerapia(item)
-        return t === filters.terapia
-      })
-      .sort((a, b) => {
-        const horario = getHorarioInicial(a).localeCompare(getHorarioInicial(b))
-        if (horario !== 0) return horario
-        return getPaciente(a).localeCompare(getPaciente(b))
-      })
+        if (t !== filters.terapia) continue
+      }
+      result.push(item)
+    }
+
+    return result.sort((a, b) => {
+      const horario = getHorarioInicial(a).localeCompare(getHorarioInicial(b))
+      if (horario !== 0) return horario
+      return getPaciente(a).localeCompare(getPaciente(b))
+    })
   }, [
     dados,
     deferredBusca,
@@ -342,6 +345,15 @@ Object.values(grupos).forEach(
     )
   }, [gruposPorTerapeuta, filters.statusFiltro])
 
+  const totalPaginas = Math.ceil(gruposFiltradosPorStatus.length / POR_PAGINA)
+
+  const gruposPaginados = useMemo(
+    () => gruposFiltradosPorStatus.slice(pagina * POR_PAGINA, (pagina + 1) * POR_PAGINA),
+    [gruposFiltradosPorStatus, pagina]
+  )
+
+  useEffect(() => { setPagina(0) }, [gruposFiltradosPorStatus])
+
   const handleAbrirModalStatus = useCallback(
     (grupo: GrupoTerapeutaMobile, status: string) => {
       const grupoCompleto = {
@@ -387,15 +399,28 @@ return (
           </div>
         )}
 
-        {!loading &&
+        {!loading && erro && (
+          <div className="bg-white rounded-2xl p-10 text-center space-y-4">
+            <p className="text-rose-600 font-medium">{erro}</p>
+            <button
+              type="button"
+              onClick={() => carregarDados(true)}
+              className="px-4 h-9 rounded-lg bg-[#3A8FB7] text-white text-sm font-semibold hover:bg-[#327ea1] transition"
+            >
+              Tentar novamente
+            </button>
+          </div>
+        )}
+
+        {!loading && !erro &&
           filtrados.length === 0 && (
             <div className="bg-white rounded-2xl p-10 text-center text-slate-400">
               Nenhum atendimento encontrado
             </div>
           )}
 
-        {!loading &&
-          gruposFiltradosPorStatus.map((grupo) => (
+        {!loading && !erro &&
+          gruposPaginados.map((grupo) => (
             <ControleTerapeutaMobileCard
               key={grupo.terapeuta}
               grupo={grupo}
@@ -404,6 +429,28 @@ return (
               salvandoStatus={salvandoTerapeutas.has(grupo.terapeuta)}
             />
           ))}
+
+        {!loading && !erro && totalPaginas > 1 && (
+          <div className="flex items-center justify-center gap-2 pt-2 pb-1">
+            <button
+              disabled={pagina === 0}
+              onClick={() => setPagina((p) => p - 1)}
+              className="px-3 h-9 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+            >
+              ← Anterior
+            </button>
+            <span className="text-sm text-slate-500 font-medium select-none">
+              {pagina + 1} / {totalPaginas}
+            </span>
+            <button
+              disabled={pagina >= totalPaginas - 1}
+              onClick={() => setPagina((p) => p + 1)}
+              className="px-3 h-9 rounded-lg border border-slate-200 text-sm font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+            >
+              Próximo →
+            </button>
+          </div>
+        )}
 
       </div>
 

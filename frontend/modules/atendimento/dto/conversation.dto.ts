@@ -1,0 +1,139 @@
+import type { ConversationStatus } from '../types/central.types'
+
+type ParseResult<T> = { ok: true; data: T } | { ok: false; errors: string[] }
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+const isUUID    = (v: unknown): v is string => typeof v === 'string' && UUID_RE.test(v)
+const isISODate = (v: unknown): v is string => typeof v === 'string' && !isNaN(new Date(v).getTime())
+
+const VALID_STATUSES: ConversationStatus[] = ['open', 'assigned', 'waiting', 'resolved', 'archived']
+const VALID_ACTIONS = ['assign', 'transfer', 'resolve', 'archive', 'reopen'] as const
+export type PatchAction = typeof VALID_ACTIONS[number]
+
+// ----------------------------------------------------------------------------
+// List conversations
+// ----------------------------------------------------------------------------
+
+export interface ListConversationsQuery {
+  inboxId?:        string
+  status?:         ConversationStatus | ConversationStatus[]
+  // null = buscar não atribuídas; string UUID = atribuídas ao operador
+  assignedUserId?: string | null
+  contactId?:      string
+  limit:           number
+  cursor?:         string
+}
+
+export function parseListConversationsQuery(p: URLSearchParams): ParseResult<ListConversationsQuery> {
+  const errors: string[] = []
+
+  const inboxId = p.get('inboxId') ?? undefined
+  if (inboxId !== undefined && !isUUID(inboxId)) errors.push('inboxId deve ser um UUID válido')
+
+  const statusRaw = p.get('status')
+  let status: ConversationStatus | ConversationStatus[] | undefined
+  if (statusRaw) {
+    const parts = statusRaw.split(',').map(s => s.trim() as ConversationStatus)
+    const invalid = parts.filter(s => !VALID_STATUSES.includes(s))
+    if (invalid.length) errors.push(`status inválido: ${invalid.join(', ')}`)
+    else status = parts.length === 1 ? parts[0] : parts
+  }
+
+  const assignedRaw = p.get('assignedUserId')
+  let assignedUserId: string | null | undefined
+  if (assignedRaw === 'unassigned') {
+    assignedUserId = null
+  } else if (assignedRaw !== null) {
+    if (!isUUID(assignedRaw)) errors.push('assignedUserId deve ser UUID ou "unassigned"')
+    else assignedUserId = assignedRaw
+  }
+
+  const contactId = p.get('contactId') ?? undefined
+  if (contactId !== undefined && !isUUID(contactId)) errors.push('contactId deve ser um UUID válido')
+
+  const limit = clampInt(p.get('limit'), 1, 100, 30)
+
+  const cursor = p.get('cursor') ?? undefined
+  if (cursor !== undefined && !isISODate(cursor)) errors.push('cursor deve ser uma data ISO válida')
+
+  if (errors.length) return { ok: false, errors }
+  return { ok: true, data: { inboxId, status, assignedUserId, contactId, limit, cursor } }
+}
+
+// ----------------------------------------------------------------------------
+// Create conversation (manual)
+// ----------------------------------------------------------------------------
+
+export interface CreateConversationBody {
+  contactId: string
+  channelId: string
+  inboxId:   string
+}
+
+export function parseCreateConversationBody(body: unknown): ParseResult<CreateConversationBody> {
+  const errors: string[] = []
+  if (!body || typeof body !== 'object') return { ok: false, errors: ['Body inválido'] }
+  const b = body as Record<string, unknown>
+
+  if (!isUUID(b.contactId)) errors.push('contactId é obrigatório (UUID)')
+  if (!isUUID(b.channelId)) errors.push('channelId é obrigatório (UUID)')
+  if (!isUUID(b.inboxId))   errors.push('inboxId é obrigatório (UUID)')
+
+  if (errors.length) return { ok: false, errors }
+  return {
+    ok: true,
+    data: {
+      contactId: b.contactId as string,
+      channelId: b.channelId as string,
+      inboxId:   b.inboxId   as string,
+    },
+  }
+}
+
+// ----------------------------------------------------------------------------
+// Patch conversation (discriminated union por action)
+// ----------------------------------------------------------------------------
+
+export type PatchConversationBody =
+  | { action: 'assign';   toUserId: string }
+  | { action: 'transfer'; toUserId: string; reason?: string }
+  | { action: 'resolve' }
+  | { action: 'archive' }
+  | { action: 'reopen' }
+
+export function parsePatchConversationBody(body: unknown): ParseResult<PatchConversationBody> {
+  if (!body || typeof body !== 'object') return { ok: false, errors: ['Body inválido'] }
+  const b = body as Record<string, unknown>
+
+  const action = b.action as string
+  if (!VALID_ACTIONS.includes(action as PatchAction)) {
+    return { ok: false, errors: [`action deve ser um de: ${VALID_ACTIONS.join(', ')}`] }
+  }
+
+  if (action === 'assign' || action === 'transfer') {
+    if (!isUUID(b.toUserId)) {
+      return { ok: false, errors: ['toUserId é obrigatório (UUID) para assign e transfer'] }
+    }
+  }
+
+  if (action === 'assign') {
+    return { ok: true, data: { action, toUserId: b.toUserId as string } }
+  }
+  if (action === 'transfer') {
+    return {
+      ok: true,
+      data: { action, toUserId: b.toUserId as string, reason: b.reason as string | undefined },
+    }
+  }
+  return { ok: true, data: { action: action as 'resolve' | 'archive' | 'reopen' } }
+}
+
+// ----------------------------------------------------------------------------
+// Helpers
+// ----------------------------------------------------------------------------
+
+function clampInt(raw: string | null, min: number, max: number, fallback: number): number {
+  if (raw === null) return fallback
+  const n = parseInt(raw, 10)
+  return isNaN(n) ? fallback : Math.min(max, Math.max(min, n))
+}

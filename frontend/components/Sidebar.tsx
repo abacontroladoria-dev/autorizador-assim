@@ -8,6 +8,9 @@ import {
   FileText,
   ShieldCheck,
   ClipboardList,
+  ClipboardPlus,
+  ListChecks,
+  Link2,
   CalendarDays,
   UserRound,
   Building2,
@@ -16,9 +19,35 @@ import {
   Star,
   KeyRound,
   BarChart3,
+  CalendarPlus,
+  Database,
+  LogOut,
+  TrendingUp,
+  UserCheck,
+  UserPlus,
+  Clock,
+  XCircle,
+  AlertTriangle,
+  CalendarOff,
+  BookOpen,
+  Settings,
+  CalendarRange,
+  ClipboardCheck,
+  Handshake,
+  Wallet,
+  RotateCcw,
+  DoorOpen,
+  ArrowRightLeft,
+  Tag,
+  Calendar,
+  FileSignature,
+  Percent,
+  History,
+  UserSearch,
+  Package,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
-import { usePathname, useRouter } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { getFunctionHeaders, getFunctionUrl } from "@/lib/supabase/functions"
 import toast from "react-hot-toast"
@@ -31,7 +60,8 @@ import { useTheme } from "@/contexts/ThemeContext"
 import { useImpersonation } from "@/contexts/ImpersonationContext"
 import { ImpersonationSelector } from "@/components/admin/ImpersonationSelector"
 import { ROLE_LABELS } from "@/constants/roleLabels"
-import { getRoleDefaultPermissions, codigosToRotas } from "@/lib/permissions/routes"
+import { codigosToRotas, hasRouteAccess } from "@/lib/permissions/routes"
+import { resolverPermissoes } from "@/lib/permissions/resolver"
 import { getUsuarioPermissoes } from "@/services/permissoes.service"
 
 type Favorito = { label: string; path: string }
@@ -39,21 +69,53 @@ type Favorito = { label: string; path: string }
 const pathIconMap: Record<string, any> = {
   "/": LayoutDashboard,
   "/solicitar": PlusCircle,
+  "/autorizacoes-avulsas": ClipboardPlus,
   "/central-pacientes": Activity,
   "/central-terapeutas": UserRound,
-  "/agenda/pacientes": CalendarDays,
-  "/agenda/terapeutas": CalendarDays,
-  "/agenda/salas": Building2,
-  "/guias-digitais": FileText,
+  "/cadastros/pacientes": UserRound,
   "/auditoria-assim": ClipboardList,
+  "/auditoria-assim?tab=auditoria": ClipboardList,
+  "/auditoria-assim?tab=reconciliacao": Link2,
   "/cco": BarChart3,
   "/admin": ShieldCheck,
   "/admin/permissoes": KeyRound,
+  "/relacionamento-prestador/solicitacoes?tab=simulacao": UserPlus,
+  "/relacionamento-prestador/solicitacoes?tab=novo-cron": CalendarPlus,
+  "/relacionamento-prestador/solicitacoes?tab=banco": Database,
+  "/relacionamento-prestador/ocupacao-salas": DoorOpen,
+  "/cadastros/cadastro-valores": Tag,
+  "/cadastros/convenios": Building2,
+  "/cadastros/feriados": Calendar,
+  "/cadastros/contratos": FileSignature,
+  "/cadastros/taxas-e-parametros": Percent,
+  "/cronograma/saida-profissional": LogOut,
+  "/cronograma/ocupacao-paciente": TrendingUp,
+  "/relacionamento-prestador/ocupar-profissionais-disponiveis": UserSearch,
+  "/cronograma/ocupacao?tab=fila": Clock,
+  "/cronograma/ocupacao?tab=recusados": XCircle,
+  "/cronograma/ocupacao?tab=inviavel": AlertTriangle,
+  "/cronograma/ocupacao?tab=gaps": CalendarOff,
+  "/cronograma/ocupacao?tab=inconsistencias": AlertTriangle,
+  "/cronograma/ocupacao?tab=guia": BookOpen,
+  "/cronograma/ocupacao?tab=config": Settings,
+  "/analise-tratativas": ClipboardCheck,
+  "/relacionamento-prestador/analise": TrendingUp,
+  "/relacionamento-prestador/rp": Wallet,
+  "/relacionamento-prestador/individual": UserRound,
+  "/relacionamento-prestador/pep": ListChecks,
+  "/relacionamento-prestador/pep-historico": History,
+  "/cronograma/indicadores?tab=profissionais": BarChart3,
+  "/cronograma/indicadores?tab=unidades": Building2,
+  "/cronograma/indicadores?tab=pacientes": UserCheck,
+  "/cronograma/indicadores?tab=previsao-receitas": Wallet,
+  "/cronograma/indicadores?tab=historico-receitas": History,
+  "/cronograma/indicadores?tab=comparativo-sessoes": ArrowRightLeft,
 }
 
 export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const supabase = getSupabaseClient()
   const { theme } = useTheme()
   const { isImpersonating, impersonatedTarget, canImpersonate } = useImpersonation()
@@ -97,8 +159,16 @@ export default function Sidebar() {
   }
 
   function isActive(path: string) {
+    const [rawPart, queryPart] = path.split("?")
+    const pathPart = rawPart.replace(/\/$/, "") || "/"
     const current = pathname.replace(/\/$/, "") || "/"
-    return current === path
+    if (current !== pathPart) return false
+    if (!queryPart) return true
+    const expected = new URLSearchParams(queryPart)
+    for (const [k, v] of expected) {
+      if (searchParams.get(k) !== v) return false
+    }
+    return true
   }
 
   async function handleLogout() {
@@ -109,7 +179,8 @@ export default function Sidebar() {
 
   function canAccess(path: string) {
     if (!role) return false
-    return allowedPaths.includes(path)
+    const [barePath, query] = path.split("?")
+    return hasRouteAccess(barePath, query ? `?${query}` : "", allowedPaths)
   }
 
   useEffect(() => {
@@ -147,23 +218,19 @@ export default function Sidebar() {
         return
       }
 
-      const codigosPorRole = getRoleDefaultPermissions(targetRole)
-      let codigos = new Set(codigosPorRole)
-
+      // resolverPermissoes é a mesma função usada pelo proxy.ts (gate real das
+      // páginas) e pelas rotas de API. Esta era a terceira cópia da regra
+      // "defaults do papel + concessões − revogações, revogação vencendo": se o
+      // Sidebar divergir do proxy, o menu mostra item que a navegação recusa.
+      let overrides: { permissao_codigo: string; permitido: boolean }[] = []
       if (targetId) {
         try {
-          const overrides = await getUsuarioPermissoes(targetId)
-          for (const o of overrides) {
-            if (o.permitido) {
-              codigos.add(o.permissao_codigo)
-            } else {
-              codigos.delete(o.permissao_codigo)
-            }
-          }
+          overrides = await getUsuarioPermissoes(targetId)
         } catch (error) {
           console.error("Erro ao carregar permissões do usuário:", error)
         }
       }
+      const codigos = resolverPermissoes(targetRole, overrides)
 
       const rotas = codigosToRotas(codigos)
 
@@ -211,18 +278,39 @@ export default function Sidebar() {
     checkUser()
   }, [])
 
+  // Os dois badges da fila.
+  //
+  // Só com a aba visível, e a cada 60 s. A Sidebar existe em toda tela, então
+  // este par de contagens é multiplicado por aba aberta — em 24/08 os logs do
+  // PostgREST mostram 7 chamadas de cada uma no MESMO segundo, de abas
+  // esquecidas abertas, enquanto o banco já estava sem conexão livre. Não foi a
+  // causa daquele incidente, mas é tráfego que não serve a ninguém: ninguém lê
+  // um badge de aba que não está na frente.
+  //
+  // Ao voltar o foco a contagem é refeita na hora, senão o badge mostraria por
+  // até um minuto um número de antes de a aba ser escondida.
   useEffect(() => {
+    let vivo = true
+
     async function fetchCounts() {
+      if (document.visibilityState !== "visible") return
       const [{ count: cp }, { count: ce }] = await Promise.all([
         supabase.from("fila_autorizacoes").select("*", { count: "exact", head: true }).eq("status", "processando"),
         supabase.from("fila_autorizacoes").select("*", { count: "exact", head: true }).eq("status", "erro"),
       ])
+      if (!vivo) return
       setCountProcessando(cp ?? 0)
       setCountErros(ce ?? 0)
     }
+
     fetchCounts()
-    const interval = setInterval(fetchCounts, 30000)
-    return () => clearInterval(interval)
+    const interval = setInterval(fetchCounts, 60000)
+    document.addEventListener("visibilitychange", fetchCounts)
+    return () => {
+      vivo = false
+      clearInterval(interval)
+      document.removeEventListener("visibilitychange", fetchCounts)
+    }
   }, [])
 
   useEffect(() => {
@@ -291,7 +379,14 @@ export default function Sidebar() {
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error)
-      toast.success(`${json.liberados} processo${json.liberados !== 1 ? "s" : ""} liberado${json.liberados !== 1 ? "s" : ""}`)
+      const plural = json.liberados !== 1 ? "s" : ""
+      // `retidas` são as travadas que a função deliberadamente NÃO devolveu para a
+      // fila: de outro dia, ou já com guia emitida. Sem dizer isso, um resultado
+      // "0 liberados" com 30 travadas na tela parece defeito do botão.
+      toast.success(
+        `${json.liberados} processo${plural} liberado${plural}` +
+        (json.retidas ? ` · ${json.retidas} retido${json.retidas !== 1 ? "s" : ""} (outro dia ou já autorizado)` : "")
+      )
     } catch (err: any) { toast.error(err.message) }
     setLoadingLiberar(false)
   }
@@ -348,12 +443,35 @@ export default function Sidebar() {
         className="fixed top-0 left-0 w-64 h-screen flex flex-col z-50 bg-sidebar border-r border-sidebar-border transition-colors duration-300"
       >
 
-        {/* LOGO */}
+        {/* LOGO — lockup do Pulsar.
+
+            Duas imagens trocadas por CSS (`dark:`) em vez de um `src`
+            condicional: o tema só é conhecido depois da hidratação, e trocar a
+            URL ali faz o navegador buscar o outro arquivo e piscar. Com as duas
+            no HTML o swap é imediato e sem requisição extra.
+
+            E não é mais `filter: brightness(0) invert(1)`, que era o jeito de
+            clarear o logo antigo: aplicado neste lockup ele achataria tudo em
+            branco sólido e apagaria o ponto rosa, que é o único acento de cor
+            da marca. A variante clara já existe no repo (a mesma que a /tv usa)
+            e preserva o rosa. */}
         <div className="h-20 flex items-center justify-center px-6 border-b border-sidebar-border">
           <img
-            src="/logo-universo-aba.png"
-            className="h-20 object-contain"
-            style={{ filter: isDark ? 'brightness(0) invert(1)' : 'none' }}
+            src="/pulsar-lockup-1920-transparent.png"
+            alt="Pulsar"
+            className="max-h-full w-full object-contain dark:hidden"
+          />
+          {/* `max-h-[60%]` não é chute: os dois arquivos têm exatamente o mesmo
+              conteúdo (1133x462), mas o de 1920x768 carrega 39,8% de margem
+              transparente embutida e este aqui é recorte justo (0%). Sem
+              compensar, a marca aparecia 66% maior no tema escuro e encostava
+              nas bordas da barra. 60% ≈ os 60,2% que a arte ocupa no arquivo
+              acolchoado, então a marca fica do mesmo tamanho nos dois temas. */}
+          <img
+            src="/pulsar-lockup-tv-light.png"
+            alt=""
+            aria-hidden="true"
+            className="hidden max-h-[60%] w-full object-contain dark:block"
           />
         </div>
 
@@ -385,58 +503,179 @@ export default function Sidebar() {
           <hr className="my-2 border-sidebar-border" />
 
           {/* Pacientes */}
-          {(canAccess("/solicitar") || canAccess("/central-pacientes") || canAccess("/agenda/pacientes")) && (
+          {(canAccess("/solicitar") || canAccess("/autorizacoes-avulsas") || canAccess("/central-pacientes")) && (
             <SidebarGroup
               title="Pacientes"
               icon={Users}
-              defaultOpen={["/solicitar", "/central-pacientes", "/agenda/pacientes"].some(p => pathname === p)}
+              defaultOpen={["/solicitar", "/autorizacoes-avulsas", "/central-pacientes"].some(p => pathname === p)}
             >
               {canAccess("/solicitar") && (
                 <MenuItem label="Atendimentos" icon={PlusCircle} path="/solicitar" />
               )}
               {canAccess("/central-pacientes") && (
-                <MenuItem label="Gestão" icon={Activity} path="/central-pacientes" />
+                <MenuItem label="Gestão Recepção" icon={Activity} path="/central-pacientes" />
               )}
-              {canAccess("/agenda/pacientes") && (
-                <MenuItem label="Cronograma" icon={CalendarDays} path="/agenda/pacientes" />
+              {canAccess("/autorizacoes-avulsas") && (
+                <MenuItem label="Autorizações Avulsas" icon={ClipboardPlus} path="/autorizacoes-avulsas" />
               )}
             </SidebarGroup>
           )}
 
           {/* Terapêutico */}
-          {(canAccess("/central-terapeutas") || canAccess("/agenda/terapeutas") || canAccess("/agenda/salas")) && (
+          {(canAccess("/central-terapeutas") || canAccess("/analise-tratativas")) && (
             <SidebarGroup
               title="Terapêutico"
               icon={Stethoscope}
-              defaultOpen={["/central-terapeutas", "/agenda/terapeutas", "/agenda/salas"].some(p => pathname === p)}
+              defaultOpen={["/central-terapeutas", "/analise-tratativas"].some(p => pathname === p)}
             >
               {canAccess("/central-terapeutas") && (
                 <MenuItem label="Gestão" icon={UserRound} path="/central-terapeutas" />
               )}
-              {canAccess("/agenda/terapeutas") && (
-                <MenuItem label="Agenda Terapêutica" icon={CalendarDays} path="/agenda/terapeutas" />
-              )}
-              {canAccess("/agenda/salas") && (
-                <MenuItem label="Salas" icon={Building2} path="/agenda/salas" />
+              {canAccess("/analise-tratativas") && (
+                <MenuItem label="Análise de Evolução" icon={ClipboardCheck} path="/analise-tratativas" />
               )}
             </SidebarGroup>
           )}
 
-          {/* Operações */}
-          {(canAccess("/auditoria-assim") || canAccess("/guias-digitais") || canAccess("/cco")) && (
+          {/* Autorização */}
+          {(canAccess("/auditoria-assim") || canAccess("/cco")) && (
             <SidebarGroup
-              title="Operações"
+              title="Autorização"
               icon={BriefcaseBusiness}
-              defaultOpen={["/auditoria-assim", "/guias-digitais", "/cco"].some(p => pathname === p)}
+              defaultOpen={pathname === "/cco" || pathname === "/auditoria-assim"}
             >
               {canAccess("/cco") && (
                 <MenuItem label="Conciliação ASSIM" icon={BarChart3} path="/cco" />
               )}
-              {canAccess("/auditoria-assim") && (
-                <MenuItem label="Auditoria ASSIM" icon={ClipboardList} path="/auditoria-assim" />
+              {/* Duas visões da mesma rota. canAccess("/auditoria-assim?tab=…")
+                  resolve para o bare path '/auditoria-assim' de CODIGO_PARA_ROTAS,
+                  então nenhum código de permissão novo foi necessário.
+                  Reconciliação: quem vê a Conferência vê a aba; quem pode VINCULAR
+                  é decidido pelas RPCs (admin/autorizacao/recepcao), não aqui —
+                  diretoria consulta sem escrever. */}
+              {canAccess("/auditoria-assim?tab=auditoria") && (
+                <MenuItem label="Conferência ASSIM" icon={ClipboardList} path="/auditoria-assim?tab=auditoria" />
               )}
-              {canAccess("/guias-digitais") && (
-                <MenuItem label="Guias Digitais" icon={FileText} path="/guias-digitais" />
+              {canAccess("/auditoria-assim?tab=reconciliacao") && (
+                <MenuItem label="Reconciliação ASSIM" icon={Link2} path="/auditoria-assim?tab=reconciliacao" />
+              )}
+            </SidebarGroup>
+          )}
+
+          {/* Insumos — controle de compras (porte do AXIUM). Grupo próprio, e não
+              dentro de Faturamento: aquele grupo é faturamento de convênio
+              (ASSIM), este é compra de insumo. Vai crescer com Estoque. */}
+          {canAccess("/insumos") && (
+            <SidebarGroup title="Suprimentos" icon={Package} defaultOpen={pathname === "/insumos"}>
+              <MenuItem label="Solicitações" icon={Package} path="/insumos" />
+            </SidebarGroup>
+          )}
+
+          {/* Cronograma */}
+          {(canAccess("/cronograma/saida-profissional") || canAccess("/cronograma/ocupacao-paciente") ||
+            canAccess("/cronograma/ocupacao?tab=oportunidades-recusadas") || canAccess("/cronograma/ocupacao?tab=gaps") ||
+            canAccess("/cronograma/ocupacao?tab=inconsistencias") ||
+            canAccess("/cronograma/reposicao")) && (
+            <SidebarGroup
+              title="Cronograma"
+              icon={CalendarRange}
+              defaultOpen={[
+                "/cronograma/saida-profissional",
+                "/cronograma/ocupacao-paciente",
+                "/cronograma/reposicao",
+              ].includes(pathname) || pathname === "/cronograma/ocupacao"}
+            >
+              {canAccess("/cronograma/saida-profissional") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/saida-profissional" />}
+              {canAccess("/cronograma/ocupacao-paciente") && <MenuItem label="Ocupação Paciente" icon={UserCheck} path="/cronograma/ocupacao-paciente" />}
+              {canAccess("/cronograma/reposicao") && <MenuItem label="Reposição de Faltas" icon={RotateCcw} path="/cronograma/reposicao" />}
+              {canAccess("/cronograma/ocupacao?tab=oportunidades-recusadas") && <MenuItem label="Oportunidades recusadas" icon={XCircle} path="/cronograma/ocupacao?tab=oportunidades-recusadas" />}
+              {canAccess("/cronograma/ocupacao?tab=gaps") && <MenuItem label="Diferença: Laudo e Oferta" icon={BarChart3} path="/cronograma/ocupacao?tab=gaps" />}
+              {canAccess("/cronograma/ocupacao?tab=inconsistencias") && <MenuItem label="Inconsistências e Exceções" icon={AlertTriangle} path="/cronograma/ocupacao?tab=inconsistencias" />}
+            </SidebarGroup>
+          )}
+
+          {/* Indicadores — uma permissão por aba, não uma pra rota inteira */}
+          {(canAccess("/cronograma/indicadores?tab=profissionais") ||
+            canAccess("/cronograma/indicadores?tab=unidades") ||
+            canAccess("/cronograma/indicadores?tab=pacientes") ||
+            canAccess("/cronograma/indicadores?tab=previsao-receitas") ||
+            canAccess("/cronograma/indicadores?tab=historico-receitas") ||
+            canAccess("/cronograma/indicadores?tab=comparativo-sessoes")) && (
+            <SidebarGroup title="Indicadores" icon={TrendingUp} defaultOpen={pathname === "/cronograma/indicadores"}>
+              {canAccess("/cronograma/indicadores?tab=profissionais") && (
+                <MenuItem label="Ocupação de Profissionais" icon={BarChart3} path="/cronograma/indicadores?tab=profissionais" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=unidades") && (
+                <MenuItem label="Ocupação Clínica" icon={Building2} path="/cronograma/indicadores?tab=unidades" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=pacientes") && (
+                <MenuItem label="Dashboard de Pacientes" icon={UserCheck} path="/cronograma/indicadores?tab=pacientes" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=previsao-receitas") && (
+                <MenuItem label="Previsão de Receitas" icon={Wallet} path="/cronograma/indicadores?tab=previsao-receitas" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=historico-receitas") && (
+                <MenuItem label="Histórico de Receitas" icon={History} path="/cronograma/indicadores?tab=historico-receitas" />
+              )}
+              {canAccess("/cronograma/indicadores?tab=comparativo-sessoes") && (
+                <MenuItem label="Comparativo de Sessões" icon={ArrowRightLeft} path="/cronograma/indicadores?tab=comparativo-sessoes" />
+              )}
+            </SidebarGroup>
+          )}
+
+          {/* Cadastros */}
+          {(canAccess("/cadastros/cadastro-valores") || canAccess("/cadastros/feriados") ||
+            canAccess("/cadastros/contratos") || canAccess("/cadastros/taxas-e-parametros") ||
+            canAccess("/cadastros/pacientes") || canAccess("/cadastros/convenios")) && (
+            <SidebarGroup
+              title="Cadastros"
+              icon={Database}
+              defaultOpen={pathname.startsWith("/cadastros")}
+            >
+              {canAccess("/cadastros/pacientes") && <MenuItem label="Pacientes" icon={UserRound} path="/cadastros/pacientes" />}
+              {canAccess("/cadastros/convenios") && <MenuItem label="Convênios" icon={Building2} path="/cadastros/convenios" />}
+              {canAccess("/cadastros/cadastro-valores") && <MenuItem label="Cadastro de Valores" icon={Tag} path="/cadastros/cadastro-valores" />}
+              {canAccess("/cadastros/feriados") && <MenuItem label="Feriados" icon={Calendar} path="/cadastros/feriados" />}
+              {canAccess("/cadastros/taxas-e-parametros") && <MenuItem label="Variáveis & Taxas" icon={Percent} path="/cadastros/taxas-e-parametros" />}
+              {canAccess("/cadastros/contratos") && <MenuItem label="Contratos" icon={FileSignature} path="/cadastros/contratos" />}
+            </SidebarGroup>
+          )}
+
+          {/* Relacionamento Prestador */}
+          {(canAccess("/relacionamento-prestador/analise") || canAccess("/relacionamento-prestador/rp") ||
+            canAccess("/relacionamento-prestador/individual") || canAccess("/relacionamento-prestador/pep") ||
+            canAccess("/relacionamento-prestador/pep-historico") ||
+            canAccess("/relacionamento-prestador/ocupacao-salas") ||
+            canAccess("/relacionamento-prestador/solicitacoes") ||
+            canAccess("/relacionamento-prestador/ocupar-profissionais-disponiveis")) && (
+            <SidebarGroup
+              title="Relacionamento Prestador"
+              icon={Handshake}
+              defaultOpen={pathname.startsWith("/relacionamento-prestador")}
+            >
+              {canAccess("/relacionamento-prestador/ocupacao-salas") && (
+                <MenuItem label="Ocupação de Salas" icon={DoorOpen} path="/relacionamento-prestador/ocupacao-salas" />
+              )}
+              {canAccess("/relacionamento-prestador/solicitacoes") && (
+                <MenuItem label="Simulação de Novo Prestador" icon={UserPlus} path="/relacionamento-prestador/solicitacoes?tab=simulacao" />
+              )}
+              {canAccess("/relacionamento-prestador/ocupar-profissionais-disponiveis") && (
+                <MenuItem label="Ocupar Profissionais Disponíveis" icon={UserSearch} path="/relacionamento-prestador/ocupar-profissionais-disponiveis" />
+              )}
+              {canAccess("/relacionamento-prestador/analise") && (
+                <MenuItem label="Rem. Mês - Previsão" icon={TrendingUp} path="/relacionamento-prestador/analise" />
+              )}
+              {canAccess("/relacionamento-prestador/rp") && (
+                <MenuItem label="Remuneração Total" icon={Wallet} path="/relacionamento-prestador/rp" />
+              )}
+              {canAccess("/relacionamento-prestador/individual") && (
+                <MenuItem label="Remuneração Individual" icon={UserRound} path="/relacionamento-prestador/individual" />
+              )}
+              {canAccess("/relacionamento-prestador/pep") && (
+                <MenuItem label="Entregas PEP" icon={ListChecks} path="/relacionamento-prestador/pep" />
+              )}
+              {canAccess("/relacionamento-prestador/pep-historico") && (
+                <MenuItem label="PEP - Histórico" icon={History} path="/relacionamento-prestador/pep-historico" />
               )}
             </SidebarGroup>
           )}

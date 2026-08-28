@@ -1,23 +1,27 @@
 'use client'
 
-import { CalendarDays, Clock, Hash, Search, SlidersHorizontal } from 'lucide-react'
+import { useState } from 'react'
+import { CalendarDays, ChartColumn, Clock, KeySquare, Search } from 'lucide-react'
 import type { AuditoriaFilters } from './types'
+import ModalTokenMensal from './ModalTokenMensal'
+import ModalVisaoGerencial from './ModalVisaoGerencial'
 
 type Props = {
   filters: AuditoriaFilters
   onChange: (filters: AuditoriaFilters) => void
 }
 
-const SITUACOES = [
-  { value: 'NAO_SOLICITADA', label: 'Não Solicitada' },
-  { value: 'SINCRONIZANDO', label: 'Sincronizando' },
-  { value: 'RETORNO_NAO_CONFIRMADO', label: 'Retorno Não Confirmado' },
-  { value: 'LIBERADA', label: 'Liberada' },
-  { value: 'GLOSA', label: 'Glosa' },
-  { value: 'CANCELADA', label: 'Cancelada' },
-  { value: 'FALTA', label: 'Falta Paciente' },
-  { value: 'FALTA_TERAPEUTA', label: 'Falta Terapeuta' },
-]
+// O seletor de Status saiu daqui: os cards de KPI já SÃO esse filtro (clicar
+// num card escreve `filters.situacao`, clicar de novo limpa), então a barra
+// oferecia duas portas para o mesmo campo — e a de baixo era a que ninguém
+// usava, porque o número que motiva o filtro está no card.
+//
+// O que se perdeu junto, e não tinha card: `SOLICITACAO_CANCELADA` (o recorte
+// exato de quem quer só as tentativas que quebraram no meio, hoje somadas
+// dentro de "Não Solicitadas") e `GLOSA_RESOLVIDA` (que vive como dica no card
+// de Glosas). Os dois continuam visíveis na coluna Situação da tabela; só não
+// são mais filtráveis. Se voltarem a ser necessários, o caminho é um card ou um
+// clique no próprio badge da linha — não o seletor de volta.
 
 const HORARIOS_BLOCOS = [
   { value: '08:00-08:40', label: '08:00 - 08:40' },
@@ -36,13 +40,22 @@ const HORARIOS_BLOCOS = [
 ]
 
 export default function FiltrosAuditoria({ filters, onChange }: Props) {
+  const [conferenciaAberta, setConferenciaAberta] = useState(false)
+  const [gerencialAberta, setGerencialAberta] = useState(false)
+
   function update<K extends keyof AuditoriaFilters>(key: K, value: AuditoriaFilters[K]) {
     onChange({ ...filters, [key]: value })
   }
 
   return (
     <div className="bg-white/90 backdrop-blur border border-white/50 rounded-2xl p-3 shadow-sm">
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-[180px_1fr_200px_160px_180px]">
+      {/* A faixa única só a partir de `xl`, e não de `md`.
+          Medido: com cinco colunas ela pede ~870px, e a área de conteúdo tem
+          ~990px numa tela de 1280 (a sidebar fixa come 256px) — cabe, mas por
+          pouco, e abaixo de 1024 estourava horizontalmente. Duas colunas no
+          intervalo médio resolvem sem apertar nenhum controle: a barra fica mais
+          alta, nunca mais estreita que o conteúdo. */}
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-[180px_1fr_190px_auto_auto]">
 
         <label className="relative">
           <CalendarDays className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
@@ -66,33 +79,6 @@ export default function FiltrosAuditoria({ filters, onChange }: Props) {
         </label>
 
         <label className="relative">
-          <SlidersHorizontal className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <select
-            value={filters.situacao}
-            onChange={(e) => update('situacao', e.target.value)}
-            className={`${inputClass} pl-11`}
-          >
-            <option value="">Todas as situações</option>
-            {SITUACOES.map((s) => (
-              <option key={s.value} value={s.value}>
-                {s.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className="relative">
-          <Hash className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
-          <input
-            type="text"
-            placeholder="Código TUSS"
-            value={filters.tuss}
-            onChange={(e) => update('tuss', e.target.value)}
-            className={`${inputClass} pl-11`}
-          />
-        </label>
-
-        <label className="relative">
           <Clock className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
           <select
             value={filters.horario_bloco}
@@ -108,7 +94,32 @@ export default function FiltrosAuditoria({ filters, onChange }: Props) {
           </select>
         </label>
 
+        {/* Brand-outline, e não um segundo botão preenchido ao lado do outro:
+            o DESIGN.md reserva o preenchido para a ação que cria um estado, e
+            a visão gerencial só emoldura o que já existe. Dois preenchidos
+            lado a lado também fariam a barra ter dois "primeiros" botões. */}
+        <button
+          type="button"
+          onClick={() => setGerencialAberta(true)}
+          className="flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-2xl border border-brand bg-white px-4 text-sm font-semibold text-brand-fg transition hover:bg-brand-surface focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none"
+        >
+          <ChartColumn size={16} />
+          Visão do Período
+        </button>
+
+        <button
+          type="button"
+          onClick={() => setConferenciaAberta(true)}
+          className="flex h-11 items-center justify-center gap-2 whitespace-nowrap rounded-2xl bg-brand-fg px-4 text-sm font-semibold text-white transition hover:bg-brand-dark"
+        >
+          <KeySquare size={16} />
+          Conferência de Filipetas
+        </button>
+
       </div>
+
+      <ModalTokenMensal open={conferenciaAberta} onClose={() => setConferenciaAberta(false)} />
+      <ModalVisaoGerencial aberto={gerencialAberta} onClose={() => setGerencialAberta(false)} />
     </div>
   )
 }
@@ -124,7 +135,7 @@ const inputClass = `
   text-slate-700
   outline-none
   focus:ring-4
-  focus:ring-violet-100
-  focus:border-violet-300
+  focus:ring-brand/15
+  focus:border-brand
   transition
 `

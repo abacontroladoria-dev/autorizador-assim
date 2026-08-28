@@ -86,6 +86,10 @@ export default function FluxoOperacionalCard({
             .select("data_atendimento, sala_nome, terapias")
             .gte("data_atendimento", queryStart)
             .lte("data_atendimento", queryEnd)
+            // Ordenação determinística (chave única) — paginação estável, sem pular/duplicar linhas
+            .order("data_atendimento")
+            .order("horario")
+            .order("paciente_id")
             .range(from, from + BATCH - 1)
           if (error || !data || data.length === 0) break
           all.push(...data)
@@ -100,7 +104,10 @@ export default function FluxoOperacionalCard({
         supabase
           .from("config_regras_terapias")
           .select("terapia_nome")
-          .eq("categoria", "blacklist_autorizacao")
+          // Maiúsculo: é o valor gravado pela 20260611000006 e usado por todos os
+          // outros consumidores (get_auditoria_assim, get_dashboard_kpis, etc).
+          // Em minúsculo o filtro não casa com nada e a blacklist vinha vazia.
+          .eq("categoria", "BLACKLIST_AUTORIZACAO")
           .eq("ativo", true),
       ])
 

@@ -1,0 +1,62 @@
+# ============================================================
+#  O que NAO entra no git
+# ============================================================
+#  Antes, o .gitignore raiz ignorava `robo-autorizador/` inteiro. Efeito
+#  colateral: todo o toolchain do instalador (RoboAutorizador.iss, start.bat,
+#  start.vbs) existia apenas na maquina de quem o escreveu — a uma falha de
+#  disco de ser irreproduzivel. Agora o codigo e versionado e so os pesados e os
+#  segredos ficam de fora.
+# ============================================================
+
+# --- Segredos ---
+.env
+.env.local
+# Chave privada de assinatura de atualizacao. NUNCA versionar: quem a tiver
+# publica codigo para todos os PCs da clinica.
+*.pem
+assinatura-privada*
+
+# Chave publica: gerada por `npm run chaves`, embutida no payload do instalador.
+# Fora do git para nao existir chave "de exemplo" que alguem confunda com a real.
+chave-publica.json
+
+# --- Estado local da instalacao ---
+versao.json
+.saudavel
+log/
+*.bak
+*.novo
+
+# --- Pesados ---
+node_modules/
+node/
+browsers/
+*.exe
+*.zip
+
+# Pacotes de atualizacao gerados (o conteudo vai para o banco, nao para o git)
+pacote-*.json
+
+# Build do instalador Inno Setup: payload de ~300MB + setup de ~240MB.
+# O .iss e os scripts SAO versionados; o payload montado e o Output nao.
+exe-build/payload/
+exe-build/Output/
+
+# --- Geracoes superadas do instalador ---
+# Continuam no disco de quem as gerou, mas fora do git: nao servem mais e
+# confundiriam quem clonasse o repositorio.
+#
+#   install.bat              v1: exigia Node instalado no sistema e internet
+#   instalador-laptop_sede/  v2: pasta portatil, rodava npm ci na instalacao
+#   patch-ws/                hotfix do WebSocket, desnecessario desde que o robo
+#                            deixou de usar @supabase/supabase-js
+#
+# Podem ser apagadas do disco com seguranca. Nao foram apagadas aqui porque nao
+# estao no git: nao haveria como desfazer.
+install.bat
+instalador-*/
+instalador-*.zip
+isntalador.zip
+Instalador/
+patch-ws/
+patch-ws.zip

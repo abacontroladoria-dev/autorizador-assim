@@ -1,6 +1,8 @@
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { supabaseService } from '@/lib/supabase/service'
+import { gerarSenhaAleatoria } from '@/lib/admin/temp-password'
+import { UNIDADES_DISPONIVEIS } from '@/lib/admin/unidades'
 
 async function getCurrentUser(request: NextRequest) {
   const token = request.headers.get('authorization')?.replace('Bearer ', '')
@@ -42,15 +44,21 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const { nome, email, role, password, username } = await request.json()
+    const { nome, email, role, username, unidades } = await request.json()
 
-    if (!nome || !email || !role || !password) {
+    if (!nome || !email || !role) {
       return NextResponse.json({ error: 'Preencha todos os campos obrigatórios' }, { status: 400 })
     }
 
+    const unidadesValidas = Array.isArray(unidades)
+      ? unidades.filter((u) => UNIDADES_DISPONIVEIS.includes(u))
+      : []
+
+    const senhaTemporaria = gerarSenhaAleatoria()
+
     const { data, error } = await supabaseService.auth.admin.createUser({
       email,
-      password,
+      password: senhaTemporaria,
       email_confirm: true,
       user_metadata: { nome, role },
     })
@@ -66,13 +74,14 @@ export async function POST(request: NextRequest) {
           email,
           role,
           ativo: true,
-          primeiro_acesso: false,
+          primeiro_acesso: true,
           username: username?.trim() || null,
+          unidades: unidadesValidas.length > 0 ? unidadesValidas : null,
         },
         { onConflict: 'id' }
       )
 
-    return NextResponse.json({ success: true })
+    return NextResponse.json({ success: true, password: senhaTemporaria })
   } catch {
     return NextResponse.json({ error: 'Erro interno do servidor' }, { status: 500 })
   }

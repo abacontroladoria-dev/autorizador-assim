@@ -1,61 +1,19 @@
 'use client'
 
-import { useEffect } from 'react'
-import { useHeader } from '@/contexts/HeaderContext'
-import { useAuditoriaAssim } from '@/hooks/useAuditoriaAssim'
-import KpiCards from '@/components/auditoria-assim/KpiCards'
-import FiltrosAuditoria from '@/components/auditoria-assim/FiltrosAuditoria'
-import TabelaAuditoria from '@/components/auditoria-assim/TabelaAuditoria'
+import { Suspense } from 'react'
+import AuditoriaAssimShell from '@/components/auditoria-assim/AuditoriaAssimShell'
 
+/**
+ * O <Suspense> é obrigatório: o Shell usa useSearchParams para resolver o ?tab=,
+ * e um componente cliente que chama useSearchParams sem boundary faz o build de
+ * produção falhar ("Missing Suspense boundary with useSearchParams"). Em dev as
+ * rotas são renderizadas on-demand e o erro não aparece.
+ * Mesmo padrão de app/(dashboard)/cronograma/ocupacao/page.tsx.
+ */
 export default function AuditoriaAssimPage() {
-  const { setHeader } = useHeader()
-  const {
-    dados,
-    kpis,
-    loading,
-    filters,
-    setFilters,
-    pagina,
-    setPagina,
-    totalPaginas,
-    totalFiltrados,
-    sortKey,
-    sortDir,
-    setSort,
-    carregarDados,
-  } = useAuditoriaAssim()
-
-  useEffect(() => {
-    setHeader('Auditoria ASSIM', 'Controle operacional de autorizações e pendências')
-  }, [setHeader])
-
   return (
-    <div className="bg-card rounded-2xl">
-      <div className="flex flex-col gap-4 overflow-hidden">
-
-        <KpiCards
-          kpis={kpis}
-          loading={loading}
-          activeFilter={filters.situacao}
-          onFilter={(situacao) => setFilters({ ...filters, situacao })}
-        />
-
-        <FiltrosAuditoria filters={filters} onChange={setFilters} />
-
-        <TabelaAuditoria
-          dados={dados}
-          loading={loading}
-          pagina={pagina}
-          totalPaginas={totalPaginas}
-          totalFiltrados={totalFiltrados}
-          sortKey={sortKey}
-          sortDir={sortDir}
-          onSort={setSort}
-          onPaginaChange={setPagina}
-          onRefresh={() => carregarDados(true)}
-        />
-
-      </div>
-    </div>
+    <Suspense fallback={null}>
+      <AuditoriaAssimShell />
+    </Suspense>
   )
 }

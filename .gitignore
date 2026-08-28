@@ -8,10 +8,55 @@ README.md
 LICENSE
 instalador/
 node/
-robo-autorizador/
+# robo-autorizador/ NAO e mais ignorado por inteiro: o toolchain do instalador
+# (.iss, start.bat, start.vbs) existia so na maquina do autor. O que precisa
+# ficar de fora esta em robo-autorizador/.gitignore — segredos, node_modules,
+# Chromium e o payload/Output do Inno Setup.
 package-lock.json
 .vscode/
 backup_12MAI2026/
 .claude
 .impeccable
 .vscode
+references/
+nina-api-oficial/
+
+# Dados reais/sensíveis que nunca podem ir pro histórico do git
+# (pacientes, receita, laudos) — ver PLANO_REDEPLOY_SEGURO.md seção 2
+*.xlsx
+*.xls
+supabase/sync_public_from_cloud*.sql
+integração/
+
+# Achado da revisão de segurança de 2026-07-28: backups/dumps soltos na raiz
+# e scripts de debug/teste ad-hoc já vazaram a service_role key em texto puro
+# mais de uma vez (ver migration 20260728190000 e memória do projeto). Nunca
+# devem ser versionados — se precisar de um script de debug local, mantenha
+# fora do repo ou em scripts/ com segredo vindo de variável de ambiente.
+backup_*.sql
+# 2026-08-05: o backup lógico de csv_grades_profissionais (scripts/backup-csv-grades.js)
+# também emite .json com as mesmas 54 mil linhas de nome de paciente e CPF de
+# profissional. Sem esta linha o .json ficava visível ao git — um `git add -A` de
+# distância de ir pro histórico de um repo público.
+backup_*.json
+# 2026-08-07: mesma regra para a pasta com os exports crus da TiTa usados na
+# conferência do /rp (66 MB de agendamento com nome de paciente). O padrão
+# backup_* acima não pega diretório.
+backup_agendamentos/
+# 2026-08-24: dumps de log baixados do painel do Supabase para diagnosticar a
+# lentidão daquele dia. Não trazem token, mas trazem e-mail de funcionária e o
+# UUID de cada usuário autenticado — e este repo é público. Mesmo raciocínio das
+# linhas acima: o conteúdo é útil no disco e nunca no histórico.
+supabase_logs/
+/check_*.py
+/debug_*.py
+/invoke_*.py
+/run_fase2b_tests.*
+/final_r3_summary.py
+
+# 2026-08-26: exports da TiTa em CSV (relatorio_situacao_favorecido e afins).
+# Trazem nome, CPF, endereço, telefone e plano de saúde de paciente — e ESTE
+# REPOSITÓRIO É PÚBLICO. Mesmo raciocínio de *.xlsx acima: o arquivo é útil no
+# disco durante a importação (scripts/importar-favorecidos-tita.js) e nunca no
+# histórico. Apague do disco quando a importação terminar.
+*.csv

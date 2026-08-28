@@ -156,6 +156,74 @@ All five states carry a fixed meaning across every screen. None are interchangea
 - **Substitute Sky** (`#0369a1`): Session transferred to another therapist. Badge for `substituido`.
 - **Pending Slate** (`#64748b`): No status recorded yet. Badge for `pendente`. Also the default muted text color.
 
+#### Contrast correction (2026-08-19)
+
+The badge recipes originally published in §5 paired a `-600` text with a `-50`/`-100` tint. Measured, several land below the 4.5:1 that 12px badge text requires: available `#059669` on `#d1fae5` is 3.3:1, unavailable `#e11d48` on `#ffe4e6` is 4.0:1. **Badge text uses the `-700` step; the base status hex stays the fill/button value.** Partial Amber (`#b45309` = amber-700) and Substitute Sky (`#0369a1` = sky-700) were already at the correct step and are unchanged.
+
+#### Extension: Authorization vocabulary (`/auditoria-assim`)
+
+The Status Lock Rule requires documenting before extending, so: the authorization audit tracks a **six-stage lifecycle** the therapist-availability vocabulary has no word for. It reuses the locked hues where the meaning matches and adds **two**: violet and stone.
+
+Colors are assigned by the `prioridade` the RPC already returns (1 = most urgent), so the palette encodes the same severity that orders the list.
+
+| Prioridade | Estado | Hue | Meaning |
+| --- | --- | --- | --- |
+| 1 | Não Solicitada | Rose 700 | Nothing sent yet — the widest gap |
+| 2 | Glosa | **Violet 700** | Claim rejected. A financial outcome needing a dispute, not a resend |
+| 3 | Retorno Não Confirmado | Amber 700 | Sent, no answer |
+| 4 | Sincronizando | Sky 700 | In transit |
+| 5 | Cancelada | Slate 600 | Closed with no effect |
+| 6 | Liberada | Emerald 700 | Authorized |
+| — | Falta / Falta Terapeuta | **Stone 600 / 700** | The session did not happen — outside the authorization ramp entirely |
+
+**Violet** is new because glosa is categorically unlike the other five: every other state is a workflow stage that time advances, while glosa is a terminal financial rejection. Violet is **semantic only** — it is not available for focus rings, sort indicators, or any decoration, so that one hue never means "glosa" in one cell and "you are here" in the next.
+
+**Stone** is new because faltas are not authorization states at all. Keeping them off the ramp stops an absence from reading as a lifecycle stage. The pair distinguishes by weight, icon, and label — never by hue alone. (Before this pass, `NAO_SOLICITADA` and `FALTA_TERAPEUTA` both rendered `red-50 / red-600 / ring-red-300`, separated only by a red-600 vs red-500 dot: two meanings, one appearance.)
+
+**Two orthogonal axes may appear in the same row.** Situação (above) and conferência de filipeta (emerald = conferida, amber = a conferir) are different dimensions, so an emerald "Liberada" pill beside an amber "Conferir" pill is correct, not a collision — both carry text labels. Amber's meaning is consistent across both axes: *waiting on something*.
+
+##### The surface step (2026-08-20)
+
+Each situação now carries a **second, weaker form of the same hue** — a `surface` entry (`-50/70` fill + `-200/80` hairline) alongside the badge recipe, both living in `SITUACAO_CONFIG`. No new hue: the surface step is the existing hue at container strength, for when a situação has to tint a whole region instead of a pill.
+
+Its only consumer is the header of `ModalDetalhamentoAtendimento`, which previously carried a 4px colored spine across the top of the dialog. The spine was color touching no content — the severity still had to be read off the badge, so the hue was spent on decoration. Wearing the hue on the header surface makes the state arrive with the patient's name.
+
+Two constraints ride with it, and a new situação must satisfy both or get neither form:
+
+- **Tint only, never text.** What sits on a surface is slate (title `slate-900`, subtitle `slate-600` — measured 7.1:1 to 7.4:1 across all six tints). A situação hue never becomes reading text outside its own badge.
+- **The surface reinforces a label, never replaces one.** The tinted header still contains the `SituacaoBadge`. Remove the badge and the tint alone would be the state — which is the color-as-sole-signal failure the vocabulary exists to prevent.
+
+##### Âmbar sólido não é botão (2026-08-20)
+
+Amber has no accessible solid-fill form. White text needs `-700` or darker to clear 4.5:1 (`amber-500` measures **2.15:1**, `amber-600` 3.0:1), and `amber-700` as a fill reads as rust — fine once, a wall when it repeats down a list. So **amber never fills a button.** The conferência control is a tint-and-ring pill in both states, which is what `TabelaAuditoria` already used: `bg-amber-100 / text-amber-900 / ring-amber-400` a conferir, `bg-emerald-50 / text-emerald-700 / ring-emerald-200` conferida.
+
+The same reasoning governs filter chips. `KpiCards` had already settled the pattern — active = `-50` tint + `-400` border + `-700`/`-800` text, never a saturated fill with white text — and the Conferência de Filipetas tabs now follow it instead of the `bg-amber-500 text-white` they shipped with.
+
+A filter chip *may* wear a status hue, and that is not a Decoration-Free violation: the chip filters that exact status, so the hue is still the state. The rule bans a status hue on something that isn't that status.
+
+##### Steel on `/auditoria-assim` (2026-08-20)
+
+The 2026-08-19 pass removed the competing blues from this surface but left brand steel absent from it, which is half the Decoration-Free Semantics Rule: status hues stop decorating *and* steel takes the roles they vacated. In the detail modal steel now holds exactly three: the section titles (`brand-fg`, the structural wayfinding layer), both save buttons, and the focus rings.
+
+Notably, **"Salvar motivo" moved off `violet-600` onto `brand-fg`**. Filled violet made one hue mean "this block is a glosa" and "primary action" within a single section, and made the modal's two save buttons two different components. Steel is deliberately kept off the 16 field labels — spread that far it stops being a signal and just becomes the modal's text color.
+
+##### The third axis: cota semanal (2026-08-20)
+
+A row on this surface can now carry **three orthogonal dimensions**, and the Status Lock Rule is satisfied by reusing hues rather than adding one:
+
+1. **Situação** — the six-stage authorization lifecycle above. Its own hue per stage.
+2. **Conferência de filipeta** — emerald conferida / amber a conferir.
+3. **Cota semanal** — emerald *a conta bate*, amber *divergente*. It lives on the Reconciliação tab, which compares the sessions a patient had scheduled in a week against the authorizations ASSIM actually processed for that week, per TUSS. (It shipped as a modal on the Conferência tab on 2026-08-20 and was folded into that tab a day later: the weekly read is *how* you discover a guia needs linking, so it belongs on the screen where the linking happens.)
+
+**No new hue.** Amber keeps the meaning it already carries on both other axes — *waiting on someone to look* — and emerald keeps meaning *settled*. That consistency is the whole reason a third axis can coexist in one row without the reader having to learn a third vocabulary.
+
+Two constraints, same as the other axes:
+
+- **Violet stays out.** Glosa is the *consequence* of a blown quota, not the quota state itself. Letting violet mean "over quota" here would make the hue mean two things one screen apart.
+- **The tally chips wear the hue because they filter it.** Each chip in the placar filters both columns to its TUSS, so the hue is still the state — the Decoration-Free Semantics Rule bans a status hue on something that *isn't* that status, not on a control that selects it. Chips follow the `KpiCards` recipe: active = `-50` tint + `-300` border + `-700` text, never a saturated fill (see Âmbar sólido não é botão).
+
+**"Not paired" is not a state, so it gets no hue.** In the authorizations column, amber is reserved for the guia that is genuinely in the reconciliation queue — the one `get_guias_orfas` says needs a link. A guia that merely fails to touch any session of the *displayed* week (already triaged, paired to a neighbouring week, or captured by Pulsar itself) wears a slate pill reading *fora desta semana*. The distinction is the whole point: amber promises there is work to do, and a screen that promises work where there is none stops being read.
+
 ### Neutral
 
 - **Ink** (`#1e293b` / slate-800): Primary text. Therapist names, patient names, any primary label.
@@ -169,7 +237,9 @@ All five states carry a fixed meaning across every screen. None are interchangea
 
 **The One Steel Rule.** Clinical Steel appears as an accent signal, not a background color. It colors initials, focus rings, brand-label text, and navigation indicators. It does not fill buttons (those are semantic: emerald or rose), tint sections, or paint headings. The single appearance of brand blue per card is the therapy type label — that's the maximum.
 
-**The Status Lock Rule.** The five semantic state colors (emerald, rose, amber, sky, slate) are locked to their meanings. Emerald is always available. Rose is always unavailable. Adding a sixth color for a new state requires updating this document first.
+**The Status Lock Rule.** The five semantic state colors (emerald, rose, amber, sky, slate) are locked to their meanings. Emerald is always available. Rose is always unavailable. Adding a colour for a new state requires updating this document first — see the authorization extension above, which added violet and stone under that rule.
+
+**The Decoration-Free Semantics Rule.** A hue that carries a status meaning is spent; it may not also decorate. Focus rings, sort indicators, pagination, and primary actions use Clinical Steel — never a status hue. This is what `/auditoria-assim` violated before 2026-08-19: violet meant "glosa" in the badge and "sorted by this column" in the header two rows up, while the brand steel was absent from the surface and two other blues (indigo, violet) competed for the accent role.
 
 ## 3. Typography
 

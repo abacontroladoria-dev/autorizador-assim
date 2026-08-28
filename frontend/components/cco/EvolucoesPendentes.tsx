@@ -60,11 +60,11 @@ export default function EvolucoesPendentes({ evolucoes, evolucoesPorTerapeuta = 
             <h3 className="text-base font-semibold text-foreground">Evoluções Pendentes</h3>
             <p className="text-xs text-foreground/60 mt-0.5">Ranking de carga por terapeuta</p>
           </div>
-          <div className="flex items-center gap-3">
-            <span className="text-xs font-medium text-foreground/60">
+          <div className="flex items-center gap-3 text-xs font-medium text-foreground/60">
+            <span>
               Total: <span className="font-bold text-indigo-600">{total}</span>
             </span>
-            <span className="text-xs font-medium text-foreground/60">
+            <span>
               Terapeutas: <span className="font-bold text-foreground">{evolucoesFiltradas.length} de {evolucoes.length}</span>
             </span>
           </div>

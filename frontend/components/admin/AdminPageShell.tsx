@@ -7,13 +7,21 @@ import AdminSummaryCards from './AdminSummaryCards'
 import AdminUsersTable from './AdminUsersTable'
 import AdminMachinesTable, { isMachineOnline } from './AdminMachinesTable'
 import {
-  changeUserRole,
   deleteUser,
   getAdminMachines,
   getAdminUsers,
+  resetUserPassword,
   toggleUserActive,
   updateMachineStatus,
+  updateUserRoleUnidades,
 } from '@/services/admin.service'
+import {
+  getAllMembrosPorGrupo,
+  getGrupos,
+  sincronizarGruposDoUsuario,
+} from '@/services/grupos.service'
+import type { Grupo } from '@/services/grupos.service'
+import ResetPasswordModal from './ResetPasswordModal'
 import { getFunctionHeaders, getFunctionUrl } from '@/lib/supabase/functions'
 
 export type AdminUser = {
@@ -24,6 +32,7 @@ export type AdminUser = {
   ativo?: boolean
   created_at?: string
   username?: string | null
+  unidades?: string[] | null
 }
 
 export type AdminMachine = {
@@ -48,11 +57,20 @@ export default function AdminPageShell({
 
   const [users, setUsers] = useState(initialUsers)
   const [machines, setMachines] = useState(initialMachines)
+  const [grupos, setGrupos] = useState<Grupo[]>([])
+  // grupo_id → ids dos membros, como vem de grupos_permissoes_membros.
+  const [membrosPorGrupo, setMembrosPorGrupo] = useState<Record<string, string[]>>({})
   const [searchUser, setSearchUser] = useState('')
   const [searchMachine, setSearchMachine] = useState('')
   const [roleFilter, setRoleFilter] = useState('')
   const [busyId, setBusyId] = useState<string | null>(null)
   const [errorMessage, setErrorMessage] = useState('')
+  const [resetPasswordResult, setResetPasswordResult] = useState<{
+    nome: string
+    email: string
+    username: string
+    password: string
+  } | null>(null)
 
   useEffect(() => {
     setHeader(
@@ -63,12 +81,16 @@ export default function AdminPageShell({
 
   useEffect(() => {
     async function load() {
-      const [loadedUsers, loadedMachines] = await Promise.all([
+      const [loadedUsers, loadedMachines, loadedGrupos, loadedMembros] = await Promise.all([
         getAdminUsers(),
         getAdminMachines(),
+        getGrupos(),
+        getAllMembrosPorGrupo(),
       ])
       setUsers(loadedUsers)
       setMachines(loadedMachines)
+      setGrupos(loadedGrupos)
+      setMembrosPorGrupo(loadedMembros)
     }
     load()
 
@@ -96,6 +118,23 @@ export default function AdminPageShell({
       offlineMachines,
     }
   }, [users, machines])
+
+  // usuário → ids dos grupos a que pertence (o inverso de membrosPorGrupo).
+  const gruposPorUsuario = useMemo(() => {
+    const map: Record<string, string[]> = {}
+    for (const grupo of grupos) {
+      for (const usuarioId of membrosPorGrupo[grupo.id] || []) {
+        if (!map[usuarioId]) map[usuarioId] = []
+        map[usuarioId].push(grupo.id)
+      }
+    }
+    return map
+  }, [grupos, membrosPorGrupo])
+
+  const grupoOptions = useMemo(
+    () => grupos.map((grupo) => ({ id: grupo.id, nome: grupo.nome })),
+    [grupos]
+  )
 
   const filteredUsers = useMemo(() => {
     return users.filter((user) => {
@@ -142,24 +181,55 @@ export default function AdminPageShell({
     setBusyId(null)
   }
 
-  async function handleRoleChange(userId: string, role: string) {
+  async function handleSaveUser(
+    userId: string,
+    role: string,
+    unidades: string[],
+    grupoIds: string[]
+  ) {
     setBusyId(userId)
     setErrorMessage('')
 
-    const updated = await changeUserRole(userId, role)
+    const result = await updateUserRoleUnidades(userId, role, unidades)
 
-    if (!updated) {
-      setErrorMessage('Não foi possível alterar o setor do usuário.')
+    if (!result.ok) {
+      setErrorMessage(result.error ?? 'Não foi possível salvar as alterações do usuário.')
       setBusyId(null)
-      return
+      return false
     }
 
     setUsers((current) =>
       current.map((user) =>
-        user.id === userId ? { ...user, role } : user
+        user.id === userId
+          ? { ...user, role, unidades: unidades.length > 0 ? unidades : null }
+          : user
       )
     )
+
+    // Grupo é vínculo puramente organizacional (tabela própria) — muda quem está
+    // no grupo, não as permissões já aplicadas a cada um. Quem aplica as
+    // permissões do modelo é a aba "Por grupo" em Permissões.
+    const gruposAtuais = gruposPorUsuario[userId] || []
+    const gruposOk = await sincronizarGruposDoUsuario(userId, grupoIds, gruposAtuais)
+
+    if (!gruposOk) {
+      setErrorMessage('Perfil e unidades foram salvos, mas não foi possível salvar os grupos.')
+      setBusyId(null)
+      return false
+    }
+
+    const alvo = new Set(grupoIds)
+    setMembrosPorGrupo((current) => {
+      const next: Record<string, string[]> = {}
+      for (const grupo of grupos) {
+        const membros = (current[grupo.id] || []).filter((id) => id !== userId)
+        next[grupo.id] = alvo.has(grupo.id) ? [...membros, userId] : membros
+      }
+      return next
+    })
+
     setBusyId(null)
+    return true
   }
 
   async function handleResendInvite(userId: string, email: string, nome: string, role: string) {
@@ -200,6 +270,22 @@ export default function AdminPageShell({
     setBusyId(null)
   }
 
+  async function handleResetPassword(userId: string, nome: string, email: string, username: string) {
+    setBusyId(userId)
+    setErrorMessage('')
+
+    const result = await resetUserPassword(userId)
+
+    if (!result.ok || !result.password) {
+      setErrorMessage(result.error ?? 'Não foi possível redefinir a senha do usuário.')
+      setBusyId(null)
+      return
+    }
+
+    setResetPasswordResult({ nome, email, username, password: result.password })
+    setBusyId(null)
+  }
+
   async function handleMachineToggle(machineId: string, currentAtiva: boolean) {
     setBusyId(machineId)
     setErrorMessage('')
@@ -235,10 +321,13 @@ export default function AdminPageShell({
           <div className="space-y-4">
             <AdminUsersTable
               users={filteredUsers}
+              grupos={grupoOptions}
+              gruposPorUsuario={gruposPorUsuario}
               onToggleActive={handleToggleActive}
-              onChangeRole={handleRoleChange}
+              onSaveUser={handleSaveUser}
               onResendInvite={handleResendInvite}
               onDeleteUser={handleDeleteUser}
+              onResetPassword={handleResetPassword}
               loadingId={busyId}
               searchUser={searchUser}
               onSearchUserChange={setSearchUser}
@@ -256,6 +345,11 @@ export default function AdminPageShell({
           </div>
         </div>
       </div>
+
+      <ResetPasswordModal
+        result={resetPasswordResult}
+        onClose={() => setResetPasswordResult(null)}
+      />
     </div>
   )
 }

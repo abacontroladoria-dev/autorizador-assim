@@ -71,6 +71,7 @@ serve(async (req: Request) => {
     .from("usuarios")
     .select("id")
     .eq("username", username.toLowerCase())
+    .neq("id", user.id)
     .maybeSingle();
 
   if (existing) return jsonResponse({ error: "username_taken" }, 409, corsHeaders);

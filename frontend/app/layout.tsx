@@ -8,11 +8,26 @@ import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 const geist = Geist({subsets:['latin'],variable:'--font-sans'});
 
 export const metadata: Metadata = {
-  manifest: '/manifest.json',
+  title: "Sistema Pulsar - Universo ABA",
+  description: "Sistema Pulsar",
+
+  manifest: "/manifest.json",
+
+  // Declarar `icons` aqui é intencional: quando este campo existe, o Next ignora
+  // por completo os ícones por convenção de arquivo (app/icon.*) — ver o guard
+  // `if (!resolvedMetadata.icons)` em resolve-metadata.js. É o que garante que só
+  // este ícone valha, mesmo que sobre um app/icon.svg antigo na árvore de build.
+  icons: {
+    icon: [
+      { url: "/icon.png", type: "image/png", sizes: "512x512" },
+    ],
+    apple: "/icon-192.png",
+  },
+
   appleWebApp: {
     capable: true,
-    statusBarStyle: 'default',
-    title: 'Disponib.',
+    statusBarStyle: "default",
+    title: "Pulsar",
   },
 };
 
@@ -28,7 +43,6 @@ export default function RootLayout({
   return (
     <html lang="pt-BR" className={cn("font-sans", geist.variable)} suppressHydrationWarning>
       <head>
-        <link rel="apple-touch-icon" href="/icon-192.png" />
         <script dangerouslySetInnerHTML={{ __html: `try{var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}` }} />
       </head>
       <body>

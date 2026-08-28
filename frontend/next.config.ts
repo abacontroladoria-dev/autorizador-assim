@@ -4,6 +4,9 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   trailingSlash: true,
   allowedDevOrigins: ['192.168.0.241'],
+  turbopack: {
+    root: __dirname,
+  },
 
   async headers() {
     return [

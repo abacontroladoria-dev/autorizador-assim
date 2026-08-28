@@ -222,8 +222,6 @@ export default function Home() {
           <div className="shrink-0 grid grid-cols-2 gap-2">
             <ShortcutButton href="/central-pacientes"  icon={Users}         label="Controle de Pacientes"  iconBg="bg-teal-50"   iconColor="text-teal-600"   accentHex="#0d9488" />
             <ShortcutButton href="/central-terapeutas" icon={Stethoscope}   label="Controle de Terapeutas" iconBg="bg-blue-50"   iconColor="text-[#3A8FB7]" accentHex="#3A8FB7" />
-            <ShortcutButton href="/agenda/pacientes"   icon={Calendar}      label="Agenda Paciente"        iconBg="bg-purple-50" iconColor="text-purple-600" accentHex="#9333ea" />
-            <ShortcutButton href="/agenda/terapeutas"  icon={CalendarCheck} label="Agenda Terapeuta"       iconBg="bg-orange-50" iconColor="text-orange-500" accentHex="#f97316" />
           </div>
         </div>
       </div>
