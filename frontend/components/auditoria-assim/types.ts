@@ -67,6 +67,21 @@ export type AuditoriaAssimItem = {
    * Nulo em toda sessão sem cobertura por vínculo — que é a esmagadora maioria.
    */
   vinculo: VinculoCobertura | null
+  /**
+   * Metadados crus da reclassificação manual ativa deste bloco — de onde para
+   * onde, quem decidiu, quando e por quê.
+   *
+   * Só existe porque `situacao` já reflete a decisão (GLOSA vira FALTA, por
+   * exemplo) e a seção "Motivo da glosa" do detalhamento é condicionada a
+   * `ehGlosa(situacao)`: reclassificar uma glosa some com a única seção que
+   * mostrava o motivo original, e nada tomava o lugar dela além de uma frase
+   * corrida dentro de `observacao`. Nula em todo bloco sem reclassificação
+   * ativa — que é a esmagadora maioria.
+   */
+  reclassificacao_situacao_anterior: string | null
+  reclassificacao_justificativa: string | null
+  reclassificacao_por: string | null
+  reclassificacao_em: string | null
 }
 
 export type KpisAuditoriaAssim = {

@@ -29,6 +29,8 @@ function sessao(p: Partial<AuditoriaAssimItem>): AuditoriaAssimItem {
     // A cobertura é campo da aba Auditoria, que a enriquece por bloco_id. Aqui
     // o vínculo entra pelos mapas de `montarGrade`, não pela linha.
     vinculo: null,
+    reclassificacao_situacao_anterior: null, reclassificacao_justificativa: null,
+    reclassificacao_por: null, reclassificacao_em: null,
     ...p,
   }
 }
