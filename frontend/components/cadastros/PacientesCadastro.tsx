@@ -360,7 +360,7 @@ function CardPaciente({ paciente }: { paciente: Paciente }) {
           um alvo pequeno demais para o tamanho do cartão. */}
       <Link
         href={`/cadastros/pacientes/${paciente.id_paciente}`}
-        className={`group flex h-full flex-col rounded-xl border border-border bg-card p-4 shadow-sm transition-all duration-200 ease-out hover:-translate-y-1.5 hover:border-foreground/15 hover:shadow-lg motion-reduce:transform-none motion-reduce:transition-none ${foco}`}
+        className={`group flex h-full flex-col rounded-xl border border-border bg-card p-5 shadow-sm transition-all duration-200 ease-out hover:-translate-y-1.5 hover:border-foreground/15 hover:shadow-lg motion-reduce:transform-none motion-reduce:transition-none ${foco}`}
       >
         <div className="flex items-start justify-between gap-2">
           <span className="text-sm text-muted-foreground">
@@ -376,16 +376,19 @@ function CardPaciente({ paciente }: { paciente: Paciente }) {
           </div>
         </div>
 
-        <div className="mt-3 flex flex-col items-center text-center">
+        <div className="mt-4 flex flex-col items-center text-center">
           <AvatarLista paciente={paciente} tom={tom} />
-          <h2 className="mt-3 line-clamp-2 min-h-11 text-base font-bold leading-snug text-foreground">
+          <h2
+            className="mt-4 w-full truncate text-base font-bold leading-snug text-foreground"
+            title={paciente.nome}
+          >
             {paciente.nome}
           </h2>
         </div>
 
-        <hr className="my-3 border-border" />
+        <hr className="my-4 border-border" />
 
-        <dl className="space-y-2 text-sm">
+        <dl className="space-y-3 pb-3 text-sm">
           <LinhaDado icone={IdCard} rotulo="CPF" valor={paciente.cpf ? maskCpfCnpj(paciente.cpf) : null} />
           <LinhaDado icone={Cake} rotulo="Nascimento" valor={dataBR(paciente.data_nascimento)} />
           <LinhaDado icone={Phone} rotulo="Celular" valor={paciente.telefone} />
@@ -405,12 +408,12 @@ function LinhaDado({
   valor: string | null
 }) {
   return (
-    <div>
-      <dt className="flex items-center gap-1.5 text-muted-foreground">
+    <div className="flex items-center gap-2">
+      <dt className="flex w-24 shrink-0 items-center gap-1.5 text-muted-foreground">
         <Icone className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
         {rotulo}
       </dt>
-      <dd className="mt-0.5 font-semibold text-foreground">{valor || "—"}</dd>
+      <dd className="truncate text-left font-semibold text-foreground">{valor || "—"}</dd>
     </div>
   )
 }
@@ -447,16 +450,16 @@ function GridEsqueleto() {
   return (
     <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
       {Array.from({ length: 10 }).map((_, i) => (
-        <div key={i} className="rounded-xl border border-border bg-card p-4 shadow-sm">
+        <div key={i} className="rounded-xl border border-border bg-card p-5 shadow-sm">
           <div className="flex items-start justify-between">
             <div className="h-3 w-14 animate-pulse rounded bg-muted" />
             <div className="h-4 w-12 animate-pulse rounded-full bg-muted" />
           </div>
-          <div className="mt-3 flex flex-col items-center">
+          <div className="mt-4 flex flex-col items-center">
             <div className="h-24 w-24 animate-pulse rounded-full bg-muted" />
-            <div className="mt-3 h-3 w-28 animate-pulse rounded bg-muted" />
+            <div className="mt-4 h-3 w-28 animate-pulse rounded bg-muted" />
           </div>
-          <hr className="my-3 border-border" />
+          <hr className="my-4 border-border" />
           <div className="space-y-3">
             {Array.from({ length: 3 }).map((__, j) => (
               <div key={j}>
