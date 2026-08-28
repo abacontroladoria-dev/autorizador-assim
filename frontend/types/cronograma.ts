@@ -38,6 +38,26 @@ export interface LaudoRow {
   [key: string]: string | number | undefined
 }
 
+/**
+ * De onde veio o relatório de laudos que está na tela.
+ *
+ * Vive aqui, e não em services/laudos/relatorio.ts (que produz o valor), porque
+ * o badge do header é componente CLIENTE e aquele módulo é `server-only` —
+ * importar o tipo de lá arrastaria o módulo de servidor para o bundle.
+ *
+ * `null` no estado do layout significa "não vem do relatório automático": ou
+ * nada carregado, ou arquivo enviado à mão. Nesse caso não há frescor a exibir.
+ */
+export interface MetaImportacaoLaudos {
+  importacaoId: string
+  arquivoNome: string
+  concluidoEm: string | null
+  /** O que o robô diz ter gravado. Nulo quando o metadado não foi preenchido. */
+  totalLinhas: number | null
+  /** O que a leitura de fato trouxe. Divergir de `totalLinhas` é erro. */
+  linhasLidas: number
+}
+
 /** Linha da disponibilidade (CSV do Órbita) */
 export interface DispRow {
   "Nome Paciente": string

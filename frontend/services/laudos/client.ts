@@ -1,5 +1,23 @@
 import "server-only"
 
+// ─── SEM CHAMADOR desde 2026-07-17 — mantido de propósito ───────────────────
+//
+// Esta é a busca de laudos na API do TI (cronogramauniversoaba.com.br),
+// paciente a paciente. Ela deixou de ser chamada em 17/07/2026, quando a API
+// saiu do ar e o upload manual do Excel voltou a ser o fluxo principal; em
+// 27/08/2026 a origem passou a ser o relatório do Órbita gravado no Supabase
+// pelo robô do Coolify (services/laudos/relatorio.ts), e /api/laudos foi
+// religada apontando para lá.
+//
+// Por que não apagar agora: é a única segunda opção pronta se o robô do Coolify
+// cair de vez. O custo de manter é zero (nada importa este arquivo, ele não
+// entra em bundle nenhum) e o de reescrever, alto.
+//
+// REAVALIAR EM 27/09/2026 — um ciclo. Se até lá a leitura do relatório estiver
+// estável e ninguém tiver precisado deste caminho, apagar este arquivo e
+// ./types.ts. O que NÃO se apaga junto: `desfazerMerges` e `parseXlsx` em
+// CronogramaDataLayout.tsx, que são do fallback manual e continuam em uso.
+
 import { supabaseService } from "@/lib/supabase/service"
 import { buscarGrade } from "@/lib/grade/fonte"
 import type { LaudoRow } from "@/types/cronograma"
