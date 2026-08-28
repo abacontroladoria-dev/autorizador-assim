@@ -49,6 +49,7 @@ import {
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import Link from "next/link"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { getFunctionHeaders, getFunctionUrl } from "@/lib/supabase/functions"
 import toast from "react-hot-toast"
@@ -406,8 +407,8 @@ export default function Sidebar() {
     const isFav = favoritos.some(f => f.path === path)
 
     return (
-      <button
-        onClick={() => router.push(path)}
+      <Link
+        href={path}
         className={`group flex w-full items-center gap-2.5 py-2 pr-2 rounded-lg text-sm transition-all duration-150
         ${
           active
@@ -423,7 +424,7 @@ export default function Sidebar() {
         <span className="flex-1 text-left">{label}</span>
         {path !== "/" && (
           <span
-            onClick={e => { e.stopPropagation(); toggleFavorito(label, path) }}
+            onClick={e => { e.preventDefault(); e.stopPropagation(); toggleFavorito(label, path) }}
             className={`p-1 rounded transition-all duration-150 hover:bg-sidebar-accent
               ${isFav
                 ? "opacity-100 text-yellow-500"
@@ -433,7 +434,7 @@ export default function Sidebar() {
             <Star size={12} fill={isFav ? "currentColor" : "none"} />
           </span>
         )}
-      </button>
+      </Link>
     )
   }
 
