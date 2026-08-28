@@ -1,9 +1,46 @@
 "use client"
 
 import { useRef, useState } from "react"
-import { CheckCircle2, CalendarDays, Upload, Loader2, X } from "lucide-react"
+import { CheckCircle2, CalendarDays, Upload, Loader2, X, AlertTriangle } from "lucide-react"
 import { getRefWeek } from "@/lib/cronograma/helpers"
-import type { CsvRow, DispRow, LaudoRow } from "@/types/cronograma"
+import type { CsvRow, DispRow, LaudoRow, MetaImportacaoLaudos } from "@/types/cronograma"
+
+// Acima disto o dado para de ser "de hoje" e o badge sai do verde. Dois dias
+// cobre o robô perder uma rodada (ele roda diário) sem alarme falso, e acusa a
+// segunda perda — que já é robô parado, não soluço.
+const HORAS_PARA_ALERTA = 48
+
+/**
+ * Quão velho é o relatório carregado, e como dizer isso em uma linha.
+ *
+ * Existe porque carga automática troca a pergunta de quem olha o header: com
+ * upload manual a pessoa sabia a idade do dado (ela mesma tinha baixado o
+ * arquivo); com o robô, não sabe. E robô parado é falha silenciosa — badge
+ * verde com relatório de cinco dias é pior do que erro, porque ninguém
+ * investiga o que parece certo.
+ */
+function frescorDoRelatorio(meta: MetaImportacaoLaudos | null | undefined) {
+  if (!meta) return null
+  if (!meta.concluidoEm) {
+    return { velho: false, titulo: `Relatório do Órbita · ${meta.arquivoNome} · data da carga não informada` }
+  }
+  const carga = new Date(meta.concluidoEm)
+  if (Number.isNaN(carga.getTime())) {
+    return { velho: false, titulo: `Relatório do Órbita · ${meta.arquivoNome}` }
+  }
+  const horas = (Date.now() - carga.getTime()) / 3_600_000
+  const quando = carga.toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })
+  const idade = horas < 1
+    ? "há menos de 1 hora"
+    : horas < 24
+      ? `há ${Math.floor(horas)}h`
+      : `há ${Math.floor(horas / 24)} dia(s)`
+  return {
+    velho: horas >= HORAS_PARA_ALERTA,
+    titulo: `Relatório do Órbita · ${meta.arquivoNome} · carregado ${quando} (${idade})`
+      + (horas >= HORAS_PARA_ALERTA ? " — o robô do Órbita pode estar parado" : ""),
+  }
+}
 
 interface Props {
   cRows: CsvRow[]
@@ -25,13 +62,17 @@ interface Props {
   // Sobrescreve o rótulo do "Período" — usado por Ocupação de Paciente, que carrega sua
   // própria janela de grade (getJanelaOcupacaoPaciente) em vez do cRows deste layout.
   periodLabel?: string
+  // De onde veio o relatório de laudos, quando veio do robô do Órbita. Opcional:
+  // sem ela o badge se comporta como antes (só a contagem), que é o certo para o
+  // upload manual — ali não há frescor de carga automática a informar.
+  laudosMeta?: MetaImportacaoLaudos | null
 }
 
 export function CronogramaUploadBadges({
   cRows, lRows, gradeLoading, loading, error, onSelectFile, onClear,
   showLaudos = true,
   showDisponibilidade = false, dispRows = [], dispLoading = false, dispError = null, onSelectDisp, onClearDisp,
-  periodLabel,
+  periodLabel, laudosMeta = null,
 }: Props) {
   const inputRef = useRef<HTMLInputElement>(null)
   const dispInputRef = useRef<HTMLInputElement>(null)
@@ -41,6 +82,7 @@ export function CronogramaUploadBadges({
   const gradeLoaded = cRows.length > 0
   const laudosLoaded = lRows.length > 0
   const dispLoaded = dispRows.length > 0
+  const frescor = laudosLoaded ? frescorDoRelatorio(laudosMeta) : null
 
   function onDispInputChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0]
@@ -88,7 +130,9 @@ export function CronogramaUploadBadges({
           Grade{gradeLoaded ? ` · ${cRows.length.toLocaleString("pt-BR")} horários` : ""}
         </span>
 
-        {/* Laudos — carregados automaticamente via API do TI; status-only, igual à Grade. */}
+        {/* Laudos — carregados automaticamente do relatório do Órbita que o robô do Coolify
+            grava no Supabase (ver services/laudos/relatorio.ts). Status-only, igual à Grade,
+            mais o frescor da carga: âmbar acima de 48h. */}
         {showLaudos && (
           <>
             <input
@@ -99,14 +143,20 @@ export function CronogramaUploadBadges({
               onChange={onInputChange}
             />
             {!error && (
-              <span className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors
-                ${laudosLoaded
-                  ? "border-green-200 bg-green-50 text-green-700 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400"
-                  : "border-border bg-muted text-muted-foreground"}`}
+              <span
+                title={frescor?.titulo}
+                className={`flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium transition-colors
+                ${!laudosLoaded
+                  ? "border-border bg-muted text-muted-foreground"
+                  : frescor?.velho
+                    ? "border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:border-amber-800 dark:text-amber-400"
+                    : "border-green-200 bg-green-50 text-green-700 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400"}`}
               >
                 {loading && !laudosLoaded
                   ? <Loader2 size={11} className="animate-spin" />
-                  : <CheckCircle2 size={11} className={laudosLoaded ? "text-green-500" : "text-muted-foreground/30"} />
+                  : frescor?.velho
+                    ? <AlertTriangle size={11} className="text-amber-500" />
+                    : <CheckCircle2 size={11} className={laudosLoaded ? "text-green-500" : "text-muted-foreground/30"} />
                 }
                 Laudos{laudosLoaded ? ` · ${lRows.length.toLocaleString("pt-BR")} registros` : ""}
               </span>
