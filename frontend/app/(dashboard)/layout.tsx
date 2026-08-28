@@ -9,7 +9,7 @@ import { getSupabaseClient } from '@/lib/supabase/client'
 
 import {
   HeaderProvider,
-  useHeader,
+  useHeaderState,
 } from '@/contexts/HeaderContext'
 import { ThemeProvider } from '@/contexts/ThemeContext'
 import { ImpersonationProvider, useImpersonation } from '@/contexts/ImpersonationContext'
@@ -72,7 +72,7 @@ function DashboardShellContent({
 }: {
   children: React.ReactNode
 }) {
-  const { title, subtitle, rightContent } = useHeader()
+  const { title, subtitle, rightContent } = useHeaderState()
   const { isImpersonating } = useImpersonation()
 
   return (

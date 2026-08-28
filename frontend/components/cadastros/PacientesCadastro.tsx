@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, useEffect, useRef } from "react"
+import { memo, useMemo, useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { useHeader } from "@/contexts/HeaderContext"
 import { getFotoUrlAssinada } from "@/services/pacientesFoto.service"
@@ -351,7 +351,7 @@ function FiltroSituacao({
   )
 }
 
-function CardPaciente({ paciente }: { paciente: Paciente }) {
+const CardPaciente = memo(function CardPaciente({ paciente }: { paciente: Paciente }) {
   const tom = getTomAvatar(paciente.id_paciente)
 
   return (
@@ -396,7 +396,7 @@ function CardPaciente({ paciente }: { paciente: Paciente }) {
       </Link>
     </li>
   )
-}
+})
 
 function LinhaDado({
   icone: Icone,
