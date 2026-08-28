@@ -286,6 +286,73 @@ function montarMensagem(a: Aviso, codigos: Map<string, string>): string {
   return linhas.join("\n");
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// A MENÇÃO QUE FUNCIONA: [@Nome](#user_mention#{id})
+// ─────────────────────────────────────────────────────────────────────────────
+// Esta sintaxe NÃO ESTÁ NA DOC OFICIAL do ClickUp. Foi descoberta por tentativa
+// em 2026-08-28, e confirmada de duas formas: o endpoint
+// GET /v3/workspaces/{ws}/chat/messages/{id}/tagged_users passou a devolver o
+// usuário, e a pessoa mencionada RECEBEU a notificação. Ninguém vai reencontrar
+// isto lendo documentação — daí o registro completo aqui.
+//
+// Sete candidatos, cada um enviado e conferido em tagged_users:
+//
+//   @Nome (texto puro, o controle) ......... vazio
+//   followers: [ids] (campo do POST) ....... 201, vazio
+//   clickup://user/{id} .................... vazio
+//   [@Nome](clickup://user/{id}) ........... vazio
+//   [@Nome](user:{id}) ..................... vazio
+//   [@Nome](#user_mention{id}) ............. vazio   <- SEM o # final
+//   [@Nome](#user_mention#{id}) ............ ✅ reconheceu E notificou
+//   [Nome](#user_mention#{id}) ............. ✅ reconheceu
+//
+// TRÊS REGRAS QUE SAEM DISSO, e nenhuma é óbvia:
+//
+//   1. O `#` FINAL É OBRIGATÓRIO. `#user_mention#{id}` funciona;
+//      `#user_mention{id}` não. Um caractere separa menção de link morto.
+//   2. O `@` do rótulo é DECORATIVO — o que resolve é o LINK. Mantido porque é o
+//      que a pessoa espera ver escrito.
+//   3. O ALVO PRECISA PERTENCER AO CANAL. A primeira rodada falhou com esta
+//      mesma sintaxe: o app mostrava "undefined não tem acesso a este canal",
+//      porque o id testado era de alguém de fora. **Trocar de canal exige
+//      reconferir os ids**, não só o channel_id.
+//
+// O caminho até aqui foi longo e vale registrar para não se repetir: `@Nome` em
+// texto não notifica, e `followers` foi aceito com 201 sem avisar ninguém
+// (testado 2x). Lição de método: **201 não prova que um campo FAZ algo** — prova
+// só que o request era válido.
+//
+// Script do teste: supabase/snippets/testar_mention_clickup.mjs
+
+type UsuarioMencionado = { nome?: string; id?: string };
+
+/**
+ * Os nomes a citar, como menções que o ClickUp reconhece.
+ *
+ * Lê `mencionar_usuarios` (jsonb, pares nome+id) e cai para `mencionar` — a
+ * coluna antiga, texto solto — só se a nova estiver vazia. A antiga não
+ * notifica; existe como rede de segurança para o caso de a migration 20260828160000
+ * não ter sido aplicada, e some quando ela for.
+ *
+ * Config guarda o FATO (quem citar); a sintaxe mora aqui. A API de Chat v3 é
+ * experimental ("subject to change at any time"), então se o formato mudar, muda
+ * uma linha nesta função — não a linha de config.
+ */
+function montarMencoes(usuarios: unknown, textoAntigo: string | null): string | null {
+  if (Array.isArray(usuarios) && usuarios.length > 0) {
+    const partes = (usuarios as UsuarioMencionado[])
+      // Sem id não há menção possível: o link precisa do número. Um nome solto
+      // aqui viraria texto que finge notificar — exatamente o que se está
+      // corrigindo.
+      .filter((u) => u?.id)
+      .map((u) => `[@${u.nome ?? "usuário"}](#user_mention#${u.id})`);
+
+    if (partes.length > 0) return partes.join(" ");
+  }
+
+  return textoAntigo?.trim() || null;
+}
+
 /**
  * Chat do ClickUp (API v3). O token pessoal vai CRU no Authorization, sem
  * "Bearer" — é assim para token pessoal, diferente do OAuth.
@@ -373,6 +440,9 @@ serve(async () => {
       if (c?.codigo && c?.descricao) codigos.set(String(c.codigo), String(c.descricao));
     }
 
+    // Uma vez por execução: quem é citado não muda entre um aviso e outro.
+    const mencoes = montarMencoes(cfg.mencionar_usuarios, cfg.mencionar);
+
     let enviados = 0;
     const falhas: string[] = [];
 
@@ -381,9 +451,11 @@ serve(async () => {
         await enviarClickUp(
           cfg.clickup_workspace_id,
           cfg.clickup_channel_id,
-          // A menção vai no fim, e é decorativa: a API não notifica por ela.
-          cfg.mencionar
-            ? `${montarMensagem(aviso, codigos)}\n\n${cfg.mencionar}`
+          // A menção vai no FIM, depois do dossiê: ela chama as pessoas, não
+          // informa nada. Quem lê quer saber quem foi recusado antes de ver
+          // quem foi chamado.
+          mencoes
+            ? `${montarMensagem(aviso, codigos)}\n\n${mencoes}`
             : montarMensagem(aviso, codigos),
         );
 

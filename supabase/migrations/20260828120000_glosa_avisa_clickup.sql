@@ -37,11 +37,12 @@
 -- Como não há print, O ROBÔ NÃO MUDA — nada de publicar versão nova para as 11
 -- máquinas, e nenhum dado de paciente sai do sistema como imagem.
 --
--- Não notifica de verdade. Menção na API de chat v3 NÃO avisa ninguém:
--- `@[Nome](user:id)` vira um link azul, não popula tagged_users e não dispara
--- notificação (a própria ClickUp lista "true @mentions" como Planned). Quem
--- acompanha o canal vê. A notificação real que já existe é o alerta `assim_glosa`
--- no sino do Pulsar, com prioridade alta e tolerância 0 (20260813130200).
+-- Não notifica de verdade. -- ⚠️ SUPERADO NO MESMO DIA, ver 20260828160000:
+-- a menção `[@Nome](#user_mention#{id})` (com o # FINAL) É reconhecida e NOTIFICA.
+-- O que este parágrafo dizia continua valendo para as formas que se tentou antes
+-- — `@Nome` em texto, `[@Nome](user:id)`, `clickup://user/id` e o campo
+-- `followers` —, nenhuma das quais popula tagged_users nem avisa ninguém.
+-- Fica registrado porque a conclusão errada custou seis tentativas.
 -- =============================================================================
 
 -- ─────────────────────────────────────────────────────────────────────────────

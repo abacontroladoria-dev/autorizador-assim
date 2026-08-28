@@ -86,16 +86,127 @@ ON CONFLICT (fila_id) DO UPDATE
 --
 -- Conferir a mensagem em https://app.clickup.com/9011600909/chat/r/8cj47gd-16871
 
--- PASSO 4 — depois de conferir o formato no tecnologia-dev, virar para a equipe.
--- É onde o healthcheck da ASSIM já posta, então o canal já está provado.
--- CUIDADO ao trocar este id na mão: existem quatro nomes parecidos no workspace
+-- PASSO 4 — A VIRADA PARA A EQUIPE, com as menções reais.
+-- Decidida em 2026-08-28, depois de a menção provar que notifica.
+--
+-- ORDEM QUE IMPORTA — as menções dependem de código novo:
+--   a) aplicar 20260828160000_glosa_aviso_mencoes_reais.sql (cria
+--      `mencionar_usuarios` e já grava as três);
+--   b) supabase functions deploy glosa-clickup;
+--   c) só então este UPDATE.
+-- Fora dessa ordem, a função lê uma coluna que não existe e cai no texto antigo
+-- — a mensagem sai, mas sem notificar ninguém.
+--
+-- CUIDADO com o channel_id: há quatro nomes parecidos no workspace
 -- (recepção-aberto, autorização-aberto, Solicitações Autorização).
-/*
+--
+-- E A ARMADILHA DAS MENÇÕES: **o id só resolve se a pessoa for membro do
+-- canal**. Um id de fora vira link morto, e o app mostra "undefined não tem
+-- acesso a este canal" ao passar o mouse. As três são members e followers do
+-- `suporte-recepção-autorização`; se um dia o canal mudar, RECONFERIR OS IDS,
+-- não só o channel_id.
+
 UPDATE public.glosa_avisos_config
    SET clickup_channel_id = '8cj47gd-16891',   -- suporte-recepção-autorização
+       mencionar_usuarios = jsonb_build_array(
+         jsonb_build_object('nome', 'Victoria França', 'id', '87452697'),
+         jsonb_build_object('nome', 'Aline Notes',     'id', '87395094'),
+         jsonb_build_object('nome', 'Luana Calixto',   'id', '87452695')
+       ),
+       mencionar          = NULL,   -- coluna antiga (texto que não notificava)
        updated_at         = now()
  WHERE id = 1;
-*/
+
+-- Confirme ANTES de esperar a próxima glosa real:
+SELECT ativo,
+       CASE clickup_channel_id
+         WHEN '8cj47gd-16891' THEN 'OK — suporte-recepcao-autorizacao (EQUIPE)'
+         WHEN '8cj47gd-16871' THEN 'ainda no tecnologia-dev (TESTE)'
+         ELSE 'CANAL DESCONHECIDO — confira'
+       END AS destino,
+       jsonb_array_length(coalesce(mencionar_usuarios, '[]'::jsonb)) AS qtd_mencoes,
+       mencionar_usuarios
+  FROM public.glosa_avisos_config WHERE id = 1;
+
+-- Como a menção vai sair na mensagem (confere a sintaxe sem precisar disparar).
+-- O `#` FINAL é obrigatório: sem ele o ClickUp não resolve a menção.
+SELECT string_agg(
+         format('[@%s](#user_mention#%s)', u->>'nome', u->>'id'), ' '
+       ) AS rodape_da_mensagem
+  FROM public.glosa_avisos_config c,
+       jsonb_array_elements(c.mencionar_usuarios) u
+ WHERE c.id = 1;
+
+-- =============================================================================
+-- A MENÇÃO QUE FUNCIONA: [@Nome](#user_mention#{id})
+-- =============================================================================
+-- NÃO ESTÁ NA DOC DO CLICKUP. Descoberta por tentativa em 2026-08-28, e
+-- confirmada duas vezes: o GET .../chat/messages/{id}/tagged_users passou a
+-- devolver o usuário, E a pessoa mencionada recebeu a notificação. Ninguém vai
+-- reencontrar isto lendo documentação — daí o registro.
+--
+-- Sete candidatos, cada um enviado e conferido em tagged_users:
+--
+--   @Nome (texto puro, o controle) ........ vazio
+--   followers: [ids] (campo do POST) ...... 201, vazio
+--   clickup://user/{id} ................... vazio
+--   [@Nome](clickup://user/{id}) .......... vazio
+--   [@Nome](user:{id}) .................... vazio
+--   [@Nome](#user_mention{id}) ............ vazio   <- SEM o # final
+--   [@Nome](#user_mention#{id}) ........... ✅ reconheceu E notificou
+--   [Nome](#user_mention#{id}) ............ ✅ reconheceu
+--
+-- TRÊS REGRAS, nenhuma óbvia:
+--   1. O `#` FINAL É OBRIGATÓRIO. Um caractere separa menção de link morto.
+--   2. O `@` do rótulo é decorativo — o que resolve é o LINK.
+--   3. O ALVO PRECISA SER MEMBRO DO CANAL. A 1ª rodada falhou com esta mesma
+--      sintaxe porque o id era de alguém de fora; o app mostrava "undefined não
+--      tem acesso a este canal". Trocar de canal exige RECONFERIR OS IDS.
+--
+-- Lição de método: **201 não prova que um campo FAZ algo** — prova só que o
+-- request era válido. Foi o que enganou no `followers`.
+--
+-- Script do teste: supabase/snippets/testar_mention_clickup.mjs
+-- Config: `mencionar_usuarios` (jsonb, pares nome+id). A coluna `mencionar`
+-- ficou obsoleta — era o texto que não notificava.
+
+-- =============================================================================
+-- LIMPEZA DEPOIS DOS TESTES  (2026-08-28)
+-- =============================================================================
+-- 1. AS LINHAS FABRICADAS. O paciente fictício foi inventado para provocar aviso
+--    sem esperar glosa real; ele não corresponde a atendimento nenhum e
+--    poluiria qualquer consulta futura à outbox.
+--
+--    A FK é ON DELETE CASCADE (20260828120000:104), então apagar a linha da
+--    fila já leva o aviso junto. O primeiro DELETE continua aqui porque cobre o
+--    caso em que o aviso foi INSERIDO à mão (PASSO 2) sobre uma linha de fila
+--    que se quer preservar.
+
+DELETE FROM public.glosa_avisos
+ WHERE paciente_nome ILIKE '%[TESTE]%'
+    OR recepcionista = 'Teste Manual';
+
+DELETE FROM public.fila_autorizacoes
+ WHERE paciente_nome ILIKE '%[TESTE]%'
+    OR id = 'deadbeef-0000-4000-8000-000000000001';
+
+-- 2. AS GLOSAS REAIS REENVIADAS. Se você usou o PASSO 2 para reenviar um caso
+--    de verdade, a linha ficou com enviado_em preenchido e está correta — NÃO
+--    apague. Conferir antes de mexer:
+--
+--    SELECT id, paciente_nome, criado_em, enviado_em, tentativas
+--      FROM public.glosa_avisos ORDER BY criado_em DESC LIMIT 10;
+
+-- 3. AS MENSAGENS NO CANAL tecnologia-dev. Ficaram lá as sondas de menção
+--    ([teste-mention 1..5]) e os avisos fabricados. Apagar é pela API — o SQL
+--    não alcança o ClickUp:
+--
+--      $env:CLICKUP_TOKEN="pk_..."
+--      node supabase/snippets/limpar_mensagens_teste_clickup.mjs            # simula
+--      node supabase/snippets/limpar_mensagens_teste_clickup.mjs --apagar   # apaga
+--
+--    Ele só apaga o que casa com os padrões de teste, num canal só. Mensagem
+--    apagada no ClickUp não volta.
 
 -- =============================================================================
 -- CONFERÊNCIA
