@@ -16,6 +16,7 @@ import {
   ChevronRight,
   ListFilter,
   Check,
+  X,
 } from "lucide-react"
 import { HistoricoCadastrosModal } from "@/components/cadastros/historico/HistoricoCadastrosModal"
 import { getTomAvatar, iniciaisDe } from "@/lib/cadastros/avatarPastel"
@@ -133,8 +134,8 @@ export function PacientesCadastro() {
             aria-hidden="true"
           />
           <input
-            type="search"
-            className={`${campo} pl-9 w-96`}
+            type="text"
+            className={`${campo} pl-9 ${buscaTexto ? "pr-9" : ""} w-96`}
             placeholder="Buscar nome, CPF ou ID"
             value={buscaTexto}
             onChange={(e) => {
@@ -143,6 +144,19 @@ export function PacientesCadastro() {
             }}
             aria-label="Buscar paciente"
           />
+          {buscaTexto && (
+            <button
+              type="button"
+              onClick={() => {
+                setBuscaTexto("")
+                setPagina(1)
+              }}
+              className={`absolute right-1.5 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-full text-muted-foreground hover:bg-muted hover:text-foreground ${foco}`}
+              aria-label="Limpar busca"
+            >
+              <X className="h-4 w-4" aria-hidden="true" />
+            </button>
+          )}
         </div>
         <FiltroSituacao
           value={situacoes}
@@ -349,13 +363,13 @@ function CardPaciente({ paciente }: { paciente: Paciente }) {
         className={`group flex h-full flex-col rounded-xl border border-border bg-card p-4 shadow-sm transition-all duration-200 ease-out hover:-translate-y-1.5 hover:border-foreground/15 hover:shadow-lg motion-reduce:transform-none motion-reduce:transition-none ${foco}`}
       >
         <div className="flex items-start justify-between gap-2">
-          <span className="text-xs text-muted-foreground">
+          <span className="text-sm text-muted-foreground">
             ID <span className="font-semibold text-foreground">{idExibicao(paciente)}</span>
           </span>
           <div className="flex flex-wrap justify-end gap-1">
             <Situacao paciente={paciente} />
             {paciente.ficticio && (
-              <span className="inline-flex rounded-full bg-amber-500/10 px-2 py-0.5 text-xs font-medium text-amber-600 dark:text-amber-400">
+              <span className="inline-flex rounded-full bg-amber-500/10 px-2 py-0.5 text-sm font-medium text-amber-600 dark:text-amber-400">
                 Fictício
               </span>
             )}
@@ -364,14 +378,14 @@ function CardPaciente({ paciente }: { paciente: Paciente }) {
 
         <div className="mt-3 flex flex-col items-center text-center">
           <AvatarLista paciente={paciente} tom={tom} />
-          <h2 className="mt-3 text-sm font-bold leading-snug text-foreground">
+          <h2 className="mt-3 line-clamp-2 min-h-11 text-base font-bold leading-snug text-foreground">
             {paciente.nome}
           </h2>
         </div>
 
         <hr className="my-3 border-border" />
 
-        <dl className="space-y-2 text-xs">
+        <dl className="space-y-2 text-sm">
           <LinhaDado icone={IdCard} rotulo="CPF" valor={paciente.cpf ? maskCpfCnpj(paciente.cpf) : null} />
           <LinhaDado icone={Cake} rotulo="Nascimento" valor={dataBR(paciente.data_nascimento)} />
           <LinhaDado icone={Phone} rotulo="Celular" valor={paciente.telefone} />
@@ -407,20 +421,20 @@ function LinhaDado({
 function Situacao({ paciente }: { paciente: Paciente }) {
   if (paciente.falecido) {
     return (
-      <span className="inline-flex rounded-full bg-muted px-2 py-0.5 text-xs font-medium text-muted-foreground">
+      <span className="inline-flex rounded-full bg-muted px-2 py-0.5 text-sm font-medium text-muted-foreground">
         Falecido
       </span>
     )
   }
   if (!paciente.ativo) {
     return (
-      <span className="inline-flex rounded-full bg-rose-500/10 px-2 py-0.5 text-xs font-medium text-rose-600 dark:text-rose-400">
+      <span className="inline-flex rounded-full bg-rose-500/10 px-2 py-0.5 text-sm font-medium text-rose-600 dark:text-rose-400">
         Inativo
       </span>
     )
   }
   return (
-    <span className="inline-flex rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+    <span className="inline-flex rounded-full bg-emerald-500/10 px-2 py-0.5 text-sm font-medium text-emerald-600 dark:text-emerald-400">
       Ativo
     </span>
   )
@@ -439,7 +453,7 @@ function GridEsqueleto() {
             <div className="h-4 w-12 animate-pulse rounded-full bg-muted" />
           </div>
           <div className="mt-3 flex flex-col items-center">
-            <div className="h-16 w-16 animate-pulse rounded-full bg-muted" />
+            <div className="h-24 w-24 animate-pulse rounded-full bg-muted" />
             <div className="mt-3 h-3 w-28 animate-pulse rounded bg-muted" />
           </div>
           <hr className="my-3 border-border" />
@@ -476,7 +490,7 @@ function AvatarLista({ paciente, tom }: { paciente: Paciente, tom: { bg: string,
 
   if (url) {
     return (
-      <div className="flex h-16 w-16 overflow-hidden rounded-full border border-border bg-muted transition-transform duration-200 ease-out group-hover:scale-105 motion-reduce:transform-none motion-reduce:transition-none">
+      <div className="flex h-24 w-24 overflow-hidden rounded-full border border-border bg-muted transition-transform duration-200 ease-out group-hover:scale-105 motion-reduce:transform-none motion-reduce:transition-none">
         <img src={url} alt={`Foto de ${paciente.nome}`} className="h-full w-full object-cover" />
       </div>
     )
@@ -484,7 +498,7 @@ function AvatarLista({ paciente, tom }: { paciente: Paciente, tom: { bg: string,
 
   return (
     <span
-      className="flex h-16 w-16 items-center justify-center rounded-full text-xl font-bold transition-transform duration-200 ease-out group-hover:scale-105 motion-reduce:transform-none motion-reduce:transition-none"
+      className="flex h-24 w-24 items-center justify-center rounded-full text-2xl font-bold transition-transform duration-200 ease-out group-hover:scale-105 motion-reduce:transform-none motion-reduce:transition-none"
       style={{ backgroundColor: tom.bg, color: tom.fg }}
       aria-hidden="true"
     >

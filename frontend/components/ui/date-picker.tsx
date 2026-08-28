@@ -105,7 +105,7 @@ export function DatePicker({ value, onChange, disabled, placeholder = "dd/mm/aaa
             {/* Days header */}
             <div className="mb-2 grid grid-cols-7 gap-1 text-center">
               {dayNames.map((day, i) => (
-                <div key={`${day}-${i}`} className="text-[11px] font-medium text-muted-foreground">
+                <div key={`${day}-${i}`} className="text-[11px] font-bold text-foreground">
                   {day}
                 </div>
               ))}
@@ -120,6 +120,7 @@ export function DatePicker({ value, onChange, disabled, placeholder = "dd/mm/aaa
                 const currentDate = formatDate(year, month, day)
                 const isSelected = currentDate === value
                 const isToday = currentDate === formatDate(new Date().getFullYear(), new Date().getMonth(), new Date().getDate())
+                const isWeekend = idx % 7 === 0 || idx % 7 === 6
 
                 return (
                   <button
@@ -131,6 +132,8 @@ export function DatePicker({ value, onChange, disabled, placeholder = "dd/mm/aaa
                         ? "bg-primary font-bold text-primary-foreground hover:bg-primary/90"
                         : isToday
                         ? "bg-accent font-semibold text-accent-foreground hover:bg-accent/80"
+                        : isWeekend
+                        ? "text-red-500 hover:bg-muted"
                         : "text-foreground hover:bg-muted"
                     }`}
                   >

@@ -1,7 +1,7 @@
 "use client"
 
-import type { ReactNode } from "react"
-import * as Select from "@radix-ui/react-select"
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from "react"
+import * as Popover from "@radix-ui/react-popover"
 import { Check, ChevronDown } from "lucide-react"
 
 // Classes de formulário do projeto. Mesmas constantes de
@@ -199,61 +199,97 @@ export function CampoSelect<T extends string>({
   opcoes: { valor: T; rotulo: string }[]
   vazio?: string
 }) {
+  const id = useId()
+  const [aberto, setAberto] = useState(false)
+  const [busca, setBusca] = useState("")
+  const buscaRef = useRef<HTMLInputElement>(null)
+
+  const rotuloSelecionado = value ? opcoes.find(o => o.valor === value)?.rotulo : null
+
+  const filtradas = useMemo(() => {
+    const q = busca.trim().toLowerCase()
+    if (!q) return opcoes
+    return opcoes.filter(o => o.rotulo.toLowerCase().includes(q))
+  }, [busca, opcoes])
+
+  useEffect(() => {
+    if (aberto) setBusca("")
+  }, [aberto])
+
+  const selecionar = (v: T | null) => {
+    onChange(v)
+    setAberto(false)
+  }
+
   return (
     <div className={largo ? "sm:col-span-2" : undefined}>
-      <label className={rotulo}>{label}</label>
-      <Select.Root
-        value={value ?? "__none__"}
-        onValueChange={(val) => onChange(val === "__none__" ? null : (val as T))}
-        disabled={disabled}
-      >
-        <Select.Trigger
-          className={`mt-1 flex w-full items-center justify-between rounded-md border border-border bg-transparent px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-default disabled:bg-muted/40 disabled:text-muted-foreground [&>span]:line-clamp-1 ${!value ? "text-muted-foreground/60" : ""}`}
-        >
-          <Select.Value placeholder={vazio}>
-            {value ? opcoes.find(o => o.valor === value)?.rotulo : vazio}
-          </Select.Value>
-          <Select.Icon asChild>
-            <ChevronDown className="h-4 w-4 opacity-50" />
-          </Select.Icon>
-        </Select.Trigger>
-        <Select.Portal>
-          <Select.Content
-            position="popper"
-            sideOffset={4}
-            className="relative z-[100] max-h-96 min-w-[8rem] overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2"
+      <label className={rotulo} htmlFor={id}>{label}</label>
+      <Popover.Root open={aberto} onOpenChange={disabled ? undefined : setAberto}>
+        <Popover.Trigger asChild>
+          <button
+            id={id}
+            type="button"
+            disabled={disabled}
+            className={`mt-1 flex w-full items-center justify-between rounded-md border border-border bg-transparent px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-default disabled:bg-muted/40 disabled:text-muted-foreground ${!value ? "text-muted-foreground/60" : ""}`}
           >
-            <Select.Viewport className="h-[var(--radix-select-trigger-height)] w-full min-w-[var(--radix-select-trigger-width)] p-1 bg-card">
-              <Select.Item
-                value="__none__"
-                className="relative flex w-full cursor-pointer select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
-              >
-                <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
-                  <Select.ItemIndicator>
-                    <Check className="h-4 w-4" />
-                  </Select.ItemIndicator>
-                </span>
-                <Select.ItemText>{vazio}</Select.ItemText>
-              </Select.Item>
-              
-              {opcoes.map((o) => (
-                <Select.Item
-                  key={o.valor}
-                  value={o.valor}
-                  className="relative flex w-full cursor-pointer select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+            <span className="line-clamp-1 text-left">{rotuloSelecionado ?? vazio}</span>
+            <ChevronDown className="h-4 w-4 shrink-0 opacity-50" />
+          </button>
+        </Popover.Trigger>
+        {!disabled && (
+          <Popover.Portal>
+            <Popover.Content
+              align="start"
+              sideOffset={4}
+              onOpenAutoFocus={(e) => { e.preventDefault(); buscaRef.current?.focus() }}
+              className="z-[100] w-[var(--radix-popover-trigger-width)] overflow-hidden rounded-md border border-border bg-popover text-popover-foreground shadow-md data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=top]:slide-in-from-bottom-2"
+            >
+              <div className="border-b border-border p-1">
+                <input
+                  ref={buscaRef}
+                  type="text"
+                  value={busca}
+                  onChange={(e) => setBusca(e.target.value)}
+                  placeholder="Digite para buscar..."
+                  className="w-full rounded-sm bg-transparent px-2 py-1.5 text-sm text-foreground placeholder:text-muted-foreground/60 focus:outline-none"
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && filtradas.length === 1) selecionar(filtradas[0].valor)
+                    else if (e.key === "Escape") setAberto(false)
+                  }}
+                />
+              </div>
+              <div className="max-h-96 overflow-y-auto p-1">
+                <button
+                  type="button"
+                  onClick={() => selecionar(null)}
+                  className="relative flex w-full cursor-pointer select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground"
                 >
                   <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
-                    <Select.ItemIndicator>
-                      <Check className="h-4 w-4" />
-                    </Select.ItemIndicator>
+                    {!value && <Check className="h-4 w-4" />}
                   </span>
-                  <Select.ItemText>{o.rotulo}</Select.ItemText>
-                </Select.Item>
-              ))}
-            </Select.Viewport>
-          </Select.Content>
-        </Select.Portal>
-      </Select.Root>
+                  {vazio}
+                </button>
+                {filtradas.map((o) => (
+                  <button
+                    key={o.valor}
+                    type="button"
+                    onClick={() => selecionar(o.valor)}
+                    className="relative flex w-full cursor-pointer select-none items-center rounded-sm py-1.5 pl-8 pr-2 text-left text-sm outline-none hover:bg-accent hover:text-accent-foreground"
+                  >
+                    <span className="absolute left-2 flex h-3.5 w-3.5 items-center justify-center">
+                      {value === o.valor && <Check className="h-4 w-4" />}
+                    </span>
+                    {o.rotulo}
+                  </button>
+                ))}
+                {filtradas.length === 0 && (
+                  <p className="px-2 py-1.5 text-sm text-muted-foreground">Nenhuma opção encontrada.</p>
+                )}
+              </div>
+            </Popover.Content>
+          </Popover.Portal>
+        )}
+      </Popover.Root>
       {dica && <p className="mt-1 text-xs text-muted-foreground">{dica}</p>}
     </div>
   )

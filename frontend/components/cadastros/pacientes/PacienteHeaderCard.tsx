@@ -7,6 +7,25 @@ import { SalvarTudoBar } from "@/components/cadastros/shared/SalvarTudoBar"
 import { FotoPacienteUpload } from "./FotoPacienteUpload"
 import { foco } from "./ui/campos"
 
+function dataNascimentoBR(iso: string | null): string {
+  if (!iso) return "—"
+  const [ano, mes, dia] = iso.slice(0, 10).split("-")
+  return `${dia}/${mes}/${ano}`
+}
+
+// Idade calculada em relação a HOJE, não à data de nascimento sozinha — por
+// isso o mês/dia atual entram na conta, não só a diferença de anos.
+function calcularIdade(iso: string | null): number | null {
+  if (!iso) return null
+  const [ano, mes, dia] = iso.slice(0, 10).split("-").map(Number)
+  const hoje = new Date()
+  let idade = hoje.getFullYear() - ano
+  const aniversarioJaPassou =
+    hoje.getMonth() + 1 > mes || (hoje.getMonth() + 1 === mes && hoje.getDate() >= dia)
+  if (!aniversarioJaPassou) idade -= 1
+  return idade
+}
+
 export function PacienteHeaderCard({
   paciente,
   editando,
@@ -46,16 +65,29 @@ export function PacienteHeaderCard({
           <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-muted-foreground">
             <span>
               <span className="text-xs uppercase tracking-wide">ID</span>{" "}
-              <span className="font-mono">{idExibicao(paciente)}</span>
+              <span className="font-mono text-base font-semibold text-foreground">
+                {idExibicao(paciente)}
+              </span>
+            </span>
+            <span>
+              {dataNascimentoBR(paciente.data_nascimento)}
+              {calcularIdade(paciente.data_nascimento) !== null && (
+                <> ({calcularIdade(paciente.data_nascimento)} anos)</>
+              )}
             </span>
             {paciente.falecido && (
               <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium">
                 Falecido
               </span>
             )}
-            {!paciente.ativo && (
+            {!paciente.falecido && !paciente.ativo && (
               <span className="rounded-full bg-rose-500/10 px-2 py-0.5 text-xs font-medium text-rose-600 dark:text-rose-400">
                 Inativo
+              </span>
+            )}
+            {!paciente.falecido && paciente.ativo && (
+              <span className="rounded-full bg-emerald-500/10 px-2 py-0.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
+                Ativo
               </span>
             )}
             {paciente.ficticio && (
