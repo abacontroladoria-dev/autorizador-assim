@@ -75,7 +75,6 @@ const pathIconMap: Record<string, any> = {
   "/cadastros/pacientes": UserRound,
   "/auditoria-assim": ClipboardList,
   "/auditoria-assim?tab=auditoria": ClipboardList,
-  "/auditoria-assim?tab=pendencias": ListChecks,
   "/auditoria-assim?tab=reconciliacao": Link2,
   "/cco": BarChart3,
   "/admin": ShieldCheck,
@@ -536,15 +535,12 @@ export default function Sidebar() {
               {canAccess("/cco") && (
                 <MenuItem label="Conciliação ASSIM" icon={BarChart3} path="/cco" />
               )}
-              {/* Três visões da mesma rota. canAccess("/auditoria-assim?tab=…")
+              {/* Duas visões da mesma rota. canAccess("/auditoria-assim?tab=…")
                   resolve para o bare path '/auditoria-assim' de CODIGO_PARA_ROTAS,
                   então nenhum código de permissão novo foi necessário.
                   Reconciliação: quem vê a Conferência vê a aba; quem pode VINCULAR
                   é decidido pelas RPCs (admin/autorizacao/recepcao), não aqui —
                   diretoria consulta sem escrever. */}
-              {canAccess("/auditoria-assim?tab=pendencias") && (
-                <MenuItem label="Pendências ASSIM" icon={ListChecks} path="/auditoria-assim?tab=pendencias" />
-              )}
               {canAccess("/auditoria-assim?tab=auditoria") && (
                 <MenuItem label="Conferência ASSIM" icon={ClipboardList} path="/auditoria-assim?tab=auditoria" />
               )}
