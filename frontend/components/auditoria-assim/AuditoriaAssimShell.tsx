@@ -5,18 +5,13 @@ import { useRouter, useSearchParams } from 'next/navigation'
 
 import { useHeader } from '@/contexts/HeaderContext'
 import AuditoriaTab from './tabs/AuditoriaTab'
-import PendenciasTab from './tabs/PendenciasTab'
 import ReconciliacaoTab from './tabs/ReconciliacaoTab'
 import type { AlvoAnalise } from './types'
 
-const TABS = ['pendencias', 'auditoria', 'reconciliacao'] as const
+const TABS = ['auditoria', 'reconciliacao'] as const
 type TabKey = (typeof TABS)[number]
 
 const TAB_META: Record<TabKey, { titulo: string; subtitulo: string }> = {
-  pendencias: {
-    titulo: 'Pendências ASSIM',
-    subtitulo: 'Atendimentos que precisam de ação — o sistema detecta e encerra sozinho',
-  },
   auditoria: {
     titulo: 'Conferência ASSIM',
     subtitulo: 'Controle operacional de autorizações e pendências',
@@ -35,9 +30,6 @@ const TAB_META: Record<TabKey, { titulo: string; subtitulo: string }> = {
  * <Suspense> — obrigatório, porque useSearchParams em componente cliente quebra o
  * build de produção sem boundary (em dev funciona, o que esconde o problema).
  *
- * Aba default = pendencias: é o novo ponto de entrada operacional. A aba auditoria
- * preserva integralmente a tela anterior.
- *
  * Permissões: NÃO há código novo. `auditoria_assim` em lib/permissions/routes.ts é
  * bare path ('/auditoria-assim'), e routeMatches sem '?' compara só o pathname —
  * então já cobre as duas abas para todos os roles que hoje têm acesso (recepcao,
@@ -50,10 +42,10 @@ export default function AuditoriaAssimShell() {
   const { setHeader } = useHeader()
 
   const rawTab = searchParams.get('tab')
-  const activeTab: TabKey = TABS.includes(rawTab as TabKey) ? (rawTab as TabKey) : 'pendencias'
+  const activeTab: TabKey = TABS.includes(rawTab as TabKey) ? (rawTab as TabKey) : 'auditoria'
 
   useEffect(() => {
-    if (!rawTab) router.replace('/auditoria-assim?tab=pendencias')
+    if (!rawTab) router.replace('/auditoria-assim?tab=auditoria')
   }, [rawTab, router])
 
   useEffect(() => {
@@ -83,7 +75,6 @@ export default function AuditoriaAssimShell() {
 
   return (
     <div className="flex flex-col gap-4">
-      {activeTab === 'pendencias' && <PendenciasTab />}
       {activeTab === 'auditoria' && <AuditoriaTab onAnalisarSemana={irParaAnalise} />}
       {activeTab === 'reconciliacao' && (
         <ReconciliacaoTab alvo={alvoAnalise} onAlvoConsumido={() => setAlvoAnalise(null)} />
