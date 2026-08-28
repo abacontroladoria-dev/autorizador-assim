@@ -80,6 +80,12 @@ export async function listarFaltasAuditoria(data: string): Promise<AuditoriaAssi
       // Falta não tem cobertura por definição: a sessão não aconteceu, então
       // não há o que uma autorização cubra.
       vinculo: null,
+      // Idem: esta falta é sintetizada porque nunca houve solicitação, então
+      // não há sessão nenhuma no banco para carregar uma reclassificação.
+      reclassificacao_situacao_anterior: null,
+      reclassificacao_justificativa: null,
+      reclassificacao_por: null,
+      reclassificacao_em: null,
     }
   })
 }

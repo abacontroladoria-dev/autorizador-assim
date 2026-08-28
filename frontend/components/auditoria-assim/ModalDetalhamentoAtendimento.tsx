@@ -207,6 +207,21 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
       ? { codigo: item.codigo_erro, descricao: 'Motivo não informado pela ASSIM.' }
       : null
 
+  // A reclassificação manual ativa deste bloco, quando houver. Existe porque
+  // `ehGlosa(item.situacao)` deixa de ser true assim que uma glosa vira FALTA
+  // (a própria mudança que a reclassificação promove), e a seção "Motivo da
+  // glosa" — a única que mostrava o motivo original — some junto. Sem esta
+  // seção o que sobrava era o rodapé cru da Autorização ASSIM, sem estrutura
+  // nenhuma sobre quem decidiu, quando e por quê.
+  const reclassificacao = item.reclassificacao_por
+    ? {
+        situacaoAnterior: item.reclassificacao_situacao_anterior,
+        justificativa: item.reclassificacao_justificativa,
+        por: item.reclassificacao_por,
+        em: item.reclassificacao_em,
+      }
+    : null
+
   // Numa recusa, o rodapé desta coluna diria o MESMO que o bloco "Resposta da
   // ASSIM" da coluna ao lado — e diria pior: `status_assim` chega truncado da
   // origem ("1601-REINCIDENCIA NO ATEN"), então a linha saía
@@ -215,8 +230,11 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
   // e é o lado onde se age sobre ele. Fora da glosa o rodapé segue intacto —
   // ali ele carrega 'Liberado', o token e a observação, que não repetem nada.
   // `ehGlosa`: em GLOSA_RESOLVIDA a coluna ao lado continua mostrando a resposta
-  // da ASSIM, então o rodapé repetiria o motivo do mesmo jeito.
-  const motivoJaMostradoAoLado = ehGlosa(item.situacao) && respostaAssim !== null
+  // da ASSIM, então o rodapé repetiria o motivo do mesmo jeito. O segundo termo
+  // cobre o caso em que `situacao` NÃO é mais glosa por causa da própria
+  // reclassificação: a seção "Reclassificação manual" (coluna da direita) já
+  // mostra `respostaAssim` e a frase inteira que `observacao` carregaria aqui.
+  const motivoJaMostradoAoLado = (ehGlosa(item.situacao) && respostaAssim !== null) || reclassificacao !== null
 
   // A cobertura vinda da aba Reconciliação. Não sai da RPC: ela reflete o
   // vínculo na `situacao` e o narra no fim de `observacao`, mas a coluna `guia`
@@ -424,6 +442,72 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
 
           {/* Coluna direita — o que fazer a respeito do atendimento */}
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto px-6 py-4">
+
+            {/* Reclassificação manual — independente de `ehGlosa(situacao)` de
+                propósito: reclassificar É a ação que tira o bloco do grupo
+                glosa (GLOSA -> FALTA, por exemplo), e a seção abaixo (que
+                escreve o motivo original) só aparece PARA glosa ativa. Sem
+                esta seção própria, reclassificar uma glosa apagava da tela o
+                único lugar que mostrava o motivo — sobrava a resposta da ASSIM
+                crua no rodapé, sem nenhum sinal de que alguém decidiu outra
+                coisa sobre o que aconteceu.
+
+                Âmbar porque é o matiz de "decisão humana registrada" que o
+                resto do módulo já usa para "aguardando conferência"; aqui o
+                significado é próximo — uma pessoa afirmou algo que o sistema
+                sozinho não deduziria. Fica ACIMA do motivo original: quem lê
+                de cima para baixo vê primeiro o desfecho vigente (o "para
+                onde"), depois a explicação de origem (o "o que a ASSIM
+                disse"), na mesma ordem que a `observacao` da RPC já narra. */}
+            {reclassificacao && (
+              <section className="shrink-0 rounded-xl border border-amber-200 bg-amber-50/40 p-3.5">
+                <h3 className="mb-1.5 flex items-center gap-1.5 text-sm font-semibold text-amber-900">
+                  <AlertOctagon size={14} />
+                  Reclassificação manual
+                </h3>
+
+                <div className="mb-2 flex items-center gap-2 text-sm">
+                  <SituacaoBadge situacao={reclassificacao.situacaoAnterior} />
+                  <span className="text-amber-700">→</span>
+                  <SituacaoBadge situacao={item.situacao} />
+                </div>
+
+                {reclassificacao.justificativa && (
+                  <div className="mb-2 rounded-lg border border-amber-200 bg-white px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                      Justificativa
+                    </p>
+                    <p className="mt-0.5 text-sm leading-snug wrap-break-word text-amber-900">
+                      {reclassificacao.justificativa}
+                    </p>
+                  </div>
+                )}
+
+                {/* O motivo original da glosa, preservado aqui — é a única
+                    seção que continua exibindo `respostaAssim` quando a
+                    situação atual já não é mais glosa. */}
+                {respostaAssim && (
+                  <div className="mb-2 rounded-lg border border-amber-200 bg-white px-3 py-2">
+                    <p className="text-[10px] font-semibold uppercase tracking-wide text-amber-700">
+                      {respostaAssim.codigo ? 'Resposta da ASSIM (motivo original)' : 'Retorno da solicitação (original)'}
+                    </p>
+                    <p className="mt-0.5 text-sm leading-snug font-medium wrap-break-word text-amber-900">
+                      {respostaAssim.codigo && (
+                        <span className="font-mono tabular-nums text-amber-700">
+                          {respostaAssim.codigo} ·{' '}
+                        </span>
+                      )}
+                      {respostaAssim.descricao}
+                    </p>
+                  </div>
+                )}
+
+                <p className="text-xs leading-relaxed text-amber-800">
+                  Reclassificado por <span className="font-semibold">{reclassificacao.por}</span>
+                  {reclassificacao.em ? ` em ${formatarDataHora(reclassificacao.em)}` : ''}
+                </p>
+              </section>
+            )}
 
             {/* Motivo da glosa — em GLOSA e também em GLOSA_RESOLVIDA: o vínculo
                 não apaga a recusa, e é aqui que o motivo é lido e anotado.
