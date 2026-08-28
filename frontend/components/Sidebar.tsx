@@ -504,7 +504,11 @@ export default function Sidebar() {
 
           {/* Pacientes */}
           {(canAccess("/solicitar") || canAccess("/autorizacoes-avulsas") || canAccess("/central-pacientes")) && (
-            <SidebarGroup title="Pacientes" icon={Users}>
+            <SidebarGroup
+              title="Pacientes"
+              icon={Users}
+              defaultOpen={["/solicitar", "/autorizacoes-avulsas", "/central-pacientes"].some(p => pathname === p)}
+            >
               {canAccess("/solicitar") && (
                 <MenuItem label="Atendimentos" icon={PlusCircle} path="/solicitar" />
               )}
@@ -519,7 +523,11 @@ export default function Sidebar() {
 
           {/* Terapêutico */}
           {(canAccess("/central-terapeutas") || canAccess("/analise-tratativas")) && (
-            <SidebarGroup title="Terapêutico" icon={Stethoscope}>
+            <SidebarGroup
+              title="Terapêutico"
+              icon={Stethoscope}
+              defaultOpen={["/central-terapeutas", "/analise-tratativas"].some(p => pathname === p)}
+            >
               {canAccess("/central-terapeutas") && (
                 <MenuItem label="Gestão" icon={UserRound} path="/central-terapeutas" />
               )}
@@ -531,7 +539,11 @@ export default function Sidebar() {
 
           {/* Autorização */}
           {(canAccess("/auditoria-assim") || canAccess("/cco")) && (
-            <SidebarGroup title="Autorização" icon={BriefcaseBusiness}>
+            <SidebarGroup
+              title="Autorização"
+              icon={BriefcaseBusiness}
+              defaultOpen={pathname === "/cco" || pathname === "/auditoria-assim"}
+            >
               {canAccess("/cco") && (
                 <MenuItem label="Conciliação ASSIM" icon={BarChart3} path="/cco" />
               )}
@@ -554,7 +566,7 @@ export default function Sidebar() {
               dentro de Faturamento: aquele grupo é faturamento de convênio
               (ASSIM), este é compra de insumo. Vai crescer com Estoque. */}
           {canAccess("/insumos") && (
-            <SidebarGroup title="Suprimentos" icon={Package}>
+            <SidebarGroup title="Suprimentos" icon={Package} defaultOpen={pathname === "/insumos"}>
               <MenuItem label="Solicitações" icon={Package} path="/insumos" />
             </SidebarGroup>
           )}
@@ -564,7 +576,15 @@ export default function Sidebar() {
             canAccess("/cronograma/ocupacao?tab=oportunidades-recusadas") || canAccess("/cronograma/ocupacao?tab=gaps") ||
             canAccess("/cronograma/ocupacao?tab=inconsistencias") ||
             canAccess("/cronograma/reposicao")) && (
-            <SidebarGroup title="Cronograma" icon={CalendarRange}>
+            <SidebarGroup
+              title="Cronograma"
+              icon={CalendarRange}
+              defaultOpen={[
+                "/cronograma/saida-profissional",
+                "/cronograma/ocupacao-paciente",
+                "/cronograma/reposicao",
+              ].includes(pathname) || pathname === "/cronograma/ocupacao"}
+            >
               {canAccess("/cronograma/saida-profissional") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/saida-profissional" />}
               {canAccess("/cronograma/ocupacao-paciente") && <MenuItem label="Ocupação Paciente" icon={UserCheck} path="/cronograma/ocupacao-paciente" />}
               {canAccess("/cronograma/reposicao") && <MenuItem label="Reposição de Faltas" icon={RotateCcw} path="/cronograma/reposicao" />}
@@ -581,7 +601,7 @@ export default function Sidebar() {
             canAccess("/cronograma/indicadores?tab=previsao-receitas") ||
             canAccess("/cronograma/indicadores?tab=historico-receitas") ||
             canAccess("/cronograma/indicadores?tab=comparativo-sessoes")) && (
-            <SidebarGroup title="Indicadores" icon={TrendingUp}>
+            <SidebarGroup title="Indicadores" icon={TrendingUp} defaultOpen={pathname === "/cronograma/indicadores"}>
               {canAccess("/cronograma/indicadores?tab=profissionais") && (
                 <MenuItem label="Ocupação de Profissionais" icon={BarChart3} path="/cronograma/indicadores?tab=profissionais" />
               )}
@@ -607,7 +627,11 @@ export default function Sidebar() {
           {(canAccess("/cadastros/cadastro-valores") || canAccess("/cadastros/feriados") ||
             canAccess("/cadastros/contratos") || canAccess("/cadastros/taxas-e-parametros") ||
             canAccess("/cadastros/pacientes") || canAccess("/cadastros/convenios")) && (
-            <SidebarGroup title="Cadastros" icon={Database}>
+            <SidebarGroup
+              title="Cadastros"
+              icon={Database}
+              defaultOpen={pathname.startsWith("/cadastros")}
+            >
               {canAccess("/cadastros/pacientes") && <MenuItem label="Pacientes" icon={UserRound} path="/cadastros/pacientes" />}
               {canAccess("/cadastros/convenios") && <MenuItem label="Convênios" icon={Building2} path="/cadastros/convenios" />}
               {canAccess("/cadastros/cadastro-valores") && <MenuItem label="Cadastro de Valores" icon={Tag} path="/cadastros/cadastro-valores" />}
@@ -624,7 +648,11 @@ export default function Sidebar() {
             canAccess("/relacionamento-prestador/ocupacao-salas") ||
             canAccess("/relacionamento-prestador/solicitacoes") ||
             canAccess("/relacionamento-prestador/ocupar-profissionais-disponiveis")) && (
-            <SidebarGroup title="Relacionamento Prestador" icon={Handshake}>
+            <SidebarGroup
+              title="Relacionamento Prestador"
+              icon={Handshake}
+              defaultOpen={pathname.startsWith("/relacionamento-prestador")}
+            >
               {canAccess("/relacionamento-prestador/ocupacao-salas") && (
                 <MenuItem label="Ocupação de Salas" icon={DoorOpen} path="/relacionamento-prestador/ocupacao-salas" />
               )}
@@ -654,7 +682,11 @@ export default function Sidebar() {
 
           {/* Administração */}
           {canAccess("/admin") && (
-            <SidebarGroup title="Administração" icon={ShieldCheck}>
+            <SidebarGroup
+              title="Administração"
+              icon={ShieldCheck}
+              defaultOpen={["/admin", "/admin/permissoes"].some(p => pathname === p)}
+            >
               <MenuItem label="Usuários" icon={Users} path="/admin" />
               {canAccess("/admin/permissoes") && (
                 <MenuItem label="Permissões" icon={KeyRound} path="/admin/permissoes" />
