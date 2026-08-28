@@ -19,7 +19,7 @@ import {
   X,
 } from "lucide-react"
 import { HistoricoCadastrosModal } from "@/components/cadastros/historico/HistoricoCadastrosModal"
-import { getTomAvatar, iniciaisDe } from "@/lib/cadastros/avatarPastel"
+import { ICONES, getTomAvatar, indiceIconeAvatar } from "@/lib/cadastros/avatarPastel"
 import { usePacientes } from "@/hooks/usePacientes"
 import { maskCpfCnpj, onlyDigits } from "@/lib/remuneracao/formatacao"
 import { idExibicao } from "@/types/paciente"
@@ -499,13 +499,18 @@ function AvatarLista({ paciente, tom }: { paciente: Paciente, tom: { bg: string,
     )
   }
 
+  // Mesmo ID que decide a cor (`tom`, no chamador): o mesmo paciente mantém o
+  // mesmo bicho aqui e em Acompanhamento de Laudos. Acesso por ÍNDICE em
+  // `ICONES`, não chamada de função — ver o comentário lá.
+  const Icone = ICONES[indiceIconeAvatar(paciente.id_paciente)]
+
   return (
     <span
-      className="flex h-24 w-24 items-center justify-center rounded-full text-2xl font-bold transition-transform duration-200 ease-out group-hover:scale-105 motion-reduce:transform-none motion-reduce:transition-none"
+      className="flex h-24 w-24 items-center justify-center rounded-full transition-transform duration-200 ease-out group-hover:scale-105 motion-reduce:transform-none motion-reduce:transition-none"
       style={{ backgroundColor: tom.bg, color: tom.fg }}
       aria-hidden="true"
     >
-      {iniciaisDe(paciente.nome)}
+      <Icone className="h-11 w-11" strokeWidth={1.75} />
     </span>
   )
 }

@@ -45,6 +45,7 @@ import {
   History,
   UserSearch,
   Package,
+  FileClock,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -73,6 +74,7 @@ const pathIconMap: Record<string, any> = {
   "/central-pacientes": Activity,
   "/central-terapeutas": UserRound,
   "/cadastros/pacientes": UserRound,
+  "/acompanhamento/laudos": FileClock,
   "/auditoria-assim": ClipboardList,
   "/auditoria-assim?tab=auditoria": ClipboardList,
   "/auditoria-assim?tab=pendencias": ListChecks,
@@ -504,7 +506,8 @@ export default function Sidebar() {
           <hr className="my-2 border-sidebar-border" />
 
           {/* Pacientes */}
-          {(canAccess("/solicitar") || canAccess("/autorizacoes-avulsas") || canAccess("/central-pacientes")) && (
+          {(canAccess("/solicitar") || canAccess("/autorizacoes-avulsas") || canAccess("/central-pacientes") ||
+            canAccess("/acompanhamento/laudos")) && (
             <SidebarGroup title="Pacientes" icon={Users}>
               {canAccess("/solicitar") && (
                 <MenuItem label="Atendimentos" icon={PlusCircle} path="/solicitar" />
@@ -514,6 +517,14 @@ export default function Sidebar() {
               )}
               {canAccess("/autorizacoes-avulsas") && (
                 <MenuItem label="Autorizações Avulsas" icon={ClipboardPlus} path="/autorizacoes-avulsas" />
+              )}
+              {/* Fila de laudos vencidos + registro do aviso ao responsável.
+                  Neste grupo, e não em Autorização (ao lado da Reconciliação) nem
+                  em Cadastros: quem trabalha aqui é a recepção, e o grupo
+                  Pacientes é onde as outras telas dela já estão. Decisão do
+                  usuário em 28/08/2026. */}
+              {canAccess("/acompanhamento/laudos") && (
+                <MenuItem label="Status dos Laudos" icon={FileClock} path="/acompanhamento/laudos" />
               )}
             </SidebarGroup>
           )}

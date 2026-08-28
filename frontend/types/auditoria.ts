@@ -16,6 +16,11 @@ export type EntidadeAuditada =
   | "laudo"
   | "alta"
   | "alta_individualidade"
+  // Acompanhamento de laudo do Órbita (tela /acompanhamento/laudos). O
+  // `registro_id` é o `ID Laudo` do Órbita — texto, não id numérico do Pulsar —,
+  // que é a única chave daquele relatório que sobrevive à troca de importação do
+  // robô. Ver 20260828150000/150100.
+  | "laudo_acompanhamento"
 
 export type AcaoAuditada = "criar" | "editar" | "excluir" | "inativar" | "reativar"
 
@@ -65,6 +70,7 @@ export const ENTIDADE_LABEL: Record<EntidadeAuditada, string> = {
   laudo: "Laudo",
   alta: "Alta",
   alta_individualidade: "Individualidades",
+  laudo_acompanhamento: "Acompanhamento de laudo",
 }
 
 export const ACAO_LABEL: Record<AcaoAuditada, string> = {

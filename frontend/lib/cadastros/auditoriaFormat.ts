@@ -141,6 +141,19 @@ const LABEL_POR_ENTIDADE: Record<EntidadeAuditada, Record<string, string>> = {
     ambiente_natural: "Autorização de ambiente natural",
     nivel_suporte: "Nível de suporte clínico",
   },
+  // Os `snap_*` são o retrato do laudo no momento do save, e entram na trilha de
+  // propósito: seis meses depois, "avisado em 14/08" só significa algo ao lado
+  // de "e a validade era 01/07". O laudo em si vive no Órbita e pode sair do
+  // relatório — a trilha é o que sobra.
+  laudo_acompanhamento: {
+    mensagem_enviada_em: "Mensagem enviada em",
+    observacao: "Observação",
+    snap_paciente_nome: "Paciente (no relatório)",
+    snap_data_laudo: "Data do laudo",
+    snap_validade: "Validade",
+    snap_situacao: "Situação do laudo",
+    snap_autorizado_em: "Autorizado em",
+  },
 }
 
 const VALOR_LEGIVEL: Record<string, Record<string, string>> = {
@@ -186,7 +199,16 @@ export function formatarValor(campo: string, valor: unknown): string {
   const mapa = VALOR_LEGIVEL[campo]
   if (mapa && typeof valor === "string" && mapa[valor]) return mapa[valor]
 
-  if (typeof valor === "string" && /^\d{4}-\d{2}-\d{2}/.test(valor) && campo.includes("data")) {
+  // `campo.includes("data")` cobria `data_laudo`, `data_alta`… e deixava de fora
+  // os campos cujo nome termina em `_em`, que também são data pura:
+  // `autorizado_em` do laudo e `mensagem_enviada_em` do acompanhamento apareciam
+  // no histórico como "2026-08-14". Os `_em` de infraestrutura (`criado_em`,
+  // `atualizado_em`) não passam por aqui — estão em CAMPOS_IGNORADOS.
+  if (
+    typeof valor === "string" &&
+    /^\d{4}-\d{2}-\d{2}/.test(valor) &&
+    (campo.includes("data") || campo.endsWith("_em"))
+  ) {
     return dataBR(valor)
   }
   if (campo === "foto_path") return "imagem enviada"

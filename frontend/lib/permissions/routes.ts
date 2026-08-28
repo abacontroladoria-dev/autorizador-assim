@@ -8,6 +8,7 @@
 export const roleDefaults: Record<string, string[]> = {
   admin: [
     'dashboard', 'atendimentos', 'autorizacoes_avulsas', 'gestao',
+    'acompanhamento_laudos',
     'escala_terapeutica',
     'auditoria_assim', 'usuarios', 'permissoes', 'cco',
     'preauditoria', 'outros_convenios',
@@ -29,6 +30,7 @@ export const roleDefaults: Record<string, string[]> = {
   ],
   diretoria: [
     'dashboard', 'atendimentos', 'gestao',
+    'acompanhamento_laudos',
     'escala_terapeutica', 'auditoria_assim',
     'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
@@ -50,6 +52,10 @@ export const roleDefaults: Record<string, string[]> = {
   recepcao: [
     'dashboard', 'atendimentos', 'autorizacoes_avulsas', 'gestao', 'auditoria_assim',
     'outros_convenios',
+    // A recepção é quem cobra a renovação do laudo vencido — é a dona da tela,
+    // não uma convidada. Os mesmos três papéis estão no ramo por papel da RLS
+    // (20260828150000), senão quem tem a tela pelo papel não conseguiria gravar.
+    'acompanhamento_laudos',
   ],
   autorizacao: [
     'dashboard', 'auditoria_assim',
@@ -93,6 +99,12 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   // papéis que têm INSERT na RLS da tabela (20260817120000).
   autorizacoes_avulsas: ['/autorizacoes-avulsas'],
   gestao: ['/central-pacientes'],
+  // Código PRÓPRIO, e não uma segunda rota dentro de `cadastros_pacientes`: quem
+  // opera a fila de laudos vencidos é a RECEPÇÃO, e a recepção não tem
+  // `cadastros_pacientes`. Reaproveitar aquele código daria a tela a quem mantém
+  // o cadastro e a negaria a quem faz a cobrança. A RLS de
+  // public.laudos_acompanhamento exige este mesmo código (20260828150000).
+  acompanhamento_laudos: ['/acompanhamento/laudos'],
   escala_terapeutica: ['/central-terapeutas'],
   auditoria_assim: ['/auditoria-assim'],
   usuarios: ['/admin'],

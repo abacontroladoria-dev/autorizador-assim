@@ -29,9 +29,25 @@ interface DatePickerProps {
   disabled?: boolean
   placeholder?: string
   align?: "left" | "right" | "center"
+  /**
+   * SUBSTITUI as classes do botão-gatilho (não soma a elas).
+   *
+   * Existe porque o gatilho padrão nasceu para um campo de formulário: traz
+   * `mt-1` e a moldura de `<input>`, que dentro de uma barra de filtros viram um
+   * degrau de 4px e uma segunda borda. Com esta prop o calendário — a parte que
+   * importa reusar — é o mesmo, e só a casca acompanha o lugar.
+   *
+   * Omitida, o comportamento é exatamente o de antes: nenhum chamador existente
+   * muda de aparência.
+   */
+  classeGatilho?: string
 }
 
-export function DatePicker({ value, onChange, disabled, placeholder = "dd/mm/aaaa", align = "start" as any }: DatePickerProps) {
+// `align` sem valor padrão: o antigo era `"start" as any` — uma string que não
+// pertence ao próprio tipo do prop, sustentada por um cast. Omitido, o
+// `radixAlign` abaixo já nasce "start", que era o efeito pretendido. Nenhum
+// chamador muda: os que passam "right"/"center" continuam mapeados igual.
+export function DatePicker({ value, onChange, disabled, placeholder = "dd/mm/aaaa", align, classeGatilho }: DatePickerProps) {
   const [isOpen, setIsOpen] = useState(false)
   const [currentMonth, setCurrentMonth] = useState(() => parseDateLocal(value))
   
@@ -75,7 +91,10 @@ export function DatePicker({ value, onChange, disabled, placeholder = "dd/mm/aaa
         <button
           type="button"
           disabled={disabled}
-          className="flex w-full mt-1 items-center justify-between rounded-md border border-border bg-transparent px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-default disabled:bg-muted/40 disabled:text-muted-foreground"
+          className={
+            classeGatilho ??
+            "flex w-full mt-1 items-center justify-between rounded-md border border-border bg-transparent px-2 py-1.5 text-sm text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-default disabled:bg-muted/40 disabled:text-muted-foreground"
+          }
         >
           <span className={value ? "" : "text-muted-foreground/60"}>{displayDate}</span>
           <CalendarIcon className="h-4 w-4 text-muted-foreground/50" />
