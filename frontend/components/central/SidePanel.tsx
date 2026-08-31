@@ -16,6 +16,7 @@ import {
 } from '@/lib/central/severity'
 import { completarMotivoGlosa, motivoGlosaDaSessao } from '@/lib/glosa'
 import { rotuloOrigemGuia, rotuloSolicitadoPor } from '@/lib/guiaOrigem'
+import { rotuloForma } from '@/components/auditoria-assim/formaValidacao'
 import { useGlosaCodigos } from '@/hooks/useGlosaCodigos'
 
 interface Props {
@@ -271,7 +272,7 @@ function SidePanel({ atendimento, onReverterFalta }: Props) {
               )}
               value={atendimento.criado_por}
             />
-            <Row label="Forma" value={atendimento.forma_autorizacao} />
+            <Row label="Forma" value={rotuloForma(atendimento.forma_autorizacao)} />
             <Row
               label="Convênio"
               value={atendimento.convenio || atendimento.convenio_nome}

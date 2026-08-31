@@ -43,7 +43,7 @@ export default function CentralTerapeuticaPage() {
   const [horario, setHorario] = useState('')
   const [unidade, setUnidade] = useState('')
   const [terapia, setTerapia] = useState('')
-  const [profissional, setProfissional] = useState('')
+  const [forma, setForma] = useState('')
 
   const [data, setData] = useState(hoje)
 
@@ -245,14 +245,16 @@ export default function CentralTerapeuticaPage() {
         return a.classificacao_terapia === terapia
       })
 
+      // Forma de validação da presença na ASSIM. Comparação exata contra a
+      // opção que saiu da própria lista (derivada dos dados), então não há
+      // normalização a fazer aqui — a tolerância a acento/caixa de
+      // `erroReconhecimentoFacial` existe para classificar texto solto, o que
+      // não é o caso de um valor escolhido no próprio select.
       .filter(a => {
 
-        if (!profissional) return true
+        if (!forma) return true
 
-        return [
-          a.profissional_nome,
-          a.profissional_realizou_nome,
-        ].includes(profissional)
+        return (a.forma_autorizacao || '') === forma
       })
 
 .sort((a, b) => {
@@ -286,7 +288,7 @@ export default function CentralTerapeuticaPage() {
     horario,
     unidade,
     terapia,
-    profissional,
+    forma,
     data
   ])
 
@@ -368,9 +370,12 @@ export default function CentralTerapeuticaPage() {
     const horarios = new Set<string>()
     const unidadesPresentes = new Set<string>()
     const terapias = new Set<string>()
-    const profissionais = new Set<string>()
+    const formas = new Set<string>()
 
     for (const a of dados) {
+      const f = (a.forma_autorizacao || '').trim()
+      if (f) formas.add(f)
+
       const h = a.horario?.slice(0, 5) || a.hora_inicial?.slice(0, 5)
       if (h) horarios.add(h)
 
@@ -378,10 +383,6 @@ export default function CentralTerapeuticaPage() {
       if (u) unidadesPresentes.add(u)
 
       if (a.classificacao_terapia) terapias.add(a.classificacao_terapia)
-
-      if (a.profissional_nome) profissionais.add(a.profissional_nome)
-      if (a.profissional_realizou_nome)
-        profissionais.add(a.profissional_realizou_nome)
     }
 
     const ordenar = (s: Set<string>) =>
@@ -392,7 +393,7 @@ export default function CentralTerapeuticaPage() {
       // só Realengo, Padre Miguel e Fazendinha, na ordem canônica
       unidades: ORDEM_UNIDADES.filter((u) => unidadesPresentes.has(u)),
       terapias: ordenar(terapias),
-      profissionais: ordenar(profissionais),
+      formas: ordenar(formas),
     }
   }, [dados])
 
@@ -422,9 +423,9 @@ export default function CentralTerapeuticaPage() {
           setTerapia={setTerapia}
           terapiaOpcoes={opcoes.terapias}
 
-          profissional={profissional}
-          setProfissional={setProfissional}
-          profissionalOpcoes={opcoes.profissionais}
+          forma={forma}
+          setForma={setForma}
+          formaOpcoes={opcoes.formas}
 
           data={data}
           setData={setData}
