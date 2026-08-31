@@ -21,6 +21,8 @@ import { ContactService }       from './contact.service'
 import { AppointmentService }   from './appointment.service'
 import { AgentSettingsService } from './agent-settings.service'
 
+import { MetaWabaProvider } from '../providers/meta-waba.provider'
+
 // ============================================================================
 // ProviderFactory
 //
@@ -51,6 +53,23 @@ export class ProviderFactory {
 
 // Singleton do factory — compartilhado entre todas as instâncias de serviço
 const providerFactory = new ProviderFactory()
+
+// ----------------------------------------------------------------------------
+// Bootstrap dos providers concretos
+//
+// Feito na carga do módulo, e não dentro de cada factory function, porque o
+// registro precisa valer para TODO caller: `createSystemServices()` (worker),
+// `createMessageService()` (rota com sessão) e qualquer outro. Registrar em um
+// só deles deixaria os demais lançando ProviderNotImplementedError conforme o
+// caminho — o tipo de defeito que só aparece em produção, num caminho menos
+// percorrido.
+//
+// O provider recebe `supabaseService` porque precisa ler
+// `channel_connections.provider_metadata`, cuja coluna foi retirada do SELECT
+// de `authenticated` na 20260810120300 (credencial gravável e não legível).
+// Com o cliente do usuário isto responderia 403.
+// ----------------------------------------------------------------------------
+providerFactory.register('meta_waba', new MetaWabaProvider(supabaseService))
 
 // ============================================================================
 // Factory functions — instanciam os serviços com o cliente correto
