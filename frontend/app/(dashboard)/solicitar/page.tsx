@@ -12,7 +12,7 @@ import { criarAutorizacao, resolverNomeUsuario } from '@/services/autorizacoes.s
 
 import toast from 'react-hot-toast'
 
-import { Lock, CheckCircle, Megaphone, XCircle } from 'lucide-react'
+import { Lock, CheckCircle, Loader2, Megaphone, XCircle } from 'lucide-react'
 
 import { getMachineId } from '@/lib/machine'
 
@@ -23,6 +23,16 @@ import {
   podeSolicitar,
 } from '@/lib/central/intervaloAssim'
 
+
+// Janela em que um segundo "Chamar" para a MESMA sessão é recusado.
+//
+// O número sai dos dados: em 30 dias de `chamada_paciente`, toda rechamada
+// deliberada (o responsável não apareceu, a recepção insistiu) esteve acima de
+// 2 min, enquanto as rajadas de cards irmãos ficaram abaixo de 1s. 90s separa
+// os dois casos com folga dos dois lados — e errar para o lado curto é o certo:
+// a recepção espera alguns segundos e chama de novo, contra um pai que nunca
+// descobre que foi chamado.
+const JANELA_RECHAMADA_MS = 90_000
 
 // =========================
 // TERAPIAS OCULTAS
@@ -238,7 +248,90 @@ const unidades = [
     return () => { cancelado = true }
   }, [])
 
+  // Chamar o responsável é um ato sobre a PESSOA numa sessão, então a chave é
+  // (paciente, data, horário) e não `buildCardKey` — que inclui a terapia e
+  // deixaria a trava passar por cima do mesmo pai duas vezes.
+  //
+  // Por que a trava existe: em 31/08 o Davi Lucas acumulou 15 chamadas num dia,
+  // 6 delas em 900 ms. A investigação descartou bug — o clique gera UM insert
+  // (verificado na aba Network), a RPC devolve um card por sessão (339 para 339)
+  // e a página não tem realtime remontando nada. Eram cliques reais, repetidos.
+  //
+  // O que fazia a recepção clicar tanto: a TV ficou MUDA até 31/08 (não havia
+  // servidor de áudio no mini PC). Quem apertava não tinha retorno nenhum — a
+  // tela está em outra sala —, então clicava de novo. Nos dias anteriores, com o
+  // mesmo silêncio, os intervalos eram de 11–18s; sem nada acontecendo, foram
+  // encurtando.
+  //
+  // O som resolvido remove a causa, e esta trava fecha a porta: o botão passa a
+  // "Chamado" e informa, na própria tela onde se clicou, que a chamada saiu.
+  const chaveChamada = (p: any) =>
+    [String(p.paciente_id), String(p.data_atendimento), String(p.horario)].join('_')
+
+  // Instante da última chamada por sessão. Não é só "em voo": segue valendo
+  // depois que o insert responde, porque o clique seguinte na fileira vem
+  // centenas de milissegundos depois — o `finally` já teria liberado.
+  const chamadasRecentes = useRef<Map<string, number>>(new Map())
+
+  // Cards cujo "Chamar" está em voo — só para o feedback visual do botão.
+  const [chamando, setChamando] = useState<Set<string>>(new Set())
+
+  // Relógio de 1s que existe só para o botão sair de "Chamado" sozinho quando a
+  // janela expira. Sem ele o rótulo dependeria de um re-render por outro motivo
+  // — e o botão poderia ficar travado por minutos numa tela parada.
+  //
+  // Um `setState` a cada segundo numa página deste tamanho não é de graça, então
+  // o relógio só existe ENQUANTO há chamada dentro da janela: `chamandoAlgo`
+  // liga o efeito, e o próprio efeito se desliga quando o Map esvazia.
+  const [tique, setTique] = useState(() => Date.now())
+  const [chamandoAlgo, setChamandoAlgo] = useState(false)
+
+  useEffect(() => {
+    if (!chamandoAlgo) return
+
+    const id = setInterval(() => {
+      const agora = Date.now()
+
+      // Some com o que já expirou: mantém o Map pequeno numa jornada inteira e
+      // é o que permite ao efeito saber que não há mais nada a vigiar.
+      for (const [k, t] of chamadasRecentes.current) {
+        if (agora - t >= JANELA_RECHAMADA_MS) chamadasRecentes.current.delete(k)
+      }
+
+      setTique(agora)
+
+      // Nada mais dentro da janela: desliga o relógio em vez de ficar
+      // re-renderizando a página de segundo em segundo pelo resto do plantão.
+      if (chamadasRecentes.current.size === 0) setChamandoAlgo(false)
+    }, 1000)
+
+    return () => clearInterval(id)
+  }, [chamandoAlgo])
+
   const chamarResponsavel = async (paciente: any) => {
+    const chave = chaveChamada(paciente)
+    const agora = Date.now()
+    const ultima = chamadasRecentes.current.get(chave)
+
+    // Rechamar é legítimo — o responsável pode não ter aparecido —, então a
+    // janela é curta de propósito: ela separa a insistência de quem não viu
+    // retorno da rechamada consciente, minutos depois. Nos 30 dias analisados,
+    // toda repetição acima de 2 min foi deliberada; as rajadas ficaram abaixo
+    // de 1s. 90s cai no meio com folga dos dois lados, e errar para o lado curto
+    // é o certo: pior que uma trava frouxa é um pai que nunca é chamado.
+    if (ultima !== undefined && agora - ultima < JANELA_RECHAMADA_MS) {
+      toast(`${paciente.paciente_nome} já foi chamado agora`, { icon: '📣' })
+      return
+    }
+
+    // Marca ANTES do await: dois cliques no mesmo tick precisam ver a marca já
+    // gravada, e `useRef` é síncrono (ao contrário de setState).
+    chamadasRecentes.current.set(chave, agora)
+    setChamandoAlgo(true)
+
+    const chaveCard = buildCardKey(paciente)
+    setChamando((atual) => new Set(atual).add(chaveCard))
+
     try {
       // A tupla da sessão é o que permite a TV tirar o nome da tela sozinha
       // quando a autorização encerra. Não dá para gravar o id da fila aqui: no
@@ -283,6 +376,14 @@ const unidades = [
     } catch (err) {
       console.error(err)
       toast.error('Erro ao chamar paciente')
+    } finally {
+      // `finally` e não o fim do `try`: o ramo de erro acima sai por `return`, e
+      // sem isto o botão daquele card ficaria travado até recarregar a página.
+      setChamando((atual) => {
+        const proximo = new Set(atual)
+        proximo.delete(chaveCard)
+        return proximo
+      })
     }
   }
 
@@ -1804,13 +1905,45 @@ useEffect(() => {
   </button>
 )}
 
-<button
-  onClick={() => chamarResponsavel(p)}
-  className="w-full flex items-start justify-center gap-1.5 text-[12px] px-2 py-1.5 rounded-lg font-medium bg-emerald-100 text-emerald-700 hover:bg-emerald-200 tracking-tight leading-none"
->
-  <Megaphone size={14} className="relative -top-[1px]" />
-  Chamar
-</button>
+{(() => {
+  const emVoo = chamando.has(buildCardKey(p))
+
+  // O rótulo "Chamado" é o ponto principal desta correção, não a trava: até
+  // 31/08 apertar "Chamar" não devolvia nada visível — a TV fica em outra sala
+  // e estava sem som —, e era essa ausência de retorno que fazia a recepção
+  // clicar de novo. Dizer na própria tela que a chamada saiu remove o motivo.
+  //
+  // Ler um ref na render não agenda re-render: o `tique` de 1s abaixo é quem
+  // faz o botão voltar sozinho ao normal quando a janela expira.
+  const ultima = chamadasRecentes.current.get(chaveChamada(p))
+  const chamadoAgora =
+    ultima !== undefined && tique - ultima < JANELA_RECHAMADA_MS
+
+  const inerte = emVoo || chamadoAgora
+
+  return (
+    <button
+      onClick={() => chamarResponsavel(p)}
+      disabled={inerte}
+      aria-busy={emVoo}
+      title={
+        chamadoAgora
+          ? 'Responsável chamado há instantes — aguarde antes de chamar de novo'
+          : undefined
+      }
+      className="w-full flex items-start justify-center gap-1.5 text-[12px] px-2 py-1.5 rounded-lg font-medium bg-emerald-100 text-emerald-700 hover:bg-emerald-200 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-emerald-100 tracking-tight leading-none"
+    >
+      {emVoo ? (
+        <Loader2 size={14} className="relative -top-[1px] animate-spin" />
+      ) : chamadoAgora ? (
+        <CheckCircle size={14} className="relative -top-[1px]" />
+      ) : (
+        <Megaphone size={14} className="relative -top-[1px]" />
+      )}
+      {emVoo ? 'Chamando…' : chamadoAgora ? 'Chamado' : 'Chamar'}
+    </button>
+  )
+})()}
 
 <button
   onClick={() => {

@@ -184,8 +184,36 @@ async function listar(request: NextRequest) {
     return agora - chamadoEm > PISO_VISIVEL_MS
   }
 
+  // Um paciente ocupa UMA linha na tela, por mais vezes que tenha sido chamado.
+  //
+  // Em 31/08 um paciente apareceu 9 vezes na lateral: a recepção clicava de novo
+  // porque a TV estava sem som e nada confirmava que a chamada tinha saído. A
+  // causa foi tratada na origem (som + o botão virando "Chamado" na /solicitar),
+  // mas a tela precisa aguentar repetição de qualquer jeito — as linhas antigas
+  // seguem no banco, e rechamar continua legítimo quando o responsável não vem.
+  //
+  // Nove linhas do mesmo nome não informam mais que uma; só empurram os outros
+  // pacientes para fora do LIMITE, que é o dado que a sala de espera precisa ver.
+  //
+  // Fica a MAIS RECENTE (a lista já vem ordenada por `chamado_em` desc, então é
+  // a primeira que aparece): é ela que carrega a idade certa para o rótulo
+  // "agora" e para o teto de anúncio. A dedupe é por `paciente_id` quando
+  // existe; as chamadas legadas sem ele caem no nome, que é o que a tela mostra
+  // de qualquer forma.
+  //
+  // Isto NÃO afeta o anúncio de uma rechamada: a marca d'água do cliente compara
+  // `chamado_em`, e o da rechamada é maior que o da anterior — id novo, instante
+  // maior, a TV fala de novo. O que a dedupe evita é só a repetição visual.
+  const vistos = new Set<string>()
+
   const visiveis = chamadas
     .filter((c) => !oculta(c))
+    .filter((c) => {
+      const k = c.paciente_id ? `id:${c.paciente_id}` : `nome:${c.nome}`
+      if (vistos.has(k)) return false
+      vistos.add(k)
+      return true
+    })
     .slice(0, LIMITE)
     // Campo a campo, sem espalhar a linha: `paciente_id`, `data_atendimento` e
     // `horario` são lidos só para decidir o que sai da tela e NÃO podem ir na
