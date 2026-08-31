@@ -2,7 +2,7 @@
 
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 
 import { getSupabaseClient } from '@/lib/supabase/client'
 
