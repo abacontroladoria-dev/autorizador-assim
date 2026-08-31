@@ -74,10 +74,14 @@ export default function SemPermissaoPage() {
           className="flex items-center justify-center py-9 px-8"
           style={{ background: 'linear-gradient(135deg, #1e4a6b 0%, #152e47 100%)' }}
         >
+          {/* Variante de tinta clara: o bloco atrás é o gradiente navy
+              (#1e4a6b -> #152e47) e o lockup escuro sumiria nele. Este arquivo
+              é recorte justo (sem a margem embutida do outro), por isso h-14
+              e não h-24 — na mesma altura a marca sairia 66% maior. */}
           <img
-            src="/logo-universo-aba.png"
-            alt="Universo ABA"
-            className="h-24 w-auto object-contain"
+            src="/pulsar-lockup-tv-light.png"
+            alt="Pulsar"
+            className="h-14 w-auto object-contain"
           />
         </div>
 

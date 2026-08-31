@@ -10,20 +10,38 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { ChevronDown } from "lucide-react"
 
-export interface OpcaoMulti {
-  id: number
+// `Id` é genérico (default number, como os ids numéricos de terapia/especialidade
+// que motivaram o componente) pra também servir a listas com chave de texto —
+// ex.: os grupos de permissão, cujo id é uuid.
+export interface OpcaoMulti<Id extends string | number = number> {
+  id: Id
   nome: string
 }
 
-interface Props {
-  opcoes: OpcaoMulti[]
-  selecionados: Set<number>
-  onToggle: (id: number) => void
+interface Props<Id extends string | number> {
+  opcoes: OpcaoMulti<Id>[]
+  selecionados: Set<Id>
+  onToggle: (id: Id) => void
   placeholder?: string
   ariaLabel: string
+  /** Plural usado no resumo com 3+ selecionados (ex.: "3 {nomePlural} selecionadas"). */
+  nomePlural?: string
+  /** Lista todos os selecionados no resumo, em vez de resumir em "N selecionadas". */
+  resumoCompleto?: boolean
+  /** Classe extra do gatilho, pra casar com o estilo da tela que o usa. */
+  className?: string
+  disabled?: boolean
+  /**
+   * "plano" abre mão de borda/fundo/padding próprios pra que `className` defina
+   * o gatilho inteiro — usado no card do Painel Administrativo, onde ele precisa
+   * ser uma pill colorida igual à do setor.
+   */
+  variant?: "padrao" | "plano"
+  /** Foco programático no gatilho (ex.: item "Editar" de um menu de ações). */
+  triggerRef?: React.RefObject<HTMLButtonElement | null>
 }
 
-export function MultiSearchCombobox({ opcoes, selecionados, onToggle, placeholder = "Nenhuma opção selecionada", ariaLabel }: Props) {
+export function MultiSearchCombobox<Id extends string | number = number>({ opcoes, selecionados, onToggle, placeholder = "Nenhuma opção selecionada", ariaLabel, nomePlural = "opções", resumoCompleto = false, className = "", disabled = false, variant = "padrao", triggerRef }: Props<Id>) {
   const [aberto, setAberto] = useState(false)
   const [texto, setTexto] = useState("")
   const wrapperRef = useRef<HTMLDivElement>(null)
@@ -53,23 +71,30 @@ export function MultiSearchCombobox({ opcoes, selecionados, onToggle, placeholde
   const nomesSelecionados = useMemo(() => opcoes.filter(o => selecionados.has(o.id)).map(o => o.nome), [opcoes, selecionados])
   const resumo = nomesSelecionados.length === 0
     ? placeholder
-    : nomesSelecionados.length <= 2
+    : resumoCompleto || nomesSelecionados.length <= 2
       ? nomesSelecionados.join(", ")
-      : `${nomesSelecionados.length} terapias selecionadas`
+      : `${nomesSelecionados.length} ${nomePlural} selecionadas`
+
+  const plano = variant === "plano"
+  const classesGatilho = plano
+    ? "flex w-full items-center justify-between gap-2 text-left text-[13px] focus:outline-none focus:ring-2 focus:ring-brand/30"
+    : `flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-card px-2.5 py-2 text-left text-[13px] focus:outline-none focus:ring-2 focus:ring-ring ${nomesSelecionados.length ? "text-foreground" : "text-muted-foreground"}`
 
   return (
     <div ref={wrapperRef} className="relative">
       <button
+        ref={triggerRef}
         type="button"
         aria-haspopup="listbox"
         aria-expanded={aberto}
         aria-label={ariaLabel}
+        disabled={disabled}
         onClick={() => setAberto(v => !v)}
         onKeyDown={e => { if (e.key === "Escape") setAberto(false) }}
-        className={`flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-card px-2.5 py-2 text-left text-[13px] focus:outline-none focus:ring-2 focus:ring-ring ${nomesSelecionados.length ? "text-foreground" : "text-muted-foreground"}`}
+        className={`${classesGatilho} ${className}`}
       >
         <span className="truncate">{resumo}</span>
-        <ChevronDown size={14} className={`shrink-0 text-muted-foreground transition-transform ${aberto ? "rotate-180" : ""}`} />
+        <ChevronDown size={14} className={`shrink-0 transition-transform ${plano ? "opacity-60" : "text-muted-foreground"} ${aberto ? "rotate-180" : ""}`} />
       </button>
 
       {aberto && (
@@ -82,6 +107,7 @@ export function MultiSearchCombobox({ opcoes, selecionados, onToggle, placeholde
           <input
             ref={inputRef}
             type="text"
+            autoComplete="off"
             aria-label={`Buscar em ${ariaLabel}`}
             value={texto}
             onChange={e => setTexto(e.target.value)}

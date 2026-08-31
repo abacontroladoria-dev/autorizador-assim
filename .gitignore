@@ -8,7 +8,10 @@ README.md
 LICENSE
 instalador/
 node/
-robo-autorizador/
+# robo-autorizador/ NAO e mais ignorado por inteiro: o toolchain do instalador
+# (.iss, start.bat, start.vbs) existia so na maquina do autor. O que precisa
+# ficar de fora esta em robo-autorizador/.gitignore — segredos, node_modules,
+# Chromium e o payload/Output do Inno Setup.
 package-lock.json
 .vscode/
 backup_12MAI2026/
@@ -40,8 +43,20 @@ backup_*.json
 # conferência do /rp (66 MB de agendamento com nome de paciente). O padrão
 # backup_* acima não pega diretório.
 backup_agendamentos/
+# 2026-08-24: dumps de log baixados do painel do Supabase para diagnosticar a
+# lentidão daquele dia. Não trazem token, mas trazem e-mail de funcionária e o
+# UUID de cada usuário autenticado — e este repo é público. Mesmo raciocínio das
+# linhas acima: o conteúdo é útil no disco e nunca no histórico.
+supabase_logs/
 /check_*.py
 /debug_*.py
 /invoke_*.py
 /run_fase2b_tests.*
 /final_r3_summary.py
+
+# 2026-08-26: exports da TiTa em CSV (relatorio_situacao_favorecido e afins).
+# Trazem nome, CPF, endereço, telefone e plano de saúde de paciente — e ESTE
+# REPOSITÓRIO É PÚBLICO. Mesmo raciocínio de *.xlsx acima: o arquivo é útil no
+# disco durante a importação (scripts/importar-favorecidos-tita.js) e nunca no
+# histórico. Apague do disco quando a importação terminar.
+*.csv

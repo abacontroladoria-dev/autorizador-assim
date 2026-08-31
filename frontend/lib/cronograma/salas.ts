@@ -124,9 +124,8 @@ function statusDoSlot(
   capacidadeProjetada: number,
   numAlocacoes: number,
 ): StatusOcupacaoSlot {
-  if (status === "adm") return "adm"
   if (status === "bloqueada") return "bloqueado"
-  if (status === "nti") return "nti"
+  if (status !== "operacional") return "inativo"
   if (numAlocacoes === 0) return "livre"
   if (numAlocacoes >= capacidadeProjetada) return "ocupado"
   return "parcial"
@@ -165,20 +164,38 @@ export function calcularSlotsDaSala(
   // de verdade é profissional + dia + turno + unidade, não o número da sala.
   const sessoesPorProfissionalId = new Map<string, number>()
   const sessoesPorProfissional = new Map<string, number>()
+  // Mesmo agrupamento (profissional + dow + turno, sem exigir sala exata), mas
+  // pra 'Livre' — a TiTa reserva um horário de agenda ABERTO pro profissional
+  // (sem paciente marcado ainda), não é sessão real, então não conta pro "X/Y
+  // com paciente". Existe só pra alimentar `temAgendaTita` abaixo: sem isto,
+  // profissional recém-cadastrado que só tem horário 'Livre' (nenhum
+  // atendimento no histórico ainda, caso da Andréa Aparecida Borges de
+  // Oliveira, 2026-08-27) fica indistinguível de alocação puramente
+  // fantasiosa, sem NENHUM vínculo com a agenda real — os dois caíam no mesmo
+  // "sem cruzamento no CSV"/"Alocação sem sessão", quando só o segundo é de
+  // fato uma pendência de planejamento.
+  const livrePorProfissionalId = new Set<string>()
+  const livrePorProfissional = new Set<string>()
   linhasUnidade.forEach(r => {
     const dow = dowDeDiaSemana(r.dia_semana)
     if (!dow) return
-    if (!normTxt(r.status_agendamento).includes("agendado")) return
+    const statusNorm = normTxt(r.status_agendamento)
+    const ehAgendado = statusNorm.includes("agendado")
+    const ehLivre = !ehAgendado && statusNorm.includes("livre")
+    if (!ehAgendado && !ehLivre) return
     const minutos = pm(r.hora_inicial)
     if (minutos === null) return
     const turno = turnoDoHorario(minutos)
     const prof = cleanTxt(r.profissional_nome)
     if (!prof) return
     const key = `${dow}|${turno}|${normTxt(prof)}`
-    sessoesPorProfissional.set(key, (sessoesPorProfissional.get(key) ?? 0) + 1)
-    if (r.profissional_id !== null && r.profissional_id !== undefined) {
-      const keyId = `${dow}|${turno}|${r.profissional_id}`
-      sessoesPorProfissionalId.set(keyId, (sessoesPorProfissionalId.get(keyId) ?? 0) + 1)
+    const keyId = r.profissional_id !== null && r.profissional_id !== undefined ? `${dow}|${turno}|${r.profissional_id}` : null
+    if (ehAgendado) {
+      sessoesPorProfissional.set(key, (sessoesPorProfissional.get(key) ?? 0) + 1)
+      if (keyId) sessoesPorProfissionalId.set(keyId, (sessoesPorProfissionalId.get(keyId) ?? 0) + 1)
+    } else {
+      livrePorProfissional.add(key)
+      if (keyId) livrePorProfissionalId.add(keyId)
     }
   })
 
@@ -233,6 +250,12 @@ export function calcularSlotsDaSala(
           ?? sessoesPorProfissional.get(`${dow}|${turno}|${normTxt(a.profissional_nome)}`)
           ?? 0
         const sessoesLimitadas = Math.min(sessoesReais, capacidadeBloco)
+        // "Tem agenda na TiTa" é mais amplo que "tem sessão real": inclui
+        // horário 'Livre' reservado pro profissional, mesmo sem paciente
+        // marcado ainda — ver comentário de livrePorProfissionalId acima.
+        const temAgendaTita = sessoesReais > 0
+          || (a.profissional_id !== null && livrePorProfissionalId.has(`${dow}|${turno}|${a.profissional_id}`))
+          || livrePorProfissional.has(`${dow}|${turno}|${normTxt(a.profissional_nome)}`)
         const verificacao = verificarExclusividade(sala.id, a.terapia_id, indiceExclusividade, nomeDaSalaPorId)
         return {
           alocacaoId: a.id,
@@ -241,7 +264,7 @@ export function calcularSlotsDaSala(
           sessoesReais: sessoesLimitadas,
           sessoesCapacidadeTurno: capacidadeBloco,
           pctOcupacao: capacidadeBloco > 0 ? sessoesLimitadas / capacidadeBloco : null,
-          semCruzamentoCsv: sessoesReais === 0,
+          semCruzamentoCsv: !temAgendaTita,
           violacaoExclusividade: verificacao.status === "bloqueado" ? { direcao: verificacao.direcao, motivo: verificacao.motivo } : null,
         }
       })
@@ -345,7 +368,8 @@ export function calcularResumoUnidades(salas: Sala[], alocacoes: AlocacaoSala[],
     let slotsTotal = 0, slotsOcupados = 0, slotsLivres = 0, slotsBloqueados = 0
     let blocosTotal = 0, blocosPreenchidos = 0
     let capacidadeSimultanea = 0
-    let salasAtivas = 0, salasBloqueadas = 0, salasAdm = 0, salasNti = 0
+    let salasAtivas = 0
+    const porStatus: Record<string, number> = {}
     let inconsistencias = 0
     const salasPorCapacidade: Record<SalaCapacidade, number> = { unico: 0, duplo: 0, multiplo: 0 }
     const porTurnoAcc: Record<"Manhã" | "Tarde", ResumoTurnoUnidadeSalas> = {
@@ -356,15 +380,13 @@ export function calcularResumoUnidades(salas: Sala[], alocacoes: AlocacaoSala[],
 
     salasUnidade.forEach(sala => {
       if (sala.status === "operacional") salasAtivas++
-      else if (sala.status === "bloqueada") salasBloqueadas++
-      else if (sala.status === "adm") salasAdm++
-      else if (sala.status === "nti") salasNti++
+      else porStatus[sala.status] = (porStatus[sala.status] ?? 0) + 1
       capacidadeSimultanea += capacidadeProjetadaSala(sala.capacidade, sala.status)
       salasPorCapacidade[sala.capacidade]++
 
       const { slots } = calcularOcupacaoDaSala(sala, alocacoes, linhas, indiceExclusividade, nomeDaSalaPorId)
       slots.forEach(slot => {
-        if (slot.status === "adm" || slot.status === "nti") return
+        if (slot.status === "inativo") return
         const turnoBucket = porTurnoAcc[slot.turno]
         if (slot.status === "bloqueado") {
           slotsBloqueados++
@@ -408,9 +430,7 @@ export function calcularResumoUnidades(salas: Sala[], alocacoes: AlocacaoSala[],
       unidade,
       salasTotal: salasUnidade.length,
       salasAtivas,
-      salasBloqueadas,
-      salasAdm,
-      salasNti,
+      porStatus,
       salasPorCapacidade,
       capacidadeSimultanea,
       slotsTotal,
@@ -518,7 +538,7 @@ export function resumoOcupacaoDeItens(itens: SalaComOcupacao[]): ResumoOcupacaoI
 
   itens.forEach(item => {
     item.slots.forEach(slot => {
-      if (slot.status === "adm" || slot.status === "nti") return
+      if (slot.status === "inativo") return
       if (slot.status === "bloqueado") {
         slotsBloqueados++
         return

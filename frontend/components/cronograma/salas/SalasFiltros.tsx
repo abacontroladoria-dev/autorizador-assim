@@ -6,7 +6,7 @@
 // checkboxes em vez de um <select> nativo, que só permite uma opção por vez.
 
 import { useEffect, useRef, useState } from "react"
-import { ChevronDown } from "lucide-react"
+import { ChevronDown, Filter, Search, X } from "lucide-react"
 import { normTxt } from "@/lib/cronograma/constants"
 import { CAPACIDADE_LABEL_CURTO } from "@/lib/cronograma/salasTypes"
 import { useStatusLabels } from "@/hooks/useStatusLabels"
@@ -64,15 +64,25 @@ function MultiSelectFiltro({ label, values, options, onChange, labelFor }: Multi
       : `${values.length} selecionados`
 
   return (
-    <div ref={ref} className="relative flex flex-col gap-1 text-xs">
-      <span className="font-semibold text-muted-foreground uppercase tracking-wide">{label}</span>
+    <div ref={ref} className="relative">
+      {/* Só o rótulo, nunca o valor escolhido — mostrar "Núcleo:
+          Desenvolvimento e..." dentro do botão fazia a largura variar por
+          filtro e quebrar a barra em duas linhas. O ícone de funil cinza/verde
+          diz "tem filtro aqui ou não" à distância; o valor em si aparece no
+          título (hover) e, claro, dentro do dropdown ao abrir. */}
       <button
         type="button"
         onClick={() => setAberto(v => !v)}
         aria-expanded={aberto}
-        className={`flex min-w-[130px] items-center justify-between gap-2 rounded-lg border border-border bg-card px-2.5 py-1.5 text-left text-sm ${values.length ? "text-foreground" : "text-muted-foreground"}`}
+        title={resumo}
+        className="flex h-9 items-center gap-1.5 whitespace-nowrap rounded-lg border border-border bg-card px-2.5 text-sm text-foreground"
       >
-        <span className="truncate">{resumo}</span>
+        <Filter
+          size={15}
+          className={values.length ? "shrink-0 fill-emerald-500 text-emerald-500" : "shrink-0 text-muted-foreground"}
+          strokeWidth={2.25}
+        />
+        <span className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
         <ChevronDown size={14} className="shrink-0 text-muted-foreground" />
       </button>
       {aberto && (
@@ -104,11 +114,11 @@ interface SalasFiltrosProps {
 }
 
 const CAPACIDADE_OPCOES: SalaCapacidade[] = ["unico", "duplo", "multiplo"]
-const STATUS_OPCOES: SalaStatus[] = ["operacional", "bloqueada", "adm", "nti"]
 const TURNO_OPCOES = ["Manhã", "Tarde"] as const
 
 export function SalasFiltros({ value, onChange, unidades, nucleos, andares }: SalasFiltrosProps) {
   const { labels: statusLabels } = useStatusLabels()
+  const statusOpcoes = Object.keys(statusLabels)
 
   function set<K extends keyof SalasFiltrosState>(key: K, v: SalasFiltrosState[K]) {
     onChange({ ...value, [key]: v })
@@ -119,17 +129,17 @@ export function SalasFiltros({ value, onChange, unidades, nucleos, andares }: Sa
     || value.semSessao || value.comExclusividade
 
   return (
-    <div className="flex flex-wrap gap-3 rounded-xl border border-border bg-card/60 p-3">
-      <label className="flex flex-col gap-1 text-xs">
-        <span className="font-semibold text-muted-foreground uppercase tracking-wide">Profissional</span>
+    <div className="flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card/60 p-2">
+      <div className="flex h-9 items-center gap-1.5 rounded-lg border border-border bg-card px-2.5">
+        <Search size={13} className="shrink-0 text-muted-foreground" />
         <input
           type="text"
           value={value.profissional}
           onChange={e => set("profissional", e.target.value)}
-          placeholder="Nome do profissional..."
-          className="min-w-[180px] rounded-lg border border-border bg-card px-2.5 py-1.5 text-sm text-foreground"
+          placeholder="Profissional..."
+          className="w-[150px] bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
         />
-      </label>
+      </div>
       <MultiSelectFiltro label="Unidade" values={value.unidade} options={unidades} onChange={v => set("unidade", v)} />
       <MultiSelectFiltro label="Núcleo" values={value.nucleo} options={nucleos} onChange={v => set("nucleo", v)} />
       <MultiSelectFiltro label="Andar" values={value.andar} options={andares} onChange={v => set("andar", v)} />
@@ -149,47 +159,42 @@ export function SalasFiltros({ value, onChange, unidades, nucleos, andares }: Sa
       <MultiSelectFiltro
         label="Status"
         values={value.status}
-        options={STATUS_OPCOES}
+        options={statusOpcoes}
         onChange={v => set("status", v as SalaStatus[])}
-        labelFor={o => statusLabels[o as SalaStatus].label_curto}
+        labelFor={o => statusLabels[o]?.label_curto ?? o}
       />
-      <label className="flex flex-col gap-1 text-xs">
-        <span className="font-semibold text-muted-foreground uppercase tracking-wide">&nbsp;</span>
-        <button
-          type="button"
-          onClick={() => set("semSessao", !value.semSessao)}
-          aria-pressed={value.semSessao}
-          className={`rounded-lg border px-2.5 py-1.5 text-sm font-semibold transition-colors ${
-            value.semSessao
-              ? "border-amber-400 bg-amber-100 text-amber-800 dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-300"
-              : "border-border bg-card text-muted-foreground hover:bg-muted/50"
-          }`}
-        >
-          Alocação sem sessão
-        </button>
-      </label>
-      <label className="flex flex-col gap-1 text-xs">
-        <span className="font-semibold text-muted-foreground uppercase tracking-wide">&nbsp;</span>
-        <button
-          type="button"
-          onClick={() => set("comExclusividade", !value.comExclusividade)}
-          aria-pressed={value.comExclusividade}
-          className={`rounded-lg border px-2.5 py-1.5 text-sm font-semibold transition-colors ${
-            value.comExclusividade
-              ? "border-blue-400 bg-blue-100 text-blue-800 dark:border-blue-500 dark:bg-blue-950/40 dark:text-blue-300"
-              : "border-border bg-card text-muted-foreground hover:bg-muted/50"
-          }`}
-        >
-          Sala com exclusividade
-        </button>
-      </label>
+      <div className="mx-1 h-6 w-px shrink-0 bg-border" aria-hidden />
+      <button
+        type="button"
+        onClick={() => set("semSessao", !value.semSessao)}
+        aria-pressed={value.semSessao}
+        className={`flex h-9 items-center whitespace-nowrap rounded-lg border px-2.5 text-sm font-semibold transition-colors ${
+          value.semSessao
+            ? "border-amber-400 bg-amber-100 text-amber-800 dark:border-amber-500 dark:bg-amber-950/40 dark:text-amber-300"
+            : "border-border bg-card text-muted-foreground hover:bg-muted/50"
+        }`}
+      >
+        Alocação sem sessão
+      </button>
+      <button
+        type="button"
+        onClick={() => set("comExclusividade", !value.comExclusividade)}
+        aria-pressed={value.comExclusividade}
+        className={`flex h-9 items-center whitespace-nowrap rounded-lg border px-2.5 text-sm font-semibold transition-colors ${
+          value.comExclusividade
+            ? "border-blue-400 bg-blue-100 text-blue-800 dark:border-blue-500 dark:bg-blue-950/40 dark:text-blue-300"
+            : "border-border bg-card text-muted-foreground hover:bg-muted/50"
+        }`}
+      >
+        Sala com exclusividade
+      </button>
       {temFiltroAtivo && (
         <button
           type="button"
           onClick={() => onChange(SALAS_FILTROS_VAZIO)}
-          className="self-end rounded-lg border border-border px-3 py-1.5 text-xs font-semibold text-muted-foreground hover:bg-muted/50"
+          className="flex h-9 items-center gap-1 whitespace-nowrap rounded-lg border border-border px-2.5 text-xs font-semibold text-muted-foreground hover:bg-muted/50"
         >
-          Limpar filtros
+          <X size={12} /> Limpar filtros
         </button>
       )}
     </div>

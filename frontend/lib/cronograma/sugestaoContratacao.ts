@@ -9,8 +9,9 @@ import {
   avaliarPeriodo, calcularGaps, construirAgendaNovoProfissional, gapsParaMapa, limitarCandidatosPorGap, listarEspecialidades, UNIDADES_SIMULACAO,
   type GapItem, type Turno,
 } from "./simulacaoNovoPrestador"
-import { DIAS_UTIL, ESP_CLINICO, EXCLUIR_OCUP, NOME_PARA_TERAPIA_ID, normTxt } from "./constants"
-import { capacidadeDiretaRestante } from "./disponibilidadeInterna"
+import { DIAS_UTIL, ESP_CLINICO, EXCLUIR_OCUP, HORAS_GRID, NOME_PARA_TERAPIA_ID, TERAPIA_TO_ESP, normTxt } from "./constants"
+import { turnoFromHora } from "./helpers"
+import { capacidadeDiretaRestante, capacidadeLivrePorGrupo } from "./disponibilidadeInterna"
 import { dowDeDiaSemana } from "./salas"
 import { normalizarUnidadeOcupacao } from "./ocupacaoProf"
 import { resolverValorSessao } from "./faturamentoProjecao"
@@ -196,7 +197,7 @@ export function anexarModalidadeERemanejamento(
     return { ...s, candidatos, modalidadeDominante }
   })
 
-  return limitarCandidatosPorGapNaSugestao(comRemanejamento, gapMap)
+  return limitarCandidatosPorGapNaSugestao(comRemanejamento, cRows, gapMap)
 }
 
 /** Mesmo teto de limitarCandidatosPorGap (simulacaoNovoPrestador.ts), mas
@@ -210,9 +211,9 @@ export function anexarModalidadeERemanejamento(
  *  Agrupa por paciente+especialidade, já que o gap é por especialidade —
  *  cada `SugestaoContratacao` carrega a sua própria (s.especialidade). */
 function limitarCandidatosPorGapNaSugestao(
-  sugestoes: SugestaoContratacao[], gapMap: Record<string, GapItem>,
+  sugestoes: SugestaoContratacao[], cRows: CsvRow[], gapMap: Record<string, GapItem>,
 ): SugestaoContratacao[] {
-  interface Ocorrencia { sugestaoIdx: number; vagaChave: string; alternativas: number }
+  interface Ocorrencia { sugestaoIdx: number; vagaChave: string; alternativas: number; coberta: boolean }
 
   const porVaga = new Map<string, number>()
   sugestoes.forEach((s, sugestaoIdx) => {
@@ -222,13 +223,27 @@ function limitarCandidatosPorGapNaSugestao(
     }
   })
 
+  // Mesma lógica de cobertura de dividirPorDisponibilidadeInterna (mais
+  // abaixo neste arquivo) — usada aqui só pra decidir PRIORIDADE de quem
+  // mantém a ocorrência quando o paciente excede o gap, não pra remover
+  // candidatos (isso continua sendo feito só por dividirPorDisponibilidadeInterna).
+  const capacidadeDireta = capacidadeDiretaRestante(cRows, gapMap)
+  const capacidadeLivreBruta = capacidadeLivrePorGrupo(cRows)
+  function temCoberturaReal(s: SugestaoContratacao, c: CandidatoNaSugestao): boolean {
+    const chave = `${s.dia}|||${c.hora}|||${s.unidade}|||${s.especialidade}`
+    const capacidade = c.modalidade === "remanejamento"
+      ? Math.max(0, (capacidadeLivreBruta.get(chave) ?? 0) - (capacidadeDireta.get(chave) ?? 0))
+      : capacidadeDireta.get(chave) ?? 0
+    return capacidade > 0
+  }
+
   const ocorrenciasPorPacienteEsp = new Map<string, Ocorrencia[]>()
   sugestoes.forEach((s, sugestaoIdx) => {
     for (const c of s.candidatos) {
       const vagaChave = `${sugestaoIdx}|||${c.turno}|||${c.hora}`
       const chavePac = `${c.paciente}|||${s.especialidade}`
       const lista = ocorrenciasPorPacienteEsp.get(chavePac) ?? []
-      lista.push({ sugestaoIdx, vagaChave, alternativas: (porVaga.get(vagaChave) ?? 1) - 1 })
+      lista.push({ sugestaoIdx, vagaChave, alternativas: (porVaga.get(vagaChave) ?? 1) - 1, coberta: temCoberturaReal(s, c) })
       ocorrenciasPorPacienteEsp.set(chavePac, lista)
     }
   })
@@ -238,7 +253,14 @@ function limitarCandidatosPorGapNaSugestao(
     const [paciente, especialidade] = chavePac.split("|||")
     const gap = gapMap[`${paciente}|||${especialidade}`]?.gap ?? 0
     if (ocorrencias.length <= gap) continue
-    const excedentes = [...ocorrencias].sort((a, b) => a.alternativas - b.alternativas).slice(gap)
+    // Prioriza manter ocorrências com cobertura interna real (custam zero
+    // contratação) sobre as que precisariam de contratação — sem isso o
+    // paciente podia "sumir" de uma vaga já coberta e reaparecer noutra vaga
+    // do plano como se precisasse de contratação (mesmo bug de
+    // limitarCandidatosPorGap em simulacaoNovoPrestador.ts, aqui na camada
+    // de adjacência+remanejamento combinados).
+    const ordenadas = [...ocorrencias].sort((a, b) => Number(b.coberta) - Number(a.coberta) || a.alternativas - b.alternativas)
+    const excedentes = ordenadas.slice(gap)
     for (const e of excedentes) remover.add(`${e.vagaChave}|||${paciente}`)
   }
   if (!remover.size) return sugestoes
@@ -258,35 +280,109 @@ function limitarCandidatosPorGapNaSugestao(
  *  livre → sobram 3 candidatos que realmente precisariam de contratação
  *  nova; só quando a capacidade cobre TODOS os candidatos da vaga ela some de
  *  vez. A capacidade vem de `capacidadeDiretaRestante`, a MESMA fonte usada
- *  pela tela "Ocupar Profissionais Disponíveis" — já descontando os
- *  pacientes reais que essa tela já casou com esses profissionais livres,
- *  pra não contar a mesma vaga livre como cobertura duas vezes. Os
- *  candidatos restantes de uma vaga parcialmente coberta ganham
+ *  pela tela "Ocupar Profissionais Disponíveis" — é o número de pareamentos
+ *  profissional-livre↔paciente que essa tela já mostra pra esse grupo, então
+ *  os dois lugares nunca divergem sobre quantos já estão cobertos sem
+ *  contratar. Os candidatos restantes de uma vaga parcialmente coberta ganham
  *  `cobertosInternamente` com quantos já têm cobertura, pra UI avisar sem
  *  esconder a necessidade real de contratação. Descarta a sugestão inteira
  *  só quando todas as suas vagas somem. */
+interface SplitDisponibilidadeInterna { restantes: SugestaoContratacao[]; cobertos: SugestaoContratacao[] }
+
+/** Total de vagas de horário (denominador da %) do combo dia+turno(s) — o
+ *  mesmo grid usado por construirAgendaNovoProfissional, mas sem precisar
+ *  reconstruir a agenda inteira só pra saber o tamanho dela. */
+function totalSlotsDoCombo(turnos: Turno[]): number {
+  return turnos.reduce((acc, turno) => acc + HORAS_GRID.filter(h => turnoFromHora(h) === turno).length, 0)
+}
+
+/** Recalcula pctOcupacaoPrevista/faixaCascata pra uma fatia de candidatos
+ *  (pós-split por disponibilidade interna) — sem isso os dois campos ficam
+ *  com o valor "bruto" de antes do split, contando como ocupada uma vaga que
+ *  a UI já mostra como coberta sem precisar de contratação (ver Simulação de
+ *  Novo Prestador, que sempre recalcula em cima da fila líquida). */
+function recalcularOcupacao(candidatos: CandidatoNaSugestao[], turnos: Turno[]): { pctOcupacaoPrevista: number; faixaCascata: FaixaCascata } {
+  const totalSlots = totalSlotsDoCombo(turnos)
+  const horasComCandidato = new Set(candidatos.map(c => c.hora)).size
+  const pctOcupacaoPrevista = totalSlots ? (horasComCandidato / totalSlots) * 100 : 0
+  const faixaCascata = FAIXAS_CASCATA.find(f => pctOcupacaoPrevista >= f) ?? FAIXAS_CASCATA[FAIXAS_CASCATA.length - 1]
+  return { pctOcupacaoPrevista, faixaCascata }
+}
+
+/** Núcleo compartilhado por filtrarPorDisponibilidadeInterna (só o lado
+ *  "restantes", pro pipeline de sugestão automática) e por
+ *  separarCobertosPorDisponibilidadeInterna (só o lado "cobertos", pra UI da
+ *  Simulação de Novo Prestador poder mostrar separadamente "Agenda do novo
+ *  profissional" vs. "Agenda atual disponível já cobre" — ver
+ *  SimulacaoNovoPrestadorTab.tsx). Mesmo critério de corte de sempre: quando a
+ *  vaga tem mais candidatos que capacidade interna, os primeiros da fila
+ *  (ordenados por maior gap) ficam como "restantes" e os últimos como
+ *  "cobertos" — é só um critério de desempate técnico, não uma atribuição
+ *  clínica real de qual paciente específico usaria a vaga interna. */
+function dividirPorDisponibilidadeInterna(
+  sugestoes: SugestaoContratacao[], cRows: CsvRow[], gapMap: Record<string, GapItem>,
+): SplitDisponibilidadeInterna {
+  const capacidadePorGrupo = capacidadeDiretaRestante(cRows, gapMap)
+  // Sobra de profissional(is) livre(s) real(is) que o motor Direto não usou
+  // (ver capacidadeLivrePorGrupo) — só conta pra candidatos de remanejamento,
+  // que Direto nunca enxerga (é um motor de candidatura totalmente separado).
+  // Nunca o contrário: candidatos "adjacente" continuam limitados só pela
+  // capacidade Direta oficial, pra não competir por uma sobra que só existe
+  // por causa do remanejamento de outro paciente.
+  const capacidadeLivreBruta = capacidadeLivrePorGrupo(cRows)
+  const restantes: SugestaoContratacao[] = []
+  const cobertos: SugestaoContratacao[] = []
+
+  for (const s of sugestoes) {
+    const porVaga = new Map<string, CandidatoNaSugestao[]>()
+    for (const c of s.candidatos) {
+      const chave = chaveVaga(c)
+      if (!porVaga.has(chave)) porVaga.set(chave, [])
+      porVaga.get(chave)!.push(c)
+    }
+    const candidatosRestantes: CandidatoNaSugestao[] = []
+    const candidatosCobertos: CandidatoNaSugestao[] = []
+    for (const daVaga of porVaga.values()) {
+      const chaveGrupo = `${s.dia}|||${daVaga[0].hora}|||${s.unidade}|||${s.especialidade}`
+      const capacidadeDireta = capacidadePorGrupo.get(chaveGrupo) ?? 0
+      const capacidadeRemanejamento = Math.max(0, (capacidadeLivreBruta.get(chaveGrupo) ?? 0) - capacidadeDireta)
+
+      const naoRemanejamento = daVaga.filter(c => c.modalidade !== "remanejamento")
+      const remanejamento = daVaga.filter(c => c.modalidade === "remanejamento")
+      const restantesNaoRem = naoRemanejamento.slice(0, Math.max(0, naoRemanejamento.length - capacidadeDireta))
+      const cobertosNaoRem = naoRemanejamento.slice(restantesNaoRem.length)
+      const restantesRem = remanejamento.slice(0, Math.max(0, remanejamento.length - capacidadeRemanejamento))
+      const cobertosRem = remanejamento.slice(restantesRem.length)
+
+      const restantesDaVaga = [...restantesNaoRem, ...restantesRem]
+      const cobertosDaVaga = [...cobertosNaoRem, ...cobertosRem]
+
+      if (cobertosDaVaga.length > 0) {
+        candidatosRestantes.push(...restantesDaVaga.map(c => ({ ...c, cobertosInternamente: cobertosDaVaga.length })))
+        candidatosCobertos.push(...cobertosDaVaga)
+      } else {
+        candidatosRestantes.push(...restantesDaVaga)
+      }
+    }
+    if (candidatosRestantes.length) restantes.push({ ...s, candidatos: candidatosRestantes, ...recalcularOcupacao(candidatosRestantes, s.turnos) })
+    if (candidatosCobertos.length) cobertos.push({ ...s, candidatos: candidatosCobertos, ...recalcularOcupacao(candidatosCobertos, s.turnos) })
+  }
+
+  return { restantes, cobertos }
+}
+
 export function filtrarPorDisponibilidadeInterna(
   sugestoes: SugestaoContratacao[], cRows: CsvRow[], gapMap: Record<string, GapItem>,
 ): SugestaoContratacao[] {
-  const capacidadePorGrupo = capacidadeDiretaRestante(cRows, gapMap)
-  return sugestoes
-    .map(s => {
-      const porVaga = new Map<string, CandidatoNaSugestao[]>()
-      for (const c of s.candidatos) {
-        const chave = chaveVaga(c)
-        if (!porVaga.has(chave)) porVaga.set(chave, [])
-        porVaga.get(chave)!.push(c)
-      }
-      const candidatos = [...porVaga.values()].flatMap(daVaga => {
-        const capacidade = capacidadePorGrupo.get(`${s.dia}|||${daVaga[0].hora}|||${s.unidade}|||${s.especialidade}`) ?? 0
-        if (capacidade <= 0) return daVaga
-        const restantes = daVaga.slice(0, Math.max(0, daVaga.length - capacidade))
-        const cobertos = daVaga.length - restantes.length
-        return cobertos > 0 ? restantes.map(c => ({ ...c, cobertosInternamente: cobertos })) : restantes
-      })
-      return { ...s, candidatos }
-    })
-    .filter(s => s.candidatos.length > 0)
+  return dividirPorDisponibilidadeInterna(sugestoes, cRows, gapMap).restantes
+}
+
+/** Lado complementar de filtrarPorDisponibilidadeInterna: só os candidatos que
+ *  a capacidade interna JÁ cobre (não precisam da contratação hipotética). */
+export function separarCobertosPorDisponibilidadeInterna(
+  sugestoes: SugestaoContratacao[], cRows: CsvRow[], gapMap: Record<string, GapItem>,
+): SugestaoContratacao[] {
+  return dividirPorDisponibilidadeInterna(sugestoes, cRows, gapMap).cobertos
 }
 
 const TURNO_PARA_ALOCACAO: Record<Turno, "Manhã" | "Tarde"> = { manha: "Manhã", tarde: "Tarde" }
@@ -363,6 +459,28 @@ export function terapiaDaEspecialidade(especialidade: string): string {
   return (ESP_CLINICO[especialidade] || [especialidade]).filter(t => !EXCLUIR_OCUP.has(t))[0] || especialidade
 }
 
+/** Soma real de sessões no mês de referência — mesma lógica de
+ *  ProjecaoFinanceiraDetalheModal (soma da coluna "Sessões" de "Receita por
+ *  dia do mês"), só que sem precisar enumerar as datas uma a uma: por
+ *  periodo, conta as vagas com melhor candidato e multiplica pela ocorrência
+ *  real daquele dia da semana no mês (getCalendario já desconta feriado). */
+export function contarSessoesReaisMes(
+  periodosEnriquecidos: SugestaoContratacao[],
+  mesReferencia: { ano: number; mes: number } | null,
+  feriados: Record<string, FeriadoInfo>,
+): number {
+  if (!mesReferencia) return 0
+  const cal = getCalendario(mesReferencia.ano, mesReferencia.mes, feriados)
+  let total = 0
+  for (const s of periodosEnriquecidos) {
+    const dow = dowDeDiaSemana(s.dia)
+    if (dow === null) continue
+    const vagas = new Set(s.candidatos.filter(c => c.ordemNaVaga === 1).map(c => `${c.turno}|||${c.hora}`)).size
+    total += vagas * cal.counts[dow as 1 | 2 | 3 | 4 | 5]
+  }
+  return total
+}
+
 export function primeiroConvenioDoPaciente(paciente: string, cRows: CsvRow[]): string {
   const row = cRows.find(r => r["Nome Favorecido"] === paciente && r["Convênio"])
   return row?.["Convênio"] || "Não informado"
@@ -378,8 +496,12 @@ function pacienteIdDoPaciente(paciente: string, cRows: CsvRow[]): number | null 
   return row?.PacienteId ?? null
 }
 
+// r.Terapia guarda o nome GRANULAR da terapia (ex.: "Aplicador ABA (PS)",
+// "Supervisão ABA"), nunca a especialidade agregada "Psicologia ABA" — por
+// isso precisa passar por TERAPIA_TO_ESP. Critério = cronograma inteiro do
+// paciente nesse convênio, na semana de referência (cRows já é essa janela).
 function pacienteTemPsicologiaAba(paciente: string, cRows: CsvRow[]): boolean {
-  return cRows.some(r => r["Nome Favorecido"] === paciente && r.Terapia === "Psicologia ABA")
+  return cRows.some(r => r["Nome Favorecido"] === paciente && TERAPIA_TO_ESP[r.Terapia] === "Psicologia ABA")
 }
 
 function projetarReceitaCandidato(
@@ -488,7 +610,7 @@ export function anexarRemuneracaoEOrdenar(
   })
 
   return comProjecao.sort((a, b) =>
-    (b.projecaoRemuneracao?.receitaMensalProjetada ?? 0) - (a.projecaoRemuneracao?.receitaMensalProjetada ?? 0) ||
-    b.pctOcupacaoPrevista - a.pctOcupacaoPrevista,
+    b.pctOcupacaoPrevista - a.pctOcupacaoPrevista ||
+    (b.projecaoRemuneracao?.receitaMensalProjetada ?? 0) - (a.projecaoRemuneracao?.receitaMensalProjetada ?? 0),
   )
 }

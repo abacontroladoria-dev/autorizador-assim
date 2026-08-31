@@ -34,6 +34,17 @@ export async function POST(request: NextRequest) {
 
   const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString()
 
+  // Data de HOJE em São Paulo. `en-CA` devolve YYYY-MM-DD, o formato de data_atendimento.
+  const hojeSP = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+  }).format(new Date())
+
+  // Mesmos filtros da Edge Function automation-release-stuck, que é a que o botão
+  // do Sidebar chama de fato. Sem eles, um clique devolvia para 'pendente' toda
+  // linha órfã em 'processando' de qualquer dia (incidente de 2026-08-14):
+  //   - sessão de outro dia não pode ser autorizada hoje — a ASSIM carimba
+  //     data_execucao no instante da autorização e o casamento por data quebra
+  //   - linha que já tem guia reautorizada vira "1601-REINCIDENCIA NO ATEN"
   const { data, error } = await supabaseService
     .from('fila_autorizacoes')
     .update({
@@ -43,9 +54,21 @@ export async function POST(request: NextRequest) {
     })
     .eq('status', 'processando')
     .lt('updated_at', twoHoursAgo)
+    .eq('data_atendimento', hojeSP)
+    .is('numero_autorizacao', null)
     .select('id')
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 })
 
-  return NextResponse.json({ success: true, liberados: data?.length ?? 0 })
+  const { count: retidas } = await supabaseService
+    .from('fila_autorizacoes')
+    .select('id', { count: 'exact', head: true })
+    .eq('status', 'processando')
+    .lt('updated_at', twoHoursAgo)
+
+  return NextResponse.json({
+    success: true,
+    liberados: data?.length ?? 0,
+    retidas: retidas ?? 0,
+  })
 }

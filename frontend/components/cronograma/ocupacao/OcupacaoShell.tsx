@@ -19,7 +19,7 @@ import { detectarInconsistencias } from "@/lib/cronograma/inconsistencias"
 import type { AlgorithmResult, Sugestao, WaStatus } from "@/types/cronograma"
 
 const TABS = [
-  { key: "acompanhamento",   label: "📬 Acompanhamento" },
+  { key: "oportunidades-recusadas", label: "🚫 Oportunidades Recusadas" },
   { key: "gaps",             label: "📊 Diferença: Laudo e Oferta" },
   { key: "inconsistencias",  label: "⚠️ Inconsistências e Exceções" },
   { key: "guia",             label: "📖 Guia" },
@@ -28,19 +28,22 @@ const TABS = [
 type TabKey = (typeof TABS)[number]["key"]
 
 const TAB_HEADERS: Record<TabKey, { title: string; subtitle: string }> = {
-  acompanhamento:  { title: "Aceites e Recusas",             subtitle: "Acompanhamento de sugestões e redistribuições" },
+  "oportunidades-recusadas": { title: "Oportunidades Recusadas",  subtitle: "Acompanhamento de sugestões e redistribuições" },
   gaps:            { title: "Diferença: Laudo e Oferta",     subtitle: "Comparativo entre laudos autorizados e sessões ofertadas" },
   inconsistencias: { title: "Inconsistências e Exceções",    subtitle: "Registros com divergências ou exceções no cronograma" },
   guia:            { title: "Guia do Cronograma",            subtitle: "" },
 }
 
 export function OcupacaoShell() {
-  const { cRows, lRows, rec, inv, waMap, cfg, conf, pacBundles, savedAt, saveError, clearSaveError, sRec, sInv, sWa, setCRows } = useCronogramaData()
+  const { cRows, lRows, rec, inv, waMap, cfg, conf, pacBundles, saveError, clearSaveError, sRec, sInv, sWa, setCRows } = useCronogramaData()
 
   const searchParams = useSearchParams()
   const router = useRouter()
   const rawTab = searchParams.get("tab")
-  const activeTab: TabKey = rawTab && TABS.some(t => t.key === rawTab) ? (rawTab as TabKey) : "acompanhamento"
+  // "acompanhamento" era o nome antigo desta aba (renomeada 2026-08-25) — mantém
+  // links/favoritos antigos funcionando em vez de cair no default silenciosamente.
+  const resolvedTab = rawTab === "acompanhamento" ? "oportunidades-recusadas" : rawTab
+  const activeTab: TabKey = resolvedTab && TABS.some(t => t.key === resolvedTab) ? (resolvedTab as TabKey) : "oportunidades-recusadas"
 
   const { setHeader } = useHeader()
 
@@ -57,7 +60,7 @@ export function OcupacaoShell() {
   const [apiErr, setApiErr] = useState("")
 
   useEffect(() => {
-    if (!rawTab) router.replace("/cronograma/ocupacao?tab=acompanhamento")
+    if (!rawTab) router.replace("/cronograma/ocupacao?tab=oportunidades-recusadas")
   }, [rawTab])
 
   useEffect(() => {
@@ -146,9 +149,11 @@ export function OcupacaoShell() {
 
   return (
     <div style={{ display: "flex", flexDirection: "column" }}>
-      {/* Status bar — período já está no cabeçalho; "Salvo às" só faz sentido em
-          Acompanhamento (única aba que grava rec/inv/waMap). */}
-      {(load || err || (activeTab === "acompanhamento" && (savedAt || saveError))) && (
+      {/* Status bar — período já está no cabeçalho. O indicador "Salvo às" foi
+          retirado a pedido (2026-08-25): a persistência já é automática e o
+          aviso não trazia informação acionável. O erro de salvamento continua
+          visível — esse sim precisa de ação do usuário. */}
+      {(load || err || (activeTab === "oportunidades-recusadas" && saveError)) && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: "8px", marginBottom: "14px", alignItems: "center" }}>
           {load && (
             <span style={{ display: "inline-flex", alignItems: "center", gap: "5px", fontSize: "var(--text-xs)", color: B.blue, fontWeight: "var(--weight-semibold)" }}>
@@ -160,10 +165,7 @@ export function OcupacaoShell() {
               <AlertTriangle size={12} /> {err}
             </span>
           )}
-          {activeTab === "acompanhamento" && savedAt && !saveError && (
-            <span style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)" }}>Salvo às {savedAt}</span>
-          )}
-          {activeTab === "acompanhamento" && saveError && (
+          {activeTab === "oportunidades-recusadas" && saveError && (
             <button
               type="button"
               style={{ display: "inline-flex", alignItems: "center", gap: "5px", background: "#fef2f2", color: "#dc2626", border: "1px solid #fca5a5", borderRadius: "999px", padding: "3px 10px", fontSize: "var(--text-xs)", fontWeight: "var(--weight-bold)", cursor: "pointer", fontFamily: "inherit" }}
@@ -177,7 +179,7 @@ export function OcupacaoShell() {
       )}
 
       {/* Tab content */}
-      {activeTab === "acompanhamento" && (
+      {activeTab === "oportunidades-recusadas" && (
         <AcompanhamentoTab res={res}
           onWA={handleWA} onWAUndo={handleWAUndo} onWAStatus={handleWAStatus}
           onRec={setCRec} onInv={setCInv} onCron={s => setCronPac(s.pac)} />

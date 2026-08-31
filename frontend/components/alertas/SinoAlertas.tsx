@@ -1,8 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { Bell, ExternalLink } from 'lucide-react'
-import { useRouter } from 'next/navigation'
+import { Bell } from 'lucide-react'
 
 import { useAlertas } from '@/hooks/useAlertas'
 import { useImpersonation } from '@/contexts/ImpersonationContext'
@@ -21,7 +20,6 @@ import AlertaLinha from './AlertaLinha'
  * reposicionaria aquelas 16 páginas.
  */
 export default function SinoAlertas() {
-  const router = useRouter()
   const { isImpersonating } = useImpersonation()
   const [aberto, setAberto] = useState(false)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -98,14 +96,6 @@ export default function SinoAlertas() {
                     : `${contadores.abertos} aberta(s) · ${contadores.em_andamento} em andamento`}
               </p>
             </div>
-            <button
-              type="button"
-              onClick={() => { setAberto(false); router.push('/auditoria-assim?tab=pendencias') }}
-              className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-700"
-            >
-              Ver todos
-              <ExternalLink size={11} />
-            </button>
           </div>
 
           <div className="flex-1 overflow-y-auto p-2">
@@ -129,10 +119,6 @@ export default function SinoAlertas() {
                   key={a.id}
                   alerta={a}
                   compacto
-                  onClick={() => {
-                    setAberto(false)
-                    router.push(`/auditoria-assim?tab=pendencias&alerta=${a.id}`)
-                  }}
                 />
               ))}
             </div>

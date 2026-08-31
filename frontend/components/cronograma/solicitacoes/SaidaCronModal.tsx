@@ -5,7 +5,6 @@ import { createPortal } from "react-dom"
 import { B, DIAS_LIST, DIAS_ORD, HORAS_GRID, UNID_COR, ABA_EXIB_PSICO_NAMES, EXIB_ID, EXIB_NOME, TERAPIA_ID } from "@/lib/cronograma/constants"
 import { fmtName, buildCronoUnitMeta, shouldShowSessionUnit, unidadeBadgeText } from "@/lib/cronograma/helpers"
 import { UnitHeaderBadges, CronoGlobalUnitBadge } from "@/components/cronograma/ui/UnitBadges"
-import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
 import type {
   AfetadaItem,
   AnaliseResult,
@@ -367,9 +366,6 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
     return movimentos.map(m => `${m.paraProf}|||${m.paraDia}|||${m.paraHora}`).join(";;")
   }
 
-  // ── Diálogo de confirmação ────────────────────────────────────────────────
-  const [confirmDialog, setConfirmDialog] = useState<"aceitar" | "inviavel" | null>(null)
-
   // ── Salvamento ────────────────────────────────────────────────────────────
 
   function save(status: StatusSaida, obsAceite?: string) {
@@ -616,44 +612,12 @@ export function SaidaCronModal({ pac, afetada, analise, statusAtual, onClose, on
         {/* Footer */}
         <div className="px-5 py-[10px] border-t border-gray-100 flex gap-[6px] flex-wrap items-center bg-gray-50 rounded-b-[18px]">
           <div className="flex-1 text-[11px] text-gray-400 truncate">{descricaoProposta()}</div>
-          {!readOnly && (st === "pendente" || st === "recusado") && (
-            <>
-              <button onClick={() => setConfirmDialog("aceitar")} disabled={!opcSel} style={{ padding: "7px 12px", borderRadius: "9px", border: "none", background: opcSel ? "#16a34a" : "#86efac", color: "white", fontWeight: 700, fontSize: "11px", cursor: opcSel ? "pointer" : "not-allowed" }}>Aceitar (→ Acompanhamento)</button>
-              <button onClick={() => setConfirmDialog("inviavel")} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid var(--border)", background: "var(--muted)", color: "var(--muted-foreground)", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>⛔ Inviável</button>
-            </>
-          )}
           {!readOnly && st === "aguardando" && (
-            <>
-              <button onClick={() => setConfirmDialog("inviavel")} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid var(--border)", background: "var(--muted)", color: "var(--muted-foreground)", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>⛔ Inviável</button>
-              <button onClick={() => save("pendente")} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid var(--border)", background: "var(--card)", color: "var(--muted-foreground)", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>Cancelar</button>
-            </>
+            <button onClick={() => save("pendente")} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid var(--border)", background: "var(--card)", color: "var(--muted-foreground)", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>Cancelar</button>
           )}
           <button onClick={onClose} style={{ padding: "7px 12px", borderRadius: "9px", border: "1px solid var(--border)", background: "var(--card)", color: "var(--muted-foreground)", fontWeight: 600, fontSize: "11px", cursor: "pointer" }}>Fechar</button>
         </div>
       </div>
-
-      {confirmDialog === "aceitar" && (
-        <ConfirmDialog
-          title="Aceitar sugestão?"
-          description="A sessão será enviada para Acompanhamento."
-          confirmLabel="✓ Aceitar"
-          confirmColor="#16a34a"
-          onConfirm={() => { save("aguardando"); setConfirmDialog(null) }}
-          onCancel={() => setConfirmDialog(null)}
-        />
-      )}
-      {confirmDialog === "inviavel" && (
-        <ConfirmDialog
-          title="Marcar como inviável"
-          obsLabel="Motivo"
-          obsRequired
-          obsPlaceholder="ex: profissional sem disponibilidade, horário conflita..."
-          confirmLabel="⛔ Confirmar inviável"
-          confirmColor="#d97706"
-          onConfirm={(obs) => { save("sem_solucao", obs); setConfirmDialog(null) }}
-          onCancel={() => setConfirmDialog(null)}
-        />
-      )}
     </div>
   )
 }

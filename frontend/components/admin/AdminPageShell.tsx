@@ -15,6 +15,12 @@ import {
   updateMachineStatus,
   updateUserRoleUnidades,
 } from '@/services/admin.service'
+import {
+  getAllMembrosPorGrupo,
+  getGrupos,
+  sincronizarGruposDoUsuario,
+} from '@/services/grupos.service'
+import type { Grupo } from '@/services/grupos.service'
 import ResetPasswordModal from './ResetPasswordModal'
 import { getFunctionHeaders, getFunctionUrl } from '@/lib/supabase/functions'
 
@@ -51,6 +57,9 @@ export default function AdminPageShell({
 
   const [users, setUsers] = useState(initialUsers)
   const [machines, setMachines] = useState(initialMachines)
+  const [grupos, setGrupos] = useState<Grupo[]>([])
+  // grupo_id → ids dos membros, como vem de grupos_permissoes_membros.
+  const [membrosPorGrupo, setMembrosPorGrupo] = useState<Record<string, string[]>>({})
   const [searchUser, setSearchUser] = useState('')
   const [searchMachine, setSearchMachine] = useState('')
   const [roleFilter, setRoleFilter] = useState('')
@@ -72,12 +81,16 @@ export default function AdminPageShell({
 
   useEffect(() => {
     async function load() {
-      const [loadedUsers, loadedMachines] = await Promise.all([
+      const [loadedUsers, loadedMachines, loadedGrupos, loadedMembros] = await Promise.all([
         getAdminUsers(),
         getAdminMachines(),
+        getGrupos(),
+        getAllMembrosPorGrupo(),
       ])
       setUsers(loadedUsers)
       setMachines(loadedMachines)
+      setGrupos(loadedGrupos)
+      setMembrosPorGrupo(loadedMembros)
     }
     load()
 
@@ -105,6 +118,23 @@ export default function AdminPageShell({
       offlineMachines,
     }
   }, [users, machines])
+
+  // usuário → ids dos grupos a que pertence (o inverso de membrosPorGrupo).
+  const gruposPorUsuario = useMemo(() => {
+    const map: Record<string, string[]> = {}
+    for (const grupo of grupos) {
+      for (const usuarioId of membrosPorGrupo[grupo.id] || []) {
+        if (!map[usuarioId]) map[usuarioId] = []
+        map[usuarioId].push(grupo.id)
+      }
+    }
+    return map
+  }, [grupos, membrosPorGrupo])
+
+  const grupoOptions = useMemo(
+    () => grupos.map((grupo) => ({ id: grupo.id, nome: grupo.nome })),
+    [grupos]
+  )
 
   const filteredUsers = useMemo(() => {
     return users.filter((user) => {
@@ -151,7 +181,12 @@ export default function AdminPageShell({
     setBusyId(null)
   }
 
-  async function handleSaveUser(userId: string, role: string, unidades: string[]) {
+  async function handleSaveUser(
+    userId: string,
+    role: string,
+    unidades: string[],
+    grupoIds: string[]
+  ) {
     setBusyId(userId)
     setErrorMessage('')
 
@@ -170,6 +205,29 @@ export default function AdminPageShell({
           : user
       )
     )
+
+    // Grupo é vínculo puramente organizacional (tabela própria) — muda quem está
+    // no grupo, não as permissões já aplicadas a cada um. Quem aplica as
+    // permissões do modelo é a aba "Por grupo" em Permissões.
+    const gruposAtuais = gruposPorUsuario[userId] || []
+    const gruposOk = await sincronizarGruposDoUsuario(userId, grupoIds, gruposAtuais)
+
+    if (!gruposOk) {
+      setErrorMessage('Perfil e unidades foram salvos, mas não foi possível salvar os grupos.')
+      setBusyId(null)
+      return false
+    }
+
+    const alvo = new Set(grupoIds)
+    setMembrosPorGrupo((current) => {
+      const next: Record<string, string[]> = {}
+      for (const grupo of grupos) {
+        const membros = (current[grupo.id] || []).filter((id) => id !== userId)
+        next[grupo.id] = alvo.has(grupo.id) ? [...membros, userId] : membros
+      }
+      return next
+    })
+
     setBusyId(null)
     return true
   }
@@ -263,6 +321,8 @@ export default function AdminPageShell({
           <div className="space-y-4">
             <AdminUsersTable
               users={filteredUsers}
+              grupos={grupoOptions}
+              gruposPorUsuario={gruposPorUsuario}
               onToggleActive={handleToggleActive}
               onSaveUser={handleSaveUser}
               onResendInvite={handleResendInvite}

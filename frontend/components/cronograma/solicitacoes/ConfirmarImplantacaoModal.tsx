@@ -10,17 +10,22 @@ const DIA_ABR: Record<string, string> = {
   "Quinta-feira": "Quinta", "Sexta-feira": "Sexta", "Sábado": "Sábado",
 }
 
+/** Terapia que ficará com 3+ profissionais diferentes após a implantação. */
+export interface AvisoMultiProf { tP: string; profs: string[] }
+
 interface Props {
   pac: string
   sessoesAtuais: number
   sessoes: AceiteSessao[]
+  /** Avisos de 3+ profissionais por terapia — NÃO bloqueiam a implantação, só alertam em vermelho. */
+  avisoMultiProf?: AvisoMultiProf[]
   /** true enquanto a chamada à API da TiTa está em andamento — desabilita as ações do modal. */
   confirming?: boolean
   onConfirm: () => void
   onCancel: () => void
 }
 
-export function ConfirmarImplantacaoModal({ pac, sessoesAtuais, sessoes, confirming = false, onConfirm, onCancel }: Props) {
+export function ConfirmarImplantacaoModal({ pac, sessoesAtuais, sessoes, avisoMultiProf = [], confirming = false, onConfirm, onCancel }: Props) {
   const confirmRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => {
@@ -32,6 +37,9 @@ export function ConfirmarImplantacaoModal({ pac, sessoesAtuais, sessoes, confirm
 
   const adicionadas = sessoes.length
   const depois = sessoesAtuais + adicionadas
+  // Aviso, nunca bloqueio: a implantação segue permitida — só fica vermelha e explicada.
+  const temAviso = avisoMultiProf.length > 0
+  const terapiasAvisadas = new Set(avisoMultiProf.map(a => a.tP))
 
   return (
     <div
@@ -78,19 +86,40 @@ export function ConfirmarImplantacaoModal({ pac, sessoesAtuais, sessoes, confirm
               SESSÕES SELECIONADAS ({adicionadas})
             </div>
             <div style={{ display: "flex", flexDirection: "column", gap: "5px", maxHeight: "220px", overflowY: "auto" }}>
-              {sessoes.map((s, i) => (
-                <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", background: "var(--muted)", borderRadius: "8px", padding: "7px 10px" }}>
-                  <span style={{ fontFamily: "monospace", fontVariantNumeric: "tabular-nums", fontSize: "12px", fontWeight: 800, color: B.navy, flexShrink: 0 }}>
+              {sessoes.map((s, i) => {
+                const avisada = terapiasAvisadas.has(s.tP)
+                return (
+                <div key={i} style={{ display: "flex", alignItems: "center", gap: "8px", background: avisada ? "#fff1f2" : "var(--muted)", border: `1px solid ${avisada ? "#fca5a5" : "transparent"}`, borderRadius: "8px", padding: "7px 10px" }}>
+                  <span style={{ fontFamily: "monospace", fontVariantNumeric: "tabular-nums", fontSize: "12px", fontWeight: 800, color: avisada ? "#dc2626" : B.navy, flexShrink: 0 }}>
                     {(DIA_ABR[s.dia] ?? s.dia.replace("-feira", ""))} {s.hora}
                   </span>
-                  <span style={{ fontSize: "12px", fontWeight: 600, color: "var(--card-foreground)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                  <span style={{ fontSize: "12px", fontWeight: 600, color: avisada ? "#dc2626" : "var(--card-foreground)", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                     {s.tP}
                   </span>
-                  <span style={{ fontSize: "11px", color: "var(--muted-foreground)", flexShrink: 0 }}>{fmtName(s.prof)}</span>
+                  <span style={{ fontSize: "11px", color: avisada ? "#dc2626" : "var(--muted-foreground)", flexShrink: 0 }}>{fmtName(s.prof)}</span>
                 </div>
-              ))}
+                )
+              })}
             </div>
           </div>
+
+          {/* Aviso de 3+ profissionais na mesma terapia — não impede confirmar */}
+          {temAviso && (
+            <div style={{ display: "flex", gap: "8px", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "10px", padding: "10px 12px" }}>
+              <span style={{ fontSize: "15px", lineHeight: 1 }}>⚠️</span>
+              <div style={{ fontSize: "11.5px", color: "#dc2626", lineHeight: 1.4 }}>
+                <div>
+                  Após esta implantação, {avisoMultiProf.length === 1 ? "uma terapia ficará" : "estas terapias ficarão"} com{" "}
+                  <strong>3 ou mais profissionais diferentes</strong>. O ideal é no máximo 2 por terapia — você pode confirmar mesmo assim, mas revise antes.
+                </div>
+                {avisoMultiProf.map(a => (
+                  <div key={a.tP} style={{ marginTop: "5px" }}>
+                    <strong>{a.tP}</strong>: {a.profs.map(p => fmtName(p)).join(" · ")}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
 
           {/* Aviso */}
           <div style={{ display: "flex", gap: "8px", background: "#f0fdf4", border: "1px solid #bbf7d0", borderRadius: "10px", padding: "10px 12px" }}>
@@ -114,9 +143,9 @@ export function ConfirmarImplantacaoModal({ pac, sessoesAtuais, sessoes, confirm
             ref={confirmRef}
             onClick={onConfirm}
             disabled={confirming}
-            style={{ flex: 2, padding: "10px 16px", borderRadius: "10px", background: "#16a34a", color: "white", border: "none", cursor: confirming ? "not-allowed" : "pointer", opacity: confirming ? 0.75 : 1, fontFamily: "inherit", fontWeight: 800, fontSize: "13px", boxShadow: "0 2px 10px rgba(22,163,74,.3)" }}
+            style={{ flex: 2, padding: "10px 16px", borderRadius: "10px", background: temAviso ? "#dc2626" : "#16a34a", color: "white", border: "none", cursor: confirming ? "not-allowed" : "pointer", opacity: confirming ? 0.75 : 1, fontFamily: "inherit", fontWeight: 800, fontSize: "13px", boxShadow: temAviso ? "0 2px 10px rgba(220,38,38,.3)" : "0 2px 10px rgba(22,163,74,.3)" }}
           >
-            {confirming ? "⏳ Implantando sessões na TiTa…" : "🔒 Confirmar implantação"}
+            {confirming ? "⏳ Implantando sessões na TiTa…" : temAviso ? "⚠ Confirmar mesmo assim" : "🔒 Confirmar implantação"}
           </button>
         </div>
       </div>

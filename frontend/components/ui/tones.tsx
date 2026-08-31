@@ -44,7 +44,7 @@ export function StatusChip({ tone, children, className = "", dense = false }: {
   const c = TONE_CHIP[tone]
   const sizing = dense ? "text-[10px] px-1.5 py-0.5" : "text-[11px] px-2 py-0.5"
   return (
-    <span className={`inline-flex items-center gap-1 rounded-full font-semibold whitespace-nowrap ${sizing} ${c.bg} ${c.text} ${className}`}>
+    <span className={`inline-flex items-center gap-1 rounded-full font-semibold whitespace-nowrap transition-colors duration-200 ${sizing} ${c.bg} ${c.text} ${className}`}>
       {children}
     </span>
   )

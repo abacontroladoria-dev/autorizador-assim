@@ -1,28 +1,24 @@
 'use client'
 
-import { useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { ClipboardList, ListChecks } from 'lucide-react'
 
 import { useHeader } from '@/contexts/HeaderContext'
 import AuditoriaTab from './tabs/AuditoriaTab'
-import PendenciasTab from './tabs/PendenciasTab'
+import ReconciliacaoTab from './tabs/ReconciliacaoTab'
+import type { AlvoAnalise } from './types'
 
-const TABS = ['pendencias', 'auditoria'] as const
+const TABS = ['auditoria', 'reconciliacao'] as const
 type TabKey = (typeof TABS)[number]
 
-const TAB_META: Record<TabKey, { label: string; titulo: string; subtitulo: string; icon: typeof ListChecks }> = {
-  pendencias: {
-    label: 'Pendências',
-    titulo: 'Pendências ASSIM',
-    subtitulo: 'Atendimentos que precisam de ação — o sistema detecta e encerra sozinho',
-    icon: ListChecks,
-  },
+const TAB_META: Record<TabKey, { titulo: string; subtitulo: string }> = {
   auditoria: {
-    label: 'Auditoria',
-    titulo: 'Auditoria ASSIM',
+    titulo: 'Conferência ASSIM',
     subtitulo: 'Controle operacional de autorizações e pendências',
-    icon: ClipboardList,
+  },
+  reconciliacao: {
+    titulo: 'Autorizações e pendências',
+    subtitulo: 'Autorizações, faltas, cancelamentos e glosas.',
   },
 }
 
@@ -33,9 +29,6 @@ const TAB_META: Record<TabKey, { label: string; titulo: string; subtitulo: strin
  * `?tab=` e cada aba é um componente em ./tabs/. A page.tsx só envolve num
  * <Suspense> — obrigatório, porque useSearchParams em componente cliente quebra o
  * build de produção sem boundary (em dev funciona, o que esconde o problema).
- *
- * Aba default = pendencias: é o novo ponto de entrada operacional. A aba auditoria
- * preserva integralmente a tela anterior.
  *
  * Permissões: NÃO há código novo. `auditoria_assim` em lib/permissions/routes.ts é
  * bare path ('/auditoria-assim'), e routeMatches sem '?' compara só o pathname —
@@ -49,10 +42,10 @@ export default function AuditoriaAssimShell() {
   const { setHeader } = useHeader()
 
   const rawTab = searchParams.get('tab')
-  const activeTab: TabKey = TABS.includes(rawTab as TabKey) ? (rawTab as TabKey) : 'pendencias'
+  const activeTab: TabKey = TABS.includes(rawTab as TabKey) ? (rawTab as TabKey) : 'auditoria'
 
   useEffect(() => {
-    if (!rawTab) router.replace('/auditoria-assim?tab=pendencias')
+    if (!rawTab) router.replace('/auditoria-assim?tab=auditoria')
   }, [rawTab, router])
 
   useEffect(() => {
@@ -60,44 +53,32 @@ export default function AuditoriaAssimShell() {
     setHeader(meta.titulo, meta.subtitulo)
   }, [activeTab, setHeader])
 
+  /**
+   * A ponte da Conferência para a Reconciliação: a linha em glosa manda o
+   * paciente e a semana, e a outra aba abre já resolvida.
+   *
+   * Estado, e não query string, por dois motivos. Nome de paciente e carteirinha
+   * numa URL vazam para o histórico do navegador sem necessidade. E o Shell é o
+   * mesmo componente montado nas duas abas — só o `?tab=` muda —, então o estado
+   * sobrevive à navegação. O preço, aceito: o pulo não é bookmarkável e se perde
+   * no reload.
+   */
+  const [alvoAnalise, setAlvoAnalise] = useState<AlvoAnalise | null>(null)
+
+  const irParaAnalise = useCallback(
+    (alvo: AlvoAnalise) => {
+      setAlvoAnalise(alvo)
+      router.push('/auditoria-assim?tab=reconciliacao')
+    },
+    [router]
+  )
+
   return (
     <div className="flex flex-col gap-4">
-      {/* Alternador de abas. As duas visões são do MESMO domínio (ao contrário
-          das abas de /cronograma/ocupacao, que navegam só pelo Sidebar), então
-          vale um switch em tela para ir de uma à outra sem passar pelo menu. */}
-      <nav
-        role="tablist"
-        aria-label="Visões do módulo ASSIM"
-        className="inline-flex w-fit gap-1 rounded-2xl border border-slate-200 bg-white p-1"
-      >
-        {TABS.map((tab) => {
-          const meta = TAB_META[tab]
-          const Icon = meta.icon
-          const ativo = tab === activeTab
-          return (
-            <button
-              key={tab}
-              role="tab"
-              aria-selected={ativo}
-              type="button"
-              onClick={() => router.replace(`/auditoria-assim?tab=${tab}`)}
-              className={`
-                inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-sm font-semibold transition
-                ${ativo
-                  ? 'bg-indigo-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:bg-slate-50'
-                }
-              `}
-            >
-              <Icon size={15} />
-              {meta.label}
-            </button>
-          )
-        })}
-      </nav>
-
-      {activeTab === 'pendencias' && <PendenciasTab />}
-      {activeTab === 'auditoria' && <AuditoriaTab />}
+      {activeTab === 'auditoria' && <AuditoriaTab onAnalisarSemana={irParaAnalise} />}
+      {activeTab === 'reconciliacao' && (
+        <ReconciliacaoTab alvo={alvoAnalise} onAlvoConsumido={() => setAlvoAnalise(null)} />
+      )}
     </div>
   )
 }

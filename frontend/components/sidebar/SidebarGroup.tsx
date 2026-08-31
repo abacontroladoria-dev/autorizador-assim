@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { ChevronRight } from "lucide-react"
 import type { ReactNode } from "react"
 
@@ -13,6 +13,10 @@ interface SidebarGroupProps {
 
 export function SidebarGroup({ title, icon: Icon, defaultOpen = false, children }: SidebarGroupProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen)
+
+  useEffect(() => {
+    setIsOpen(defaultOpen)
+  }, [defaultOpen])
 
   return (
     <div>

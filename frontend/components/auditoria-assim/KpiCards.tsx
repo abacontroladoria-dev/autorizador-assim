@@ -1,7 +1,8 @@
 'use client'
 
-import { AlertCircle, AlertTriangle, Ban, Calendar, CheckCircle2, RefreshCw, UserX, XCircle, Ticket } from 'lucide-react'
+import { Calendar } from 'lucide-react'
 import type { KpisAuditoriaAssim } from './types'
+import { KPI_VISUAL, ORDEM_KPIS, type VisualKpi } from './kpisVisual'
 
 type Props = {
   kpis: KpisAuditoriaAssim | null
@@ -11,145 +12,24 @@ type Props = {
   onFilter: (situacao: string) => void
 }
 
-type KpiConfig = {
-  key: string
-  title: string
-  hint?: string
-  value: number
-  tone: string
-  iconTone: string
-  barTone: string
-  borderActive: string
-  hoverBorder: string
-  bgActive: string
-  icon: typeof RefreshCw
-  situacao: string
-}
+/** O visual do card mais o número daquele recorte. */
+type KpiConfig = VisualKpi & { value: number }
 
 export default function KpiCards({ kpis, loading, activeFilter, totalFiltrados, onFilter }: Props) {
   const total = (kpis?.total ?? 0) + (kpis?.faltas ?? 0) + (kpis?.faltas_terapeuta ?? 0)
 
-  const cards: KpiConfig[] = [
-    {
-      key: 'nao-solicitadas',
-      situacao: 'NAO_SOLICITADA',
-      title: 'Não Solicitadas',
-      value: kpis?.nao_solicitadas ?? 0,
-      tone: 'text-red-600',
-      iconTone: 'bg-red-50 text-red-600',
-      barTone: 'bg-red-500',
-      borderActive: 'border-red-400',
-      hoverBorder: 'hover:border-red-300',
-      bgActive: 'bg-red-50/60',
-      icon: AlertCircle,
-    },
-    {
-      key: 'sincronizando',
-      situacao: 'SINCRONIZANDO',
-      title: 'Sincronizando',
-      hint: 'até 10 min',
-      value: kpis?.sincronizando ?? 0,
-      tone: 'text-blue-600',
-      iconTone: 'bg-blue-50 text-blue-600',
-      barTone: 'bg-blue-500',
-      borderActive: 'border-blue-400',
-      hoverBorder: 'hover:border-blue-300',
-      bgActive: 'bg-blue-50/60',
-      icon: RefreshCw,
-    },
-    {
-      key: 'retorno-nao-confirmado',
-      situacao: 'RETORNO_NAO_CONFIRMADO',
-      title: 'Retorno Não\nConfirmado',
-      hint: 'mais de 10 min',
-      value: kpis?.retorno_nao_confirmado ?? 0,
-      tone: 'text-orange-600',
-      iconTone: 'bg-orange-50 text-orange-600',
-      barTone: 'bg-orange-500',
-      borderActive: 'border-orange-400',
-      hoverBorder: 'hover:border-orange-300',
-      bgActive: 'bg-orange-50/60',
-      icon: AlertTriangle,
-    },
-    {
-      key: 'liberadas',
-      situacao: 'LIBERADA',
-      title: 'Liberadas',
-      value: kpis?.liberadas ?? 0,
-      tone: 'text-green-600',
-      iconTone: 'bg-green-50 text-green-600',
-      barTone: 'bg-green-500',
-      borderActive: 'border-green-400',
-      hoverBorder: 'hover:border-green-300',
-      bgActive: 'bg-green-50/60',
-      icon: CheckCircle2,
-    },
-    {
-      key: 'tokens',
-      situacao: 'TOKENS',
-      title: 'Com Token',
-      value: kpis?.tokens ?? 0,
-      tone: 'text-indigo-600',
-      iconTone: 'bg-indigo-50 text-indigo-600',
-      barTone: 'bg-indigo-500',
-      borderActive: 'border-indigo-400',
-      hoverBorder: 'hover:border-indigo-300',
-      bgActive: 'bg-indigo-50/60',
-      icon: Ticket,
-    },
-    {
-      key: 'glosas',
-      situacao: 'GLOSA',
-      title: 'Glosas',
-      value: kpis?.glosas ?? 0,
-      tone: 'text-violet-600',
-      iconTone: 'bg-violet-50 text-violet-600',
-      barTone: 'bg-violet-500',
-      borderActive: 'border-violet-400',
-      hoverBorder: 'hover:border-violet-300',
-      bgActive: 'bg-violet-50/60',
-      icon: XCircle,
-    },
-    {
-      key: 'canceladas',
-      situacao: 'CANCELADA',
-      title: 'Canceladas',
-      value: kpis?.canceladas ?? 0,
-      tone: 'text-slate-500',
-      iconTone: 'bg-slate-100 text-slate-500',
-      barTone: 'bg-slate-400',
-      borderActive: 'border-slate-400',
-      hoverBorder: 'hover:border-slate-300',
-      bgActive: 'bg-slate-50/80',
-      icon: Ban,
-    },
-    {
-      key: 'faltas',
-      situacao: 'FALTA',
-      title: 'Faltas Paciente',
-      value: kpis?.faltas ?? 0,
-      tone: 'text-yellow-600',
-      iconTone: 'bg-yellow-50 text-yellow-600',
-      barTone: 'bg-yellow-400',
-      borderActive: 'border-yellow-400',
-      hoverBorder: 'hover:border-yellow-300',
-      bgActive: 'bg-yellow-50/60',
-      icon: UserX,
-    },
-    {
-      key: 'faltas-terapeuta',
-      situacao: 'FALTA_TERAPEUTA',
-      title: 'Faltas Terapeuta',
-      value: kpis?.faltas_terapeuta ?? 0,
-      tone: 'text-red-600',
-      iconTone: 'bg-red-50 text-red-600',
-      barTone: 'bg-red-500',
-      borderActive: 'border-red-400',
-      hoverBorder: 'hover:border-red-300',
-      bgActive: 'bg-red-50/60',
-      icon: UserX,
-    },
-  ]
+  const cards: KpiConfig[] = ORDEM_KPIS.map((metrica) => {
+    const visual = KPI_VISUAL[metrica]
+    // A dica de Glosas é a única dinâmica: as já cobertas por vínculo aparecem
+    // como dica, e não somadas — "houve glosa" continua na tela sem inflar o
+    // número que a operação usa para dimensionar trabalho. Some quando é zero,
+    // porque dica que diz "0" é ruído.
+    if (metrica === 'glosas' && kpis?.glosas_resolvidas) {
+      const n = kpis.glosas_resolvidas
+      return { ...visual, value: kpis.glosas, hint: `+${n} resolvida${n > 1 ? 's' : ''}` }
+    }
+    return { ...visual, value: kpis?.[metrica] ?? 0 }
+  })
 
   return (
     <section className="flex flex-col gap-2 xl:flex-row pt-0.5">
@@ -200,7 +80,7 @@ function TotalCard({
         xl:w-40 xl:shrink-0
         flex flex-col items-center justify-between
         rounded-2xl p-2.5 pt-3
-        bg-linear-to-br from-indigo-600 to-violet-700
+        bg-linear-to-br from-[oklch(0.52_0.092_217)] to-[oklch(0.34_0.070_217)]
         shadow-md min-h-24
         cursor-pointer text-left
         transition hover:-translate-y-px hover:shadow-lg
@@ -213,7 +93,7 @@ function TotalCard({
           <Calendar size={17} className="text-white" />
         </div>
 
-        <span className="text-[10px] font-bold uppercase tracking-widest text-indigo-200 leading-tight text-center">
+        <span className="text-[10px] font-bold uppercase tracking-widest text-[oklch(0.86_0.040_217)] leading-tight text-center">
           Total de Sessões
         </span>
 
@@ -222,7 +102,7 @@ function TotalCard({
             <span className="text-4xl font-bold text-white leading-none">
               {loading ? '—' : totalFiltrados}
             </span>
-            <span className="text-[11px] text-indigo-300 mt-0.5">
+            <span className="text-[11px] text-[oklch(0.82_0.045_217)] mt-0.5">
               {loading ? '' : `/ ${total} no dia`}
             </span>
           </div>
@@ -231,7 +111,7 @@ function TotalCard({
             <span className="text-4xl font-bold text-white leading-none mt-1">
               {loading ? '—' : total}
             </span>
-            <span className="text-[11px] text-indigo-300 mt-0.5">100% do total</span>
+            <span className="text-[11px] text-[oklch(0.82_0.045_217)] mt-0.5">100% do total</span>
           </>
         )}
       </div>

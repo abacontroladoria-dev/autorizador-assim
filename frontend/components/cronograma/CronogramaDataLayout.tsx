@@ -19,7 +19,7 @@ import { buscarGradeComoCSVRows } from "@/lib/cronograma/gradeService"
 import { parseDisponibilidadeCSV } from "@/lib/cronograma/disponibilidade"
 import { getRefWeek, getJanelaOcupacaoPaciente } from "@/lib/cronograma/helpers"
 import { CronogramaUploadBadges } from "@/components/cronograma/CronogramaUploadBadges"
-import type { LaudoRow } from "@/types/cronograma"
+import type { LaudoRow, MetaImportacaoLaudos } from "@/types/cronograma"
 
 // Excel de laudos costuma vir com a coluna "Paciente" (ou "ID Favorecido")
 // mesclada verticalmente cobrindo todas as linhas de especialidade do mesmo
@@ -70,12 +70,17 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
   const [uploadError, setUploadError] = useState<string | null>(null)
   const [dispUploading, setDispUploading] = useState(false)
   const [dispError, setDispError] = useState<string | null>(null)
+  // De qual importação do robô vieram os laudos que estão na tela. `null` = não
+  // vieram dele (nada carregado, ou arquivo enviado à mão) — e aí o badge não
+  // tem frescor de carga automática para mostrar. Não é persistido, igual ao
+  // lRows: some no refresh e é recarregado junto.
+  const [laudosMeta, setLaudosMeta] = useState<MetaImportacaoLaudos | null>(null)
   const pathname = usePathname()
   const searchParams = useSearchParams()
   // Indicadores gerencia rightContent por conta própria (não precisa do badge de Laudos no header).
-  // Ocupação (Diferença: Laudo e Oferta) PRECISA do badge — é a única forma de subir o Excel de
-  // laudos manualmente, já que a busca automática via API está desativada (ver
-  // REATIVAR_API_LAUDOS.md) e a aba de gaps não funciona sem laudos carregados.
+  // Ocupação (Diferença: Laudo e Oferta) PRECISA do badge — ele mostra o estado da carga
+  // automática do relatório do Órbita e é a única forma de subir o Excel manualmente quando
+  // ela falha; a aba de gaps não funciona sem laudos carregados.
   const isIndicadoresPage = !!pathname?.includes('/indicadores')
   // Ocupação de Salas cruza dados estruturais (cronograma_salas) com a agenda — não depende
   // dos laudos do TI, então o badge "Laudos" não é relevante aqui, mas "Grade" continua sendo.
@@ -87,6 +92,13 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
   // page.tsx da rota), não o cRows deste layout — o badge "Período" precisa mostrar essa
   // janela aqui, senão mostra a janela errada (getRefWeek()) para a única aba que não a usa.
   const isOcupacaoPacientePage = !!pathname?.includes('/ocupacao-paciente')
+  // "Oportunidades Recusadas" (ex-"Acompanhamento") não consulta grade nem
+  // laudo — é auditoria de recusas (rec/pacBundles/statusMap + tabela de
+  // auditoria própria). Os badges de Grade/Laudos/Período não fazem sentido
+  // aqui; aceita o valor antigo do tab também, pra links salvos antes da
+  // renomeação (2026-08-25) continuarem escondendo o badge certo.
+  const isOportunidadesRecusadasTab = !!pathname?.includes('/ocupacao') && !isOcupacaoPacientePage && !isOcupacaoSalasPage &&
+    (searchParams.get('tab') === 'oportunidades-recusadas' || searchParams.get('tab') === 'acompanhamento')
   const gradeFetchedRef = useRef(false)
   const laudosFetchedRef = useRef(false)
 
@@ -111,32 +123,42 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
       .finally(() => setGradeLoading(false))
   }, [cRows.length, setCRows])
 
-  // DESATIVADO TEMPORARIAMENTE (2026-07-17): a API de laudos do TI
-  // (cronogramauniversoaba.com.br/api_laudos) está com problema. Enquanto isso,
-  // pulamos direto para o estado de erro para que o botão de upload manual do
-  // Excel de laudos apareça (ver CronogramaUploadBadges). Nenhuma chamada de rede
-  // é feita — o fetch para /api/laudos foi só comentado abaixo, não removido.
-  // Para reativar a busca automática via API, ver prompt salvo em:
-  // frontend/app/(dashboard)/cronograma/REATIVAR_API_LAUDOS.md
+  // Carrega os laudos automaticamente do relatório do Órbita que o robô hospedado
+  // no Coolify grava todo dia no Supabase (orbita_laudos_importacoes +
+  // orbita_laudos_relatorio, lidos por services/laudos/relatorio.ts através de
+  // /api/laudos). Religado em 2026-08-27: entre 17/07 e 27/08 este efeito só
+  // fazia setUploadError(...) para forçar o botão de upload manual, porque a
+  // origem anterior — a API de laudos do TI — saiu do ar.
+  //
+  // Sem `inicio`/`fim`: o relatório do Órbita é um snapshot completo e não tem
+  // recorte por período, então o getRefWeek() saiu deste efeito (a rota ainda
+  // aceita os parâmetros, e os ignora).
+  //
+  // O upload manual continua vivo como fallback, e é o
+  // `laudosFetchedRef.current = false` no catch que o mantém: sem ele o efeito
+  // se dá por executado e o badge fica preso no erro sem permitir nova
+  // tentativa.
   useEffect(() => {
     if (laudosFetchedRef.current || lRows.length > 0) return
     laudosFetchedRef.current = true
-    setUploadError("Carregamento automático de laudos desativado. Selecione o arquivo manualmente.")
-    // const rw = getRefWeek()
-    // setUploading(true)
-    // setUploadError(null)
-    // fetch(`/api/laudos?inicio=${rw.inicio}&fim=${rw.fim}`)
-    //   .then(async res => {
-    //     const body = await res.json().catch(() => null)
-    //     if (!res.ok || !body?.ok) throw new Error("Não foi possível carregar os laudos automaticamente.")
-    //     if (body.rows.length === 0) throw new Error("Nenhum laudo encontrado para o período.")
-    //     setLRows(body.rows as LaudoRow[])
-    //   })
-    //   .catch(e => {
-    //     laudosFetchedRef.current = false // permite nova tentativa (ex.: via upload manual)
-    //     setUploadError(e instanceof Error ? e.message : "Erro ao carregar os laudos.")
-    //   })
-    //   .finally(() => setUploading(false))
+    setUploading(true)
+    setUploadError(null)
+    // Barra final porque `trailingSlash: true` no next.config — sem ela a
+    // requisição paga um 308 antes de chegar na rota.
+    fetch("/api/laudos/")
+      .then(async res => {
+        const body = await res.json().catch(() => null)
+        if (!res.ok || !body?.ok) throw new Error("Não foi possível carregar os laudos automaticamente.")
+        if (!body.rows?.length) throw new Error("Nenhum laudo encontrado no relatório do Órbita.")
+        setLRows(body.rows as LaudoRow[])
+        setLaudosMeta((body.meta as MetaImportacaoLaudos | undefined) ?? null)
+      })
+      .catch(e => {
+        laudosFetchedRef.current = false // permite nova tentativa (ex.: via upload manual)
+        setLaudosMeta(null)
+        setUploadError(e instanceof Error ? e.message : "Erro ao carregar os laudos.")
+      })
+      .finally(() => setUploading(false))
   }, [lRows.length, setLRows])
 
   const handleLaudosFile = useCallback(async (file: File) => {
@@ -147,6 +169,10 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
       const lResult = await parseXlsx<LaudoRow>(file)
       if (lResult.length === 0) throw new Error("Nenhuma linha encontrada no arquivo.")
       setLRows(lResult)
+      // Arquivo escolhido à mão sobrepõe o relatório do robô: a meta do robô
+      // deixa de descrever o que está na tela, e mantê-la faria o badge datar o
+      // dado do usuário com a hora da carga automática.
+      setLaudosMeta(null)
       // Garante a grade caso o carregamento automático tenha falhado ou ainda não ocorrido.
       if (cRows.length === 0) {
         const gradeResult = await buscarGradeComoCSVRows(rw.inicio, rw.fim)
@@ -164,6 +190,7 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
   const handleClear = useCallback(() => {
     setCRows([])
     setLRows([])
+    setLaudosMeta(null)
     setUploadError(null)
     laudosFetchedRef.current = false
   }, [setCRows, setLRows])
@@ -189,7 +216,7 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
   }, [setDispRows])
 
   useEffect(() => {
-    if (isIndicadoresPage || isReposicaoPage) return // página gerencia o próprio rightContent — não interferir
+    if (isIndicadoresPage || isReposicaoPage || isOportunidadesRecusadasTab) return // página gerencia o próprio rightContent — não interferir
     setRightContent(
       <CronogramaUploadBadges
         cRows={cRows}
@@ -207,10 +234,11 @@ function CronogramaLayoutInner({ children }: { children: React.ReactNode }) {
         onSelectDisp={handleDispFile}
         onClearDisp={handleClearDisp}
         periodLabel={isOcupacaoPacientePage ? getJanelaOcupacaoPaciente().label : undefined}
+        laudosMeta={laudosMeta}
       />
     )
     return () => setRightContent(null)
-  }, [cRows, lRows, dispRows, uploading, gradeLoading, uploadError, dispUploading, dispError, handleLaudosFile, handleClear, handleDispFile, handleClearDisp, setRightContent, isIndicadoresPage, isOcupacaoSalasPage, isReposicaoPage, isNovoCron, isOcupacaoPacientePage])
+  }, [cRows, lRows, dispRows, uploading, gradeLoading, uploadError, dispUploading, dispError, laudosMeta, handleLaudosFile, handleClear, handleDispFile, handleClearDisp, setRightContent, isIndicadoresPage, isOcupacaoSalasPage, isReposicaoPage, isNovoCron, isOcupacaoPacientePage, isOportunidadesRecusadasTab])
 
   return <div>{children}</div>
 }

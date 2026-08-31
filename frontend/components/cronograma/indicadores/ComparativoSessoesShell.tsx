@@ -1884,19 +1884,18 @@ function AgendaGrid({ titulo, sessoes, horarios, dias, agruparRepetidos = false,
                   // linha por terapia, cada uma com sua própria bolinha de cor.
                   const nomes = celula?.flatMap(s => (s.terapia || "—").split(" + "))
                   const tooltip = celula?.map(s => `${s.terapia || "—"} (Id Terapia: ${s.idTerapia ?? "—"})`).join(" + ")
-                  // Faixa vertical na borda esquerda da célula, na cor da
+                  // Contorno arredondado ao longo de toda a célula, na cor da
                   // terapia — reforça a identidade visual além do ícone,
-                  // ocupando a altura inteira do slot de 40min. `border-left`
-                  // num <div> interno, de propósito — NÃO box-shadow direto na
-                  // <td>: box-shadow em table-cell tem histórico de renderização
-                  // inconsistente entre navegadores (linha vazando pra fora da
-                  // célula). border-left num elemento normal não tem essa
-                  // ambiguidade.
+                  // ocupando a altura inteira do slot de 40min. Borda (não
+                  // box-shadow) num <div> interno, de propósito — box-shadow em
+                  // table-cell tem histórico de renderização inconsistente
+                  // entre navegadores (linha vazando pra fora da célula).
+                  const cor = nomes ? corDotComContraste(nomes[0]) : undefined
                   return (
-                    <td key={d} className="p-0 text-left text-foreground" title={tooltip}>
+                    <td key={d} className="p-0.5 text-left text-foreground" title={tooltip}>
                       <div
-                        className="relative h-full px-3 py-2"
-                        style={nomes ? { borderLeft: `3px solid ${corDotComContraste(nomes[0])}` } : undefined}
+                        className="relative h-full rounded-lg px-2.5 py-2"
+                        style={cor ? { border: `1.5px solid ${cor}`, backgroundColor: hexParaRgba(cor, 0.08) } : undefined}
                       >
                         {celula && (
                           <div className="absolute right-1 top-1">

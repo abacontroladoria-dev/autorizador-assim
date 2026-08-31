@@ -2,18 +2,37 @@
 
 'use client'
 
-import { useEffect, useState, useMemo } from 'react'
+import { useEffect, useState, useMemo, useRef } from 'react'
 
 import { getSupabaseClient } from '@/lib/supabase/client'
+
+import { descreverErro, ehMigrationPendente } from '@/lib/supabase/erro'
 
 import { criarAutorizacao, resolverNomeUsuario } from '@/services/autorizacoes.service'
 
 import toast from 'react-hot-toast'
 
-import { Lock, CheckCircle, Megaphone, XCircle } from 'lucide-react'
+import { Lock, CheckCircle, Loader2, Megaphone, XCircle } from 'lucide-react'
 
 import { getMachineId } from '@/lib/machine'
 
+import {
+  INTERVALO_ASSIM_MIN,
+  horaDoTimestamp,
+  minutosDesde,
+  podeSolicitar,
+} from '@/lib/central/intervaloAssim'
+
+
+// Janela em que um segundo "Chamar" para a MESMA sessão é recusado.
+//
+// O número sai dos dados: em 30 dias de `chamada_paciente`, toda rechamada
+// deliberada (o responsável não apareceu, a recepção insistiu) esteve acima de
+// 2 min, enquanto as rajadas de cards irmãos ficaram abaixo de 1s. 90s separa
+// os dois casos com folga dos dois lados — e errar para o lado curto é o certo:
+// a recepção espera alguns segundos e chama de novo, contra um pai que nunca
+// descobre que foi chamado.
+const JANELA_RECHAMADA_MS = 90_000
 
 // =========================
 // TERAPIAS OCULTAS
@@ -208,27 +227,163 @@ const unidades = [
   const [MACHINE_ID, setMachineId] = useState<string | null>(null)
   
   const [workerOnline, setWorkerOnline] = useState(false)
-  
+
+  // Confirmação em dois toques para os avisos de ordem/adiantamento: o primeiro
+  // clique arma o card e explica, o segundo (em até 10s) solicita mesmo assim.
+  // Bloquear de vez travaria a recepção nos casos legítimos; não avisar foi o que
+  // deixou a colisão de 21/08 passar calada.
+  const [avisoArmado, setAvisoArmado] =
+    useState<{ chave: string; ate: number } | null>(null)
+
+  // Nome de quem está na estação, resolvido uma vez. Serve só para o selo do card
+  // aparecer com autor no mesmo instante do clique — quem grava de fato é
+  // criarAutorizacao(), que chama resolverNomeUsuario() por conta própria.
+  const [nomeUsuario, setNomeUsuario] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelado = false
+    resolverNomeUsuario(supabase)
+      .then((nome) => { if (!cancelado) setNomeUsuario(nome) })
+      .catch(() => { /* sem nome o selo só não mostra autor */ })
+    return () => { cancelado = true }
+  }, [])
+
+  // Chamar o responsável é um ato sobre a PESSOA numa sessão, então a chave é
+  // (paciente, data, horário) e não `buildCardKey` — que inclui a terapia e
+  // deixaria a trava passar por cima do mesmo pai duas vezes.
+  //
+  // Por que a trava existe: em 31/08 o Davi Lucas acumulou 15 chamadas num dia,
+  // 6 delas em 900 ms. A investigação descartou bug — o clique gera UM insert
+  // (verificado na aba Network), a RPC devolve um card por sessão (339 para 339)
+  // e a página não tem realtime remontando nada. Eram cliques reais, repetidos.
+  //
+  // O que fazia a recepção clicar tanto: a TV ficou MUDA até 31/08 (não havia
+  // servidor de áudio no mini PC). Quem apertava não tinha retorno nenhum — a
+  // tela está em outra sala —, então clicava de novo. Nos dias anteriores, com o
+  // mesmo silêncio, os intervalos eram de 11–18s; sem nada acontecendo, foram
+  // encurtando.
+  //
+  // O som resolvido remove a causa, e esta trava fecha a porta: o botão passa a
+  // "Chamado" e informa, na própria tela onde se clicou, que a chamada saiu.
+  const chaveChamada = (p: any) =>
+    [String(p.paciente_id), String(p.data_atendimento), String(p.horario)].join('_')
+
+  // Instante da última chamada por sessão. Não é só "em voo": segue valendo
+  // depois que o insert responde, porque o clique seguinte na fileira vem
+  // centenas de milissegundos depois — o `finally` já teria liberado.
+  const chamadasRecentes = useRef<Map<string, number>>(new Map())
+
+  // Cards cujo "Chamar" está em voo — só para o feedback visual do botão.
+  const [chamando, setChamando] = useState<Set<string>>(new Set())
+
+  // Relógio de 1s que existe só para o botão sair de "Chamado" sozinho quando a
+  // janela expira. Sem ele o rótulo dependeria de um re-render por outro motivo
+  // — e o botão poderia ficar travado por minutos numa tela parada.
+  //
+  // Um `setState` a cada segundo numa página deste tamanho não é de graça, então
+  // o relógio só existe ENQUANTO há chamada dentro da janela: `chamandoAlgo`
+  // liga o efeito, e o próprio efeito se desliga quando o Map esvazia.
+  const [tique, setTique] = useState(() => Date.now())
+  const [chamandoAlgo, setChamandoAlgo] = useState(false)
+
+  useEffect(() => {
+    if (!chamandoAlgo) return
+
+    const id = setInterval(() => {
+      const agora = Date.now()
+
+      // Some com o que já expirou: mantém o Map pequeno numa jornada inteira e
+      // é o que permite ao efeito saber que não há mais nada a vigiar.
+      for (const [k, t] of chamadasRecentes.current) {
+        if (agora - t >= JANELA_RECHAMADA_MS) chamadasRecentes.current.delete(k)
+      }
+
+      setTique(agora)
+
+      // Nada mais dentro da janela: desliga o relógio em vez de ficar
+      // re-renderizando a página de segundo em segundo pelo resto do plantão.
+      if (chamadasRecentes.current.size === 0) setChamandoAlgo(false)
+    }, 1000)
+
+    return () => clearInterval(id)
+  }, [chamandoAlgo])
+
   const chamarResponsavel = async (paciente: any) => {
+    const chave = chaveChamada(paciente)
+    const agora = Date.now()
+    const ultima = chamadasRecentes.current.get(chave)
+
+    // Rechamar é legítimo — o responsável pode não ter aparecido —, então a
+    // janela é curta de propósito: ela separa a insistência de quem não viu
+    // retorno da rechamada consciente, minutos depois. Nos 30 dias analisados,
+    // toda repetição acima de 2 min foi deliberada; as rajadas ficaram abaixo
+    // de 1s. 90s cai no meio com folga dos dois lados, e errar para o lado curto
+    // é o certo: pior que uma trava frouxa é um pai que nunca é chamado.
+    if (ultima !== undefined && agora - ultima < JANELA_RECHAMADA_MS) {
+      toast(`${paciente.paciente_nome} já foi chamado agora`, { icon: '📣' })
+      return
+    }
+
+    // Marca ANTES do await: dois cliques no mesmo tick precisam ver a marca já
+    // gravada, e `useRef` é síncrono (ao contrário de setState).
+    chamadasRecentes.current.set(chave, agora)
+    setChamandoAlgo(true)
+
+    const chaveCard = buildCardKey(paciente)
+    setChamando((atual) => new Set(atual).add(chaveCard))
+
     try {
+      // A tupla da sessão é o que permite a TV tirar o nome da tela sozinha
+      // quando a autorização encerra. Não dá para gravar o id da fila aqui: no
+      // instante do "Chamar" ela normalmente ainda não existe — o responsável
+      // está sendo chamado justamente para que a autorização seja feita.
+      //
+      // paciente_id vai como texto porque é assim que fila_autorizacoes o
+      // guarda; casar sem cast é o que mantém `unique_fila_agendamento` em uso.
       const { error } = await supabase
         .from('chamada_paciente')
         .insert([
           {
             nome: paciente.paciente_nome,
             sala:  'Recepção 1',
-			agenda_id: null
+            paciente_id: paciente.paciente_id != null
+              ? String(paciente.paciente_id)
+              : null,
+            data_atendimento: paciente.data_atendimento ?? null,
+            horario: paciente.horario ?? null,
           }
         ])
   
       if (error) {
-        console.error(error)
-        toast.error('Erro ao chamar paciente')
+        // `console.error(error)` sozinho imprimia `{}` — PostgrestError não
+        // sobrevive à serialização do console. E o toast dizia só "Erro ao
+        // chamar paciente", que não distingue permissão de coluna inexistente.
+        console.error('chamarResponsavel:', descreverErro(error))
+
+        toast.error(
+          ehMigrationPendente(error)
+            ? 'Erro ao chamar: falta migration nesta base (chamada_paciente)'
+            : `Erro ao chamar paciente: ${descreverErro(error)}`
+        )
         return
       }
-  
-      } catch (err) {
+
+      // O sucesso precisa dizer algo. Sem isto o botão não confirma nada, e a
+      // única prova de que funcionou era o nome surgir na TV — que fica noutra
+      // sala. Quando a TV parou de mostrar, o sintoma na recepção foi "aperto e
+      // nada acontece", indistinguível de insert falhando.
+      toast.success(`${paciente.paciente_nome} chamado na TV`)
+    } catch (err) {
       console.error(err)
+      toast.error('Erro ao chamar paciente')
+    } finally {
+      // `finally` e não o fim do `try`: o ramo de erro acima sai por `return`, e
+      // sem isto o botão daquele card ficaria travado até recarregar a página.
+      setChamando((atual) => {
+        const proximo = new Set(atual)
+        proximo.delete(chaveCard)
+        return proximo
+      })
     }
   }
 
@@ -287,32 +442,84 @@ useEffect(() => {
 // PODE SOLICITAR
 // =========================
 
-function podeSolicitar(
-  ultima: string | null,
-  status?: string
-) {
+// A regra dos 30 minutos mora em lib/central/intervaloAssim.ts desde que a página
+// de autorizações avulsas passou a precisar dela: a avulsa é uma identificação do
+// MESMO beneficiário no mesmo portal, então concorre pela mesma janela. Aqui ficam
+// só as regras que são desta tela.
+//
+// `ultima_autorizacao_anterior` (RPC listar_central_autorizacoes) é a última
+// autorização do paciente NO DIA, em qualquer horário. Antes ela só enxergava
+// sessões mais cedo (fa2.horario < b.horario) e ficava cega justamente quando a
+// recepção autorizava fora de ordem.
 
-  if (status === 'erro') {
-    return true
+// Tolerância para pedir antes de a sessão começar. A ASSIM confirma a PRESENÇA do
+// beneficiário: pedir muito antes é autorizar quem ainda não chegou — e queima a
+// janela de 30 min da sessão seguinte.
+const TOLERANCIA_ADIANTAMENTO_MIN = 15
+
+function hhmm(horario: any) {
+  return String(horario || '').slice(0, 5)
+}
+
+function inicioDaSessao(p: any): Date | null {
+
+  if (!p?.data_atendimento || !p?.horario) return null
+
+  const [ano, mes, dia] =
+    String(p.data_atendimento).slice(0, 10).split('-').map(Number)
+
+  const [hora, minuto] =
+    String(p.horario).split(':').map(Number)
+
+  if (!ano || !mes || !dia) return null
+
+  return new Date(ano, mes - 1, dia, hora || 0, minuto || 0, 0, 0)
+}
+
+// Minutos que faltam para a sessão começar, só quando passam da tolerância.
+function minutosDeAdiantamento(p: any) {
+
+  const inicio = inicioDaSessao(p)
+
+  if (!inicio) return 0
+
+  const faltam = (inicio.getTime() - Date.now()) / 60000
+
+  return faltam > TOLERANCIA_ADIANTAMENTO_MIN ? Math.round(faltam) : 0
+}
+
+// Sessão mais cedo do mesmo paciente, no mesmo dia, que ninguém pediu ainda.
+// 'pendente'/'processando' já foram pedidas; 'falta'/'cancelado' não serão.
+function sessaoAnteriorSemPedido(p: any, lista: any[]) {
+
+  return lista.find(i =>
+    String(i.paciente_id) === String(p.paciente_id) &&
+    i.data_atendimento === p.data_atendimento &&
+    i.tipo_fluxo === 'autorizacao' &&
+    String(i.horario) < String(p.horario) &&
+    (i.status_final === 'sem_acao' || i.status_final === 'erro')
+  ) || null
+}
+
+// Avisos que NÃO são a regra da ASSIM: valem uma confirmação, não um bloqueio.
+// Fora de ordem vem antes de adiantamento porque é o motivo mais específico.
+function motivoDeAviso(p: any, lista: any[]) {
+
+  const anterior = sessaoAnteriorSemPedido(p, lista)
+
+  if (anterior) {
+    return `A sessão das ${hhmm(anterior.horario)} deste paciente ainda não foi ` +
+      `solicitada. Autorizar fora de ordem queima a janela de 30 min dela.`
   }
 
-  if (!ultima) {
-    return true
+  const faltam = minutosDeAdiantamento(p)
+
+  if (faltam) {
+    return `Essa sessão só começa às ${hhmm(p.horario)} — faltam ${faltam} min. ` +
+      `A ASSIM confirma a presença do beneficiário na hora do pedido.`
   }
 
-  const agora = new Date()
-
-  const ultimaData =
-    new Date(ultima)
-
-  const diffMs =
-    agora.getTime() -
-    ultimaData.getTime()
-
-  const diffMin =
-    diffMs / 1000 / 60
-
-  return diffMin >= 30
+  return null
 }
 
   // =========================
@@ -374,7 +581,6 @@ async function handleSolicitarLista(
 
   try {
 
-    const statusAtual = p.status_final
     // evita clique duplo
     if (
       p.status_final === 'processando'
@@ -382,22 +588,10 @@ async function handleSolicitarLista(
       return
     }
 
-    // regra 30 min
-    if (
-      !podeSolicitar(
-        p.ultima_autorizacao_anterior,
-        statusAtual
-      )
-    ) {
-
-      toast.error(
-        'Aguarde 30 minutos desde a última autorização'
-      )
-
-      return
-    }
-
-    // busca existente
+    // A linha que já existe para esta sessão é lida ANTES dos guardas: é ela que
+    // diz se a tentativa anterior quebrou no meio, e o aviso precisa dizer isso
+    // com todas as letras. "Solicitação cancelada" não é "paciente autorizado" —
+    // uma não emitiu guia nenhuma, a outra emitiu.
     const { data: existente } =
       await supabase
         .from('fila_autorizacoes')
@@ -412,6 +606,98 @@ async function handleSolicitarLista(
 		.order('created_at', { ascending: false })
 		.limit(1)
 		.maybeSingle()
+
+    // error_message é escrito pelo robô (robo_concluir_tarefa) com o texto que o
+    // RPA levantou, p.ex. "A janela da ASSIM foi fechada durante a identificação
+    // do beneficiário."
+    const motivoErroAnterior =
+      p.status_final === 'erro'
+        ? String(existente?.error_message || '').trim().replace(/\s+/g, ' ')
+        : ''
+
+    // -- Regra dos 30 min da ASSIM -----------------------------------------
+    // Bloqueio duro só para PEDIDO NOVO. Linha em 'erro' é retomada de uma
+    // tentativa interrompida — a atendente abre, fecha a janela e volta dois
+    // minutos depois — e isso NÃO PODE TRAVAR. Ali o intervalo vira aviso.
+    //
+    // Vale notar que a trava não olha o status da própria linha: a subquery de
+    // ultima_autorizacao_anterior exclui o próprio horário, então uma tentativa
+    // interrompida nunca bloqueia a si mesma. Quem bloquearia é OUTRA sessão do
+    // paciente autorizada há pouco — e mesmo essa, no reprocesso, só avisa.
+    const emErro = p.status_final === 'erro'
+
+    let avisoIntervalo: string | null = null
+
+    if (!podeSolicitar(p.ultima_autorizacao_anterior)) {
+
+      const decorridos = minutosDesde(p.ultima_autorizacao_anterior) ?? 0
+      const faltam = Math.max(1, Math.ceil(INTERVALO_ASSIM_MIN - decorridos))
+
+      // "OUTRA sessão": ultima_autorizacao_anterior exclui o próprio horário por
+      // construção, e dizer só "paciente autorizado" faz a atendente achar que
+      // ESTA sessão já saiu.
+      const recado =
+        `OUTRA sessão deste paciente foi autorizada às ` +
+        `${horaDoTimestamp(p.ultima_autorizacao_anterior)} — faltam ${faltam} min ` +
+        `para os ${INTERVALO_ASSIM_MIN} min que a ASSIM exige entre autorizações ` +
+        `do mesmo beneficiário.`
+
+      if (!emErro) {
+
+        toast.error(recado)
+
+        return
+      }
+
+      avisoIntervalo = recado
+    }
+
+    // -- Avisos: confirmação em dois toques --------------------------------
+    const chaveCard = buildCardKey(p)
+
+    const armado =
+      !!avisoArmado &&
+      avisoArmado.chave === chaveCard &&
+      Date.now() < avisoArmado.ate
+
+    if (!armado) {
+
+      // O intervalo tem precedência: é o que a ASSIM vai reclamar primeiro.
+      const aviso = avisoIntervalo ?? motivoDeAviso(p, listaDia)
+
+      if (aviso) {
+
+        setAvisoArmado({
+          chave: chaveCard,
+          ate: Date.now() + 10000
+        })
+
+        // Abre pelo que aconteceu com a tentativa anterior, e só depois pelo
+        // motivo do aviso. Sem isto o texto começa falando de autorização e a
+        // atendente lê "autorizado" onde houve cancelamento.
+        const preambulo = emErro
+          ? `A solicitação anterior das ${hhmm(p.horario)} foi CANCELADA` +
+            (motivoErroAnterior ? `: ${motivoErroAnterior}` : '.') +
+            `\nNenhuma guia foi emitida para esta sessão.\n\n`
+          : ''
+
+        toast(
+          `${preambulo}${aviso}\n\nClique de novo para solicitar mesmo assim.`,
+          {
+            icon: '⚠️',
+            duration: 10000,
+            // O \n só vira quebra com pre-line; sem isto o aviso e a saída
+            // colam numa linha só e o "clique de novo" some no meio do texto.
+            style: { whiteSpace: 'pre-line', maxWidth: '420px' }
+          }
+        )
+
+        return
+      }
+    }
+
+    setAvisoArmado(null)
+
 		
     // reaproveita
     if (existente) {
@@ -439,7 +725,11 @@ async function handleSolicitarLista(
 			buildCardKey(item) === buildCardKey(p)
 			  ? {
 				  ...item,
-				  status_final: 'pendente'
+				  status_final: 'pendente',
+				  // Reprocessar não passa por criarAutorizacao, então o criado_por
+				  // da linha continua o de quem solicitou originalmente. Mantém o
+				  // que veio do banco e só preenche se estava vazio.
+				  criado_por: item.criado_por ?? nomeUsuario
 				}
 			  : item
 		  )
@@ -563,7 +853,10 @@ async function handleSolicitarLista(
 		buildCardKey(item) === buildCardKey(p)
 		  ? {
 			  ...item,
-			  status_final: 'pendente'
+			  status_final: 'pendente',
+			  // Mesmo nome que criarAutorizacao acabou de gravar, para o selo já
+			  // sair com autor sem esperar o realtime ou um F5.
+			  criado_por: nomeUsuario
 			}
 		  : item
 	  )
@@ -1099,7 +1392,15 @@ useEffect(() => {
               }
 
               // REMOVE DA TELA
-              if (novo.status === 'concluido' || novo.status === 'concluido_sem_guia') {
+              // 'glosa' entra aqui porque também é desfecho: a ASSIM respondeu,
+              // recusando. A guia, o horário e o motivo já foram gravados pelo
+              // robô a partir do recibo — não sobra ação para a recepção nesta
+              // tela. Refazer, depois de corrigir o cadastro, é pela /autorizacoes.
+              if (
+                novo.status === 'concluido' ||
+                novo.status === 'concluido_sem_guia' ||
+                novo.status === 'glosa'
+              ) {
                 return null
               }
 
@@ -1107,7 +1408,11 @@ useEffect(() => {
               return {
                 ...item,
                 status_final: novo.status,
-                cancelado_por_nome: novo.cancelado_por_nome ?? item.cancelado_por_nome
+                cancelado_por_nome: novo.cancelado_por_nome ?? item.cancelado_por_nome,
+                // Sem isto, a passagem de 'pendente' para 'processando' feita pelo
+                // robô apagaria o nome de quem solicitou: o payload do realtime
+                // substitui o item inteiro e o card voltaria a dizer só "Processando".
+                criado_por: novo.criado_por ?? item.criado_por
               }
             })
 
@@ -1482,16 +1787,27 @@ useEffect(() => {
       {/* STATUS */}
       {(p.status_final === 'processando') &&
 	  (
-        <span className="flex items-center gap-1 text-xs font-semibold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-md">
-          <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse"></span>
-          Processando
+        <span className="flex items-center gap-1 text-xs font-semibold text-blue-800 bg-blue-100 px-2 py-0.5 rounded-md max-w-[260px]">
+          <span className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-pulse shrink-0"></span>
+          <span className="shrink-0">Processando</span>
+          {/* Quem pediu. Numa recepção com várias estações, "Processando" sozinho
+              vira pergunta em voz alta. truncate porque criado_por cai no e-mail
+              quando o usuário não tem nome preenchido em `usuarios`. */}
+          {p.criado_por && (
+            <span className="font-normal text-blue-700 truncate">· {p.criado_por}</span>
+          )}
         </span>
       )}
 
 		{p.status_final === 'pendente' && (
-		  <span className="flex items-center gap-1 text-xs font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-md">
-			<span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse"></span>
-			Na fila
+		  <span className="flex items-center gap-1 text-xs font-semibold text-amber-800 bg-amber-100 px-2 py-0.5 rounded-md max-w-[260px]">
+			<span className="w-1.5 h-1.5 bg-amber-500 rounded-full animate-pulse shrink-0"></span>
+			<span className="shrink-0">Na fila</span>
+			{/* Mesmo motivo do selo acima: logo depois do clique o card fica aqui,
+			    e é justamente quando a recepção precisa saber de quem é. */}
+			{p.criado_por && (
+			  <span className="font-normal text-amber-700 truncate">· {p.criado_por}</span>
+			)}
 		  </span>
 		)}
 
@@ -1589,13 +1905,45 @@ useEffect(() => {
   </button>
 )}
 
-<button
-  onClick={() => chamarResponsavel(p)}
-  className="w-full flex items-start justify-center gap-1.5 text-[12px] px-2 py-1.5 rounded-lg font-medium bg-emerald-100 text-emerald-700 hover:bg-emerald-200 tracking-tight leading-none"
->
-  <Megaphone size={14} className="relative -top-[1px]" />
-  Chamar
-</button>
+{(() => {
+  const emVoo = chamando.has(buildCardKey(p))
+
+  // O rótulo "Chamado" é o ponto principal desta correção, não a trava: até
+  // 31/08 apertar "Chamar" não devolvia nada visível — a TV fica em outra sala
+  // e estava sem som —, e era essa ausência de retorno que fazia a recepção
+  // clicar de novo. Dizer na própria tela que a chamada saiu remove o motivo.
+  //
+  // Ler um ref na render não agenda re-render: o `tique` de 1s abaixo é quem
+  // faz o botão voltar sozinho ao normal quando a janela expira.
+  const ultima = chamadasRecentes.current.get(chaveChamada(p))
+  const chamadoAgora =
+    ultima !== undefined && tique - ultima < JANELA_RECHAMADA_MS
+
+  const inerte = emVoo || chamadoAgora
+
+  return (
+    <button
+      onClick={() => chamarResponsavel(p)}
+      disabled={inerte}
+      aria-busy={emVoo}
+      title={
+        chamadoAgora
+          ? 'Responsável chamado há instantes — aguarde antes de chamar de novo'
+          : undefined
+      }
+      className="w-full flex items-start justify-center gap-1.5 text-[12px] px-2 py-1.5 rounded-lg font-medium bg-emerald-100 text-emerald-700 hover:bg-emerald-200 disabled:opacity-60 disabled:cursor-not-allowed disabled:hover:bg-emerald-100 tracking-tight leading-none"
+    >
+      {emVoo ? (
+        <Loader2 size={14} className="relative -top-[1px] animate-spin" />
+      ) : chamadoAgora ? (
+        <CheckCircle size={14} className="relative -top-[1px]" />
+      ) : (
+        <Megaphone size={14} className="relative -top-[1px]" />
+      )}
+      {emVoo ? 'Chamando…' : chamadoAgora ? 'Chamado' : 'Chamar'}
+    </button>
+  )
+})()}
 
 <button
   onClick={() => {

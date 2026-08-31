@@ -18,7 +18,8 @@ import {
 
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { useToneColor, type Tone } from "@/hooks/useToneColor"
-import { isCancelado, isSim } from "@/lib/remuneracao/formatacao"
+import { isSim } from "@/lib/remuneracao/formatacao"
+import { isCancelado } from "@/lib/remuneracao/rotulosExecucao"
 import { formatDateBR } from "@/lib/remuneracao/datas"
 import { composicaoEvolucao, bucketDaSessao, type BucketSessao } from "@/lib/remuneracao/evolucao"
 import type { ProfTratativas, SessaoTratativa } from "@/lib/remuneracao/tratativas"

@@ -78,7 +78,14 @@ export function GroupHeader({ label, count, open, onToggle }: { label: string; c
         background: "transparent", border: "none", cursor: "pointer", fontFamily: "inherit", textAlign: "left",
       }}
     >
-      <span style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-bold)", color: "var(--muted-foreground)", textTransform: "uppercase", letterSpacing: ".05em", whiteSpace: "nowrap" }}>
+      <span style={{
+        fontSize: "var(--text-xs)", fontWeight: "var(--weight-bold)", color: "var(--muted-foreground)",
+        textTransform: "uppercase", letterSpacing: ".05em",
+        // minWidth:0 é o que permite o ellipsis funcionar dentro de um flex item —
+        // sem ele, nomes de paciente longos (diferente dos rótulos curtos de dia
+        // da semana que este componente agrupava antes) estouram a largura da linha.
+        whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, flexShrink: 1,
+      }}>
         {label}
       </span>
       <span style={{ fontSize: "var(--text-xs)", color: "var(--muted-foreground)", whiteSpace: "nowrap" }}>· {count}</span>
@@ -99,6 +106,53 @@ export function TimeBadge({ hora, color }: { hora: string; color?: string }) {
     }}>
       <div style={{ fontFamily: "monospace", fontWeight: "var(--weight-heavy)", fontSize: "var(--text-sm)", color: color ?? "var(--foreground)" }}>{hora}</div>
     </div>
+  )
+}
+
+// ─── Painel de detalhe expansível (seta ▾ por linha) ───────────────────────
+// Mesmo padrão de CampoDetalhe já usado em ModalRemuneracaoRP.tsx e
+// ModalAnaliseTerapeuta.tsx (rótulo/valor em grid) — esta é a 3ª tela a
+// precisar dele, então passa a viver aqui em vez de copiado de novo.
+
+export function CampoDetalhe({ rotulo, valor }: { rotulo: string; valor: ReactNode }) {
+  return (
+    <div style={{ minWidth: 0 }}>
+      <div style={{ fontSize: "var(--text-xs)", fontWeight: "var(--weight-bold)", textTransform: "uppercase", letterSpacing: ".04em", color: "var(--muted-foreground)" }}>
+        {rotulo}
+      </div>
+      <div style={{ marginTop: "2px", fontSize: "var(--text-xs)", color: "var(--foreground)", wordBreak: "break-word" }}>
+        {valor}
+      </div>
+    </div>
+  )
+}
+
+export function DetalheGrid({ children }: { children: ReactNode }) {
+  return (
+    <div style={{
+      display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(130px, 1fr))", gap: "10px 16px",
+      padding: "12px 18px", background: "var(--muted)", borderTop: "1px solid var(--border)",
+    }}>
+      {children}
+    </div>
+  )
+}
+
+export function ExpandToggle({ open, onToggle, label }: { open: boolean; onToggle: () => void; label?: string }) {
+  return (
+    <button
+      onClick={onToggle}
+      aria-expanded={open}
+      aria-label={label ?? (open ? "Ocultar detalhes" : "Ver detalhes")}
+      style={{
+        flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center",
+        width: "28px", height: "28px", borderRadius: "var(--radius-sm)",
+        border: "1px solid var(--border)", background: "var(--card)", color: "var(--muted-foreground)",
+        cursor: "pointer", fontFamily: "inherit",
+      }}
+    >
+      <ChevronDown size={14} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform 160ms ease" }} />
+    </button>
   )
 }
 

@@ -8,7 +8,9 @@ import {
   FileText,
   ShieldCheck,
   ClipboardList,
+  ClipboardPlus,
   ListChecks,
+  Link2,
   CalendarDays,
   UserRound,
   Building2,
@@ -43,9 +45,12 @@ import {
   History,
   UserSearch,
   Zap,
+  Package,
+  FileClock,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import Link from "next/link"
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { getFunctionHeaders, getFunctionUrl } from "@/lib/supabase/functions"
 import toast from "react-hot-toast"
@@ -58,7 +63,8 @@ import { useTheme } from "@/contexts/ThemeContext"
 import { useImpersonation } from "@/contexts/ImpersonationContext"
 import { ImpersonationSelector } from "@/components/admin/ImpersonationSelector"
 import { ROLE_LABELS } from "@/constants/roleLabels"
-import { getRoleDefaultPermissions, codigosToRotas, hasRouteAccess } from "@/lib/permissions/routes"
+import { codigosToRotas, hasRouteAccess } from "@/lib/permissions/routes"
+import { resolverPermissoes } from "@/lib/permissions/resolver"
 import { getUsuarioPermissoes } from "@/services/permissoes.service"
 
 type Favorito = { label: string; path: string }
@@ -66,15 +72,14 @@ type Favorito = { label: string; path: string }
 const pathIconMap: Record<string, any> = {
   "/": LayoutDashboard,
   "/solicitar": PlusCircle,
+  "/autorizacoes-avulsas": ClipboardPlus,
   "/central-pacientes": Activity,
   "/central-terapeutas": UserRound,
-  "/agenda/pacientes": CalendarDays,
-  "/agenda/terapeutas": CalendarDays,
-  "/agenda/salas": Building2,
-  "/guias-digitais": FileText,
+  "/cadastros/pacientes": UserRound,
+  "/acompanhamento/laudos": FileClock,
   "/auditoria-assim": ClipboardList,
   "/auditoria-assim?tab=auditoria": ClipboardList,
-  "/auditoria-assim?tab=pendencias": ListChecks,
+  "/auditoria-assim?tab=reconciliacao": Link2,
   "/cco": BarChart3,
   "/admin": ShieldCheck,
   "/admin/permissoes": KeyRound,
@@ -84,6 +89,7 @@ const pathIconMap: Record<string, any> = {
   "/relacionamento-prestador/solicitacoes?tab=banco": Database,
   "/relacionamento-prestador/ocupacao-salas": DoorOpen,
   "/cadastros/cadastro-valores": Tag,
+  "/cadastros/convenios": Building2,
   "/cadastros/feriados": Calendar,
   "/cadastros/contratos": FileSignature,
   "/cadastros/taxas-e-parametros": Percent,
@@ -218,23 +224,19 @@ export default function Sidebar() {
         return
       }
 
-      const codigosPorRole = getRoleDefaultPermissions(targetRole)
-      let codigos = new Set(codigosPorRole)
-
+      // resolverPermissoes é a mesma função usada pelo proxy.ts (gate real das
+      // páginas) e pelas rotas de API. Esta era a terceira cópia da regra
+      // "defaults do papel + concessões − revogações, revogação vencendo": se o
+      // Sidebar divergir do proxy, o menu mostra item que a navegação recusa.
+      let overrides: { permissao_codigo: string; permitido: boolean }[] = []
       if (targetId) {
         try {
-          const overrides = await getUsuarioPermissoes(targetId)
-          for (const o of overrides) {
-            if (o.permitido) {
-              codigos.add(o.permissao_codigo)
-            } else {
-              codigos.delete(o.permissao_codigo)
-            }
-          }
+          overrides = await getUsuarioPermissoes(targetId)
         } catch (error) {
           console.error("Erro ao carregar permissões do usuário:", error)
         }
       }
+      const codigos = resolverPermissoes(targetRole, overrides)
 
       const rotas = codigosToRotas(codigos)
 
@@ -282,18 +284,39 @@ export default function Sidebar() {
     checkUser()
   }, [])
 
+  // Os dois badges da fila.
+  //
+  // Só com a aba visível, e a cada 60 s. A Sidebar existe em toda tela, então
+  // este par de contagens é multiplicado por aba aberta — em 24/08 os logs do
+  // PostgREST mostram 7 chamadas de cada uma no MESMO segundo, de abas
+  // esquecidas abertas, enquanto o banco já estava sem conexão livre. Não foi a
+  // causa daquele incidente, mas é tráfego que não serve a ninguém: ninguém lê
+  // um badge de aba que não está na frente.
+  //
+  // Ao voltar o foco a contagem é refeita na hora, senão o badge mostraria por
+  // até um minuto um número de antes de a aba ser escondida.
   useEffect(() => {
+    let vivo = true
+
     async function fetchCounts() {
+      if (document.visibilityState !== "visible") return
       const [{ count: cp }, { count: ce }] = await Promise.all([
         supabase.from("fila_autorizacoes").select("*", { count: "exact", head: true }).eq("status", "processando"),
         supabase.from("fila_autorizacoes").select("*", { count: "exact", head: true }).eq("status", "erro"),
       ])
+      if (!vivo) return
       setCountProcessando(cp ?? 0)
       setCountErros(ce ?? 0)
     }
+
     fetchCounts()
-    const interval = setInterval(fetchCounts, 30000)
-    return () => clearInterval(interval)
+    const interval = setInterval(fetchCounts, 60000)
+    document.addEventListener("visibilitychange", fetchCounts)
+    return () => {
+      vivo = false
+      clearInterval(interval)
+      document.removeEventListener("visibilitychange", fetchCounts)
+    }
   }, [])
 
   useEffect(() => {
@@ -362,7 +385,14 @@ export default function Sidebar() {
       })
       const json = await res.json()
       if (!res.ok) throw new Error(json.error)
-      toast.success(`${json.liberados} processo${json.liberados !== 1 ? "s" : ""} liberado${json.liberados !== 1 ? "s" : ""}`)
+      const plural = json.liberados !== 1 ? "s" : ""
+      // `retidas` são as travadas que a função deliberadamente NÃO devolveu para a
+      // fila: de outro dia, ou já com guia emitida. Sem dizer isso, um resultado
+      // "0 liberados" com 30 travadas na tela parece defeito do botão.
+      toast.success(
+        `${json.liberados} processo${plural} liberado${plural}` +
+        (json.retidas ? ` · ${json.retidas} retido${json.retidas !== 1 ? "s" : ""} (outro dia ou já autorizado)` : "")
+      )
     } catch (err: any) { toast.error(err.message) }
     setLoadingLiberar(false)
   }
@@ -380,8 +410,8 @@ export default function Sidebar() {
     const isFav = favoritos.some(f => f.path === path)
 
     return (
-      <button
-        onClick={() => router.push(path)}
+      <Link
+        href={path}
         className={`group flex w-full items-center gap-2.5 py-2 pr-2 rounded-lg text-sm transition-all duration-150
         ${
           active
@@ -397,7 +427,7 @@ export default function Sidebar() {
         <span className="flex-1 text-left">{label}</span>
         {path !== "/" && (
           <span
-            onClick={e => { e.stopPropagation(); toggleFavorito(label, path) }}
+            onClick={e => { e.preventDefault(); e.stopPropagation(); toggleFavorito(label, path) }}
             className={`p-1 rounded transition-all duration-150 hover:bg-sidebar-accent
               ${isFav
                 ? "opacity-100 text-yellow-500"
@@ -407,7 +437,7 @@ export default function Sidebar() {
             <Star size={12} fill={isFav ? "currentColor" : "none"} />
           </span>
         )}
-      </button>
+      </Link>
     )
   }
 
@@ -419,12 +449,35 @@ export default function Sidebar() {
         className="fixed top-0 left-0 w-64 h-screen flex flex-col z-50 bg-sidebar border-r border-sidebar-border transition-colors duration-300"
       >
 
-        {/* LOGO */}
+        {/* LOGO — lockup do Pulsar.
+
+            Duas imagens trocadas por CSS (`dark:`) em vez de um `src`
+            condicional: o tema só é conhecido depois da hidratação, e trocar a
+            URL ali faz o navegador buscar o outro arquivo e piscar. Com as duas
+            no HTML o swap é imediato e sem requisição extra.
+
+            E não é mais `filter: brightness(0) invert(1)`, que era o jeito de
+            clarear o logo antigo: aplicado neste lockup ele achataria tudo em
+            branco sólido e apagaria o ponto rosa, que é o único acento de cor
+            da marca. A variante clara já existe no repo (a mesma que a /tv usa)
+            e preserva o rosa. */}
         <div className="h-20 flex items-center justify-center px-6 border-b border-sidebar-border">
           <img
-            src="/logo-universo-aba.png"
-            className="h-20 object-contain"
-            style={{ filter: isDark ? 'brightness(0) invert(1)' : 'none' }}
+            src="/pulsar-lockup-1920-transparent.png"
+            alt="Pulsar"
+            className="max-h-full w-full object-contain dark:hidden"
+          />
+          {/* `max-h-[60%]` não é chute: os dois arquivos têm exatamente o mesmo
+              conteúdo (1133x462), mas o de 1920x768 carrega 39,8% de margem
+              transparente embutida e este aqui é recorte justo (0%). Sem
+              compensar, a marca aparecia 66% maior no tema escuro e encostava
+              nas bordas da barra. 60% ≈ os 60,2% que a arte ocupa no arquivo
+              acolchoado, então a marca fica do mesmo tamanho nos dois temas. */}
+          <img
+            src="/pulsar-lockup-tv-light.png"
+            alt=""
+            aria-hidden="true"
+            className="hidden max-h-[60%] w-full object-contain dark:block"
           />
         </div>
 
@@ -456,69 +509,101 @@ export default function Sidebar() {
           <hr className="my-2 border-sidebar-border" />
 
           {/* Pacientes */}
-          {(canAccess("/solicitar") || canAccess("/central-pacientes") || canAccess("/agenda/pacientes")) && (
-            <SidebarGroup title="Pacientes" icon={Users}>
+          {(canAccess("/solicitar") || canAccess("/autorizacoes-avulsas") || canAccess("/central-pacientes") ||
+            canAccess("/acompanhamento/laudos")) && (
+            <SidebarGroup
+              title="Pacientes"
+              icon={Users}
+              defaultOpen={["/solicitar", "/autorizacoes-avulsas", "/central-pacientes", "/acompanhamento/laudos"].some(p => pathname === p)}
+            >
               {canAccess("/solicitar") && (
                 <MenuItem label="Atendimentos" icon={PlusCircle} path="/solicitar" />
               )}
               {canAccess("/central-pacientes") && (
-                <MenuItem label="Gestão" icon={Activity} path="/central-pacientes" />
+                <MenuItem label="Gestão Recepção" icon={Activity} path="/central-pacientes" />
               )}
-              {canAccess("/agenda/pacientes") && (
-                <MenuItem label="Cronograma" icon={CalendarDays} path="/agenda/pacientes" />
+              {canAccess("/autorizacoes-avulsas") && (
+                <MenuItem label="Autorizações Avulsas" icon={ClipboardPlus} path="/autorizacoes-avulsas" />
+              )}
+              {/* Fila de laudos vencidos + registro do aviso ao responsável.
+                  Neste grupo, e não em Autorização (ao lado da Reconciliação) nem
+                  em Cadastros: quem trabalha aqui é a recepção, e o grupo
+                  Pacientes é onde as outras telas dela já estão. Decisão do
+                  usuário em 28/08/2026. */}
+              {canAccess("/acompanhamento/laudos") && (
+                <MenuItem label="Status dos Laudos" icon={FileClock} path="/acompanhamento/laudos" />
               )}
             </SidebarGroup>
           )}
 
           {/* Terapêutico */}
-          {(canAccess("/central-terapeutas") || canAccess("/analise-tratativas") || canAccess("/agenda/terapeutas") || canAccess("/agenda/salas")) && (
-            <SidebarGroup title="Terapêutico" icon={Stethoscope}>
+          {(canAccess("/central-terapeutas") || canAccess("/analise-tratativas")) && (
+            <SidebarGroup
+              title="Terapêutico"
+              icon={Stethoscope}
+              defaultOpen={["/central-terapeutas", "/analise-tratativas"].some(p => pathname === p)}
+            >
               {canAccess("/central-terapeutas") && (
                 <MenuItem label="Gestão" icon={UserRound} path="/central-terapeutas" />
               )}
               {canAccess("/analise-tratativas") && (
                 <MenuItem label="Análise de Evolução" icon={ClipboardCheck} path="/analise-tratativas" />
               )}
-              {canAccess("/agenda/terapeutas") && (
-                <MenuItem label="Agenda Terapêutica" icon={CalendarDays} path="/agenda/terapeutas" />
-              )}
-              {canAccess("/agenda/salas") && (
-                <MenuItem label="Salas" icon={Building2} path="/agenda/salas" />
-              )}
             </SidebarGroup>
           )}
 
-          {/* Operações */}
-          {(canAccess("/auditoria-assim") || canAccess("/guias-digitais") || canAccess("/cco")) && (
-            <SidebarGroup title="Operações" icon={BriefcaseBusiness}>
+          {/* Autorização */}
+          {(canAccess("/auditoria-assim") || canAccess("/cco")) && (
+            <SidebarGroup
+              title="Autorização"
+              icon={BriefcaseBusiness}
+              defaultOpen={pathname === "/cco" || pathname === "/auditoria-assim"}
+            >
               {canAccess("/cco") && (
                 <MenuItem label="Conciliação ASSIM" icon={BarChart3} path="/cco" />
               )}
               {/* Duas visões da mesma rota. canAccess("/auditoria-assim?tab=…")
                   resolve para o bare path '/auditoria-assim' de CODIGO_PARA_ROTAS,
-                  então nenhum código de permissão novo foi necessário. */}
-              {canAccess("/auditoria-assim?tab=pendencias") && (
-                <MenuItem label="Pendências ASSIM" icon={ListChecks} path="/auditoria-assim?tab=pendencias" />
-              )}
+                  então nenhum código de permissão novo foi necessário.
+                  Reconciliação: quem vê a Conferência vê a aba; quem pode VINCULAR
+                  é decidido pelas RPCs (admin/autorizacao/recepcao), não aqui —
+                  diretoria consulta sem escrever. */}
               {canAccess("/auditoria-assim?tab=auditoria") && (
-                <MenuItem label="Auditoria ASSIM" icon={ClipboardList} path="/auditoria-assim?tab=auditoria" />
+                <MenuItem label="Conferência ASSIM" icon={ClipboardList} path="/auditoria-assim?tab=auditoria" />
               )}
-              {canAccess("/guias-digitais") && (
-                <MenuItem label="Guias Digitais" icon={FileText} path="/guias-digitais" />
+              {canAccess("/auditoria-assim?tab=reconciliacao") && (
+                <MenuItem label="Reconciliação ASSIM" icon={Link2} path="/auditoria-assim?tab=reconciliacao" />
               )}
+            </SidebarGroup>
+          )}
+
+          {/* Insumos — controle de compras (porte do AXIUM). Grupo próprio, e não
+              dentro de Faturamento: aquele grupo é faturamento de convênio
+              (ASSIM), este é compra de insumo. Vai crescer com Estoque. */}
+          {canAccess("/insumos") && (
+            <SidebarGroup title="Suprimentos" icon={Package} defaultOpen={pathname === "/insumos"}>
+              <MenuItem label="Solicitações" icon={Package} path="/insumos" />
             </SidebarGroup>
           )}
 
           {/* Cronograma */}
           {(canAccess("/cronograma/saida-profissional") || canAccess("/cronograma/ocupacao-paciente") ||
-            canAccess("/cronograma/ocupacao?tab=acompanhamento") || canAccess("/cronograma/ocupacao?tab=gaps") ||
+            canAccess("/cronograma/ocupacao?tab=oportunidades-recusadas") || canAccess("/cronograma/ocupacao?tab=gaps") ||
             canAccess("/cronograma/ocupacao?tab=inconsistencias") ||
             canAccess("/cronograma/reposicao")) && (
-            <SidebarGroup title="Cronograma" icon={CalendarRange}>
+            <SidebarGroup
+              title="Cronograma"
+              icon={CalendarRange}
+              defaultOpen={[
+                "/cronograma/saida-profissional",
+                "/cronograma/ocupacao-paciente",
+                "/cronograma/reposicao",
+              ].includes(pathname) || pathname === "/cronograma/ocupacao"}
+            >
               {canAccess("/cronograma/saida-profissional") && <MenuItem label="Saída Profissional" icon={LogOut} path="/cronograma/saida-profissional" />}
               {canAccess("/cronograma/ocupacao-paciente") && <MenuItem label="Ocupação Paciente" icon={UserCheck} path="/cronograma/ocupacao-paciente" />}
               {canAccess("/cronograma/reposicao") && <MenuItem label="Reposição de Faltas" icon={RotateCcw} path="/cronograma/reposicao" />}
-              {canAccess("/cronograma/ocupacao?tab=acompanhamento") && <MenuItem label="Aceites e Recusas" icon={ClipboardList} path="/cronograma/ocupacao?tab=acompanhamento" />}
+              {canAccess("/cronograma/ocupacao?tab=oportunidades-recusadas") && <MenuItem label="Oportunidades recusadas" icon={XCircle} path="/cronograma/ocupacao?tab=oportunidades-recusadas" />}
               {canAccess("/cronograma/ocupacao?tab=gaps") && <MenuItem label="Diferença: Laudo e Oferta" icon={BarChart3} path="/cronograma/ocupacao?tab=gaps" />}
               {canAccess("/cronograma/ocupacao?tab=inconsistencias") && <MenuItem label="Inconsistências e Exceções" icon={AlertTriangle} path="/cronograma/ocupacao?tab=inconsistencias" />}
             </SidebarGroup>
@@ -531,7 +616,7 @@ export default function Sidebar() {
             canAccess("/cronograma/indicadores?tab=previsao-receitas") ||
             canAccess("/cronograma/indicadores?tab=historico-receitas") ||
             canAccess("/cronograma/indicadores?tab=comparativo-sessoes")) && (
-            <SidebarGroup title="Indicadores" icon={TrendingUp}>
+            <SidebarGroup title="Indicadores" icon={TrendingUp} defaultOpen={pathname === "/cronograma/indicadores"}>
               {canAccess("/cronograma/indicadores?tab=profissionais") && (
                 <MenuItem label="Ocupação de Profissionais" icon={BarChart3} path="/cronograma/indicadores?tab=profissionais" />
               )}
@@ -555,8 +640,15 @@ export default function Sidebar() {
 
           {/* Cadastros */}
           {(canAccess("/cadastros/cadastro-valores") || canAccess("/cadastros/feriados") ||
-            canAccess("/cadastros/contratos") || canAccess("/cadastros/taxas-e-parametros")) && (
-            <SidebarGroup title="Cadastros" icon={Database}>
+            canAccess("/cadastros/contratos") || canAccess("/cadastros/taxas-e-parametros") ||
+            canAccess("/cadastros/pacientes") || canAccess("/cadastros/convenios")) && (
+            <SidebarGroup
+              title="Cadastros"
+              icon={Database}
+              defaultOpen={pathname.startsWith("/cadastros")}
+            >
+              {canAccess("/cadastros/pacientes") && <MenuItem label="Pacientes" icon={UserRound} path="/cadastros/pacientes" />}
+              {canAccess("/cadastros/convenios") && <MenuItem label="Convênios" icon={Building2} path="/cadastros/convenios" />}
               {canAccess("/cadastros/cadastro-valores") && <MenuItem label="Cadastro de Valores" icon={Tag} path="/cadastros/cadastro-valores" />}
               {canAccess("/cadastros/feriados") && <MenuItem label="Feriados" icon={Calendar} path="/cadastros/feriados" />}
               {canAccess("/cadastros/taxas-e-parametros") && <MenuItem label="Variáveis & Taxas" icon={Percent} path="/cadastros/taxas-e-parametros" />}
@@ -571,7 +663,11 @@ export default function Sidebar() {
             canAccess("/relacionamento-prestador/ocupacao-salas") ||
             canAccess("/relacionamento-prestador/solicitacoes") ||
             canAccess("/relacionamento-prestador/ocupar-profissionais-disponiveis")) && (
-            <SidebarGroup title="Relacionamento Prestador" icon={Handshake}>
+            <SidebarGroup
+              title="Relacionamento Prestador"
+              icon={Handshake}
+              defaultOpen={pathname.startsWith("/relacionamento-prestador")}
+            >
               {canAccess("/relacionamento-prestador/ocupacao-salas") && (
                 <MenuItem label="Ocupação de Salas" icon={DoorOpen} path="/relacionamento-prestador/ocupacao-salas" />
               )}
@@ -601,7 +697,11 @@ export default function Sidebar() {
 
           {/* Administração */}
           {canAccess("/admin") && (
-            <SidebarGroup title="Administração" icon={ShieldCheck}>
+            <SidebarGroup
+              title="Administração"
+              icon={ShieldCheck}
+              defaultOpen={["/admin", "/admin/permissoes"].some(p => pathname === p)}
+            >
               <MenuItem label="Usuários" icon={Users} path="/admin" />
               {canAccess("/admin/permissoes") && (
                 <MenuItem label="Permissões" icon={KeyRound} path="/admin/permissoes" />

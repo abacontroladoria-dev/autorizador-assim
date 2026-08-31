@@ -53,7 +53,8 @@
       "Bash(rm -f /tmp/alocacoes_v2.sql /tmp/alocacoes_v2_diag.log)",
       "Bash(node _tmp_check_unidade_nome.mjs)",
       "Bash(powershell -Command \"\\(Get-Content -Encoding UTF8 'C:\\\\Users\\\\Maquina001\\\\sistema-pulsar\\\\docs\\\\cronograma\\\\specs\\\\ocupacao-salas-roadmap.md' | Measure-Object -Line\\).Lines\")",
-      "Bash(node -e ' *)"
+      "Bash(node -e ' *)",
+      "Bash(supabase db *)"
     ],
     "additionalDirectories": [
       "c:\\Users\\Maquina001\\sistema-pulsar\\frontend\\app\\(dashboard)\\cronograma",

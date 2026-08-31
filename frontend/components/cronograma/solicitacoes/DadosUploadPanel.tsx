@@ -28,9 +28,19 @@ interface DropzoneProps<T> {
   onClear: () => void
   parseFile: (file: File) => Promise<T[]>
   actionLabel?: string
+  /**
+   * O que escrever no lugar do nome do arquivo quando as linhas já vieram
+   * prontas de fora (contexto) e nenhum arquivo foi escolhido AQUI.
+   *
+   * Sem isto o card carregado mostra uma linha em branco no meio: `fileName` só
+   * é preenchido por `handleFile`, e desde que os laudos passaram a ser
+   * carregados automaticamente do relatório do Órbita (ver
+   * services/laudos/relatorio.ts) o caso comum é justamente chegar sem arquivo.
+   */
+  origemPadrao?: string
 }
 
-function Dropzone<T>({ label, accept, rows, rowLabel, onLoad, onClear, parseFile, actionLabel }: DropzoneProps<T>) {
+function Dropzone<T>({ label, accept, rows, rowLabel, onLoad, onClear, parseFile, actionLabel, origemPadrao }: DropzoneProps<T>) {
   const inputRef = useRef<HTMLInputElement>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -90,7 +100,7 @@ function Dropzone<T>({ label, accept, rows, rowLabel, onLoad, onClear, parseFile
           <CheckCircle2 size={22} className="text-green-500 shrink-0" />
           <div className="space-y-0.5">
             <p className="text-sm font-semibold text-green-700 dark:text-green-400">{label}</p>
-            <p className="text-xs text-muted-foreground truncate max-w-[180px]">{fileName}</p>
+            <p className="text-xs text-muted-foreground truncate max-w-[180px]">{fileName ?? origemPadrao}</p>
             <p className="text-xs font-medium text-green-600 dark:text-green-500">{rows.length} {rowLabel}</p>
           </div>
           <button
@@ -298,6 +308,12 @@ function parseXlsx<T>(file: File): Promise<T[]> {
   })
 }
 
+// SEM CHAMADOR hoje (verificado em 2026-08-27): este painel era a área de upload
+// da aba "Novo Cronograma", que foi retirada do ar por não estar pronta — ver o
+// cabeçalho de SolicitacoesShell.tsx, onde `?tab=novo-cron` redireciona para
+// `simulacao`. Mantido junto com NovoCronogramaTab, e ajustado quando os laudos
+// passaram a vir do relatório do Órbita para não voltar com o card carregado
+// mostrando uma linha em branco no lugar do nome do arquivo.
 export function DadosUploadPanel({ cRows, lRows, dispRows, onCRows, onLRows, onDispRows, onImport }: Props) {
   const [gradeLoading, setGradeLoading] = useState(false)
   const [gradeError, setGradeError] = useState<string | null>(null)
@@ -337,6 +353,12 @@ export function DadosUploadPanel({ cRows, lRows, dispRows, onCRows, onLRows, onD
           onClear={() => onLRows([])}
           parseFile={f => parseXlsx<LaudoRow>(f)}
           actionLabel="Selecionar arquivo XLSX"
+          // Neutro de propósito: quando os laudos chegam pelo contexto, este
+          // componente não tem como saber se vieram do relatório do Órbita ou de
+          // um arquivo que a pessoa subiu no badge do cabeçalho — e afirmar a
+          // origem errada é pior do que apontar onde ela está escrita. O badge do
+          // header tem a meta da importação e mostra data e arquivo no title.
+          origemPadrao="Já carregado — ver o badge no cabeçalho"
         />
       </div>
 

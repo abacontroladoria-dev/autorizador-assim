@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import {
   Ban, BarChart3, CalendarDays, Check, CheckCircle2, ChevronDown, ChevronUp,
-  ClipboardList, Clock, Download, DoorOpen, Inbox, Search, User, X,
+  ClipboardList, Clock, DoorOpen, Inbox, Search, User, X,
 } from "lucide-react"
 import type { LucideIcon } from "lucide-react"
 import { B, SK_SAIDA, HORAS_GRID, DIAS_LIST, DIAS_ORD } from "@/lib/cronograma/constants"
@@ -16,6 +16,8 @@ import type { AceitePacBundle, AceiteSessao, ConfItem, SlotStatus } from "@/type
 import { SaidaCronModal } from "@/components/cronograma/solicitacoes/SaidaCronModal"
 import { ConfirmDialog } from "@/components/cronograma/ui/ConfirmDialog"
 import { ListCard, EmptyState, GroupHeader, TimeBadge, SearchInput, rowStyle, rowClass } from "@/components/cronograma/ui/DataTable"
+import { registrarRecusa, registrarReativacao } from "@/services/cronogramaRecusasAuditoria.service"
+import { reativarRecusaPaciente } from "@/lib/cronograma/reativarRecusaPaciente"
 
 const SLOT_META: Record<SlotStatus, { label: string; bg: string; c: string; bd: string }> = {
   confirmado: { label: "Confirmou",  bg: "#dcfce7", c: "#14532d", bd: "#86efac" },
@@ -144,7 +146,9 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     cRows, rec, inv, waMap, statusMap, sRec, sInv, sWa, persistStatus,
     profMap, pacBundles, conf, persistProfMap, persistPacBundles, persistConf,
   } = useCronogramaData()
-  const [sub, setSub] = useState<Sub>("aguardando")
+  // Abre em "recusados": é a única aba visível hoje (ver SUBS_VISIVEIS abaixo).
+  // Se outra aba voltar a ser exibida, este padrão continua válido.
+  const [sub, setSub] = useState<Sub>("recusados")
   const [ocupOpen, setOcupOpen] = useState(false)
   const [saidaOpen, setSaidaOpen] = useState(false)
   const [ocupProfOpen, setOcupProfOpen] = useState(false)
@@ -294,8 +298,39 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
       })))
   ), [pacBundles])
 
+  // Recusas vindas dos bundles COMPARTILHADOS (acomp_pac_bundles), no mesmo padrão
+  // de pacConfDerived. Sem isto a aba mostrava só `rec`, que vive no localStorage
+  // de cada navegador (a tabela cronograma_estado não existe no banco): o motor de
+  // sugestões bloqueava por bundle — visível para todo mundo — mas a tela listava
+  // apenas as recusas registradas NESTE navegador. Resultado observado no paciente
+  // Arthur Luiz Maciel Fortes: 17 slots bloqueados, 4 visíveis, e nenhuma forma de
+  // reativar os outros 13 nem de entender por que as sugestões sumiram.
+  // Dedup contra `rec` pela coordenada, porque a mesma recusa costuma existir nos
+  // dois lugares (handleAcaoDireta grava em ambos) e apareceria duplicada.
+  const pacRecDerived = useMemo((): RecItem[] => {
+    const jaEmRec = new Set(rec.map(r => `${r.paciente}|||${r.profissional}|||${r.dia}|||${r.hora}`))
+    const vistos = new Set<string>()
+    const out: RecItem[] = []
+    for (const b of pacBundles) {
+      for (const s of b.sessoes) {
+        const recusadoNoSlot = b.slotStatus?.[`${s.dia}|||${s.hora}`] === "recusado"
+        if (b.status !== "recusado" && !recusadoNoSlot) continue
+        const chave = `${b.pac}|||${s.prof}|||${s.dia}|||${s.hora}`
+        if (jaEmRec.has(chave) || vistos.has(chave)) continue
+        vistos.add(chave)
+        out.push({
+          paciente: b.pac, profissional: s.prof, especialidade: s.tP, unidade: s.unidade,
+          dia: s.dia, hora: s.hora,
+          registradoEm: new Date(b.ts).toLocaleDateString("pt-BR"),
+          obs: b.motivo || undefined,
+        })
+      }
+    }
+    return out
+  }, [pacBundles, rec])
+
   const allConf = useMemo(() => [...conf, ...saidaConfDerived, ...pacConfDerived], [conf, saidaConfDerived, pacConfDerived])
-  const allRec  = useMemo(() => [...rec,  ...saidaRecDerived],  [rec,  saidaRecDerived])
+  const allRec  = useMemo(() => [...rec,  ...saidaRecDerived, ...pacRecDerived],  [rec,  saidaRecDerived, pacRecDerived])
   const allInv  = useMemo(() => [...inv,  ...saidaInvDerived],  [inv,  saidaInvDerived])
 
   // CRON-008: remover um Confirmado derivado de Reserva Pendente precisa reverter a
@@ -319,12 +354,26 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     if (idx !== -1) persistConf(conf.filter((_, j) => j !== idx))
   }
 
-  const SUBS: { key: Sub; label: string; count: number; icon: LucideIcon }[] = [
+  const TODAS_SUBS: { key: Sub; label: string; count: number; icon: LucideIcon }[] = [
     { key: "aguardando",  label: "Aguardando",          count: aguardandoCount,  icon: Clock },
     { key: "confirmados", label: "Confirmados",          count: allConf.length,   icon: CheckCircle2 },
     { key: "recusados",   label: "Recusados",            count: allRec.length,    icon: X },
     { key: "inviavel",    label: "Inviáveis",             count: allInv.length,    icon: Ban },
   ]
+
+  // Abas visíveis — decisão do usuário em 2026-08-20: a operação usa só "Recusados".
+  // OCULTAR, não apagar: nenhum dado é excluído e nenhuma lógica é removida; as
+  // outras abas continuam sendo alimentadas normalmente e voltam ao ar bastando
+  // acrescentar a chave aqui. Medição que embasou a decisão (ação por mês):
+  //   Recusados   243 registros — 5 jun / 47 jul / 191 ago  (uso intenso)
+  //   Confirmados  34 bundles   —      8 jul /  26 ago      (uso ativo)
+  //   Aguardando   13 bundles   — 3 jun /  9 jul /   1 ago  (praticamente parada)
+  //   Inviáveis     0 bundles no banco (os itens exibidos vinham do localStorage)
+  // Registro de divergência: "Confirmados" tinha 26 implantações em agosto e é o
+  // registro visível do que foi escrito na TiTa; recomendei mantê-la e o usuário
+  // optou por ocultar assim mesmo. Reverter = devolver "confirmados" a esta lista.
+  const SUBS_VISIVEIS: Sub[] = ["recusados"]
+  const SUBS = TODAS_SUBS.filter(s => SUBS_VISIVEIS.includes(s.key))
 
   function handleOcupAceito(key: string, sug: { pac: string; prof: string; tP?: string; esp?: string; unidade?: string; dia?: string; hora?: string } | null) {
     sWa({ ...waMap, [key]: "aceito" as WaStatus })
@@ -342,6 +391,10 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
         unidade: sug.unidade, dia: sug.dia, hora: sug.hora,
         registradoEm: new Date().toLocaleDateString("pt-BR"),
       }])
+      registrarRecusa({
+        origem: "ocp-clinica", paciente: sug.pac, profissional: sug.prof,
+        especialidade: sug.esp, unidade: sug.unidade, dia: sug.dia, hora: sug.hora,
+      })
     }
   }
   function handleOcupCancelar(key: string) {
@@ -371,6 +424,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     persistProfMap({ ...profMap, [key]: "recusado" })
     const [pac, prof, dia, hora] = key.split("|||")
     sRec([...rec, { paciente: pac, profissional: prof, especialidade: "", unidade: "", dia, hora, registradoEm: hoje() }])
+    registrarRecusa({ origem: "ocp-profissional", paciente: pac, profissional: prof, dia, hora })
   }
   function handleProfInviavel(key: string) {
     persistProfMap({ ...profMap, [key]: "inviavel" })
@@ -384,30 +438,50 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
   }
 
   function handlePacCancelar(id: string) {
-    persistPacBundles(pacBundles.filter(b => b.id !== id))
+    // Forma de função: cancelar vários itens em cliques seguidos parte sempre do
+    // estado mais recente, não do array capturado no render (ver persistPacBundles).
+    persistPacBundles(prev => prev.filter(b => b.id !== id))
   }
   function handlePacSlotStatus(id: string, slotKey: string, status: SlotStatus | null) {
     const bundle = pacBundles.find(b => b.id === id)
     const sessao = bundle?.sessoes.find(s => `${s.dia}|||${s.hora}` === slotKey)
-    persistPacBundles(pacBundles.map(b => {
+    // Capturado ANTES do persistPacBundles: é o que diz se `status === null`
+    // (toggle-off do botão "Recusou") é uma reativação de verdade ou um clique
+    // sem efeito (slot que já não estava recusado).
+    const statusAnterior = bundle?.slotStatus?.[slotKey]
+    persistPacBundles(prev => prev.map(b => {
       if (b.id !== id) return b
       const slotStatus = { ...(b.slotStatus ?? {}) }
       if (status === null) delete slotStatus[slotKey]
       else slotStatus[slotKey] = status
-      return { ...b, slotStatus }
+      // Recusar slot a slot também tem que marcar o bundle como recusado quando
+      // TODAS as sessões dele foram recusadas — buildSugestoes bloqueia reoferta
+      // por bundle.status, então sem isso um bundle inteiro recusado slot a slot
+      // continuava sendo reofertado.
+      const todasRecusadas = b.sessoes.every(s => slotStatus[`${s.dia}|||${s.hora}`] === "recusado")
+      return { ...b, slotStatus, status: todasRecusadas ? "recusado" as const : b.status }
     }))
-    if (bundle && sessao && status) {
+    if (bundle && sessao) {
       const d = hoje()
       if (status === "confirmado")
         persistConf([...conf, { id: genConfId(), pac: bundle.pac, prof: sessao.prof, esp: sessao.tP, unidade: sessao.unidade, dia: sessao.dia, hora: sessao.hora, origem: "Ocp. Paciente", registradoEm: d }])
-      else if (status === "recusado")
+      else if (status === "recusado") {
         sRec([...rec, { paciente: bundle.pac, profissional: sessao.prof, especialidade: sessao.tP, unidade: sessao.unidade, dia: sessao.dia, hora: sessao.hora, registradoEm: d }])
-      else if (status === "inviavel")
+        registrarRecusa({ origem: "ocp-paciente", paciente: bundle.pac, profissional: sessao.prof, especialidade: sessao.tP, unidade: sessao.unidade, dia: sessao.dia, hora: sessao.hora })
+      } else if (status === "inviavel")
         sInv([...inv, { paciente: bundle.pac, motivo: sessao.tP, dia: sessao.dia, hora: sessao.hora, registradoEm: d }])
+      else if (status === null && statusAnterior === "recusado") {
+        // Mesma correção do bug em OcupPacMode.tsx (reativarCombo): sem limpar
+        // `rec` aqui, o item ficava aparecendo em "Recusados" e "Reativados"
+        // ao mesmo tempo — o toggle só desfazia o bundle, não a entrada em rec
+        // que handlePacSlotStatus grava junto ao recusar (linha 469 acima).
+        sRec(rec.filter(r => !(r.paciente === bundle.pac && r.profissional === sessao.prof && r.dia === sessao.dia && r.hora === sessao.hora)))
+        registrarReativacao({ origem: "ocp-paciente", paciente: bundle.pac, profissional: sessao.prof, especialidade: sessao.tP, unidade: sessao.unidade, dia: sessao.dia, hora: sessao.hora })
+      }
     }
   }
   function handlePacSlotRemove(id: string, slotKey: string) {
-    persistPacBundles(pacBundles.map(b => {
+    persistPacBundles(prev => prev.map(b => {
       if (b.id !== id) return b
       const sessoes = b.sessoes.filter(s => `${s.dia}|||${s.hora}` !== slotKey)
       const slotStatus = { ...(b.slotStatus ?? {}) }
@@ -418,7 +492,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
   function handlePacBulkStatus(id: string, status: SlotStatus | "cancelar") {
     if (status === "cancelar") { handlePacCancelar(id); return }
     const bundle = pacBundles.find(b => b.id === id)
-    persistPacBundles(pacBundles.map(b => {
+    persistPacBundles(prev => prev.map(b => {
       if (b.id !== id) return b
       const slotStatus: Record<string, SlotStatus> = {}
       for (const s of b.sessoes) slotStatus[`${s.dia}|||${s.hora}`] = status
@@ -432,9 +506,11 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     // status "confirmado") já é surfaced na aba Confirmados via pacConfDerived.
     // Gravar aqui também duplicaria a linha (uma real + uma derivada) e reabriria
     // o mesmo problema de duas fontes de verdade para a mesma reserva.
-    if (status === "recusado")
+    if (status === "recusado") {
       sRec([...rec, ...bundle.sessoes.map(s => ({ paciente: bundle.pac, profissional: s.prof, especialidade: s.tP, unidade: s.unidade, dia: s.dia, hora: s.hora, registradoEm: d }))])
-    else if (status === "inviavel")
+      for (const s of bundle.sessoes)
+        registrarRecusa({ origem: "ocp-paciente", paciente: bundle.pac, profissional: s.prof, especialidade: s.tP, unidade: s.unidade, dia: s.dia, hora: s.hora })
+    } else if (status === "inviavel")
       sInv([...inv, ...bundle.sessoes.map(s => ({ paciente: bundle.pac, motivo: s.tP, dia: s.dia, hora: s.hora, registradoEm: d }))])
   }
 
@@ -453,6 +529,7 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
     const [pac, dia, hora, terapia] = key.split("|||")
     const { prof: profRes } = parseSlotReservado(val.slotReservado)
     sRec([...rec, { paciente: pac, profissional: profRes || "", especialidade: terapia, unidade: "", dia, hora, registradoEm: hoje(), obs: obsAceite }])
+    registrarRecusa({ origem: "saida-profissional", paciente: pac, profissional: profRes || "", especialidade: terapia, dia, hora, motivo: obsAceite })
   }
   function handleSaidaInviavel(key: string, obsAceite: string) {
     const val = statusMap[key]
@@ -502,8 +579,13 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
       {/* Sub-abas em formato de planilha + painel — agrupadas num único wrapper para
           não herdar o "gap" do container pai, já que a aba ativa precisa tocar o painel */}
       <div>
-      <div style={{ display: "flex", alignItems: "flex-end", gap: "12px" }}>
-        <div style={{ display: "flex", gap: "3px", overflowX: "auto", flex: 1 }}>
+      {/* Com uma única sub-aba visível (SUBS_VISIVEIS), a pastilha de abas não
+          seleciona nada — só repetia o título já mostrado no painel abaixo.
+          Só volta a aparecer se outra sub-aba for reativada. "Exportar CSV"
+          mudou de lugar: agora é uma action do próprio painel (ao lado da
+          busca), não uma barra solta acima dele. */}
+      {SUBS.length > 1 && (
+        <div style={{ display: "flex", gap: "3px", overflowX: "auto" }}>
           {SUBS.map(s => {
             const active = sub === s.key
             return (
@@ -535,18 +617,11 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
             )
           })}
         </div>
-        <button onClick={handleExportCSV} style={{
-          flexShrink: 0, display: "flex", alignItems: "center", gap: "6px",
-          fontSize: "var(--text-xs)", fontWeight: "var(--weight-semibold)", padding: "6px 12px",
-          borderRadius: "var(--radius-md)", background: "var(--card)", color: "var(--muted-foreground)",
-          border: "1px solid var(--border)", cursor: "pointer", marginBottom: "6px",
-        }}>
-          <Download size={12} /> Exportar CSV
-        </button>
-      </div>
+      )}
 
-      {/* Painel conectado à aba ativa (mesma cor de fundo, sem costura na borda) */}
-      <div style={{ marginTop: "-1px", position: "relative", zIndex: 1 }}>
+      {/* Painel conectado à aba ativa (mesma cor de fundo, sem costura na borda) —
+          só faz sentido "colar" quando existe uma pastilha de aba acima dela. */}
+      <div style={{ marginTop: SUBS.length > 1 ? "-1px" : 0, position: "relative", zIndex: 1 }}>
       {sub === "aguardando" && (
         <ListCard icon={Clock} title="Aguardando confirmação"
           count={aguardandoCount} titleColor={B.blue}
@@ -661,8 +736,33 @@ export function AcompanhamentoTab({ res, onWA, onWAUndo, onWAStatus, onRec, onIn
         <ConfirmadosTab conf={allConf} removidos={pacRemovidoDerived} onRemove={handleRemoverConfirmado} />
       )}
       {sub === "recusados" && (
-        <RecusadosTab rec={allRec} inv={allInv} waMap={waMap}
-          onRemove={i => { if (i < rec.length) sRec(rec.filter((_, j) => j !== i)) }} />
+        <RecusadosTab rec={allRec} inv={allInv} waMap={waMap} onExportCSV={handleExportCSV}
+          onRemove={i => {
+            // allRec = [...rec, ...saidaRecDerived, ...pacRecDerived]. O item pode vir
+            // de qualquer um dos três; só `rec` é editável diretamente (localStorage),
+            // os derivados são reflexo dos bundles compartilhados. Em ambos os casos o
+            // que precisa sair é o bloqueio no bundle — senão "Reativar sugestão"
+            // limparia só a auditoria e o slot continuaria preso.
+            const item = allRec[i]
+            if (!item) return
+            if (i < rec.length) sRec(rec.filter((_, j) => j !== i))
+            const antes = pacBundles
+            const depois = reativarRecusaPaciente(pacBundles, item)
+            persistPacBundles(depois)
+            // `rec` mistura as 3 origens sem guardar qual — melhor sinal disponível:
+            // se a limpeza acima realmente tirou algo de um bundle, é Ocupação
+            // Paciente; senão, se havia um registro "recusado" em statusMap pra essa
+            // combinação, é Saída de Profissional; caso contrário, Ocupação Clínica
+            // (a mais comum das que sobram).
+            const chaveSaida = `${item.paciente}|||${item.dia}|||${item.hora}|||${item.especialidade ?? ""}`
+            const origem = depois.length !== antes.length || depois.some((b, j) => b !== antes[j])
+              ? "ocp-paciente"
+              : statusMap[chaveSaida]?.status === "recusado" ? "saida-profissional" : "ocp-clinica"
+            registrarReativacao({
+              origem, paciente: item.paciente, profissional: item.profissional,
+              especialidade: item.especialidade, unidade: item.unidade, dia: item.dia, hora: item.hora,
+            })
+          }} />
       )}
       {sub === "inviavel" && (
         <InviavelTab inv={allInv} rec={allRec} waMap={waMap}

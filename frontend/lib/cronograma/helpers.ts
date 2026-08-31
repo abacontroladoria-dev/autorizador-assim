@@ -1,4 +1,4 @@
-import { ADMIN_ONLY, B, EXIB_ID, EXIB_NOME, HORAS_GRID, PROFISSIONAIS_SEM_CAPACIDADE_LIVRE, normTxt } from "./constants"
+import { ABA_EXT, ADMIN_ONLY, B, EXIB_ID, EXIB_NOME, HORAS_GRID, PROFISSIONAIS_SEM_CAPACIDADE_LIVRE, normTxt } from "./constants"
 
 const PROFISSIONAIS_SEM_CAPACIDADE_LIVRE_NORM = new Set([...PROFISSIONAIS_SEM_CAPACIDADE_LIVRE].map(normTxt))
 import type { CsvRow, Sugestao } from "@/types/cronograma"
@@ -24,6 +24,39 @@ export function espRealPorExibicao(terapia: string, terapiaExibicao: string, esp
     return terapiaExibicao === EXIB_NOME[EXIB_ID.HS_ABA] ? "Habilidades Sociais" : "Psicologia ABA"
   }
   return espPadrao
+}
+
+/**
+ * Especialidade de uma terapia para fins de CH consumida em Ocupação de
+ * Paciente. Espelha TERAPIA_TO_ESP, mas resolve também ABA em Ambiente
+ * Natural (Aplicador ABA Casa/Escola) como "Psicologia ABA" — esse mapeamento
+ * fica de fora de TERAPIA_TO_ESP de propósito porque o motor de sugestões/
+ * simulação de novo prestador usa TERAPIA_TO_ESP para achar vaga de GRADE
+ * (Sala/HORAS_GRID), e Ambiente Natural não tem slot de grade.
+ */
+export function espParaOcupacaoPac(terapia: string, terapiaToEsp: Record<string, string>): string | undefined {
+  return terapiaToEsp[terapia] ?? (ABA_EXT.has(terapia) ? "Psicologia ABA" : undefined)
+}
+
+/**
+ * Peso de consumo de quantidade autorizada por sessão da grade. ABA em
+ * Ambiente Natural (Aplicador ABA Casa/Escola) consome 0,666 de quantidade
+ * autorizada por sessão, contra 1,0 das terapias em Ambiente Clínico —
+ * mesma unidade de contagem já usada hoje (1 sessão = 1 linha da grade).
+ */
+export function pesoOcupacaoAba(terapia: string): number {
+  return ABA_EXT.has(terapia) ? 0.666 : 1
+}
+
+/**
+ * Arredonda a CH consumida exibida sempre para cima, para o inteiro mais
+ * próximo — pedido do usuário: 30 sessões × 0,666 = 19,98 deve aparecer como
+ * "20", nunca como "19.98". Passa por 2 casas antes do ceil pra não estourar
+ * por erro de ponto flutuante (ex.: soma que deveria ser exatamente 3 vira
+ * 3.0000000000000004 e não pode virar "4").
+ */
+export function ceilOcupacaoAba(qtd: number): number {
+  return Math.ceil(Math.round(qtd * 100) / 100)
 }
 
 // ─── TEMPO ────────────────────────────────────────────────────────────────────
@@ -148,6 +181,45 @@ export const turnoNome: Record<"manha" | "tarde", string> = {
 export function filtrarCapacidadeLivreReservada(cRows: CsvRow[]): CsvRow[] {
   if (!PROFISSIONAIS_SEM_CAPACIDADE_LIVRE.size) return cRows
   return cRows.filter(r => !(r["Status do Agendamento"] === "Livre" && PROFISSIONAIS_SEM_CAPACIDADE_LIVRE_NORM.has(normTxt(r["Profissional"]))))
+}
+
+// Nunca ofertar horário de profissional que já tem uma linha "Agendado" no mesmo
+// dia/hora — inclusive quando o "paciente" é administrativo (PACS_ADMIN, ex.:
+// "Horário Bloqueado").
+//
+// HONESTIDADE SOBRE O ALCANCE (medido em 2026-08-20, 24.599 linhas ativas na
+// janela operacional): esta trava é uma REDE DE SEGURANÇA, não a correção de um
+// problema observado. A hipótese original era que a TiTa manteria uma linha por
+// terapia ofertada, deixando uma vaga "Livre" gêmea sobreviver quando o horário
+// fosse preenchido. A medição REFUTOU isso: existem ZERO slots com Livre+Agendado
+// no mesmo profissional/data/hora. A TiTa emite uma linha por profissional/slot,
+// e o sync a substitui. Os 279 slots com mais de uma linha são todos
+// Agendado+Agendado — sessões em grupo legítimas (Aplicador ABA (EF),
+// Musicoterapia, Terapia Alimentar).
+//
+// A causa real dos casos Mariana Ferreira Reis e Marcia Regina Araujo de Paula
+// era GRADE DESATUALIZADA: o sync diário falhou e o banco guardava o estado
+// anterior, com o horário ainda Livre. A defesa contra isso é o sync confiável e
+// com falha visível (fn_sync_grade_csv_em_lotes, retry + alerta), não esta função.
+//
+// Mantida mesmo assim por ser barata e invariante: se um dia a TiTa mudar de
+// formato, o sistema já não oferta horário ocupado. Não a trate como prova de
+// que o problema está resolvido.
+//
+// Ignora unidade de propósito: o mesmo profissional não pode estar em duas
+// salas ao mesmo tempo, então a unidade da linha "Agendado" é irrelevante pra
+// decidir se ele está ocupado naquele dia/hora.
+export function construirProfissionaisOcupados(cRows: CsvRow[]): Set<string> {
+  const ocupado = new Set<string>()
+  for (const r of cRows) {
+    if (r["Status do Agendamento"] !== "Agendado" || !r["Profissional"]) continue
+    ocupado.add(`${normTxt(r["Profissional"])}|||${r["Dia da Semana"]}|||${String(r.HI_str || "")}`)
+  }
+  return ocupado
+}
+
+export function profissionalEstaOcupado(ocupado: Set<string>, profissional: string, dia: string, hora: string): boolean {
+  return ocupado.has(`${normTxt(profissional)}|||${dia}|||${hora}`)
 }
 
 // ─── LAUDO / ALTA ─────────────────────────────────────────────────────────────

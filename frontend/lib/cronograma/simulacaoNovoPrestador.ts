@@ -5,7 +5,7 @@
 // (mínimo 1 sessão no dia + blocos consecutivos de 40min) usa a MESMA fonte de
 // verdade que "Vagas Agora" e "Saída de Profissional": slotValidoParaPaciente.
 
-import { pm, turnoFromHora } from "./helpers"
+import { espRealPorExibicao, pm, turnoFromHora } from "./helpers"
 import { DIAS_UTIL, HORAS_GRID, PACS_ADMIN, TERAPIA_TO_ESP } from "./constants"
 import { slotValidoParaPaciente } from "./candidatos"
 import type { CsvRow, LaudoRow } from "@/types/cronograma"
@@ -24,23 +24,28 @@ export const UNIDADES_SIMULACAO = ["Realengo", "Padre Miguel", "Fazendinha"] as 
  *  Padre Miguel com outra unidade dentro do mesmo dia. */
 export const UNIDADE_COM_RESTRICAO_GEOGRAFICA = "Padre Miguel"
 
-const EXCLUIR_GAPS = new Set([
-  "Coordenador de Caso", "Supervisão ABA",
+// "Ofertado" (contagem de sessões já entregues, pra calcular o gap) conta
+// TODAS as variações de Aplicador ABA, Supervisão ABA e Coordenador de Caso —
+// só os ABA externos (casa/escola) ficam de fora, já que não são presença na
+// unidade. Confirmado com o time clínico: Coordenador de Caso e Supervisão
+// ABA PRECISAM contar como ofertado de Psicologia ABA (mesma regra já usada
+// em "Ocupar Profissionais Disponíveis", ver EXCLUIR_GAPS de OcupPacMode.tsx).
+const EXCLUIR_OFERTADO = new Set([
   "Aplicador ABA Casa", "Aplicador ABA Escola", "Aplicador ABA Escola/Casa",
 ])
 
-// Diferente de EXCLUIR_GAPS (que rege só a contagem de "ofertado" no cálculo
-// de gap, em calcularGaps): "Coordenador de Caso" ocupa sala física na
-// unidade, então pra decidir se um paciente já frequenta a unidade naquele
+// Diferente de EXCLUIR_OFERTADO (que rege só a contagem de "ofertado" no
+// cálculo de gap, em calcularGaps): "Coordenador de Caso" ocupa sala física
+// na unidade, então pra decidir se um paciente já frequenta a unidade naquele
 // dia — e pra passar as sessões dele pra slotValidoParaPaciente checar
 // sequenciamento sem buraco — ele TEM que contar, senão a linha nunca chega
 // na checagem de sequenciamento e o paciente fica sem sugestão nenhuma
 // naquele dia (confirmado com o time clínico). "Supervisão ABA" e os ABA
 // externos (casa/escola) continuam de fora: não representam presença física
 // na unidade nesse horário.
-const EXCLUIR_ATENDIMENTO = new Set(
-  [...EXCLUIR_GAPS].filter(t => t !== "Coordenador de Caso"),
-)
+const EXCLUIR_ATENDIMENTO = new Set([
+  "Supervisão ABA", "Aplicador ABA Casa", "Aplicador ABA Escola", "Aplicador ABA Escola/Casa",
+])
 
 /** Especialidades simuláveis — todas as que têm mapeamento terapia → especialidade. */
 export function listarEspecialidades(): string[] {
@@ -92,7 +97,7 @@ function rowUnidade(r: CsvRow): string { return String(r.Unidade || "Desconhecid
 // referência (WeakMap) é suficiente e nunca fica obsoleta.
 const agendaClinicaCache = new WeakMap<CsvRow[], CsvRow[]>()
 
-function agendaClinica(cRows: CsvRow[]): CsvRow[] {
+export function agendaClinica(cRows: CsvRow[]): CsvRow[] {
   const cache = agendaClinicaCache.get(cRows)
   if (cache) return cache
   const resultado = cRows.filter(r =>
@@ -120,7 +125,9 @@ export function pacientesDaUnidadeNoDia(dia: string, unidade: string, cRows: Csv
   return pacientesQueFrequentamUnidade(dia, unidade, agendaClinica(cRows))
 }
 
-/** Calcula, por paciente+especialidade, quantas sessões faltam (autorizado − ofertado). */
+/** Calcula, por paciente+especialidade, quantas sessões faltam (autorizado −
+ *  ofertado). Conta laudo VENCIDO junto com vigente — ver o comentário sobre
+ *  "Situação" no laço de qtdAutorizada. Só "Alta" exclui. */
 export function calcularGaps(lRows: LaudoRow[], cRows: CsvRow[]): GapItem[] {
   if (!cRows.length || !lRows.length) return []
 
@@ -129,8 +136,10 @@ export function calcularGaps(lRows: LaudoRow[], cRows: CsvRow[]): GapItem[] {
     if (r["Status do Agendamento"] !== "Agendado") continue
     const pac = r["Nome Favorecido"]
     if (!pac || PACS_ADMIN.has(pac)) continue
-    const esp = TERAPIA_TO_ESP[r.Terapia]
-    if (!esp || EXCLUIR_GAPS.has(r.Terapia)) continue
+    const espPadrao = TERAPIA_TO_ESP[r.Terapia]
+    if (!espPadrao || EXCLUIR_OFERTADO.has(r.Terapia)) continue
+    const terapiaExib = String(r["Terapia Exibição"] || r["Terapia Exibicao"] || "").trim()
+    const esp = espRealPorExibicao(r.Terapia, terapiaExib, espPadrao)
     const k = `${pac}|||${esp}`
     qtdOfertada[k] = (qtdOfertada[k] || 0) + 1
   }
@@ -146,8 +155,20 @@ export function calcularGaps(lRows: LaudoRow[], cRows: CsvRow[]): GapItem[] {
       comAlta.add(`${pac}|||${esp}`)
       continue
     }
-    const situacao = String(l["Situação"] || "").trim()
-    if (situacao && situacao.toLowerCase() !== "vigente") continue
+    // "Situação" (Vigente/Vencido) NÃO recorta nada aqui, de propósito. A
+    // renovação de laudo é um controle administrativo PARALELO: na prática o
+    // paciente segue sendo atendido com laudo vencido enquanto a renovação
+    // tramita, então a demanda dele é real e a vaga existe. Filtrar por
+    // "vigente" fazia esta tela esconder mais da metade da demanda —
+    // 1000 das 1845 linhas do relatório de laudos em uso estavam "Vencido"
+    // (27/08/2026), e em Musicoterapia eram 90 pacientes vencidos contra 87
+    // vigentes — apagando oportunidades de contratação reais sem nenhum aviso
+    // (caso real: Pedro Henrique Machado de Azeredo, laudo 582 Musicoterapia
+    // aut=1, validade 10/04/2026, não aparecia em Padre Miguel Terça 09:20 nem
+    // Sexta 10:00 por causa deste filtro).
+    //
+    // "Alta" continua excluindo acima: alta é fim de tratamento, não pendência
+    // de papelada — ali não há vaga a preencher.
     const aut = parseFloat(String(l["Qtd autorizada"] || "0").replace(",", ".")) || 0
     if (aut <= 0) continue
     const k = `${pac}|||${esp}`
@@ -242,17 +263,23 @@ export function avaliarPeriodo(
  *  as outras aparições do mesmo paciente. */
 export function limitarCandidatosPorGap(
   periodos: PeriodoSimulado[], gapMap: Record<string, GapItem>, especialidade: string,
+  capacidadePorGrupo?: Map<string, number>,
 ): PeriodoSimulado[] {
-  interface Ocorrencia { periodoIdx: number; slotIdx: number; alternativas: number }
+  interface Ocorrencia { periodoIdx: number; slotIdx: number; alternativas: number; coberta: boolean }
   const ocorrenciasPorPaciente = new Map<string, Ocorrencia[]>()
 
   periodos.forEach((p, periodoIdx) => {
     p.slots.forEach((s, slotIdx) => {
-      for (const c of s.candidatos) {
+      const capacidade = capacidadePorGrupo?.get(chaveGrupoCapacidade(p.dia, s.hora, p.unidade, especialidade)) ?? 0
+      // candidatos já vem ordenado por maior gap primeiro (mesmo critério de
+      // dividirPorDisponibilidadeInterna, sugestaoContratacao.ts): os últimos
+      // `capacidade` são quem a capacidade interna cobre.
+      s.candidatos.forEach((c, idx) => {
+        const coberta = idx >= s.candidatos.length - capacidade
         const lista = ocorrenciasPorPaciente.get(c.pac) ?? []
-        lista.push({ periodoIdx, slotIdx, alternativas: s.candidatos.length - 1 })
+        lista.push({ periodoIdx, slotIdx, alternativas: s.candidatos.length - 1, coberta })
         ocorrenciasPorPaciente.set(c.pac, lista)
-      }
+      })
     })
   })
 
@@ -260,7 +287,18 @@ export function limitarCandidatosPorGap(
   for (const [pac, ocorrencias] of ocorrenciasPorPaciente) {
     const gap = gapMap[`${pac}|||${especialidade}`]?.gap ?? 0
     if (ocorrencias.length <= gap) continue
-    const excedentes = [...ocorrencias].sort((a, b) => a.alternativas - b.alternativas).slice(gap)
+    // Entre as ocorrências do paciente, prioriza MANTER as que a capacidade
+    // interna já cobre (custam "zero" contratação) sobre as que precisariam
+    // de contratação — sem isso, o corte por escassez podia manter o
+    // paciente numa vaga que precisaria de contratação e descartar a vaga
+    // já coberta internamente, fazendo-o aparecer como "precisa contratar"
+    // em algum lugar do plano mesmo já estando coberto em outro (bug real
+    // 2026-08-17: paciente sumia de uma vaga com cobertura interna real e
+    // reaparecia noutra vaga simulada como se precisasse de contratação).
+    // Dentro de cada grupo (coberta/não coberta), mantém o desempate de
+    // escassez de sempre.
+    const ordenadas = [...ocorrencias].sort((a, b) => Number(b.coberta) - Number(a.coberta) || a.alternativas - b.alternativas)
+    const excedentes = ordenadas.slice(gap)
     for (const e of excedentes) remover.add(`${e.periodoIdx}|||${e.slotIdx}|||${pac}`)
   }
   if (!remover.size) return periodos
@@ -277,25 +315,74 @@ export function limitarCandidatosPorGap(
 
 export interface PeriodoAlvo { dia: string; turno: Turno }
 
-/** Ranqueia cada unidade candidata pela ocupação total que geraria, somando
- *  todos os períodos (dia+turno) selecionados pelo usuário. */
+/** Mesma chave de agrupamento de chaveGrupo (disponibilidadeInterna.ts) —
+ *  replicada aqui em vez de importada porque disponibilidadeInterna.ts já
+ *  importa deste arquivo (avaliarPeriodo), e capacidadeDiretaRestante importar
+ *  de volta criaria um ciclo. Só serve pra casar com as chaves do Map
+ *  retornado por capacidadeDiretaRestante. */
+function chaveGrupoCapacidade(dia: string, hora: string, unidade: string, especialidade: string): string {
+  return `${dia}|||${hora}|||${unidade}|||${especialidade}`
+}
+
+/** Sessões/pacientes de um período descontando quem a capacidade interna já
+ *  cobre sozinha (mesmo critério de dividirPorDisponibilidadeInterna em
+ *  sugestaoContratacao.ts: a capacidade cobre os últimos da fila, que já vem
+ *  ordenada por maior gap primeiro — então os primeiros `restantes` são os
+ *  descobertos). Usado só pra escolher/ranquear a unidade recomendada — nunca
+ *  altera os candidatos dos períodos retornados, que continuam com a fila
+ *  bruta (a UI final desconta a cobertura separadamente, mostrando
+ *  "Totalmente coberto sem contratar"/"Parcialmente coberto" em vez de
+ *  remover esses candidatos da vista).
+ *
+ *  Corrige um caso real (2026-08-17): sem isso, a unidade recomendada podia
+ *  ser uma onde TODOS os candidatos já estavam cobertos internamente (demanda
+ *  real = 0), vencendo por volume bruto sobre outra unidade com candidato(s)
+ *  genuinamente sem cobertura (ex.: Quarta-manhã recomendava Fazendinha, cujo
+ *  único candidato já tinha disponibilidade interna, em vez de Realengo, que
+ *  tinha um paciente realmente precisando da contratação). */
+function sessoesLiquidas(
+  periodo: PeriodoSimulado, especialidade: string, capacidadePorGrupo: Map<string, number> | undefined,
+): { sessoes: number; pacientes: Set<string> } {
+  const pacientes = new Set<string>()
+  let sessoes = 0
+  for (const slot of periodo.slots) {
+    const capacidade = capacidadePorGrupo?.get(chaveGrupoCapacidade(periodo.dia, slot.hora, periodo.unidade, especialidade)) ?? 0
+    const restantes = Math.max(0, slot.candidatos.length - capacidade)
+    sessoes += restantes
+    slot.candidatos.slice(0, restantes).forEach(c => pacientes.add(c.pac))
+  }
+  return { sessoes, pacientes }
+}
+
+/** Ranqueia cada unidade candidata pela demanda REAL (líquida de cobertura
+ *  interna) que geraria, somando todos os períodos (dia+turno) selecionados
+ *  pelo usuário. `capacidadePorGrupo` é opcional (vem de
+ *  capacidadeDiretaRestante, disponibilidadeInterna.ts) — sem ele, ranqueia
+ *  pelo volume bruto de sempre. */
 export function ranquearUnidades(
   periodosAlvo: PeriodoAlvo[],
   especialidade: string,
   cRows: CsvRow[],
   gapMap: Record<string, GapItem>,
+  capacidadePorGrupo?: Map<string, number>,
 ): UnidadeRanqueada[] {
   return UNIDADES_SIMULACAO.map(unidade => {
     const periodosBrutos = periodosAlvo.map(p => avaliarPeriodo(p.dia, p.turno, unidade, especialidade, cRows, gapMap))
-    const periodos = limitarCandidatosPorGap(periodosBrutos, gapMap, especialidade)
+    const periodos = limitarCandidatosPorGap(periodosBrutos, gapMap, especialidade, capacidadePorGrupo)
     const pacientes = new Set<string>()
     let totalSessoes = 0
+    let sessoesLiq = 0
+    const pacientesLiq = new Set<string>()
     for (const periodo of periodos) {
       totalSessoes += periodo.totalSessoes
       periodo.slots.forEach(s => s.candidatos.forEach(c => pacientes.add(c.pac)))
+      const liq = sessoesLiquidas(periodo, especialidade, capacidadePorGrupo)
+      sessoesLiq += liq.sessoes
+      liq.pacientes.forEach(p => pacientesLiq.add(p))
     }
-    return { unidade, nPacientes: pacientes.size, totalSessoes, periodos }
-  }).sort((a, b) => b.totalSessoes - a.totalSessoes || b.nPacientes - a.nPacientes || a.unidade.localeCompare(b.unidade))
+    return { unidade, nPacientes: pacientes.size, totalSessoes, periodos, _sessoesLiq: sessoesLiq, _pacientesLiq: pacientesLiq.size }
+  }).sort((a, b) => b._sessoesLiq - a._sessoesLiq || b._pacientesLiq - a._pacientesLiq || a.unidade.localeCompare(b.unidade))
+   .map(({ _sessoesLiq, _pacientesLiq, ...resto }) => resto)
 }
 
 /** Monta o plano recomendado: escolhe a melhor unidade para cada período
@@ -306,13 +393,15 @@ export function montarPlanoRecomendado(
   especialidade: string,
   cRows: CsvRow[],
   gapMap: Record<string, GapItem>,
+  capacidadePorGrupo?: Map<string, number>,
 ): PeriodoSimulado[] {
   if (!periodosAlvo.length) return []
 
   const escolhas: PeriodoSimulado[] = periodosAlvo.map(p =>
     UNIDADES_SIMULACAO
       .map(unidade => avaliarPeriodo(p.dia, p.turno, unidade, especialidade, cRows, gapMap))
-      .sort((a, b) => b.totalSessoes - a.totalSessoes || b.nPacientes - a.nPacientes || a.unidade.localeCompare(b.unidade))[0],
+      .map(periodo => ({ periodo, liq: sessoesLiquidas(periodo, especialidade, capacidadePorGrupo) }))
+      .sort((a, b) => b.liq.sessoes - a.liq.sessoes || b.liq.pacientes.size - a.liq.pacientes.size || a.periodo.unidade.localeCompare(b.periodo.unidade))[0].periodo,
   )
 
   for (const dia of DIAS_UTIL) {
@@ -326,9 +415,16 @@ export function montarPlanoRecomendado(
         const periodos = idxsNoDia.map(i => avaliarPeriodo(escolhas[i].dia, escolhas[i].turno, unidade, especialidade, cRows, gapMap))
         const pacientes = new Set(periodos.flatMap(p => p.slots.flatMap(s => s.candidatos.map(c => c.pac))))
         const totalSessoes = periodos.reduce((soma, p) => soma + p.totalSessoes, 0)
-        return { unidade, totalSessoes, nPacientes: pacientes.size, periodos }
+        let sessoesLiq = 0
+        const pacientesLiq = new Set<string>()
+        for (const periodo of periodos) {
+          const liq = sessoesLiquidas(periodo, especialidade, capacidadePorGrupo)
+          sessoesLiq += liq.sessoes
+          liq.pacientes.forEach(p => pacientesLiq.add(p))
+        }
+        return { unidade, totalSessoes, nPacientes: pacientes.size, periodos, sessoesLiq, pacientesLiq: pacientesLiq.size }
       })
-      .sort((a, b) => b.totalSessoes - a.totalSessoes || b.nPacientes - a.nPacientes || a.unidade.localeCompare(b.unidade))[0]
+      .sort((a, b) => b.sessoesLiq - a.sessoesLiq || b.pacientesLiq - a.pacientesLiq || a.unidade.localeCompare(b.unidade))[0]
 
     idxsNoDia.forEach((i, j) => { escolhas[i] = melhorUnidadeFixa.periodos[j] })
   }
@@ -336,7 +432,7 @@ export function montarPlanoRecomendado(
   // Teto final sobre o PLANO INTEIRO (todos os dias/turnos escolhidos juntos)
   // — sem isso, um paciente com gap=1 que for elegível em dois dias diferentes
   // apareceria como candidato nos dois, como se pudesse aceitar ambos.
-  return limitarCandidatosPorGap(escolhas, gapMap, especialidade)
+  return limitarCandidatosPorGap(escolhas, gapMap, especialidade, capacidadePorGrupo)
 }
 
 // ─── Hipótese: como ficaria a agenda do novo profissional ──────────────────

@@ -2,7 +2,8 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit'
-import { getRoleDefaultPermissions, codigosToRotas, hasRouteAccess } from '@/lib/permissions/routes'
+import { codigosToRotas, hasRouteAccess } from '@/lib/permissions/routes'
+import { resolverPermissoes } from '@/lib/permissions/resolver'
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next()
@@ -111,20 +112,15 @@ export async function proxy(request: NextRequest) {
   // Deriva as rotas permitidas do mesmo modelo do Sidebar:
   // defaults do role + overrides individuais (usuarios_permissoes).
   // A RLS permite o usuário ler as próprias linhas.
-  const codigos = new Set(getRoleDefaultPermissions(role))
-
   const { data: overrides } = await supabase
     .from('usuarios_permissoes')
     .select('permissao_codigo, permitido')
     .eq('usuario_id', user.id)
 
-  for (const o of overrides ?? []) {
-    if (o.permitido) {
-      codigos.add(o.permissao_codigo)
-    } else {
-      codigos.delete(o.permissao_codigo)
-    }
-  }
+  // resolverPermissoes é compartilhado com as rotas de API (lib/insumos/auth.ts).
+  // O matcher deste proxy exclui /api, então route handler precisa checar
+  // permissão por conta própria — e as duas checagens têm de sair da mesma regra.
+  const codigos = resolverPermissoes(role, overrides ?? [])
 
   const allowedRoutes = codigosToRotas(codigos)
 

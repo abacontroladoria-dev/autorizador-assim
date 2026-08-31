@@ -5,17 +5,21 @@ import toast from "react-hot-toast"
 import { type CSSProperties, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import {
   ABA_EXIB_PSICO_NAMES, B, DIAS_LIST, DIAS_ORD, EXCLUIR_OCUP, EXIB_ID, EXIB_NOME,
-  HORAS_GRID, PACS_ADMIN, TERAPIA_TO_ESP, isProfBloqueadoTemp,
+  HORAS_GRID, PACS_ADMIN, TERAPIA_TO_ESP, TODAS_ESP, isProfBloqueadoTemp, normTxt,
 } from "@/lib/cronograma/constants"
 import {
-  buildCronoUnitMeta, espRealPorExibicao, fm, fmtName, isLaudoComAlta, pm,
+  buildCronoUnitMeta, ceilOcupacaoAba, espParaOcupacaoPac, espRealPorExibicao, fm, fmtName, isLaudoComAlta, pesoOcupacaoAba, pm,
   shouldShowSessionUnit, unidadeBadgeText,
 } from "@/lib/cronograma/helpers"
 import { UnitHeaderBadges, CronoGlobalUnitBadge } from "@/components/cronograma/ui/UnitBadges"
-import { ConfirmarImplantacaoModal } from "./ConfirmarImplantacaoModal"
+import { MultiSearchCombobox } from "@/components/cronograma/ui/MultiSearchCombobox"
+import { ConfirmarImplantacaoModal, type AvisoMultiProf } from "./ConfirmarImplantacaoModal"
+import { ObservacaoPacienteBox } from "./ObservacaoPacienteBox"
 import type { CsvRow, LaudoRow, CfgState, RecItem, InvItem } from "@/types/cronograma"
 import type { AceiteSessao } from "@/types/acompanhamento"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
+import { reativarRecusaPaciente } from "@/lib/cronograma/reativarRecusaPaciente"
+import { registrarRecusa, registrarReativacao } from "@/services/cronogramaRecusasAuditoria.service"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -54,6 +58,11 @@ interface AceitePacBundle {
   status: "pendente" | "confirmado" | "recusado" | "inviavel" | "removido_tita"
   inviavelSlots: string[]
   motivo?: string
+  // Recusa/confirmação slot a slot feita na aba Acompanhamento — um bundle pode
+  // seguir "pendente" no todo com sessões individuais já recusadas. Espelha o
+  // campo homônimo do tipo canônico em types/acompanhamento.ts.
+  slotStatus?: Record<string, "confirmado" | "recusado" | "inviavel">
+
   // Auditoria da implantação (imutável) — ver types/acompanhamento.ts.
   implantadoPor?: string
   implantadoPorEmail?: string
@@ -183,6 +192,18 @@ function countSlots(rows: CsvRow[]): number {
 // Pedido 1: encontra slot livre mais próximo para deslocar a Supervisão ABA
 function findSupervTarget(dia: string, hora: string, prof: string, cRows: CsvRow[]): string | null {
   const myHMin = pm(hora) ?? 0
+  // Mesma regra do profOcupado em buildSugestoes: horário "Agendado" do profissional
+  // nunca pode ser alvo, mesmo existindo uma linha "Livre" gêmea dele no mesmo dia/hora
+  // (a TiTa mantém uma linha por terapia ofertada). Vale para qualquer paciente —
+  // real ou fictício de bloqueio —, porque o critério é o status, não o nome.
+  const horasOcupadas = new Set<string>()
+  for (const r of cRows) {
+    if (r["Status do Agendamento"] !== "Agendado") continue
+    if (r["Dia da Semana"] !== dia) continue
+    if (normTxt(r.Profissional) !== normTxt(prof)) continue
+    const c = fm(pm(hiStr(r)) ?? hiMin(r))
+    if (c) horasOcupadas.add(c)
+  }
   let best: { dist: number; hora: string } | null = null
   for (const r of cRows) {
     if (r["Status do Agendamento"] !== "Livre") continue
@@ -192,10 +213,25 @@ function findSupervTarget(dia: string, hora: string, prof: string, cRows: CsvRow
     const h = pm(hiStr(r)) ?? hiMin(r)
     const canonical = fm(h)
     if (!canonical) continue
+    if (horasOcupadas.has(canonical)) continue
     const dist = Math.abs(h - myHMin)
     if (!best || dist < best.dist) best = { dist, hora: canonical }
   }
   return best?.hora ?? null
+}
+
+// Opções do multiselect de "Alterar preferência → Por especialidade". O índice é o id
+// exigido por MultiSearchCombobox; o nome é a chave real usada em prefEsps/prefSet.
+const ESP_PREF_OPCOES = TODAS_ESP.map((nome, id) => ({ id, nome }))
+
+// Marcador de rádio das opções de "Alterar preferência" — anel + miolo, para as duas
+// alternativas se lerem como escolhas mutuamente exclusivas do mesmo grupo.
+function PrefRadio({ ativo }: { ativo: boolean }) {
+  return (
+    <span aria-hidden="true" style={{ width: "13px", height: "13px", borderRadius: "50%", flexShrink: 0, marginTop: "1px", border: `2px solid ${ativo ? B.navy : "var(--border)"}`, background: "var(--card)", display: "inline-flex", alignItems: "center", justifyContent: "center" }}>
+      {ativo && <span style={{ width: "6px", height: "6px", borderRadius: "50%", background: B.navy }} />}
+    </span>
+  )
 }
 
 // ─── buildSugestoes ───────────────────────────────────────────────────────────
@@ -209,7 +245,13 @@ function buildSugestoes(
   aceites: AceitePacBundle[] = [],
   conv = "",
   isLiminar = false,
+  // "Alterar preferência" → Por especialidade. Nomes de especialidade a priorizar na
+  // escolha automática da terapia de cada card. Vazio = preferência natural (maior
+  // distância entre ofertado e autorizado). Só reordena: nunca muda a elegibilidade,
+  // então nenhuma vaga deixa de ser ofertada por causa da preferência.
+  prefEsps: string[] = [],
 ): Sugestao[] {
+  const prefSet = new Set(prefEsps)
   const pacClinRows = agendClin.filter(r => r["Nome Favorecido"] === pac)
   const clinPuras   = pacClinRows.filter(r => !ABA_EXT_NAMES.has(r.Terapia))
 
@@ -222,11 +264,27 @@ function buildSugestoes(
   const clinTurno: "manhã" | "tarde" | null =
     manhaCt + tardeCt === 0 ? null : manhaCt >= tardeCt ? "manhã" : "tarde"
 
+  // ABA em Ambiente Natural (Aplicador ABA Casa/Escola) ocupa o TURNO inteiro do
+  // paciente, não só o dia/hora exato da sessão — pedido explícito do usuário
+  // (2026-08-25): se o paciente tem Escola SEG/QUA/SEX de manhã, TER/QUI de manhã
+  // também ficam bloqueados pra novas ofertas, mesmo sem sessão de Escola nesses
+  // dias. `agend` (não `agendClin`/`pacClinRows`, que já descartam Ambiente
+  // Natural via EXCLUIR_GAPS) é a única fonte com essas linhas.
+  const turnosAmbNat = new Set<"manhã" | "tarde">()
+  for (const r of agend) {
+    if (r["Nome Favorecido"] !== pac || !ABA_EXT_NAMES.has(r.Terapia)) continue
+    const h = pm(hiStr(r)) ?? hiMin(r)
+    if (!h && h !== 0) continue
+    turnosAmbNat.add(h < 720 ? "manhã" : "tarde")
+  }
+
   function hMin(r: CsvRow): number { return pm(hiStr(r)) ?? hiMin(r) }
 
   function isTurnoOk(hMinVal: number): boolean {
+    const turnoDoSlot = hMinVal < 720 ? "manhã" : "tarde"
+    if (turnosAmbNat.has(turnoDoSlot)) return false
     if (clinTurno === null) return true
-    return clinTurno === "manhã" ? hMinVal < 720 : hMinVal >= 720
+    return clinTurno === turnoDoSlot
   }
 
   // Todas as sessões do paciente — usado para evitar sugerir slot já ocupado
@@ -240,26 +298,91 @@ function buildSugestoes(
     if (!dayHours[d]) dayHours[d] = new Set()
     dayHours[d].add(canonical)
   }
+  // Ocupação REAL do profissional (independe do paciente da vez). A TiTa mantém uma
+  // linha por terapia ofertada, então quando um horário do profissional é preenchido
+  // as OUTRAS linhas dele no mesmo dia/hora continuam com Status "Livre". Sem esta
+  // trava, o horário volta a ser ofertado mesmo já estando ocupado — bastava a vaga
+  // "Livre" gêmea existir. dayHours só olha a agenda do próprio paciente e por isso
+  // nunca pegou esse caso.
+  // Usa `agend` inteiro de propósito (nunca `agendClin`): pacientes-bloqueio como
+  // "Horário Bloqueado" / "Horário Administrativo" ocupam a agenda do profissional
+  // exatamente como um paciente real — é justamente esse tipo de linha que o
+  // agendClin descarta.
+  const profOcupado = new Set<string>()
+  for (const r of agend) {
+    const p = normTxt(r.Profissional)
+    if (!p) continue
+    const h = hMin(r)
+    if (!h && h !== 0) continue
+    const canonical = fm(h)
+    if (!canonical) continue
+    profOcupado.add(`${p}|||${r["Dia da Semana"]}|||${canonical}`)
+  }
+  const isProfOcupado = (prof: string, dia: string, hora: string) =>
+    profOcupado.has(`${normTxt(prof)}|||${dia}|||${hora}`)
   // CRON-008: slots já reservados (implantação imediata) por OUTROS pacientes — vagas
   // ainda "Livre" no CSV mas comprometidas, não podem ser sugeridas para ninguém mais.
+  // Chave normalizada (normTxt no profissional), igual à de profOcupado: o nome do
+  // bundle vem do que foi gravado no aceite e o da grade vem do CSV da TiTa, e uma
+  // diferença de acento/caixa/espaço faria a trava falhar em silêncio.
+  const chaveSlot = (prof: string, dia: string, hora: string) => `${normTxt(prof)}|||${dia}|||${hora}`
   const slotsReservadosOutros = new Set<string>()
   for (const bundle of aceites) {
     if (bundle.pac === pac || bundle.status !== "confirmado") continue
-    for (const s of bundle.sessoes) slotsReservadosOutros.add(`${s.prof}|||${s.dia}|||${s.hora}`)
+    for (const s of bundle.sessoes) slotsReservadosOutros.add(chaveSlot(s.prof, s.dia, s.hora))
   }
-  // Vagas comprometidas: sessões aguardando ou confirmadas que ainda não estão no agend
+  // Slots que a própria família já recusou pra esse paciente — não podem ser
+  // reofertados enquanto a recusa não for desfeita ("Reativar sugestão" na aba
+  // Recusados). Sem essa trava, buildSugestoes ignorava "rec" (só auditoria) e
+  // reofertava o mesmo horário/profissional a cada recálculo.
+  // Considera também recusa slot a slot (slotStatus), não só o status do bundle:
+  // a aba Acompanhamento permite recusar sessões individuais de um bundle que
+  // continua "pendente" como um todo.
+  //
+  // Achado 2026-08-20 (caso Adrian Araújo Nery): a chave incluía o profissional,
+  // então recusar "Psicopedagogia com a Ana Beatriz" às 08:00 não impedia oferecer
+  // "Psicomotricidade com a Rafaela" no MESMO horário — o sistema ofertava outra
+  // coisa bem em cima de um horário que a família já tinha dito não servir.
+  // Os motivos reais de recusa (ver Arthur Luiz Maciel Fortes) são quase sempre
+  // sobre o HORÁRIO, não sobre o profissional específico: "não consegue chegar
+  // às 13h por causa da escola", "não aguenta muitas terapias no mesmo dia". A
+  // chave agora é só dia+hora — qualquer recusa nesse paciente naquele dia/hora
+  // bloqueia QUALQUER terapia/profissional novo ali, não só o que foi recusado.
+  const chaveDiaHora = (dia: string, hora: string) => `${dia}|||${hora}`
+  const slotsRecusados = new Set<string>()
   for (const bundle of aceites) {
     if (bundle.pac !== pac) continue
-    if (bundle.status !== "pendente" && bundle.status !== "confirmado") continue
+    for (const s of bundle.sessoes) {
+      const recusadoNoSlot = bundle.slotStatus?.[`${s.dia}|||${s.hora}`] === "recusado"
+      if (bundle.status === "recusado" || recusadoNoSlot) slotsRecusados.add(chaveDiaHora(s.dia, s.hora))
+    }
+  }
+  // Vagas comprometidas: sessões confirmadas que ainda não estão no agend
+  // ("pendente" não bloqueia mais — é um status que nenhum caminho da UI cria hoje).
+  for (const bundle of aceites) {
+    if (bundle.pac !== pac) continue
+    if (bundle.status !== "confirmado") continue
     for (const s of bundle.sessoes) {
       if (!dayHours[s.dia]) dayHours[s.dia] = new Set()
       dayHours[s.dia].add(s.hora)
     }
   }
 
-  // Apenas sessões clínicas (excl. EXCLUIR_OCUP) — usado para adjacência e hasDay
+  // Usado só para adjacência/hasDay: "a paciente já está presente nesse dia perto
+  // desse horário?". "Coordenador de Caso" é a ÚNICA exceção de EXCLUIR_OCUP aqui
+  // (mesmo carve-out do allFreeRows acima): mesmo sendo administrativa, uma sessão
+  // nova de 40min colada nela não é um "dia novo" isolado, é avulsa aproveitando
+  // uma visita que já vai acontecer. As demais administrativas (Supervisão ABA,
+  // Visita Guiada, Triagem, Avaliações) NÃO contam — a paciente não está
+  // fisicamente presente nelas, então usá-las como âncora criaria um buraco real
+  // (ex.: oferecer 08:00 só porque 08:40 é Supervisão ABA, sem ninguém de verdade
+  // até bem mais tarde). Exclui também AT Externo (atendimento domiciliar, não é
+  // presença física na unidade).
   const dayHoursClin: Record<string, Set<string>> = {}
-  for (const r of agend.filter(r => r["Nome Favorecido"] === pac && !EXCLUIR_OCUP.has(r.Terapia) && !ABA_EXT_NAMES.has(r.Terapia))) {
+  for (const r of agend.filter(r =>
+    r["Nome Favorecido"] === pac && !ABA_EXT_NAMES.has(r.Terapia)
+    && (!EXCLUIR_OCUP.has(r.Terapia) || r.Terapia === "Coordenador de Caso"),
+  )) {
     const d = r["Dia da Semana"]
     const h = hMin(r)
     if (!h && h !== 0) continue
@@ -269,17 +392,65 @@ function buildSugestoes(
     dayHoursClin[d].add(canonical)
   }
 
-  const pacUnidades = new Set(pacClinRows.map(r => rowUnid(r)))
-
-  // R5.4: mapa da unidade que o paciente já usa por dia+turno (manhã < 720 min; tarde ≥ 720)
-  const pacDayTurnoUnid: Record<string, string> = {}
-  for (const r of pacClinRows) {
+  // Sessões administrativas onde a paciente NÃO está fisicamente presente (tudo de
+  // EXCLUIR_OCUP exceto Coordenador de Caso, que já tem tratamento próprio acima) —
+  // nunca servem de vizinha pra justificar uma sessão nova adjacente a elas: colar
+  // um horário novo do lado de uma Supervisão ABA (por ex.), sem ninguém de verdade
+  // logo depois/antes, cria um buraco real na presença da paciente, mesmo que o dia
+  // tenha presença real em outro horário mais distante (hasDay true não basta aqui).
+  const adminSemPresenca: Record<string, Set<string>> = {}
+  for (const r of agend.filter(r =>
+    r["Nome Favorecido"] === pac && EXCLUIR_OCUP.has(r.Terapia) && r.Terapia !== "Coordenador de Caso",
+  )) {
     const d = r["Dia da Semana"]
     const h = hMin(r)
     if (!h && h !== 0) continue
+    const canonical = fm(h)
+    if (!canonical) continue
+    if (!adminSemPresenca[d]) adminSemPresenca[d] = new Set()
+    adminSemPresenca[d].add(canonical)
+  }
+
+  const pacUnidades = new Set(pacClinRows.map(r => rowUnid(r)))
+
+  // R5.4: mapa da unidade DOMINANTE (maioria das sessões) que o paciente já usa
+  // por dia+turno (manhã < 720 min; tarde ≥ 720) — não a primeira linha
+  // encontrada, já que `clinPuras` não vem em ordem cronológica e "primeira
+  // vence" podia travar o turno inteiro numa unidade minoritária (ex.: uma
+  // sessão isolada às 08:40 decidindo a unidade de todo o resto da manhã).
+  // Mesmo critério de unidadeDominanteDoDia (disponibilidadeInterna.ts), usado
+  // pelas telas de Ocupação Profissional/Categoria: empate → sem restrição.
+  // `clinPuras` já exclui AT Externo (Aplicador ABA Casa/Escola), que não é
+  // unidade física e não deve contar pra maioria.
+  const pacDayTurnoCounts: Record<string, Record<string, number>> = {}
+  for (const r of clinPuras) {
+    const h = hMin(r)
+    if (!h && h !== 0) continue
     const turno = h < 720 ? "manha" : "tarde"
-    const key = `${d}|||${turno}`
-    if (!pacDayTurnoUnid[key]) pacDayTurnoUnid[key] = rowUnid(r)
+    const key = `${r["Dia da Semana"]}|||${turno}`
+    const unid = rowUnid(r)
+    if (!pacDayTurnoCounts[key]) pacDayTurnoCounts[key] = {}
+    pacDayTurnoCounts[key][unid] = (pacDayTurnoCounts[key][unid] || 0) + 1
+  }
+  const pacDayTurnoUnid: Record<string, string> = {}
+  for (const [key, counts] of Object.entries(pacDayTurnoCounts)) {
+    const entries = Object.entries(counts)
+    const max = Math.max(...entries.map(([, n]) => n))
+    const top = entries.filter(([, n]) => n === max)
+    if (top.length === 1) pacDayTurnoUnid[key] = top[0][0]
+  }
+  // Fallback pro empate acima (turno sem maioria clara — ex.: tarde real. meio a
+  // meio entre duas unidades): usa a unidade do horário exato vizinho, se houver.
+  // Cobre "16:20 é Fazendinha → 17:00 só pode ser Fazendinha ou nada", mesmo
+  // quando o turno inteiro não tem unidade dominante pra decidir sozinho.
+  const dayHourUnid: Record<string, string> = {}
+  for (const r of clinPuras) {
+    const h = hMin(r)
+    if (!h && h !== 0) continue
+    const canonical = fm(h)
+    if (!canonical) continue
+    const key = `${r["Dia da Semana"]}|||${canonical}`
+    if (!dayHourUnid[key]) dayHourUnid[key] = rowUnid(r)
   }
 
   const pacGaps = Object.entries(gapMap)
@@ -294,9 +465,18 @@ function buildSugestoes(
   const espMeta: Record<string, { dif: number; aut: number; of: number }> = {}
   for (const g of pacGaps) { espDif[g.esp] = g.dif; espMeta[g.esp] = g }
 
-  // Rastreia sessões já propostas nesta rodada para não ultrapassar o autorizado.
+  // Rastreia sessões já propostas nesta rodada — usado só pra ORDENAR (prioriza
+  // quem ainda tem mais déficit efetivo), nunca pra parar de gerar candidatos:
+  // a tela deve mostrar toda vaga encaixável mesmo além do que falta pro
+  // autorizado (o usuário decide o que aceitar); quem trava a escrita real na
+  // TiTa é o "hasExcesso"/excessoEsps no render, que desabilita "Aceitar
+  // alterações" quando a seleção ultrapassa a CH Autorizada.
   const proposedOf: Record<string, number> = {}
   const effDif = (e: string, extra = 0) => (espDif[e] ?? 0) - (proposedOf[e] ?? 0) - extra
+  // Elegibilidade (gera candidato ou não) usa o déficit ORIGINAL, fixo — nunca o
+  // efetivo (effDif), que cairia a 0 assim que a rodada já tivesse proposto o
+  // suficiente e impediria mostrar mais opções encaixáveis pro usuário escolher.
+  const hasGap = (e: string) => (espDif[e] ?? 0) > 0
 
   const isAssimSaude = /assim/i.test(conv)
   const isGratuidade = /gratuidade/i.test(conv)
@@ -311,15 +491,30 @@ function buildSugestoes(
     if (isAssimSaude) return (gapMap[`${pac}|||${laudoEsp}`]?.aut ?? 0) <= 1
     return false
   }
+  // Coordenador de Caso só pode ser ofertado como acréscimo pra compor o déficit de
+  // Psicologia ABA — nunca cria o vínculo do zero (paciente sem Coordenador de Caso
+  // agendado não recebe a oferta) e nunca troca de coordenador (só o mesmo
+  // profissional que já é o Coordenador de Caso atual dela).
+  const coordenadorAtual = new Set(
+    agend
+      .filter(r => r["Nome Favorecido"] === pac && r.Terapia === "Coordenador de Caso")
+      .map(r => normTxt(r.Profissional)),
+  )
   const seenFree = new Set<string>()
   const allFreeRows: Array<CsvRow & { _hMin: number; _hora: string }> = []
   for (const r of cRows) {
     if (r["Status do Agendamento"] !== "Livre") continue
     if (isProfBloqueadoTemp(r.Profissional)) continue
-    // Aplicador ABA (AE) é a única exceção liberada de EXCLUIR_OCUP aqui — as
-    // demais (Coordenador de Caso, Supervisão ABA etc.) continuam fora da oferta
-    // de sugestões. Ver AE_HS_LAUDO_ESP acima para a condição real de elegibilidade.
-    if (EXCLUIR_OCUP.has(r.Terapia) && r.Terapia !== "Aplicador ABA (AE)") continue
+    // Aplicador ABA (AE) é a única exceção "de sempre" liberada de EXCLUIR_OCUP aqui.
+    // Coordenador de Caso é uma segunda exceção, condicional: só passa se for
+    // exatamente o profissional que já é o coordenador atual da paciente (ver
+    // coordenadorAtual acima). As demais (Supervisão ABA etc.) continuam fora da
+    // oferta de sugestões. Ver AE_HS_LAUDO_ESP acima para a condição real de
+    // elegibilidade do Aplicador ABA (AE).
+    if (EXCLUIR_OCUP.has(r.Terapia) && r.Terapia !== "Aplicador ABA (AE)") {
+      const coordMatch = r.Terapia === "Coordenador de Caso" && coordenadorAtual.has(normTxt(r.Profissional))
+      if (!coordMatch) continue
+    }
     if (aeHsBloqueado(r.Terapia)) continue
     const esp = TERAPIA_TO_ESP[r.Terapia]
     if (!esp || !espDif[esp]) continue
@@ -330,7 +525,10 @@ function buildSugestoes(
     if (!isTurnoOk(h)) continue
     const canonical = fm(h)
     if (!canonical) continue
-    if (slotsReservadosOutros.has(`${r.Profissional}|||${r["Dia da Semana"]}|||${canonical}`)) continue
+    if (slotsReservadosOutros.has(chaveSlot(r.Profissional, r["Dia da Semana"], canonical))) continue
+    if (slotsRecusados.has(chaveDiaHora(r["Dia da Semana"], canonical))) continue
+    // Vaga "Livre" gêmea de um horário já agendado do mesmo profissional — ver profOcupado.
+    if (isProfOcupado(r.Profissional, r["Dia da Semana"], canonical)) continue
     const dk = `${r["Dia da Semana"]}|||${h}|||${r.Terapia}|||${r.Profissional}`
     if (seenFree.has(dk)) continue
     seenFree.add(dk)
@@ -345,13 +543,27 @@ function buildSugestoes(
   }
 
   const sugestoes: Sugestao[] = []
+  // "Dia novo" (!hasDay) não tem nenhuma sessão real pra ancorar R5.4 — o turno
+  // inteiro está sendo inventado slot a slot. Sem isso, cada horário escolhia
+  // unidade de forma independente (ex.: 13:00–16:20 saem Fazendinha "por sorte"
+  // de ordem, 17:00 sai Realengo). `cRows` chega ordenado por data+hora (ver
+  // buscarGradeComoCSVRows), e slotMap preserva essa ordem de inserção — então o
+  // PRIMEIRO horário processado de um dia+turno "trava" a unidade pros seguintes:
+  // ou o resto do turno usa a mesma unidade, ou não oferece nada ali.
+  const novoDiaUnidEscolhida: Record<string, string> = {}
 
   for (const [slotKey, slotRows] of Object.entries(slotMap)) {
     const parts = slotKey.split("|||")
     const dia  = parts[0]
     const hora = slotRows[0]._hora
+    const slotTurno = (pm(hora) ?? 0) < 720 ? "manha" : "tarde"
 
     if (dayHours[dia]?.has(hora)) continue
+
+    const adjs = adjHs(hora)
+    // Nunca oferece colado numa sessão administrativa sem presença física da
+    // paciente (Supervisão ABA etc.) — ver adminSemPresenca acima.
+    if (adjs.some(a => adminSemPresenca[dia]?.has(a))) continue
 
     const byEspRows: Record<string, typeof allFreeRows> = {}
     const seenProf = new Set<string>()
@@ -366,13 +578,17 @@ function buildSugestoes(
 
     const hoursOnDay = dayHoursClin[dia]
     const hasDay = !!hoursOnDay && hoursOnDay.size > 0
-    const adjs   = adjHs(hora)
-    const isAdj  = hasDay && adjs.some(a => hoursOnDay!.has(a))
 
-    // Esps elegíveis: ordenadas por déficit efetivo desc; tiebreak por taxa de preenchimento asc.
+    // Esps elegíveis: qualquer uma com déficit original (hasGap) — não para de gerar
+    // candidato só porque a rodada já propôs o suficiente (ver comentário em hasGap).
+    // Ordenadas por déficit efetivo desc; tiebreak por taxa de preenchimento asc.
+    // Com preferência "Por especialidade" ativa, as escolhidas vêm primeiro — entre
+    // elas (e entre as demais) a ordenação natural acima continua valendo intacta.
     const eligibleEsps = Object.keys(byEspRows)
-      .filter(esp => effDif(esp) > 0)
+      .filter(esp => hasGap(esp))
       .sort((a, b) => {
+        const pa = prefSet.has(a) ? 0 : 1, pb = prefSet.has(b) ? 0 : 1
+        if (pa !== pb) return pa - pb
         const da = effDif(a), db = effDif(b)
         if (db !== da) return db - da
         const ra = (espMeta[a]?.aut ?? 0) > 0 ? (espMeta[a].of / espMeta[a].aut) : 0
@@ -383,7 +599,12 @@ function buildSugestoes(
 
     // Constrói os dados de uma esp para este slot; retorna null se inválido.
     const buildEntry = (esp: string): EspAlt | null => {
-      const espRows = byEspRows[esp]
+      const chaveTurnoNovoDia = `${dia}|||${slotTurno}`
+      const unidJaEscolhida = !hasDay ? novoDiaUnidEscolhida[chaveTurnoNovoDia] : undefined
+      const espRows = unidJaEscolhida
+        ? byEspRows[esp].filter(r => rowUnid(r) === unidJaEscolhida)
+        : byEspRows[esp]
+      if (espRows.length === 0) return null
       const [primaryRow, ...altRows] = espRows
       const unid = rowUnid(primaryRow)
       // Para dia-novo: restringe profAlts à mesma unidade do slot principal, pois os
@@ -405,22 +626,36 @@ function buildSugestoes(
           if (EXCLUIR_OCUP.has(r.Terapia) && r.Terapia !== "Aplicador ABA (AE)") continue
           if (aeHsBloqueado(r.Terapia)) continue
           const compEsp = TERAPIA_TO_ESP[r.Terapia]
-          // Desconta 1 do esp principal, pois ele já será adicionado neste slot.
-          if (!compEsp || effDif(compEsp, compEsp === esp ? 1 : 0) <= 0) continue
+          // hasGap (déficit original), não effDif — mesmo motivo do eligibleEsps acima.
+          if (!compEsp || !hasGap(compEsp)) continue
           const ch = hMin(r)
           if (!isTurnoOk(ch)) continue
           const cHora = fm(ch)
           if (!adjs.includes(cHora)) continue
+          // Mesmas travas do allFreeRows — a varredura de companheiras tinha ficado de
+          // fora, e por isso um horário recusado (ou já reservado por outro paciente)
+          // voltava a ser ofertado como sessão adjacente mesmo estando bloqueado.
+          if (isProfOcupado(r.Profissional, dia, cHora)) continue
+          if (slotsReservadosOutros.has(chaveSlot(r.Profissional, dia, cHora))) continue
+          if (slotsRecusados.has(chaveDiaHora(dia, cHora))) continue
           const ck = `${r.Terapia}|||${r.Profissional}|||${cHora}`
           if (seenComp.has(ck)) continue
           seenComp.add(ck)
           compRows.push({ tP: r.Terapia, prof: r.Profissional, hora: cHora, csvGradeId: r.CsvGradeId! })
         }
-        if (compRows.length === 0) return null
+        // Não exige mais compRows não-vazio: uma vaga isolada (sem parceira livre
+        // adjacente pra formar dupla) ainda é "encaixável" — o usuário decide se
+        // aceita; só a escrita real na TiTa fica travada acima do autorizado
+        // (hasExcesso/excessoEsps no render). Sem isso, uma sessão avulsa útil
+        // (ex.: déficit grande, sem vaga livre adjacente de outra especialidade)
+        // era descartada por inteiro em vez de oferecida sozinha.
         // Ordena por déficit desc + taxa de preenchimento asc para que g[0] seja sempre
         // a especialidade mais necessária em cada hora.
         compRows.sort((a, b) => {
           const espA = TERAPIA_TO_ESP[a.tP] ?? "", espB = TERAPIA_TO_ESP[b.tP] ?? ""
+          // Preferência "Por especialidade" também vale para as sessões companheiras.
+          const pa = prefSet.has(espA) ? 0 : 1, pb = prefSet.has(espB) ? 0 : 1
+          if (pa !== pb) return pa - pb
           // Desconta 1 do esp principal ao comparar vComps do mesmo slot.
           const da = effDif(espA, espA === esp ? 1 : 0)
           const db = effDif(espB, espB === esp ? 1 : 0)
@@ -444,8 +679,16 @@ function buildSugestoes(
       // R5.4: slot adjacente deve estar na mesma unidade que as sessões existentes do
       // paciente naquele dia+turno. Filtra todas as linhas pelo turno correto e rejeita
       // se nenhuma tiver a unidade esperada.
-      const slotTurno = (pm(hora) ?? 0) < 720 ? "manha" : "tarde"
-      const existingUnid = pacDayTurnoUnid[`${dia}|||${slotTurno}`]
+      let existingUnid = pacDayTurnoUnid[`${dia}|||${slotTurno}`]
+      if (!existingUnid) {
+        // Turno sem maioria clara (empate): usa a unidade do horário vizinho mais
+        // próximo, se houver — ver dayHourUnid acima. Cobre "16:20 é Fazendinha →
+        // 17:00 só pode ser Fazendinha ou nada", mesmo com o turno inteiro empatado.
+        for (const a of adjs) {
+          const vizinho = dayHourUnid[`${dia}|||${a}`]
+          if (vizinho) { existingUnid = vizinho; break }
+        }
+      }
       if (existingUnid) {
         const validRows = espRows.filter(r => rowUnid(r) === existingUnid)
         if (validRows.length === 0) return null
@@ -478,7 +721,15 @@ function buildSugestoes(
     // (Profissional + Terapia + Status=Livre). allEsps e allProfs no render são a única
     // fonte de verdade para terapias e profissionais disponíveis — não há terapia elegível
     // sem profissional correspondente.
-    if (hasDay && isAdj) {
+    // Antes só empurrava quando hasDay && isAdj (dia já frequentado E o horário
+    // colado numa sessão existente) ou quando !hasDay (dia novo). O meio-termo —
+    // dia já frequentado, mas esse horário específico não está a ±40min de
+    // nenhuma sessão existente (ex.: só sessões à tarde, oferta às 13:00 quando a
+    // mais próxima é 14:20) — não caía em nenhuma das duas: buildEntry calculava
+    // a entrada certinha (já validada por unidade/turno via R5.4) e ela era
+    // descartada sem nunca virar sugestão. `isAdj` continua sem uso aqui — a
+    // vaga é "encaixável" (unidade/turno batem) mesmo sem adjacência estrita.
+    if (hasDay) {
       sugestoes.push({
         id: `${dia}|||${hora}|||${defaultEntry.esp}`,
         esp: defaultEntry.esp, tP: defaultEntry.tP,
@@ -489,7 +740,7 @@ function buildSugestoes(
         espAlts: altEntries,
       })
       proposedOf[defaultEntry.esp] = (proposedOf[defaultEntry.esp] ?? 0) + 1
-    } else if (!hasDay) {
+    } else {
       sugestoes.push({
         id: `${dia}|||${hora}|||${defaultEntry.esp}`,
         esp: defaultEntry.esp, tP: defaultEntry.tP,
@@ -500,6 +751,10 @@ function buildSugestoes(
         profAlts: defaultEntry.profAlts,
         espAlts: altEntries,
       })
+      // Trava a unidade desse dia+turno pros próximos horários "dia novo" — ver
+      // comentário em novoDiaUnidEscolhida.
+      const chaveTurnoNovoDia = `${dia}|||${slotTurno}`
+      if (!novoDiaUnidEscolhida[chaveTurnoNovoDia]) novoDiaUnidEscolhida[chaveTurnoNovoDia] = defaultEntry.unidade
       proposedOf[defaultEntry.esp] = (proposedOf[defaultEntry.esp] ?? 0) + 1
       for (const vc of defaultEntry.vComp) {
         const e = TERAPIA_TO_ESP[vc.tP]
@@ -543,14 +798,21 @@ interface TodasSugestoesModalProps {
   stOf: (s: Sugestao) => Status | null
   setSt: (s: Sugestao, st: Status | null) => void
   estrategia: Estrategia; setEstrategia: (e: Estrategia) => void
-  onAceitar: (bundle: { sessoes: AceiteSessao[]; beforeCount: number }) => void
+  onAceitar: (bundle: { sessoes: AceiteSessao[]; beforeCount: number; avisoMultiProf: AvisoMultiProf[] }) => void
   onInviavel: (sessoes: AceiteSessao[], motivo: string) => void
   onAcaoDireta: (sessoes: AceiteSessao[], status: "pendente" | "recusado" | "inviavel", motivo?: string) => void
-  recusadasSet: Set<string>
   onUndoRecusa: (dia: string, hora: string, tP: string, prof: string) => void
   /** CRON-008: sessões já reservadas (implantação imediata) deste paciente — exibidas
    * diretamente na grade como "Reservado", fora do fluxo normal de sugestões. */
   reservasConfirmadas: AceiteSessao[]
+  /** Horários recusados pela família para este paciente — exibidos em vermelho na
+   *  grade para o bloqueio ficar visível no próprio horário. Não são sugestões. */
+  recusasPac: {
+    dia: string; hora: string; tP: string; prof: string; unidade: string
+    ocorrencias: Array<{ ts: number; data: string; motivo?: string }>
+  }[]
+  /** Abre o modal de detalhe do card "recusadoFamilia" ao ser clicado. */
+  onAbrirRecusaDetalhe: (dia: string, hora: string, recusas: Array<{ tP: string; prof: string; ocorrencias: Array<{ ts: number; data: string; motivo?: string }> }>) => void
 }
 
 export interface TodasSugestoesModalHandle {
@@ -561,7 +823,7 @@ export interface TodasSugestoesModalHandle {
 const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoesModalProps>(function TodasSugestoesModal({
   pac, conv, cRows, sugestoes, pacGaps, pacAllEsp, stOf, setSt,
   estrategia, setEstrategia, onAceitar, onInviavel, onAcaoDireta,
-  recusadasSet, onUndoRecusa, reservasConfirmadas,
+  onUndoRecusa, reservasConfirmadas, recusasPac, onAbrirRecusaDetalhe,
 }: TodasSugestoesModalProps, ref: React.Ref<TodasSugestoesModalHandle>) {
   const [selIdx, setSelIdx]         = useState<Record<string, Record<string, number>>>({})
   const [profSelIdx, setProfSelIdx] = useState<Record<string, number>>({})
@@ -606,12 +868,8 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
       const next = new Set<string>()
       for (const s of sugestoes) {
         if (stOf(s) === "inviavel") continue
-        const mainKey = `${s.dia}|||${s.hora}|||${s.tP}|||${s.prof}`
-        if (recusadasSet.has(mainKey)) continue
         next.add(s.id)
         for (const vc of getActiveVComps(s)) {
-          const vcKey = `${s.dia}|||${vc.hora}|||${vc.tP}|||${vc.prof}`
-          if (recusadasSet.has(vcKey)) continue
           next.add(`${s.id}|||vc|||${vc.hora}`)
         }
       }
@@ -712,7 +970,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     // CRON-008: não aplica nem limpa a seleção aqui — o pai abre o modal premium de
     // confirmação; a seleção só é limpa (via ref.clearAll) após a implantação ser
     // efetivamente confirmada, permitindo cancelar sem perder o que foi selecionado.
-    onAceitar({ sessoes, beforeCount: sessPac.length })
+    onAceitar({ sessoes, beforeCount: sessPac.length, avisoMultiProf: multiProfTerapias })
   }
 
   const sessPac = useMemo(() => {
@@ -720,7 +978,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     const ADMIN_WARN = new Set(["Triagem", "Avaliação Neuropsicológica", "Visita Guiada"])
     const res: { dia: string; hora: string; tP: string; tE?: string; prof: string; unidade: string; tipo: "exist" | "adminSuperv" | "adminWarn" }[] = []
     for (const r of cRows) {
-      if (r["Nome Favorecido"] !== pac || ABA_EXT_NAMES.has(r.Terapia)) continue
+      if (r["Nome Favorecido"] !== pac) continue
       const hm = pm(hiStr(r)) ?? Number(r.HI || 0)
       const hora = fm(hm) || hiStr(r)
       const k = `${r["Dia da Semana"]}|||${hm}|||${r.Terapia}|||${r.Profissional}`
@@ -740,10 +998,21 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
 
   type CellInfo = {
     tP: string; tE?: string; prof: string
-    tipo: "proposta" | "aceito" | "exist" | "adminSuperv" | "adminWarn" | "supervDesloc" | "recusada" | "reservado"
+    // "recusadoFamilia": horário que a família recusou. NÃO é sugestão (buildSugestoes
+    // já o exclui) — existe só para o bloqueio ficar visível no próprio horário, em
+    // vermelho, em vez de o card simplesmente sumir sem explicação.
+    tipo: "proposta" | "aceito" | "exist" | "adminSuperv" | "adminWarn" | "supervDesloc" | "recusada" | "reservado" | "recusadoFamilia"
     unidade: string; target?: string
     sugestaoId?: string
     isVComp?: boolean
+    // Lista estruturada por trás do card "recusadoFamilia" — o modal de detalhe
+    // (aberto ao clicar no card) usa isto. Cada combinação terapia+profissional
+    // carrega TODAS as vezes que foi recusada (data + motivo de cada uma), pra
+    // deixar claro se é uma recusa isolada ou a mesma oferta recusada de novo.
+    recusas?: Array<{
+      tP: string; prof: string
+      ocorrencias: Array<{ ts: number; data: string; motivo?: string }>
+    }>
   }
 
   const cMap: Record<string, CellInfo[]> = {}
@@ -767,6 +1036,47 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     }
   }
 
+  // Horários recusados pela família: buildSugestoes já os exclui das sugestões, mas
+  // sumir sem deixar rastro fazia a grade parecer vazia sem motivo aparente — foi
+  // exatamente o que aconteceu com o paciente Arthur Luiz Maciel Fortes, cujas
+  // sugestões desapareceram todas de uma vez. Entram aqui só como marcação visual
+  // (vermelho, não clicável, sem sugestaoId), para o bloqueio ficar explícito no
+  // próprio horário.
+  // UM card por horário, nunca um por recusa: o mesmo horário costuma acumular
+  // várias recusas (terapias/profissionais diferentes, ou a mesma recusada mais de
+  // uma vez ao longo do tempo). Empilhadas, elas transbordavam a célula e invadiam
+  // as linhas seguintes da grade. O que importa visualmente é "este horário está
+  // bloqueado"; o detalhe de quantas e quais vai no tooltip.
+  const recusasPorSlot: Record<string, typeof recusasPac> = {}
+  for (const r of recusasPac) {
+    const k = `${r.dia}|||${r.hora}`
+    if (!recusasPorSlot[k]) recusasPorSlot[k] = []
+    recusasPorSlot[k].push(r)
+  }
+  for (const [k, lista] of Object.entries(recusasPorSlot)) {
+    // Se o horário já tem uma sessão REAL do paciente (tipo "exist"/adminSuperv/
+    // adminWarn/reservado, inseridas acima a partir de sessPac/reservasConfirmadas),
+    // mostrar a recusa ali é redundante: dayHours já impede qualquer oferta nova
+    // nesse dia/hora por causa da sessão existente, com ou sem a recusa histórica.
+    // O card vermelho ficaria competindo com o card real por atenção sem acrescentar
+    // nada — foi o caso do Adrian às 10:00 (Psicopedagogia real + recusa antiga de
+    // "Aplicador ABA (PS)" empilhadas sem necessidade).
+    if ((cMap[k] ?? []).some(x => x.tipo !== "recusadoFamilia")) continue
+    if (!cMap[k]) cMap[k] = []
+    // n = combinações terapia+profissional distintas recusadas nesse horário — não
+    // o total de recusas (uma combinação pode ter sido recusada mais de uma vez).
+    const n = lista.length
+    cMap[k].push({
+      // Com mais de uma combinação não dá pra eleger uma como "a" recusa do horário
+      // sem mentir sobre as outras — então o título passa a ser a contagem.
+      tP: n === 1 ? lista[0].tP : `${n} recusas neste horário`,
+      prof: n === 1 ? lista[0].prof : "",
+      tipo: "recusadoFamilia",
+      unidade: lista[0].unidade,
+      recusas: lista.map(r => ({ tP: r.tP, prof: r.prof, ocorrencias: r.ocorrencias })),
+    })
+  }
+
   // Todos os cards de proposta sempre visíveis na grade — o estado visual muda, não a presença.
   // mainSlots registra todos os slots principais para impedir que vComps os sobrescrevam.
   const mainSlots = new Set<string>()
@@ -780,10 +1090,10 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     const st  = stOf(s)
     const ae  = getActiveEntry(s)
     const kP  = `${s.dia}|||${s.hora}`
-    // tipo visual: "recusada" se inviavel ou já recusado pelo usuário; "proposta" caso contrário
+    // tipo visual: "recusada" se inviavel; "proposta" caso contrário — recusa da família
+    // não bloqueia mais reoferta (só fica registrada em "rec" para auditoria/histórico).
     // A distinção aceita/não-aceita é feita no render via selectedIds.has(c.sugestaoId)
-    const recKey = `${s.dia}|||${s.hora}|||${ae.tP}|||${ae.prof}`
-    const tipo: CellInfo["tipo"] = st === "inviavel" ? "recusada" : recusadasSet.has(recKey) ? "recusada" : "proposta"
+    const tipo: CellInfo["tipo"] = st === "inviavel" ? "recusada" : "proposta"
     if (!cMap[kP]) cMap[kP] = []
     if (!cMap[kP].some(x => x.sugestaoId === s.id)) {
       cMap[kP].push({ tP: ae.tP, tE: tExib(ae.tP), prof: ae.prof, tipo, unidade: ae.unidade, sugestaoId: s.id })
@@ -806,9 +1116,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
       seenSlot.add(kC)
       if (!cMap[kC]) cMap[kC] = []
       if (!cMap[kC].some(x => x.sugestaoId === vcSugId)) {
-        const recKeyVc = `${s.dia}|||${vc.hora}|||${vc.tP}|||${vc.prof}`
-        const tipoVc: CellInfo["tipo"] = recusadasSet.has(recKeyVc) ? "recusada" : "proposta"
-        cMap[kC].push({ tP: vc.tP, tE: tExib(vc.tP), prof: vc.prof, tipo: tipoVc, unidade: activeUnid, sugestaoId: vcSugId, isVComp: true })
+        cMap[kC].push({ tP: vc.tP, tE: tExib(vc.tP), prof: vc.prof, tipo: "proposta", unidade: activeUnid, sugestaoId: vcSugId, isVComp: true })
       }
     }
   }
@@ -888,19 +1196,23 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
     if (tipo === "aceito")       return { bg: B.blueLt,  bd: B.blue,    label: "Aceito"   }
     if (tipo === "proposta")     return { bg: B.blueLt,  bd: B.blue,    label: null       }
     if (tipo === "recusada")     return { bg: "#fff5f5", bd: "#fca5a5", label: null       }
+    // Vermelho forte e borda sólida: precisa ler como BLOQUEIO, não como sugestão
+    // desbotada — é a diferença entre "não há vaga aqui" e "há vaga, mas a família
+    // recusou". O tom fraco (#fff5f5) já é usado acima para a recusa de sugestão.
+    // "Ver detalhe" no rótulo: única pista visual de que o card abre um modal ao
+    // ser clicado — não há botão de ação aqui como nos cards de proposta.
+    if (tipo === "recusadoFamilia") return { bg: "#fee2e2", bd: "#dc2626", label: "🚫 Recusado · ver detalhe" }
     if (tipo === "reservado")    return { bg: "#f0fdf4", bd: "#16a34a", label: "✅ Implantado" }
     return                              { bg: "#f8fafc", bd: "#e2e8f0", label: null       }
   }
 
   const selectedCount = buildSelectedSessoes().length
 
-  // Verdadeiro quando algum card selecionado tem múltiplas terapias sem wizard completo
-  const hasPendingEsp = Array.from(selectedIds).some(id => {
-    if (id.includes("|||vc|||")) return false
-    const s = sugestoes.find(x => x.id === id)
-    if (!s || s.espAlts.length === 0) return false
-    return espSelIdx[s.id] === undefined || !profConfirmed.has(s.id)
-  })
+  // Cards multi-terapia já vêm com terapia/profissional pré-selecionados (maior
+  // déficit primeiro — ver wizardComplete acima), então nunca ficam "pendentes"
+  // de escolha antes de aceitar. Mantido como constante pra não mexer nos
+  // pontos que ainda leem essa variável (label/estilo do botão "Aceitar").
+  const hasPendingEsp = false
 
   const selectedByEsp: Record<string, number> = {}
   for (const id of selectedIds) {
@@ -934,6 +1246,28 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
   const excessoEsps = new Set<string>(
     pacAllEsp.filter(g => (g.of + (selectedByEsp[g.esp] || 0)) > g.aut).map(g => g.esp)
   )
+
+  // AVISO (nunca bloqueia): 3+ profissionais diferentes atendendo a mesma terapia.
+  // Diferente do hasExcesso/CH Autorizada, que trava a escrita na TiTa, aqui só
+  // pintamos de vermelho e explicamos — o usuário decide se aceita mesmo assim.
+  // Conta o quadro final do paciente: sessões já existentes/implantadas + as
+  // propostas efetivamente selecionadas nesta rodada.
+  const profsPorTerapia: Record<string, Map<string, string>> = {}
+  for (const cells of Object.values(cMap)) {
+    for (const c of cells) {
+      if (c.tipo === "adminSuperv" || c.tipo === "adminWarn" || c.tipo === "supervDesloc" || c.tipo === "recusada") continue
+      if (c.tipo === "proposta" && !(c.sugestaoId && selectedIds.has(c.sugestaoId))) continue
+      const key = normTxt(c.prof)
+      if (!key) continue
+      if (!profsPorTerapia[c.tP]) profsPorTerapia[c.tP] = new Map()
+      if (!profsPorTerapia[c.tP].has(key)) profsPorTerapia[c.tP].set(key, c.prof)
+    }
+  }
+  const multiProfTerapias = Object.entries(profsPorTerapia)
+    .filter(([, m]) => m.size >= 3)
+    .map(([tP, m]) => ({ tP, profs: [...m.values()] }))
+  const multiProfSet = new Set<string>(multiProfTerapias.map(x => x.tP))
+  const hasMultiProf = multiProfTerapias.length > 0
 
   return (
     <>
@@ -1026,25 +1360,34 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                 const espAltCount = Math.max(0, allEsps.length - 1)
                                 const isEspExpanded = expandedEspCardId === c.sugestaoId
                                 const curEspIdx   = mainSug ? (espSelIdx[mainSug.id] ?? 0) : 0
-                                // Wizard multi-terapia: estados derivados
-                                const espIsExplicitlySet = mainSug ? espSelIdx[mainSug.id] !== undefined : true
-                                const wizardComplete = mainSug
-                                  ? (allEsps.length > 1 && espIsExplicitlySet && profConfirmed.has(mainSug.id))
-                                  : false
-                                const espIsPending = mainSug ? (allEsps.length > 1 && !wizardComplete) : false
+                                // Wizard multi-terapia: estados derivados. Terapia/profissional já vêm
+                                // pré-selecionados no índice 0 — que é sempre a maior distância entre
+                                // autorizado e ofertado, porque buildSugestoes já ordena eligibleEsps por
+                                // déficit efetivo desc (ver comentário em hasGap/eligibleEsps). Não exige
+                                // mais escolha explícita pra liberar o card: "Alterar terapia" reabre o
+                                // mesmo picker pra quem quiser trocar.
+                                const wizardComplete = !!mainSug && allEsps.length > 1
+                                const espIsPending = false
                                 const cardEsp = isVCompCard
                                   ? (TERAPIA_TO_ESP[c.tP] ?? null)
                                   : (mainEd?.esp ?? TERAPIA_TO_ESP[c.tP] ?? null)
                                 const isExcesso = isSel && cardEsp !== null && excessoEsps.has(cardEsp)
-                                // Cor do card: amarelo se pendente, vermelho se excesso, verde se selecionado, default caso contrário
-                                const bg  = espIsPending ? "#fefce8" : isExcesso ? "#fff1f2" : (isSel ? "#dcfce7" : cs.bg)
-                                const bd  = espIsPending ? "#fbbf24" : isExcesso ? "#fca5a5" : (isSel ? "#16a34a" : cs.bd)
+                                // Aviso (não bloqueia): esta terapia ficou com 3+ profissionais diferentes
+                                const isMultiProf = isSel && multiProfSet.has(c.tP)
+                                const isVermelho = isExcesso || isMultiProf
+                                // Cor do card: amarelo se pendente, vermelho se excesso/3+ profissionais, verde se selecionado, default caso contrário
+                                const bg  = espIsPending ? "#fefce8" : isVermelho ? "#fff1f2" : (isSel ? "#dcfce7" : cs.bg)
+                                const bd  = espIsPending ? "#fbbf24" : isVermelho ? "#fca5a5" : (isSel ? "#16a34a" : cs.bd)
                                 const isMultiEsp = !!(mainSug && allEsps.length > 1)
                                 const cardClickable = isClickable && (!isMultiEsp || wizardComplete)
                                 return (
                                   <div
                                     key={ci}
-                                    onClick={cardClickable ? () => toggleSelected(c.sugestaoId!) : undefined}
+                                    onClick={
+                                      cardClickable ? () => toggleSelected(c.sugestaoId!)
+                                        : c.tipo === "recusadoFamilia" ? () => onAbrirRecusaDetalhe(d, slot, c.recusas ?? [])
+                                        : undefined
+                                    }
                                     style={{
                                       background: bg,
                                       // Sprint 4: borda sólida também para "reservado" — a implantação na TiTa é
@@ -1054,7 +1397,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                       flex: (isExpanded || isEspExpanded) ? "none" : "1",
                                       boxSizing: "border-box", display: "flex", flexDirection: "column", gap: "2px",
                                       outline: isDisc ? "2px solid #fed7aa" : "none",
-                                      cursor: cardClickable ? "pointer" : "default",
+                                      cursor: (cardClickable || c.tipo === "recusadoFamilia") ? "pointer" : "default",
                                       position: "relative",
                                       opacity: isRecusadaCard ? 0.65 : 1,
                                       zIndex: (isExpanded || isEspExpanded) ? 20 : "auto",
@@ -1066,7 +1409,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                     {!isMultiEsp && (
                                       <>
                                         {isSel && !isExpanded && (
-                                          <span style={{ position: "absolute", top: "3px", right: "4px", fontSize: "10px", fontWeight: 900, color: isExcesso ? "#dc2626" : "#16a34a", lineHeight: 1, pointerEvents: "none" }}>{isExcesso ? "⚠" : "✓"}</span>
+                                          <span style={{ position: "absolute", top: "3px", right: "4px", fontSize: "10px", fontWeight: 900, color: isVermelho ? "#dc2626" : "#16a34a", lineHeight: 1, pointerEvents: "none" }}>{isVermelho ? "⚠" : "✓"}</span>
                                         )}
                                         {isRecusadaCard && (
                                           <span style={{ position: "absolute", top: "2px", right: "4px", fontSize: "9px", lineHeight: 1, pointerEvents: "none", opacity: 0.7 }}>🚫</span>
@@ -1110,8 +1453,10 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                               </div>
                                             ) : isExcesso ? (
                                               <span style={{ fontSize: "9px", fontWeight: 800, color: "#dc2626", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 5px", lineHeight: "1.6" }}>Acima do limite</span>
+                                            ) : isMultiProf ? (
+                                              <span style={{ fontSize: "9px", fontWeight: 800, color: "#dc2626", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 5px", lineHeight: "1.6" }}>3+ profissionais</span>
                                             ) : cs.label ? (
-                                              <span style={{ color: c.tipo === "aceito" ? B.blue : "#374151" }}>{cs.label}</span>
+                                              <span style={{ color: c.tipo === "aceito" ? B.blue : c.tipo === "recusadoFamilia" ? "#dc2626" : "#374151" }}>{cs.label}</span>
                                             ) : null}
                                             {isClickable && c.sugestaoId && (
                                               <button onClick={e => { e.stopPropagation(); const sid = isVCompCard ? c.sugestaoId!.slice(0, c.sugestaoId!.indexOf("|||vc|||")) : c.sugestaoId!; const sug = sugestoes.find(x => x.id === sid); if (!sug) return; const ae = getActiveEntry(sug); setPendingAcao({ sugestao: sug, hora: slot, tP: c.tP, prof: c.prof, unidade: ae.unidade, csvGradeId: ae.csvGradeId, acao: "recusar" }); setAcaoMotivo("") }}
@@ -1155,7 +1500,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                           <div data-esp-dropdown="true" onClick={e => e.stopPropagation()} style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
                                             <div style={{ fontSize: "9px", fontWeight: 800, color: "#374151", marginBottom: "1px" }}>Escolha uma terapia</div>
                                             {allEsps.map((e, i) => {
-                                              const isCurr = espIsExplicitlySet && curEspIdx === i
+                                              const isCurr = curEspIdx === i
                                               return (
                                                 <button key={i}
                                                   onClick={evt => { evt.stopPropagation(); setEspSelIdx(prev => ({ ...prev, [mainSug!.id]: i })); setProfSelIdx(prev => ({ ...prev, [mainSug!.id]: 0 })); setSelIdx(prev => ({ ...prev, [mainSug!.id]: {} })); setProfConfirmed(prev => { const s = new Set(prev); s.delete(mainSug!.id); return s }) }}
@@ -1165,13 +1510,12 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                                 </button>
                                               )
                                             })}
-                                            {/* Estágio 3: lista de profissionais aparece após terapia escolhida */}
-                                            {espIsExplicitlySet && (
-                                              <>
+                                            {/* Lista de profissionais sempre visível — a terapia já vem pré-selecionada */}
+                                            <>
                                                 <div style={{ borderTop: "1px solid #e5e7eb", margin: "2px 0" }} />
                                                 <div style={{ fontSize: "9px", fontWeight: 800, color: "#374151", marginBottom: "1px" }}>Escolha um profissional</div>
                                                 {allProfs.map((p, i) => {
-                                                  const isCurr = profConfirmed.has(mainSug!.id) && (profSelIdx[mainSug!.id] ?? 0) === i
+                                                  const isCurr = (profSelIdx[mainSug!.id] ?? 0) === i
                                                   return (
                                                     <button key={i}
                                                       onClick={evt => { evt.stopPropagation(); setProfSelIdx(prev => ({ ...prev, [mainSug!.id]: i })); setProfConfirmed(prev => { const s = new Set(prev); s.add(mainSug!.id); return s }); setExpandedEspCardId(null) }}
@@ -1181,8 +1525,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                                     </button>
                                                   )
                                                 })}
-                                              </>
-                                            )}
+                                            </>
                                           </div>
                                         )}
 
@@ -1190,7 +1533,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                         {!isEspExpanded && wizardComplete && (
                                           <>
                                             {isSel && (
-                                              <span style={{ position: "absolute", top: "3px", right: "4px", fontSize: "10px", fontWeight: 900, color: isExcesso ? "#dc2626" : "#16a34a", lineHeight: 1, pointerEvents: "none" }}>{isExcesso ? "⚠" : "✓"}</span>
+                                              <span style={{ position: "absolute", top: "3px", right: "4px", fontSize: "10px", fontWeight: 900, color: isVermelho ? "#dc2626" : "#16a34a", lineHeight: 1, pointerEvents: "none" }}>{isVermelho ? "⚠" : "✓"}</span>
                                             )}
                                             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "2px" }}>
                                               <span style={{ fontSize: "10px", fontWeight: 600, color: "#111827", lineHeight: "1.3", overflow: "hidden", textOverflow: "ellipsis", minWidth: 0 }}>{c.tP}</span>
@@ -1203,6 +1546,7 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                                             {isDisc && <div style={{ fontSize: "11px", fontWeight: 700, color: "#ea580c", marginTop: "2px", display: "flex", alignItems: "center", gap: "3px" }}>⚠ {c.unidade}</div>}
                                             <div style={{ fontSize: "10px", fontWeight: 700, marginTop: "auto", display: "flex", alignItems: "center", gap: "3px" }}>
                                               {isExcesso && <span style={{ fontSize: "9px", fontWeight: 800, color: "#dc2626", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 5px", lineHeight: "1.6" }}>Acima do limite</span>}
+                                              {!isExcesso && isMultiProf && <span style={{ fontSize: "9px", fontWeight: 800, color: "#dc2626", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 5px", lineHeight: "1.6" }}>3+ profissionais</span>}
                                               <button
                                                 data-esp-dropdown="true"
                                                 onClick={e => { e.stopPropagation(); setProfConfirmed(prev => { const s = new Set(prev); s.delete(mainSug!.id); return s }); setExpandedEspCardId(c.sugestaoId!); setExpandedProfCardId(null) }}
@@ -1282,12 +1626,15 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                     <button
                       disabled={hasExcesso || hasPendingEsp}
                       onClick={() => !hasExcesso && !hasPendingEsp && handleAceitar()}
-                      style={{ padding: "8px 16px", borderRadius: "9px", border: "none", background: (hasExcesso || hasPendingEsp) ? "#e5e7eb" : "#16a34a", color: (hasExcesso || hasPendingEsp) ? "#9ca3af" : "white", cursor: (hasExcesso || hasPendingEsp) ? "not-allowed" : "pointer", fontFamily: "inherit", fontWeight: 800, fontSize: "12px", boxShadow: (hasExcesso || hasPendingEsp) ? "none" : "0 2px 8px rgba(22,163,74,0.30)" }}>
+                      style={{ padding: "8px 16px", borderRadius: "9px", border: "none", background: (hasExcesso || hasPendingEsp) ? "#e5e7eb" : hasMultiProf ? "#dc2626" : "#16a34a", color: (hasExcesso || hasPendingEsp) ? "#9ca3af" : "white", cursor: (hasExcesso || hasPendingEsp) ? "not-allowed" : "pointer", fontFamily: "inherit", fontWeight: 800, fontSize: "12px", boxShadow: (hasExcesso || hasPendingEsp) ? "none" : hasMultiProf ? "0 2px 8px rgba(220,38,38,0.30)" : "0 2px 8px rgba(22,163,74,0.30)" }}>
                       Aceitar alterações ({n})
                     </button>
                   </div>
-                  <div style={{ fontSize: "10px", color: hasExcesso ? "#dc2626" : hasPendingEsp ? "#d97706" : "var(--muted-foreground)", fontWeight: (hasExcesso || hasPendingEsp) ? 700 : 400 }}>
-                    {hasExcesso ? "⚠ Limite ultrapassado — desmarque sessões em excesso." : hasPendingEsp ? "⚠ Selecione a terapia de todas as sugestões antes de continuar." : "As alterações só serão aplicadas após a confirmação."}
+                  <div style={{ fontSize: "10px", maxWidth: "340px", textAlign: "right", color: (hasExcesso || hasMultiProf) ? "#dc2626" : hasPendingEsp ? "#d97706" : "var(--muted-foreground)", fontWeight: (hasExcesso || hasPendingEsp || hasMultiProf) ? 700 : 400 }}>
+                    {hasExcesso ? "⚠ Limite ultrapassado — desmarque sessões em excesso."
+                      : hasPendingEsp ? "⚠ Selecione a terapia de todas as sugestões antes de continuar."
+                      : hasMultiProf ? `⚠ ${multiProfTerapias.map(x => x.tP).join(", ")} ficará com 3 ou mais profissionais diferentes. O ideal é no máximo 2 por terapia — você pode continuar, mas revise antes.`
+                      : "As alterações só serão aplicadas após a confirmação."}
                   </div>
                 </div>
               </div>
@@ -1377,6 +1724,16 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                 ⚠ Limite ultrapassado. Desmarque sessões em excesso antes de aceitar.
               </div>
             )}
+            {hasMultiProf && (
+              <div style={{ marginTop: "12px", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "8px", padding: "8px 10px", fontSize: "10px", color: "#dc2626", fontWeight: 700, flexShrink: 0 }}>
+                <div>⚠ 3 ou mais profissionais na mesma terapia (ideal: até 2).</div>
+                {multiProfTerapias.map(x => (
+                  <div key={x.tP} style={{ marginTop: "5px", fontWeight: 400 }}>
+                    <span style={{ fontWeight: 700 }}>{x.tP}</span>: {x.profs.map(p => fmtName(p)).join(" · ")}
+                  </div>
+                ))}
+              </div>
+            )}
         </div>
       </div>
     </div>
@@ -1454,134 +1811,6 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
   </>
   )
 })
-
-// ─── AceitesPanel ─────────────────────────────────────────────────────────────
-
-const BUNDLE_STATUS_META = {
-  pendente:   { label: "Pendente",  bg: "#fef3c7", c: "#92400e", bd: "#fbbf24" },
-  confirmado: { label: "Confirmou", bg: "#dcfce7", c: "#14532d", bd: "#86efac" },
-  recusado:   { label: "Recusou",   bg: "#fee2e2", c: "#7f1d1d", bd: "#fca5a5" },
-  inviavel:   { label: "⛔ Inviável", bg: "#f3f4f6", c: "#6b7280", bd: "#d1d5db" },
-  removido_tita: { label: "Removido na TiTa", bg: "#fffbeb", c: "#b45309", bd: "#fcd34d" },
-}
-
-function AceitesPanel({
-  pac, aceites, onUpdate, onVerAll,
-}: {
-  pac: string
-  aceites: AceitePacBundle[]
-  onUpdate: (updated: AceitePacBundle[]) => void
-  onVerAll: () => void
-}) {
-  const [confirmandoId, setConfirmandoId] = useState<string | null>(null)
-  const pacAceites = aceites.filter(a => a.pac === pac)
-  if (!pacAceites.length) return null
-
-  function updateBundle(id: string, patch: Partial<AceitePacBundle>) {
-    onUpdate(aceites.map(a => a.id === id ? { ...a, ...patch } : a))
-  }
-
-  function deleteBundle(id: string) {
-    onUpdate(aceites.filter(a => a.id !== id))
-  }
-
-  function toggleInviavel(bundleId: string, slotKey: string) {
-    const bundle = aceites.find(a => a.id === bundleId)
-    if (!bundle) return
-    const inviavelSlots = bundle.inviavelSlots.includes(slotKey)
-      ? bundle.inviavelSlots.filter(k => k !== slotKey)
-      : [...bundle.inviavelSlots, slotKey]
-    updateBundle(bundleId, { inviavelSlots })
-  }
-
-  return (
-    <div style={{ background: "var(--card)", borderRadius: "14px", border: "1px solid var(--border)", padding: "16px", marginTop: "16px" }}>
-      <div style={{ fontWeight: 800, color: B.navy, fontSize: "13px", marginBottom: "12px" }}>
-        Aceites e Recusas — ocp. paciente
-      </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
-        {pacAceites.map(bundle => {
-          const sm = BUNDLE_STATUS_META[bundle.status]
-          const d  = new Date(bundle.ts)
-          const dateStr = `${d.getDate().toString().padStart(2, "0")}/${(d.getMonth() + 1).toString().padStart(2, "0")} ${d.getHours().toString().padStart(2, "0")}:${d.getMinutes().toString().padStart(2, "0")}`
-          return (
-            <div key={bundle.id} style={{ border: "1px solid var(--border)", borderRadius: "12px", padding: "12px", background: "var(--card)" }}>
-              {/* Bundle header */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                  <span style={{ fontSize: "11px", fontWeight: 700, color: "var(--muted-foreground)" }}>{dateStr}</span>
-                  <span style={{ fontSize: "10px", fontWeight: 600, color: "var(--muted-foreground)", background: "var(--muted)", padding: "0 6px", borderRadius: "4px" }}>ocp. paciente</span>
-                  <span style={{ padding: "1px 7px", borderRadius: "5px", fontSize: "11px", fontWeight: 800, background: sm.bg, color: sm.c, border: `1px solid ${sm.bd}` }}>{sm.label}</span>
-                </div>
-                <span style={{ fontSize: "11px", color: "var(--muted-foreground)", flexShrink: 0 }}>{bundle.sessoes.length} sessão(ões)</span>
-              </div>
-
-              {/* Motivo (bundles recusados ou inviáveis) */}
-              {(bundle.status === "inviavel" || bundle.status === "recusado") && bundle.motivo && (
-                <div style={{ background: "#f8fafc", border: "1px solid #e5e7eb", borderRadius: "8px", padding: "7px 10px", marginBottom: "10px", fontSize: "11px", color: "#6b7280" }}>
-                  <span style={{ fontWeight: 700 }}>Justificativa: </span>{bundle.motivo}
-                </div>
-              )}
-
-              {/* Sessões */}
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(155px, 1fr))", gap: "6px", marginBottom: "10px" }}>
-                {bundle.sessoes.map((s, i) => {
-                  const slotKey  = `${s.dia}|||${s.hora}`
-                  const isInv    = bundle.inviavelSlots.includes(slotKey)
-                  const isInvBundle = bundle.status === "inviavel"
-                  return (
-                    <div key={i} style={{ border: `1px solid ${isInv || isInvBundle ? "#fca5a5" : "#e5e7eb"}`, borderRadius: "8px", padding: "7px 9px", background: isInv || isInvBundle ? "#fff1f2" : "white", opacity: isInv ? 0.7 : 1 }}>
-                      <div style={{ fontFamily: "monospace", fontVariantNumeric: "tabular-nums", fontSize: "10px", fontWeight: 800, color: B.navy }}>{s.dia.replace("-feira", "")} {s.hora}</div>
-                      <div style={{ fontSize: "10px", fontWeight: 700, color: "#1f2937", marginTop: "2px" }}>{s.tP}</div>
-                      <div style={{ fontSize: "11px", color: "#6b7280" }}>{fmtName(s.prof)}</div>
-                      {!isInvBundle && (
-                        <button
-                          onClick={() => toggleInviavel(bundle.id, slotKey)}
-                          style={{ ...btnStyle(isInv ? "#f3f4f6" : "#fef2f2", isInv ? "#6b7280" : "#dc2626", isInv ? "#e5e7eb" : "#fca5a5"), fontSize: "10px", marginTop: "5px", width: "100%", textAlign: "center" }}>
-                          {isInv ? "↩ Desfazer" : "⛔ Inviável"}
-                        </button>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-
-              {/* Ações do bundle */}
-              <div style={{ display: "flex", gap: "5px", flexWrap: "wrap", borderTop: "1px solid #f0f0f0", paddingTop: "8px", alignItems: "center" }}>
-                {bundle.status !== "inviavel" && (
-                  <>
-                    <button
-                      onClick={() => updateBundle(bundle.id, { status: "confirmado" })}
-                      style={{ ...btnStyle(bundle.status === "confirmado" ? "#dcfce7" : "#f0fdf4", "#14532d", bundle.status === "confirmado" ? "#86efac" : "#bbf7d0"), fontSize: "10px" }}>
-                      ✓ Responsável Confirmou
-                    </button>
-                    <button
-                      onClick={() => updateBundle(bundle.id, { status: "recusado" })}
-                      style={{ ...btnStyle(bundle.status === "recusado" ? "#fee2e2" : "#fef2f2", "#7f1d1d", bundle.status === "recusado" ? "#fca5a5" : "#fecaca"), fontSize: "10px" }}>
-                      ✗ Recusou
-                    </button>
-                    {bundle.status !== "pendente" && (
-                      <button onClick={() => updateBundle(bundle.id, { status: "pendente" })} style={{ ...btnStyle("#f3f4f6", "#6b7280", "#e5e7eb"), fontSize: "10px" }}>Desfazer</button>
-                    )}
-                  </>
-                )}
-                {confirmandoId === bundle.id ? (
-                  <div style={{ display: "flex", gap: "4px", marginLeft: "auto", alignItems: "center" }}>
-                    <span style={{ fontSize: "10px", color: "#dc2626", fontWeight: 700 }}>Excluir bundle?</span>
-                    <button onClick={() => { deleteBundle(bundle.id); setConfirmandoId(null) }} style={{ ...btnStyle("#fef2f2", "#dc2626", "#fca5a5"), fontSize: "10px" }}>Sim</button>
-                    <button onClick={() => setConfirmandoId(null)} style={{ ...btnStyle("#f3f4f6", "#6b7280", "#e5e7eb"), fontSize: "10px" }}>Não</button>
-                  </div>
-                ) : (
-                  <button onClick={() => setConfirmandoId(bundle.id)} style={{ ...btnStyle("#fef2f2", "#dc2626", "#fca5a5"), fontSize: "10px", marginLeft: "auto" }}>Cancelar</button>
-                )}
-              </div>
-            </div>
-          )
-        })}
-      </div>
-    </div>
-  )
-}
 
 // ─── PacAgendaGrid ────────────────────────────────────────────────────────────
 
@@ -1752,11 +1981,17 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
   const persistAceites = persistPacBundles
   const [invPending, setInvPending] = useState<Sugestao | null>(null)
   const [invMotivo, setInvMotivo]   = useState("")
+  // Modal de detalhe do card "recusadoFamilia" — aberto ao clicar no card, em vez
+  // de depender só do title nativo (que não funciona em toque e não é clicável).
+  const [recusaDetalheAberto, setRecusaDetalheAberto] = useState<{
+    dia: string; hora: string
+    recusas: Array<{ tP: string; prof: string; ocorrencias: Array<{ ts: number; data: string; motivo?: string }> }>
+  } | null>(null)
   const [inputFocused, setInputFocused] = useState(false)
   const [highlightedIdx, setHighlightedIdx] = useState(-1)
   const listboxRef = useRef<HTMLDivElement>(null)
   // CRON-008: sessões aguardando confirmação no modal premium de implantação
-  const [pendingConfirm, setPendingConfirm] = useState<{ sessoes: AceiteSessao[]; beforeCount: number } | null>(null)
+  const [pendingConfirm, setPendingConfirm] = useState<{ sessoes: AceiteSessao[]; beforeCount: number; avisoMultiProf: AvisoMultiProf[] } | null>(null)
   // Confirmação agora chama a API da TiTa (fetch assíncrono) — usado para desabilitar
   // o modal e impedir cancelar/duplo-clique enquanto a chamada está em andamento.
   const [confirmando, setConfirmando] = useState(false)
@@ -1767,6 +2002,36 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     () => aceites.filter(b => b.pac === pac && b.status === "confirmado").flatMap(b => b.sessoes),
     [aceites, pac],
   )
+
+  // Horários recusados pela família, para marcar a grade em vermelho. Mesma regra de
+  // slotsRecusados em buildSugestoes (status do bundle OU recusa slot a slot), para
+  // que o que é BLOQUEADO e o que é MOSTRADO como bloqueado nunca divirjam.
+  // Achado 2026-08-20 (caso Arthur Luiz Maciel Fortes, quarta 13:00): o mesmo
+  // horário pode ter sido recusado mais de uma vez — às vezes para a MESMA
+  // combinação terapia+profissional (a família recusa, o sistema volta a oferecer
+  // exatamente aquilo meses depois, ela recusa de novo), às vezes para combinações
+  // diferentes. Antes isso era achatado num único ponto por combinação, sem data
+  // — no modal ficava impossível saber se era "recusado 1 vez, bloqueando 3
+  // opções" ou "recusado 3 vezes, uma por opção". Agora cada combinação carrega
+  // TODAS as ocorrências (data + motivo), em ordem cronológica.
+  const recusasPac = useMemo(() => {
+    type Ocorrencia = { ts: number; data: string; motivo?: string }
+    const porCombo = new Map<string, { dia: string; hora: string; tP: string; prof: string; unidade: string; ocorrencias: Ocorrencia[] }>()
+    for (const b of aceites) {
+      if (b.pac !== pac) continue
+      for (const s of b.sessoes) {
+        const recusadoNoSlot = b.slotStatus?.[`${s.dia}|||${s.hora}`] === "recusado"
+        if (b.status !== "recusado" && !recusadoNoSlot) continue
+        const k = `${s.dia}|||${s.hora}|||${s.tP}|||${s.prof}`
+        if (!porCombo.has(k)) porCombo.set(k, { dia: s.dia, hora: s.hora, tP: s.tP, prof: s.prof, unidade: s.unidade, ocorrencias: [] })
+        // Ordena pela data real (ts), não pelo texto já formatado — "09/07" vem
+        // antes de "19/08" no calendário, mas depois em ordem alfabética de string.
+        porCombo.get(k)!.ocorrencias.push({ ts: b.ts, data: new Date(b.ts).toLocaleDateString("pt-BR"), motivo: b.motivo })
+      }
+    }
+    for (const combo of porCombo.values()) combo.ocorrencias.sort((a, b) => a.ts - b.ts)
+    return [...porCombo.values()]
+  }, [aceites, pac])
 
   // Reconciliação com a TiTa. A API só grava, não exclui — então uma série pode ser
   // removida diretamente na TiTa sem que o Pulsar saiba. Como o estado "Implantado"
@@ -1812,15 +2077,6 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     }
   }, [pac, cRows, aceites, persistAceites])
 
-  const recusadasSet = useMemo(() => {
-    const s = new Set<string>()
-    for (const r of recGlobal) {
-      if (r.paciente !== pac) continue
-      s.add(`${r.dia}|||${r.hora}|||${r.especialidade}|||${r.profissional}`)
-    }
-    return s
-  }, [recGlobal, pac])
-
   function openInvModal(s: Sugestao) { setInvPending(s); setInvMotivo("") }
   function confirmInv() {
     if (!invPending) return
@@ -1837,9 +2093,9 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
 
   // CRON-008: "Aceitar alterações" não aplica mais direto — abre o modal premium de
   // confirmação. A implantação de fato só ocorre em confirmarImplantacao().
-  function handleAceitar({ sessoes, beforeCount }: { sessoes: AceiteSessao[]; beforeCount: number }) {
+  function handleAceitar({ sessoes, beforeCount, avisoMultiProf }: { sessoes: AceiteSessao[]; beforeCount: number; avisoMultiProf: AvisoMultiProf[] }) {
     if (!sessoes.length) return
-    setPendingConfirm({ sessoes, beforeCount })
+    setPendingConfirm({ sessoes, beforeCount, avisoMultiProf })
   }
 
   function cancelarImplantacao() {
@@ -1980,6 +2236,8 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
         obs: motivo || undefined,
       }))
       sRec([...recGlobal, ...newItems])
+      for (const s of sessoes)
+        registrarRecusa({ origem: "ocp-paciente", paciente: pac, profissional: s.prof, especialidade: s.tP, unidade: s.unidade, dia: s.dia, hora: s.hora, motivo })
     }
 
     if (status === "inviavel" && sInv && !invGlobal.some(x => x.paciente === pac)) {
@@ -2005,6 +2263,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
         })
         .filter(b => b.sessoes.length > 0)
     )
+    registrarReativacao({ origem: "ocp-paciente", paciente: pac, profissional: prof, especialidade: tP, dia, hora })
   }
 
   const stKey = (sugestao: Sugestao) => `${pac}|||${sugestao.id}`
@@ -2076,9 +2335,9 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     const seenOf = new Set<string>()
     for (const r of agend) {
       const rawP = r["Nome Favorecido"]
-      if (!rawP || PACS_ADMIN_OCUP_PAC.has(rawP) || EXCLUIR_GAPS.has(r.Terapia)) continue
+      if (!rawP || PACS_ADMIN_OCUP_PAC.has(rawP)) continue
       const p = agendMergeMap.get(rawP) ?? rawP
-      const espPadrao = TERAPIA_TO_ESP[r.Terapia]
+      const espPadrao = espParaOcupacaoPac(r.Terapia, TERAPIA_TO_ESP)
       if (!espPadrao) continue
       const terapiaExib = String(r["Terapia Exibição"] || r["Terapia Exibicao"] || "").trim()
       const esp = espRealPorExibicao(r.Terapia, terapiaExib, espPadrao)
@@ -2086,24 +2345,24 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       const dk = `${p}|||${r["Dia da Semana"]}|||${hm}|||${r.Terapia}|||${r.Profissional}`
       if (seenOf.has(dk)) continue
       seenOf.add(dk)
-      qtdOf[`${p}|||${esp}`] = (qtdOf[`${p}|||${esp}`] || 0) + 1
+      qtdOf[`${p}|||${esp}`] = (qtdOf[`${p}|||${esp}`] || 0) + pesoOcupacaoAba(r.Terapia)
     }
-    // Reservas aguardando resposta/confirmação também ocupam a vaga — sem isso o
-    // motor de sugestões (buildSugestoes) continuaria ofertando sessões além do que
-    // resta de autorização. `seenOf` evita dupla contagem após a sincronização.
+    // Reservas confirmadas também ocupam a vaga — sem isso o motor de sugestões
+    // (buildSugestoes) continuaria ofertando sessões além do que resta de autorização.
+    // "pendente" não conta mais — nenhum caminho da UI cria esse status hoje.
+    // `seenOf` evita dupla contagem após a sincronização.
     for (const b of aceites) {
-      if (b.status !== "pendente" && b.status !== "confirmado") continue
+      if (b.status !== "confirmado") continue
       if (PACS_ADMIN_OCUP_PAC.has(b.pac)) continue
       for (const s of b.sessoes) {
-        if (EXCLUIR_GAPS.has(s.tP)) continue
-        const esp = TERAPIA_TO_ESP[s.tP]
+        const esp = espParaOcupacaoPac(s.tP, TERAPIA_TO_ESP)
         if (!esp) continue
         const hm = pm(s.hora)
         if (hm === null) continue
         const dk = `${b.pac}|||${s.dia}|||${hm}|||${s.tP}|||${s.prof}`
         if (seenOf.has(dk)) continue
         seenOf.add(dk)
-        qtdOf[`${b.pac}|||${esp}`] = (qtdOf[`${b.pac}|||${esp}`] || 0) + 1
+        qtdOf[`${b.pac}|||${esp}`] = (qtdOf[`${b.pac}|||${esp}`] || 0) + pesoOcupacaoAba(s.tP)
       }
     }
     const qtdAut: Record<string, number> = {}
@@ -2122,7 +2381,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     for (const k of altaSet) delete qtdAut[k]
     const result: Record<string, { dif: number; aut: number; of: number }> = {}
     for (const [k, aut] of Object.entries(qtdAut)) {
-      const of_ = qtdOf[k] || 0
+      const of_ = ceilOcupacaoAba(qtdOf[k] || 0)
       const dif = Math.round((aut - of_) * 10) / 10
       result[k] = { dif, aut, of: of_ }
     }
@@ -2214,6 +2473,34 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
   const [statusFilter, setStatusFilter]   = useState<Set<string>>(new Set())
   const [situacaoOpen, setSituacaoOpen]   = useState(false)
   const [convOpen, setConvOpen]           = useState(false)
+  // "Alterar preferência": quais especialidades priorizar na escolha automática da
+  // terapia de cada card. Vazio = preferência natural (maior distância entre ofertado
+  // e autorizado), que é o padrão e segue valendo sempre que nada é escolhido aqui.
+  const [prefOpen, setPrefOpen]           = useState(false)
+  const [prefEspIds, setPrefEspIds]       = useState<Set<number>>(new Set())
+  const prefEsps = useMemo(
+    () => ESP_PREF_OPCOES.filter(o => prefEspIds.has(o.id)).map(o => o.nome),
+    [prefEspIds],
+  )
+  // Nenhuma especialidade escolhida = preferência natural em vigor.
+  const prefPadrao = prefEspIds.size === 0
+  const alternarPrefEsp = (id: number) => setPrefEspIds(prev => {
+    const next = new Set(prev)
+    if (next.has(id)) next.delete(id); else next.add(id)
+    return next
+  })
+  // Fecha ao clicar fora. O ref envolve gatilho + painel (mesmo padrão de
+  // MultiSearchCombobox), então clicar no próprio gatilho continua alternando.
+  const prefRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    if (!prefOpen) return
+    const fechar = (e: MouseEvent) => {
+      if (prefRef.current?.contains(e.target as Node)) return
+      setPrefOpen(false)
+    }
+    document.addEventListener("mousedown", fechar)
+    return () => document.removeEventListener("mousedown", fechar)
+  }, [prefOpen])
 
   const convenios = useMemo(() => {
     const s = new Set<string>()
@@ -2274,9 +2561,9 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     const seenOf = new Set<string>()
     for (const r of agend) {
       const rawP = r["Nome Favorecido"]
-      if (!rawP || EXCLUIR_GAPS.has(r.Terapia)) continue
+      if (!rawP) continue
       if ((agendMergeMap.get(rawP) ?? rawP) !== pac) continue
-      const espPadrao = TERAPIA_TO_ESP[r.Terapia]
+      const espPadrao = espParaOcupacaoPac(r.Terapia, TERAPIA_TO_ESP)
       if (!espPadrao) continue
       const terapiaExib = String(r["Terapia Exibição"] || r["Terapia Exibicao"] || "").trim()
       const esp = espRealPorExibicao(r.Terapia, terapiaExib, espPadrao)
@@ -2284,24 +2571,24 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       const dk = `${r["Dia da Semana"]}|||${hm}|||${r.Terapia}|||${r.Profissional}`
       if (seenOf.has(dk)) continue
       seenOf.add(dk)
-      qtdOf[esp] = (qtdOf[esp] || 0) + 1
+      qtdOf[esp] = (qtdOf[esp] || 0) + pesoOcupacaoAba(r.Terapia)
     }
     // Sprint 4: implantação na TiTa é imediata e definitiva — reservas confirmadas
     // contam junto com o que já veio de `agend`, num único total (sem "+N" separado
     // à espera de sincronização). `seenOf` evita dupla contagem quando a mesma sessão
     // também aparecer em `agend` após o próximo sync do CSV.
+    // "pendente" não conta mais — nenhum caminho da UI cria esse status hoje.
     for (const b of aceites) {
-      if (b.pac !== pac || (b.status !== "pendente" && b.status !== "confirmado")) continue
+      if (b.pac !== pac || b.status !== "confirmado") continue
       for (const s of b.sessoes) {
-        if (EXCLUIR_GAPS.has(s.tP)) continue
-        const esp = TERAPIA_TO_ESP[s.tP]
+        const esp = espParaOcupacaoPac(s.tP, TERAPIA_TO_ESP)
         if (!esp) continue
         const hm = pm(s.hora)
         if (hm === null) continue
         const dk = `${s.dia}|||${hm}|||${s.tP}|||${s.prof}`
         if (seenOf.has(dk)) continue
         seenOf.add(dk)
-        qtdOf[esp] = (qtdOf[esp] || 0) + 1
+        qtdOf[esp] = (qtdOf[esp] || 0) + pesoOcupacaoAba(s.tP)
       }
     }
     const qtdAut: Record<string, number> = {}
@@ -2319,7 +2606,10 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     }
     for (const esp of altaSet) delete qtdAut[esp]
     return Object.entries(qtdAut)
-      .map(([esp, aut]) => ({ esp, aut, of: qtdOf[esp] || 0, dif: Math.round((aut - (qtdOf[esp] || 0)) * 10) / 10 }))
+      .map(([esp, aut]) => {
+        const of_ = ceilOcupacaoAba(qtdOf[esp] || 0)
+        return { esp, aut, of: of_, dif: Math.round((aut - of_) * 10) / 10 }
+      })
       .sort((a, b) => b.dif - a.dif)
   }, [pac, agend, lRows, agendIdMap, agendMergeMap, aceites])
 
@@ -2330,11 +2620,15 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
     // CRON-008: bundles "confirmado" (Reserva Pendente) são passados para que a vaga
     // implantada saia da lista de sugestões — tanto para o próprio paciente (não pode
     // ser reofertada) quanto para os demais (slot já reservado, ver slotsReservadosOutros).
+    // Bundles "recusado" também são passados: a família já recusou aquele horário
+    // (com justificativa registrada em "rec"), então buildSugestoes não pode reofertá-lo
+    // até a família reativar via "Reativar sugestão" na aba Recusados (ver slotsRecusados).
     // Bundles "pendente" continuam fora do cálculo — preserva o comportamento anterior
     // de manter os cards visíveis enquanto aguardam confirmação do responsável.
-    const aceitesConfirmados = aceites.filter(a => a.status === "confirmado")
-    return buildSugestoes(pac, agend, agendClin, cRows, gapMap, aceitesConfirmados, conv, isLiminar)
-  }, [pac, estrategia, agend, agendClin, cRows, gapMap, pacConvMap, cfg.judicialMap, aceites])
+    const aceitesRelevantes = aceites.filter(a => a.status === "confirmado" || a.status === "recusado")
+    return buildSugestoes(pac, agend, agendClin, cRows, gapMap, aceitesRelevantes, conv, isLiminar, prefEsps)
+    // prefEsps nas deps: trocar a preferência recalcula as sugestões na hora, sem recarregar a página.
+  }, [pac, estrategia, agend, agendClin, cRows, gapMap, pacConvMap, cfg.judicialMap, aceites, prefEsps])
 
   useEffect(() => {
     if (!pac) return
@@ -2353,7 +2647,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") { setSituacaoOpen(false); setConvOpen(false); setDropOpen(false) }
+      if (e.key === "Escape") { setSituacaoOpen(false); setConvOpen(false); setDropOpen(false); setPrefOpen(false) }
     }
     document.addEventListener("keydown", onKey)
     return () => document.removeEventListener("keydown", onKey)
@@ -2400,6 +2694,11 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
             <input
               id="pac-search"
               type="text"
+              // O campo não tinha autoComplete definido, então o Chrome guardava o que
+              // já foi digitado aqui e sobrepunha sua própria caixa de sugestão (preta,
+              // fora do nosso CSS) por cima da lista branca do sistema. "off" some com
+              // ela; a lista própria (role="listbox" abaixo) continua funcionando igual.
+              autoComplete="off"
               aria-label="Buscar paciente"
               aria-autocomplete="list"
               aria-controls={dropOpen ? "pac-listbox" : undefined}
@@ -2451,9 +2750,12 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
               </div>
             )}
           </div>
-          {pac && pacConvMap[pac] && (
-            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginTop: "2px", paddingLeft: "2px" }}>
-              {pacConvMap[pac]}
+          {pac && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", marginTop: "2px", paddingLeft: "2px" }}>
+              <div style={{ fontSize: "12px", color: "var(--muted-foreground)" }}>
+                {pacConvMap[pac] ?? ""}
+              </div>
+              <ObservacaoPacienteBox pac={pac} />
             </div>
           )}
         </div>
@@ -2535,6 +2837,69 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
               )}
             </div>
 
+          </div>
+
+          {/* Alterar preferência — qual terapia o sistema escolhe sozinho em cada card */}
+          <div style={{ display: "flex", gap: "8px" }}>
+            <div ref={prefRef} style={{ position: "relative", flex: 1 }}>
+              <button
+                type="button"
+                aria-expanded={prefOpen}
+                aria-haspopup="listbox"
+                onClick={() => { setPrefOpen(v => !v); setSituacaoOpen(false); setConvOpen(false) }}
+                className="ocup-btn-situacao"
+                style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "space-between", padding: "6px 10px", borderRadius: "8px", fontSize: "11px", fontWeight: 700, cursor: "pointer", fontFamily: "inherit", border: `1px solid ${prefEspIds.size > 0 ? B.navy : "var(--border)"}`, background: prefEspIds.size > 0 ? `${B.navy}15` : "var(--muted)", color: prefEspIds.size > 0 ? B.navy : "var(--card-foreground)" }}>
+                <span>Alterar preferência{prefEspIds.size > 0 ? ` (${prefEspIds.size})` : ""}</span>
+                <span aria-hidden="true" style={{ fontSize: "10px", marginLeft: "4px" }}>{prefOpen ? "▲" : "▼"}</span>
+              </button>
+              {prefOpen && (
+                <div role="radiogroup" aria-label="Preferência de escolha automática da terapia" style={{ position: "absolute", top: "calc(100% + 4px)", right: 0, zIndex: 200, background: "var(--card)", border: "1px solid var(--border)", borderRadius: "12px", boxShadow: "0 8px 24px rgba(0,0,0,.1)", padding: "10px", width: "300px", display: "flex", flexDirection: "column", gap: "7px" }}>
+                  <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--muted-foreground)", letterSpacing: "0.02em" }}>
+                    Como o sistema escolhe a terapia de cada card
+                  </div>
+
+                  {/* Opção 1 — preferência natural. Ativa sempre que nenhuma especialidade está escolhida. */}
+                  <button type="button" role="radio" aria-checked={prefPadrao}
+                    onClick={() => setPrefEspIds(new Set())}
+                    style={{ display: "flex", alignItems: "flex-start", gap: "8px", padding: "9px 10px", borderRadius: "10px", cursor: "pointer", fontFamily: "inherit", textAlign: "left", border: `1px solid ${prefPadrao ? B.navy : "var(--border)"}`, background: prefPadrao ? `${B.navy}0d` : "transparent" }}>
+                    <PrefRadio ativo={prefPadrao} />
+                    <span style={{ display: "flex", flexDirection: "column", gap: "2px", minWidth: 0 }}>
+                      <span style={{ display: "flex", alignItems: "center", gap: "5px", flexWrap: "wrap" }}>
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: prefPadrao ? B.navy : "var(--card-foreground)" }}>Quantidade ofertada mais distante da autorizada</span>
+                        <span style={{ fontSize: "9px", fontWeight: 800, color: "var(--muted-foreground)", background: "var(--muted)", border: "1px solid var(--border)", borderRadius: "4px", padding: "0 4px", lineHeight: "1.6" }}>Padrão</span>
+                      </span>
+                      <span style={{ fontSize: "10px", color: "var(--muted-foreground)", lineHeight: 1.35 }}>
+                        Prioriza a especialidade com o maior vão entre o ofertado e o autorizado.
+                      </span>
+                    </span>
+                  </button>
+
+                  {/* Opção 2 — por especialidade. A caixa de seleção fica dentro do próprio cartão. */}
+                  <div role="radio" aria-checked={!prefPadrao}
+                    style={{ display: "flex", alignItems: "flex-start", gap: "8px", padding: "9px 10px", borderRadius: "10px", border: `1px solid ${!prefPadrao ? B.navy : "var(--border)"}`, background: !prefPadrao ? `${B.navy}0d` : "transparent" }}>
+                    <PrefRadio ativo={!prefPadrao} />
+                    <div style={{ display: "flex", flexDirection: "column", gap: "6px", minWidth: 0, flex: 1 }}>
+                      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        <span style={{ fontSize: "11px", fontWeight: 700, color: !prefPadrao ? B.navy : "var(--card-foreground)" }}>Por especialidade</span>
+                        <span style={{ fontSize: "10px", color: "var(--muted-foreground)", lineHeight: 1.35 }}>
+                          {prefPadrao
+                            ? "Escolha uma ou mais especialidades abaixo para priorizá-las."
+                            : "As escolhidas passam à frente. Nenhuma oferta deixa de aparecer — só muda a ordem."}
+                        </span>
+                      </div>
+                      <MultiSearchCombobox
+                        opcoes={ESP_PREF_OPCOES}
+                        selecionados={prefEspIds}
+                        onToggle={alternarPrefEsp}
+                        placeholder="Todas as especialidades"
+                        nomePlural="especialidades"
+                        ariaLabel="Especialidades a priorizar"
+                      />
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
@@ -2683,11 +3048,11 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
             onAceitar={handleAceitar}
             onInviavel={handleInviavel}
             onAcaoDireta={handleAcaoDireta}
-            recusadasSet={recusadasSet}
             onUndoRecusa={onUndoRecusa}
             reservasConfirmadas={reservasConfirmadas}
+            recusasPac={recusasPac}
+            onAbrirRecusaDetalhe={(dia, hora, recusas) => setRecusaDetalheAberto({ dia, hora, recusas })}
           />
-          <AceitesPanel pac={pac} aceites={aceites} onUpdate={persistAceites} onVerAll={() => {}} />
         </>
       )}
 
@@ -2696,6 +3061,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
           pac={pac}
           sessoesAtuais={pendingConfirm.beforeCount}
           sessoes={pendingConfirm.sessoes}
+          avisoMultiProf={pendingConfirm.avisoMultiProf}
           confirming={confirmando}
           onConfirm={confirmarImplantacao}
           onCancel={cancelarImplantacao}
@@ -2729,6 +3095,83 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
           </div>
         </div>
       )}
+
+      {recusaDetalheAberto && (() => {
+        const combos = recusaDetalheAberto.recusas
+        const { dia, hora } = recusaDetalheAberto
+        function reativarCombo(r: { tP: string; prof: string }) {
+          // Precisa limpar as DUAS representações da mesma recusa: o bundle
+          // (pacBundles/slotStatus, que bloqueia a sugestão) E a entrada em
+          // `rec` (RecItem, que é o que a aba Recusados lê pra decidir o que
+          // mostrar) — handleAcaoDireta/handlePacSlotStatus gravam nas duas ao
+          // recusar, então reativar sem limpar `rec` deixava o item aparecendo
+          // ao mesmo tempo em "Recusados" e "Reativados".
+          sRec?.(recGlobal.filter(x =>
+            !(x.paciente === pac && x.dia === dia && x.hora === hora && x.profissional === r.prof)
+          ))
+          persistAceites(prev => reativarRecusaPaciente(prev, { paciente: pac, profissional: r.prof, dia, hora }))
+          registrarReativacao({ origem: "ocp-paciente", paciente: pac, profissional: r.prof, especialidade: r.tP, dia, hora })
+          setRecusaDetalheAberto(prevState => {
+            if (!prevState) return null
+            const restantes = prevState.recusas.filter(x => !(x.tP === r.tP && x.prof === r.prof))
+            return restantes.length ? { ...prevState, recusas: restantes } : null
+          })
+        }
+        return (
+        <div
+          style={{ position: "fixed", inset: 0, zIndex: 80, display: "flex", alignItems: "center", justifyContent: "center", background: "rgba(0,0,0,.4)", padding: "16px" }}
+          onClick={e => { if (e.target === e.currentTarget) setRecusaDetalheAberto(null) }}
+        >
+          <div style={{ background: "var(--card)", borderRadius: "18px", boxShadow: "0 20px 60px rgba(0,0,0,.2)", maxWidth: "420px", width: "100%", padding: "18px", maxHeight: "80vh", overflowY: "auto" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "7px", fontWeight: 900, fontSize: "15px", marginBottom: "3px", color: "#dc2626" }}>
+              🚫 Recusado pela família
+            </div>
+            <div style={{ fontSize: "12px", color: "var(--muted-foreground)", marginBottom: "14px" }}>
+              {recusaDetalheAberto.dia.replace("-feira", "")} · {recusaDetalheAberto.hora} · {fmtName(pac)}
+            </div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "7px", marginBottom: "14px" }}>
+              {combos.map((r, i) => {
+                // Acha o olho: mesma data + mesmo motivo (ou os dois sem motivo) é a
+                // MESMA recusa que já apareceria idêntica de novo — junta numa linha só
+                // em vez de repetir a data (achado real: duas linhas "23/06/2026" iguais
+                // uma embaixo da outra, sem nada que as diferenciasse).
+                const vistos = new Set<string>()
+                const linhas: typeof r.ocorrencias = []
+                for (const o of r.ocorrencias) {
+                  const k = `${o.data}|||${o.motivo ?? ""}`
+                  if (vistos.has(k)) continue
+                  vistos.add(k)
+                  linhas.push(o)
+                }
+                return (
+                <div key={i} style={{ background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "10px", padding: "8px 11px" }}>
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", gap: "8px" }}>
+                    <div style={{ fontSize: "12.5px", fontWeight: 700, color: "#7f1d1d" }}>{r.tP} · {fmtName(r.prof)}</div>
+                    {r.ocorrencias.length > 1 && (
+                      <span style={{ fontSize: "10px", fontWeight: 800, color: "#7f1d1d", background: "rgba(255,255,255,.6)", border: "1px solid #fca5a5", borderRadius: "4px", padding: "0 5px", flexShrink: 0 }}>
+                        {r.ocorrencias.length}x
+                      </span>
+                    )}
+                  </div>
+                  {linhas.map((o, j) => (
+                    <div key={j} style={{ fontSize: "11px", color: "#991b1b", marginTop: "2px" }}>
+                      {o.data}{o.motivo && <span> — "{o.motivo}"</span>}
+                    </div>
+                  ))}
+                  <button onClick={() => reativarCombo(r)} style={{ marginTop: "6px", width: "100%", padding: "5px 10px", borderRadius: "7px", border: "1px solid #fca5a5", background: "rgba(255,255,255,.7)", color: "#7f1d1d", cursor: "pointer", fontFamily: "inherit", fontWeight: 700, fontSize: "11.5px" }}>
+                    ↺ Reativar
+                  </button>
+                </div>
+                )
+              })}
+            </div>
+            <button onClick={() => setRecusaDetalheAberto(null)} style={{ width: "100%", padding: "8px 16px", borderRadius: "10px", background: "var(--muted)", color: "var(--card-foreground)", border: "none", cursor: "pointer", fontFamily: "inherit", fontWeight: 600, fontSize: "13px" }}>
+              Fechar
+            </button>
+          </div>
+        </div>
+        )
+      })()}
     </>
   )
 }

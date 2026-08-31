@@ -44,10 +44,12 @@ interface Ocorrencia {
   valor: number | null
 }
 
-/** Datas reais (ISO) de cada dia da semana (1-5) dentro do mês, excluindo
- *  feriados — mesma regra de exclusão de getCalendario, só que devolvendo as
- *  datas em vez de só a contagem, pra poder listar sessão por sessão. */
-function diasDoMesPorDow(ano: number, mes: number, feriados: Record<string, FeriadoInfo>): Record<1 | 2 | 3 | 4 | 5, string[]> {
+/** Datas reais (ISO) de cada dia da semana (1-5) dentro do mês — SEM excluir
+ *  feriados aqui: quem decide o que fazer com um feriado é quem consome o
+ *  resultado (sessão a sessão não deve listar sessão em dia de feriado, mas
+ *  "Receita por dia do mês" precisa mostrar a data com R$0,00 pra deixar
+ *  claro por que ela não fatura, em vez de simplesmente sumir da tabela). */
+function diasDoMesPorDow(ano: number, mes: number): Record<1 | 2 | 3 | 4 | 5, string[]> {
   const resultado: Record<1 | 2 | 3 | 4 | 5, string[]> = { 1: [], 2: [], 3: [], 4: [], 5: [] }
   const dim = new Date(ano, mes, 0).getDate()
   for (let d = 1; d <= dim; d++) {
@@ -55,7 +57,6 @@ function diasDoMesPorDow(ano: number, mes: number, feriados: Record<string, Feri
     const dow = dt.getDay()
     if (dow < 1 || dow > 5) continue
     const iso = `${ano}-${String(mes).padStart(2, "0")}-${String(d).padStart(2, "0")}`
-    if (feriados[iso]) continue
     resultado[dow as 1 | 2 | 3 | 4 | 5].push(iso)
   }
   return resultado
@@ -75,8 +76,8 @@ export function ProjecaoFinanceiraDetalheModal({
   periodosEnriquecidos, mesReferencia, labelMesReferencia, feriados, cRows, onClose,
 }: Props) {
   const porDow = useMemo(
-    () => mesReferencia ? diasDoMesPorDow(mesReferencia.ano, mesReferencia.mes, feriados) : null,
-    [mesReferencia, feriados],
+    () => mesReferencia ? diasDoMesPorDow(mesReferencia.ano, mesReferencia.mes) : null,
+    [mesReferencia],
   )
 
   const ocorrencias = useMemo((): Ocorrencia[] => {
@@ -92,6 +93,7 @@ export function ProjecaoFinanceiraDetalheModal({
         if (!melhor) continue
         const convenio = primeiroConvenioDoPaciente(melhor.paciente, cRows)
         for (const data of datas) {
+          if (feriados[data]) continue // feriado: não tem sessão real nesse dia
           linhas.push({
             data, dataLabel: fmtData(data), diaSemana: s.dia, hora: melhor.hora, turno: melhor.turno,
             paciente: melhor.paciente, terapia,
@@ -102,18 +104,31 @@ export function ProjecaoFinanceiraDetalheModal({
       }
     }
     return linhas.sort((a, b) => a.data.localeCompare(b.data) || a.hora.localeCompare(b.hora))
-  }, [periodosEnriquecidos, porDow, cRows])
+  }, [periodosEnriquecidos, porDow, cRows, feriados])
 
   const resumoPorDia = useMemo(() => {
-    const mapa = new Map<string, { data: string; dataLabel: string; diaSemana: string; qtd: number; receita: number }>()
+    const mapa = new Map<string, { data: string; dataLabel: string; diaSemana: string; qtd: number; receita: number; feriado: string | null }>()
     for (const o of ocorrencias) {
-      const atual = mapa.get(o.data) ?? { data: o.data, dataLabel: o.dataLabel, diaSemana: o.diaSemana, qtd: 0, receita: 0 }
+      const atual = mapa.get(o.data) ?? { data: o.data, dataLabel: o.dataLabel, diaSemana: o.diaSemana, qtd: 0, receita: 0, feriado: null }
       atual.qtd += 1
       atual.receita += o.valor ?? 0
       mapa.set(o.data, atual)
     }
+    // Datas que teriam sessão pelo dia da semana marcado, mas caem em feriado —
+    // precisam aparecer na tabela com R$0,00 e o motivo, não simplesmente sumir.
+    if (porDow) {
+      for (const s of periodosEnriquecidos) {
+        const dow = dowDeDiaSemana(s.dia)
+        if (dow === null) continue
+        for (const data of porDow[dow as 1 | 2 | 3 | 4 | 5]) {
+          const feriado = feriados[data]
+          if (!feriado || mapa.has(data)) continue
+          mapa.set(data, { data, dataLabel: fmtData(data), diaSemana: s.dia, qtd: 0, receita: 0, feriado: feriado.nome })
+        }
+      }
+    }
     return [...mapa.values()].sort((a, b) => a.data.localeCompare(b.data))
-  }, [ocorrencias])
+  }, [ocorrencias, porDow, periodosEnriquecidos, feriados])
 
   const totalCenario1 = useMemo(() => ocorrencias.reduce((s, o) => s + (o.valor ?? 0), 0), [ocorrencias])
 
@@ -123,14 +138,17 @@ export function ProjecaoFinanceiraDetalheModal({
     for (const s of periodosEnriquecidos) {
       const dow = dowDeDiaSemana(s.dia)
       if (dow === null) continue
-      const ocorrenciasMes = porDow[dow as 1 | 2 | 3 | 4 | 5].length
+      // porDow traz TODAS as datas do dia da semana (feriado incluído, ver
+      // diasDoMesPorDow) — precisa descontar feriado aqui, senão conta uma
+      // ocorrência que não existe de verdade (sem sessão real nesse dia).
+      const ocorrenciasMes = porDow[dow as 1 | 2 | 3 | 4 | 5].filter(data => !feriados[data]).length
       for (const candidatos of candidatosPorVaga(s.candidatos).values()) {
         const segundo = candidatos.find(c => c.ordemNaVaga === 2) ?? candidatos.find(c => c.ordemNaVaga === 1)
         total += (segundo?.valorSessaoProjetado ?? 0) * ocorrenciasMes
       }
     }
     return total
-  }, [periodosEnriquecidos, porDow])
+  }, [periodosEnriquecidos, porDow, feriados])
 
   const faixaMin = Math.min(totalCenario1, totalCenario2)
   const faixaMax = Math.max(totalCenario1, totalCenario2)
@@ -171,9 +189,18 @@ export function ProjecaoFinanceiraDetalheModal({
             {resumoPorDia.map(row => (
               <tr key={row.data} className="border-b border-border last:border-b-0">
                 <td className="px-3 py-1.5 font-mono tabular-nums text-foreground">{row.dataLabel}</td>
-                <td className="px-3 py-1.5 text-foreground">{diaCurto(row.diaSemana)}</td>
+                <td className="px-3 py-1.5 text-foreground">
+                  {diaCurto(row.diaSemana)}
+                  {row.feriado && (
+                    <span className="ml-1.5 rounded bg-rose-100 px-1.5 py-0.5 text-[10px] font-bold uppercase text-rose-700 dark:bg-rose-900/30 dark:text-rose-400">
+                      Feriado — {row.feriado}
+                    </span>
+                  )}
+                </td>
                 <td className="px-3 py-1.5 text-right tabular-nums text-foreground">{row.qtd}</td>
-                <td className="px-3 py-1.5 text-right tabular-nums font-bold text-emerald-700 dark:text-emerald-400">{fmtReal(row.receita)}</td>
+                <td className={`px-3 py-1.5 text-right tabular-nums font-bold ${row.feriado ? "text-rose-600 dark:text-rose-400" : "text-emerald-700 dark:text-emerald-400"}`}>
+                  {fmtReal(row.receita)}
+                </td>
               </tr>
             ))}
             {!resumoPorDia.length && (

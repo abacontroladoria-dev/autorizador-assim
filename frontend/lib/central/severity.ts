@@ -13,6 +13,7 @@ import {
   Clock3,
   Loader2,
   AlertTriangle,
+  Ban,
   UserMinus,
   UserX,
   type LucideIcon,
@@ -158,6 +159,29 @@ const TOKENS: Record<string, StatusToken> = {
     severidade: 'critico',
     icon: AlertTriangle,
   },
+  // Ícone próprio, e não o triângulo do 'erro', porque as duas coisas pedem
+  // ações opostas: 'erro' é o robô que não terminou (refazer); 'glosa' é a ASSIM
+  // que respondeu recusando (contestar). Sem este token a sessão caía no
+  // FALLBACK e aparecia como a palavra crua "glosa" pintada de pendente.
+  glosa: {
+    key: 'glosa',
+    label: 'Glosa',
+    severidade: 'critico',
+    icon: Ban,
+  },
+  // A recusa aconteceu E uma autorização externa passou a cobrir a sessão (aba
+  // Reconciliação). Não pede nada: existe guia liberada. Mesma palavra da
+  // Auditoria (SITUACAO_CONFIG.GLOSA_RESOLVIDA) porque é o mesmo fato — quem
+  // trabalha nas duas telas não deveria ter de aprender dois nomes para ele.
+  //
+  // Não existe `status_operacional = 'glosa_resolvida'` no banco: este token só
+  // é alcançado pelo ramo do vínculo em `resolverStatus`.
+  glosa_resolvida: {
+    key: 'glosa_resolvida',
+    label: 'Glosa Resolvida',
+    severidade: 'resolvido',
+    icon: CheckCircle2,
+  },
 }
 
 const FALLBACK: StatusToken = {
@@ -174,6 +198,19 @@ export function resolverStatus(item: any): StatusToken {
     item?.status_assim ||
     item?.status ||
     ''
+
+  // Eco local de `situacaoComVinculo` (auditoria-assim/reconciliacao/cobertura.ts):
+  // a cobertura mora em `autorizacoes_vinculos` e nada na `fila_autorizacoes`
+  // muda quando ela é gravada — a linha continua dizendo 'glosa' para sempre. A
+  // tela não pode ficar cobrando tratativa de uma sessão que ela própria acabou
+  // de ler como coberta: seria mostrar como trabalho a fazer algo já feito.
+  //
+  // O `status_operacional` cru é preservado de propósito (quem anexa o vínculo
+  // não o reescreve): é ele que faz `motivoGlosaDaSessao` continuar devolvendo o
+  // motivo da recusa, que segue visível na ficha. O histórico não se apaga.
+  if (String(bruto).toLowerCase() === 'glosa' && item?.vinculo) {
+    return TOKENS.glosa_resolvida
+  }
 
   const token = TOKENS[String(bruto).toLowerCase()]
   if (token) {

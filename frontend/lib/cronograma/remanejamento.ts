@@ -12,7 +12,7 @@
 // os mesmos conjuntos de exclusão de candidatos.ts/simulacaoNovoPrestador.ts —
 // nenhuma regra de negócio é duplicada aqui, só recombinada.
 
-import { pm, turnoFromHora } from "./helpers"
+import { construirProfissionaisOcupados, pm, profissionalEstaOcupado, turnoFromHora } from "./helpers"
 import { ABA_EXT, HORAS_GRID } from "./constants"
 import { IGNORAR_NO_SEQUENCIAMENTO } from "./candidatos"
 import { hiStr, pacientesDaUnidadeNoDia, type GapItem, type Turno } from "./simulacaoNovoPrestador"
@@ -51,12 +51,17 @@ export interface IndiceRemanejamento {
 }
 
 export function construirIndiceRemanejamento(cRows: CsvRow[]): IndiceRemanejamento {
+  // Vaga "Livre" gêmea de um horário já agendado do mesmo profissional (ver
+  // construirProfissionaisOcupados em helpers.ts) — checado ANTES do loop
+  // principal porque a linha "Agendado" real pode vir depois da "Livre" gêmea
+  // dentro de cRows.
+  const profOcupado = construirProfissionaisOcupados(cRows)
   const livre = new Set<string>()
   const agendadoPorPacDiaHora = new Map<string, CsvRow>()
   const agendadoMovivelPorPac = new Map<string, CsvRow[]>()
   for (const r of cRows) {
     const status = r["Status do Agendamento"]
-    if (status === "Livre" && r["Profissional"]) {
+    if (status === "Livre" && r["Profissional"] && !profissionalEstaOcupado(profOcupado, r["Profissional"], r["Dia da Semana"], hiStr(r))) {
       livre.add(`${r["Profissional"]}|||${r["Dia da Semana"]}|||${hiStr(r)}|||${rowUnidade(r)}`)
     } else if (status === "Agendado" && r["Nome Favorecido"]) {
       const pac = r["Nome Favorecido"]
@@ -77,6 +82,13 @@ export function construirIndiceRemanejamento(cRows: CsvRow[]): IndiceRemanejamen
  *  horário em que o profissional simplesmente não atua. */
 function profissionalLivre(profissional: string, dia: string, hora: string, unidade: string, cRows: CsvRow[], indice?: IndiceRemanejamento): boolean {
   if (indice) return indice.livre.has(`${profissional}|||${dia}|||${hora}|||${unidade}`)
+  const ocupado = cRows.some(r =>
+    r["Status do Agendamento"] === "Agendado" &&
+    r["Profissional"] === profissional &&
+    r["Dia da Semana"] === dia &&
+    hiStr(r) === hora,
+  )
+  if (ocupado) return false
   return cRows.some(r =>
     r["Status do Agendamento"] === "Livre" &&
     r["Profissional"] === profissional &&

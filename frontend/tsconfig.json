@@ -37,5 +37,11 @@
       "noImplicitAny": false
     }
   },
-  "exclude": ["node_modules", "supabase", "../nina-api-oficial"]
+  "exclude": [
+    "node_modules",
+    "supabase",
+    "../nina-api-oficial",
+    "services/reboot/**",
+    "hooks/useProfissionaisReboot.ts"
+  ]
 }

@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { listarSalas, listarAlocacoes, buscarLinhasAgendaParaSalas, listarExclusividadesTerapia } from "@/services/salas.service"
+import { listarSalas, listarAlocacoes, buscarLinhasAgendaParaSalas, buscarTurnosBloqueioAdministrativo, listarExclusividadesTerapia, listarTodosProfissionaisSalas, type ProfissionalOpcao } from "@/services/salas.service"
+import { listarTerapiasFiltro } from "@/services/agenda.service"
 import { calcularOcupacaoDaSala, calcularResumoUnidades, construirNomeDaSalaPorId } from "@/lib/cronograma/salas"
 import { construirIndiceExclusividadeTerapia } from "@/lib/cronograma/exclusividadeTerapia"
 import { calcularDashboardPacientes } from "@/lib/cronograma/pacientesDashboard"
@@ -32,7 +33,11 @@ export interface UseOcupacaoSalasResult {
   salas: Sala[]
   alocacoes: AlocacaoSala[]
   linhas: AgendaSalaRow[]
+  turnosBloqueioAdmin: AgendaSalaRow[]
   exclusividades: SalaTerapiaExclusiva[]
+  /** Todos os profissionais distintos da grade + terapias vistas na agenda — carregados uma vez aqui (não a cada abertura do modal de alocação) para o AlocarSessaoModal abrir sem round-trip. */
+  profissionaisTodos: ProfissionalOpcao[]
+  terapiasTodas: string[]
   salasComOcupacao: SalaComOcupacao[]
   resumoUnidades: ResumoUnidadeSalas[]
   dashboardPacientes: DashboardPacientesGeral
@@ -56,7 +61,10 @@ export function useOcupacaoSalas(inicio?: string, fim?: string): UseOcupacaoSala
   const [salas, setSalas] = useState<Sala[]>([])
   const [alocacoes, setAlocacoes] = useState<AlocacaoSala[]>([])
   const [linhas, setLinhas] = useState<AgendaSalaRow[]>([])
+  const [turnosBloqueioAdmin, setTurnosBloqueioAdmin] = useState<AgendaSalaRow[]>([])
   const [exclusividades, setExclusividades] = useState<SalaTerapiaExclusiva[]>([])
+  const [profissionaisTodos, setProfissionaisTodos] = useState<ProfissionalOpcao[]>([])
+  const [terapiasTodas, setTerapiasTodas] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [refreshKey, setRefreshKey] = useState(0)
@@ -70,15 +78,25 @@ export function useOcupacaoSalas(inicio?: string, fim?: string): UseOcupacaoSala
       listarSalas(),
       listarAlocacoes(),
       buscarLinhasAgendaParaSalas(periodo.inicio, periodo.fim),
+      buscarTurnosBloqueioAdministrativo(periodo.inicio, periodo.fim),
       listarExclusividadesTerapia(),
     ])
-      .then(([salasData, alocacoesData, linhasData, exclusividadesData]) => {
+      .then(([salasData, alocacoesData, linhasData, turnosBloqueioAdminData, exclusividadesData]) => {
         if (cancelled) return
         setSalas(salasData)
         setAlocacoes(alocacoesData)
         setLinhas(linhasData)
+        setTurnosBloqueioAdmin(turnosBloqueioAdminData)
         setExclusividades(exclusividadesData)
         setLoading(false)
+        // Profissionais/terapias do modal de alocação são carregados só depois
+        // que a grade (as consultas pesadas acima) já terminou — disparar as
+        // duas junto com o resto sobrecarregava o banco a ponto de um dos
+        // statements exceder o timeout ("canceling statement due to statement
+        // timeout"). Não bloqueiam `loading`: a grade aparece na hora, essas
+        // listas só precisam estar prontas antes do usuário abrir o modal.
+        listarTodosProfissionaisSalas().then(data => { if (!cancelled) setProfissionaisTodos(data) })
+        listarTerapiasFiltro().then(data => { if (!cancelled) setTerapiasTodas(data) })
       })
       .catch(err => {
         if (cancelled) return
@@ -145,7 +163,10 @@ export function useOcupacaoSalas(inicio?: string, fim?: string): UseOcupacaoSala
     salas,
     alocacoes,
     linhas,
+    turnosBloqueioAdmin,
     exclusividades,
+    profissionaisTodos,
+    terapiasTodas,
     salasComOcupacao,
     resumoUnidades,
     dashboardPacientes,

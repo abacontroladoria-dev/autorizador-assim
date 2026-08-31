@@ -80,6 +80,110 @@
     --color-central-topbar:  oklch(0.97 0.007 240);
     --color-central-sidebar: oklch(0.94 0.010 240);
     --color-central-panel:   oklch(0.975 0.005 240);
+
+    /* ── TV de chamada (/tv) — matiz 257 ──────────────────────────────────
+       A tela do saguão nascera com hex cravado (#334155 / #e2e8f0 / #cbd5e1
+       / #0f172a + slate-* + blue-600) e três textos abaixo de AA (audit
+       2026-08-14): 2.13:1 no rótulo do card, 3.09:1 no eyebrow do header,
+       3.86:1 na linha da recepção. Estes tokens são os mesmos valores de
+       antes, corrigidos e nomeados.
+
+       Matiz 257 e não os 217 de --color-brand: o azul de fato praticado no
+       app é este (--sidebar-primary #2563EB, --bloco-* em 255) e o próprio
+       comentário da escada de blocos registra a saída deliberada do 217 pra
+       não ter dois azuis brigando. Trocar a TV pelo teal da marca mudaria a
+       cara da tela mais pública da clínica sem ninguém pedir.
+
+       Só tema claro, de propósito: é sinalização numa sala de espera com luz
+       do dia — por isso pode viver no @theme sem o cuidado que as --bloco-*
+       precisam ter com a redefinição em .dark.
+
+       Contrastes conferidos por conversão oklch→sRGB:
+         ink sobre card ......... 16.70:1   (nome, 3:1 exigido)
+         ink sobre panel ........ 16.22:1   (nomes da lista)
+         ink-muted sobre card .... 6.57:1   (4.5 exigido)
+         ink-muted sobre edge ..... 5.88:1
+         ink-muted sobre ground ... 5.37:1
+         bar-muted sobre bar ...... 5.84:1
+         branco sobre bar ........ 10.86:1
+         branco sobre accent ...... 5.17:1
+         accent sobre card ........ 4.99:1  (régua/ícone, não-texto)
+       O accent é o #2563EB do sidebar-primary, para a TV não inventar um
+       terceiro azul de ação.                                              */
+    --color-tv-bar:       oklch(0.360 0.038 257);
+    --color-tv-bar-muted: oklch(0.800 0.022 257);
+    --color-tv-ground:    oklch(0.920 0.016 257);
+    --color-tv-card:      oklch(0.988 0.005 257);
+    --color-tv-card-edge: oklch(0.950 0.012 257);
+    --color-tv-panel:     oklch(0.978 0.008 257);
+    --color-tv-border:    oklch(0.885 0.020 257);
+    --color-tv-ink:       oklch(0.220 0.035 257);
+    --color-tv-ink-muted: oklch(0.470 0.040 257);
+    --color-tv-accent:    #2563EB;
+    --color-tv-accent-dark: #1D4ED8;
+
+    /* O accent tem exatamente dois significados nesta tela, e nenhum deles é
+       decoração: ação primária (o botão de ativar som) e "esta chamada é
+       agora". Régua, ícone de histórico e ícone do modal são neutros de
+       propósito — accent gasto em enfeite deixa de sinalizar qualquer coisa.
+
+       accent-fg é separado do accent porque #2563EB como TEXTO dá 4.14:1 no
+       lado escuro do gradiente do card, abaixo de AA. Medidos:
+         accent-fg sobre card-edge .. 5.37:1
+         accent-fg sobre panel ...... 6.28:1
+         accent (borda) vs ground ... 4.08:1  (3:1 exigido pra limite)
+       warn é o estado degradado na barra escura — 6.15:1 sobre tv-bar. O
+       amber-300 cru que estava ali passava, mas era a única cor da tela fora
+       do sistema. O status-partial do DESIGN.md (#b45309) não serve: foi
+       calibrado pra fundo claro e dá 1.9:1 aqui.                            */
+    --color-tv-accent-fg: #1D4ED8;
+    --color-tv-warn:      oklch(0.82 0.125 78);
+
+    /* Terceira cor da tela, de propósito: até aqui o momento de "seu nome foi
+       chamado" só reusava o mesmo azul do resto (borda "é agora", ícones,
+       botão) em intensidades diferentes — mesmo hue, sem contraste real, e é
+       exatamente o tipo de "acento tímido" que não se destaca de longe. Um
+       laranja quente contra a tela fria em azul é o oposto de decoração: é o
+       único momento em que essa cor aparece, e ela nunca é reaproveitada
+       depois — quando o anúncio termina o card volta pro azul “agora” de
+       sempre. Fica longe do hue do warn (78, amarelo-dourado, "conexão
+       caiu") pra não ler como alerta de erro.
+       Branco sobre signal: 5.2:1 (AA folgado pro selo "Chamando agora"). */
+    --color-tv-signal: #C2410C;
+
+    /* 🎨 PALETA DA MARCA — amostrada do logo-universo-aba.png (contagem de
+       pixels saturados, não a olho):
+         azul  #2C90BC  oklch(0.617 0.111 232)  48012 px  "universo", cenário, o A
+         coral #E47450  oklch(0.682 0.148 38)   32896 px  o B
+         roxo  #9068A8  oklch(0.583 0.105 312)  18736 px  o primeiro A
+         rosa  #DC8CB8  oklch(0.735 0.111 346)   6120 px  tarja direita
+         verde #D0DC9C  oklch(0.870 0.085 117)   5943 px  tarja esquerda
+
+       Usadas SÓ no estado de espera, e só na camada decorativa (ilustração +
+       ambiente). Três motivos pra não ir além disso:
+
+       1. Nenhuma passa 4.5:1 sobre o card (azul 3.52, coral 2.96, roxo 4.33,
+          rosa 2.41, verde 1.42) — nenhuma pode carregar texto. O texto segue
+          em tv-ink (15.33:1). Estas são cor de ilustração, não de conteúdo.
+       2. O coral do logo está em hue 38.4 — o MESMO hue do --color-tv-signal
+          (#C2410C, 38.4). Um segundo laranja na tela competiria com o único
+          significado que laranja tem aqui: "estão te chamando agora". Coral e
+          rosa ficam de fora do ambiente por isso.
+       3. Dosagem 60/30/10 sobre os elementos colorIDOS: azul domina (é o maior
+          share do logo e o hue mais perto do azul-ardósia da tela), roxo
+          apoia, verde aparece só na planta — onde a cor é literal.
+
+       Só o -soft entra em área grande; os cheios são traço fino de ilustração,
+       que não exige contraste de texto (decoração, WCAG 1.4.11 não se aplica).
+       Prefixo tv-brand pra deixar explícito que não são cor de estado: quem
+       mexer no card de chamada não alcança estas.
+
+       Declaradas em :root e não aqui no @theme, pela mesma razão das --bloco-*
+       acima: `@theme inline` substitui o valor direto no utilitário e NÃO emite
+       a custom property, então `fill="var(--color-tv-brand-blue)"` num atributo
+       de SVG não resolve nada e a forma some. Verificado no build: a ilustração
+       inteira renderizou vazia. Como estas cores são consumidas por atributo de
+       SVG (fill/stroke), elas precisam existir em tempo de execução. */
 }
 
 :root {
@@ -147,6 +251,31 @@
     --bloco-cap: oklch(0.932 0.032 255.585);
     --bloco-cap-borda: oklch(0.900 0.045 255);
     --bloco-borda: oklch(0.865 0.055 255);
+
+    /* 🎨 paleta do logo da clínica, usada só no estado de espera da /tv — o
+       porquê de cada cor e as medidas de contraste estão no @theme acima, junto
+       das outras --color-tv-*. Aqui em :root porque são consumidas como var()
+       crua em atributo de SVG, que o @theme inline não alcança. */
+    --color-tv-brand-blue:   oklch(0.617 0.111 232);
+    --color-tv-brand-purple: oklch(0.583 0.105 312);
+    --color-tv-brand-green:  oklch(0.870 0.085 117);
+    /* versões lavadas pro fundo/ambiente: chroma baixo, L alto — o mesmo hue
+       do logo sem virar bloco de cor atrás de texto */
+    --color-tv-brand-blue-soft:  oklch(0.955 0.024 232);
+    --color-tv-brand-green-soft: oklch(0.962 0.030 117);
+    /* O verde do logo (L 0.87) dá 1.36:1 sobre o card — invisível como TRAÇO.
+       Esta é a mesma folha, escurecida só o bastante pro contorno aparecer a 4 m
+       (3.41:1, acima do piso de 3:1); o verde claro do logo continua sendo o
+       PREENCHIMENTO da folha. */
+    --color-tv-brand-green-ink: oklch(0.620 0.105 128);
+
+    /* Dourado do sino da pílula (pedido do usuário). NÃO é o --color-tv-warn
+       (hue 78, "conexão caiu") nem o --color-tv-signal (hue 38, "chamando
+       agora"): fica em 85, entre os dois, e aparece num único lugar da tela —
+       um ícone decorativo (aria-hidden) dentro de instrução permanente. Como o
+       sino é só ornamento ao lado de uma frase que já diz tudo, ele não precisa
+       passar 3:1; medido, dá 2.36:1 sobre a pílula azul (#C59720). */
+    --color-tv-brand-gold: oklch(0.700 0.135 85);
 
     --sidebar: #F8FAFC;
     --sidebar-foreground: #334155;
@@ -337,6 +466,87 @@ html {
 @keyframes float-card {
   0%, 100% { transform: translateY(0px); }
   50%       { transform: translateY(-10px); }
+}
+
+/* ─── TV de chamada — pulso da chamada ───────────────────────────────────
+   Dura do sino até o fim da fala, não só o sino: é a janela inteira em que o
+   pai precisa olhar pra tela, não só o segundo do "ding".
+   Cor é --color-tv-signal (laranja, #C2410C = 194,65,12), não o azul do
+   accent — antes disso o momento "seu nome foi chamado" só reusava o mesmo
+   azul do resto da tela em intensidades diferentes, e por isso ficava
+   tímido: sem contraste de matiz, só de brilho. Laranja quente contra a tela
+   fria em azul é o que faz o olho notar de longe.
+   Ainda sem 0%/100% ligado-desligado (nada pisca liga/desliga abrupto, só
+   cresce e relaxa) porque a sala é de clínica ABA, onde luz piscando de
+   verdade incomoda — bold na cor e no tamanho, não no strobe.
+   Batida dupla (dois picos por ciclo) lê como "pulso" — o próprio nome da
+   marca — em vez de "coisa esticando". */
+@keyframes tv-heartbeat {
+  0%, 28%, 100% {
+    transform: scale(1);
+    box-shadow: 0 25px 70px rgba(16, 27, 43, 0.15);
+  }
+  14% {
+    transform: scale(1.075);
+    box-shadow: 0 0 140px 20px rgba(194, 65, 12, 0.65);
+  }
+  42% {
+    transform: scale(1.035);
+    box-shadow: 0 0 90px 10px rgba(194, 65, 12, 0.42);
+  }
+}
+.tv-heartbeat {
+  animation: tv-heartbeat 1.3s ease-in-out infinite;
+}
+
+/* Os três anéis que ecoam pra fora do card enquanto a chamada toca — como
+   uma onda de som se propagando. Grossos, opacos e expandindo bem além do
+   card (1 → 1.4), pra sobrar visível mesmo do fundo da sala. */
+@keyframes tv-pulse-ring {
+  0% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+  70%, 100% {
+    transform: scale(1.4);
+    opacity: 0;
+  }
+}
+.tv-pulse-ring {
+  animation: tv-pulse-ring 1.3s cubic-bezier(0.25, 0.8, 0.4, 1) infinite;
+}
+
+/* Auréola atrás do card: brilho radial que respira por baixo de tudo,
+   sangrando pro cinza ao redor — é o que faz o pulso se notar na visão
+   periférica sem pintar a tela inteira de uma cor chapada (o que já foi
+   tentado e não fez sentido: tapava o próprio conteúdo). */
+@keyframes tv-aura {
+  0%, 100% { opacity: 0.5; }
+  14%       { opacity: 1; }
+  42%       { opacity: 0.75; }
+}
+.tv-aura {
+  animation: tv-aura 1.3s ease-in-out infinite;
+}
+
+/* Selo "Chamando agora": entra num pop rápido (não fica repetindo — pisca
+   uma vez e fica firme, o resto do trabalho de chamar atenção é do pulso
+   acima) quando o card muda pra estado de chamada. */
+@keyframes tv-badge-pop {
+  0%   { transform: scale(0.85); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+.tv-badge-pop {
+  animation: tv-badge-pop 0.25s cubic-bezier(0.2, 0.8, 0.3, 1.3) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tv-heartbeat,
+  .tv-pulse-ring,
+  .tv-aura,
+  .tv-badge-pop {
+    animation: none;
+  }
 }
 
 /* ─── FullCalendar — design system ASSIM ─────────────────────────────── */
@@ -687,6 +897,13 @@ html {
 .dark .hover\:bg-gray-100:hover      { background-color: oklch(0.26 0    0);    }
 .dark .hover\:bg-emerald-100:hover   { background-color: oklch(0.32 0.05  160); }
 .dark .hover\:bg-rose-100:hover      { background-color: oklch(0.32 0.05   10); }
+/* Âmbar (matiz 80, o mesmo de .dark .bg-amber-*) faltava só no hover, então a
+   aba "Pendentes" e o botão "Conferir" da Conferência de Filipetas piscavam
+   âmbar claro sobre fundo escuro ao passar o mouse. Um degrau acima do estado
+   de repouso correspondente, como nas outras famílias daqui. */
+.dark .hover\:bg-amber-50:hover      { background-color: oklch(0.28 0.04   80); }
+.dark .hover\:bg-amber-100:hover     { background-color: oklch(0.32 0.05   80); }
+.dark .hover\:bg-amber-200:hover     { background-color: oklch(0.36 0.06   80); }
 .dark .hover\:border-blue-300:hover  { border-color: oklch(0.38 0.06 245); }
 .dark .hover\:border-orange-300:hover { border-color: oklch(0.38 0.06  50); }
 
@@ -702,6 +919,57 @@ html {
 .dark [data-kpi="amber"]  { --kpi-icon-bg: oklch(0.22 0.04  80); --kpi-chip-bg: oklch(0.20 0.025  80); --kpi-chip-border: oklch(0.65 0.12  80 / 0.25); --kpi-card-border: oklch(0.65 0.12  80 / 0.30); }
 .dark [data-kpi="purple"] { --kpi-icon-bg: oklch(0.22 0.04 300); --kpi-chip-bg: oklch(0.20 0.025 300); --kpi-chip-border: oklch(0.55 0.10 300 / 0.25); --kpi-card-border: oklch(0.55 0.10 300 / 0.30); }
 .dark [data-kpi="rose"]   { --kpi-icon-bg: oklch(0.22 0.04  10); --kpi-chip-bg: oklch(0.20 0.025  10); --kpi-chip-border: oklch(0.55 0.10  10 / 0.25); --kpi-card-border: oklch(0.55 0.10  10 / 0.30); }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   .rachurado — "isto foi encerrado", em textura e não em cor
+   ══════════════════════════════════════════════════════════════════════════
+
+   Hachura diagonal levíssima sobre a superfície do elemento. Ela responde a uma
+   pergunta que cor nenhuma responde nesta superfície: os cinco matizes
+   semânticos já estão todos falando (violeta = glosa, rose = descoberta, âmbar =
+   a conferir, esmeralda = liberada, slate = sem efeito), e "este item saiu da
+   fila" não é um sexto estado — é uma qualificação sobre o estado que já está
+   escrito. Textura é o canal livre.
+
+   Usos, todos "encerrado sem pedir mais nada": a sessão cuja glosa foi coberta
+   por uma avulsa, a guia triada como autorização extra, e a autorização
+   cancelada. Cada um conserva o próprio matiz — a hachura não pinta, ela risca.
+
+   `.rachurado-forte` é o mesmo dispositivo, só que mais VISÍVEL — 8% em vez de
+   4%. Existe porque a mesma opacidade não mede igual em toda cor: o slate do
+   cancelamento é ele próprio um cinza sobre fundo quase branco, e 4% de
+   `currentColor` cinza sobre esse fundo lê muito mais fraco do que 4% de violeta
+   sobre fundo branco (mais contraste de partida). Ajustado em tela — reportado
+   como "pode ser um pouco mais forte" — e reservado a essa combinação; os demais
+   usos continuam na opacidade base.
+
+   `currentColor` na cor da listra é o que faz um utilitário servir aos dois:
+   a listra nasce do texto do elemento, então no cartão violeta ela sai violeta e
+   na pílula slate sai slate, sem uma segunda classe e sem entrar no shim escuro
+   (que remapeia cores nomeadas, e aqui não há nenhuma). 4% de opacidade num
+   passo de 6px é o que mede "leve": visível de perto num cartão de 144px, e
+   invisível quando a grade é varrida de cima a baixo — se a textura competisse
+   com a cor, ela teria virado um sexto estado, que é o oposto do que se quer.
+
+   No pseudo-elemento, e não em `background-image` do próprio elemento: os dois
+   usos têm fundo próprio (branco no cartão, `bg-slate-100` na pílula), e um
+   `background-image` substituiria o `background-color` que o Tailwind põe ali.
+   `inherit` no raio para a hachura não vazar dos cantos arredondados. */
+.rachurado, .rachurado-forte { position: relative; }
+.rachurado::after, .rachurado-forte::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    currentColor 0 1px,
+    transparent 1px 6px
+  );
+}
+.rachurado::after       { opacity: 0.04; }
+.rachurado-forte::after { opacity: 0.08; }
 
 /* ══════════════════════════════════════════════════════════════════════════
    FullCalendar — dark mode
@@ -728,6 +996,38 @@ html {
 /* Acompanhamento (Ocupação) — hover de linhas de tabela/lista */
 .acomp-tr { transition: background-color .1s ease; }
 .acomp-tr:hover { background-color: var(--muted); }
+
+/* ─── Sombra de rolagem horizontal (tabelas dentro de overflow-x-auto) ─────
+   /impeccable audit 2026-08-18 (insumos/): tabela de 8-9 colunas dentro de
+   overflow-x-auto não dava nenhuma pista de que havia mais coluna fora da
+   tela — em 375px sumia a ação de abrir a linha, calado.
+
+   Truque clássico (sem JS): duas camadas com attachment:local, da cor do
+   card, que ANDAM com o conteúdo e cobrem a borda quando a rolagem chega no
+   limite daquele lado; por baixo, duas camadas com attachment:scroll (sombra
+   fixa, sempre na borda real do viewport). Onde ainda há conteúdo para
+   revelar, a camada local já rolou embora e a sombra aparece; no limite, a
+   camada local tampa a sombra. Aparece/some sozinho conforme a posição do
+   scroll, nos dois lados. */
+.scroll-fade-x {
+  background:
+    linear-gradient(to right, var(--card) 30%, transparent) left,
+    linear-gradient(to left, var(--card) 30%, transparent) right,
+    linear-gradient(to right, rgba(15, 23, 42, 0.16), transparent) left,
+    linear-gradient(to left, rgba(15, 23, 42, 0.16), transparent) right;
+  background-color: var(--card);
+  background-repeat: no-repeat;
+  background-size: 24px 100%, 24px 100%, 8px 100%, 8px 100%;
+  background-position: 0 0, 100% 0, 0 0, 100% 0;
+  background-attachment: local, local, scroll, scroll;
+}
+.dark .scroll-fade-x {
+  background-image:
+    linear-gradient(to right, var(--card) 30%, transparent),
+    linear-gradient(to left, var(--card) 30%, transparent),
+    linear-gradient(to right, rgba(255, 255, 255, 0.14), transparent),
+    linear-gradient(to left, rgba(255, 255, 255, 0.14), transparent);
+}
 
 /* ══════════════════════════════════════════════════════════════════════════
    Acessibilidade — prefers-reduced-motion

@@ -25,7 +25,8 @@ import {
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
 import { StatusChip, TONE_CHIP, TONE_PANEL } from "@/components/ui/tones"
 import { useToneColor, type Tone } from "@/hooks/useToneColor"
-import { fmt, isCancelado, isSim } from "@/lib/remuneracao/formatacao"
+import { fmt, isSim } from "@/lib/remuneracao/formatacao"
+import { isCancelado } from "@/lib/remuneracao/rotulosExecucao"
 import { formatDateBR } from "@/lib/remuneracao/datas"
 import { bucketDaSessao, composicaoRP } from "@/lib/remuneracao/composicaoRP"
 import type { ProfRemunReal, SessaoComPapel } from "@/lib/remuneracao/calculo"
@@ -446,13 +447,31 @@ export function ModalRemuneracaoRP({ p, periodo, pepResumo, onClose }: Props) {
               <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:flex-wrap" aria-hidden>
                 {!c.soFixo && (
                   <>
-                    <PassoConta moeda tone={tomDoValor(c.valorPA, "green")} icon={<Banknote size={16} />} valor={fmt(c.valorPA)} titulo="PA por sessão"
-                      nota={`${c.remuneradas} ${c.remuneradas === 1 ? "sessão remunerada" : "sessões remuneradas"}`} />
-                    <Conector sinal="+" />
-                    <PassoConta moeda tone={tomDoValor(c.ppd, "blue")} icon={<Sun size={16} />} valor={fmt(c.ppd)} titulo="PPD" nota="diária por período" />
-                    <Conector sinal="+" />
-                    <PassoConta moeda tone={tomDoValor(c.bonusEta, "amber")} icon={<Sparkles size={16} />} valor={fmt(c.bonusEta)} titulo="Bônus ETA"
-                      nota={p.etaWeeksPeriodo > 0 ? `${p.etaWeeksPeriodo} ${p.etaWeeksPeriodo === 1 ? "semana" : "semanas"}` : undefined} />
+                    {c.paPorContrato.length > 1 ? (
+                      <>
+                        {c.paPorContrato.map((item, i) => (
+                          <Fragment key={item.label}>
+                            {i > 0 && <Conector sinal="+" />}
+                            <PassoConta moeda tone={tomDoValor(item.total, "blue")} icon={<Banknote size={16} />}
+                              valor={fmt(item.total)} titulo={item.label} nota={`${item.count}×${fmt(item.rate)}`} />
+                          </Fragment>
+                        ))}
+                        <Conector sinal="=" />
+                        <PassoConta moeda tone={tomDoValor(c.valorPA, "green")} icon={<Wallet size={16} />} valor={fmt(c.valorPA)} titulo="PA total" />
+                      </>
+                    ) : (
+                      <PassoConta moeda tone={tomDoValor(c.valorPA, "green")} icon={<Banknote size={16} />} valor={fmt(c.valorPA)} titulo="PA por sessão"
+                        nota={`${c.remuneradas} ${c.remuneradas === 1 ? "sessão remunerada" : "sessões remuneradas"}`} />
+                    )}
+                    {(c.ppd > 0 || c.bonusEta > 0) && (
+                      <>
+                        <Conector sinal="+" />
+                        <PassoConta moeda tone={tomDoValor(c.ppd, "blue")} icon={<Sun size={16} />} valor={fmt(c.ppd)} titulo="PPD" nota="diária por período" />
+                        <Conector sinal="+" />
+                        <PassoConta moeda tone={tomDoValor(c.bonusEta, "amber")} icon={<Sparkles size={16} />} valor={fmt(c.bonusEta)} titulo="Bônus ETA"
+                          nota={p.etaWeeksPeriodo > 0 ? `${p.etaWeeksPeriodo} ${p.etaWeeksPeriodo === 1 ? "semana" : "semanas"}` : undefined} />
+                      </>
+                    )}
                     <Conector sinal="+" />
                     <PassoConta moeda tone={tomDoValor(c.pe, "purple")} icon={<ClipboardList size={16} />} valor={fmt(c.pe)} titulo="PE proporcional" />
                     <Conector sinal="=" />

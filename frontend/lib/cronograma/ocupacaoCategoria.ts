@@ -7,15 +7,29 @@
 // só trocando o agrupamento de "por profissional" pra "por categoria" — nunca
 // mexe na agenda de ninguém, é só visualização.
 
-import { listarOportunidadesDiretas, listarSlotsLivres, type OportunidadeDireta } from "./disponibilidadeInterna"
+import { listarOportunidadesDiretas, listarSlotsLivres, unidadeDominanteDoDia, type OportunidadeDireta } from "./disponibilidadeInterna"
 import { encontrarCandidatosRemanejamento, construirIndiceRemanejamento, type IndiceRemanejamento } from "./remanejamento"
+import { listarOportunidadesNovoDia, construirIndiceNovoDia, type OportunidadeNovoDia } from "./novoDia"
 import { filtrarCapacidadeLivreReservada, turnoFromHora } from "./helpers"
 import { hiStr, type GapItem, type Turno } from "./simulacaoNovoPrestador"
 import { DIAS_UTIL, TERAPIA_TO_ESP, TODAS_ESP, UNID_COR } from "./constants"
+import type { FaixaCascata, ModoCascataOcupacao } from "./sugestaoContratacao"
 import type { RemanejamentoDetalhe } from "./sugestaoContratacaoTypes"
 import type { CsvRow } from "@/types/cronograma"
 
 const TURNOS: Turno[] = ["manha", "tarde"]
+
+// Mesma cascata 70/60/50 das sugestões automáticas de contratação
+// (sugestaoContratacao.ts) — usada só pra colorir o badge de aproveitamento
+// (BadgeOcupacao), não mais como filtro de corte do ranking (ver
+// rankearOportunidadesInternas: hoje ordena por quantidade de sessões).
+const FAIXAS_CASCATA: readonly FaixaCascata[] = [70, 60, 50]
+
+/** Teto de sessões possíveis por período — 6 horários de manhã + 7 de tarde
+ *  em HORAS_GRID (constants.ts) = 13 no dia inteiro. */
+export const MAX_SESSOES_PERIODO: Record<Turno | "diaInteiro", number> = {
+  manha: 6, tarde: 7, diaInteiro: 13,
+}
 
 export interface VagaCategoria {
   hora: string
@@ -24,10 +38,18 @@ export interface VagaCategoria {
    *  um profissional livre na mesma hora dentro da mesma categoria. */
   profissional: string
   terapia: string
-  status: "livre" | "direto" | "remanejamento"
+  /** "remanejamento-mesmo-dia": a sessão realocada fica no mesmo dia da vaga
+   *  (RemanejamentoDetalhe.de.dia === .para.dia). "remanejamento-outro-dia":
+   *  vai pra outro dia que o paciente já frequenta (ver remanejamento.ts,
+   *  passo 2 de tentarRemanejamento). Distinção só de exibição — nenhuma das
+   *  duas muda a lógica de elegibilidade, só o rótulo/cor/prioridade
+   *  mostrados ao usuário. */
+  status: "livre" | "direto" | "remanejamento-mesmo-dia" | "remanejamento-outro-dia" | "novo-dia"
   paciente?: { pac: string; gap: number; aut: number; of: number }
-  /** Só presente quando status === "remanejamento". */
+  /** Só presente quando status começa com "remanejamento". */
   remanejamento?: RemanejamentoDetalhe
+  /** Só presente quando status === "novo-dia". */
+  novoDia?: OportunidadeNovoDia
 }
 
 /** Gera as vagas de uma categoria (Unidade+Dia+Especialidade), direto +
@@ -50,6 +72,7 @@ export function gerarVagasCategoria(
    * segue funcionando igual sem informar nada.
    */
   diretasPrecalculadas?: OportunidadeDireta[], indiceRemanejamento?: IndiceRemanejamento,
+  novoDiaPrecalculadas?: OportunidadeNovoDia[],
 ): VagaCategoria[] {
   const cRows = filtrarCapacidadeLivreReservada(cRowsBrutos)
   const slots = listarSlotsLivres(cRows).filter(
@@ -71,7 +94,13 @@ export function gerarVagasCategoria(
   const slotsSemDireta: typeof slots = []
   for (const s of slots) {
     const direta = diretaPorSlot.get(`${s.profissional}|||${s.hora}`)
-    if (direta) {
+    // R5.4: a unidade da vaga precisa ser a que já concentra a maioria das
+    // sessões do paciente nesse dia — sem isso, um paciente com 1 sessão
+    // isolada numa unidade (ex.: troca pontual de agenda) vira candidato pra
+    // qualquer vaga dessa unidade minoritária, mesmo o resto do dia dele
+    // sendo noutra unidade. Ver unidadeDominanteDoDia (disponibilidadeInterna.ts).
+    const dominante = direta ? unidadeDominanteDoDia(direta.paciente.pac, dia, cRows) : null
+    if (direta && (!dominante || dominante === unidade)) {
       vagas.push({
         hora: s.hora, turno: turnoFromHora(s.hora), profissional: s.profissional, terapia: s.terapia,
         status: "direto",
@@ -90,21 +119,49 @@ export function gerarVagasCategoria(
   for (const turno of turnosPresentes) {
     for (const { hora, candidato } of encontrarCandidatosRemanejamento(dia, turno, unidade, especialidade, cRows, gapMap, indiceRemanejamento)) {
       if (!candidato.remanejamento) continue
+      // Mesma regra R5.4 aplicada à modalidade "direto" acima — remanejamento
+      // não pode empurrar o paciente pra uma unidade minoritária do dia dele.
+      const dominante = unidadeDominanteDoDia(candidato.paciente, dia, cRows)
+      if (dominante && dominante !== unidade) continue
       const lista = candidatosPorHora.get(hora) ?? []
       lista.push({ pac: candidato.paciente, gap: candidato.gap, aut: candidato.aut, of: candidato.of, remanejamento: candidato.remanejamento })
       candidatosPorHora.set(hora, lista)
     }
   }
 
+  const slotsSemNada: typeof slots = []
   for (const s of slotsSemDireta) {
     const disponiveis = candidatosPorHora.get(s.hora)
     const candidato = disponiveis?.shift()
     if (candidato) {
+      const mesmoDia = candidato.remanejamento.de.dia === candidato.remanejamento.para.dia
       vagas.push({
         hora: s.hora, turno: turnoFromHora(s.hora), profissional: s.profissional, terapia: s.terapia,
-        status: "remanejamento",
+        status: mesmoDia ? "remanejamento-mesmo-dia" : "remanejamento-outro-dia",
         paciente: { pac: candidato.pac, gap: candidato.gap, aut: candidato.aut, of: candidato.of },
         remanejamento: candidato.remanejamento,
+      })
+    } else {
+      slotsSemNada.push(s)
+    }
+  }
+
+  // Modalidade "Novo Dia": só tentada nos slots que sobraram sem Direto nem
+  // Remanejamento — as duas primeiras resolvem a MESMA terapia sem exigir
+  // mudança de rotina do paciente, sempre preferíveis quando existem.
+  const todasNovoDia = (novoDiaPrecalculadas ?? listarOportunidadesNovoDia(cRows, gapMap))
+    .filter(o => o.dia === dia && o.unidade === unidade && o.ancora.especialidade === especialidade)
+  const novoDiaPorSlot = new Map(todasNovoDia.map(o => [`${o.ancora.profissional}|||${o.ancora.hora}`, o]))
+
+  for (const s of slotsSemNada) {
+    const oportunidade = novoDiaPorSlot.get(`${s.profissional}|||${s.hora}`)
+    if (oportunidade) {
+      const g = oportunidade.gapPorEspecialidade[especialidade]
+      vagas.push({
+        hora: s.hora, turno: turnoFromHora(s.hora), profissional: s.profissional, terapia: s.terapia,
+        status: "novo-dia",
+        paciente: { pac: oportunidade.paciente, gap: (g?.aut ?? 0) - (g?.of ?? 0), aut: g?.aut ?? 0, of: g?.of ?? 0 },
+        novoDia: oportunidade,
       })
     } else {
       vagas.push({ hora: s.hora, turno: turnoFromHora(s.hora), profissional: s.profissional, terapia: s.terapia, status: "livre" })
@@ -153,17 +210,39 @@ function limitarPorGapCategoria(
 export interface CategoriaComOportunidade {
   unidade: string
   dia: string
-  turno: Turno
+  /** "diaInteiro" quando `modo` agrupa manhã+tarde numa linha só; senão o turno isolado. */
+  periodo: Turno | "diaInteiro"
   especialidade: string
   qtdDireto: number
-  qtdRemanejamento: number
+  qtdRemanejamentoMesmoDia: number
+  qtdRemanejamentoOutroDia: number
+  qtdNovoDia: number
   qtdLivre: number
+  /** direto + remanejamento (mesmo dia + outro dia) + novo-dia — métrica principal do ranking. */
+  qtdOportunidade: number
+  /** Teto de sessões possíveis nesse período (MAX_SESSOES_PERIODO). */
+  maxSessoes: number
+  /** % da capacidade "Livre" já existente nesse período que já virou
+   *  oportunidade — só usado hoje pra colorir o badge, não filtra mais nada. */
+  pctAproveitamento: number
+  /** Maior faixa da cascata 70/60/50 que pctAproveitamento atinge. */
+  faixa: FaixaCascata
 }
 
-/** Varre TODA combinação Unidade × Dia × Turno × Especialidade (mesmo
- *  espírito de calcularTodosCombos em sugestaoContratacao.ts, só que sem
- *  simular contratação nova — é aproveitamento com quem já está contratado)
- *  e ranqueia por quantidade de oportunidade (direto + remanejamento) —
+export interface RankearOportunidadesInternasOpts {
+  /** Unidades a varrer; omitido/vazio = compara as 3 unidades juntas. */
+  unidades?: ReadonlySet<string>
+  /** "diaInteiro" agrupa manhã+tarde numa linha por dia; "porTurno" mantém uma linha por turno isolado. */
+  modo: ModoCascataOcupacao
+  /** Especialidades a considerar; omitido/vazio = todas (TODAS_ESP). */
+  especialidades?: ReadonlySet<string>
+}
+
+/** Varre Unidade × Dia × (Turno ou dia inteiro, conforme `modo`) ×
+ *  Especialidade (mesmo espírito de calcularTodosCombos em
+ *  sugestaoContratacao.ts, só que sem simular contratação nova — é
+ *  aproveitamento com quem já está contratado) e ranqueia por quantidade de
+ *  sessões de oportunidade (direto + remanejamento + novo-dia) —
  *  equivalente ao painel "Sugestões automáticas de contratação" da
  *  Simulação de Novo Prestador, só que apontando pra onde já dá pra
  *  aproveitar internamente, sem precisar contratar. Só entram combinações
@@ -171,37 +250,94 @@ export interface CategoriaComOportunidade {
  *  usuário a decidir onde olhar. */
 export function rankearOportunidadesInternas(
   cRowsBrutos: CsvRow[], gapMap: Record<string, GapItem>,
+  opts: RankearOportunidadesInternasOpts,
 ): CategoriaComOportunidade[] {
-  // Pré-calculados UMA VEZ pra toda a varredura (3 unidades × 5 dias × 13
-  // especialidades = ~195 combinações) — sem isso, gerarVagasCategoria
+  const { unidades: unidadesFiltro, modo, especialidades } = opts
+  const unidades = unidadesFiltro?.size ? [...unidadesFiltro] : Object.keys(UNID_COR)
+  const listaEspecialidades = especialidades?.size ? [...especialidades] : TODAS_ESP
+
+  // Pré-calculados UMA VEZ pra toda a varredura — sem isso, gerarVagasCategoria
   // recomputava listarOportunidadesDiretas (o dataset inteiro) e refazia
-  // todo scan de remanejamento a cada combinação, multiplicando o custo por
-  // ~195x e travando a aba antes do primeiro paint.
+  // todo scan de remanejamento a cada combinação, multiplicando o custo pelo
+  // nº de combinações e travando a aba antes do primeiro paint.
   const cRows = filtrarCapacidadeLivreReservada(cRowsBrutos)
   const diretasGlobais = listarOportunidadesDiretas(cRows, gapMap)
   const indiceRemanejamento = construirIndiceRemanejamento(cRows)
+  const indiceNovoDia = construirIndiceNovoDia(cRows, gapMap)
+  const novoDiaGlobais = listarOportunidadesNovoDia(cRows, gapMap, indiceNovoDia)
 
   const resultado: CategoriaComOportunidade[] = []
-  for (const unidade of Object.keys(UNID_COR)) {
+  for (const unid of unidades) {
     for (const dia of DIAS_UTIL) {
-      for (const especialidade of TODAS_ESP) {
-        const vagas = gerarVagasCategoria(unidade, dia, especialidade, cRows, gapMap, diretasGlobais, indiceRemanejamento)
+      for (const especialidade of listaEspecialidades) {
+        const vagas = gerarVagasCategoria(unid, dia, especialidade, cRows, gapMap, diretasGlobais, indiceRemanejamento, novoDiaGlobais)
         if (!vagas.length) continue
-        for (const turno of TURNOS) {
-          const doTurno = vagas.filter(v => v.turno === turno)
-          if (!doTurno.length) continue
-          const qtdDireto = doTurno.filter(v => v.status === "direto").length
-          const qtdRemanejamento = doTurno.filter(v => v.status === "remanejamento").length
-          if (qtdDireto + qtdRemanejamento === 0) continue
-          resultado.push({
-            unidade, dia, turno, especialidade, qtdDireto, qtdRemanejamento,
-            qtdLivre: doTurno.filter(v => v.status === "livre").length,
-          })
+
+        const grupos: { periodo: Turno | "diaInteiro"; doGrupo: typeof vagas }[] = modo === "diaInteiro"
+          ? [{ periodo: "diaInteiro", doGrupo: vagas }]
+          : TURNOS.map(turno => ({ periodo: turno, doGrupo: vagas.filter(v => v.turno === turno) }))
+
+        for (const { periodo, doGrupo } of grupos) {
+          if (!doGrupo.length) continue
+          const qtdDireto = doGrupo.filter(v => v.status === "direto").length
+          const qtdRemanejamentoMesmoDia = doGrupo.filter(v => v.status === "remanejamento-mesmo-dia").length
+          const qtdRemanejamentoOutroDia = doGrupo.filter(v => v.status === "remanejamento-outro-dia").length
+          const qtdNovoDia = doGrupo.filter(v => v.status === "novo-dia").length
+          const qtdOportunidade = qtdDireto + qtdRemanejamentoMesmoDia + qtdRemanejamentoOutroDia + qtdNovoDia
+          if (qtdOportunidade === 0) continue
+          const qtdLivre = doGrupo.filter(v => v.status === "livre").length
+          const pctAproveitamento = (qtdOportunidade / doGrupo.length) * 100
+          const faixa = FAIXAS_CASCATA.find(f => pctAproveitamento >= f) ?? 50
+          const maxSessoes = MAX_SESSOES_PERIODO[periodo]
+          resultado.push({ unidade: unid, dia, periodo, especialidade, qtdDireto, qtdRemanejamentoMesmoDia, qtdRemanejamentoOutroDia, qtdNovoDia, qtdLivre, qtdOportunidade, maxSessoes, pctAproveitamento, faixa })
         }
       }
     }
   }
-  return resultado.sort((a, b) => (b.qtdDireto + b.qtdRemanejamento) - (a.qtdDireto + a.qtdRemanejamento))
+  return resultado.sort((a, b) => b.qtdOportunidade - a.qtdOportunidade || b.pctAproveitamento - a.pctAproveitamento)
+}
+
+export interface UnidadeComOportunidade {
+  unidade: string
+  qtdDireto: number
+  qtdRemanejamentoMesmoDia: number
+  qtdRemanejamentoOutroDia: number
+  qtdNovoDia: number
+  qtdLivre: number
+}
+
+/** Compara as 3 unidades pra um mesmo recorte de dia(s)/turno(s)/especialidade
+ *  — equivalente a "Ou fixe numa unidade única" da Simulação de Novo
+ *  Prestador (ranquearUnidades em simulacaoNovoPrestador.ts), só que pra
+ *  oportunidade JÁ existente com quem está contratado, não uma contratação
+ *  hipotética. Sempre varre as 3 unidades, independente de qual (se alguma)
+ *  está selecionada no filtro de "Ocupar por unidade, dia e especialidade" —
+ *  o usuário precisa ver o comparativo mesmo já tendo fixado uma unidade. */
+export function compararUnidadesOportunidade(
+  periodos: { dia: string; turno: Turno }[], especialidade: string, cRows: CsvRow[], gapMap: Record<string, GapItem>,
+): UnidadeComOportunidade[] {
+  const diasPresentes = [...new Set(periodos.map(p => p.dia))]
+  if (!diasPresentes.length || !especialidade) return []
+
+  const cRowsFiltradas = filtrarCapacidadeLivreReservada(cRows)
+  const diretasGlobais = listarOportunidadesDiretas(cRowsFiltradas, gapMap)
+  const indiceRemanejamento = construirIndiceRemanejamento(cRowsFiltradas)
+  const novoDiaGlobais = listarOportunidadesNovoDia(cRowsFiltradas, gapMap, construirIndiceNovoDia(cRowsFiltradas, gapMap))
+
+  return Object.keys(UNID_COR).map(unidade => {
+    let qtdDireto = 0, qtdRemanejamentoMesmoDia = 0, qtdRemanejamentoOutroDia = 0, qtdNovoDia = 0, qtdLivre = 0
+    for (const dia of diasPresentes) {
+      const turnosDoDia = new Set(periodos.filter(p => p.dia === dia).map(p => p.turno))
+      const vagas = gerarVagasCategoria(unidade, dia, especialidade, cRowsFiltradas, gapMap, diretasGlobais, indiceRemanejamento, novoDiaGlobais)
+        .filter(v => turnosDoDia.has(v.turno))
+      qtdDireto += vagas.filter(v => v.status === "direto").length
+      qtdRemanejamentoMesmoDia += vagas.filter(v => v.status === "remanejamento-mesmo-dia").length
+      qtdRemanejamentoOutroDia += vagas.filter(v => v.status === "remanejamento-outro-dia").length
+      qtdNovoDia += vagas.filter(v => v.status === "novo-dia").length
+      qtdLivre += vagas.filter(v => v.status === "livre").length
+    }
+    return { unidade, qtdDireto, qtdRemanejamentoMesmoDia, qtdRemanejamentoOutroDia, qtdNovoDia, qtdLivre }
+  })
 }
 
 /** Quantas sessões "Agendado" já existem nessa Unidade+Especialidade, dentro

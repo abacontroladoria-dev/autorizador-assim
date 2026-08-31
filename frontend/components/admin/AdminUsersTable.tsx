@@ -3,7 +3,6 @@
 import { useRef, useState } from 'react'
 import {
   Ban,
-  ChevronDown,
   CircleCheck,
   KeyRound,
   MoreVertical,
@@ -22,6 +21,9 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
+import { MultiSearchCombobox } from '@/components/cronograma/ui/MultiSearchCombobox'
+
+export type GrupoOption = { id: string; nome: string }
 
 // Cor fixa por unidade — nunca a cor de marca (essa fica reservada a estado/foco).
 // O anel é o que separa o chip de unidade da pill de setor, que usa a mesma família.
@@ -43,25 +45,38 @@ const roleOptions = [
   { value: 'terapeutico', label: 'Terapêutico' },
 ]
 
-// Uma cor por setor — nunca as cores de status (emerald/rose/amber/sky/slate já
-// têm significado fixo em Status; setor usa uma paleta própria pra não colidir).
-const ROLE_STYLES: Record<string, { bg: string; text: string }> = {
-  admin: { bg: 'bg-slate-100', text: 'text-slate-700' },
-  diretoria: { bg: 'bg-orange-100', text: 'text-orange-700' },
-  recepcao: { bg: 'bg-blue-100', text: 'text-blue-700' },
-  autorizacao: { bg: 'bg-violet-100', text: 'text-violet-700' },
-  terapeutico: { bg: 'bg-teal-100', text: 'text-teal-700' },
-  faturamento: { bg: 'bg-cyan-100', text: 'text-cyan-700' },
-  rp: { bg: 'bg-fuchsia-100', text: 'text-fuchsia-700' },
-  cronograma: { bg: 'bg-indigo-100', text: 'text-indigo-700' },
-  disponibilidade_terapeuta: { bg: 'bg-pink-100', text: 'text-pink-700' },
+// Uma cor por grupo — nunca as cores de status (emerald/rose/amber/sky/slate já
+// têm significado fixo em Status; grupo usa uma paleta própria pra não colidir).
+// Os nomes abaixo são os grupos criados pelo seed (um por setor), então a pill
+// mantém a mesma cor que a de setor tinha antes; grupo criado à mão cai no
+// fallback determinístico por nome.
+const GRUPO_STYLES: Record<string, { bg: string; text: string }> = {
+  Administrador: { bg: 'bg-slate-100', text: 'text-slate-700' },
+  Diretoria: { bg: 'bg-orange-100', text: 'text-orange-700' },
+  Recepção: { bg: 'bg-blue-100', text: 'text-blue-700' },
+  Autorização: { bg: 'bg-violet-100', text: 'text-violet-700' },
+  Terapêutico: { bg: 'bg-teal-100', text: 'text-teal-700' },
+  Faturamento: { bg: 'bg-cyan-100', text: 'text-cyan-700' },
+  RP: { bg: 'bg-fuchsia-100', text: 'text-fuchsia-700' },
+  Cronograma: { bg: 'bg-indigo-100', text: 'text-indigo-700' },
+  'Disponib. Terapeuta': { bg: 'bg-pink-100', text: 'text-pink-700' },
 }
 
-function roleStyle(role: string) {
-  return ROLE_STYLES[role] ?? { bg: 'bg-slate-100', text: 'text-slate-700' }
+const GRUPO_PALETA = Object.values(GRUPO_STYLES)
+const SEM_GRUPO_STYLE = { bg: 'bg-slate-50 ring-1 ring-inset ring-slate-200', text: 'text-slate-500' }
+
+// Cor da pill: a do primeiro grupo listado (a lista é alfabética, então a cor é
+// estável e casa com o primeiro nome que aparece no campo).
+function grupoStyle(nomes: string[]) {
+  const nome = nomes[0]
+  if (!nome) return SEM_GRUPO_STYLE
+  if (GRUPO_STYLES[nome]) return GRUPO_STYLES[nome]
+  let hash = 0
+  for (const char of nome) hash = (hash + char.codePointAt(0)!) % GRUPO_PALETA.length
+  return GRUPO_PALETA[hash]
 }
 
-function mesmasUnidades(a: string[], b: string[]) {
+function mesmoConjunto(a: string[], b: string[]) {
   if (a.length !== b.length) return false
   const setB = new Set(b)
   return a.every((u) => setB.has(u))
@@ -69,6 +84,8 @@ function mesmasUnidades(a: string[], b: string[]) {
 
 export default function AdminUsersTable({
   users,
+  grupos,
+  gruposPorUsuario,
   onToggleActive,
   onSaveUser,
   onResendInvite,
@@ -83,8 +100,15 @@ export default function AdminUsersTable({
   onSearchMachineChange,
 }: {
   users: AdminUser[]
+  grupos: GrupoOption[]
+  gruposPorUsuario: Record<string, string[]>
   onToggleActive: (userId: string, active: boolean) => Promise<void>
-  onSaveUser: (userId: string, role: string, unidades: string[]) => Promise<boolean>
+  onSaveUser: (
+    userId: string,
+    role: string,
+    unidades: string[],
+    grupoIds: string[]
+  ) => Promise<boolean>
   onResendInvite: (userId: string, email: string, nome: string, role: string) => Promise<void>
   onDeleteUser: (userId: string) => Promise<void>
   onResetPassword: (userId: string, nome: string, email: string, username: string) => Promise<void>
@@ -167,6 +191,8 @@ export default function AdminUsersTable({
               <UserRow
                 key={user.id}
                 user={user}
+                grupos={grupos}
+                grupoIds={gruposPorUsuario[user.id] ?? []}
                 isLoading={loadingId === user.id}
                 onToggleActive={onToggleActive}
                 onSaveUser={onSaveUser}
@@ -190,6 +216,8 @@ export default function AdminUsersTable({
 
 function UserRow({
   user,
+  grupos,
+  grupoIds,
   isLoading,
   onToggleActive,
   onSaveUser,
@@ -201,9 +229,16 @@ function UserRow({
   onConfirmDelete,
 }: {
   user: AdminUser
+  grupos: GrupoOption[]
+  grupoIds: string[]
   isLoading: boolean
   onToggleActive: (userId: string, active: boolean) => Promise<void>
-  onSaveUser: (userId: string, role: string, unidades: string[]) => Promise<boolean>
+  onSaveUser: (
+    userId: string,
+    role: string,
+    unidades: string[],
+    grupoIds: string[]
+  ) => Promise<boolean>
   onResendInvite: (userId: string, email: string, nome: string, role: string) => Promise<void>
   onResetPassword: (userId: string, nome: string, email: string, username: string) => Promise<void>
   confirmDelete: boolean
@@ -217,21 +252,32 @@ function UserRow({
     return u.unidades && u.unidades.length > 0 ? u.unidades : [...UNIDADES_DISPONIVEIS]
   }
 
-  const [roleDraft, setRoleDraft] = useState(user.role || '')
   const [unidadesDraft, setUnidadesDraft] = useState<string[]>(unidadesEfetivas(user))
+  const [gruposDraft, setGruposDraft] = useState<Set<string>>(new Set(grupoIds))
 
   // Ressincroniza o rascunho quando o usuário é atualizado de fora (ex.: após salvar),
   // ajustando o estado durante a renderização em vez de um useEffect (evita um
   // re-render em cascata — ver https://react.dev/learn/you-might-not-need-an-effect).
-  const [syncedFrom, setSyncedFrom] = useState({ role: user.role, unidades: user.unidades })
-  if (syncedFrom.role !== user.role || syncedFrom.unidades !== user.unidades) {
-    setSyncedFrom({ role: user.role, unidades: user.unidades })
-    setRoleDraft(user.role || '')
+  // `grupoIds` vem de um array recriado a cada render do pai, então a comparação
+  // aqui é pelo conteúdo (chave ordenada), nunca pela identidade.
+  const grupoIdsKey = [...grupoIds].sort().join(',')
+  const [syncedFrom, setSyncedFrom] = useState({
+    unidades: user.unidades,
+    grupos: grupoIdsKey,
+  })
+  if (syncedFrom.unidades !== user.unidades || syncedFrom.grupos !== grupoIdsKey) {
+    setSyncedFrom({ unidades: user.unidades, grupos: grupoIdsKey })
     setUnidadesDraft(unidadesEfetivas(user))
+    setGruposDraft(new Set(grupoIds))
   }
 
+  // Na ordem em que o campo lista (alfabética), pra a cor da pill casar com o
+  // primeiro nome exibido.
+  const nomesGruposDraft = grupos.filter((g) => gruposDraft.has(g.id)).map((g) => g.nome)
+
   const dirty =
-    roleDraft !== (user.role || '') || !mesmasUnidades(unidadesDraft, unidadesEfetivas(user))
+    !mesmoConjunto(unidadesDraft, unidadesEfetivas(user)) ||
+    !mesmoConjunto([...gruposDraft], grupoIds)
   const disabled = isLoading
 
   function toggleUnidade(unidade: string) {
@@ -242,10 +288,19 @@ function UserRow({
     )
   }
 
+  function toggleGrupo(grupoId: string) {
+    setGruposDraft((current) => {
+      const next = new Set(current)
+      if (next.has(grupoId)) next.delete(grupoId)
+      else next.add(grupoId)
+      return next
+    })
+  }
+
   // "Editar" no menu leva o foco pro primeiro campo editável do card (a edição é
   // inline). O Radix devolve o foco ao gatilho ao fechar, então interceptamos.
-  const setorSelectRef = useRef<HTMLSelectElement>(null)
-  const focarSetorAoFechar = useRef(false)
+  const grupoTriggerRef = useRef<HTMLButtonElement>(null)
+  const focarGrupoAoFechar = useRef(false)
 
   return (
     <li className="relative rounded-2xl border border-slate-200 bg-white shadow-[0_1px_2px_rgb(15_23_42/0.04)] transition-[border-color,box-shadow] duration-150 hover:border-slate-300 hover:shadow-md">
@@ -275,28 +330,26 @@ function UserRow({
           </div>
         </div>
 
-        {/* SETOR — pill editável */}
-        <label className={`relative flex w-full max-w-55 items-center ${roleStyle(roleDraft).text}`}>
-          <span className="sr-only">Setor de {user.nome || user.email || 'usuário'}</span>
-          <select
-            ref={setorSelectRef}
-            value={roleDraft}
-            onChange={(event) => setRoleDraft(event.target.value)}
+        {/* GRUPO(S) — pill editável, com a mesma cor que a de setor tinha. O
+            gatilho já mostra os grupos separados por vírgula. O setor (`role`)
+            não é editável aqui de propósito: ele é comparado literalmente em
+            dezenas de policies de RLS, então mora só em Permissões → "Editar
+            perfil", onde a troca é uma decisão consciente. */}
+        <div className={`w-full max-w-55 ${grupoStyle(nomesGruposDraft).text}`}>
+          <MultiSearchCombobox<string>
+            opcoes={grupos}
+            selecionados={gruposDraft}
+            onToggle={toggleGrupo}
+            placeholder="Sem grupo"
+            nomePlural="grupos"
+            resumoCompleto
+            variant="plano"
             disabled={disabled}
-            className={`min-h-11 w-full cursor-pointer appearance-none rounded-full py-2 pl-4 pr-9 text-sm font-semibold outline-none transition focus:outline-none focus:ring-2 focus:ring-brand/30 disabled:cursor-not-allowed disabled:opacity-50 ${roleStyle(roleDraft).bg}`}
-          >
-            {roleOptions.map((option) => (
-              <option key={option.value} value={option.value}>
-                {option.label}
-              </option>
-            ))}
-          </select>
-          <ChevronDown
-            size={14}
-            aria-hidden="true"
-            className="pointer-events-none absolute right-3.5 opacity-60"
+            triggerRef={grupoTriggerRef}
+            ariaLabel={`Grupos de ${user.nome || user.email || 'usuário'}`}
+            className={`min-h-11 cursor-pointer rounded-full py-2 pl-4 pr-3.5 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-50 ${grupoStyle(nomesGruposDraft).bg}`}
           />
-        </label>
+        </div>
 
         {/* UNIDADE(S) — chips empilhados */}
         <div
@@ -355,15 +408,15 @@ function UserRow({
 
             <DropdownMenuContent
               onCloseAutoFocus={(event) => {
-                if (!focarSetorAoFechar.current) return
-                focarSetorAoFechar.current = false
+                if (!focarGrupoAoFechar.current) return
+                focarGrupoAoFechar.current = false
                 event.preventDefault()
-                setorSelectRef.current?.focus()
+                grupoTriggerRef.current?.focus()
               }}
             >
               <DropdownMenuItem
                 onSelect={() => {
-                  focarSetorAoFechar.current = true
+                  focarGrupoAoFechar.current = true
                 }}
               >
                 <Pencil aria-hidden="true" />
@@ -444,7 +497,7 @@ function UserRow({
           <p className="text-sm text-slate-500">Alterações não salvas.</p>
 
           <button
-            onClick={() => onSaveUser(user.id, roleDraft, unidadesDraft)}
+            onClick={() => onSaveUser(user.id, user.role ?? '', unidadesDraft, [...gruposDraft])}
             disabled={disabled}
             className="inline-flex min-h-11 items-center rounded-xl border border-emerald-200 bg-emerald-50 px-4 text-sm font-medium text-emerald-700 transition hover:bg-emerald-100 disabled:opacity-50"
           >

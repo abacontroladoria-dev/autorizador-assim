@@ -1,5 +1,5 @@
 import { DIAS_UTIL, EXCLUIR_OCUP } from "./constants"
-import { pm, isLaudoComAlta, getTurno } from "./helpers"
+import { construirProfissionaisOcupados, pm, isLaudoComAlta, getTurno, profissionalEstaOcupado } from "./helpers"
 import type {
   AfetadaItem,
   AnaliseResult,
@@ -111,6 +111,7 @@ function buildSwap(
   profSaindo: string,
   isRes: (r: CsvRow) => boolean,
   modo: "mantido" | "alterado",
+  profOcupado: Set<string>,
   maxOpcoes = 4,
 ): EstrategiaSwap | null {
   const tipo = modo === "mantido" ? "e2" : "e5"
@@ -126,14 +127,18 @@ function buildSwap(
   )
 
   // Helper: verifica se um profissional tem slot livre em dia/hora/unidade específicos
-  const profTemLivre = (prof: string, dia: string, hora: string, unidade: string): CsvRow | null =>
-    livre.find(r =>
+  // — nunca aceita a vaga se o profissional já tem um horário "Agendado" real
+  // ali (vaga "Livre" gêmea, ver profissionalEstaOcupado em helpers.ts).
+  const profTemLivre = (prof: string, dia: string, hora: string, unidade: string): CsvRow | null => {
+    if (profissionalEstaOcupado(profOcupado, prof, dia, hora)) return null
+    return livre.find(r =>
       String(r.Profissional) === prof &&
       String(r["Dia da Semana"]) === dia &&
       String(r.HI_str) === hora &&
       String(r.Unidade) === unidade &&
       !isRes(r)
     ) ?? null
+  }
 
   // Helper: encontra qualquer prof livre para uma terapia em dia/hora/unidade (excluindo lista)
   const qualquerLivre = (dia: string, hora: string, terapia: string, unidade: string, excluir: string[]): CsvRow | null =>
@@ -143,7 +148,8 @@ function buildSwap(
       terapiasEquivalentes(String(r.Terapia), terapia) &&
       String(r.Unidade) === unidade &&
       !excluir.includes(String(r.Profissional)) &&
-      !isRes(r)
+      !isRes(r) &&
+      !profissionalEstaOcupado(profOcupado, String(r.Profissional), dia, hora)
     ) ?? null
 
   const opcoes: OpcaoSwap[] = []
@@ -297,6 +303,7 @@ function buildDiaMigracao(
   isRes: (r: CsvRow) => boolean,
   modo: "mantido" | "alterado",
   pacTurno: "manhã" | "tarde" | "ambos",
+  profOcupado: Set<string>,
 ): EstrategiaDia | null {
   const tipo = modo === "mantido" ? "e6" : "e7"
   const label = modo === "mantido"
@@ -312,14 +319,16 @@ function buildDiaMigracao(
   const sessDiaOrigem = sessPac.filter(s => s.dia === afetada.dia && !s.isAdmin)
   if (sessDiaOrigem.length < 2) return null // não faz sentido mover um dia com < 2 sessões
 
-  const profTemLivre = (prof: string, dia: string, hora: string, unidade: string): CsvRow | null =>
-    livre.find(r =>
+  const profTemLivre = (prof: string, dia: string, hora: string, unidade: string): CsvRow | null => {
+    if (profissionalEstaOcupado(profOcupado, prof, dia, hora)) return null
+    return livre.find(r =>
       String(r.Profissional) === prof &&
       String(r["Dia da Semana"]) === dia &&
       String(r.HI_str) === hora &&
       String(r.Unidade) === unidade &&
       !isRes(r)
     ) ?? null
+  }
 
   const qualquerLivre = (dia: string, hora: string, terapia: string, unidade: string, excluir: string[]): CsvRow | null =>
     livre.find(r =>
@@ -328,7 +337,8 @@ function buildDiaMigracao(
       terapiasEquivalentes(String(r.Terapia), terapia) &&
       String(r.Unidade) === unidade &&
       !excluir.includes(String(r.Profissional)) &&
-      !isRes(r)
+      !isRes(r) &&
+      !profissionalEstaOcupado(profOcupado, String(r.Profissional), dia, hora)
     ) ?? null
 
   const opcoes: OpcaoDiaMigracao[] = []
@@ -475,6 +485,11 @@ export function buildSaidaAnalise(
   // 4. Turno e helpers
   const pacTurno = getPacTurno(sessPac)
   const livre = (cRows || []).filter(r => r["Status do Agendamento"] === "Livre")
+  // Vaga "Livre" gêmea de um horário já agendado do mesmo profissional (ver
+  // construirProfissionaisOcupados em helpers.ts) — nunca usar essa vaga pra
+  // realocar paciente nenhum, mesmo que o cronograma que está saindo esteja
+  // livre no papel.
+  const profOcupado = construirProfissionaisOcupados(cRows || [])
   const isRes = (r: CsvRow) => reservados.has(`${r.Profissional}|||${r["Dia da Semana"]}|||${r.HI_str}`)
   const isSessaoAfetada = (s: SessPacItem) =>
     s.dia === dia && s.hora === hora && s.terapia === terapia && s.prof === profSaindo
@@ -517,7 +532,7 @@ export function buildSaidaAnalise(
       : null
 
   // ── E2 — Swap de posições, profissionais mantidos ─────────────────────────
-  const e2 = buildSwap(sessPac, afetada, livre, profSaindo, isRes, "mantido")
+  const e2 = buildSwap(sessPac, afetada, livre, profSaindo, isRes, "mantido", profOcupado)
 
   // ── E3 — Mesma terapia, horário adjacente (sem buraco no dia de origem) ───
   let e3: Estrategia | null = null
@@ -618,13 +633,13 @@ export function buildSaidaAnalise(
   }
 
   // ── E5 — Swap de posições, profissionais alterados ────────────────────────
-  const e5 = buildSwap(sessPac, afetada, livre, profSaindo, isRes, "alterado")
+  const e5 = buildSwap(sessPac, afetada, livre, profSaindo, isRes, "alterado", profOcupado)
 
   // ── E6 — Migração de dia, mesmos profissionais ────────────────────────────
-  const e6 = buildDiaMigracao(sessPac, afetada, livre, profSaindo, isRes, "mantido", pacTurno)
+  const e6 = buildDiaMigracao(sessPac, afetada, livre, profSaindo, isRes, "mantido", pacTurno, profOcupado)
 
   // ── E7 — Migração de dia, profissionais diferentes ────────────────────────
-  const e7 = buildDiaMigracao(sessPac, afetada, livre, profSaindo, isRes, "alterado", pacTurno)
+  const e7 = buildDiaMigracao(sessPac, afetada, livre, profSaindo, isRes, "alterado", pacTurno, profOcupado)
 
   return {
     sessPac,

@@ -7,10 +7,11 @@
 // `disponibilidade_terapeuta` não entra aqui: tem fluxo dedicado e rota pública.
 export const roleDefaults: Record<string, string[]> = {
   admin: [
-    'dashboard', 'atendimentos', 'gestao', 'cronograma',
-    'escala_terapeutica', 'agenda_terapeutica', 'salas',
-    'guias_digitais', 'auditoria_assim', 'usuarios', 'permissoes', 'cco',
-    'autorizacoes', 'preauditoria', 'outros_convenios',
+    'dashboard', 'atendimentos', 'autorizacoes_avulsas', 'gestao',
+    'acompanhamento_laudos',
+    'escala_terapeutica',
+    'auditoria_assim', 'usuarios', 'permissoes', 'cco',
+    'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
     'cronograma_disponibilidade_interna',
     'ocupacao_clinica', 'ocupacao_clinica_gaps', 'ocupacao_clinica_inconsistencias',
@@ -19,13 +20,18 @@ export const roleDefaults: Record<string, string[]> = {
     'indicadores_comparativo_sessoes',
     'reposicao_faltas', 'cronograma_ocupacao_salas',
     'cronograma_valores_convenio', 'cadastros_feriados', 'cadastros_contratos', 'cadastros_taxas',
+    'cadastros_convenios',
     'analise_tratativas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
     'relacionamento_prestador_individual',
     'connect',
+    'cadastros_pacientes', 'cadastros_profissionais',
+    'cronograma_por_paciente', 'cronograma_por_profissional',
+    'insumos',
   ],
   diretoria: [
     'dashboard', 'atendimentos', 'gestao',
+    'acompanhamento_laudos',
     'escala_terapeutica', 'auditoria_assim',
     'preauditoria', 'outros_convenios',
     'cronograma_solicitacoes', 'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
@@ -36,20 +42,30 @@ export const roleDefaults: Record<string, string[]> = {
     'indicadores_comparativo_sessoes',
     'reposicao_faltas', 'cronograma_ocupacao_salas',
     'cronograma_valores_convenio', 'cadastros_feriados', 'cadastros_contratos', 'cadastros_taxas',
+    'cadastros_convenios',
     'analise_tratativas',
     'relacionamento_prestador_analise', 'relacionamento_prestador_rp',
     'relacionamento_prestador_individual',
+    'cadastros_pacientes', 'cadastros_profissionais',
+    'cronograma_por_paciente', 'cronograma_por_profissional',
+    'insumos',
   ],
   recepcao: [
-    'dashboard', 'atendimentos', 'gestao', 'auditoria_assim',
-    'autorizacoes', 'outros_convenios',
+    'dashboard', 'atendimentos', 'autorizacoes_avulsas', 'gestao', 'auditoria_assim',
+    'outros_convenios',
+    // A recepção é quem cobra a renovação do laudo vencido — é a dona da tela,
+    // não uma convidada. Os mesmos três papéis estão no ramo por papel da RLS
+    // (20260828150000), senão quem tem a tela pelo papel não conseguiria gravar.
+    'acompanhamento_laudos',
   ],
   autorizacao: [
     'dashboard', 'auditoria_assim',
-    'autorizacoes', 'preauditoria',
+    'preauditoria',
   ],
   terapeutico: ['dashboard', 'escala_terapeutica', 'analise_tratativas'],
-  faturamento: ['dashboard'],
+  // O setor que opera o controle de insumos, junto com admin e diretoria
+  // (definido pelo usuario em 2026-08-18). Ate entao tinha so o dashboard.
+  faturamento: ['dashboard', 'insumos'],
   rp: [
     'dashboard', 'escala_terapeutica',
     'cadastros_feriados', 'cadastros_contratos', 'cadastros_taxas',
@@ -65,6 +81,8 @@ export const roleDefaults: Record<string, string[]> = {
     'cronograma_saida_profissional', 'cronograma_ocupacao_paciente',
     'cronograma_disponibilidade_interna',
     'ocupacao_clinica', 'ocupacao_clinica_gaps', 'ocupacao_clinica_inconsistencias',
+    'cadastros_pacientes', 'cadastros_profissionais',
+    'cronograma_por_paciente', 'cronograma_por_profissional',
   ],
 }
 
@@ -76,17 +94,27 @@ export function getRoleDefaultPermissions(role: string): string[] {
 export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   dashboard: ['/'],
   atendimentos: ['/solicitar'],
+  // Código próprio, e não uma segunda rota dentro de `atendimentos`: a avulsa é a
+  // única tela que INSERE em fila_autorizacoes sem sessão por trás, e quem pode
+  // fazer isso é decisão de setor. Concedido a admin e recepcao — exatamente os
+  // papéis que têm INSERT na RLS da tabela (20260817120000).
+  autorizacoes_avulsas: ['/autorizacoes-avulsas'],
   gestao: ['/central-pacientes'],
-  cronograma: ['/agenda/pacientes'],
+  // Código PRÓPRIO, e não uma segunda rota dentro de `cadastros_pacientes`: quem
+  // opera a fila de laudos vencidos é a RECEPÇÃO, e a recepção não tem
+  // `cadastros_pacientes`. Reaproveitar aquele código daria a tela a quem mantém
+  // o cadastro e a negaria a quem faz a cobrança. A RLS de
+  // public.laudos_acompanhamento exige este mesmo código (20260828150000).
+  acompanhamento_laudos: ['/acompanhamento/laudos'],
   escala_terapeutica: ['/central-terapeutas'],
-  agenda_terapeutica: ['/agenda/terapeutas'],
-  salas: ['/agenda/salas'],
-  guias_digitais: ['/guias-digitais'],
   auditoria_assim: ['/auditoria-assim'],
   usuarios: ['/admin'],
   permissoes: ['/admin/permissoes'],
   cco: ['/cco'],
-  autorizacoes: ['/autorizacoes'],
+  // `autorizacoes` (a rota /autorizacoes) saiu em 2026-08-26: a tela foi
+  // descontinuada e quem chama o responsável agora é a /solicitar. O código
+  // pode continuar existindo em permissões já gravadas de usuários — sem
+  // entrada aqui, `codigosToRotas` simplesmente o ignora (`?? []`).
   preauditoria: ['/preauditoria'],
   outros_convenios: ['/outros-convenios'],
   cronograma_solicitacoes: ['/relacionamento-prestador/solicitacoes'],
@@ -94,9 +122,9 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   cronograma_ocupacao_paciente: ['/cronograma/ocupacao-paciente'],
   cronograma_disponibilidade_interna: ['/relacionamento-prestador/ocupar-profissionais-disponiveis'],
   // Mesmo padrão de Indicadores: /cronograma/ocupacao tem 3 abas
-  // (Aceites e Recusas, Diferença: Laudo e Oferta, Inconsistências e
+  // (Oportunidades Recusadas, Diferença: Laudo e Oferta, Inconsistências e
   // Exceções), cada uma com seu próprio código de permissão.
-  ocupacao_clinica: ['/cronograma/ocupacao?tab=acompanhamento'],
+  ocupacao_clinica: ['/cronograma/ocupacao?tab=oportunidades-recusadas'],
   ocupacao_clinica_gaps: ['/cronograma/ocupacao?tab=gaps'],
   ocupacao_clinica_inconsistencias: ['/cronograma/ocupacao?tab=inconsistencias'],
   // Indicadores: uma rota só (/cronograma/indicadores), abas diferenciadas por
@@ -115,6 +143,10 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   cadastros_feriados: ['/cadastros/feriados'],
   cadastros_contratos: ['/cadastros/contratos'],
   cadastros_taxas: ['/cadastros/taxas-e-parametros'],
+  // Cadastro nativo de Convênios + Planos de Saúde, fonte do select "Plano de
+  // saúde" na Ficha Médica do Cadastro de Pacientes — ver
+  // supabase/migrations/20260826110000_create_convenios_planos_saude.sql.
+  cadastros_convenios: ['/cadastros/convenios'],
   analise_tratativas: ['/analise-tratativas'],
   relacionamento_prestador_analise: ['/relacionamento-prestador/analise'],
   relacionamento_prestador_rp: ['/relacionamento-prestador/rp'],
@@ -128,6 +160,20 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   // decidir pela mesma fonte — e conceder Connect a alguém que não é admin
   // passa a ser um clique em /admin/permissoes, não uma mudança de código.
   connect: ['/connect'],
+  // Sistema próprio de agendamentos/grade (nativo, substituindo gradualmente
+  // o TiTa Therapy) — ver supabase/migrations/20260812140000_create_reboot_pacientes.sql.
+  // Responsável não tem rota própria: é controlado dentro do cadastro do
+  // paciente ("Filiação e responsáveis"), e a RLS de public.responsaveis já é
+  // gated por esta mesma permissão (20260826100200).
+  cadastros_pacientes: ['/cadastros/pacientes'],
+  cadastros_profissionais: ['/cadastros/profissionais'],
+  cronograma_por_paciente: ['/cronograma/por-paciente'],
+  cronograma_por_profissional: ['/cronograma/por-profissional'],
+  // Controle de insumos (porte do AXIUM). Um código só, não os 8 granulares do
+  // AXIUM (compras.ver/aprovar/comprar/…): o acesso definido pelo usuário é por
+  // setor — faturamento, admin e diretoria. Granularizar depois, se aparecer o
+  // caso de quem cota mas não aprova.
+  insumos: ['/insumos'],
 }
 
 // Converte um conjunto de códigos de permissão em rotas permitidas,

@@ -21,18 +21,20 @@ export default function Login() {
       let emailParaLogin = login
 
       if (!login.includes("@")) {
-        const { data: usuario } = await supabase
-          .from("usuarios")
-          .select("email")
-          .eq("username", login)
-          .maybeSingle()
+        // RPC, e não SELECT direto em `usuarios`: este passo roda antes de
+        // autenticar, ou seja como `anon`. Com RLS ligada na tabela não existe
+        // policy pra anon e a leitura voltaria vazia — todo login por username
+        // passaria a dizer "Usuário não encontrado" com a senha certa.
+        // email_por_username é SECURITY DEFINER e responde só o email.
+        const { data: emailDoUsuario, error: erroBusca } = await supabase
+          .rpc("email_por_username", { p_username: login })
 
-        if (!usuario?.email) {
+        if (erroBusca || !emailDoUsuario) {
           setErro("Usuário não encontrado. Verifique e tente novamente.");
           setLoading(false);
           return;
         }
-        emailParaLogin = usuario.email
+        emailParaLogin = emailDoUsuario
       }
 
       const { data, error } = await supabase.auth.signInWithPassword({
@@ -156,10 +158,14 @@ export default function Login() {
                 pointerEvents: "none"
               }}
             />
+            {/* w-64 e não w-44 pelo mesmo motivo do logo mobile: ~40% da
+                largura do arquivo é margem transparente. Sem `drop-shadow-sm`
+                — sombra sob um lockup vazado marca o contorno de cada letra,
+                não o bloco; no logo anterior, opaco, isso não aparecia. */}
             <img
-              src="/logo-universo-aba.png"
-              alt="Universo ABA"
-              className="w-44 h-auto object-contain drop-shadow-sm relative z-10"
+              src="/pulsar-lockup-1920-transparent.png"
+              alt="Pulsar"
+              className="w-64 h-auto object-contain relative z-10"
             />
           </div>
 
@@ -172,25 +178,28 @@ export default function Login() {
             }}
           >
 
-            {/* Logo mobile */}
+            {/* Logo mobile — h-28 e não h-20: o lockup carrega ~40% de margem
+                transparente embutida, então na mesma altura a marca sairia
+                menor que o logo anterior. */}
             <div className="flex justify-center mb-6 sm:hidden">
               <img
-                src="/logo-universo-aba.png"
-                alt="Universo ABA"
-                className="h-20 w-auto object-contain"
+                src="/pulsar-lockup-1920-transparent.png"
+                alt="Pulsar"
+                className="h-28 w-auto object-contain"
               />
             </div>
 
             <div className="mb-7">
               <h1 id="page-title" className="text-2xl font-bold text-balance leading-tight" style={{ color: '#1e5a7d' }}>
-                Sistema PULSAR
-              </h1>
-              <p className="mt-1.5 text-sm" style={{ color: '#6b7280' }}>
                 Clínica Universo ABA
-              </p>
+              </h1>
             </div>
 
-            <form onSubmit={handleLogin} aria-labelledby="page-title" className="space-y-5">
+            {/* aria-label explícito em vez de apontar para o h1: o título agora
+                nomeia a clínica, e "Clínica Universo ABA" sozinho não diz a um
+                leitor de tela o que este formulário faz. O h1 segue com o id
+                porque é referência estável da página. */}
+            <form onSubmit={handleLogin} aria-label="Acessar o Sistema Pulsar" className="space-y-5">
 
               {erro && (
                 <div

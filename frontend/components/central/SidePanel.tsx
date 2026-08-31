@@ -1,7 +1,7 @@
 'use client'
 
 import { memo, useEffect, useState } from 'react'
-import { Repeat2, ChevronDown, RotateCcw } from 'lucide-react'
+import { Repeat2, ChevronDown, ExternalLink, RotateCcw } from 'lucide-react'
 
 import Timeline from './Timeline'
 import StatusBadge from './StatusBadge'
@@ -14,6 +14,9 @@ import {
   realizouPor,
   houveSubstituicao,
 } from '@/lib/central/severity'
+import { completarMotivoGlosa, motivoGlosaDaSessao } from '@/lib/glosa'
+import { rotuloOrigemGuia, rotuloSolicitadoPor } from '@/lib/guiaOrigem'
+import { useGlosaCodigos } from '@/hooks/useGlosaCodigos'
 
 interface Props {
   atendimento: any
@@ -32,6 +35,17 @@ function fraseSituacao(item: any): string {
       return 'Paciente faltou. Avaliar remarcação.'
     case 'erro':
       return 'Atendimento sem autorização. Requer ação manual.'
+    // Frase própria, e não a de 'erro': 'erro' é o robô que não terminou
+    // (refazer); glosa é a ASSIM que respondeu recusando (contestar). Sem este
+    // caso a ficha caía no `default` e repetia o rótulo do badge — "Glosa" — sem
+    // dizer o que fazer a respeito.
+    case 'glosa':
+      return 'A ASSIM recusou a autorização. Requer contestação.'
+    // A recusa continua sendo verdade — e o motivo dela segue logo abaixo desta
+    // frase. O que mudou é que existe guia liberada cobrindo o atendimento, e
+    // por isso não há o que contestar. A guia sai nomeada na seção Autorização.
+    case 'glosa_resolvida':
+      return 'Glosa coberta por autorização externa. Nenhuma ação necessária.'
     case 'processando':
       return 'Autorização em processamento pelo sistema.'
     case 'concluido_sem_guia':
@@ -49,6 +63,9 @@ function SidePanel({ atendimento, onReverterFalta }: Props) {
   const [logsAbertos, setLogsAbertos] = useState(false)
   const [modalReverterAberto, setModalReverterAberto] = useState(false)
   const [loadingReverter, setLoadingReverter] = useState(false)
+  // Antes do early return de "nenhum atendimento": hook não pode ficar atrás de
+  // condicional.
+  const codigosGlosa = useGlosaCodigos()
 
   useEffect(() => {
     async function carregarLogs() {
@@ -90,6 +107,40 @@ function SidePanel({ atendimento, onReverterFalta }: Props) {
   const ui = SEVERIDADE_UI[token.severidade]
   const realizou = realizouPor(atendimento)
   const subbed = houveSubstituicao(atendimento)
+  // Motivo por extenso da recusa. Só existe em sessão glosada — nas demais,
+  // `status_assim` é 'Liberado' e afins. O de-para entra porque a coluna pode
+  // ter vindo do relatório, onde a ASSIM corta o texto em 25 caracteres.
+  const motivoGlosa = completarMotivoGlosa(motivoGlosaDaSessao(atendimento), codigosGlosa)
+
+  // A guia que resolveu a glosa (aba Reconciliação). Ela NÃO substitui o campo
+  // Guia: aquele continua sendo a autorização recusada, porque vincular não
+  // reescreve o pareamento. São dois números diferentes contando a mesma
+  // história, e esconder um deles apaga metade dela.
+  const vinculo = atendimento.vinculo
+  const procedenciaVinculo = vinculo
+    ? [
+        vinculo.vinculado_por ? `vínculo por ${vinculo.vinculado_por}` : null,
+        vinculo.data_execucao
+          ? new Date(vinculo.data_execucao).toLocaleString('pt-BR', {
+              day: '2-digit',
+              month: '2-digit',
+              hour: '2-digit',
+              minute: '2-digit',
+            })
+          : null,
+      ]
+        .filter(Boolean)
+        .join(' · ')
+    : null
+
+  // De onde veio a guia: o robô a capturou no recibo, ou ela foi tirada direto no
+  // portal da ASSIM. Nulo quando não há guia (inclusive nas linhas de presença, que
+  // gravam 'N/A') ou quando a sessão é anterior ao registro de procedência — nesses
+  // casos a Row não aparece, em vez de afirmar o que ninguém apurou.
+  const origemGuia = rotuloOrigemGuia(
+    atendimento.numero_autorizacao_origem,
+    atendimento.numero_autorizacao
+  )
 
   const unidade =
     atendimento.unidade?.replace('Unid. ', '')?.split(' - ')[0] ||
@@ -137,6 +188,19 @@ function SidePanel({ atendimento, onReverterFalta }: Props) {
       <div className={`px-5 py-4 ${ui.soft} border-b border-slate-100`}>
         <SectionTitle>Situação atual</SectionTitle>
         <p className={`text-sm font-medium ${ui.text}`}>{fraseSituacao(atendimento)}</p>
+        {/* O motivo é o que a coordenação precisa para contestar, então fica na
+            frase de situação e não numa Row lá embaixo. Herda o `ui.text` da
+            severidade — mesma tinta da frase que ele completa. O código sai em
+            fonte tabular por ser número de protocolo, que se lê dígito a
+            dígito. */}
+        {motivoGlosa && (
+          <p className={`mt-1.5 text-sm ${ui.text} opacity-90 wrap-break-word`}>
+            {motivoGlosa.codigo && (
+              <span className="font-mono tabular-nums">{motivoGlosa.codigo} · </span>
+            )}
+            {motivoGlosa.descricao}
+          </p>
+        )}
         {atendimento.status_operacional === 'falta_paciente' && onReverterFalta && (
           <Button
             size="sm"
@@ -163,7 +227,50 @@ function SidePanel({ atendimento, onReverterFalta }: Props) {
               }
               mono
             />
-            <Row label="Solicitado por" value={atendimento.criado_por} />
+            {/* Procedência, logo abaixo da guia que ela descreve — e ANTES de "Coberta
+                pela guia", que é outro número e ganharia a leitura errada se a linha
+                caísse depois dele. `completion_type` no gate porque a Row acima já
+                trocou o valor por 'N/A — fora ASSIM' nesse caso: anotar a origem de uma
+                guia que a tela não está mostrando não diria nada. */}
+            {origemGuia && atendimento.completion_type === 'automated' && (
+              <Row
+                label="Origem da guia"
+                value={
+                  <span className={origemGuia.chip} title={origemGuia.detalhe}>
+                    {origemGuia.foraDoPulsar && (
+                      <ExternalLink className="w-3 h-3 shrink-0" />
+                    )}
+                    {origemGuia.texto}
+                  </span>
+                }
+              />
+            )}
+            {vinculo && (
+              <Row
+                label="Coberta pela guia"
+                value={
+                  <span className="inline-flex flex-col items-end gap-0.5">
+                    <span className="tabular-nums text-emerald-700">
+                      {vinculo.guia}
+                    </span>
+                    {procedenciaVinculo && (
+                      <span className="text-xs text-slate-400">
+                        {procedenciaVinculo}
+                      </span>
+                    )}
+                  </span>
+                }
+              />
+            )}
+            {/* O rótulo muda quando a guia veio de fora: ali este nome é de quem abriu
+                a solicitação, não de quem conseguiu a autorização. Ver lib/guiaOrigem.ts. */}
+            <Row
+              label={rotuloSolicitadoPor(
+                atendimento.numero_autorizacao_origem,
+                atendimento.numero_autorizacao
+              )}
+              value={atendimento.criado_por}
+            />
             <Row label="Forma" value={atendimento.forma_autorizacao} />
             <Row
               label="Convênio"

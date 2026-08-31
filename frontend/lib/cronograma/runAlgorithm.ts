@@ -19,6 +19,7 @@ import {
 } from "./constants"
 import {
   cFx,
+  construirProfissionaisOcupados,
   espRealPorExibicao,
   exU,
   fm,
@@ -28,6 +29,7 @@ import {
   isSupervisaoAba,
   isUnidadeValida,
   pm,
+  profissionalEstaOcupado,
 } from "./helpers"
 import { slotValidoParaPaciente } from "./candidatos"
 import type {
@@ -58,8 +60,14 @@ export function runAlgorithm(
   }))
 
   const agend = df.filter(r => r["Status do Agendamento"] === "Agendado")
+  // Vaga "Livre" gêmea de um horário já agendado do mesmo profissional (ver
+  // construirProfissionaisOcupados em helpers.ts) — a TiTa mantém uma linha por
+  // terapia ofertada, então preencher um horário não apaga as outras linhas
+  // "Livre" do mesmo profissional nesse dia/hora.
+  const profOcupado = construirProfissionaisOcupados(agend)
   const livre = df.filter(
-    r => r["Status do Agendamento"] === "Livre" && !isProfBloqueadoTemp(r["Profissional"]),
+    r => r["Status do Agendamento"] === "Livre" && !isProfBloqueadoTemp(r["Profissional"])
+      && !profissionalEstaOcupado(profOcupado, r["Profissional"], r["Dia da Semana"], r.HI_str || ""),
   )
 
   const qtdAut: Record<string, number> = {}
@@ -79,21 +87,31 @@ export function runAlgorithm(
       const f = cFx(String(r["Data nasc."]))
       if (f) fxM[pac] = f
     }
+    // "Situação" (Vigente/Vencido) NÃO recorta nada aqui — mesma regra de
+    // calcularGaps (simulacaoNovoPrestador.ts), pelo mesmo motivo: a renovação
+    // de laudo é um controle administrativo PARALELO, o paciente segue sendo
+    // atendido com laudo vencido enquanto a renovação tramita, então a demanda
+    // é real e a vaga existe. Filtrar por "vigente" escondia mais da metade da
+    // demanda (1000 das 1845 linhas do relatório estavam "Vencido" em
+    // 27/08/2026), apagando oportunidades sem aviso na tela.
+    //
+    // "Alta" continua excluindo, e agora vale mesmo vindo de laudo vencido —
+    // antes um laudo com alta só entrava no altaSet se estivesse vigente, o
+    // que deixava passar como demanda um paciente já com alta cujo laudo
+    // tinha vencido depois.
     const espAlta = String(r["Especialidade"] || "").trim()
-    if (espAlta && isLaudoComAlta(r as Record<string, unknown>) && String(r["Situação"] || "").toLowerCase() === "vigente") {
+    if (espAlta && isLaudoComAlta(r as Record<string, unknown>)) {
       const altaK = `${pac}|||${espAlta}`
       altaSet.add(altaK)
       const qAlta = parseFloat(String(r["Qtd autorizada"])) || 0
       if (qAlta > 0) altaAut[altaK] = Math.max(altaAut[altaK] || 0, qAlta)
       continue
     }
-    if (String(r["Situação"] || "").toLowerCase() === "vigente") {
-      const esp = String(r["Especialidade"] || "").trim()
-      const q = parseFloat(String(r["Qtd autorizada"])) || 0
-      if (esp && q > 0) {
-        const k = `${pac}|||${esp}`
-        qtdAut[k] = Math.max(qtdAut[k] || 0, q)
-      }
+    const esp = String(r["Especialidade"] || "").trim()
+    const q = parseFloat(String(r["Qtd autorizada"])) || 0
+    if (esp && q > 0) {
+      const k = `${pac}|||${esp}`
+      qtdAut[k] = Math.max(qtdAut[k] || 0, q)
     }
   }
 

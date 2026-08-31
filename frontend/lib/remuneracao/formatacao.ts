@@ -54,8 +54,10 @@ export const isSim = (v: unknown): boolean =>
     String(v || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim()
   )
 
-export const isCancelado = (v: unknown): boolean =>
-  String(v || "").toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "").trim().includes("cancel")
+// `isCancelado` morava aqui. Saiu para lib/remuneracao/rotulosExecucao.ts junto
+// com o resto do vocabulário de execução da TiTa: o que era um `includes` de
+// formatação virou tradução de rótulo externo — versionado, medido e testado —
+// depois que a TiTa renomeou 'Cancelado' em 24/08/2026. Importe de lá.
 
 export const htmlEsc = (v: unknown): string =>
   String(v ?? "").replace(/[&<>"']/g, ch => (
@@ -104,6 +106,30 @@ export function validarCpfCnpj(v: unknown): boolean {
   return digitos.length === 11 || digitos.length === 14
 }
 
+// Valida CPF com dígito verificador de verdade — mais rígida que
+// `validarCpfCnpj`, que só confere a contagem de dígitos. Não endurecer a
+// função existente: ela roda sobre dados sujos vindos de import (TiTa/CSV) e
+// não pode passar a rejeitar o que já estava salvo. Esta valida só onde o
+// CPF é DIGITADO na hora, no cadastro de responsáveis.
+export function validarCpf(v: unknown): boolean {
+  const d = onlyDigits(v)
+  if (!d) return true
+  if (d.length !== 11 || /^(\d)\1{10}$/.test(d)) return false
+
+  const digitoVerificador = (base: string): number => {
+    let soma = 0
+    for (let i = 0; i < base.length; i++) {
+      soma += Number(base[i]) * (base.length + 1 - i)
+    }
+    const resto = (soma * 10) % 11
+    return resto === 10 ? 0 : resto
+  }
+
+  const d1 = digitoVerificador(d.slice(0, 9))
+  const d2 = digitoVerificador(d.slice(0, 10))
+  return d1 === Number(d[9]) && d2 === Number(d[10])
+}
+
 // Documento → texto mascarado, escolhendo o formato pela contagem de dígitos:
 // até 11 vira CPF, acima vira CNPJ. Formata parcialmente enquanto se digita
 // (não espera o documento estar completo), e trunca em 14 dígitos. Usado em
@@ -122,6 +148,19 @@ export function maskCpfCnpj(raw: string): string {
     .replace(/(\d{3})(\d)/, "$1.$2")
     .replace(/(\d{3})(\d)/, "$1/$2")
     .replace(/(\d{4})(\d{1,2})$/, "$1-$2")
+}
+
+// CPF puro — para campos que NUNCA aceitam CNPJ (pessoa física: paciente,
+// responsável). Trunca em 11 dígitos, então não há como o texto formatado
+// escorregar para o padrão de CNPJ (00.000.000/0000-00) no meio da digitação.
+// maskCpfCnpj continua existindo à parte para os campos que são
+// legitimamente PF-ou-PJ (profissional, contrato).
+export function maskCpf(raw: string): string {
+  const d = onlyDigits(raw).slice(0, 11)
+  return d
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d)/, "$1.$2")
+    .replace(/(\d{3})(\d{1,2})$/, "$1-$2")
 }
 
 // Documento único → cpf/cnpj separados pelo nº de dígitos, pra gravar nas duas
