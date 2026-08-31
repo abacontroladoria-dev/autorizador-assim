@@ -17,7 +17,15 @@ import { ESP_CLINICO } from "@/lib/cronograma/constants"
 import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
 import { SearchCombobox } from "@/components/cronograma/ui/SearchCombobox"
 import { DatePicker } from "@/components/ui/date-picker"
-import type { AltaIndividualidade, AltaIndividualidadeForm, NivelSuporte, PacienteAlta, PacienteAltaForm } from "@/types/laudos"
+import { ORIGENS_JUDICIAIS } from "@/types/laudos"
+import type {
+  AltaIndividualidade,
+  AltaIndividualidadeForm,
+  NivelSuporte,
+  OrigemJudicial,
+  PacienteAlta,
+  PacienteAltaForm,
+} from "@/types/laudos"
 
 type Props = {
   pacienteId: number
@@ -37,6 +45,7 @@ function formVazio(): AltaIndividualidadeForm {
     paciente_verbal: null,
     ambiente_natural: null,
     nivel_suporte: null,
+    origem_judicial: null,
   }
 }
 
@@ -46,6 +55,7 @@ function formDeDados(dados: AltaIndividualidade): AltaIndividualidadeForm {
     paciente_verbal: dados.paciente_verbal,
     ambiente_natural: dados.ambiente_natural,
     nivel_suporte: dados.nivel_suporte,
+    origem_judicial: dados.origem_judicial,
   }
 }
 
@@ -192,6 +202,16 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
               { valor: "3", rotulo: "3" },
               { valor: "NA", rotulo: "NA" },
             ]}
+          />
+          {/* Sem opção "Não informado" na lista: ela É o vazio (null). Ter as
+              duas coisas daria dois jeitos de gravar a mesma ausência. */}
+          <CampoSelect<OrigemJudicial>
+            label="Origem judicial"
+            value={form.origem_judicial}
+            onChange={(v) => set("origem_judicial", v)}
+            disabled={salvando}
+            vazio="Não informado"
+            opcoes={ORIGENS_JUDICIAIS.map((o) => ({ valor: o, rotulo: o }))}
           />
         </div>
 

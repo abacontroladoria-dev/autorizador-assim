@@ -60,7 +60,7 @@ const SITUACOES: { valor: SituacaoFiltro; rotulo: string }[] = [
 ]
 
 export function PacientesCadastro() {
-  const { pacientes, loading, error } = usePacientes()
+  const { pacientes, telefonesResponsaveis, loading, error } = usePacientes()
   // Texto e filtro são estados SEPARADOS: `buscaTexto` segue o teclado sem
   // atraso (o <input> nunca perde tecla), e `busca` — quem de fato refiltra
   // e re-renderiza a grade de até 75 cards — só se atualiza 200ms depois que
@@ -211,7 +211,14 @@ export function PacientesCadastro() {
       ) : (
         <ul className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
           {daPagina.map((p) => (
-            <CardPaciente key={p.id_paciente} paciente={p} />
+            <CardPaciente
+              key={p.id_paciente}
+              paciente={p}
+              // Resolvido aqui, e não dentro do card, para o `memo` continuar
+              // valendo: uma string muda de identidade só quando muda de valor,
+              // enquanto o Map inteiro invalidaria todos os cards a cada carga.
+              telefoneResponsavel={telefonesResponsaveis.get(p.id_paciente) ?? null}
+            />
           ))}
         </ul>
       )}
@@ -351,7 +358,13 @@ function FiltroSituacao({
   )
 }
 
-const CardPaciente = memo(function CardPaciente({ paciente }: { paciente: Paciente }) {
+const CardPaciente = memo(function CardPaciente({
+  paciente,
+  telefoneResponsavel,
+}: {
+  paciente: Paciente
+  telefoneResponsavel: string | null
+}) {
   const tom = getTomAvatar(paciente.id_paciente)
 
   return (
@@ -391,7 +404,11 @@ const CardPaciente = memo(function CardPaciente({ paciente }: { paciente: Pacien
         <dl className="space-y-3 pb-3 text-sm">
           <LinhaDado icone={IdCard} rotulo="CPF" valor={paciente.cpf ? maskCpfCnpj(paciente.cpf) : null} />
           <LinhaDado icone={Cake} rotulo="Nascimento" valor={dataBR(paciente.data_nascimento)} />
-          <LinhaDado icone={Phone} rotulo="Celular" valor={paciente.telefone} />
+          {/* O telefone útil é o de quem responde pelo paciente: a clínica
+              atende sobretudo menores, e paciente.telefone estava vazio na
+              maioria dos cadastros enquanto o do responsável vinha preenchido
+              do TiTa. */}
+          <LinhaDado icone={Phone} rotulo="Celular" valor={telefoneResponsavel} />
         </dl>
       </Link>
     </li>

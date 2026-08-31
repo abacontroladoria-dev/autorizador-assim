@@ -75,7 +75,10 @@ export type Paciente = {
   rg_uf: string | null
   rg_data_emissao: string | null
   email: string | null
-  telefone: string | null
+  // `telefone` (celular do próprio paciente) foi dropada em 20260828170200:
+  // vinha vazia na quase totalidade dos cadastros, porque a clínica atende
+  // sobretudo menores. O telefone de contato é o do responsável, em
+  // public.responsaveis (ver getTelefonesDosResponsaveis).
   telefone_residencial: string | null
   /**
    * Óbito. Deliberadamente INDEPENDENTE de `ativo`: um paciente pode estar
@@ -154,7 +157,6 @@ export type PacienteEdit = {
   rg_uf: string | null
   rg_data_emissao: string | null
   email: string | null
-  telefone: string | null
   telefone_residencial: string | null
   falecido: boolean
   ativo: boolean

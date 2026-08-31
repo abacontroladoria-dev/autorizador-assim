@@ -53,7 +53,6 @@ function montarForm(
     rg_uf: paciente.rg_uf,
     rg_data_emissao: paciente.rg_data_emissao,
     email: paciente.email,
-    telefone: paciente.telefone,
     telefone_residencial: paciente.telefone_residencial,
     falecido: paciente.falecido,
     ativo: paciente.ativo,

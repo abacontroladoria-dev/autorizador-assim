@@ -72,15 +72,60 @@ async function definirAtivoConvenio(id: number, ativo: boolean): Promise<void> {
     .maybeSingle()
   if (error) throw new Error(error.message)
 
+  const convenioNome = (antes as Convenio | null)?.nome ?? null
+
   await registrarAuditoria({
     tabela: "convenio",
     registroId: id,
     acao: ativo ? "reativar" : "inativar",
-    convenioNome: (antes as Convenio | null)?.nome ?? null,
-    alvoNome: (antes as Convenio | null)?.nome ?? null,
+    convenioNome,
+    alvoNome: convenioNome,
     antes: (antes ?? null) as Record<string, unknown> | null,
     depois: (data ?? null) as Record<string, unknown> | null,
   })
+
+  // Inativar o convênio inativa os planos dele junto: `getPlanosSaudeAtivos`
+  // já esconde plano de convênio inativo do select da Ficha Médica, mas a
+  // coluna `ativo` do plano continuava true — e a tela de Convênios mostrava
+  // "Inativo" no convênio com os planos dentro ainda marcados como ativos.
+  //
+  // O caminho inverso NÃO é simétrico de propósito: reativar o convênio não
+  // ressuscita os planos. Um plano pode ter sido desativado por decisão
+  // própria (produto descontinuado) antes do convênio inteiro sair, e reativar
+  // em massa desfaria essa decisão sem ninguém pedir. Reativação é plano a
+  // plano, pela tela.
+  if (ativo) return
+
+  const { data: planosAtivos, error: erroBusca } = await sb
+    .from(TABLE_PLANOS)
+    .select("*")
+    .eq("convenio_id", id)
+    .eq("ativo", true)
+  if (erroBusca) throw new Error(erroBusca.message)
+
+  for (const plano of (planosAtivos ?? []) as PlanoSaude[]) {
+    const { data: depois, error: erroUpdate } = await sb
+      .from(TABLE_PLANOS)
+      .update({ ativo: false })
+      .eq("id", plano.id)
+      .select("*")
+      .maybeSingle()
+    if (erroUpdate) throw new Error(erroUpdate.message)
+
+    // Uma linha por plano, e não uma só resumindo: a trilha é consultada por
+    // entidade (`tabela = 'plano_saude'`), então sem isto o plano sumiria da
+    // tela sem registro de quando nem por quê.
+    await registrarAuditoria({
+      tabela: "plano_saude",
+      registroId: plano.id,
+      acao: "inativar",
+      convenioNome,
+      alvoNome: plano.nome,
+      antes: plano as unknown as Record<string, unknown>,
+      depois: (depois ?? null) as Record<string, unknown> | null,
+      motivo: `Convênio "${convenioNome ?? id}" foi inativado.`,
+    })
+  }
 }
 
 export async function listarPlanosSaude(convenioId?: number): Promise<PlanoSaude[]> {

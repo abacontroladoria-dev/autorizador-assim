@@ -12,7 +12,25 @@ import { Campo, Secao, campo, rotulo, CampoSelect } from "../ui/campos"
 // convênios fica atrás dele, para a origem do dado poder mudar num arquivo só.
 //
 // O rótulo traz o convênio junto ("Unimed — Nacional") porque planos homônimos
-// entre convênios são comuns e o nome sozinho não desambigua.
+// entre convênios são comuns e o nome sozinho não desambigua. A exceção é
+// "Padrão": ver rotuloPlano.
+
+/**
+ * Como o plano aparece no select.
+ *
+ * "Padrão" é o nome que todo convênio recebe quando não tem produto próprio
+ * cadastrado (carga inicial, APLICAR_3_convenios) — repeti-lo transformaria a
+ * lista em dezessete linhas terminadas na mesma palavra, que não distingue
+ * nada. Nesse caso o convênio sozinho já é a resposta.
+ *
+ * Quando o plano tem nome de verdade ("Nacional", "Volta Redonda"), o convênio
+ * continua na frente: aí os dois pedaços carregam informação.
+ */
+function rotuloPlano(plano: PlanoSaudeTipo): string {
+  if (!plano.convenio_nome) return plano.nome
+  const generico = plano.nome.trim().toLowerCase() === "padrão"
+  return generico ? plano.convenio_nome : `${plano.convenio_nome} — ${plano.nome}`
+}
 
 export function PlanoSaude({
   ficha,
@@ -66,10 +84,7 @@ export function PlanoSaude({
         onChange={(v) => setFicha({ plano_saude_id: v ? Number(v) : null })}
         disabled={disabled || planos.length === 0}
         vazio={planos.length === 0 ? "Nenhum plano cadastrado" : "Não informado"}
-        opcoes={planos.map(p => ({
-          valor: String(p.id),
-          rotulo: p.convenio_nome ? `${p.convenio_nome} — ${p.nome}` : p.nome
-        }))}
+        opcoes={planos.map(p => ({ valor: String(p.id), rotulo: rotuloPlano(p) }))}
       />
 
       <Campo

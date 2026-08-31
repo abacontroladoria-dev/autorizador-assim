@@ -5,6 +5,7 @@ import { mensagemDeErroBanco } from "@/lib/cadastros/erroBanco"
 import type {
   Responsavel,
   ResponsavelEdit,
+  TipoVinculoResponsavel,
   VinculoResponsavel,
   VinculoResponsavelEdit,
 } from "@/types/responsavel"
@@ -245,6 +246,85 @@ export async function getVinculosDeResponsaveis(responsavelIds: number[]): Promi
   }
 
   return { data: porResponsavel, error: null }
+}
+
+/**
+ * Ordem de preferência do telefone que representa o paciente numa lista.
+ *
+ * Segue a mesma ordem em que os vínculos aparecem no formulário
+ * (`TIPOS_VINCULO`): filiação primeiro, porque é quem a clínica liga primeiro.
+ */
+const PRIORIDADE_TELEFONE: TipoVinculoResponsavel[] = [
+  "filiacao_1",
+  "filiacao_2",
+  "financeiro",
+  "pedagogico",
+]
+
+/** Quanto o PostgREST devolve por requisição, e o passo da paginação. */
+const PAGINA = 1000
+
+/**
+ * Um celular por paciente, para a listagem de pacientes.
+ *
+ * PAGINA o resultado de propósito: o PostgREST tem teto padrão de 1000 linhas e
+ * corta o excedente **sem devolver erro** — este projeto já perdeu 850 linhas em
+ * silêncio por isso (ver orbita_laudos_relatorio). Com até 4 vínculos por
+ * paciente, o teto é alcançável com ~250 pacientes preenchidos, ou seja, agora.
+ *
+ * Ordena por (paciente_id, tipo), que é a PK: sem ordenação total a paginação
+ * pode repetir e pular linhas entre as páginas.
+ */
+export async function getTelefonesDosResponsaveis(): Promise<{
+  data: Map<number, string>
+  error: string | null
+}> {
+  const supabase = getSupabaseClient()
+
+  type Linha = {
+    paciente_id: number
+    tipo: TipoVinculoResponsavel
+    responsavel: { celular: string | null } | null
+  }
+
+  const linhas: Linha[] = []
+  for (let inicio = 0; ; inicio += PAGINA) {
+    const { data, error } = await supabase
+      .from(TABLE_VINCULO)
+      .select("paciente_id,tipo,responsavel:responsaveis(celular)")
+      .order("paciente_id")
+      .order("tipo")
+      .range(inicio, inicio + PAGINA - 1)
+
+    if (error) {
+      console.error("Erro ao buscar telefones dos responsáveis:", error)
+      return { data: new Map(), error: mensagemDeErroBanco(error) }
+    }
+
+    const lote = (data ?? []) as unknown as Linha[]
+    linhas.push(...lote)
+    if (lote.length < PAGINA) break
+  }
+
+  // Guarda a POSIÇÃO na prioridade junto com o telefone: assim um vínculo de
+  // filiação que chegue depois de um financeiro (a ordenação é por tipo
+  // alfabético, não por prioridade) ainda vence.
+  const melhor = new Map<number, { posicao: number; celular: string }>()
+  for (const linha of linhas) {
+    const celular = linha.responsavel?.celular?.trim()
+    if (!celular) continue
+    const posicao = PRIORIDADE_TELEFONE.indexOf(linha.tipo)
+    if (posicao < 0) continue
+    const atual = melhor.get(linha.paciente_id)
+    if (!atual || posicao < atual.posicao) {
+      melhor.set(linha.paciente_id, { posicao, celular })
+    }
+  }
+
+  return {
+    data: new Map([...melhor].map(([id, { celular }]) => [id, celular])),
+    error: null,
+  }
 }
 
 /**

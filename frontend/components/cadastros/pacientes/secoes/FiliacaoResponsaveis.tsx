@@ -6,8 +6,13 @@ import { Plus, ClipboardCopy, AlertCircle, ExternalLink, Copy, Users2, X } from 
 import { maskCpfCnpj } from "@/lib/remuneracao/formatacao"
 import { useResponsaveis } from "@/hooks/useResponsaveis"
 import { getVinculosDeResponsaveis, getVinculosDoPaciente } from "@/services/responsaveis.service"
-import { TIPOS_VINCULO } from "@/types/responsavel"
-import type { Responsavel, TipoVinculoResponsavel, VinculoResponsavelEdit } from "@/types/responsavel"
+import { PARENTESCOS, TIPOS_VINCULO } from "@/types/responsavel"
+import type {
+  Parentesco,
+  Responsavel,
+  TipoVinculoResponsavel,
+  VinculoResponsavelEdit,
+} from "@/types/responsavel"
 import type { PacienteForm } from "@/hooks/usePacienteDetalhe"
 import { SearchCombobox } from "@/components/cronograma/ui/SearchCombobox"
 import { ResponsavelFormModal } from "../ResponsavelFormModal"
@@ -15,9 +20,18 @@ import { ResponsavelPainel } from "../ResponsavelPainel"
 import { CopiarResponsaveisModal } from "../CopiarResponsaveisModal"
 import { campo, foco, rotulo, Secao } from "../ui/campos"
 
-/** Rótulo de uma opção no combobox — nome + CPF (se tiver) + selo de inativo. */
+/**
+ * Nome puro de uma opção no combobox.
+ *
+ * O CPF e o selo de inativo NÃO entram aqui: no SearchCombobox o valor de uma
+ * opção É o próprio texto exibido (`sufixoOpcao` é a "prop em vez de sufixo no
+ * texto", como o comentário de lá explica) — se o rótulo carregasse "(CPF)"
+ * embutido, o campo ficaria mostrando "Nome (056.210.717-78)" para sempre
+ * depois de escolhido, não só durante a busca. CPF e inativo aparecem como
+ * sufixo NA LISTA, via `sufixoOpcao` abaixo.
+ */
 function rotuloResponsavel(r: Responsavel): string {
-  return `${r.nome}${r.cpf ? ` (${maskCpfCnpj(r.cpf)})` : ""}${!r.ativo ? " (inativo)" : ""}`
+  return r.nome
 }
 
 const FILIACOES = new Set<TipoVinculoResponsavel>(["filiacao_1", "filiacao_2"])
@@ -258,10 +272,12 @@ export function FiliacaoResponsaveis({
           (r) => r.ativo || r.id === vinculo?.responsavel_id
         )
 
-        // Rótulo → id: o SearchCombobox trabalha com strings, então o nome
-        // formatado É o valor. Duas pessoas homônimas sem CPF colidiriam no
-        // mesmo rótulo — desambigua só quando isso acontece, com "#id" no
-        // final, pra não poluir o caso comum.
+        // Rótulo → id: o SearchCombobox trabalha com strings, então o nome É
+        // o valor. Duas pessoas homônimas colidiriam no mesmo rótulo —
+        // desambigua só quando isso acontece, com "#id" no final, pra não
+        // poluir o caso comum. O CPF fica de fora do rótulo (ver comentário
+        // de rotuloResponsavel); é a lista, não o valor, que precisa dele
+        // para diferenciar dois "Maria Silva" na hora de escolher.
         const contagemRotulo = new Map<string, number>()
         for (const r of opcoes) {
           const rot = rotuloResponsavel(r)
@@ -273,12 +289,20 @@ export function FiliacaoResponsaveis({
         }
 
         const idPorRotulo = new Map(opcoes.map((r) => [rotuloUnico(r), r.id]))
+        // Caminho inverso, só para o sufixo da lista: rótulo -> registro
+        // completo, de onde tira o CPF e o `ativo` a exibir ao lado do nome.
+        const responsavelPorRotulo = new Map(opcoes.map((r) => [rotuloUnico(r), r]))
         const rotuloNaoCarregado = naoCarregado
           ? `Responsável #${vinculo!.responsavel_id} — não carregado`
           : null
         if (naoCarregado) idPorRotulo.set(rotuloNaoCarregado!, vinculo!.responsavel_id)
 
         const valorAtual = responsavel ? rotuloUnico(responsavel) : (rotuloNaoCarregado ?? "")
+
+        const parentescoForaDaLista =
+          vinculo?.parentesco && !PARENTESCOS.includes(vinculo.parentesco as Parentesco)
+            ? vinculo.parentesco
+            : null
 
         return (
           <div key={tipo} className="sm:col-span-2 grid gap-x-6 gap-y-2 sm:grid-cols-2">
@@ -292,6 +316,20 @@ export function FiliacaoResponsaveis({
                   placeholder="Digite para buscar um responsável..."
                   ariaLabel={label}
                   disabled={disabled || loading || naoCarregado}
+                  sufixoOpcao={(rot) => {
+                    const r = responsavelPorRotulo.get(rot)
+                    if (!r) return null
+                    return (
+                      <span className="flex shrink-0 items-center gap-1.5 text-xs text-muted-foreground">
+                        {r.cpf && maskCpfCnpj(r.cpf)}
+                        {!r.ativo && (
+                          <span className="rounded-full bg-amber-500/10 px-1.5 py-0.5 font-medium text-amber-600 dark:text-amber-400">
+                            Inativo
+                          </span>
+                        )}
+                      </span>
+                    )
+                  }}
                 />
               </div>
 
@@ -308,13 +346,19 @@ export function FiliacaoResponsaveis({
 
               <div className="mt-1 flex flex-wrap items-center gap-3 text-xs">
                 {responsavel && (
+                  // Pílula em emerald — mesmo tom já usado em cadastros para
+                  // "confirmado/em dia" (badge "Ativo" de PacienteHeaderCard,
+                  // botão salvar de SalvarTudoBar) — destacada dos outros dois
+                  // botões da linha (texto puro) porque é a ação mais comum
+                  // depois de vincular alguém: conferir se escolheu a pessoa
+                  // certa.
                   <button
                     type="button"
                     onClick={() => setPainelResponsavelId(responsavel.id)}
-                    className={`inline-flex items-center gap-1 text-primary hover:underline ${foco}`}
+                    className={`inline-flex items-center gap-1.5 rounded-md border border-emerald-600/40 bg-emerald-500/10 px-2.5 py-1 text-sm font-medium text-emerald-700 transition-colors hover:border-emerald-600/60 hover:bg-emerald-500/20 dark:text-emerald-400 ${foco}`}
                   >
-                    <ExternalLink className="h-3 w-3" aria-hidden="true" />
-                    Ver Cadastro
+                    <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
+                    Ver Cadastro do Responsável
                   </button>
                 )}
                 {!disabled && (
@@ -341,15 +385,34 @@ export function FiliacaoResponsaveis({
             </div>
 
             <div>
-              <label className={rotulo}>Parentesco</label>
-              <input
-                type="text"
+              <label className={rotulo} htmlFor={`parentesco-${tipo}`}>
+                Parentesco
+              </label>
+              <select
+                id={`parentesco-${tipo}`}
                 className={`mt-1 ${campo}`}
                 value={vinculo?.parentesco ?? ""}
                 onChange={(e) => definirParentesco(tipo, e.target.value)}
                 disabled={disabled || !vinculo}
-                placeholder={vinculo ? "Ex.: Mãe, Pai, Avó" : "Selecione um responsável"}
-              />
+              >
+                <option value="">
+                  {vinculo ? "Não informado" : "Selecione um responsável"}
+                </option>
+                {PARENTESCOS.map((p) => (
+                  <option key={p} value={p}>
+                    {p}
+                  </option>
+                ))}
+                {/* Valor fora da lista: só acontece com linha anterior ao CHECK
+                    de 20260828170000. Aparece como opção própria em vez de o
+                    <select> cair no primeiro item e trocar o parentesco de uma
+                    pessoa em silêncio ao salvar. */}
+                {parentescoForaDaLista && (
+                  <option value={parentescoForaDaLista}>
+                    {parentescoForaDaLista} (fora da lista)
+                  </option>
+                )}
+              </select>
             </div>
           </div>
         )
