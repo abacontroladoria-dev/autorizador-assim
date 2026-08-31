@@ -39,6 +39,7 @@ import {
   LlmRecusadoError,
   LlmProviderError,
   LlmConfiguracaoError,
+  LlmBudgetExceededError,
 } from './erros.js'
 import type { LlmMensagem, LlmFerramenta } from './tipos.js'
 
@@ -225,6 +226,22 @@ checar((e429 as LlmRateLimitError)?.esperarMs === 12_000, 'retry-after em segund
 fingirResposta(429, { error: { message: 'rate limit' } })
 const e429sem = await capturar(() => provider.chat({ mensagens: [{ papel: 'user', conteudo: 'oi' }] }))
 checar((e429sem as LlmRateLimitError)?.esperarMs === null, '429 sem retry-after → esperarMs null')
+
+// O MESMO 429 com significado oposto. Medido em produção 2026-08-31: a conta
+// sem crédito devolve 429, e tratá-lo como throttling faria a fila retentar
+// para sempre — `aguardar` não consome tentativa, de propósito.
+fingirResposta(429, {
+  error: {
+    message: 'You exceeded your current quota',
+    type: 'insufficient_quota',
+    code: 'credit_balance_exhausted',
+  },
+})
+const eSaldo = await capturar(() => provider.chat({ mensagens: [{ papel: 'user', conteudo: 'oi' }] }))
+checar(eSaldo instanceof LlmBudgetExceededError,
+  '429 com insufficient_quota → LlmBudgetExceededError (esperar NUNCA resolve; só crédito na conta)', eSaldo)
+checar(!(eSaldo instanceof LlmRateLimitError),
+  'saldo esgotado NÃO é rate limit — classificá-lo assim faria a fila girar em silêncio para sempre')
 
 fingirResposta(401, { error: { message: 'Incorrect API key provided', code: 'invalid_api_key' } })
 const e401 = await capturar(() => provider.chat({ mensagens: [{ papel: 'user', conteudo: 'oi' }] }))

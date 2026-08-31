@@ -10,6 +10,7 @@ import {
   LlmTimeoutError,
   LlmRecusadoError,
   LlmProviderError,
+  LlmBudgetExceededError,
 } from './erros'
 import type {
   LLMProvider,
@@ -139,6 +140,23 @@ function paraMotivoParada(bruto: string | undefined): LlmMotivoParada {
 // um 502 de borda vem como HTML. Por isso a tentativa de JSON é otimista e o
 // recorte de 300 caracteres é o fallback — mesma forma de `elevenlabs.ts`.
 // ----------------------------------------------------------------------------
+// Distingue saldo esgotado de throttling dentro do mesmo 429. A checagem é
+// pelo `type`/`code` do corpo, NUNCA pelo status — que é idêntico nos dois
+// casos. Os dois identificadores são verificados porque a OpenAI já usou
+// ambos e o `type` é o mais estável dos dois.
+function ehSaldoEsgotado(corpo: string): boolean {
+  try {
+    const json = JSON.parse(corpo) as { error?: { type?: string; code?: string } }
+    const tipo = json.error?.type ?? ''
+    const codigo = json.error?.code ?? ''
+    return tipo === 'insufficient_quota'
+      || codigo === 'insufficient_quota'
+      || codigo === 'credit_balance_exhausted'
+  } catch {
+    return false
+  }
+}
+
 function extrairErro(corpo: string): string {
   try {
     const json = JSON.parse(corpo) as { error?: { message?: string; code?: string } }
@@ -214,8 +232,26 @@ export class OpenAIProvider implements LLMProvider {
     const texto = await resposta.text()
     const detalhe = extrairErro(texto)
 
-    // 429 antes de tudo: é o único 4xx em que esperar resolve.
+    // 429 NÃO É UMA COISA SÓ, e a diferença decide se retentar faz sentido.
+    //
+    // A OpenAI devolve 429 para dois fenômenos opostos:
+    //   - throttling (`rate_limit_exceeded`): esperar RESOLVE.
+    //   - saldo esgotado (`insufficient_quota` / `credit_balance_exhausted`):
+    //     esperar NUNCA resolve — só alguém pôr crédito na conta resolve.
+    //
+    // Classificar os dois como LlmRateLimitError faria a fila devolver o item
+    // indefinidamente, sem nunca esgotar tentativas (porque `aguardar` não
+    // consome attempts, de propósito) e sem nada avisar. A atendente ficaria
+    // muda para sempre, e o log dizendo "limite de taxa, tentando de novo"
+    // apontaria o diagnóstico para o lado errado.
+    //
+    // Medido em 2026-08-31: a conta devolveu 429 com type `insufficient_quota`
+    // e code `credit_balance_exhausted`. É a mesma lição que a integração da
+    // ElevenLabs já tinha registrado — lá, 400 é chave inválida e 401 é cota.
     if (resposta.status === 429) {
+      if (ehSaldoEsgotado(texto)) {
+        throw new LlmBudgetExceededError('organizacao', detalhe)
+      }
       const retryAfter = resposta.headers.get('retry-after')
       const esperarMs = retryAfter ? Number(retryAfter) * 1000 : null
       throw new LlmRateLimitError(
