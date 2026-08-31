@@ -21,6 +21,34 @@ export const TIPOS_VINCULO: { tipo: TipoVinculoResponsavel; rotulo: string }[] =
   { tipo: "pedagogico", rotulo: "Responsável pedagógico" },
 ]
 
+/**
+ * Lista fechada de parentesco. Espelha `pacientes_responsaveis_parentesco_check`
+ * (20260828170000) — mudar um lado sem o outro faz o salvamento morrer no banco
+ * com erro de CHECK, que a tela mostra como "não foi possível salvar".
+ *
+ * Ordem pensada para o `<select>`: os dois casos que respondem por ~85% do
+ * cadastro primeiro, depois o resto por proximidade de parentesco, "Outro" no
+ * fim.
+ */
+export const PARENTESCOS = [
+  "Mãe",
+  "Pai",
+  "Madrasta",
+  "Padrasto",
+  "Avó",
+  "Avô",
+  "Irmã",
+  "Irmão",
+  "Tia",
+  "Tio",
+  "Tutor(a) legal",
+  "Responsável legal",
+  "Próprio paciente",
+  "Outro",
+] as const
+
+export type Parentesco = (typeof PARENTESCOS)[number]
+
 export type Responsavel = {
   id: number
   nome: string

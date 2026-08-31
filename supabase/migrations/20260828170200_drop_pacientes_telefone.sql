@@ -1,0 +1,27 @@
+-- Remove pacientes.telefone (celular do próprio paciente).
+--
+-- Motivo: a clínica atende sobretudo menores, então o campo nasceu vazio e
+-- continuou vazio na quase totalidade dos cadastros, enquanto o telefone que a
+-- recepção de fato usa — o do responsável — vinha preenchido do TiTa em outra
+-- coluna. Manter os dois lado a lado só produzia o cartão de paciente mostrando
+-- "não informado" para quem o sistema tinha telefone.
+--
+-- O contato passa a ser lido de public.responsaveis via o vínculo em
+-- public.pacientes_responsaveis (frontend/services/responsaveis.service.ts,
+-- getTelefonesDosResponsaveis), na ordem filiação 1 -> 2 -> financeiro ->
+-- pedagógico.
+--
+-- Aplicar SOMENTE depois de 20260828170100 (o backfill que popula o relacional)
+-- e do deploy do frontend correspondente: `telefone` é listada nominalmente em
+-- COLUNAS, no pacientes.service.ts, e o PostgREST responde 400 na LISTAGEM
+-- INTEIRA quando o select cita uma coluna que não existe mais — a tela de
+-- pacientes fica em branco, não só o campo.
+--
+-- Fora de escopo: `telefone_residencial` continua existindo. Ela é preenchida em
+-- parte dos cadastros e ninguém pediu para removê-la.
+--
+-- Verificado antes de dropar: nem supabase/functions/sync_tita_agenda/index.ts
+-- nem o backfill 20260817190100 escrevem nesta coluna — as duas fontes de sync
+-- gravam em responsavel_telefone. Nada de fora do formulário manual a alimenta.
+
+alter table public.pacientes drop column if exists telefone;

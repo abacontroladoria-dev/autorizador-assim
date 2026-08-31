@@ -70,6 +70,7 @@ export async function salvarAltaIndividualidade(
     paciente_verbal: form.paciente_verbal,
     ambiente_natural: form.ambiente_natural,
     nivel_suporte: form.nivel_suporte,
+    origem_judicial: form.origem_judicial,
   }
 
   const { data: salvo, error } = await supabase
@@ -89,6 +90,7 @@ export async function salvarAltaIndividualidade(
         paciente_verbal: registroAnterior.paciente_verbal,
         ambiente_natural: registroAnterior.ambiente_natural,
         nivel_suporte: registroAnterior.nivel_suporte,
+        origem_judicial: registroAnterior.origem_judicial,
       }
     : null
 

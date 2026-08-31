@@ -82,9 +82,9 @@ export async function getLaudosDoPaciente(
   const { data: laudos, error } = await supabase
     .from(TB_LAUDOS)
     .select("*")
-    // Laudo "excluído" continua no banco (soft-delete, 20260827100000) e
-    // CONTINUA na lista — só marcado. A tela é quem decide como mostrar
-    // (badge "Excluído"), não a query.
+    // Sem filtro de situação: a query traz todo laudo do paciente e a TELA
+    // decide o destaque (cheio quando vigente ou em uso, apagado quando nenhum
+    // dos dois). Laudo é histórico clínico — nada some da lista.
     .eq("id_paciente_pulsar", pacienteId)
     .order("data_laudo", { ascending: false })
 
@@ -242,45 +242,14 @@ export async function editarLaudo(
 
 // ─── EXCLUSÃO (soft-delete) ───────────────────────────────────────────────────
 
-/**
- * "Exclui" o laudo marcando ativo = false. A linha NUNCA é apagada.
- *
- * Laudo é registro clínico: decisão do usuário em 2026-08-27 de que nada de
- * laudo/alta sai do banco. O privilégio de DELETE está revogado no próprio
- * banco (20260827100000), então nem uma chamada direta à API consegue apagar —
- * isto aqui não é a única barreira, é a interface para ela.
- *
- * Um laudo "excluído" que estava em_uso deixa de estar: senão o paciente fica
- * com um laudo de referência que não aparece em lugar nenhum da tela.
- */
-export async function excluirLaudo(
-  laudo: PacienteLaudo,
-  pacienteNome: string
-): Promise<{ error: string | null }> {
-  const supabase = getSupabaseClient()
-
-  const { error } = await supabase
-    .from(TB_LAUDOS)
-    .update({ ativo: false, em_uso: false })
-    .eq("id_laudo", laudo.id_laudo)
-
-  if (error) return { error: error.message }
-
-  void registrarAuditoria({
-    tabela: "laudo",
-    registroId: laudo.id_laudo,
-    acao: "excluir",
-    pacienteId: laudo.id_paciente_pulsar,
-    pacienteNome,
-    antes: {
-      data_laudo: laudo.data_laudo,
-      validade: laudo.validade,
-      arquivo_path: laudo.arquivo_path,
-    },
-  })
-
-  return { error: null }
-}
+// Não existe mais excluirLaudo. "Excluído" era um estado sem volta (a tela não
+// oferecia desfazer) que tentava dizer o que a vigência já diz sozinha, e por
+// isso saiu da tela e do banco em 2026-08-31: laudo fora da validade e fora de
+// uso aparece apagado, e volta ao normal quando um dos dois muda.
+//
+// A coluna `ativo` continua existindo em cadastros_pacientes_laudos (a view
+// vw_paciente_laudos_flat a projeta, e cadastros_pacientes_altas usa a mesma
+// coluna com o significado antigo), mas para laudo ela é sempre true.
 
 // ─── UPLOAD ───────────────────────────────────────────────────────────────────
 

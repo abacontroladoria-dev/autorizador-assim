@@ -45,7 +45,11 @@ const LABEL_POR_ENTIDADE: Record<EntidadeAuditada, Record<string, string>> = {
     rg_uf: "UF do órgão emissor",
     rg_data_emissao: "Data de emissão do RG",
     email: "E-mail",
-    telefone: "Celular",
+    // A coluna foi dropada em 20260828170200 (estava vazia na maioria dos
+    // cadastros; o telefone útil é o do responsável). O rótulo FICA: a trilha
+    // guarda o JSON de antes/depois, e sem esta linha toda alteração histórica
+    // desse campo passaria a aparecer como "telefone" cru na tela.
+    telefone: "Celular do paciente (campo removido)",
     telefone_residencial: "Telefone residencial",
     falecido: "Falecido",
     ativo: "Cadastro ativo",
@@ -140,6 +144,7 @@ const LABEL_POR_ENTIDADE: Record<EntidadeAuditada, Record<string, string>> = {
     paciente_verbal: "Paciente verbal",
     ambiente_natural: "Autorização de ambiente natural",
     nivel_suporte: "Nível de suporte clínico",
+    origem_judicial: "Origem judicial",
   },
   // Os `snap_*` são o retrato do laudo no momento do save, e entram na trilha de
   // propósito: seis meses depois, "avisado em 14/08" só significa algo ao lado
