@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
 
 import { assinaturaMetaConfere } from '@/lib/central/webhook-signature'
+import { despacharWorkerEmBreve } from '@/lib/central/despachar-worker'
 import { supabaseService } from '@/lib/supabase/service'
 
 // ============================================================================
@@ -22,6 +23,11 @@ import { supabaseService } from '@/lib/supabase/service'
 // A janela de 15 segundos (`process_after` da message_grouping_queue) resolve
 // outro problema humano: gente manda "oi", "queria marcar", "pra terça" em três
 // mensagens seguidas. Sem o debounce, seriam três turnos e três respostas.
+//
+// Enfileirar não é o mesmo que esperar o cron. Depois de guardar, esta rota
+// AGENDA o worker para quando a janela fechar (despacharWorkerEmBreve), sem
+// esperar por ele. Isso tira a espera do cron da frente de cada resposta; o
+// pg_cron continua existindo como rede de segurança, não como gatilho principal.
 //
 // AUTENTICAÇÃO
 //
@@ -127,6 +133,18 @@ export async function POST(req: NextRequest) {
     console.error('[webhook whatsapp] falha ao enfileirar', error)
     return NextResponse.json({ ok: false }, { status: 503 })
   }
+
+  // Acorda o worker quando a janela de debounce fechar (~16s), em vez de esperar
+  // o próximo tique do cron. É o que aproxima isto de uma plataforma de
+  // atendimento de verdade, onde um consumidor vivo reage à chegada da mensagem.
+  //
+  // Sem `await`: a Meta reentrega se demorarmos, e o 200 não pode ficar preso
+  // atrás de um turno de IA. O despacho é agendado e a resposta sai agora.
+  //
+  // Isto NÃO substitui o pg_cron. Se o container reiniciar entre a entrega e o
+  // despacho, o timer morre com ele — o cron é quem garante que nada fica na
+  // fila para sempre. Ver lib/central/despachar-worker.ts.
+  despacharWorkerEmBreve(linhas[0].organization_id)
 
   return NextResponse.json({ ok: true, enfileiradas: linhas.length })
 }
