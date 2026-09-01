@@ -7,6 +7,7 @@ import {
   AppointmentNotFoundError,
 } from '../types/errors.types'
 import { horaCurta } from './formato'
+import { unidadeDaSala, normalizarUnidade, salaOculta, type Unidade } from './unidade'
 
 // ============================================================================
 // Ferramentas do agente de atendimento
@@ -92,7 +93,8 @@ export const DEFINICOES_FERRAMENTAS = [
     function: {
       name: 'consultar_especialidades_disponiveis',
       description:
-        'Lista as especialidades (terapias) que têm vaga livre na agenda da clínica, com a quantidade de vagas de cada uma. ' +
+        'Lista as especialidades (terapias) que têm vaga livre na agenda da clínica, com a quantidade de vagas ' +
+        'e em quais unidades cada uma tem vaga. ' +
         'Use quando o responsável perguntar o que a clínica tem disponível, ou quando ele não disser qual terapia quer. ' +
         'Chame esta ferramenta antes de consultar_horarios_disponiveis para descobrir o terapiaId correto.',
       strict: true,
@@ -114,17 +116,24 @@ export const DEFINICOES_FERRAMENTAS = [
       description:
         'Lista horários realmente livres na agenda, com profissional e sala. NUNCA ofereça um horário que não tenha vindo desta ferramenta: ' +
         'a agenda da clínica só é populada algumas semanas à frente, e horários fora dela não existem. ' +
+        'Se o responsável já disse em qual unidade quer ser atendido, passe esse valor em `unidade` — ' +
+        'não filtre por conta própria olhando o campo `sala`, e não ofereça horário de outra unidade sem avisar. ' +
         'Ofereça no máximo 3 opções por mensagem para não sobrecarregar o responsável.',
       strict: true,
       parameters: {
         type: 'object',
         properties: {
           terapiaId:  { type: ['integer', 'null'], description: 'Id da terapia, obtido em consultar_especialidades_disponiveis. null para todas.' },
+          unidade: {
+            type: ['string', 'null'],
+            enum: ['Realengo', 'Fazendinha', 'Padre Miguel', null],
+            description: 'Unidade onde o responsável quer ser atendido. null para buscar nas três.',
+          },
           dataInicio: { type: ['string', 'null'],  description: 'Início da busca, YYYY-MM-DD. Use quando o responsável indicar preferência de data; null para começar hoje.' },
           dataFim:    { type: ['string', 'null'],  description: 'Fim da busca, YYYY-MM-DD. null para hoje + 30 dias.' },
           limite:     { type: ['integer', 'null'], description: 'Máximo de horários a retornar. null usa o padrão de 20.' },
         },
-        required: ['terapiaId', 'dataInicio', 'dataFim', 'limite'],
+        required: ['terapiaId', 'unidade', 'dataInicio', 'dataFim', 'limite'],
         additionalProperties: false,
       },
     },
@@ -269,20 +278,55 @@ export class FerramentasAgente {
         // o profissional atende mais de uma especialidade naquele horário.
         nome:      t.terapiaNome,
         vagas:     t.vagas,
+        // Unidades onde essa terapia tem vaga. Se o responsável já escolheu uma
+        // unidade, use isto para não afirmar que a clínica atende ali antes de
+        // conferir.
+        unidades:  t.unidades,
       })),
     }
   }
 
   private async consultarHorarios(args: Record<string, any>): Promise<ResultadoFerramenta> {
-    const limite = clampInt(args.limite, 1, 50, 20)
-    const vagas = await this.agendamentos.listarVagas({
+    const limite  = clampInt(args.limite, 1, 50, 20)
+    const unidade = normalizarUnidade(args.unidade)
+
+    // O filtro por unidade acontece AQUI, não no banco: `unidade_id` é o mesmo
+    // valor (280) em todas as vagas, e a unidade real só existe como texto
+    // dentro de `sala_nome`. Ver modules/atendimento/agente/unidade.ts.
+    //
+    // Consequência: `limite` não pode ir para a RPC quando há filtro, senão as
+    // primeiras N vagas podem ser todas de outra unidade e a resposta vira um
+    // "não tem vaga" falso — exatamente o erro que se quer evitar. Buscamos
+    // largo e cortamos depois.
+    const vagasBrutas = await this.agendamentos.listarVagas({
       terapiaId:  toInt(args.terapiaId),
       dataInicio: args.dataInicio ?? null,
       dataFim:    args.dataFim ?? null,
-      limite,
+      limite:     unidade ? 500 : limite,
     })
 
+    const vagas = vagasBrutas
+      // 'Sala Teste' vive na grade de produção e não é lugar de atender ninguém.
+      .filter(v => !salaOculta(v.sala_nome))
+      .filter(v => (unidade ? unidadeDaSala(v.sala_nome) === unidade : true))
+      .slice(0, limite)
+
     if (vagas.length === 0) {
+      // Distinguir os dois casos muda a resposta ao responsável: "não temos
+      // essa terapia" é diferente de "temos, mas não nessa unidade". Sem essa
+      // distinção o agente descarta a especialidade inteira.
+      if (unidade && vagasBrutas.some(v => !salaOculta(v.sala_nome))) {
+        const outras = [...new Set(
+          vagasBrutas.map(v => unidadeDaSala(v.sala_nome)).filter((u): u is Unidade => u != null),
+        )]
+        return recusa(
+          MOTIVO.SEM_VAGA,
+          outras.length > 0
+            ? `Não há horário livre para essa especialidade na unidade ${unidade}. ` +
+              `Há vaga em: ${outras.join(', ')}. Diga isso ao responsável e pergunte se ele aceita outra unidade ou outra especialidade em ${unidade}.`
+            : `Não há horário livre para essa especialidade na unidade ${unidade}.`,
+        )
+      }
       return recusa(
         MOTIVO.SEM_VAGA,
         'Nenhum horário livre para essa combinação. Ofereça outra especialidade ou outro período.',
@@ -303,7 +347,10 @@ export class FerramentasAgente {
         profissional: v.profissional_nome,
         terapia:      v.terapia_nome,
         sala:         v.sala_nome,
-        unidade:      v.unidade_nome,
+        // A unidade real, extraída de sala_nome. `v.unidade_nome` é
+        // 'CLÍNICA UNIVERSO ABA' em toda vaga e não distingue endereço nenhum —
+        // mandá-lo para o modelo fazia as três unidades parecerem uma só.
+        unidade:      unidadeDaSala(v.sala_nome),
       })),
     }
   }
@@ -339,6 +386,7 @@ export class FerramentasAgente {
         profissional: criado.profissional_nome,
         terapia:      criado.terapia_nome,
         sala:         criado.sala_nome,
+        unidade:      unidadeDaSala(criado.sala_nome),
       },
       // O agente não deve prometer que já está no sistema oficial da clínica.
       avisoInterno: 'Reserva registrada no atendimento. O lançamento no TiTa é feito pela recepção.',

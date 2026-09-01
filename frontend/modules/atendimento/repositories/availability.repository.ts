@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { DiagnosticoVaga, VagaDisponivel } from '../types/central.types'
+import { unidadeDaSala, salaOculta, type Unidade } from '../agente/unidade'
 
 // ============================================================================
 // AvailabilityRepository
@@ -82,21 +83,36 @@ export class AvailabilityRepository {
   async listarTerapiasComVaga(
     dataInicio?: string | null,
     dataFim?: string | null,
-  ): Promise<{ terapiaId: number; terapiaNome: string | null; vagas: number }[]> {
+  ): Promise<{ terapiaId: number; terapiaNome: string | null; vagas: number; unidades: Unidade[] }[]> {
     // Limite alto de propósito: aqui queremos o agregado da janela inteira,
     // não uma página. O teto de 500 da RPC continua valendo como proteção.
     const vagas = await this.listarVagas({ dataInicio, dataFim, limite: 500 })
 
-    const porTerapia = new Map<number, { terapiaNome: string | null; vagas: number }>()
+    const porTerapia = new Map<number, { terapiaNome: string | null; vagas: number; unidades: Set<Unidade> }>()
     for (const vaga of vagas) {
       if (vaga.terapia_id == null) continue
+      if (salaOculta(vaga.sala_nome)) continue
+
       const atual = porTerapia.get(vaga.terapia_id)
-      if (atual) atual.vagas += 1
-      else porTerapia.set(vaga.terapia_id, { terapiaNome: vaga.terapia_nome, vagas: 1 })
+        ?? { terapiaNome: vaga.terapia_nome, vagas: 0, unidades: new Set<Unidade>() }
+      atual.vagas += 1
+
+      // Em QUAIS unidades essa terapia tem vaga. Sem isso o agente responde
+      // "sim, temos psicomotricidade" para quem já disse que só pode ir a Padre
+      // Miguel, e só descobre que não tem lá no passo seguinte.
+      const u = unidadeDaSala(vaga.sala_nome)
+      if (u) atual.unidades.add(u)
+
+      porTerapia.set(vaga.terapia_id, atual)
     }
 
     return [...porTerapia.entries()]
-      .map(([terapiaId, v]) => ({ terapiaId, ...v }))
+      .map(([terapiaId, v]) => ({
+        terapiaId,
+        terapiaNome: v.terapiaNome,
+        vagas:       v.vagas,
+        unidades:    [...v.unidades],
+      }))
       .sort((a, b) => b.vagas - a.vagas)
   }
 }
