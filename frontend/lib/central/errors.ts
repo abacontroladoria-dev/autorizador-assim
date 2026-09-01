@@ -17,6 +17,7 @@ import {
   TtsNotConfiguredError,
   TtsProviderError,
 } from '@/modules/atendimento/types/errors.types'
+import { JanelaAtendimentoFechadaError } from '@/modules/atendimento/providers/meta-waba.provider'
 import {
   unauthorized,
   forbidden,
@@ -44,6 +45,14 @@ export function mapCentralError(err: unknown): NextResponse {
   if (err instanceof SlotNotInGradeError)         return unprocessable(err.code, err.message)
   if (err instanceof SlotInPastError)             return unprocessable(err.code, err.message)
   if (err instanceof MissingContactPhoneError)    return unprocessable(err.code, err.message)
+  // 422: a janela de 24h da Meta fechou. Regra da plataforma, não falha nossa —
+  // repetir o mesmo texto nunca passa; só template aprovado passa.
+  //
+  // Precisa de linha própria porque JanelaAtendimentoFechadaError estende Error,
+  // não CentralError: sem isto cai no fallback e o operador recebe "Internal
+  // server error" quando o que ele precisa saber é que a janela fechou. O worker
+  // de envio já tratava esse caso (envio.worker.ts); a rota HTTP não tratava.
+  if (err instanceof JanelaAtendimentoFechadaError) return unprocessable(err.code, err.message)
   // 422: falta configuração nossa — nada foi tentado contra a ElevenLabs.
   if (err instanceof TtsNotConfiguredError)       return unprocessable(err.code, err.message)
   // 502: a ElevenLabs respondeu recusando. A mensagem repassada é a dela —

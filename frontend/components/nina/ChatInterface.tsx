@@ -2,46 +2,37 @@
 
 import React, { useState, useRef, useEffect } from 'react'
 import {
-  Search, MessageSquare, Loader2, Mail, Phone, Users, Info, X, Bot, User, Pause, Brain, Plus, Send, Play, Check, CheckCheck
+  Search, MessageSquare, Loader2, Mail, Phone, Users, Info, X, Bot, User, Pause, Brain, Plus, Send, Play, Check, CheckCheck, ShieldAlert, AlertCircle, WifiOff
 } from 'lucide-react'
-import { UIConversation, UIMessage, ConversationStatus, MessageDirection, MessageType } from '@/types/nina'
+import { ConversationStatus, MessageDirection } from '@/types/nina'
+import { useCentralInbox } from '@/hooks/nina/useCentralInbox'
+import { iniciais, rotuloTipoContato, type NinaMessage } from './adapters/centralToNina'
 import { Button } from './Button'
 import { toast } from 'sonner'
 
 const ChatInterface: React.FC = () => {
-  const [conversations, setConversations] = useState<UIConversation[]>([])
-  const [loading, setLoading] = useState(true)
-  const [selectedChatId, setSelectedChatId] = useState<string | null>(null)
+  const {
+    conversations, activeChat, selectedId, select,
+    loading, erro, enviar, enviando,
+  } = useCentralInbox()
+
   const [inputText, setInputText] = useState('')
   const [showProfileInfo, setShowProfileInfo] = useState(true)
   const [searchQuery, setSearchQuery] = useState('')
   const messagesEndRef = useRef<HTMLDivElement>(null)
 
-  const activeChat = conversations.find(c => c.id === selectedChatId)
-
-  useEffect(() => {
-    const loadConversations = async () => {
-      try {
-        setLoading(true)
-        // TODO: Implementar fetch de conversas via api.ts
-        setConversations([])
-      } catch (error) {
-        console.error('Error loading conversations:', error)
-        toast.error('Erro ao carregar conversas')
-      } finally {
-        setLoading(false)
-      }
-    }
-    loadConversations()
-  }, [])
+  const setSelectedChatId = select
+  const selectedChatId    = selectedId
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }
 
+  // Depende do COMPRIMENTO, não do array: o polling substitui o array a cada 5s
+  // e rolar a cada tique roubaria a rolagem de quem está lendo o histórico.
   useEffect(() => {
     scrollToBottom()
-  }, [activeChat?.messages])
+  }, [activeChat?.messages.length])
 
   const filteredConversations = conversations.filter(chat => {
     if (!searchQuery) return true
@@ -70,9 +61,37 @@ const ChatInterface: React.FC = () => {
 
   const handleSendMessage = async (e?: React.FormEvent) => {
     e?.preventDefault()
-    if (!inputText.trim() || !activeChat) return
-    setInputText('')
-    toast.info('Funcionalidade em desenvolvimento')
+    if (!inputText.trim() || !activeChat || enviando) return
+
+    const texto = inputText
+    try {
+      await enviar(texto)
+      // Limpa só DEPOIS do sucesso. O envio passa pela Meta e pode falhar
+      // (janela de 24h fechada, token expirado); limpar antes faria o operador
+      // reescrever a mensagem inteira.
+      setInputText('')
+    } catch (err) {
+      toast.error((err as Error).message)
+    }
+  }
+
+  // Sessão válida, mas o usuário não tem `central_role` em public.usuarios.
+  // Tela própria em vez de lista vazia: vazio ambíguo faz o operador procurar
+  // problema onde não há. Não redirecionar para /login — a sessão está boa, e
+  // redirecionar criaria laço com o gate do layout do /connect.
+  if (erro?.tipo === 'sem_acesso') {
+    return (
+      <div className="flex h-full bg-slate-950 items-center justify-center p-8">
+        <div className="flex flex-col items-center gap-4 text-center max-w-md">
+          <ShieldAlert className="h-10 w-10 text-amber-500" />
+          <h2 className="text-lg font-bold text-white">Sem acesso à Central</h2>
+          <p className="text-sm text-slate-400">{erro.mensagem}</p>
+          <p className="text-xs text-slate-500">
+            Um administrador precisa liberar seu usuário para a Central de Atendimento.
+          </p>
+        </div>
+      </div>
+    )
   }
 
   if (loading) {
@@ -103,6 +122,16 @@ const ChatInterface: React.FC = () => {
           </div>
         </div>
 
+        {/* Falha de rede NÃO esvazia a lista — os dados de antes continuam na
+            tela com este aviso em cima. Esvaziar por um poll falho é o pior
+            comportamento possível quando o wifi oscila. */}
+        {erro?.tipo === 'rede' && (
+          <div className="flex items-center gap-2 px-4 py-2 bg-amber-500/10 border-b border-amber-500/20 text-amber-400 text-xs">
+            <WifiOff className="w-3.5 h-3.5 shrink-0" />
+            <span>Sem conexão — tentando novamente</span>
+          </div>
+        )}
+
         <div className="flex-1 overflow-y-auto custom-scrollbar">
           {filteredConversations.length === 0 ? (
             <div className="flex flex-col items-center justify-center h-full text-slate-500 p-8 text-center">
@@ -123,17 +152,12 @@ const ChatInterface: React.FC = () => {
               >
                 <div className="relative">
                   <div className="w-12 h-12 rounded-full p-0.5 bg-gradient-to-tr from-slate-700 to-slate-900">
-                    <img
-                      src={chat.contactAvatar}
-                      alt={chat.contactName}
-                      className="w-full h-full rounded-full object-cover border border-slate-800"
-                    />
+                    <Avatar url={chat.contactAvatar} nome={chat.contactName} />
                   </div>
-                  {chat.unreadCount > 0 ? (
-                    <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-cyan-500 border-2 border-slate-900 rounded-full animate-pulse"></span>
-                  ) : (
-                    <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-slate-600 border-2 border-slate-900 rounded-full"></span>
-                  )}
+                  {/* O ponto pulsante cyan sinalizava não-lidas. Não existe
+                      registro de leitura por usuário no schema, então ele
+                      pulsaria sempre ou nunca — fica o ponto neutro. */}
+                  <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-slate-600 border-2 border-slate-900 rounded-full"></span>
                 </div>
 
                 <div className="ml-3 flex-1 min-w-0">
@@ -145,13 +169,13 @@ const ChatInterface: React.FC = () => {
                   </div>
                   <p className="text-xs text-slate-500 truncate">{chat.lastMessage}</p>
 
+                  {/* A badge numérica de não-lidas saiu: central.conversations
+                      não tem registro de leitura por usuário, então o número
+                      seria sempre inventado. Um "3" falso é pior que nada — o
+                      operador confia nele e deixa de abrir a conversa que tem
+                      mensagem nova de verdade. */}
                   <div className="flex items-center mt-2 gap-1.5">
                     {renderStatusBadge(chat.status)}
-                    {chat.unreadCount > 0 && (
-                      <span className="ml-auto bg-gradient-to-r from-cyan-600 to-teal-600 text-white text-[10px] font-bold px-1.5 h-4 min-w-[1rem] flex items-center justify-center rounded-full shadow-lg shadow-cyan-500/20">
-                        {chat.unreadCount}
-                      </span>
-                    )}
                   </div>
                 </div>
               </div>
@@ -166,7 +190,9 @@ const ChatInterface: React.FC = () => {
             <div className="h-16 px-6 flex items-center justify-between bg-slate-900/80 backdrop-blur-md border-b border-slate-800 z-10 shrink-0">
               <div className="flex items-center cursor-pointer hover:bg-slate-800/50 p-1.5 -ml-1.5 rounded-lg transition-colors pr-3">
                 <div className="relative">
-                  <img src={activeChat.contactAvatar} alt={activeChat.contactName} className="w-9 h-9 rounded-full ring-2 ring-slate-800" />
+                  <div className="w-9 h-9 rounded-full ring-2 ring-slate-800 overflow-hidden">
+                    <Avatar url={activeChat.contactAvatar} nome={activeChat.contactName} />
+                  </div>
                   <span className="absolute bottom-0 right-0 w-2.5 h-2.5 bg-emerald-500 border-2 border-slate-900 rounded-full"></span>
                 </div>
                 <div className="ml-3">
@@ -192,20 +218,41 @@ const ChatInterface: React.FC = () => {
                     <div key={msg.id} className={`flex ${isOutgoing ? 'justify-end' : 'justify-start'}`}>
                       <div className={`flex flex-col max-w-[75%] ${isOutgoing ? 'items-end' : 'items-start'}`}>
                         <div
-                          className={`px-5 py-3 rounded-2xl shadow-md relative text-sm leading-relaxed ${
-                            isOutgoing
-                              ? 'bg-gradient-to-br from-cyan-600 to-teal-700 text-white rounded-tr-sm'
-                              : 'bg-slate-800 text-slate-200 rounded-tl-sm border border-slate-700/50'
+                          className={`px-5 py-3 rounded-2xl shadow-md relative text-sm leading-relaxed whitespace-pre-wrap ${
+                            // Rascunho da IA: silhueta diferente, não só cor.
+                            // Precisa ser óbvio que esta mensagem NÃO saiu.
+                            msg.isAiDraft
+                              ? 'bg-violet-500/10 text-violet-100 border border-dashed border-violet-500/40 rounded-tr-sm'
+                              : isOutgoing
+                                ? 'bg-gradient-to-br from-cyan-600 to-teal-700 text-white rounded-tr-sm'
+                                : 'bg-slate-800 text-slate-200 rounded-tl-sm border border-slate-700/50'
                           }`}
                         >
                           {msg.content}
                         </div>
-                        <div className="flex items-center mt-1.5 gap-1.5 opacity-60 text-[10px] text-slate-500 px-1">
-                          <span>{msg.timestamp}</span>
-                          {isOutgoing && (
-                            msg.status === 'read' ? <CheckCheck className="w-3.5 h-3.5 text-cyan-500" /> :
+                        <div className="flex items-center mt-1.5 gap-1.5 text-[10px] px-1">
+                          {msg.isAiDraft && (
+                            <span className="text-violet-400 font-medium">
+                              Sugestão da Nina — não enviada
+                            </span>
+                          )}
+                          <span className="text-slate-500 opacity-60">{msg.timestamp}</span>
+                          {/* Tique só quando a mensagem realmente saiu.
+                              Rascunho e falha não recebem: antes, o `else` final
+                              desenhava um Check para QUALQUER status, então
+                              'pending' e 'failed' apareciam como enviadas. */}
+                          {isOutgoing && !msg.isAiDraft && (
+                            msg.failed              ? <AlertCircle className="w-3.5 h-3.5 text-rose-500" /> :
+                            msg.emTransito          ? <Loader2 className="w-3 h-3 text-slate-500 animate-spin" /> :
+                            msg.status === 'read'   ? <CheckCheck  className="w-3.5 h-3.5 text-cyan-500" /> :
                             msg.status === 'delivered' ? <CheckCheck className="w-3.5 h-3.5 text-slate-500" /> :
                             <Check className="w-3.5 h-3.5 text-slate-500" />
+                          )}
+                          {msg.failed && (
+                            <span className="text-rose-400">Não entregue</span>
+                          )}
+                          {msg.emTransito && (
+                            <span className="text-slate-500">Não confirmada</span>
                           )}
                         </div>
                       </div>
@@ -236,14 +283,16 @@ const ChatInterface: React.FC = () => {
 
                 <Button
                   type="submit"
-                  disabled={!inputText.trim()}
+                  disabled={!inputText.trim() || enviando}
                   className={`rounded-full w-12 h-12 p-0 transition-all ${
-                    inputText.trim()
+                    inputText.trim() && !enviando
                       ? 'shadow-lg shadow-cyan-500/20 hover:scale-105 active:scale-95'
                       : 'opacity-50 cursor-not-allowed'
                   }`}
                 >
-                  <Send className="w-5 h-5 ml-0.5" />
+                  {enviando
+                    ? <Loader2 className="w-5 h-5 animate-spin" />
+                    : <Send className="w-5 h-5 ml-0.5" />}
                 </Button>
               </form>
             </div>
@@ -264,10 +313,15 @@ const ChatInterface: React.FC = () => {
               <div className="flex-1 overflow-y-auto custom-scrollbar p-6 space-y-8">
                 <div className="flex flex-col items-center text-center">
                   <div className="w-24 h-24 rounded-full p-1 bg-gradient-to-tr from-cyan-500 to-teal-600 shadow-xl mb-4">
-                    <img src={activeChat.contactAvatar} alt={activeChat.contactName} className="w-full h-full rounded-full object-cover border-2 border-slate-900" />
+                    <div className="w-full h-full rounded-full overflow-hidden border-2 border-slate-900">
+                      <Avatar url={activeChat.contactAvatar} nome={activeChat.contactName} />
+                    </div>
                   </div>
                   <h3 className="text-xl font-bold text-white mb-1">{activeChat.contactName}</h3>
-                  <p className="text-sm text-slate-400 mb-4">Lead Qualificado</p>
+                  {/* Era "Lead Qualificado" fixo — decoração. Agora é
+                      contact_type do banco, que diz quem de fato está
+                      escrevendo (responsável, paciente, primeiro contato). */}
+                  <p className="text-sm text-slate-400 mb-4">{activeChat.rotuloTipo}</p>
                 </div>
 
                 <div className="space-y-4">
@@ -313,6 +367,26 @@ const ChatInterface: React.FC = () => {
           </div>
         </div>
       )}
+    </div>
+  )
+}
+
+// `avatar_url` é nullable no banco e o caminho /assets/default-avatar.png que o
+// transform legado usava não existe no projeto — apontar <img> para ele daria
+// ícone de imagem quebrada em toda linha da lista. Sem url, desenha iniciais.
+const Avatar: React.FC<{ url: string; nome: string }> = ({ url, nome }) => {
+  if (url) {
+    return (
+      <img
+        src={url}
+        alt={nome}
+        className="w-full h-full rounded-full object-cover border border-slate-800"
+      />
+    )
+  }
+  return (
+    <div className="w-full h-full rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400 text-xs font-semibold">
+      {iniciais(nome)}
     </div>
   )
 }
