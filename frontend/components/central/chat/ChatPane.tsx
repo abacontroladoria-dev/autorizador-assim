@@ -1,60 +1,82 @@
 'use client'
 
-import { PanelRight, MoreVertical, UserPlus, CheckCheck, Paperclip, Send, Smile } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { PanelRight, MoreVertical, UserPlus, CheckCheck, Paperclip, Send, Smile, MessageSquare } from 'lucide-react'
+import type { Message, Contact } from '@/modules/atendimento/types/central.types'
+import { useMensagens, horaDoRelogio, iniciais } from '../useCentralData'
 
 interface Props {
   contextPanelOpen:     boolean
   onToggleContextPanel: () => void
+  conversationId:       string | null
+  contato:              Contact | null
 }
 
-type Direction = 'inbound' | 'outbound'
-type MsgStatus = 'sent' | 'delivered' | 'read'
+export default function ChatPane({
+  contextPanelOpen, onToggleContextPanel, conversationId, contato,
+}: Props) {
+  const { mensagens, carregando, erro } = useMensagens(conversationId)
+  const [texto, setTexto]       = useState('')
+  const [enviando, setEnviando] = useState(false)
+  const [falhaEnvio, setFalhaEnvio] = useState<string | null>(null)
 
-interface MockMessage {
-  id:        string
-  direction: Direction
-  body:      string
-  time:      string
-  status:    MsgStatus
-}
+  const fim = useRef<HTMLDivElement>(null)
+  // Rola para o fim quando a contagem muda. Depende do COMPRIMENTO, não do
+  // array: o polling substitui o array a cada 5s e rolar a cada tique roubaria
+  // a rolagem de quem está lendo o histórico.
+  useEffect(() => { fim.current?.scrollIntoView({ block: 'end' }) }, [mensagens.length])
 
-const MOCK_MESSAGES: MockMessage[] = [
-  {
-    id: '1', direction: 'inbound', status: 'read', time: '09:32',
-    body: 'Olá! Queria confirmar se a sessão de amanhã às 9h está mantida.',
-  },
-  {
-    id: '2', direction: 'outbound', status: 'read', time: '09:34',
-    body: 'Bom dia, Maria! Sim, sessão confirmada com a terapeuta Ana. 😊',
-  },
-  {
-    id: '3', direction: 'inbound', status: 'read', time: '09:35',
-    body: 'Ótimo! E a guia do ASSIM para o próximo mês já foi liberada?',
-  },
-  {
-    id: '4', direction: 'outbound', status: 'read', time: '09:36',
-    body: 'Ainda aguardamos a confirmação do convênio. Assim que sair te aviso aqui.',
-  },
-  {
-    id: '5', direction: 'inbound', status: 'delivered', time: '09:41',
-    body: 'Perfeito, obrigada! Pode me reagendar a de sexta para segunda às 10h?',
-  },
-]
+  async function enviar() {
+    const corpo = texto.trim()
+    if (!corpo || !conversationId || enviando) return
+    setEnviando(true)
+    setFalhaEnvio(null)
+    try {
+      const res = await fetch('/api/central/messages', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ conversationId, body: corpo }),
+      })
+      if (!res.ok) {
+        const json = await res.json().catch(() => null)
+        throw new Error(json?.error?.message ?? `Falhou com ${res.status}`)
+      }
+      // Só limpa o campo depois do 200: se o envio falhou, o texto do operador
+      // continua ali para ele tentar de novo em vez de precisar reescrever.
+      setTexto('')
+    } catch (e) {
+      setFalhaEnvio((e as Error).message)
+    } finally {
+      setEnviando(false)
+    }
+  }
 
-export default function ChatPane({ contextPanelOpen, onToggleContextPanel }: Props) {
+  if (!conversationId) {
+    return (
+      <div className="flex-1 flex flex-col items-center justify-center min-w-0 bg-background gap-3">
+        <MessageSquare className="size-8 text-muted-foreground/40" aria-hidden="true" />
+        <p className="text-muted-foreground text-sm">Selecione uma conversa</p>
+      </div>
+    )
+  }
+
+  const nome = contato?.name ?? contato?.display_phone ?? 'Contato sem nome'
+
   return (
     <div className="flex-1 flex flex-col min-w-0 bg-background">
 
       <div className="h-14 shrink-0 flex items-center px-5 gap-3 border-b border-border bg-card">
         <div className="size-9 rounded-full bg-brand/15 flex items-center justify-center text-brand-fg text-xs font-semibold shrink-0">
-          MS
+          {iniciais(nome)}
         </div>
 
         <div className="flex-1 min-w-0">
-          <h2 className="text-sm font-semibold text-foreground leading-tight">Maria Silva</h2>
+          <h2 className="text-sm font-semibold text-foreground leading-tight truncate">{nome}</h2>
           <div className="flex items-center gap-1.5 mt-0.5">
             <div className="size-1.5 rounded-full bg-emerald-500" />
-            <p className="text-xs text-muted-foreground">+55 11 9 8765-4321 · WhatsApp Recepção</p>
+            <p className="text-xs text-muted-foreground truncate">
+              {contato?.display_phone ? `${contato.display_phone} · ` : ''}WhatsApp Recepção
+            </p>
           </div>
         </div>
 
@@ -90,17 +112,42 @@ export default function ChatPane({ contextPanelOpen, onToggleContextPanel }: Pro
       </div>
 
       <div className="flex-1 overflow-y-auto px-6 py-5 flex flex-col gap-2">
-        <div className="flex items-center gap-3 my-2">
-          <div className="flex-1 h-px bg-border" />
-          <span className="text-[10px] text-muted-foreground font-medium px-2">
-            Hoje
-          </span>
-          <div className="flex-1 h-px bg-border" />
-        </div>
+        {carregando && (
+          <p className="text-muted-foreground text-sm text-center py-4">Carregando mensagens...</p>
+        )}
+        {erro && (
+          <p className="text-rose-500 text-sm text-center py-4">
+            Não foi possível carregar as mensagens.
+            <span className="block text-muted-foreground text-xs mt-1">{erro}</span>
+          </p>
+        )}
+        {!carregando && !erro && mensagens.length === 0 && (
+          <p className="text-muted-foreground text-sm text-center py-4">
+            Nenhuma mensagem nesta conversa.
+          </p>
+        )}
 
-        {MOCK_MESSAGES.map(msg => (
-          <MessageBubble key={msg.id} msg={msg} />
-        ))}
+        {/* O separador de dia era fixo em "Hoje" no mock. Agora é derivado: um
+            separador quando o dia muda em relação à mensagem anterior. */}
+        {mensagens.map((msg, i) => {
+          const anterior = mensagens[i - 1]
+          const novoDia  = !anterior || !mesmoDia(anterior.created_at, msg.created_at)
+          return (
+            <div key={msg.id} className="contents">
+              {novoDia && (
+                <div className="flex items-center gap-3 my-2">
+                  <div className="flex-1 h-px bg-border" />
+                  <span className="text-[10px] text-muted-foreground font-medium px-2">
+                    {rotuloDoDia(msg.created_at)}
+                  </span>
+                  <div className="flex-1 h-px bg-border" />
+                </div>
+              )}
+              <MessageBubble msg={msg} />
+            </div>
+          )
+        })}
+        <div ref={fim} />
       </div>
 
       <div className="shrink-0 border-t border-border bg-card px-5 py-4">
@@ -118,6 +165,13 @@ export default function ChatPane({ contextPanelOpen, onToggleContextPanel }: Pro
           <div className="flex-1 bg-background border border-border rounded-2xl px-4 py-3 focus-within:border-brand/50 transition-colors">
             <textarea
               id="chat-composer"
+              value={texto}
+              onChange={e => setTexto(e.target.value)}
+              // Enter envia, Shift+Enter quebra linha — convenção de WhatsApp,
+              // que é o que o operador tem na mão do lado.
+              onKeyDown={e => {
+                if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); enviar() }
+              }}
               placeholder="Escreva uma mensagem..."
               rows={1}
               className="w-full bg-transparent text-sm text-foreground placeholder:text-muted-foreground resize-none outline-none leading-relaxed max-h-36"
@@ -132,18 +186,40 @@ export default function ChatPane({ contextPanelOpen, onToggleContextPanel }: Pro
           </button>
 
           <button
+            onClick={enviar}
+            disabled={enviando || !texto.trim()}
             aria-label="Enviar mensagem"
-            className="size-11 rounded-full bg-brand hover:bg-brand-dark flex items-center justify-center text-white transition-colors shrink-0"
+            className="size-11 rounded-full bg-brand hover:bg-brand-dark disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-center text-white transition-colors shrink-0"
           >
             <Send className="size-3.75" />
           </button>
         </div>
+
+        {/* O envio passa pelo provider da Meta e pode falhar por motivo que o
+            operador precisa ver (janela de 24h fechada, token expirado). Falha
+            silenciosa aqui significa paciente sem resposta. */}
+        {falhaEnvio && (
+          <p className="text-rose-500 text-xs mt-2">{falhaEnvio}</p>
+        )}
       </div>
     </div>
   )
 }
 
-function MessageBubble({ msg }: { msg: MockMessage }) {
+function mesmoDia(a: string, b: string): boolean {
+  return new Date(a).toDateString() === new Date(b).toDateString()
+}
+
+function rotuloDoDia(iso: string): string {
+  const d     = new Date(iso)
+  const hoje  = new Date()
+  const ontem = new Date(hoje.getTime() - 86_400_000)
+  if (d.toDateString() === hoje.toDateString())  return 'Hoje'
+  if (d.toDateString() === ontem.toDateString()) return 'Ontem'
+  return d.toLocaleDateString('pt-BR', { day: '2-digit', month: 'long' })
+}
+
+function MessageBubble({ msg }: { msg: Message }) {
   const out = msg.direction === 'outbound'
 
   return (
@@ -155,10 +231,16 @@ function MessageBubble({ msg }: { msg: MockMessage }) {
             : 'bg-muted text-foreground border border-border rounded-2xl rounded-bl-sm'
         }`}
       >
-        <p className="text-sm leading-relaxed">{msg.body}</p>
+        <p className="text-sm leading-relaxed whitespace-pre-wrap">{msg.body}</p>
         <div className={`flex items-center gap-1 mt-1.5 ${out ? 'justify-end' : ''}`}>
+          {/* Quem escreveu importa: uma resposta da atendente virtual e uma
+              resposta digitada pela recepção são coisas diferentes para quem
+              audita a conversa depois. */}
+          {msg.sent_by_ai && (
+            <span className="text-[10px] font-medium text-brand-fg mr-1">IA</span>
+          )}
           <span className="text-[10px] tabular-nums text-muted-foreground">
-            {msg.time}
+            {horaDoRelogio(msg.sent_at ?? msg.created_at)}
           </span>
           {out && (
             <CheckCheck

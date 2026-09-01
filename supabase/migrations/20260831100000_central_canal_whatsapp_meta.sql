@@ -132,7 +132,7 @@ end $$;
 --       ),
 --       external_id         = '<PHONE_NUMBER_ID>',
 --       provider_account_id = '<WABA_ID>',
---       connection_status   = 'connected'
+--       connection_status   = 'active'   -- enum channel_status; 'connected' NÃO existe
 --   where channel_id = (
 --     select id from central.channels
 --     where provider = 'meta_waba'
