@@ -17,6 +17,13 @@ export function ConveniosCadastro() {
   const { convenios, loading, error, recarregar } = useConvenios()
   const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set())
 
+  // Inativos saem da lista principal: eles não são escolha possível no select
+  // da Ficha Médica, então misturá-los aos ativos só faz a lista de trabalho
+  // crescer com o que não pode ser usado. Ficam num bloco próprio, recolhido.
+  const ativos = convenios.filter(c => c.ativo)
+  const inativos = convenios.filter(c => !c.ativo)
+  const [inativosAbertos, setInativosAbertos] = useState(false)
+
   const [modalConvenio, setModalConvenio] = useState<{ convenio?: Convenio } | null>(null)
   const [modalPlano, setModalPlano] = useState<{ convenio: Convenio; plano?: PlanoSaude } | null>(null)
   const [verHistorico, setVerHistorico] = useState(false)
@@ -133,14 +140,14 @@ export function ConveniosCadastro() {
       </div>
 
       <div className="bg-white dark:bg-slate-900 rounded-2xl border border-slate-200 dark:border-slate-800 p-6 shadow-sm">
-        {convenios.length === 0 ? (
+        {ativos.length === 0 ? (
           <div className="py-8 text-center text-slate-500 dark:text-slate-400 flex flex-col items-center gap-2">
             <Building2 className="w-8 h-8 text-slate-300 dark:text-slate-600" />
-            <p>Nenhum convênio cadastrado.</p>
+            <p>{inativos.length > 0 ? "Nenhum convênio ativo." : "Nenhum convênio cadastrado."}</p>
           </div>
         ) : (
           <div className="space-y-2">
-            {convenios.map(c => {
+            {ativos.map(c => {
               const expandido = expandedIds.has(c.id)
               return (
                 <div key={c.id} className="rounded-xl border border-slate-200 dark:border-slate-800 overflow-hidden">
@@ -252,6 +259,100 @@ export function ConveniosCadastro() {
           </div>
         )}
       </div>
+
+      {inativos.length > 0 && (
+        <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 overflow-hidden">
+          <button
+            type="button"
+            onClick={() => setInativosAbertos(a => !a)}
+            aria-expanded={inativosAbertos}
+            className="flex w-full items-center gap-2 px-6 py-4 text-left hover:bg-amber-500/10 transition-colors"
+          >
+            {inativosAbertos
+              ? <ChevronDown className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              : <ChevronRight className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />}
+            <span className="font-bold text-amber-700 dark:text-amber-400">
+              Convênios Inativos
+            </span>
+            <span className="text-sm text-amber-700/80 dark:text-amber-400/80">
+              ({inativos.length})
+            </span>
+          </button>
+
+          {inativosAbertos && (
+            <div className="px-6 pb-6 space-y-2">
+              <p className="text-sm text-amber-700/80 dark:text-amber-400/80 pb-1">
+                Não aparecem no campo Plano de saúde do cadastro de pacientes. Reativar
+                o convênio não reativa os planos — cada plano é reativado à parte.
+              </p>
+              {inativos.map(c => {
+                const expandido = expandedIds.has(c.id)
+                return (
+                  <div key={c.id} className="rounded-xl border border-amber-500/25 bg-white dark:bg-slate-900 overflow-hidden">
+                    <div className="flex items-center justify-between p-3 hover:bg-slate-50 dark:hover:bg-slate-800/50">
+                      <button
+                        type="button"
+                        onClick={() => toggleExpand(c.id)}
+                        className="flex items-center gap-2 min-w-0 flex-1 text-left"
+                      >
+                        {expandido
+                          ? <ChevronDown className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                          : <ChevronRight className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />}
+                        <div className="min-w-0">
+                          <div className="font-bold text-slate-900 dark:text-white">{c.nome}</div>
+                          <div className="text-sm text-slate-500 dark:text-slate-400 mt-0.5 truncate">
+                            {[c.cnpj, c.ans, [c.cidade, c.uf].filter(Boolean).join("/")].filter(Boolean).join(" · ") || "—"}
+                            {" · "}{c.planos.length} plano{c.planos.length === 1 ? "" : "s"}
+                          </div>
+                        </div>
+                      </button>
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          onClick={() => setModalConvenio({ convenio: c })}
+                          title="Editar convênio"
+                          className="p-2 text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 hover:bg-slate-100 dark:hover:bg-slate-800 rounded-lg transition-colors"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleReativarConvenio(c)}
+                          title="Reativar convênio"
+                          className="p-2 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {expandido && (
+                      <div className="border-t border-slate-200 dark:border-slate-800 bg-slate-50/50 dark:bg-slate-800/20 px-3 py-2 pl-9 space-y-1">
+                        {c.planos.length === 0 ? (
+                          <p className="text-sm text-slate-500 dark:text-slate-400 py-2">Nenhum plano cadastrado.</p>
+                        ) : (
+                          c.planos.map(p => (
+                            <div key={p.id} className="flex items-center justify-between py-1.5">
+                              <span className="text-sm text-slate-700 dark:text-slate-300">{p.nome}</span>
+                              {!p.ativo && (
+                                <button
+                                  onClick={() => handleReativarPlano(p)}
+                                  title="Reativar plano"
+                                  className="p-1.5 text-slate-400 hover:text-emerald-600 hover:bg-emerald-50 dark:hover:bg-emerald-900/20 rounded-lg transition-colors shrink-0"
+                                >
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {modalConvenio && (
         <ConvenioModal

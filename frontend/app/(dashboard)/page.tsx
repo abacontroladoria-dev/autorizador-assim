@@ -2,9 +2,11 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
+import Link from "next/link"
 import {
   CalendarDays,
   Users,
+  Stethoscope,
   UserX,
   UserMinus,
 } from "lucide-react"
@@ -216,7 +218,17 @@ export default function Home() {
             </div>
           </div>
 
-          <div className="ml-auto w-full max-w-sm xl:w-62.5 xl:max-w-none">
+          {/* Os dois atalhos vêm da main e continuam aqui de propósito: o commit
+              bee592b desta branch os removia ("header enxuto com apenas o Pulsar
+              Connect"), mas a main seguiu mantendo-os depois disso. Tirá-los no
+              merge mudaria a home de todo mundo por efeito colateral de uma
+              decisão tomada em julho. */}
+          <div className="ml-auto grid w-full grid-cols-1 gap-3 lg:grid-cols-[auto_minmax(220px,250px)] xl:w-auto">
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <ShortcutButton href="/central-pacientes"  icon={Users}       label="Controle de Pacientes"  iconBg="bg-teal-50" iconColor="text-teal-600"  accentHex="#0d9488" />
+              <ShortcutButton href="/central-terapeutas" icon={Stethoscope} label="Controle de Terapeutas" iconBg="bg-blue-50" iconColor="text-[#3A8FB7]" accentHex="#3A8FB7" />
+            </div>
+
             <PulsarHubCard />
           </div>
         </div>
@@ -267,3 +279,32 @@ export default function Home() {
 }
 
 
+function ShortcutButton({
+  href,
+  icon: Icon,
+  label,
+  iconBg,
+  iconColor,
+  accentHex,
+}: {
+  href: string
+  icon: typeof Users
+  label: string
+  iconBg: string
+  iconColor: string
+  accentHex: string
+}) {
+  return (
+    <Link
+      href={href}
+      className={`flex items-center gap-3 px-4 py-3 ${iconBg} rounded-xl border shadow-[0_1px_4px_rgba(0,0,0,0.07),0_3px_10px_rgba(0,0,0,0.06)] hover:shadow-[0_4px_14px_rgba(0,0,0,0.12)] hover:-translate-y-0.5 active:translate-y-0 active:shadow-sm transition-all duration-150`}
+      style={{ borderColor: `${accentHex}55` }}
+    >
+      <div className={`bg-white/80 ${iconColor} p-2 rounded-lg shrink-0 shadow-sm`} style={{ boxShadow: `0 1px 4px ${accentHex}25` }}>
+        <Icon size={16} />
+      </div>
+      <span className="text-xs font-semibold text-slate-700 leading-tight whitespace-nowrap">{label}</span>
+    </Link>
+  )
+
+}

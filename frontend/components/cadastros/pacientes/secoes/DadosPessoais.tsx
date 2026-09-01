@@ -145,14 +145,9 @@ export function DadosPessoais({
         onChange={(v) => set({ rg_data_emissao: v || null })}
         disabled={disabled}
       />
-      <Campo
-        label="Celular"
-        value={form.telefone ?? ""}
-        onChange={(v) => set({ telefone: v || null })}
-        disabled={disabled}
-        inputMode="tel"
-        placeholder="(21) 99999-9999"
-      />
+      {/* Sem campo de celular do paciente: a coluna foi removida em
+          20260828170200. O contato telefônico é o do responsável, editado na
+          seção "Filiação e responsáveis". */}
 
       <Campo
         label="E-mail"

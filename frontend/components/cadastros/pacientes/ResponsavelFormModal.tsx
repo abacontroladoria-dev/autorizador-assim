@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import toast from "react-hot-toast"
-import { X, Loader2, AlertTriangle } from "lucide-react"
+import { X, Loader2, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react"
 import { maskCpf, onlyDigits, validarCpf } from "@/lib/remuneracao/formatacao"
 import { UFS } from "@/lib/cadastros/ufs"
 import {
@@ -78,6 +78,17 @@ export function ResponsavelFormModal({
   const [salvando, setSalvando] = useState(false)
   const [erro, setErro] = useState<string | null>(null)
   const editando = Boolean(responsavel)
+
+  // Endereço nasce RECOLHIDO: o essencial pra vincular alguém é nome, CPF,
+  // contato — o endereço só importa quando diverge do endereço do PACIENTE
+  // (pais separados, financeiro que mora em outro lugar), que é o caso raro,
+  // não o comum. Sempre fechado, mesmo editando quem já tem endereço
+  // preenchido — o resumo ao lado do título é o que evita perder de vista que
+  // há dado ali sem precisar abrir.
+  const [enderecoAberto, setEnderecoAberto] = useState(false)
+  const resumoEndereco = [form.logradouro, form.bairro, form.cidade && form.uf ? `${form.cidade}/${form.uf}` : (form.cidade || form.uf)]
+    .filter(Boolean)
+    .join(", ")
 
   // Duplicidade na criação: quem já bate com o CPF (ou, sem CPF, com o nome
   // normalizado) que está sendo digitado agora.
@@ -319,51 +330,81 @@ export function ResponsavelFormModal({
             inputMode="email"
           />
 
-          <Campo
-            label="CEP"
-            value={form.cep ?? ""}
-            onChange={(v) => set({ cep: v || null })}
-            disabled={salvando}
-            inputMode="numeric"
-          />
-          <Campo
-            label="Cidade"
-            value={form.cidade ?? ""}
-            onChange={(v) => set({ cidade: v || null })}
-            disabled={salvando}
-          />
-          <Campo
-            label="Logradouro"
-            value={form.logradouro ?? ""}
-            onChange={(v) => set({ logradouro: v || null })}
-            disabled={salvando}
-          />
-          <Campo
-            label="Bairro"
-            value={form.bairro ?? ""}
-            onChange={(v) => set({ bairro: v || null })}
-            disabled={salvando}
-          />
-          <Campo
-            label="Número"
-            value={form.numero ?? ""}
-            onChange={(v) => set({ numero: v || null })}
-            disabled={salvando}
-          />
-          <Campo
-            label="Complemento"
-            value={form.complemento ?? ""}
-            onChange={(v) => set({ complemento: v || null })}
-            disabled={salvando}
-          />
-          <CampoSelect
-            label="UF"
-            value={form.uf as string | null}
-            onChange={(v) => set({ uf: v })}
-            disabled={salvando}
-            vazio="Não informada"
-            opcoes={UFS.map((uf) => ({ valor: uf, rotulo: uf }))}
-          />
+        </div>
+
+        {/* Recolhido por padrão — ver comentário de `enderecoAberto`. O
+            resumo ao lado do título mostra o que já está preenchido sem
+            precisar abrir, para editar um responsável com endereço não dar a
+            impressão de que o dado sumiu. */}
+        <div className="border-t border-border px-4 py-3">
+          <button
+            type="button"
+            onClick={() => setEnderecoAberto((a) => !a)}
+            aria-expanded={enderecoAberto}
+            className={`flex w-full items-center justify-between gap-2 text-left ${foco}`}
+          >
+            <span className="flex items-center gap-1.5 text-sm font-medium text-foreground">
+              {enderecoAberto ? (
+                <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              ) : (
+                <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+              )}
+              Endereço
+            </span>
+            {!enderecoAberto && resumoEndereco && (
+              <span className="truncate text-xs text-muted-foreground">{resumoEndereco}</span>
+            )}
+          </button>
+
+          {enderecoAberto && (
+            <div className="mt-3 grid gap-x-6 gap-y-4 sm:grid-cols-2">
+              <Campo
+                label="CEP"
+                value={form.cep ?? ""}
+                onChange={(v) => set({ cep: v || null })}
+                disabled={salvando}
+                inputMode="numeric"
+              />
+              <Campo
+                label="Cidade"
+                value={form.cidade ?? ""}
+                onChange={(v) => set({ cidade: v || null })}
+                disabled={salvando}
+              />
+              <Campo
+                label="Logradouro"
+                value={form.logradouro ?? ""}
+                onChange={(v) => set({ logradouro: v || null })}
+                disabled={salvando}
+              />
+              <Campo
+                label="Bairro"
+                value={form.bairro ?? ""}
+                onChange={(v) => set({ bairro: v || null })}
+                disabled={salvando}
+              />
+              <Campo
+                label="Número"
+                value={form.numero ?? ""}
+                onChange={(v) => set({ numero: v || null })}
+                disabled={salvando}
+              />
+              <Campo
+                label="Complemento"
+                value={form.complemento ?? ""}
+                onChange={(v) => set({ complemento: v || null })}
+                disabled={salvando}
+              />
+              <CampoSelect
+                label="UF"
+                value={form.uf as string | null}
+                onChange={(v) => set({ uf: v })}
+                disabled={salvando}
+                vazio="Não informada"
+                opcoes={UFS.map((uf) => ({ valor: uf, rotulo: uf }))}
+              />
+            </div>
+          )}
         </div>
 
         {mostrarAvisoAlcance && (

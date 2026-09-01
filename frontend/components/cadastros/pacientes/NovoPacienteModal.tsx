@@ -55,7 +55,6 @@ export function NovoPacienteModal({ onFechar }: { onFechar: () => void }) {
       rg_uf: null,
       rg_data_emissao: null,
       email: null,
-      telefone: null,
       telefone_residencial: null,
       falecido: false,
       ativo: true,

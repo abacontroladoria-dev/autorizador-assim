@@ -13,6 +13,19 @@
 export type NivelSuporte = "1" | "2" | "3" | "NA"
 export type SituacaoLaudo = "Vigente" | "Vencido"
 
+/**
+ * Como o atendimento chegou por via judicial.
+ *
+ * Espelha `individualidades_origem_judicial_check` (20260831120000) — mudar um
+ * lado sem o outro faz o salvamento morrer no banco com erro de CHECK, que a
+ * tela mostra como "não foi possível salvar".
+ *
+ * "Não informado" NÃO é um valor da lista: é a ausência dela (NULL). Ter os dois
+ * criaria dois jeitos de dizer a mesma coisa.
+ */
+export const ORIGENS_JUDICIAIS = ["Liminar", "Penhora", "Acordo"] as const
+export type OrigemJudicial = (typeof ORIGENS_JUDICIAIS)[number]
+
 // ─── LAUDO ────────────────────────────────────────────────────────────────────
 
 export type LaudoEspecialidade = {
@@ -42,11 +55,9 @@ export type PacienteLaudo = {
   arquivo_path: string | null
   observacoes: string | null
   em_uso?: boolean
-  /**
-   * false = "excluído" pela tela. Laudo nunca sai do banco — o DELETE é
-   * revogado na RLS (20260827100000). A aba lista apenas os ativos.
-   */
-  ativo: boolean
+  // Sem `ativo`: laudo não tem mais estado "excluído" (20260831130000). A coluna
+  // segue no banco, sempre true, porque a view a projeta e as ALTAS ainda usam a
+  // mesma coluna com o significado antigo — mas a tela de laudo não a lê.
   criado_em: string
   atualizado_em: string
   /** Populado pelo service, vazio se não selecionado. */
@@ -82,6 +93,8 @@ export type AltaIndividualidade = {
   paciente_verbal: boolean | null
   ambiente_natural: boolean | null
   nivel_suporte: NivelSuporte | null
+  /** NULL = não informado. Ver ORIGENS_JUDICIAIS. */
+  origem_judicial: OrigemJudicial | null
 }
 
 export type AltaIndividualidadeForm = Omit<

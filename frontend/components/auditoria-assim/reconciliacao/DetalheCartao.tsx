@@ -10,6 +10,7 @@ import type { NotaManual, TokenConferencia } from '@/services/auditoria-assim.se
 import type { CartaoGrade, ReclassificacaoSituacao } from '../types'
 import { dataHoraCurta, dataHoraDeTimestamptz, formatarDiaComNome } from './datas'
 import { sessaoDoBloco } from './vinculo'
+import { rotuloForma } from '../formaValidacao'
 
 /**
  * Tudo o que se sabe sobre um atendimento — sem sair da semana.
@@ -299,7 +300,7 @@ export default function DetalheCartao({
         {daSessao ? (
           <>
             <Campo rotulo="Status na ASSIM">{daSessao.origem.status_assim}</Campo>
-            <Campo rotulo="Forma de autorização">{daSessao.origem.forma_autorizacao}</Campo>
+            <Campo rotulo="Forma de autorização">{rotuloForma(daSessao.origem.forma_autorizacao)}</Campo>
             <Campo rotulo="Horário da autorização">{daSessao.origem.horario_autorizacao}</Campo>
             {/* Só no ramo da sessão: aqui a procedência vem da RPC, medida na linha da
                 fila. No cartão de guia órfã ela seria dedução de outro mecanismo (o

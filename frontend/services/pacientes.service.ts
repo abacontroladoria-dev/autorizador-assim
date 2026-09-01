@@ -47,7 +47,6 @@ const COLUNAS = [
   "rg_uf",
   "rg_data_emissao",
   "email",
-  "telefone",
   "telefone_residencial",
   "falecido",
   "foto_path",

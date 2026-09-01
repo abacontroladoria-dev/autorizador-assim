@@ -31,6 +31,7 @@ import { rotuloOrigemGuia, rotuloSolicitadoPor } from '@/lib/guiaOrigem'
 import type { AuditoriaAssimItem } from './types'
 import SituacaoBadge, { SITUACAO_CONFIG, SITUACAO_FALLBACK } from './SituacaoBadge'
 import { ehGlosa } from './situacoes'
+import { rotuloForma } from './formaValidacao'
 
 type Props = {
   item: AuditoriaAssimItem | null
@@ -346,7 +347,7 @@ export default function ModalDetalhamentoAtendimento({ item, open, onClose, onSa
                     />
                   )}
                   <Fact icon={User} label={rotuloOrigemCriadoPor} value={item.criado_por} />
-                  <Fact icon={Send} label="Forma" value={item.forma_autorizacao} />
+                  <Fact icon={Send} label="Forma" value={rotuloForma(item.forma_autorizacao)} />
                   <Fact icon={Clock} label="Autorizado em" value={formatarDataHora(item.horario_autorizacao)} />
                   <Fact icon={CalendarCheck} label="Executado em" value={formatarDataHora(item.data_execucao)} />
                   {item.teve_token && <Fact icon={KeySquare} label="Token" value={item.token} mono />}
