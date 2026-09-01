@@ -60,7 +60,22 @@ export interface ListMessagesParams {
 }
 
 export class MessageRepository {
-  constructor(private readonly supabase: SupabaseClient) {}
+  // `escrita` existe por causa da RLS de central.messages: a migration
+  // 20260701000800 dá a `authenticated` apenas SELECT e INSERT, e documenta
+  // "UPDATE: service_role only (delivery status updates by worker)". O desenho
+  // supunha que todo envio passaria pelo worker.
+  //
+  // Enviar pela tela quebra essa suposição: o UPDATE de confirmação sai com o
+  // client do usuário, não casa linha nenhuma, e o `.single()` do RETURNING
+  // levanta PGRST116 DEPOIS de a mensagem já ter ido para o WhatsApp — o
+  // paciente recebe e a tela diz que falhou (visto em 01/09).
+  //
+  // Quando não é passado, cai no client do usuário e o comportamento é o de
+  // antes. Os callers com service role já passam o mesmo client nos dois.
+  constructor(
+    private readonly supabase: SupabaseClient,
+    private readonly escrita:  SupabaseClient = supabase,
+  ) {}
 
   async findById(id: string): Promise<Message | null> {
     const { data, error } = await (this.supabase as any)
@@ -211,7 +226,10 @@ export class MessageRepository {
     externalId: string,
     sentAt?:    string,
   ): Promise<Message> {
-    const { data, error } = await (this.supabase as any)
+    // `escrita` e não `supabase`: ver a nota no construtor. É escrituração de
+    // sistema sobre uma linha que ACABAMOS de criar — a autorização já foi
+    // exercida no INSERT, que passou pela RLS do usuário.
+    const { data, error } = await (this.escrita as any)
       .schema('central')
       .from('messages')
       .update({
@@ -227,8 +245,12 @@ export class MessageRepository {
     return data as Message
   }
 
+  // `escrita` pelo mesmo motivo de confirmarEnvio. Aqui o sintoma era ainda
+  // mais silencioso: sem RETURNING não há PGRST116, então o UPDATE não casava
+  // linha nenhuma e a chamada voltava sem erro. Marcar 'failed' no caminho de
+  // falha do envio não marcava nada, e a mensagem ficava 'pending' para sempre.
   async updateStatus(id: string, status: MessageStatus): Promise<void> {
-    const { error } = await (this.supabase as any)
+    const { error } = await (this.escrita as any)
       .schema('central')
       .from('messages')
       .update({ status })

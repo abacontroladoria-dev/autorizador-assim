@@ -65,7 +65,21 @@ export function mapCentralError(err: unknown): NextResponse {
                : err.code
     return badGateway(code, err.message)
   }
-  if (err instanceof ProviderError)               return badGateway(err.code, err.message)
+  // 502: o provider (Meta) recusou. A mensagem repassada é a DELE — é a única
+  // que diz se o problema é token, número ou formato.
+  //
+  // O log é obrigatório aqui. Sem ele, uma recusa da Meta deixa como único
+  // rastro no servidor a linha ` POST /api/central/messages/ 502`, e descobrir
+  // o motivo exige refazer a chamada à mão contra a Graph API. Foi exatamente
+  // o que aconteceu em 01/09: dois envios falharam e o `code: 190` (token
+  // expirado) não estava em lugar nenhum do log.
+  if (err instanceof ProviderError) {
+    console.error('[Central API] provider recusou', {
+      code:    err.code,
+      message: err.message,
+    })
+    return badGateway(err.code, err.message)
+  }
   if (err instanceof ProviderNotImplementedError) return serviceUnavailable(err.code, err.message)
   if (err instanceof UnauthorizedError)           return forbidden(err.message)
 

@@ -98,7 +98,11 @@ export function createConversationService(userClient: SupabaseClient): Conversat
 
 export function createMessageService(userClient: SupabaseClient): MessageService {
   return new MessageService(
-    new MessageRepository(userClient),
+    // Leitura e INSERT com o client do usuário (RLS decide o que ele pode ver
+    // e em qual conversa pode escrever); o UPDATE de confirmação com service
+    // role, porque central.messages não tem policy de UPDATE para
+    // `authenticated` — ver a nota no construtor de MessageRepository.
+    new MessageRepository(userClient, supabaseService),
     new ConversationRepository(userClient),
     new ContactRepository(userClient),
     new AuditRepository(supabaseService),   // sempre service role
