@@ -14,7 +14,14 @@ import toast from 'react-hot-toast'
 
 import { Lock, CheckCircle, Loader2, Megaphone, XCircle } from 'lucide-react'
 
-import { getMachineId } from '@/lib/machine'
+import { sondarRobo } from '@/lib/machine'
+
+import {
+  lerHeartbeatDaMinhaMaquina,
+  mensagemDoRobo,
+  montarDiagnostico,
+  type DiagnosticoRobo,
+} from '@/lib/diagnostico-robo'
 
 import {
   INTERVALO_ASSIM_MIN,
@@ -225,8 +232,12 @@ const unidades = [
   const [filtro, setFiltro] = useState('')
   
   const [MACHINE_ID, setMachineId] = useState<string | null>(null)
-  
-  const [workerOnline, setWorkerOnline] = useState(false)
+
+  // Diagnóstico do robô, não um booleano. `robo.pronto` decide o botão; o resto
+  // existe para o aviso poder dizer O QUE fazer — ver DiagnosticoRobo.
+  const [robo, setRobo] = useState<DiagnosticoRobo>({ pronto: false, estado: 'verificando' })
+
+  const workerOnline = robo.pronto
 
   // Confirmação em dois toques para os avisos de ordem/adiantamento: o primeiro
   // clique arma o card e explica, o segundo (em até 10s) solicita mesmo assim.
@@ -415,19 +426,31 @@ useEffect(() => {
 
   async function carregarMachine() {
 
-    const id =
-      await getMachineId()
+    const sonda = await sondarRobo()
 
     if (cancelado) return
 
-    setMachineId(id)
+    if (sonda.ok) {
+      setMachineId(sonda.machineId)
+      setRobo({ pronto: true, estado: 'ok' })
+      return
+    }
 
-	setWorkerOnline(!!id)
+    // A porta local falhou. Isso AINDA NÃO diz que o robô parou: um bloqueio do
+    // browser (CSP) rejeita o fetch exatamente como um robô morto rejeitaria, e
+    // o motivo real só aparece no console. Quem separa os dois é o heartbeat.
+    setMachineId(null)
+
+    const heartbeat = await lerHeartbeatDaMinhaMaquina()
+
+    if (cancelado) return
+
+    setRobo(montarDiagnostico(sonda.motivo, heartbeat))
   }
 
   carregarMachine()
 
-  // Re-checa periodicamente para detectar o worker assim que ele sobe (ou cai),
+  // Re-checa periodicamente para detectar o robô assim que ele sobe (ou cai),
   // sem exigir refresh manual da página.
   const interval = setInterval(carregarMachine, 5000)
 
@@ -1444,25 +1467,25 @@ useEffect(() => {
         <p className="text-sm text-slate-500 mt-1">
           Gestão diária de presenças, faltas e autorizações
         </p>
-        {!workerOnline && (
-          <div className="
-            mt-4
-            rounded-xl
-            border border-amber-200
-            bg-amber-50
-            px-4
-            py-3
-            text-sm
-            text-amber-800
-            flex
-            items-center
-            gap-2
-          ">
-            <span className="text-base">⚠</span>
-
-            <span>
-              Worker não detectado neste computador — abra o sistema no PC onde o robô de autorização está instalado e em execução.
+        {/* O aviso muda de cor conforme a AÇÃO que ele pede. Âmbar quando a
+            recepção resolve sozinha (reiniciar o robô); azul quando o robô está
+            comprovadamente bem e o problema é técnico — insistir no PC ali só
+            perde tempo. Cinza enquanto a primeira sonda não voltou, para a tela
+            não piscar um alarme que se desmente em 2 segundos. */}
+        {robo.estado !== 'ok' && (
+          <div className={`
+            mt-4 rounded-xl border px-4 py-3 text-sm flex items-start gap-2
+            ${robo.estado === 'verificando'
+              ? 'border-slate-200 bg-slate-50 text-slate-600'
+              : robo.estado === 'bloqueado'
+                ? 'border-sky-200 bg-sky-50 text-sky-900'
+                : 'border-amber-200 bg-amber-50 text-amber-800'}
+          `}>
+            <span className="text-base leading-5">
+              {robo.estado === 'verificando' ? '⏳' : robo.estado === 'bloqueado' ? 'ℹ' : '⚠'}
             </span>
+
+            <span>{mensagemDoRobo(robo)}</span>
           </div>
         )}
       </div>
@@ -1857,6 +1880,7 @@ useEffect(() => {
       p.status_final === 'processando'
     }
     onClick={() => handleSolicitarLista(p)}
+    title={workerOnline ? undefined : mensagemDoRobo(robo)}
     className={`w-full flex items-start justify-center gap-1.5 text-[12px] px-3 py-1.5 rounded-lg font-medium leading-none tracking-tight ${
       !workerOnline
         ? 'bg-slate-300 text-slate-500 cursor-not-allowed'
@@ -1868,9 +1892,16 @@ useEffect(() => {
     <Lock size={14} className="relative -top-[1px]" />
 
     {
-      !workerOnline
-        ? 'Sistema Offline'
-        : 'Autorizar'
+      // "Sistema Offline" era mentira quando o robô estava vivo e o browser é
+      // que bloqueava. O rótulo cabe em 135px, então diz o essencial; o detalhe
+      // (e o que fazer) fica no aviso do topo e no title.
+      workerOnline
+        ? 'Autorizar'
+        : robo.estado === 'verificando'
+          ? 'Verificando…'
+          : robo.estado === 'bloqueado'
+            ? 'Sem acesso local'
+            : 'Robô Offline'
     }
   </button>
 
