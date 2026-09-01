@@ -185,6 +185,14 @@ export default function Sidebar() {
 
   function canAccess(path: string) {
     if (!role) return false
+    // Admin acessa tudo — o mesmo retorno antecipado do proxy.ts (gate real das
+    // páginas). Sem isto o menu diverge da navegação justamente onde o código não
+    // está no roleDefaults do papel: `autorizacoes_avulsas` só é concedido a
+    // `admin` e `recepcao` por default, então o admin abria /autorizacoes-avulsas
+    // pelo link (o proxy libera antes de olhar código nenhum) e não via o item no
+    // menu. Item invisível que a navegação aceita é a mesma divergência que o
+    // comentário de loadRole() já apontava, na direção contrária.
+    if (role === "admin") return true
     const [barePath, query] = path.split("?")
     return hasRouteAccess(barePath, query ? `?${query}` : "", allowedPaths)
   }
