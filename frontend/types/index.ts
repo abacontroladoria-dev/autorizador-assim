@@ -97,10 +97,15 @@ export interface MessageType {
   audio: 'audio'
 }
 
-export function transformDBToUIMessage(msg: DBMessage): UIMessage {
-  return { ...msg } as UIMessage
-}
-
-export function transformDBToUIConversation(conv: DBConversation, messages?: DBMessage[]): UIConversation {
-  return { ...conv, messages: messages || [] } as UIConversation
-}
+// transformDBToUIMessage e transformDBToUIConversation viviam aqui e não existem
+// mais. Eram stubs (`{ ...conv } as UIConversation`) escritos para o
+// hooks/nina/useConversations.ts, que lia de public.conversations — tabela que
+// nunca existiu neste banco — e foi removido junto com a ligação da
+// /connect/inbox no schema `central`.
+//
+// O cast do stub não compilava: o objeto de partida não tem `status`, exigido
+// por UIConversation. `npx tsc --noEmit` reportava e seguia; `next build` PARA,
+// e foi o que derrubou o deploy de 01/09.
+//
+// Quem precisa converter central → UI usa components/nina/adapters/centralToNina.ts,
+// que tem os campos completos e testes.
