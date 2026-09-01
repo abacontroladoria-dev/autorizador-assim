@@ -72,12 +72,30 @@ const nextConfig: NextConfig = {
                 "connect-src 'self'",
                 // Hosts do Supabase em uso, derivados do ambiente
                 ...origensSupabase(),
+                // Robô de autorização, servido NA MÁQUINA DA ATENDENTE.
+                //
+                // Precisa valer em produção, não só em dev: /solicitar consulta
+                // http://127.0.0.1:3010/machine-id para saber se o robô está de
+                // pé (lib/machine.ts) e desabilita o botão Autorizar quando a
+                // chamada falha. Sem esta entrada o CSP corta a requisição antes
+                // da rede, e a recepção inteira vê "Sistema Offline" com o robô
+                // vivo e autorizando — foi o que aconteceu em 01/09/2026.
+                //
+                // O sintoma tem um atraso cruel: o CSP viaja no cabeçalho do
+                // documento, então quem já estava com a página aberta continua
+                // funcionando e só quebra ao recarregar. A quebra parece
+                // espontânea e não coincide com o deploy que a causou.
+                //
+                // Liberar isto não expõe nada: connect-src autoriza o browser a
+                // falar com um serviço no computador de quem acessa. Não abre
+                // porta no servidor nem torna o robô alcançável de fora — cada
+                // máquina só enxerga o próprio.
+                'http://127.0.0.1:3010', 'http://localhost:3010',
                 // Stack local do Supabase CLI — apenas em desenvolvimento
                 ...(isDev
                   ? [
                       'http://127.0.0.1:54321', 'ws://127.0.0.1:54321',
                       'http://localhost:54321', 'ws://localhost:54321',
-                      'http://127.0.0.1:3010',  'http://localhost:3010',
                     ]
                   : []),
               ].join(' '),
