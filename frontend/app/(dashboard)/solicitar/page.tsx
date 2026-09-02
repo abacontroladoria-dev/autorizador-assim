@@ -25,6 +25,7 @@ import {
 
 import {
   INTERVALO_ASSIM_MIN,
+  LIBERACAO_SOLICITAR_MIN,
   horaDoTimestamp,
   minutosDesde,
   podeSolicitar,
@@ -651,10 +652,16 @@ async function handleSolicitarLista(
 
     let avisoIntervalo: string | null = null
 
-    if (!podeSolicitar(p.ultima_autorizacao_anterior)) {
+    // Libera em LIBERACAO_SOLICITAR_MIN (31), um minuto acima do que a ASSIM
+    // exige: o relógio que conta aqui é o do navegador, não o do portal. O TEXTO
+    // abaixo continua citando os 30 — 31 é margem nossa, e anunciá-la ensinaria a
+    // regra errada a quem lê.
+    if (!podeSolicitar(p.ultima_autorizacao_anterior, LIBERACAO_SOLICITAR_MIN)) {
 
       const decorridos = minutosDesde(p.ultima_autorizacao_anterior) ?? 0
-      const faltam = Math.max(1, Math.ceil(INTERVALO_ASSIM_MIN - decorridos))
+      // Conta contra o limiar que de fato libera, senão diria "faltam 0 min" com
+      // o botão ainda recusando.
+      const faltam = Math.max(1, Math.ceil(LIBERACAO_SOLICITAR_MIN - decorridos))
 
       // "OUTRA sessão": ultima_autorizacao_anterior exclui o próprio horário por
       // construção, e dizer só "paciente autorizado" faz a atendente achar que
