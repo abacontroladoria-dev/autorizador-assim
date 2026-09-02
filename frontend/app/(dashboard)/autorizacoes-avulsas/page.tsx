@@ -109,6 +109,22 @@ export default function AutorizacoesAvulsasPage() {
   const [motivo, setMotivo] = useState('')
   const [enviando, setEnviando] = useState(false)
 
+  // A janela de 30 min da ASSIM AVISA, mas não impede — diferente da /solicitar,
+  // que bloqueia. Decisão do usuário em 02/09/2026: a avulsa é o caso excepcional
+  // por definição (não nasce de sessão nenhuma), e quem a pede costuma ter um
+  // motivo que a regra geral não prevê. Guarda os minutos restantes enquanto a
+  // confirmação está na tela; `null` = nada a confirmar.
+  const [confirmarJanela, setConfirmarJanela] = useState<
+    { restam: number; hora: string } | null
+  >(null)
+
+  // A confirmação fala de UM paciente e UMA terapia. Se qualquer um dos dois muda
+  // enquanto ela está aberta, o "Enviar mesmo assim" passaria a valer para outra
+  // coisa que não a checada — e o aviso na tela estaria mentindo sobre quem é.
+  useEffect(() => {
+    setConfirmarJanela(null)
+  }, [rotuloPaciente, rotuloTerapia])
+
   /**
    * Rótulo -> paciente. O SearchCombobox trabalha com strings, e nome de paciente
    * REPETE: dois "Maria Silva" dariam duas opções idênticas e a escolha seria uma
@@ -253,22 +269,39 @@ export default function AutorizacoesAvulsasPage() {
   async function enviar() {
     if (impedimento || !paciente || !carteirinha || !tuss || !machineId) return
 
+    // A ASSIM cronometra 30 min por BENEFICIÁRIO, no relógio, sobre a
+    // identificação — não sobre o horário da sessão. A avulsa concorre pela mesma
+    // janela que as solicitações normais do dia.
+    //
+    // Aqui isso AVISA em vez de bloquear (a /solicitar bloqueia). O limite é da
+    // ASSIM, não nosso: removê-lo do código não o remove do portal, então o que a
+    // confirmação faz é mostrar o custo — o robô pode gastar a viagem à toa, ou a
+    // guia pode sair duplicada, como no incidente de 21/08/2026 — e deixar a
+    // decisão com quem está pedindo.
     setEnviando(true)
     try {
-      // A ASSIM cronometra 30 min por BENEFICIÁRIO, no relógio, sobre a
-      // identificação — não sobre o horário da sessão. A avulsa concorre pela
-      // mesma janela que as solicitações normais do dia.
       const ultima = await ultimaAutorizacaoDoPaciente(paciente.paciente_id)
       if (!podeSolicitar(ultima)) {
-        toast.error(
-          `A ASSIM exige ${INTERVALO_ASSIM_MIN} min entre autorizações do mesmo ` +
-            `beneficiário.\nA última foi às ${horaDoTimestamp(ultima)} — faltam ` +
-            `${minutosRestantes(ultima)} min.`,
-          { style: { whiteSpace: 'pre-line', maxWidth: '420px' }, duration: 8000 }
-        )
+        setConfirmarJanela({
+          restam: minutosRestantes(ultima),
+          hora: horaDoTimestamp(ultima),
+        })
         return
       }
+    } finally {
+      setEnviando(false)
+    }
 
+    await enviarDeFato()
+  }
+
+  /** O envio em si, já decidida a questão da janela de 30 min. */
+  async function enviarDeFato() {
+    if (impedimento || !paciente || !carteirinha || !tuss || !machineId) return
+
+    setConfirmarJanela(null)
+    setEnviando(true)
+    try {
       const r = await criarAutorizacaoAvulsa({
         paciente_id: paciente.paciente_id,
         paciente_nome: paciente.paciente_nome,
@@ -316,6 +349,40 @@ export default function AutorizacoesAvulsasPage() {
             O robô desta estação não está respondendo. Sem ele a solicitação ficaria
             na fila para sempre, então o envio está bloqueado.
           </span>
+        </div>
+      )}
+
+      {/* ── Janela de 30 min: avisa, não impede ──
+          Âmbar, e não vermelho: vermelho é o `machine_id` ausente acima, que
+          BLOQUEIA de verdade. Aqui a ação segue disponível, e usar a mesma cor
+          faria os dois estados parecerem a mesma coisa. */}
+      {confirmarJanela && (
+        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '10px', padding: '12px 16px', borderRadius: 'var(--radius-lg)', background: '#FFFBEB', border: '1px solid #FDE68A', color: '#92400E', fontSize: 'var(--text-sm)' }}>
+          <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <span>
+              A ASSIM exige {INTERVALO_ASSIM_MIN} min entre autorizações do mesmo
+              beneficiário. A última de <strong>{paciente?.paciente_nome}</strong> foi
+              às {confirmarJanela.hora} — faltam <strong>{confirmarJanela.restam} min</strong>.
+              Enviar agora pode gastar a viagem do robô à toa, ou gerar guia duplicada.
+            </span>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={enviarDeFato}
+                disabled={enviando}
+                style={{ border: '1px solid #B45309', borderRadius: 'var(--radius-md)', padding: '6px 12px', fontSize: 'var(--text-sm)', fontWeight: 'var(--weight-bold)', fontFamily: 'inherit', background: '#B45309', color: '#fff', cursor: enviando ? 'default' : 'pointer' }}
+              >
+                Enviar mesmo assim
+              </button>
+              <button
+                onClick={() => setConfirmarJanela(null)}
+                disabled={enviando}
+                style={{ border: '1px solid #FDE68A', borderRadius: 'var(--radius-md)', padding: '6px 12px', fontSize: 'var(--text-sm)', fontFamily: 'inherit', background: 'transparent', color: '#92400E', cursor: enviando ? 'default' : 'pointer' }}
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
