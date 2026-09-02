@@ -320,24 +320,53 @@ export default function ModalVisaoGerencial({ aberto, onClose }: Props) {
                 titulo={visual.title.replace('\n', ' ')}
               />
 
-              {/* As quebras são o SEGUNDO passo, e só existem depois da busca.
+              {/* "Por paciente" NÃO fica atrás da busca — as outras três, sim.
 
-                  O primeiro passo desta tela é dimensionar — quanto, e quando.
-                  Com o período inteiro em foco, as quatro quebras respondem uma
-                  pergunta que ninguém fez ainda e enchem a dobra de baixo de
-                  listas longas, empurrando o gráfico (que é o passo um) para
-                  fora da tela. Depois que a pessoa nomeia um paciente, elas
-                  passam a responder algo específico: o que está acontecendo com
-                  ELE. */}
+                  O gate existia por espaço: as quatro quebras juntas enchiam a
+                  dobra de baixo e empurravam o gráfico, que é o passo um, para
+                  fora da tela. Mas ele cobrava caro justamente desta: com o
+                  indicador em foco, "quem são os maiores" é a pergunta seguinte
+                  imediata, e exigir que se buscasse UM paciente para ver a
+                  lista de pacientes era circular — a lista respondia quem
+                  buscar, e só aparecia depois de já se ter buscado.
+
+                  Sozinha ela não reproduz o problema original: é uma seção, não
+                  quatro, e as vinte linhas vão em até três colunas. Terapia,
+                  motivo e unidade continuam depois da busca, onde de fato
+                  respondem algo específico — o que está acontecendo com ELE. */}
+              <Quebra
+                titulo="Por paciente"
+                fatias={r.porPaciente}
+                metrica={metrica}
+                barTone={visual.barTone}
+                vazio="Nenhum paciente com este indicador no período."
+                teto={TETO_FATIAS_PACIENTE}
+                colunas={3}
+                chaveAtiva={r.pacienteId}
+                // Clicar num nome ancora o modal naquela pessoa — o mesmo efeito
+                // de escolhê-la na lista de sugestões da busca, e pelo mesmo
+                // caminho preciso: por `paciente_id`, que separa homônimo. É o
+                // que faz a lista responder "quem?" e também ser o atalho para
+                // "e o que está acontecendo com ele?".
+                //
+                // Clicar de novo no mesmo nome DESFAZ. Sem isso, a única saída
+                // de um recorte aberto por clique seria apagar o campo de busca
+                // do outro lado da tela — pedir uma ação num lugar para desfazer
+                // o efeito de outro.
+                aoEscolher={(fatia) =>
+                  fatia.chave === r.pacienteId
+                    ? r.definirBusca('')
+                    : r.escolherPaciente({
+                        id: fatia.chave,
+                        nome: fatia.rotulo,
+                        normalizado: normalizarNome(fatia.rotulo),
+                        valor: fatia.kpis[metrica],
+                      })
+                }
+              />
+
               {r.busca.trim() ? (
-                <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 xl:grid-cols-4">
-                  <Quebra
-                    titulo="Por paciente"
-                    fatias={r.porPaciente}
-                    metrica={metrica}
-                    barTone={visual.barTone}
-                    vazio="Nenhum paciente com este indicador no período."
-                  />
+                <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
                   <Quebra
                     titulo="Por terapia"
                     fatias={r.porTerapia}
@@ -376,9 +405,13 @@ export default function ModalVisaoGerencial({ aberto, onClose }: Props) {
               ) : (
                 // Área que some sem explicação lê-se como tela quebrada. A frase
                 // fica no lugar exato onde as quebras vão aparecer e nomeia a
-                // ação que as traz — o campo está logo acima, na mesma coluna.
+                // ação que as traz. Agora ela aponta para a lista logo ACIMA,
+                // não só para o campo de busca: com os nomes na tela, escolher
+                // um deles é o caminho curto — e é o preciso, porque fixa o
+                // `paciente_id` e não o texto, o que separa homônimo.
                 <p className="rounded-xl border border-dashed border-slate-200 px-4 py-3 text-center text-xs text-slate-500">
-                  Busque um paciente acima para ver o detalhamento por terapia, motivo de glosa e unidade.
+                  Escolha um paciente acima — ou busque pelo nome — para ver o detalhamento por
+                  terapia, motivo de glosa e unidade.
                 </p>
               )}
             </div>
@@ -967,15 +1000,44 @@ function Evolucao({
  */
 const TETO_FATIAS = 8
 
+/**
+ * O teto de "Por paciente", que é maior que o das outras três.
+ *
+ * Ela não divide a largura com ninguém — ocupa a faixa inteira quando não há
+ * busca —, então oito nomes deixavam a lista curta num espaço que comporta
+ * bem mais. Vinte é o tamanho em que a pergunta "quem são os maiores" começa a
+ * ter resposta útil: com oito, num mês de ~7.700 sessões, o corte caía dentro
+ * do grupo que ainda importa.
+ */
+const TETO_FATIAS_PACIENTE = 20
+
 /** Uma quebra do indicador em foco, do maior ofensor para o menor. */
 function Quebra({
-  titulo, fatias, metrica, barTone, vazio,
+  titulo, fatias, metrica, barTone, vazio, teto = TETO_FATIAS, colunas = 1, aoEscolher,
+  chaveAtiva = null,
 }: {
   titulo: string
   fatias: FatiaKpis[]
   metrica: MetricaFoco
   barTone: string
   vazio: string
+  /** Quantas fatias mostrar antes do corte. Ver `TETO_FATIAS_PACIENTE`. */
+  teto?: number
+  /** Em quantas colunas quebrar a lista. Só "Por paciente" usa mais de uma:
+   *  vinte nomes numa coluna só empurrariam o gráfico para fora da tela, que é
+   *  justamente o que o gate da busca existia para impedir. */
+  colunas?: number
+  /**
+   * Torna as fatias clicáveis, ancorando o modal naquela chave.
+   *
+   * Só "Por paciente" passa: a `chave` dela é o `paciente_id`, que é o que a
+   * âncora precisa. Nas outras três a chave é TUSS, código de glosa ou nome de
+   * unidade — clicar não teria para onde levar. Ausente, a lista continua sendo
+   * texto, sem prometer interação que não existe.
+   */
+  aoEscolher?: (fatia: FatiaKpis) => void
+  /** A chave ancorada, para a lista dizer em qual linha o modal está preso. */
+  chaveAtiva?: string | null
 }) {
   const maximo = Math.max(1, ...fatias.map((f) => f.kpis[metrica]))
 
@@ -987,13 +1049,23 @@ function Quebra({
         // branco é 2,6:1 e reprova na AA.
         <p className="text-xs text-slate-500">{vazio}</p>
       ) : (
-        <ul className="flex flex-col gap-2">
-          {fatias.slice(0, TETO_FATIAS).map((fatia) => {
+        <ul
+          className={
+            colunas > 1
+              ? 'grid grid-cols-1 gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-3'
+              : 'flex flex-col gap-2'
+          }
+        >
+          {fatias.slice(0, teto).map((fatia) => {
             const valor = fatia.kpis[metrica]
-            return (
-              <li key={fatia.chave} className="flex flex-col gap-1">
+            const ativa = chaveAtiva !== null && fatia.chave === chaveAtiva
+            const conteudo = (
+              <>
                 <div className="flex items-baseline justify-between gap-2">
-                  <span className="truncate text-xs text-slate-700" title={fatia.rotulo}>
+                  <span
+                    className={`truncate text-xs ${ativa ? 'font-semibold text-brand-fg' : 'text-slate-700'}`}
+                    title={fatia.rotulo}
+                  >
                     {fatia.rotulo}
                   </span>
                   <span className="text-xs font-semibold tabular-nums text-slate-900">{valor}</span>
@@ -1004,6 +1076,31 @@ function Quebra({
                     style={{ width: `${(valor / maximo) * 100}%` }}
                   />
                 </div>
+              </>
+            )
+
+            return (
+              <li key={fatia.chave} className="flex flex-col">
+                {aoEscolher ? (
+                  // Botão de verdade, e não um `div` com onClick: é o que dá
+                  // teclado e leitor de tela de graça. O alvo cobre a linha
+                  // inteira (nome + número + barra), então não exige mira.
+                  <button
+                    type="button"
+                    onClick={() => aoEscolher(fatia)}
+                    // `aria-pressed` é o que diz a um leitor de tela que a linha
+                    // é um alternador e qual está ligada — a cor do nome sozinha
+                    // não diria nada ali, e nem para quem não distingue matiz.
+                    aria-pressed={ativa}
+                    className={`flex w-full flex-col gap-1 rounded-lg px-2 py-1.5 text-left transition-colors focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none ${
+                      ativa ? 'bg-brand-surface' : 'hover:bg-slate-50'
+                    }`}
+                  >
+                    {conteudo}
+                  </button>
+                ) : (
+                  <div className="flex flex-col gap-1">{conteudo}</div>
+                )}
               </li>
             )
           })}
@@ -1013,9 +1110,9 @@ function Quebra({
           avisar deixa quem lê concluir que são oito e pronto — e aqui isso é
           uma conclusão sobre dinheiro. "Maiores" é literal: `ordenarPorFoco`
           já entrega a lista em ordem decrescente da métrica em foco. */}
-      {fatias.length > TETO_FATIAS && (
+      {fatias.length > teto && (
         <p className="mt-2.5 border-t border-slate-100 pt-2 text-[11px] tabular-nums text-slate-500">
-          Mostrando {TETO_FATIAS} de {fatias.length} — as maiores primeiro.
+          Mostrando {teto} de {fatias.length} — as maiores primeiro.
         </p>
       )}
     </section>

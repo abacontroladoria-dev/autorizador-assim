@@ -325,15 +325,24 @@ export function useResumoGerencial(aberto: boolean) {
   )
 
   /**
-   * Quem mais gera o indicador em foco. É a quebra que a busca por nome
-   * naturalmente pede: primeiro se vê quem são, depois se digita um nome.
+   * Quem mais gera o indicador em foco — o ranking do período.
+   *
+   * Deriva de `linhas` CRU, e não de `linhasVisiveis`, pelo mesmo motivo que
+   * `pacientesDoPeriodo`: ela é a lista de ONDE se escolhe um paciente, então
+   * filtrá-la pela escolha é circular. Ancorada, ela colapsaria para uma única
+   * linha — a pessoa perderia de vista o ranking no exato momento em que
+   * navega por ele, e sem lista não haveria como trocar de paciente nem
+   * enxergar o caminho de volta.
+   *
+   * As outras três quebras seguem `linhasVisiveis` de propósito: elas existem
+   * para descrever o paciente ancorado, e é o filtro que lhes dá sentido.
    */
   const porPaciente = useMemo(
     () =>
       ordenarPorFoco(
-        agruparPorChave(linhasVisiveis, (l) => ({ chave: l.paciente_id, rotulo: l.paciente_nome }))
+        agruparPorChave(linhas, (l) => ({ chave: l.paciente_id, rotulo: l.paciente_nome }))
       ),
-    [linhasVisiveis, ordenarPorFoco]
+    [linhas, ordenarPorFoco]
   )
 
   /** O instante em que o cron recalculou o dia mais recentemente tocado. */
