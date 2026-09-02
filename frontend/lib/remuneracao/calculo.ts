@@ -21,7 +21,7 @@ import type { OcupacaoAgregada } from "@/types/ocupacaoProf"
 
 // ─── Especialidades / contrato (App.jsx linhas 34-46, 153-252) ───────────────
 
-const FUNCAO_AC = "AC"
+export const FUNCAO_AC = "AC"
 const FUNCAO_PS = "PS"
 const PA_TRATADO_OUTRO_CONTRATO = "Tratado em outro contrato"
 /** `valorPATexto` das sessões zeradas por banco de horas — quem lê a sessão
@@ -161,7 +161,7 @@ export function resolverValorPepMensal(cadastro: CadastroContratual | null, ccPE
   return comValor?.valorPepMensal ?? ccPEDefault
 }
 
-function buscarCadastroContratual(cadastros: Record<string, CadastroContratual>, prof: string): CadastroContratual | null {
+export function buscarCadastroContratual(cadastros: Record<string, CadastroContratual>, prof: string): CadastroContratual | null {
   const alvo = normKey(prof)
   if (!alvo) return null
   const entry = Object.entries(cadastros || {}).find(([nome, c]) =>

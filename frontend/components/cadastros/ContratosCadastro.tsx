@@ -17,6 +17,7 @@ import {
 import { normKey } from "@/lib/remuneracao/constants"
 import { useDraftRow, useDraftTable, type DraftTable, type SaveStatus } from "@/hooks/useDraftRow"
 import { useTerapiasAgendaPorProfissional } from "@/hooks/useTerapiasAgendaPorProfissional"
+import { MultiSearchCombobox } from "@/components/cronograma/ui/MultiSearchCombobox"
 import { useUnsavedChangesGuard } from "@/contexts/UnsavedChangesContext"
 import { UnsavedChangesModal } from "@/components/UnsavedChangesModal"
 import { NovoProfissionalModal, type NovoProfissionalPayload } from "./NovoProfissionalModal"
@@ -41,6 +42,12 @@ type ContratoItemEdit = {
   // Analista do Comportamento. Vazio = usa o valor de referência global
   // (remuneracao_config.cc_pe_default), mesmo padrão de valorPA/paDoContrato.
   valorPepMensalTexto: string
+  // Seleção crua do checkbox de banco de horas — só existe pra reabrir o
+  // checkbox marcado como foi salvo. `funcao` (acima) continua sendo o campo
+  // que o resto do sistema lê: com 0-1 marcada, funcao = a própria terapia (ou
+  // ""); com 2+, funcao vira o rótulo composto FUNCAO_MULTIPLA_LABEL. Só
+  // usada quando modeloFaturamento === "banco_horas" — ver LinhaContrato.
+  especialidadesBancoHoras: string[]
 }
 
 type LinhaBase = {
@@ -122,6 +129,13 @@ const idDoBloco = (nome: string) =>
 // rolar até um bloco — `useId` não serve porque o botão mora num componente
 // filho e o pai precisa alcançá-lo.
 const idBotaoObs = (nome: string, idx: number) => `obs-${idDoBloco(nome)}-${idx}`
+
+// Rótulo que `funcao` recebe quando 2+ terapias são marcadas no checkbox de
+// banco de horas (LinhaContrato). Vira uma especialidade própria no dashboard
+// de Rem. Mês — a pedido do usuário, o valor NÃO é rateado entre as
+// especialidades reais; fica separado justamente para distinguir este caso
+// (1 contrato cobrindo várias terapias) de quem tem um contrato por terapia.
+const FUNCAO_MULTIPLA_LABEL = "Contrato único, especialidades múltiplas"
 
 const unidadeDe = (modelo: ContratoItemEdit["modeloFaturamento"]) =>
   modelo === "banco_horas" ? "total" : "/sessão"
@@ -305,7 +319,9 @@ function LinhaContrato({
   persistido: boolean
   /** Só faz sentido escolher qual terapia cada contrato cobre quando há mais de
    * um contrato vigente — com um só, o PA dele vale pra qualquer substituição
-   * (ver resolverPARow em lib/remuneracao/calculo.ts), então o campo é ruído. */
+   * (ver resolverPARow em lib/remuneracao/calculo.ts), então o campo é ruído.
+   * Exceção: banco de horas, onde a função é a especialidade usada para
+   * agrupar o valor no dashboard de Rem. Mês mesmo com 1 único contrato. */
   mostrarFuncao: boolean
   /** Terapias reais da agenda TiTa deste profissional — mesma fonte do texto
    * abaixo do nome (useTerapiasAgendaPorProfissional). */
@@ -316,6 +332,33 @@ function LinhaContrato({
 }) {
   const ref = `contrato ${posicao} de ${nome}`
   const temNota = !!item.observacoes.trim()
+
+  // Com uma única terapia na agenda não há o que escolher — o campo existe só
+  // pra desambiguar entre 2+ (ver `mostrarFuncao` acima). Preenche sozinho em
+  // vez de deixar "Qual terapia este contrato cobre?" solto pedindo um clique
+  // óbvio. Só entra se ainda estiver vazio: não sobrescreve uma função que o
+  // operador já escolheu (nem uma "fora da agenda atual" antiga).
+  useEffect(() => {
+    if (mostrarFuncao && !item.funcao && terapiasAgenda.length === 1) {
+      onPatch({ funcao: terapiasAgenda[0], especialidadesBancoHoras: [terapiasAgenda[0]] })
+    }
+  }, [mostrarFuncao, item.funcao, terapiasAgenda, onPatch])
+
+  // Banco de horas: checkbox multi-seleção em vez do <select> único — um
+  // contrato só pode cobrir 2+ terapias quando o modelo é banco de horas (não
+  // há PA por sessão pra rotear entre contratos, então nada em calculo.ts
+  // depende de `funcao` bater exatamente com a especialidade da linha — ver
+  // escolherContratoDaLinha/paDoContrato, que só valem pra "atendimento").
+  // Com 0 ou 1 marcada, `funcao` continua sendo a própria terapia (ou ""); com
+  // 2+, vira o rótulo composto — ver FUNCAO_MULTIPLA_LABEL.
+  const toggleEspecialidadeBancoHoras = (terapia: string) => {
+    const selecionadas = item.especialidadesBancoHoras.includes(terapia)
+      ? item.especialidadesBancoHoras.filter(t => t !== terapia)
+      : [...item.especialidadesBancoHoras, terapia]
+    const funcao = selecionadas.length === 0 ? "" : selecionadas.length === 1 ? selecionadas[0] : FUNCAO_MULTIPLA_LABEL
+    onPatch({ especialidadesBancoHoras: selecionadas, funcao })
+  }
+
   return (
     // A marca mudou de lado: era o HISTÓRICO que ganhava fundo cinza, e como
     // quase todo contrato importado entrou como histórico, isso pintava a lista
@@ -379,13 +422,36 @@ function LinhaContrato({
         </button>
       </div>
 
-      {/* Só aparece com 2+ contratos vigentes: é o único caso em que
-          resolverPARow precisa saber qual contrato cobre qual terapia pra
-          rotear o PA de substituição corretamente (ver escolherContratoDaLinha
-          em lib/remuneracao/calculo.ts). Opções vêm da agenda REAL do TiTa, não
+      {/* Só aparece com 2+ contratos vigentes (ou banco de horas — ver
+          `mostrarFuncao` acima): é o único caso em que resolverPARow precisa
+          saber qual contrato cobre qual terapia pra rotear o PA de
+          substituição corretamente (ver escolherContratoDaLinha em
+          lib/remuneracao/calculo.ts). Opções vêm da agenda REAL do TiTa, não
           de um vocabulário fixo — o operador escolhe entre o que o profissional
-          de fato atende, em vez de adivinhar um rótulo genérico. */}
-      {mostrarFuncao && (
+          de fato atende, em vez de adivinhar um rótulo genérico.
+          Banco de horas usa checkbox (multi-seleção): sem PA por sessão pra
+          rotear, um único contrato pode legitimamente cobrir 2+ terapias (ver
+          toggleEspecialidadeBancoHoras). "Por atendimento" continua de escolha
+          única — ali `funcao` precisa bater exato com a especialidade da linha. */}
+      {mostrarFuncao && item.modeloFaturamento === "banco_horas" ? (
+        <div className="min-w-40 flex-2">
+          {/* `variant="plano"` + `campo`: mesmo tamanho, borda e cor do select
+              de "Banco de horas" ao lado — sem isso o combobox trazia seu
+              próprio estilo (rounded-lg, bg-card, padding maior) e destoava
+              dos outros campos da linha. */}
+          <MultiSearchCombobox
+            variant="plano"
+            className={campo}
+            opcoes={terapiasAgenda.map(t => ({ id: t, nome: t }))}
+            selecionados={new Set(item.especialidadesBancoHoras)}
+            onToggle={toggleEspecialidadeBancoHoras}
+            placeholder="Qual(is) terapia(s) este contrato cobre?"
+            nomePlural="terapias"
+            resumoCompleto
+            ariaLabel={`Terapias cobertas pelo ${ref}`}
+          />
+        </div>
+      ) : mostrarFuncao && (
         <select
           value={item.funcao}
           onChange={e => onPatch({ funcao: e.target.value })}
@@ -577,6 +643,7 @@ const GrupoProfissional = memo(function GrupoProfissional({
             valorTotal: parseNumeroBR(it.valorTotalTexto) ?? 0,
             observacoes: it.observacoes.trim(),
             valorPepMensal: it.valorPepMensalTexto.trim() ? parseNumeroBR(it.valorPepMensalTexto) : null,
+            especialidadesBancoHoras: it.especialidadesBancoHoras.length ? it.especialidadesBancoHoras : null,
           })),
       })
       setSaveError(error)
@@ -601,6 +668,9 @@ const GrupoProfissional = memo(function GrupoProfissional({
         valorTotalTexto: formatMoedaBRTexto(it.valorTotal),
         observacoes: it.observacoes ?? "",
         valorPepMensalTexto: it.valorPepMensal != null ? formatMoedaBRTexto(it.valorPepMensal) : "",
+        // Contrato salvo antes deste checkbox existir só tem `funcao` (uma
+        // string): reabre o checkbox já marcado nela, em vez de nascer vazio.
+        especialidadesBancoHoras: it.especialidadesBancoHoras?.length ? it.especialidadesBancoHoras : (it.funcao ? [it.funcao] : []),
       })),
     }),
     [linha.cpf, linha.cnpj, linha.razaoSocial, linha.documentoTipo, linha.contratosAtuais],
@@ -624,6 +694,7 @@ const GrupoProfissional = memo(function GrupoProfissional({
           valorTotalTexto: "",
           observacoes: "",
           valorPepMensalTexto: "",
+          especialidadesBancoHoras: [],
         },
       ],
     })
@@ -795,7 +866,12 @@ const GrupoProfissional = memo(function GrupoProfissional({
             // desambiguar entre contratos que a calculadora usa hoje. Um
             // histórico (vigente=false) ao lado de um vigente único não é
             // "múltiplo contrato" pra fins de pagamento — é só 1 valendo.
-            mostrarFuncao={value.contratos.filter(c => c.vigente).length > 1}
+            // Banco de horas é exceção mesmo com 1 único contrato: ali a
+            // função não desambigua PA (não há PA por sessão), ela é a própria
+            // especialidade usada para agrupar o valor fixo no dashboard de
+            // Rem. Mês (dashboardRP.ts) — sem ela o valor cai em "Sem
+            // especialidade" mesmo o profissional tendo especialidade.
+            mostrarFuncao={value.contratos.filter(c => c.vigente).length > 1 || c.modeloFaturamento === "banco_horas"}
             terapiasAgenda={terapiasAgenda || []}
             onPatch={patch => updateContrato(idx, patch)}
             onRemove={() => removeContrato(idx)}
@@ -1322,11 +1398,16 @@ export function ContratosCadastro() {
           {filtradas.length} de {linhas.length}
         </span>
         {/* Contorno, não preenchido: o emerald sólido continua exclusivo do
-            "Salvar tudo", que é a ação primária da tela. */}
+            "Salvar tudo", que é a ação primária da tela.
+            Pausado a pedido: cadastro de profissional novo por aqui fica
+            temporariamente indisponível (sem apagar o botão), até decisão em
+            contrário — ver title. */}
         <button
           type="button"
-          onClick={() => setCriando(true)}
-          className={`${foco} inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-emerald-600 px-3 py-1.5 text-xs font-bold text-emerald-700 transition-colors hover:bg-emerald-50 dark:text-emerald-400`}
+          disabled
+          aria-disabled="true"
+          title="Cadastro de novo profissional temporariamente pausado"
+          className="inline-flex shrink-0 cursor-not-allowed items-center gap-1.5 rounded-lg border border-border px-3 py-1.5 text-xs font-bold text-muted-foreground opacity-60"
         >
           <UserPlus size={13} />
           Novo profissional

@@ -11,13 +11,23 @@
 // por definição. Regra de negócio: banco de horas SEMPRE é uma especialidade —
 // por isso o valor entra direto na barra dela, sem precisar adivinhar pela
 // sessão nem deixar nada de fora.
-import type { ProfRemunReal } from "./calculo"
+//
+// Quando esse contrato foi salvo sem `funcao` (formulário antigo escondia o
+// campo com 1 único contrato vigente — corrigido em ContratosCadastro.tsx,
+// mas contratos já cadastrados continuam vazios), cai no fallback da
+// especialidade geral do profissional (reboot_profissionais.especialidade)
+// antes de virar "Sem especialidade".
+import { buscarCadastroContratual, contratosAtuaisDoCadastro, FUNCAO_AC, type CadastroContratual, type ProfRemunReal } from "./calculo"
+import { normKey } from "./constants"
 
 export type EspecialidadeTotal = {
   especialidade: string
   valor: number
   /** Fração de totalMes. */
   pct: number
+  /** Quem tem esta especialidade PRÓPRIA (contrato vigente, ou sessão/diária
+   * dela). Pode ser menos gente que "quantas pessoas geraram valor aqui" —
+   * ver o parâmetro `contarProfissional` de `add()` acima. */
   profissionais: string[]
 }
 
@@ -37,16 +47,23 @@ type ProfParaDashboard = Pick<ProfRemunReal, "prof" | "sessoes" | "diariaDetalhe
 
 export function calcularTotalPorEspecialidade(
   resultado: ProfParaDashboard[],
-  pepPorProf?: Map<string, { alcancado: number }>
+  pepPorProf?: Map<string, { alcancado: number }>,
+  cadastroPrestadores?: Record<string, CadastroContratual>,
+  especialidadeGeralPorProf?: Map<string, string>
 ): TotalRPResumo {
   const mapa: Record<string, { valor: number; profs: Set<string> }> = {}
 
-  const add = (esp: string | undefined | null, valor: number, prof: string) => {
+  // `contarProfissional=false` soma o valor na barra sem listar a pessoa em
+  // `profissionais` (nem contá-la em "N profissionais") — usado quando o
+  // dinheiro é real daquela especialidade mas o profissional não a tem como
+  // especialidade própria (ex.: substituição avulsa de quem é banco de horas
+  // em outra função, ver PEP abaixo).
+  const add = (esp: string | undefined | null, valor: number, prof: string, contarProfissional = true) => {
     if (!valor) return
     const key = esp || "Sem especialidade"
     if (!mapa[key]) mapa[key] = { valor: 0, profs: new Set() }
     mapa[key].valor += valor
-    mapa[key].profs.add(prof)
+    if (contarProfissional) mapa[key].profs.add(prof)
   }
 
   let totalBancoHoras = 0
@@ -57,8 +74,12 @@ export function calcularTotalPorEspecialidade(
       totalBancoHoras += p.valorFixoBancoHoras
       profsBancoHoras++
       // Um item por contrato em banco de horas — cada um com sua própria
-      // especialidade e valor, então soma direto na barra dela.
-      p.bancoHorasDetalhe.forEach(bh => add(bh.funcao, bh.valorTotal, p.prof))
+      // especialidade e valor, então soma direto na barra dela. Se o contrato
+      // foi cadastrado sem `funcao` (formulário antigo), cai na especialidade
+      // geral do profissional antes de virar "Sem especialidade".
+      p.bancoHorasDetalhe.forEach(bh =>
+        add(bh.funcao || especialidadeGeralPorProf?.get(normKey(p.prof)), bh.valorTotal, p.prof)
+      )
     }
     // PA por sessão: valorPA só é preenchido nas sessões que efetivamente entram
     // no acumulado (evolução própria ou substituição realizada) — ver calculo.ts.
@@ -69,8 +90,17 @@ export function calcularTotalPorEspecialidade(
     p.diariaDetalhe.forEach(dd => add(dd.esp, dd.total, p.prof))
     // PEP é exclusiva de Analista do Comportamento (Coordenador de Caso na
     // agenda) — vem de pep_apuracao_mensal, não mais de um campo em ProfRemunReal.
+    // Quem tem contrato vigente de Coordenador de Caso conta normalmente. Quem
+    // não tem (ex.: banco de horas que fez UMA substituição avulsa nessa
+    // função) segue somando o valor na barra — é receita real do mês nessa
+    // especialidade —, mas não entra na lista/filtro de profissionais dela,
+    // já que não é a especialidade própria da pessoa.
     const pep = pepPorProf?.get(p.prof)?.alcancado ?? 0
-    if (pep > 0) add("Coordenador de Caso", pep, p.prof)
+    if (pep > 0) {
+      const cadastro = cadastroPrestadores ? buscarCadastroContratual(cadastroPrestadores, p.prof) : null
+      const temContratoAC = contratosAtuaisDoCadastro(cadastro).some(c => c.funcao === FUNCAO_AC)
+      add("Coordenador de Caso", pep, p.prof, temContratoAC)
+    }
     // Bônus ETA é exclusivo de Especialista Técnico de Área.
     if (p.etaBonusPeriodo > 0) add("Especialista Técnico de Área", p.etaBonusPeriodo, p.prof)
   })

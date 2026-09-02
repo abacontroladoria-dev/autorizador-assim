@@ -33,7 +33,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { SemContratoAnteriorModal } from "./SemContratoAnteriorModal"
-import type { ProfRemunReal } from "@/lib/remuneracao/calculo"
+import type { CadastroContratual, ProfRemunReal } from "@/lib/remuneracao/calculo"
 
 // ─── Contagem animada do valor total (respeita prefers-reduced-motion) ───────
 
@@ -100,16 +100,30 @@ const LIMITE_INICIAL = 10
 
 interface DashboardProps {
   resultado: ProfRemunReal[]
-  especialidadeFiltro: string | null
-  onFiltroEspecialidade: (esp: string | null) => void
+  /** Múltiplas especialidades podem ficar ativas ao mesmo tempo (OR: aparece
+   * quem tem qualquer uma delas) — ver RemunRPTab.tsx, que também tem o
+   * dropdown multi-seleção com busca ao lado da busca por texto. */
+  especialidadesFiltro: Set<string>
+  onToggleEspecialidade: (esp: string) => void
+  onLimparEspecialidades: () => void
   // PEP apurada (pep_apuracao_mensal), por prestador — leitura pura, não
   // recalcula nada aqui. Sem isso a barra "Coordenador de Caso" fica zerada.
   pepResumo?: Map<string, { potencial: number; alcancado: number }>
+  /** Contratos cadastrados por profissional — usado para saber quem tem
+   * contrato vigente de Coordenador de Caso (filtra a PEP avulsa da lista) e
+   * como fallback de especialidade de contrato de banco de horas sem `funcao`. */
+  cadastroPrestadores?: Record<string, CadastroContratual>
+  /** Especialidade geral cadastrada do profissional (reboot_profissionais),
+   * chave normalizada por normKey — fallback de bh.funcao vazio. */
+  especialidadeGeralPorProf?: Map<string, string>
 }
 
-export function RemuneracaoRPDashboard({ resultado, especialidadeFiltro, onFiltroEspecialidade, pepResumo }: DashboardProps) {
+export function RemuneracaoRPDashboard({ resultado, especialidadesFiltro, onToggleEspecialidade, onLimparEspecialidades, pepResumo, cadastroPrestadores, especialidadeGeralPorProf }: DashboardProps) {
   const { totalMes, totalVariavel, totalBancoHoras, profsBancoHoras, porEspecialidade } =
-    useMemo(() => calcularTotalPorEspecialidade(resultado, pepResumo), [resultado, pepResumo])
+    useMemo(
+      () => calcularTotalPorEspecialidade(resultado, pepResumo, cadastroPrestadores, especialidadeGeralPorProf),
+      [resultado, pepResumo, cadastroPrestadores, especialidadeGeralPorProf]
+    )
 
   const animatedTotal = useCountUp(totalMes)
   const toneColor = useToneColor()
@@ -148,15 +162,17 @@ export function RemuneracaoRPDashboard({ resultado, especialidadeFiltro, onFiltr
             de Evolução — só estes dois elementos, nada mais entra aqui. */}
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-sm font-bold text-foreground">Remuneração por especialidade</h2>
-          {especialidadeFiltro && (
+          {especialidadesFiltro.size > 0 && (
             <button
               type="button"
-              onClick={() => onFiltroEspecialidade(null)}
-              aria-label={`Remover filtro: ${especialidadeFiltro}`}
+              onClick={onLimparEspecialidades}
+              aria-label={`Remover filtro: ${[...especialidadesFiltro].join(", ")}`}
               className="inline-flex items-center gap-1.5 rounded-full bg-muted px-2.5 py-1 text-[11px] font-semibold text-foreground transition-opacity hover:opacity-70"
             >
               <Filter size={11} />
-              {especialidadeFiltro}
+              {especialidadesFiltro.size === 1
+                ? [...especialidadesFiltro][0]
+                : `${especialidadesFiltro.size} especialidades`}
               <X size={11} />
             </button>
           )}
@@ -305,15 +321,15 @@ export function RemuneracaoRPDashboard({ resultado, especialidadeFiltro, onFiltr
               </div>
 
               {especialidadesVisiveis.map(esp => {
-                const selected = especialidadeFiltro === esp.especialidade
-                const dimmed = !!especialidadeFiltro && !selected
+                const selected = especialidadesFiltro.has(esp.especialidade)
+                const dimmed = especialidadesFiltro.size > 0 && !selected
                 const largura = maiorValor > 0 ? Math.max((esp.valor / maiorValor) * 100, 3) : 0
                 const qtd = esp.profissionais.length
                 return (
                   <button
                     key={esp.especialidade}
                     type="button"
-                    onClick={() => onFiltroEspecialidade(selected ? null : esp.especialidade)}
+                    onClick={() => onToggleEspecialidade(esp.especialidade)}
                     aria-pressed={selected}
                     aria-label={
                       selected
@@ -347,7 +363,7 @@ export function RemuneracaoRPDashboard({ resultado, especialidadeFiltro, onFiltr
                             linha ali do lado (§3.2). A linha continua ocupando o
                             espaço (nbsp) para todas terem a mesma altura. */}
                         <span className="block truncate text-[10px] text-muted-foreground/60 tabular-nums">
-                          {qtd > 1 ? `${fmt(esp.valor / qtd)} por profissional` : " "}
+                          {qtd > 1 ? `${fmt(esp.valor / qtd)} em média por profissional` : " "}
                         </span>
                       </span>
 

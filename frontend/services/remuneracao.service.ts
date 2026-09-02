@@ -108,6 +108,7 @@ export async function getContratos() {
           // marcado como não salvo sem ninguém ter mexido nele.
           observacoes: it.observacoes ?? '',
           valorPepMensal: it.valor_pep_mensal ?? null,
+          especialidadesBancoHoras: it.especialidades_banco_horas ?? null,
         })),
     }
   })
@@ -154,6 +155,7 @@ export async function upsertContrato(record: any): Promise<{ ok: boolean; error:
     // rodou, o profissional fica sem contrato nenhum.
     observacoes: it.observacoes || null,
     valor_pep_mensal: it.valorPepMensal ?? null,
+    especialidades_banco_horas: it.especialidadesBancoHoras?.length ? it.especialidadesBancoHoras : null,
   }))
   if (itens.length) {
     const { error: itensError } = await supabase.from('remuneracao_contratos_itens').insert(itens)
