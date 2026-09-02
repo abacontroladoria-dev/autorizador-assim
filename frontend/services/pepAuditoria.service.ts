@@ -1,6 +1,7 @@
 import { getSupabaseClient } from '@/lib/supabase/client'
+import { resumoAlteracao } from '@/lib/remuneracao/pepAuditoriaFormat'
 
-export type PepTrilhaTabela = 'registro_entrega' | 'planejamento_semestral' | 'apuracao_mensal'
+export type PepTrilhaTabela = 'registro_entrega' | 'planejamento_semestral' | 'apuracao_mensal' | 'calendario_competencia'
 export type PepTrilhaAcao = 'criar' | 'editar' | 'excluir'
 
 export type PepTrilhaAuditoria = {
@@ -8,7 +9,7 @@ export type PepTrilhaAuditoria = {
   tabela: PepTrilhaTabela
   registro_id: string
   acao: PepTrilhaAcao
-  prestador_nome: string
+  prestador_nome: string | null
   paciente_nome: string | null
   competencia: string | null
   antes: unknown
@@ -17,16 +18,21 @@ export type PepTrilhaAuditoria = {
   usuario_id: string | null
   usuario_nome: string | null
   criado_em: string
+  /** Já formatado como DD/MM/AAAA HH:MM, horário de Brasília — preenchido por trigger no banco. */
+  criado_em_brasilia: string | null
+  /** Resumo em uma linha ("Status: Pendente → Entregue"), calculado no insert — pra ler direto na planilha do Supabase, sem abrir o JSON. */
+  resumo: string | null
 }
 
 // PRD Seção 11.4 — toda alteração manual fica em trilha de auditoria
 // (usuário, competência, antes/depois). Chamado pelos próprios serviços de
-// escrita (pep.service.ts), nunca direto pela tela.
+// escrita (pep.service.ts, pepApuracao.service.ts, pepCalendario.service.ts),
+// nunca direto pela tela.
 export async function registrarAuditoria(input: {
   tabela: PepTrilhaTabela
   registroId: string
   acao: PepTrilhaAcao
-  prestadorNome: string
+  prestadorNome?: string | null
   pacienteNome?: string | null
   competencia?: string | null
   antes?: unknown
@@ -44,7 +50,7 @@ export async function registrarAuditoria(input: {
     tabela: input.tabela,
     registro_id: input.registroId,
     acao: input.acao,
-    prestador_nome: input.prestadorNome,
+    prestador_nome: input.prestadorNome ?? null,
     paciente_nome: input.pacienteNome ?? null,
     competencia: input.competencia ?? null,
     antes: input.antes ?? null,
@@ -52,6 +58,7 @@ export async function registrarAuditoria(input: {
     motivo: input.motivo ?? null,
     usuario_id: user?.id ?? null,
     usuario_nome: usuarioNome,
+    resumo: resumoAlteracao(input),
   })
   // Auditoria não pode derrubar a ação principal (salvar/excluir o registro
   // real) — só loga o erro. Perder uma linha de trilha é ruim; bloquear o
@@ -59,21 +66,25 @@ export async function registrarAuditoria(input: {
   if (error) console.error('Erro registrarAuditoria:', error)
 }
 
-export async function getTrilhaAuditoria(
-  prestadorNome: string,
-  competencia?: string
-): Promise<{ data: PepTrilhaAuditoria[]; error: unknown }> {
+// prestadorNome omitido = visão geral (todos os prestadores, inclusive
+// entradas sem prestador como calendario_competencia). Sempre todas as
+// competências — quem quer só o mês vê pelo próprio "Competência" da linha.
+export async function getTrilhaAuditoria(filtros?: {
+  prestadorNome?: string
+  pagina?: number
+  limite?: number
+}): Promise<{ data: PepTrilhaAuditoria[]; total: number; error: unknown }> {
   const supabase = getSupabaseClient()
-  let query = supabase
-    .from('pep_trilha_auditoria')
-    .select('*')
-    .eq('prestador_nome', prestadorNome)
-    .order('criado_em', { ascending: false })
-  if (competencia) query = query.eq('competencia', competencia)
-  const { data, error } = await query
+  let query = supabase.from('pep_trilha_auditoria').select('*', { count: 'exact' }).order('criado_em', { ascending: false })
+  if (filtros?.prestadorNome) query = query.eq('prestador_nome', filtros.prestadorNome)
+  const limite = filtros?.limite ?? 30
+  const pagina = filtros?.pagina ?? 1
+  const inicio = (pagina - 1) * limite
+  query = query.range(inicio, inicio + limite - 1)
+  const { data, error, count } = await query
   if (error) {
     console.error('Erro getTrilhaAuditoria:', error)
-    return { data: [], error }
+    return { data: [], total: 0, error }
   }
-  return { data: (data ?? []) as PepTrilhaAuditoria[], error: null }
+  return { data: (data ?? []) as PepTrilhaAuditoria[], total: count ?? 0, error: null }
 }

@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { Paperclip, Check, AlertTriangle, CalendarPlus, X, Trash2 } from "lucide-react"
+import { useEffect, useMemo, useRef, useState } from "react"
+import { Paperclip, Check, AlertTriangle, CalendarPlus, X, Trash2, History } from "lucide-react"
 import { useHeader } from "@/contexts/HeaderContext"
 import { useRemuneracaoRPContext } from "@/contexts/RemuneracaoRPContext"
 import { useParametrosGerais } from "@/hooks/useParametrosGerais"
@@ -9,10 +9,18 @@ import { usePepEntregas } from "@/hooks/usePepEntregas"
 import { usePepApuracao } from "@/hooks/usePepApuracao"
 import { usePepCalendario } from "@/hooks/usePepCalendario"
 import { RemuneracaoUploadBadges } from "./RemuneracaoUploadBadges"
+import { SeletorMesPrevisao } from "@/components/cronograma/indicadores/SeletorMesPrevisao"
+import { SearchCombobox } from "@/components/cronograma/ui/SearchCombobox"
+import { PepHistoricoModal } from "./PepHistoricoModal"
 import { COMPETENCIA_TESTE_PEP } from "@/lib/remuneracao/calculoPEP"
 import type { PepCatalogoItem, PepEvidencia, PepPlanejamentoSemestral, PepRegistroEntrega } from "@/types/pep"
 
 const money = (v: number) => `R$ ${v.toFixed(2).replace(".", ",")}`
+
+// Rótulos do combobox de "Semanas no mês" — PRD Seção 9.11.
+const SEMANAS_LABEL: Record<number, string> = { 3: "3 (recesso)", 4: "4 (padrão)", 5: "5" }
+const SEMANAS_VALOR: Record<string, number> = { "3 (recesso)": 3, "4 (padrão)": 4, "5": 5 }
+const SEMANAS_OPCOES = Object.keys(SEMANAS_VALOR)
 
 function competenciaAtual(): string {
   const d = new Date()
@@ -52,6 +60,19 @@ function normalizarEvidencias(evidencias: PepEvidencia[], n: number): PepEvidenc
 
 type CelulaAtiva = { pacienteNome: string | null; item: PepCatalogoItem } | null
 
+// Fecha o modal só quando o próprio backdrop foi pressionado E solto — não
+// quando o usuário estava selecionando texto (ex.: arrastando o mouse pra
+// selecionar tudo na Observação) e soltou fora do card. Sem isso, o "click"
+// do navegador é computado no backdrop mesmo o gesto tendo começado dentro,
+// e o modal fechava no meio da seleção.
+function useFecharAoClicarFora(onFechar: () => void) {
+  const pressionouNoBackdrop = useRef(false)
+  return {
+    onMouseDown: (e: React.MouseEvent) => { pressionouNoBackdrop.current = e.target === e.currentTarget },
+    onClick: () => { if (pressionouNoBackdrop.current) onFechar() },
+  }
+}
+
 export function PepEntregasTab() {
   const { resultado, controlesGrade } = useRemuneracaoRPContext()
   const { setHeader, setRightContent } = useHeader()
@@ -59,13 +80,14 @@ export function PepEntregasTab() {
   const [prestador, setPrestador] = useState("")
   const [competencia, setCompetencia] = useState(competenciaAtual())
   const [celulaAtiva, setCelulaAtiva] = useState<CelulaAtiva>(null)
+  const [historicoAberto, setHistoricoAberto] = useState<"prestador" | "geral" | null>(null)
   const { semanas: semanasCalendario, salvar: salvarSemanasCalendario } = usePepCalendario(competencia)
 
   // A Grade carregada aqui alimenta o mesmo contexto compartilhado das abas
   // Rem. Mês - Total e Individual — não precisa reanexar ao trocar de aba.
   useEffect(() => {
     setHeader("Entregas PEP", "Relacionamento Prestador")
-    setRightContent(<RemuneracaoUploadBadges c={controlesGrade} hidePe />)
+    setRightContent(<RemuneracaoUploadBadges c={controlesGrade} hidePe hideStatusRow />)
     return () => {
       setHeader("", "")
       setRightContent(null)
@@ -113,46 +135,52 @@ export function PepEntregasTab() {
   if (!prestador) {
     return (
       <div className="space-y-5">
-        <SeletorPrestador analistas={analistas} prestador={prestador} onChange={setPrestador} />
+        <SeletorPrestador analistas={analistas} prestador={prestador} onChange={setPrestador} onHistoricoGeral={() => setHistoricoAberto("geral")} />
         <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
           {analistas.length === 0
             ? "Nenhum Analista do Comportamento encontrado. Faça o upload da Grade no botão acima para carregar a lista de prestadores e pacientes."
             : "Selecione um Analista do Comportamento acima para registrar as entregas da PEP."}
         </div>
+        {historicoAberto === "geral" && (
+          <PepHistoricoModal catalogo={[...itensRecorrentes, ...itensSemestrais]} onClose={() => setHistoricoAberto(null)} />
+        )}
       </div>
     )
   }
 
   return (
     <div className="space-y-5">
-      <SeletorPrestador analistas={analistas} prestador={prestador} onChange={setPrestador} />
+      <SeletorPrestador
+        analistas={analistas}
+        prestador={prestador}
+        onChange={setPrestador}
+        onHistoricoGeral={() => setHistoricoAberto("geral")}
+        onHistoricoPrestador={() => setHistoricoAberto("prestador")}
+      />
 
       <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-4">
         <div className="flex items-center gap-3 flex-wrap">
-          <label htmlFor="pep-competencia" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
             Competência
-          </label>
-          <input
-            id="pep-competencia"
-            type="month"
-            value={competencia}
-            onChange={e => setCompetencia(e.target.value)}
-            className="rounded-lg border border-border bg-background px-3 py-1.5 text-sm"
+          </span>
+          <SeletorMesPrevisao
+            ano={Number(competencia.split("-")[0])}
+            mes={Number(competencia.split("-")[1])}
+            onChange={(ano, mes) => setCompetencia(`${ano}-${String(mes).padStart(2, "0")}`)}
           />
           <div className="flex items-center gap-2 border-l border-border pl-3">
-            <label htmlFor="pep-semanas" className="text-xs font-semibold text-muted-foreground uppercase tracking-wider" title="PRD Seção 9.11 — calendário parametrizado. Só afeta Supervisão/Estudo.">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider" title="PRD Seção 9.11 — calendário parametrizado. Só afeta Supervisão/Estudo.">
               Semanas no mês (Sup./Estudo)
-            </label>
-            <select
-              id="pep-semanas"
-              value={semanasCalendario}
-              onChange={e => salvarSemanasCalendario(Number(e.target.value))}
-              className="rounded-lg border border-border bg-background px-2 py-1.5 text-sm"
-            >
-              <option value={3}>3 (recesso)</option>
-              <option value={4}>4 (padrão)</option>
-              <option value={5}>5</option>
-            </select>
+            </span>
+            <div className="w-32">
+              <SearchCombobox
+                value={SEMANAS_LABEL[semanasCalendario] ?? String(semanasCalendario)}
+                onChange={rotulo => { const n = SEMANAS_VALOR[rotulo]; if (n) salvarSemanasCalendario(n) }}
+                opcoes={SEMANAS_OPCOES}
+                ariaLabel="Semanas no mês (Sup./Estudo)"
+                placeholder="Selecione..."
+              />
+            </div>
           </div>
           {salvando && <span className="text-xs text-muted-foreground">Salvando…</span>}
         </div>
@@ -329,6 +357,7 @@ export function PepEntregasTab() {
           competencia={competencia}
           semanasCalendario={semanasCalendario}
           registro={registroDe(celulaAtiva.pacienteNome, celulaAtiva.item.id)}
+          erro={error}
           onFechar={() => setCelulaAtiva(null)}
           onSalvar={async ({ quantidadeEntregue, evidencias, observacao, motivo }) => {
             await marcarQuantidade({
@@ -347,10 +376,13 @@ export function PepEntregasTab() {
             registroDe(celulaAtiva.pacienteNome, celulaAtiva.item.id)
               ? async (motivo) => {
                   const registro = registroDe(celulaAtiva.pacienteNome, celulaAtiva.item.id)
-                  if (!registro) return
-                  await excluirRegistro({ id: registro.id, pacienteNome: celulaAtiva.pacienteNome, motivo })
-                  await recalcularApuracao()
-                  setCelulaAtiva(null)
+                  if (!registro) return false
+                  const r = await excluirRegistro({ id: registro.id, pacienteNome: celulaAtiva.pacienteNome, motivo })
+                  if (r.ok) {
+                    await recalcularApuracao()
+                    setCelulaAtiva(null)
+                  }
+                  return r.ok
                 }
               : undefined
           }
@@ -364,6 +396,7 @@ export function PepEntregasTab() {
           competencia={competencia}
           registro={registroDe(celulaAtiva.pacienteNome, celulaAtiva.item.id)}
           planejamento={celulaAtiva.pacienteNome ? planejamentoDe(celulaAtiva.pacienteNome, celulaAtiva.item.id) : null}
+          erro={error}
           onFechar={() => setCelulaAtiva(null)}
           onSalvarPlanejamento={async (competenciaPlanejada) => {
             if (!celulaAtiva.pacienteNome) return
@@ -373,7 +406,8 @@ export function PepEntregasTab() {
               competenciaPlanejada,
             })
             await recalcularApuracao()
-            setCelulaAtiva(null)
+            // Mantém o painel aberto — o planejamento recém-criado já habilita
+            // a próxima etapa (observação/evidência) sem forçar reabrir o modal.
           }}
           onSalvarEntrega={async ({ status, evidencias, observacao, motivo }) => {
             const plano = celulaAtiva.pacienteNome ? planejamentoDe(celulaAtiva.pacienteNome, celulaAtiva.item.id) : null
@@ -422,10 +456,13 @@ export function PepEntregasTab() {
             registroDe(celulaAtiva.pacienteNome, celulaAtiva.item.id)
               ? async (motivo) => {
                   const registro = registroDe(celulaAtiva.pacienteNome, celulaAtiva.item.id)
-                  if (!registro) return
-                  await excluirRegistro({ id: registro.id, pacienteNome: celulaAtiva.pacienteNome, motivo })
-                  await recalcularApuracao()
-                  setCelulaAtiva(null)
+                  if (!registro) return false
+                  const r = await excluirRegistro({ id: registro.id, pacienteNome: celulaAtiva.pacienteNome, motivo })
+                  if (r.ok) {
+                    await recalcularApuracao()
+                    setCelulaAtiva(null)
+                  }
+                  return r.ok
                 }
               : undefined
           }
@@ -433,29 +470,62 @@ export function PepEntregasTab() {
             celulaAtiva.pacienteNome
               ? async (motivo) => {
                   const plano = planejamentoDe(celulaAtiva.pacienteNome!, celulaAtiva.item.id)
-                  if (!plano) return
+                  if (!plano) return false
                   const r = await excluirPlanejamento({ id: plano.id, pacienteNome: celulaAtiva.pacienteNome!, motivo })
                   if (r.ok) {
                     await recalcularApuracao()
                     setCelulaAtiva(null)
                   }
+                  return r.ok
                 }
               : undefined
           }
+        />
+      )}
+
+      {historicoAberto && (
+        <PepHistoricoModal
+          prestadorNome={historicoAberto === "prestador" ? prestador : undefined}
+          catalogo={[...itensRecorrentes, ...itensSemestrais]}
+          onClose={() => setHistoricoAberto(null)}
         />
       )}
     </div>
   )
 }
 
-function SeletorPrestador({ analistas, prestador, onChange }: {
-  analistas: string[]; prestador: string; onChange: (v: string) => void
+function SeletorPrestador({ analistas, prestador, onChange, onHistoricoGeral, onHistoricoPrestador }: {
+  analistas: string[]
+  prestador: string
+  onChange: (v: string) => void
+  onHistoricoGeral: () => void
+  onHistoricoPrestador?: () => void
 }) {
   return (
     <div className="rounded-2xl border border-border bg-card p-5 shadow-sm">
-      <label htmlFor="pep-prestador" className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider mb-2">
-        Analista do Comportamento
-      </label>
+      <div className="mb-2 flex items-center justify-between gap-2">
+        <label htmlFor="pep-prestador" className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+          Analista do Comportamento
+        </label>
+        <div className="flex items-center gap-2">
+          {onHistoricoPrestador && (
+            <button
+              type="button"
+              onClick={onHistoricoPrestador}
+              className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted/50"
+            >
+              <History size={12} /> Histórico
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onHistoricoGeral}
+            className="flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1 text-xs font-medium text-muted-foreground hover:bg-muted/50"
+          >
+            <History size={12} /> Histórico geral
+          </button>
+        </div>
+      </div>
       <select
         id="pep-prestador"
         value={prestador}
@@ -649,7 +719,7 @@ function evidenciasCompletas(evidencias: PepEvidencia[], quantidade: number): bo
 
 // Confirmação genérica pra salvar edição ou excluir — toda alteração manual
 // exige confirmação e, quando aplicável, motivo (PRD Seção 11.4).
-function ConfirmModal({ titulo, mensagem, pedirMotivo, motivo, onMotivoChange, confirmLabel, perigo, confirmDisabled, onConfirmar, onCancelar }: {
+function ConfirmModal({ titulo, mensagem, pedirMotivo, motivo, onMotivoChange, confirmLabel, perigo, confirmDisabled, erro, onConfirmar, onCancelar }: {
   titulo: string
   mensagem: string
   pedirMotivo: boolean
@@ -658,11 +728,13 @@ function ConfirmModal({ titulo, mensagem, pedirMotivo, motivo, onMotivoChange, c
   confirmLabel: string
   perigo?: boolean
   confirmDisabled?: boolean
+  erro?: string | null
   onConfirmar: () => void | Promise<void>
   onCancelar: () => void
 }) {
+  const backdrop = useFecharAoClicarFora(onCancelar)
   return (
-    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4" onClick={onCancelar}>
+    <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4" {...backdrop}>
       <div className="w-full max-w-xs rounded-2xl border border-border bg-card p-5 shadow-lg space-y-3" onClick={e => e.stopPropagation()}>
         <p className="text-sm font-bold text-foreground">{titulo}</p>
         <p className="text-xs text-muted-foreground">{mensagem}</p>
@@ -681,6 +753,7 @@ function ConfirmModal({ titulo, mensagem, pedirMotivo, motivo, onMotivoChange, c
             />
           </div>
         )}
+        {erro && <p className="text-xs font-medium text-red-600 dark:text-red-400">{erro}</p>}
         <div className="flex justify-end gap-2 pt-1">
           <button
             type="button"
@@ -703,12 +776,13 @@ function ConfirmModal({ titulo, mensagem, pedirMotivo, motivo, onMotivoChange, c
   )
 }
 
-function PainelQuantidade({ pacienteNome, item, competencia, semanasCalendario, registro, onFechar, onSalvar, onExcluir }: {
+function PainelQuantidade({ pacienteNome, item, competencia, semanasCalendario, registro, erro, onFechar, onSalvar, onExcluir }: {
   pacienteNome: string | null
   item: PepCatalogoItem
   competencia: string
   semanasCalendario: number
   registro: (RegistroResumo & { observacao?: string | null }) | null
+  erro?: string | null
   onFechar: () => void
   onSalvar: (input: {
     quantidadeEntregue: number
@@ -716,7 +790,7 @@ function PainelQuantidade({ pacienteNome, item, competencia, semanasCalendario, 
     observacao: string | null
     motivo?: string | null
   }) => void | Promise<void>
-  onExcluir?: (motivo: string) => void | Promise<void>
+  onExcluir?: (motivo: string) => boolean | Promise<boolean>
 }) {
   const esperado = quantidadeEsperada(item, semanasCalendario)
   const [quantidade, setQuantidade] = useState(registro?.quantidade_entregue ?? 0)
@@ -727,6 +801,7 @@ function PainelQuantidade({ pacienteNome, item, competencia, semanasCalendario, 
   const [confirmando, setConfirmando] = useState<"salvar" | "excluir" | null>(null)
   const [motivo, setMotivo] = useState("")
   const jaExiste = !!registro
+  const backdrop = useFecharAoClicarFora(onFechar)
 
   function alterarQuantidade(nova: number) {
     const clamped = Math.max(0, Math.min(esperado, nova))
@@ -735,7 +810,7 @@ function PainelQuantidade({ pacienteNome, item, competencia, semanasCalendario, 
   }
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" onClick={onFechar}>
+    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" {...backdrop}>
       <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-lg space-y-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <CabecalhoPainel item={item} pacienteNome={pacienteNome} competencia={competencia} onFechar={onFechar} />
 
@@ -826,10 +901,11 @@ function PainelQuantidade({ pacienteNome, item, competencia, semanasCalendario, 
           onMotivoChange={setMotivo}
           confirmLabel="Excluir"
           perigo
+          erro={erro}
           onCancelar={() => setConfirmando(null)}
           onConfirmar={async () => {
-            await onExcluir(motivo)
-            setConfirmando(null)
+            const ok = await onExcluir(motivo)
+            if (ok) setConfirmando(null)
           }}
         />
       )}
@@ -837,12 +913,13 @@ function PainelQuantidade({ pacienteNome, item, competencia, semanasCalendario, 
   )
 }
 
-function PainelSemestral({ pacienteNome, item, competencia, registro, planejamento, onFechar, onSalvarPlanejamento, onSalvarEntrega, onSalvarReprogramacaoImpedimento, onExcluirEntrega, onExcluirPlanejamento }: {
+function PainelSemestral({ pacienteNome, item, competencia, registro, planejamento, erro, onFechar, onSalvarPlanejamento, onSalvarEntrega, onSalvarReprogramacaoImpedimento, onExcluirEntrega, onExcluirPlanejamento }: {
   pacienteNome: string | null
   item: PepCatalogoItem
   competencia: string
   registro: (RegistroResumo & { observacao?: string | null }) | null
   planejamento: PepPlanejamentoSemestral | null
+  erro?: string | null
   onFechar: () => void
   onSalvarPlanejamento: (competenciaPlanejada: string) => void | Promise<void>
   onSalvarEntrega: (input: {
@@ -856,8 +933,8 @@ function PainelSemestral({ pacienteNome, item, competencia, registro, planejamen
     motivo: string
     evidencias: PepEvidencia[]
   }) => void | Promise<void>
-  onExcluirEntrega?: (motivo: string) => void | Promise<void>
-  onExcluirPlanejamento?: (motivo: string) => void | Promise<void>
+  onExcluirEntrega?: (motivo: string) => boolean | Promise<boolean>
+  onExcluirPlanejamento?: (motivo: string) => boolean | Promise<boolean>
 }) {
   const [evidencias, setEvidencias] = useState<PepEvidencia[]>(normalizarEvidencias(registro?.evidencias ?? [], 1))
   const [observacao, setObservacao] = useState(registro?.observacao ?? "")
@@ -869,10 +946,11 @@ function PainelSemestral({ pacienteNome, item, competencia, registro, planejamen
   const [confirmando, setConfirmando] = useState<"salvar" | "excluirEntrega" | "excluirPlanejamento" | null>(null)
   const [motivo, setMotivo] = useState("")
   const jaExiste = !!registro
+  const backdrop = useFecharAoClicarFora(onFechar)
 
   if (!planejamento) {
     return (
-      <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" onClick={onFechar}>
+      <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" {...backdrop}>
         <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-lg space-y-4" onClick={e => e.stopPropagation()}>
           <CabecalhoPainel item={item} pacienteNome={pacienteNome} competencia={competencia} onFechar={onFechar} />
           <div className="space-y-2 border-t border-border pt-3">
@@ -902,7 +980,7 @@ function PainelSemestral({ pacienteNome, item, competencia, registro, planejamen
   }
 
   return (
-    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" onClick={onFechar}>
+    <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" {...backdrop}>
       <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-lg space-y-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
         <CabecalhoPainel item={item} pacienteNome={pacienteNome} competencia={competencia} onFechar={onFechar} />
         <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
@@ -1059,10 +1137,11 @@ function PainelSemestral({ pacienteNome, item, competencia, registro, planejamen
           onMotivoChange={setMotivo}
           confirmLabel="Excluir"
           perigo
+          erro={erro}
           onCancelar={() => setConfirmando(null)}
           onConfirmar={async () => {
-            await onExcluirEntrega(motivo)
-            setConfirmando(null)
+            const ok = await onExcluirEntrega(motivo)
+            if (ok) setConfirmando(null)
           }}
         />
       )}
@@ -1075,10 +1154,11 @@ function PainelSemestral({ pacienteNome, item, competencia, registro, planejamen
           onMotivoChange={setMotivo}
           confirmLabel="Excluir"
           perigo
+          erro={erro}
           onCancelar={() => setConfirmando(null)}
           onConfirmar={async () => {
-            await onExcluirPlanejamento(motivo)
-            setConfirmando(null)
+            const ok = await onExcluirPlanejamento(motivo)
+            if (ok) setConfirmando(null)
           }}
         />
       )}

@@ -1,4 +1,5 @@
 import { getSupabaseClient } from '@/lib/supabase/client'
+import { registrarAuditoria } from '@/services/pepAuditoria.service'
 
 export type PepCalendarioCompetencia = {
   competencia: string
@@ -33,7 +34,16 @@ export async function salvarCalendarioCompetencia(input: {
 }): Promise<{ error: unknown }> {
   const supabase = getSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
-  const { error } = await supabase
+
+  // Estado anterior antes de sobrescrever — é o "antes" da trilha de
+  // auditoria (PRD Seção 11.4), mesmo padrão de upsertRegistroEntrega.
+  const { data: existente } = await supabase
+    .from('pep_calendario_competencias')
+    .select('*')
+    .eq('competencia', input.competencia)
+    .maybeSingle()
+
+  const { data, error } = await supabase
     .from('pep_calendario_competencias')
     .upsert({
       competencia: input.competencia,
@@ -42,6 +52,23 @@ export async function salvarCalendarioCompetencia(input: {
       atualizado_por: user?.id ?? null,
       atualizado_em: new Date().toISOString(),
     }, { onConflict: 'competencia' })
-  if (error) console.error('Erro salvarCalendarioCompetencia:', error)
-  return { error }
+    .select()
+    .single()
+  if (error) {
+    console.error('Erro salvarCalendarioCompetencia:', error)
+    return { error }
+  }
+
+  // Config. da competência inteira, não de um prestador — fica sem
+  // prestador_nome/paciente_nome, só aparece na visão geral do histórico.
+  await registrarAuditoria({
+    tabela: 'calendario_competencia',
+    registroId: input.competencia,
+    acao: existente ? 'editar' : 'criar',
+    competencia: input.competencia,
+    antes: existente ?? null,
+    depois: data,
+  })
+
+  return { error: null }
 }

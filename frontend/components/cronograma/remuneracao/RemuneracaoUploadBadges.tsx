@@ -74,11 +74,15 @@ interface Props {
   // Esconde o badge de "Upload PE" — usado na aba Entregas PEP, onde a PEP do
   // Analista do Comportamento vem do registro manual, não desse relatório.
   hidePe?: boolean
+  // Esconde a linha de status da grade (badge "Grade · N registros", aviso
+  // "N sem execução" e o botão "CSV") — usado na aba Entregas PEP, onde essa
+  // leitura é só suporte e a linha competia com o seletor de mês.
+  hideStatusRow?: boolean
 }
 
 // Recebe por prop, não por contexto: o header renderiza este componente fora do
 // RemuneracaoRPProvider. Ver o comentário de `controlesGrade` em useRemuneracao.ts.
-export function RemuneracaoUploadBadges({ c, hidePe = false }: Props) {
+export function RemuneracaoUploadBadges({ c, hidePe = false, hideStatusRow = false }: Props) {
   const {
     evoRows, peRows, csvName, carregarGrade, carregarPE, limparGrade, limparPE,
     fonteGrade, periodo, setPeriodo, periodoCarregado, coberturaGrade,
@@ -214,10 +218,11 @@ export function RemuneracaoUploadBadges({ c, hidePe = false }: Props) {
         </button>
       </div>
 
-      <div className="flex items-center gap-2">
-        <input ref={gradeInputRef} type="file" accept=".csv" className="hidden" onChange={onGradeChange} />
-        <input ref={peInputRef} type="file" accept=".csv,.xls,.xlsx,.html" className="hidden" onChange={onPeChange} />
+      <input ref={gradeInputRef} type="file" accept=".csv" className="hidden" onChange={onGradeChange} />
+      <input ref={peInputRef} type="file" accept=".csv,.xls,.xlsx,.html" className="hidden" onChange={onPeChange} />
 
+      {!hideStatusRow && (
+      <div className="flex items-center gap-2">
         {/* Badge 1: Grade */}
         {gradeLoaded ? (
           <span className="flex items-center gap-1.5 rounded-full border border-green-200 bg-green-50 text-green-700 dark:bg-green-950/30 dark:border-green-800 dark:text-green-400 px-3 py-1 text-xs font-medium">
@@ -319,6 +324,7 @@ export function RemuneracaoUploadBadges({ c, hidePe = false }: Props) {
           </span>
         )}
       </div>
+      )}
 
       <GradeIncompletaModal
         aberto={modalAberto}
