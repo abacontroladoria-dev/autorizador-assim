@@ -13,6 +13,9 @@ import {
 } from '@/hooks/useResumoGerencial'
 import { KPI_VISUAL, ORDEM_KPIS, type MetricaKpi } from './kpisVisual'
 import { useGlosaCodigos } from '@/hooks/useGlosaCodigos'
+import { useFeriados } from '@/hooks/useFeriados'
+import type { FeriadoInfo } from '@/types/feriados'
+import { feriadosDoPeriodo } from './feriadosDoPeriodo'
 
 type Props = {
   aberto: boolean
@@ -85,6 +88,19 @@ export default function ModalVisaoGerencial({ aberto, onClose }: Props) {
     [metricaAtual, setMetrica, uid]
   )
 
+  /**
+   * Os feriados DENTRO do intervalo escolhido. A regra mora em
+   * `feriadosDoPeriodo`, com os porquês do recorte por calendário.
+   *
+   * Fica ACIMA do early return de `!aberto` porque é hook: depois dele, a ordem
+   * de chamada mudaria entre o modal fechado e aberto.
+   */
+  const { feriados } = useFeriados()
+  const feriadosNoPeriodo = useMemo(
+    () => feriadosDoPeriodo(feriados, r.de, r.ate),
+    [feriados, r.de, r.ate]
+  )
+
   // `createPortal` precisa de um `document`, que no servidor não existe. Era um
   // `useState(false)` virado por efeito — o único erro de lint do arquivo
   // (setState em cascata) e, no fim, um estado a mais para responder uma
@@ -99,6 +115,21 @@ export default function ModalVisaoGerencial({ aberto, onClose }: Props) {
   const metrica = r.metrica
   const visual = metrica ? KPI_VISUAL[metrica as MetricaKpi] : null
   const totalSessoes = r.totais.total + r.totais.faltas + r.totais.faltas_terapeuta
+
+  /**
+   * A mesma informação do `title` da contagem, para quem não tem ponteiro.
+   *
+   * `title` nativo não é anunciado de forma confiável por leitor de tela e não
+   * existe no toque — o arquivo já tinha aprendido isso ao tirar os tooltips do
+   * gráfico. Aqui ele fica como atalho de mouse, e a lista dos dias entra por
+   * este resumo, que é região viva e já narra o período.
+   */
+  const resumoFeriados =
+    feriadosNoPeriodo.length === 0
+      ? ''
+      : ` ${feriadosNoPeriodo.length} dia(s) do intervalo são feriado: ${feriadosNoPeriodo
+          .map(([data, f]) => `${porExtenso(data)} ${f.nome}`)
+          .join('; ')}. As sessões desses dias continuam contadas.`
 
   return createPortal(
     <div
@@ -119,8 +150,8 @@ export default function ModalVisaoGerencial({ aberto, onClose }: Props) {
             : r.erro
               ? r.erro
               : metrica && visual
-                ? `${r.totais[metrica]} em ${visual.title.replace('\n', ' ')} entre ${porExtenso(r.de)} e ${porExtenso(r.ate)}, sobre ${totalSessoes} sessões em ${r.diasComDados} dia(s).`
-                : `${totalSessoes} sessões entre ${porExtenso(r.de)} e ${porExtenso(r.ate)}, em ${r.diasComDados} dia(s). Escolha um indicador para ver a evolução.`}
+                ? `${r.totais[metrica]} em ${visual.title.replace('\n', ' ')} entre ${porExtenso(r.de)} e ${porExtenso(r.ate)}, sobre ${totalSessoes} sessões em ${r.diasComDados} dia(s).${resumoFeriados}`
+                : `${totalSessoes} sessões entre ${porExtenso(r.de)} e ${porExtenso(r.ate)}, em ${r.diasComDados} dia(s).${resumoFeriados} Escolha um indicador para ver a evolução.`}
         </p>
 
         {/* ── Cabeçalho ────────────────────────────────────────────────── */}
@@ -193,6 +224,17 @@ export default function ModalVisaoGerencial({ aberto, onClose }: Props) {
                 : `${totalSessoes} sessões · ${r.diasComDados} dia${r.diasComDados === 1 ? '' : 's'} com movimento`}
               {!r.carregando && r.busca.trim() && (
                 <> · {r.pacientesEncontrados} paciente{r.pacientesEncontrados === 1 ? '' : 's'}</>
+              )}
+              {!r.carregando && feriadosNoPeriodo.length > 0 && (
+                <>
+                  {' · '}
+                  <span
+                    className="text-amber-800"
+                    title={feriadosNoPeriodo.map(([data, f]) => `${diaMes(data)} ${f.nome}`).join(' · ')}
+                  >
+                    {feriadosNoPeriodo.length} feriado{feriadosNoPeriodo.length === 1 ? '' : 's'}
+                  </span>
+                </>
               )}
               {r.atualizadoEm && !r.carregando && (
                 <>
@@ -318,6 +360,7 @@ export default function ModalVisaoGerencial({ aberto, onClose }: Props) {
                 diaria={r.serieDiaria}
                 tone={visual.tone}
                 titulo={visual.title.replace('\n', ' ')}
+                feriados={feriados}
               />
 
               {/* "Por paciente" NÃO fica atrás da busca — as outras três, sim.
@@ -765,7 +808,7 @@ function CardMetrica({
  * lugar fixo, largura previsível e nada para atropelar.
  */
 function Evolucao({
-  serie, metrica, diaria, tone, titulo,
+  serie, metrica, diaria, tone, titulo, feriados,
 }: {
   serie: FatiaKpis[]
   metrica: MetricaFoco
@@ -773,11 +816,26 @@ function Evolucao({
   /** Classe `text-*` da métrica. É dela que saem traço, área e ponto. */
   tone: string
   titulo: string
+  /**
+   * Feriados por data ISO. Entra como prop em vez de virar campo de
+   * `FatiaKpis`: aquele tipo é compartilhado pelas quatro quebras (por terapia,
+   * motivo, unidade e paciente), onde "feriado" não significaria nada.
+   */
+  feriados: Record<string, FeriadoInfo>
 }) {
   const maximo = Math.max(1, ...serie.map((f) => f.kpis[metrica]))
   const n = serie.length
 
   const rotuloDe = (chave: string) => (diaria ? diaMes(chave) : `sem. ${diaMes(chave)}`)
+
+  /**
+   * O feriado de um ponto — só na série DIÁRIA.
+   *
+   * Acima de 45 dias a `chave` deixa de ser um dia e passa a ser a segunda-feira
+   * da semana; marcar a semana inteira como feriado seria afirmação falsa, então
+   * a marcação simplesmente não existe nesse recorte.
+   */
+  const feriadoDe = (chave: string) => (diaria ? feriados[chave] : undefined)
 
   // Quantos rótulos de data cabem, medido — não chutado.
   //
@@ -879,7 +937,9 @@ function Evolucao({
           className="shrink-0 text-xs tabular-nums text-slate-500"
         >
           {fatiaAtiva
-            ? `${rotuloDe(fatiaAtiva.chave)} · ${fatiaAtiva.kpis[metrica]}`
+            ? `${rotuloDe(fatiaAtiva.chave)} · ${fatiaAtiva.kpis[metrica]}${
+                feriadoDe(fatiaAtiva.chave) ? ` · feriado (${feriadoDe(fatiaAtiva.chave)!.nome})` : ''
+              }`
             : `pico de ${maximo}`}
         </span>
       </div>
@@ -916,6 +976,25 @@ function Evolucao({
                 vectorEffect="non-scaling-stroke"
               />
             </svg>
+
+            {/* Os feriados do intervalo, marcados por régua vertical.
+                Vem ANTES do pico e do ponto ativo de propósito: é pano de
+                fundo, e os dois marcadores redondos têm de ficar por cima.
+
+                Régua, e não um destaque no rótulo do eixo: `mostrarRotulo`
+                ralea as datas quando o período é longo e poderia esconder
+                justamente o feriado — a marcação sumiria no recorte em que ela
+                mais importa. Âmbar sólido, sem opacidade, pelo shim de tema. */}
+            {serie.map((fatia, i) =>
+              feriadoDe(fatia.chave) ? (
+                <span
+                  key={`feriado-${fatia.chave}`}
+                  aria-hidden
+                  className="absolute inset-y-0 w-px bg-amber-300"
+                  style={{ left: `${x(i)}%` }}
+                />
+              ) : null
+            )}
 
             {/* O pico, marcado o tempo todo: é o número que o cabeçalho cita
                 quando nada está sendo lido, e ele precisa ter uma data. */}
