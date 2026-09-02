@@ -1,35 +1,56 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { AlertCircle, ExternalLink, FileText, Loader2, Plus, Save, Trash2, CalendarDays } from "lucide-react"
+import { AlertCircle, ExternalLink, FileText, Loader2, Plus, Trash2, CalendarDays, RotateCcw, CalendarClock } from "lucide-react"
 import toast from "react-hot-toast"
 import {
-  getAltaIndividualidade,
-  salvarAltaIndividualidade,
   getAltasDoPaciente,
   criarAlta,
   excluirAlta,
+  reativarAlta,
   uploadArquivoAlta,
   getUrlAssinadaAlta,
 } from "@/services/pacienteAltaIndividualidade.service"
-import { campo, rotulo, CampoSelect } from "@/components/cadastros/pacientes/ui/campos"
+import {
+  getSuspensoesDoPaciente,
+  criarSuspensao,
+  excluirSuspensao,
+  reativarSuspensao,
+  estenderPrazoSuspensao,
+  uploadArquivoSuspensao,
+  getUrlAssinadaSuspensao,
+} from "@/services/pacienteSuspensaoTemporaria.service"
+import { getCriadores } from "@/services/cadastrosAuditoria.service"
+import { campo, rotulo, CampoSelect, CampoTextarea, CampoCheckbox } from "@/components/cadastros/pacientes/ui/campos"
 import { ESP_CLINICO } from "@/lib/cronograma/constants"
 import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
 import { SearchCombobox } from "@/components/cronograma/ui/SearchCombobox"
 import { DatePicker } from "@/components/ui/date-picker"
 import { ORIGENS_JUDICIAIS } from "@/types/laudos"
 import type {
-  AltaIndividualidade,
   AltaIndividualidadeForm,
   NivelSuporte,
   OrigemJudicial,
   PacienteAlta,
   PacienteAltaForm,
+  PacienteSuspensaoTemporaria,
+  PacienteSuspensaoTemporariaForm,
 } from "@/types/laudos"
 
 type Props = {
   pacienteId: number
   pacienteNome: string
+  /**
+   * "Informações adicionais" agora vive no formulário unificado de
+   * PacienteDetalhe (usePacienteDetalhe), para entrar no mesmo
+   * dirtyCount/"Salvar tudo" do resto do cadastro — dois botões de salvar na
+   * mesma tela confundia sobre qual usar. Altas e Suspensões continuam
+   * gravando direto (cada card tem seu próprio efeito imediato — criar,
+   * excluir, reativar —, não faz sentido "descartar" isso no Cancelar).
+   */
+  individualidade: AltaIndividualidadeForm
+  setIndividualidade: (patch: Partial<AltaIndividualidadeForm>) => void
+  disabled: boolean
 }
 
 function dataBR(isoStr: string) {
@@ -39,95 +60,132 @@ function dataBR(isoStr: string) {
   return `${d}/${m}/${y}`
 }
 
-function formVazio(): AltaIndividualidadeForm {
-  return {
-    comp_agressivo: null,
-    paciente_verbal: null,
-    ambiente_natural: null,
-    nivel_suporte: null,
-    origem_judicial: null,
-  }
+/** Linha única do card: sem o "monte de informação", o detalhe fica no modal. */
+function resumoAlta(alta: PacienteAlta, criador: string | null | undefined): string {
+  return `${dataBR(alta.data_alta)} · @${criador ?? "—"}`
 }
 
-function formDeDados(dados: AltaIndividualidade): AltaIndividualidadeForm {
-  return {
-    comp_agressivo: dados.comp_agressivo,
-    paciente_verbal: dados.paciente_verbal,
-    ambiente_natural: dados.ambiente_natural,
-    nivel_suporte: dados.nivel_suporte,
-    origem_judicial: dados.origem_judicial,
-  }
+function resumoSuspensao(sus: PacienteSuspensaoTemporaria): string {
+  const prazo = sus.prazo_indefinido ? "Prazo indefinido" : `Prazo até ${dataBR(sus.prazo_fim ?? "")}`
+  return `${dataBR(sus.data_suspensao)} - ${prazo} · @${sus.criado_por_usuario_nome ?? "—"}`
 }
 
-export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
-  const [dados, setDados] = useState<AltaIndividualidade | null>(null)
+/**
+ * Não excluído acima de excluído; dentro de cada grupo, data mais recente
+ * primeiro. String ISO "YYYY-MM-DD" ordena igual a data real.
+ */
+function ordenarPorAtivoEData<T extends { ativo: boolean }>(itens: T[], data: (item: T) => string): T[] {
+  return [...itens].sort((a, b) => {
+    if (a.ativo !== b.ativo) return a.ativo ? -1 : 1
+    return data(b).localeCompare(data(a))
+  })
+}
+
+/**
+ * Vigente = ativa (não excluída) E dentro do prazo (indefinido ou
+ * prazo_fim ainda não passou). Comparação por string ISO "YYYY-MM-DD": tanto
+ * `prazo_fim` quanto "hoje" nesse formato ordenam igual a datas reais.
+ */
+function vigente(sus: PacienteSuspensaoTemporaria): boolean {
+  if (!sus.ativo) return false
+  if (sus.prazo_indefinido) return true
+  const hoje = new Date().toISOString().slice(0, 10)
+  return (sus.prazo_fim ?? "") >= hoje
+}
+
+/** Prazo passou, mas a linha continua ativa — precisa de uma decisão do usuário. */
+function prazoAlcancado(sus: PacienteSuspensaoTemporaria): boolean {
+  return sus.ativo && !vigente(sus)
+}
+
+
+export function AbaAltasIndividualidades({
+  pacienteId,
+  pacienteNome,
+  individualidade,
+  setIndividualidade,
+  disabled,
+}: Props) {
   const [altas, setAltas] = useState<PacienteAlta[]>([])
-  const [form, setForm] = useState<AltaIndividualidadeForm>(formVazio)
-  
+  const [suspensoes, setSuspensoes] = useState<PacienteSuspensaoTemporaria[]>([])
+
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
-  const [salvando, setSalvando] = useState(false)
   const [excluindo, setExcluindo] = useState<number | null>(null)
-  
+  const [excluindoSuspensao, setExcluindoSuspensao] = useState<number | null>(null)
+  const [reativando, setReativando] = useState<number | null>(null)
+  const [reativandoSuspensao, setReativandoSuspensao] = useState<number | null>(null)
+  const [estendendoPrazo, setEstendendoPrazo] = useState<number | null>(null)
+
   const [modalAberto, setModalAberto] = useState(false)
+  const [modalSuspensaoAberto, setModalSuspensaoAberto] = useState(false)
+  const [detalheAlta, setDetalheAlta] = useState<PacienteAlta | null>(null)
+  const [detalheSuspensao, setDetalheSuspensao] = useState<PacienteSuspensaoTemporaria | null>(null)
   const [abrindoLink, setAbrindoLink] = useState<number | null>(null)
+  const [abrindoLinkSuspensao, setAbrindoLinkSuspensao] = useState<number | null>(null)
+  const [verTodasAltas, setVerTodasAltas] = useState(false)
+
+  /**
+   * `id_alta` -> quem criou e quando, via trilha de auditoria (alta não tem
+   * coluna própria de responsável). Suspensão já traz isso na própria linha
+   * — ver `criado_por_usuario_nome` (20260902110000).
+   */
+  const [criadorAltas, setCriadorAltas] = useState<Record<string, { usuarioNome: string | null; criadoEm: string | null }>>({})
+
+  const LIMITE_ALTAS_VISIVEIS = 3
+  const altasVisiveis = verTodasAltas ? altas : altas.slice(0, LIMITE_ALTAS_VISIVEIS)
 
   const carregar = useCallback(async () => {
     setCarregando(true)
-    const [resIndiv, resAltas] = await Promise.all([
-      getAltaIndividualidade(pacienteId),
-      getAltasDoPaciente(pacienteId)
+    const [resAltas, resSuspensoes] = await Promise.all([
+      getAltasDoPaciente(pacienteId),
+      getSuspensoesDoPaciente(pacienteId)
     ])
-    
-    setDados(resIndiv.data)
-    setForm(resIndiv.data ? formDeDados(resIndiv.data) : formVazio())
-    setAltas(resAltas.data)
-    setErro(resIndiv.error || resAltas.error)
+
+    setAltas(ordenarPorAtivoEData(resAltas.data, (a) => a.data_alta))
+    setSuspensoes(ordenarPorAtivoEData(resSuspensoes.data, (s) => s.data_suspensao))
+    setErro(resAltas.error || resSuspensoes.error)
     setCarregando(false)
+
+    // Quem criou cada card — separado do carregamento principal para não
+    // atrasar a primeira renderização por causa de uma info secundária.
+    if (resAltas.data.length > 0) {
+      void getCriadores("alta", resAltas.data.map(a => a.id_alta)).then(setCriadorAltas)
+    }
   }, [pacienteId])
 
   useEffect(() => {
     void carregar()
   }, [carregar])
 
-  function set<K extends keyof AltaIndividualidadeForm>(
-    k: K,
-    v: AltaIndividualidadeForm[K]
-  ) {
-    setForm((f) => ({ ...f, [k]: v }))
-  }
-
-  async function salvarIndiv() {
-    setSalvando(true)
-    const { error } = await salvarAltaIndividualidade(
-      pacienteId,
-      pacienteNome,
-      form,
-      dados
-    )
-    setSalvando(false)
-
-    if (error) {
-      toast.error(`Não foi possível salvar: ${error}`)
-      return
-    }
-    toast.success("Informações adicionais salvas.")
-    void carregar()
-  }
-
-  async function confirmarExclusao(alta: PacienteAlta) {
+  /** Devolve se a exclusão realmente aconteceu — o modal de detalhe só fecha nesse caso. */
+  async function confirmarExclusao(alta: PacienteAlta): Promise<boolean> {
     if (!window.confirm("Excluir esta alta? Ela sai da lista, mas o registro é preservado e a ação fica no histórico.")) {
-      return
+      return false
     }
     setExcluindo(alta.id_alta)
     const { error } = await excluirAlta(pacienteId, pacienteNome, alta)
     setExcluindo(null)
     if (error) {
       toast.error(`Erro ao excluir: ${error}`)
-      return
+      return false
     }
     toast.success("Alta excluída. O registro ficou no histórico.")
     void carregar()
+    return true
+  }
+
+  async function reativar(alta: PacienteAlta): Promise<boolean> {
+    setReativando(alta.id_alta)
+    const { error } = await reativarAlta(pacienteId, pacienteNome, alta)
+    setReativando(null)
+    if (error) {
+      toast.error(`Erro ao reativar: ${error}`)
+      return false
+    }
+    toast.success("Alta reativada.")
+    void carregar()
+    return true
   }
 
   async function abrirArquivo(alta: PacienteAlta) {
@@ -135,6 +193,64 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
     setAbrindoLink(alta.id_alta)
     const url = await getUrlAssinadaAlta(alta.arquivo_alta_path)
     setAbrindoLink(null)
+    if (url) {
+      window.open(url, "_blank")
+    } else {
+      toast.error("Não foi possível acessar o arquivo.")
+    }
+  }
+
+  async function confirmarExclusaoSuspensao(suspensao: PacienteSuspensaoTemporaria): Promise<boolean> {
+    if (!window.confirm("Excluir esta suspensão temporária? Ela sai da lista, mas o registro é preservado e a ação fica no histórico.")) {
+      return false
+    }
+    setExcluindoSuspensao(suspensao.id_suspensao)
+    const { error } = await excluirSuspensao(pacienteId, pacienteNome, suspensao)
+    setExcluindoSuspensao(null)
+    if (error) {
+      toast.error(`Erro ao excluir: ${error}`)
+      return false
+    }
+    toast.success("Suspensão excluída. O registro ficou no histórico.")
+    void carregar()
+    return true
+  }
+
+  async function reativarSus(suspensao: PacienteSuspensaoTemporaria): Promise<boolean> {
+    setReativandoSuspensao(suspensao.id_suspensao)
+    const { error } = await reativarSuspensao(pacienteId, pacienteNome, suspensao)
+    setReativandoSuspensao(null)
+    if (error) {
+      toast.error(`Erro ao reativar: ${error}`)
+      return false
+    }
+    toast.success("Suspensão reativada.")
+    void carregar()
+    return true
+  }
+
+  async function estenderPrazo(
+    suspensao: PacienteSuspensaoTemporaria,
+    indefinido: boolean,
+    novoPrazoFim: string | null
+  ): Promise<boolean> {
+    setEstendendoPrazo(suspensao.id_suspensao)
+    const { error } = await estenderPrazoSuspensao(pacienteId, pacienteNome, suspensao, indefinido, novoPrazoFim)
+    setEstendendoPrazo(null)
+    if (error) {
+      toast.error(`Erro ao estender prazo: ${error}`)
+      return false
+    }
+    toast.success("Prazo estendido.")
+    void carregar()
+    return true
+  }
+
+  async function abrirArquivoSuspensao(suspensao: PacienteSuspensaoTemporaria) {
+    if (!suspensao.arquivo_suspensao_path) return
+    setAbrindoLinkSuspensao(suspensao.id_suspensao)
+    const url = await getUrlAssinadaSuspensao(suspensao.arquivo_suspensao_path)
+    setAbrindoLinkSuspensao(null)
     if (url) {
       window.open(url, "_blank")
     } else {
@@ -168,6 +284,8 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
   return (
     <div className="min-w-0 flex-1 space-y-6">
       {/* ── Informações adicionais ── */}
+      {/* Sem botão de salvar próprio: entra no "Salvar tudo" do topo da
+          página (usePacienteDetalhe), junto com Cadastro e Ficha médica. */}
       <section className="rounded-lg border border-border bg-card px-4 py-4 shadow-sm">
         <h2 className="mb-4 text-base font-semibold text-foreground">
           Informações adicionais
@@ -175,27 +293,27 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
         <div className="grid gap-4 sm:grid-cols-2">
           <CampoSimNao
             label="Comportamento agressivo?"
-            value={form.comp_agressivo}
-            onChange={(v) => set("comp_agressivo", v)}
-            disabled={salvando}
+            value={individualidade.comp_agressivo}
+            onChange={(v) => setIndividualidade({ comp_agressivo: v })}
+            disabled={disabled}
           />
           <CampoSimNao
             label="Paciente verbal?"
-            value={form.paciente_verbal}
-            onChange={(v) => set("paciente_verbal", v)}
-            disabled={salvando}
+            value={individualidade.paciente_verbal}
+            onChange={(v) => setIndividualidade({ paciente_verbal: v })}
+            disabled={disabled}
           />
           <CampoSimNao
             label="Autorização de ambiente natural?"
-            value={form.ambiente_natural}
-            onChange={(v) => set("ambiente_natural", v)}
-            disabled={salvando}
+            value={individualidade.ambiente_natural}
+            onChange={(v) => setIndividualidade({ ambiente_natural: v })}
+            disabled={disabled}
           />
           <CampoSelect<NivelSuporte>
             label="Nível de suporte clínico"
-            value={form.nivel_suporte}
-            onChange={(v) => set("nivel_suporte", v)}
-            disabled={salvando}
+            value={individualidade.nivel_suporte}
+            onChange={(v) => setIndividualidade({ nivel_suporte: v })}
+            disabled={disabled}
             opcoes={[
               { valor: "1", rotulo: "1" },
               { valor: "2", rotulo: "2" },
@@ -207,26 +325,17 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
               duas coisas daria dois jeitos de gravar a mesma ausência. */}
           <CampoSelect<OrigemJudicial>
             label="Origem judicial"
-            value={form.origem_judicial}
-            onChange={(v) => set("origem_judicial", v)}
-            disabled={salvando}
+            value={individualidade.origem_judicial}
+            onChange={(v) => setIndividualidade({ origem_judicial: v })}
+            disabled={disabled}
             vazio="Não informado"
             opcoes={ORIGENS_JUDICIAIS.map((o) => ({ valor: o, rotulo: o }))}
           />
         </div>
-
-        <div className="mt-4 flex justify-end">
-          <button
-            type="button"
-            onClick={() => void salvarIndiv()}
-            disabled={salvando}
-            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          >
-            {salvando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
-            Salvar
-          </button>
-        </div>
       </section>
+
+      {/* ── Altas e Suspensões, lado a lado ── */}
+      <div className="grid gap-6 lg:grid-cols-2 lg:items-start">
 
       {/* ── Lista de Altas ── */}
       <section className="space-y-3">
@@ -238,7 +347,7 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
             className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           >
             <Plus className="h-4 w-4" />
-            Adicionar alta
+            Adicionar
           </button>
         </div>
 
@@ -247,21 +356,25 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
             <p className="text-sm text-muted-foreground">Nenhuma alta registrada.</p>
           </div>
         ) : (
-          <ul className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            {altas.map((alta) => (
+          <>
+          <ul className="grid grid-cols-1 gap-4">
+            {altasVisiveis.map((alta) => (
               <li
                 key={alta.id_alta}
-                className={`flex h-full flex-col rounded-lg border border-border bg-card px-4 py-4 shadow-sm ${
+                className={`flex h-full min-h-[92px] flex-col rounded-lg border border-border bg-card px-4 py-3 shadow-sm ${
                   alta.ativo ? "" : "opacity-60"
                 }`}
               >
-                <div className="flex flex-wrap items-start justify-between gap-2">
+                <div
+                  className="flex flex-1 flex-wrap items-start justify-between gap-2 cursor-pointer"
+                  onClick={() => setDetalheAlta(alta)}
+                >
                   <div className="flex items-center gap-3">
-                    <CalendarDays className="h-4 w-4 shrink-0 text-muted-foreground mt-0.5" />
+                    <CalendarDays className="h-5 w-5 shrink-0 text-muted-foreground mt-0.5" />
                     <div>
                       <div className="flex flex-wrap items-center gap-2">
-                        <p className="text-sm font-semibold text-foreground">
-                          Alta em {alta.especialidade_alta}
+                        <p className="text-sm font-bold uppercase tracking-wide text-foreground">
+                          {alta.especialidade_alta}
                         </p>
                         {!alta.ativo && (
                           <span className="rounded-md bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 dark:bg-rose-950/50 dark:text-rose-400">
@@ -269,13 +382,16 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
                           </span>
                         )}
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        Data da alta: {dataBR(alta.data_alta)}
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Alta
+                      </p>
+                      <p className="mt-1 text-sm text-foreground">
+                        {resumoAlta(alta, criadorAltas[alta.id_alta]?.usuarioNome)}
                       </p>
                     </div>
                   </div>
 
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
                   {alta.arquivo_alta_path && (
                     <button
                       type="button"
@@ -291,9 +407,9 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
                       )}
                     </button>
                   )}
-                  {/* Excluir só faz sentido em alta ativa — uma já excluída
-                      está no estado final. */}
-                  {alta.ativo && (
+                  {/* Excluída: só reativar. Ativa: só excluir. Uma alta nunca
+                      mostra as duas ações ao mesmo tempo. */}
+                  {alta.ativo ? (
                     <button
                       type="button"
                       onClick={() => void confirmarExclusao(alta)}
@@ -307,6 +423,143 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
                         <Trash2 className="h-3.5 w-3.5" />
                       )}
                     </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void reativar(alta)}
+                      disabled={reativando === alta.id_alta}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-emerald-500/10 hover:text-emerald-600 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      title="Reativar alta"
+                    >
+                      {reativando === alta.id_alta ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  )}
+                </div>
+              </div>
+              </li>
+            ))}
+          </ul>
+          {altas.length > LIMITE_ALTAS_VISIVEIS && (
+            <div className="flex justify-center">
+              <button
+                type="button"
+                onClick={() => setVerTodasAltas((v) => !v)}
+                className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {verTodasAltas ? "Ver menos" : `Ver mais (${altas.length - LIMITE_ALTAS_VISIVEIS})`}
+              </button>
+            </div>
+          )}
+          </>
+        )}
+      </section>
+
+      {/* ── Lista de Suspensões Temporárias ── */}
+      <section className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h2 className="text-base font-semibold text-foreground">Suspensões Temporárias de Especialidades</h2>
+          <button
+            type="button"
+            onClick={() => setModalSuspensaoAberto(true)}
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            <Plus className="h-4 w-4" />
+            Adicionar
+          </button>
+        </div>
+
+        {suspensoes.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border py-12 text-center">
+            <p className="text-sm text-muted-foreground">Nenhuma suspensão temporária registrada.</p>
+          </div>
+        ) : (
+          <ul className="grid grid-cols-1 gap-4">
+            {suspensoes.map((sus) => (
+              <li
+                key={sus.id_suspensao}
+                className={`flex h-full min-h-[92px] flex-col rounded-lg border border-border bg-card px-4 py-3 shadow-sm ${
+                  !sus.ativo || prazoAlcancado(sus) ? "opacity-60" : ""
+                }`}
+              >
+                <div
+                  className="flex flex-1 flex-wrap items-start justify-between gap-2 cursor-pointer"
+                  onClick={() => setDetalheSuspensao(sus)}
+                >
+                  <div className="flex items-center gap-3">
+                    <CalendarDays className="h-5 w-5 shrink-0 text-muted-foreground mt-0.5" />
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="text-sm font-bold uppercase tracking-wide text-foreground">
+                          {sus.especialidade_suspensao}
+                        </p>
+                        {!sus.ativo ? (
+                          <span className="rounded-md bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 dark:bg-rose-950/50 dark:text-rose-400">
+                            Excluída
+                          </span>
+                        ) : prazoAlcancado(sus) ? (
+                          <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-950/50 dark:text-amber-400">
+                            Prazo alcançado
+                          </span>
+                        ) : null}
+                      </div>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                        Suspensão Temporária
+                      </p>
+                      <p className="mt-1 text-sm text-foreground">
+                        {resumoSuspensao(sus)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                  {sus.arquivo_suspensao_path && (
+                    <button
+                      type="button"
+                      onClick={() => void abrirArquivoSuspensao(sus)}
+                      disabled={abrindoLinkSuspensao === sus.id_suspensao}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50"
+                      title="Ver arquivo da suspensão"
+                    >
+                      {abrindoLinkSuspensao === sus.id_suspensao ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <ExternalLink className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  )}
+                  {/* Excluída: só reativar. Ativa: só excluir. */}
+                  {sus.ativo ? (
+                    <button
+                      type="button"
+                      onClick={() => void confirmarExclusaoSuspensao(sus)}
+                      disabled={excluindoSuspensao === sus.id_suspensao}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-destructive/10 hover:text-destructive disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      title="Excluir suspensão"
+                    >
+                      {excluindoSuspensao === sus.id_suspensao ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void reativarSus(sus)}
+                      disabled={reativandoSuspensao === sus.id_suspensao}
+                      className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-emerald-500/10 hover:text-emerald-600 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                      title="Reativar suspensão"
+                    >
+                      {reativandoSuspensao === sus.id_suspensao ? (
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      )}
+                    </button>
                   )}
                 </div>
               </div>
@@ -316,8 +569,10 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
         )}
       </section>
 
+      </div>
+
       {modalAberto && (
-        <AltaFormModal 
+        <AltaFormModal
           pacienteId={pacienteId}
           pacienteNome={pacienteNome}
           // Só a especialidade de alta ATIVA bloqueia repetição — uma alta
@@ -328,6 +583,84 @@ export function AbaAltasIndividualidades({ pacienteId, pacienteNome }: Props) {
             setModalAberto(false)
             void carregar()
           }}
+        />
+      )}
+
+      {modalSuspensaoAberto && (
+        <SuspensaoFormModal
+          pacienteId={pacienteId}
+          pacienteNome={pacienteNome}
+          // Só a especialidade com suspensão ATIVA E VIGENTE bloqueia
+          // repetição — uma suspensão excluída, ou já vencida por prazo, não
+          // deve impedir registrar outra na mesma especialidade.
+          especialidadesSuspensas={suspensoes.filter(vigente).map(s => s.especialidade_suspensao)}
+          onClose={() => setModalSuspensaoAberto(false)}
+          onSalvo={() => {
+            setModalSuspensaoAberto(false)
+            void carregar()
+          }}
+        />
+      )}
+
+      {detalheAlta && (
+        <DetalheCardModal
+          titulo={detalheAlta.especialidade_alta}
+          tipo="Alta"
+          ativo={detalheAlta.ativo}
+          linhas={[
+            { label: "Data da alta", valor: dataBR(detalheAlta.data_alta) },
+            {
+              label: "Criado por",
+              valor: criadorAltas[detalheAlta.id_alta]?.usuarioNome
+                ? `${criadorAltas[detalheAlta.id_alta].usuarioNome}${criadorAltas[detalheAlta.id_alta].criadoEm ? ` em ${criadorAltas[detalheAlta.id_alta].criadoEm}` : ""}`
+                : "—",
+            },
+          ]}
+          temArquivo={!!detalheAlta.arquivo_alta_path}
+          abrindoArquivo={abrindoLink === detalheAlta.id_alta}
+          onAbrirArquivo={() => void abrirArquivo(detalheAlta)}
+          excluindo={excluindo === detalheAlta.id_alta}
+          onExcluir={() => void confirmarExclusao(detalheAlta).then((ok) => ok && setDetalheAlta(null))}
+          reativando={reativando === detalheAlta.id_alta}
+          onReativar={() => void reativar(detalheAlta).then((ok) => ok && setDetalheAlta(null))}
+          onClose={() => setDetalheAlta(null)}
+        />
+      )}
+
+      {detalheSuspensao && (
+        <DetalheCardModal
+          titulo={detalheSuspensao.especialidade_suspensao}
+          tipo="Suspensão Temporária"
+          ativo={detalheSuspensao.ativo}
+          prazoAlcancado={prazoAlcancado(detalheSuspensao)}
+          linhas={[
+            { label: "Data da suspensão", valor: dataBR(detalheSuspensao.data_suspensao) },
+            {
+              label: "Prazo para fim da suspensão",
+              valor: detalheSuspensao.prazo_indefinido
+                ? "Indefinido"
+                : dataBR(detalheSuspensao.prazo_fim ?? ""),
+            },
+            ...(detalheSuspensao.observacoes
+              ? [{ label: "Observações", valor: detalheSuspensao.observacoes }]
+              : []),
+            {
+              label: "Criado por",
+              valor: detalheSuspensao.criado_por_usuario_nome
+                ? `${detalheSuspensao.criado_por_usuario_nome} em ${new Date(detalheSuspensao.criado_em).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}`
+                : "—",
+            },
+          ]}
+          temArquivo={!!detalheSuspensao.arquivo_suspensao_path}
+          abrindoArquivo={abrindoLinkSuspensao === detalheSuspensao.id_suspensao}
+          onAbrirArquivo={() => void abrirArquivoSuspensao(detalheSuspensao)}
+          excluindo={excluindoSuspensao === detalheSuspensao.id_suspensao}
+          onExcluir={() => void confirmarExclusaoSuspensao(detalheSuspensao).then((ok) => ok && setDetalheSuspensao(null))}
+          reativando={reativandoSuspensao === detalheSuspensao.id_suspensao}
+          onReativar={() => void reativarSus(detalheSuspensao).then((ok) => ok && setDetalheSuspensao(null))}
+          estendendoPrazo={estendendoPrazo === detalheSuspensao.id_suspensao}
+          onEstenderPrazo={(indefinido, novoPrazoFim) => estenderPrazo(detalheSuspensao, indefinido, novoPrazoFim)}
+          onClose={() => setDetalheSuspensao(null)}
         />
       )}
     </div>
@@ -468,6 +801,355 @@ function AltaFormModal({
             Salvar alta
           </button>
         </div>
+      </div>
+    </ScheduleModal>
+  )
+}
+
+// ─── MODAL NOVA SUSPENSÃO TEMPORÁRIA ────────────────────────────────────────
+
+function SuspensaoFormModal({
+  pacienteId,
+  pacienteNome,
+  especialidadesSuspensas,
+  onClose,
+  onSalvo
+}: {
+  pacienteId: number
+  pacienteNome: string
+  especialidadesSuspensas: string[]
+  onClose: () => void
+  onSalvo: () => void
+}) {
+  const [form, setForm] = useState<PacienteSuspensaoTemporariaForm>({
+    data_suspensao: new Date().toISOString().slice(0, 10),
+    especialidade_suspensao: "",
+    prazo_indefinido: false,
+    prazo_fim: "",
+    arquivo_suspensao_path: null,
+    observacoes: "",
+  })
+  const [salvando, setSalvando] = useState(false)
+  const [uploadando, setUploadando] = useState(false)
+  const [erroArquivo, setErroArquivo] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+
+  function set<K extends keyof PacienteSuspensaoTemporariaForm>(
+    k: K,
+    v: PacienteSuspensaoTemporariaForm[K]
+  ) {
+    setForm((f) => ({ ...f, [k]: v }))
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setErroArquivo(null)
+    setUploadando(true)
+    const { path, error } = await uploadArquivoSuspensao(pacienteId, file)
+    setUploadando(false)
+    if (error || !path) {
+      setErroArquivo(error ?? "Erro ao fazer upload.")
+      return
+    }
+    set("arquivo_suspensao_path", path)
+  }
+
+  async function salvar() {
+    if (!form.data_suspensao || !form.especialidade_suspensao) {
+      toast.error("Preencha a data e a especialidade.")
+      return
+    }
+    if (!form.prazo_indefinido && !form.prazo_fim) {
+      toast.error("Informe o prazo para fim da suspensão, ou marque prazo indefinido.")
+      return
+    }
+    setSalvando(true)
+    const { error } = await criarSuspensao(pacienteId, pacienteNome, {
+      ...form,
+      prazo_fim: form.prazo_indefinido ? null : form.prazo_fim,
+      observacoes: form.observacoes || null,
+    })
+    setSalvando(false)
+
+    if (error) {
+      toast.error(`Não foi possível salvar: ${error}`)
+      return
+    }
+    toast.success("Suspensão temporária cadastrada com sucesso!")
+    onSalvo()
+  }
+
+  return (
+    <ScheduleModal onClose={onClose} title="Nova Suspensão Temporária">
+      <div className="space-y-5 p-6">
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className={rotulo}>Data da suspensão *</label>
+            <DatePicker
+              value={form.data_suspensao}
+              onChange={(v) => set("data_suspensao", v)}
+            />
+          </div>
+          <div>
+            <label className={rotulo}>Especialidade da suspensão *</label>
+            <div className="mt-1">
+              <SearchCombobox
+                value={form.especialidade_suspensao}
+                onChange={(v) => set("especialidade_suspensao", v)}
+                opcoes={Object.keys(ESP_CLINICO).filter(x => !especialidadesSuspensas.includes(x))}
+                placeholder="Selecione..."
+                ariaLabel="Especialidade da suspensão"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 sm:grid-cols-2">
+          <div>
+            <label className={rotulo}>Prazo para fim da suspensão *</label>
+            <div className="mt-1">
+              <DatePicker
+                value={form.prazo_fim ?? ""}
+                onChange={(v) => set("prazo_fim", v)}
+                disabled={form.prazo_indefinido}
+              />
+            </div>
+          </div>
+          <div className="flex items-end pb-1.5">
+            <CampoCheckbox
+              label="Suspensão com prazo indefinido"
+              checked={form.prazo_indefinido}
+              onChange={(v) => set("prazo_indefinido", v)}
+              disabled={salvando}
+            />
+          </div>
+        </div>
+
+        <CampoTextarea
+          label="Observações"
+          value={form.observacoes ?? ""}
+          onChange={(v) => set("observacoes", v)}
+          disabled={salvando}
+          placeholder="Opcional"
+        />
+
+        <div>
+          <label className={rotulo}>Anexo da suspensão (PDF ou imagem)</label>
+          <div className="mt-1 flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => fileRef.current?.click()}
+              disabled={uploadando}
+              className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              {uploadando ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <FileText className="h-4 w-4" />
+              )}
+              {form.arquivo_suspensao_path ? "Substituir arquivo selecionado" : "Selecionar arquivo"}
+            </button>
+            {form.arquivo_suspensao_path && (
+              <span className="text-xs font-medium text-emerald-600">Arquivo anexado</span>
+            )}
+          </div>
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".pdf,image/*"
+            className="hidden"
+            onChange={handleFileChange}
+          />
+          {erroArquivo && <p className="mt-1 text-xs text-destructive">{erroArquivo}</p>}
+        </div>
+
+        <div className="flex justify-end gap-2 border-t border-border pt-4">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={salvando}
+            className="rounded-md border border-border px-4 py-2 text-sm text-foreground hover:bg-muted disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            Cancelar
+          </button>
+          <button
+            type="button"
+            onClick={() => void salvar()}
+            disabled={salvando || uploadando}
+            className="inline-flex items-center gap-1.5 rounded-md bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          >
+            {salvando && <Loader2 className="h-4 w-4 animate-spin" />}
+            Salvar suspensão
+          </button>
+        </div>
+      </div>
+    </ScheduleModal>
+  )
+}
+
+// ─── MODAL DE DETALHE (ALTA OU SUSPENSÃO) ───────────────────────────────────
+
+function DetalheCardModal({
+  titulo,
+  tipo,
+  ativo,
+  prazoAlcancado,
+  linhas,
+  temArquivo,
+  abrindoArquivo,
+  onAbrirArquivo,
+  excluindo,
+  onExcluir,
+  reativando,
+  onReativar,
+  estendendoPrazo,
+  onEstenderPrazo,
+  onClose,
+}: {
+  titulo: string
+  tipo: string
+  ativo: boolean
+  /** Só a Suspensão usa isto — Alta não tem prazo. */
+  prazoAlcancado?: boolean
+  linhas: { label: string; valor: string }[]
+  temArquivo: boolean
+  abrindoArquivo: boolean
+  onAbrirArquivo: () => void
+  excluindo: boolean
+  onExcluir: () => void
+  reativando: boolean
+  onReativar: () => void
+  estendendoPrazo?: boolean
+  onEstenderPrazo?: (indefinido: boolean, novoPrazoFim: string | null) => Promise<boolean>
+  onClose: () => void
+}) {
+  const [formEstenderAberto, setFormEstenderAberto] = useState(false)
+  const [novoIndefinido, setNovoIndefinido] = useState(false)
+  const [novoPrazoFim, setNovoPrazoFim] = useState("")
+
+  async function confirmarExtensao() {
+    if (!onEstenderPrazo) return
+    const hoje = new Date().toISOString().slice(0, 10)
+    if (!novoIndefinido && (!novoPrazoFim || novoPrazoFim <= hoje)) {
+      toast.error("Informe uma data futura para o novo prazo, ou marque prazo indefinido.")
+      return
+    }
+    const ok = await onEstenderPrazo(novoIndefinido, novoIndefinido ? null : novoPrazoFim)
+    if (ok) onClose()
+  }
+
+  return (
+    <ScheduleModal onClose={onClose} title={titulo}>
+      <div className="space-y-5 p-6">
+        <div className="flex items-center gap-2">
+          <span className="rounded-md bg-muted px-2 py-0.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            {tipo}
+          </span>
+          {!ativo ? (
+            <span className="rounded-md bg-rose-100 px-1.5 py-0.5 text-[10px] font-semibold text-rose-700 dark:bg-rose-950/50 dark:text-rose-400">
+              Excluída
+            </span>
+          ) : prazoAlcancado ? (
+            <span className="rounded-md bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-950/50 dark:text-amber-400">
+              Prazo alcançado
+            </span>
+          ) : null}
+        </div>
+
+        <dl className="space-y-3">
+          {linhas.map((l) => (
+            <div key={l.label}>
+              <dt className={rotulo}>{l.label}</dt>
+              <dd className="mt-0.5 text-sm text-foreground">{l.valor}</dd>
+            </div>
+          ))}
+        </dl>
+
+        {formEstenderAberto ? (
+          <div className="space-y-3 rounded-md border border-border p-3">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div>
+                <label className={rotulo}>Novo prazo *</label>
+                <div className="mt-1">
+                  <DatePicker value={novoPrazoFim} onChange={setNovoPrazoFim} disabled={novoIndefinido} />
+                </div>
+              </div>
+              <div className="flex items-end pb-1.5">
+                <CampoCheckbox
+                  label="Prazo indefinido"
+                  checked={novoIndefinido}
+                  onChange={setNovoIndefinido}
+                  disabled={!!estendendoPrazo}
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setFormEstenderAberto(false)}
+                disabled={estendendoPrazo}
+                className="rounded-md border border-border px-3 py-1.5 text-sm text-foreground hover:bg-muted disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmarExtensao()}
+                disabled={estendendoPrazo}
+                className="inline-flex items-center gap-1.5 rounded-md bg-primary px-3 py-1.5 text-sm font-semibold text-primary-foreground hover:bg-primary/90 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {estendendoPrazo && <Loader2 className="h-4 w-4 animate-spin" />}
+                Confirmar
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div className="flex flex-wrap justify-end gap-2 border-t border-border pt-4">
+            {temArquivo && (
+              <button
+                type="button"
+                onClick={onAbrirArquivo}
+                disabled={abrindoArquivo}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-muted disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {abrindoArquivo ? <Loader2 className="h-4 w-4 animate-spin" /> : <ExternalLink className="h-4 w-4" />}
+                Ver anexo
+              </button>
+            )}
+            {prazoAlcancado && onEstenderPrazo && (
+              <button
+                type="button"
+                onClick={() => setFormEstenderAberto(true)}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm text-foreground hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                <CalendarClock className="h-4 w-4" />
+                Estender prazo
+              </button>
+            )}
+            {ativo ? (
+              <button
+                type="button"
+                onClick={onExcluir}
+                disabled={excluindo}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm text-destructive hover:bg-destructive/10 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {excluindo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Excluir
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={onReativar}
+                disabled={reativando}
+                className="inline-flex items-center gap-1.5 rounded-md border border-border px-3 py-2 text-sm text-emerald-600 hover:bg-emerald-500/10 disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              >
+                {reativando ? <Loader2 className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+                Reativar
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </ScheduleModal>
   )

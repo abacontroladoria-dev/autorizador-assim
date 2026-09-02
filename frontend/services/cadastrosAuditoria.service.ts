@@ -148,3 +148,41 @@ export async function getAuditoria(filtros: FiltrosAuditoria = {}): Promise<{
     error: null,
   }
 }
+
+/**
+ * Quem criou cada registro de uma entidade, num só round-trip — para exibir
+ * "Criado por X" direto no card, sem abrir o histórico completo (que pode ter
+ * muitas linhas de edição/exclusão/reativação misturadas).
+ *
+ * Devolve um mapa `registro_id -> { usuarioNome, criadoEm }`. Registros sem
+ * linha `criar` na trilha (não deveria acontecer, mas a trilha é
+ * best-effort — ver avisarFalhaDeTrilha) simplesmente não aparecem no mapa.
+ */
+export async function getCriadores(
+  tabela: EntidadeAuditada,
+  registroIds: (string | number)[]
+): Promise<Record<string, { usuarioNome: string | null; criadoEm: string | null }>> {
+  if (registroIds.length === 0) return {}
+
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select("registro_id, usuario_nome, criado_em, criado_em_brasilia")
+    .eq("tabela", tabela)
+    .eq("acao", "criar")
+    .in("registro_id", registroIds.map(String))
+
+  if (error || !data) {
+    console.error("Erro ao buscar criadores da trilha:", error)
+    return {}
+  }
+
+  const mapa: Record<string, { usuarioNome: string | null; criadoEm: string | null }> = {}
+  for (const linha of data as { registro_id: string; usuario_nome: string | null; criado_em: string; criado_em_brasilia: string | null }[]) {
+    mapa[linha.registro_id] = {
+      usuarioNome: linha.usuario_nome,
+      criadoEm: linha.criado_em_brasilia ?? linha.criado_em,
+    }
+  }
+  return mapa
+}

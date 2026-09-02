@@ -16,6 +16,7 @@ export type EntidadeAuditada =
   | "laudo"
   | "alta"
   | "alta_individualidade"
+  | "suspensao_temporaria"
   // Acompanhamento de laudo do Órbita (tela /acompanhamento/laudos). O
   // `registro_id` é o `ID Laudo` do Órbita — texto, não id numérico do Pulsar —,
   // que é a única chave daquele relatório que sobrevive à troca de importação do
@@ -70,6 +71,7 @@ export const ENTIDADE_LABEL: Record<EntidadeAuditada, string> = {
   laudo: "Laudo",
   alta: "Alta",
   alta_individualidade: "Individualidades",
+  suspensao_temporaria: "Suspensão temporária",
   laudo_acompanhamento: "Acompanhamento de laudo",
 }
 

@@ -8,9 +8,11 @@ import {
   upsertPaciente,
 } from "@/services/pacientes.service"
 import { getVinculosDoPaciente, salvarVinculos } from "@/services/responsaveis.service"
+import { getAltaIndividualidade, salvarAltaIndividualidade } from "@/services/pacienteAltaIndividualidade.service"
 import { refetchPacientes } from "@/hooks/usePacientes"
 import type { Paciente, PacienteEdit, PacienteFichaMedica } from "@/types/paciente"
 import type { VinculoResponsavel, VinculoResponsavelEdit } from "@/types/responsavel"
+import type { AltaIndividualidade, AltaIndividualidadeForm } from "@/types/laudos"
 
 // Estado do formulário de detalhe do paciente.
 //
@@ -18,10 +20,18 @@ import type { VinculoResponsavel, VinculoResponsavelEdit } from "@/types/respons
 // sub-seções. O estado mora AQUI, acima das abas, para trocar de aba não perder
 // edição e para o contador de alterações somar as duas.
 
-/** Tudo que o formulário edita, achatado — paciente + ficha + vínculos. */
+/** Tudo que o formulário edita, achatado — paciente + ficha + vínculos + individualidades. */
 export type PacienteForm = PacienteEdit & {
   ficha: Omit<PacienteFichaMedica, "paciente_id">
   vinculos: VinculoResponsavelEdit[]
+  /**
+   * "Informações adicionais" da aba Altas e Individualidades. Unificada aqui
+   * (antes tinha carregamento e botão "Salvar" próprios, dentro de
+   * AbaAltasIndividualidades) para entrar no mesmo dirtyCount/"Salvar tudo"
+   * do resto do cadastro — dois botões de salvar na mesma tela confundia o
+   * usuário sobre qual usar.
+   */
+  individualidade: AltaIndividualidadeForm
 }
 
 const FICHA_VAZIA: Omit<PacienteFichaMedica, "paciente_id"> = {
@@ -33,10 +43,19 @@ const FICHA_VAZIA: Omit<PacienteFichaMedica, "paciente_id"> = {
   numero_carteirinha: null,
 }
 
+const INDIVIDUALIDADE_VAZIA: AltaIndividualidadeForm = {
+  comp_agressivo: null,
+  paciente_verbal: null,
+  ambiente_natural: null,
+  nivel_suporte: null,
+  origem_judicial: null,
+}
+
 function montarForm(
   paciente: Paciente,
   ficha: PacienteFichaMedica | null,
-  vinculos: VinculoResponsavel[]
+  vinculos: VinculoResponsavel[],
+  individualidade: AltaIndividualidade | null
 ): PacienteForm {
   return {
     id_paciente: paciente.id_paciente,
@@ -95,6 +114,16 @@ function montarForm(
       tipo: v.tipo,
       parentesco: v.parentesco,
     })),
+
+    individualidade: individualidade
+      ? {
+          comp_agressivo: individualidade.comp_agressivo,
+          paciente_verbal: individualidade.paciente_verbal,
+          ambiente_natural: individualidade.ambiente_natural,
+          nivel_suporte: individualidade.nivel_suporte,
+          origem_judicial: individualidade.origem_judicial,
+        }
+      : { ...INDIVIDUALIDADE_VAZIA },
   }
 }
 
@@ -103,6 +132,8 @@ export function usePacienteDetalhe(idPaciente: number) {
   const [vinculosOriginais, setVinculosOriginais] = useState<VinculoResponsavel[]>([])
   const [original, setOriginal] = useState<PacienteForm | null>(null)
   const [form, setForm] = useState<PacienteForm | null>(null)
+  /** Registro cru de individualidades (com id), só para o `registroAnterior` que salvarAltaIndividualidade usa no diff da auditoria. */
+  const [individualidadeRegistro, setIndividualidadeRegistro] = useState<AltaIndividualidade | null>(null)
   const [carregando, setCarregando] = useState(true)
   const [erro, setErro] = useState<string | null>(null)
   const [salvando, setSalvando] = useState(false)
@@ -111,10 +142,11 @@ export function usePacienteDetalhe(idPaciente: number) {
 
   const carregar = useCallback(async () => {
     setCarregando(true)
-    const [resPaciente, resFicha, resVinculos] = await Promise.all([
+    const [resPaciente, resFicha, resVinculos, resIndividualidade] = await Promise.all([
       getPacientePorId(idPaciente),
       getFichaMedica(idPaciente),
       getVinculosDoPaciente(idPaciente),
+      getAltaIndividualidade(idPaciente),
     ])
 
     if (resPaciente.error) {
@@ -128,9 +160,10 @@ export function usePacienteDetalhe(idPaciente: number) {
       return
     }
 
-    const montado = montarForm(resPaciente.data, resFicha.data, resVinculos.data)
+    const montado = montarForm(resPaciente.data, resFicha.data, resVinculos.data, resIndividualidade.data)
     setPaciente(resPaciente.data)
     setVinculosOriginais(resVinculos.data)
+    setIndividualidadeRegistro(resIndividualidade.data)
     setOriginal(montado)
     setForm(montado)
     setErro(null)
@@ -154,20 +187,32 @@ export function usePacienteDetalhe(idPaciente: number) {
     []
   )
 
-  // Comparação campo a campo. `ficha` e `vinculos` contam como UM campo cada —
-  // o número que aparece na barra é "quantos campos você mexeu", e detalhar
-  // dentro deles inflaria a conta sem ajudar.
+  const setIndividualidade = useCallback(
+    (patch: Partial<AltaIndividualidadeForm>) => {
+      setForm((atual) =>
+        atual ? { ...atual, individualidade: { ...atual.individualidade, ...patch } } : atual
+      )
+    },
+    []
+  )
+
+  // Comparação campo a campo. `ficha`, `vinculos` e `individualidade` contam
+  // como UM campo cada — o número que aparece na barra é "quantos campos você
+  // mexeu", e detalhar dentro deles inflaria a conta sem ajudar.
   const camposSujos = useMemo(() => {
     const sujos = new Set<string>()
     if (!form || !original) return sujos
 
     for (const chave of Object.keys(form) as (keyof PacienteForm)[]) {
-      if (chave === "ficha" || chave === "vinculos") continue
+      if (chave === "ficha" || chave === "vinculos" || chave === "individualidade") continue
       if (form[chave] !== original[chave]) sujos.add(chave as string)
     }
     if (JSON.stringify(form.ficha) !== JSON.stringify(original.ficha)) sujos.add("ficha")
     if (JSON.stringify(form.vinculos) !== JSON.stringify(original.vinculos)) {
       sujos.add("vinculos")
+    }
+    if (JSON.stringify(form.individualidade) !== JSON.stringify(original.individualidade)) {
+      sujos.add("individualidade")
     }
     return sujos
   }, [form, original])
@@ -183,7 +228,7 @@ export function usePacienteDetalhe(idPaciente: number) {
     setSalvando(true)
     setErroSalvar(null)
     try {
-      const { ficha, vinculos, ...dadosPaciente } = form
+      const { ficha, vinculos, individualidade, ...dadosPaciente } = form
 
       // Checkbox desmarcado tem que LIMPAR o nome civil, senão fica dado
       // fantasma: invisível na tela e presente no banco.
@@ -215,6 +260,18 @@ export function usePacienteDetalhe(idPaciente: number) {
           return false
         }
       }
+      if (camposSujos.has("individualidade")) {
+        const resIndividualidade = await salvarAltaIndividualidade(
+          idPaciente,
+          form.nome,
+          individualidade,
+          individualidadeRegistro
+        )
+        if (resIndividualidade.error) {
+          setErroSalvar(resIndividualidade.error)
+          return false
+        }
+      }
 
       // O cache module-level de usePacientes não se invalida sozinho — sem isto
       // o usuário volta para a lista e vê o nome antigo.
@@ -224,7 +281,7 @@ export function usePacienteDetalhe(idPaciente: number) {
     } finally {
       setSalvando(false)
     }
-  }, [form, camposSujos, idPaciente, carregar])
+  }, [form, camposSujos, idPaciente, individualidadeRegistro, carregar])
 
   return {
     paciente,
@@ -232,6 +289,7 @@ export function usePacienteDetalhe(idPaciente: number) {
     form,
     set,
     setFicha,
+    setIndividualidade,
     camposSujos,
     dirtyCount,
     carregando,
