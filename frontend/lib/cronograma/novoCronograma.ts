@@ -2,6 +2,10 @@ import { DIA_COLS_DISP, DIAS_LIST, DIAS_ORD, ESP_CLINICO, EXCLUIR_OCUP, TERAPIA_
 import { isLaudoComAlta, pm } from "./helpers"
 import type { CsvRow, DispRow, LaudoRow } from "@/types/cronograma"
 
+// Referência estável para quando `suspensaoSet` não é passado — `new Set()`
+// inline como default recriaria a cada chamada.
+const SUSPENSAO_SET_VAZIO = new Set<string>()
+
 // ─── TIPOS ────────────────────────────────────────────────────────────────────
 
 export interface EspEntry {
@@ -60,6 +64,7 @@ export function buildNewCronograma(
   dispRows: DispRow[] | null | undefined,
   laudosRows: LaudoRow[] | null | undefined,
   livreSlots: CsvRow[],
+  suspensaoSet: Set<string> = SUSPENSAO_SET_VAZIO,
 ): NovoCronogramaResult {
   const dispRow = (dispRows || []).find(
     r => String(r["Nome Paciente"] || "").trim().toLowerCase() === paciente.trim().toLowerCase(),
@@ -82,7 +87,7 @@ export function buildNewCronograma(
   const turnoClinico: "manha" | "tarde" | null =
     escolaIni === null ? null : escolaIni < 780 ? "tarde" : "manha"
 
-  const espTable = construirEspTable(paciente, laudosRows, true)
+  const espTable = construirEspTable(paciente, laudosRows, true, suspensaoSet)
 
   const inWindow = (dia: string, hi: number) => {
     const w = availWindows[dia]
@@ -136,6 +141,7 @@ export function buildNovoCronogramaManual(
   turno: "manha" | "tarde",
   laudosRows: LaudoRow[] | null | undefined,
   livreSlots: CsvRow[],
+  suspensaoSet: Set<string> = SUSPENSAO_SET_VAZIO,
 ): NovoCronogramaResult {
   const janela = TURNOS[turno]
   const unidadesPermitidas = new Set(unidades)
@@ -149,7 +155,7 @@ export function buildNovoCronogramaManual(
   const availWindows: Record<string, AvailWindow> = {}
   for (const dia of DIAS_LIST.slice(0, 5)) availWindows[dia] = { ...janela }
 
-  const espTable = construirEspTable(paciente, laudosRows, false)
+  const espTable = construirEspTable(paciente, laudosRows, false, suspensaoSet)
 
   const eligible = (livreSlots || []).filter(r => {
     const hiVal = Number(r.HI ?? r["HI"] ?? null)
@@ -234,11 +240,12 @@ export function buildSugestoesManual(
   turno: "manha" | "tarde",
   laudosRows: LaudoRow[] | null | undefined,
   livreSlots: CsvRow[],
+  suspensaoSet: Set<string> = SUSPENSAO_SET_VAZIO,
 ): SugestoesManualResult {
   const janela = TURNOS[turno]
   const unidadesPermitidas = new Set(unidades)
 
-  const espTable = construirEspTable(paciente, laudosRows, false)
+  const espTable = construirEspTable(paciente, laudosRows, false, suspensaoSet)
 
   // Especialidades com autorização > 0 — única condição de elegibilidade.
   const espsValidas = new Set(
@@ -382,15 +389,21 @@ function construirEspTable(
   paciente: string,
   laudosRows: LaudoRow[] | null | undefined,
   somenteVigenteConta: boolean,
+  suspensaoSet: Set<string> = SUSPENSAO_SET_VAZIO,
 ): Record<string, EspEntry> {
   const espTable: Record<string, EspEntry> = {}
-  const altaEsp = new Set<string>()
+  // "Alta" (laudo) e "Suspensão Temporária" (cadastro do paciente) — duas
+  // fontes, mesmo efeito: a especialidade não entra na tabela.
+  const excluidosEsp = new Set<string>()
 
   for (const r of laudosRows || []) {
     if (String(r["Paciente"] || "").trim() !== paciente) continue
     const esp = String(r["Especialidade"] || "").trim()
     if (!esp) continue
-    if (isLaudoComAlta(r as Record<string, unknown>)) { altaEsp.add(esp); continue }
+    if (isLaudoComAlta(r as Record<string, unknown>) || suspensaoSet.has(`${paciente}|||${esp}`)) {
+      excluidosEsp.add(esp)
+      continue
+    }
     const sol = parseFloat(String(r["Qtd laudo"] || "0")) || 0
     const aut = parseFloat(String(r["Qtd autorizada"] || "0")) || 0
     const vigente = String(r["Situação"] || "").toLowerCase() === "vigente"
@@ -399,7 +412,7 @@ function construirEspTable(
     if (vigente) espTable[esp].vigente = true
     if (vigente || !somenteVigenteConta) espTable[esp].aut = Math.max(espTable[esp].aut, aut)
   }
-  for (const esp of altaEsp) delete espTable[esp]
+  for (const esp of excluidosEsp) delete espTable[esp]
 
   // Sem quantidade autorizada não há nada a posicionar nem a exibir como meta.
   if (!somenteVigenteConta) {

@@ -27,7 +27,17 @@ type SecaoFicha = "basica" | "doencas"
 
 const ICONE = "h-4 w-4"
 
-export function PacienteDetalhe({ idPaciente }: { idPaciente: number }) {
+export function PacienteDetalhe({
+  idPaciente,
+  abaInicial,
+  suspensaoIdInicial,
+}: {
+  idPaciente: number
+  /** Deep link (ex.: vindo de Ocupação de Paciente) — abre direto nesta aba. */
+  abaInicial?: Aba
+  /** Junto de `abaInicial="altas"`, abre o modal de detalhe desta suspensão. */
+  suspensaoIdInicial?: number
+}) {
   const {
     paciente,
     form,
@@ -46,7 +56,7 @@ export function PacienteDetalhe({ idPaciente }: { idPaciente: number }) {
     recarregar,
   } = usePacienteDetalhe(idPaciente)
 
-  const [aba, setAba] = useState<Aba>("cadastro")
+  const [aba, setAba] = useState<Aba>(abaInicial ?? "cadastro")
   const [secaoCadastro, setSecaoCadastro] = useState<SecaoCadastro>("dados")
   const [secaoFicha, setSecaoFicha] = useState<SecaoFicha>("basica")
   const [editando, setEditando] = useState(false)
@@ -224,6 +234,7 @@ export function PacienteDetalhe({ idPaciente }: { idPaciente: number }) {
             individualidade={form.individualidade}
             setIndividualidade={setIndividualidade}
             disabled={!editando}
+            suspensaoIdInicial={suspensaoIdInicial}
           />
         )}
       </div>

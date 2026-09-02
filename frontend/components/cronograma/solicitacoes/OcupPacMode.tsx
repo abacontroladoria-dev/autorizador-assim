@@ -2,6 +2,7 @@
 
 import * as XLSX from "xlsx"
 import toast from "react-hot-toast"
+import Link from "next/link"
 import { type CSSProperties, forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import {
   ABA_EXIB_PSICO_NAMES, B, DIAS_LIST, DIAS_ORD, EXCLUIR_OCUP, EXIB_ID, EXIB_NOME,
@@ -20,6 +21,7 @@ import type { AceiteSessao } from "@/types/acompanhamento"
 import { useCronogramaData } from "@/contexts/CronogramaDataContext"
 import { reativarRecusaPaciente } from "@/lib/cronograma/reativarRecusaPaciente"
 import { registrarRecusa, registrarReativacao } from "@/services/cronogramaRecusasAuditoria.service"
+import type { SuspensaoLinkInfo } from "@/lib/cronograma/suspensaoTemporaria"
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -795,6 +797,8 @@ const PACIENTE_TESTE_TITA = "Notificação Prévia"
 
 interface TodasSugestoesModalProps {
   pac: string; conv: string; cRows: CsvRow[]; sugestoes: Sugestao[]; pacGaps: GapInfo[]; pacAllEsp: GapInfo[]
+  /** Especialidades deste paciente com suspensão temporária vigente — não estão em pacAllEsp (removidas de lá, junto com "Alta"). */
+  pacSuspensoes: { esp: string; info: SuspensaoLinkInfo }[]
   stOf: (s: Sugestao) => Status | null
   setSt: (s: Sugestao, st: Status | null) => void
   estrategia: Estrategia; setEstrategia: (e: Estrategia) => void
@@ -821,7 +825,7 @@ export interface TodasSugestoesModalHandle {
 }
 
 const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoesModalProps>(function TodasSugestoesModal({
-  pac, conv, cRows, sugestoes, pacGaps, pacAllEsp, stOf, setSt,
+  pac, conv, cRows, sugestoes, pacGaps, pacAllEsp, pacSuspensoes, stOf, setSt,
   estrategia, setEstrategia, onAceitar, onInviavel, onAcaoDireta,
   onUndoRecusa, reservasConfirmadas, recusasPac, onAbrirRecusaDetalhe,
 }: TodasSugestoesModalProps, ref: React.Ref<TodasSugestoesModalHandle>) {
@@ -1719,6 +1723,25 @@ const TodasSugestoesModal = forwardRef<TodasSugestoesModalHandle, TodasSugestoes
                 )
               })}
             </div>
+            {pacSuspensoes.length > 0 && (
+              <div style={{ marginTop: "12px", display: "flex", flexDirection: "column", gap: "6px", flexShrink: 0 }}>
+                {pacSuspensoes.map(({ esp, info }) => (
+                  <div key={esp} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "8px", background: "#fef3c7", border: "1px solid #fcd34d", borderRadius: "8px", padding: "6px 8px" }}>
+                    <span style={{ fontSize: "10.5px", color: "#92400e", fontWeight: 700, lineHeight: 1.3 }}>
+                      🚫 {esp} — suspensa temporariamente
+                    </span>
+                    <Link
+                      href={`/cadastros/pacientes/${info.idPacientePulsar}?aba=altas&suspensao=${info.idSuspensao}`}
+                      target="_blank"
+                      title={`Ver a suspensão de ${esp} na ficha do paciente`}
+                      style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: "22px", height: "22px", borderRadius: "6px", background: "var(--card)", border: "1px solid #fcd34d", color: "#92400e", flexShrink: 0, textDecoration: "none", fontWeight: 900, fontSize: "13px" }}
+                    >
+                      →
+                    </Link>
+                  </div>
+                ))}
+              </div>
+            )}
             {hasExcesso && (
               <div style={{ marginTop: "12px", background: "#fee2e2", border: "1px solid #fca5a5", borderRadius: "8px", padding: "8px 10px", fontSize: "10px", color: "#dc2626", fontWeight: 700, flexShrink: 0 }}>
                 ⚠ Limite ultrapassado. Desmarque sessões em excesso antes de aceitar.
@@ -1958,6 +1981,10 @@ interface Props {
   inv?: InvItem[]
   sRec?: (rec: RecItem[]) => void
   sInv?: (inv: InvItem[]) => void
+  /** `${pacienteNome}|||${especialidade}` com suspensão temporária vigente — ver suspensaoTemporaria.ts. */
+  suspensaoSet?: Set<string>
+  /** Mesma chave -> paciente/suspensão de origem, para o link "ver na ficha do paciente". */
+  suspensaoInfo?: Map<string, SuspensaoLinkInfo>
 }
 
 // "Notificação Prévia" é o paciente-teste oficial usado na homologação da
@@ -1967,7 +1994,16 @@ interface Props {
 const PACS_ADMIN_OCUP_PAC = new Set(PACS_ADMIN)
 PACS_ADMIN_OCUP_PAC.delete(PACIENTE_TESTE_TITA)
 
-export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGlobal = [], sRec, sInv }: Props) {
+// Referência estável para quando `suspensaoSet` não é passado (ex.: chamador
+// antigo, ou ainda carregando) — `new Set()` como default de destructuring
+// recriaria a cada render e invalidaria os `useMemo` que a usam como dependência.
+const SUSPENSAO_SET_VAZIO = new Set<string>()
+const SUSPENSAO_INFO_VAZIO = new Map<string, SuspensaoLinkInfo>()
+
+export function OcupPacMode({
+  cRows, lRows, cfg, rec: recGlobal = [], inv: invGlobal = [], sRec, sInv,
+  suspensaoSet = SUSPENSAO_SET_VAZIO, suspensaoInfo = SUSPENSAO_INFO_VAZIO,
+}: Props) {
   const modalRef = useRef<TodasSugestoesModalHandle>(null)
   const [pac, setPac]           = useState("")
   const [inputVal, setInputVal] = useState("")
@@ -2370,19 +2406,22 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       }
     }
     const qtdAut: Record<string, number> = {}
-    const altaSet = new Set<string>()
+    // "Alta" (do laudo) e "Suspensão Temporária" (cadastro do paciente) são
+    // duas fontes diferentes, mas o efeito é o mesmo: a especialidade não deve
+    // ser ofertada. Um Set só para as duas, mesmo padrão já usado para Alta.
+    const excluidosSet = new Set<string>()
     for (const l of lRows) {
       const idFav = String(l["ID Favorecido"] ?? l["Id Favorecido"] ?? "").trim()
       const p     = (idFav ? agendIdMap.get(idFav) : undefined) ?? String(l["Paciente"] || "").trim()
       const esp   = String(l["Especialidade"] || "").trim()
       if (!p || PACS_ADMIN_OCUP_PAC.has(p) || !esp) continue
-      if (isLaudoComAlta(l)) { altaSet.add(`${p}|||${esp}`); continue }
+      const k = `${p}|||${esp}`
+      if (isLaudoComAlta(l) || suspensaoSet.has(k)) { excluidosSet.add(k); continue }
       const aut = parseFloat(String(l["Qtd autorizada"] || "0").replace(",", ".")) || 0
       if (aut <= 0) continue
-      const k = `${p}|||${esp}`
       if (!qtdAut[k] || aut > qtdAut[k]) qtdAut[k] = aut
     }
-    for (const k of altaSet) delete qtdAut[k]
+    for (const k of excluidosSet) delete qtdAut[k]
     const result: Record<string, { dif: number; aut: number; of: number }> = {}
     for (const [k, aut] of Object.entries(qtdAut)) {
       const of_ = ceilOcupacaoAba(qtdOf[k] || 0)
@@ -2390,7 +2429,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       result[k] = { dif, aut, of: of_ }
     }
     return result
-  }, [cRows, lRows, agend, agendIdMap, agendMergeMap, aceites])
+  }, [cRows, lRows, agend, agendIdMap, agendMergeMap, aceites, suspensaoSet])
 
   const todosPacs = useMemo(() => {
     const pacs = new Set<string>()
@@ -2596,26 +2635,41 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       }
     }
     const qtdAut: Record<string, number> = {}
-    const altaSet = new Set<string>()
+    const excluidosSet = new Set<string>()
     for (const l of lRows) {
       const idFav = String(l["ID Favorecido"] ?? l["Id Favorecido"] ?? "").trim()
       const p     = (idFav ? agendIdMap.get(idFav) : undefined) ?? String(l["Paciente"] || "").trim()
       if (p !== pac) continue
       const esp = String(l["Especialidade"] || "").trim()
       if (!esp) continue
-      if (isLaudoComAlta(l)) { altaSet.add(esp); continue }
+      if (isLaudoComAlta(l) || suspensaoSet.has(`${pac}|||${esp}`)) { excluidosSet.add(esp); continue }
       const aut = parseFloat(String(l["Qtd autorizada"] || "0").replace(",", ".")) || 0
       if (aut <= 0) continue
       if (!qtdAut[esp] || aut > qtdAut[esp]) qtdAut[esp] = aut
     }
-    for (const esp of altaSet) delete qtdAut[esp]
+    for (const esp of excluidosSet) delete qtdAut[esp]
     return Object.entries(qtdAut)
       .map(([esp, aut]) => {
         const of_ = ceilOcupacaoAba(qtdOf[esp] || 0)
         return { esp, aut, of: of_, dif: Math.round((aut - of_) * 10) / 10 }
       })
       .sort((a, b) => b.dif - a.dif)
-  }, [pac, agend, lRows, agendIdMap, agendMergeMap, aceites])
+  }, [pac, agend, lRows, agendIdMap, agendMergeMap, aceites, suspensaoSet])
+
+  // Especialidades do paciente com suspensão temporária vigente — não aparecem em
+  // pacAllEsp (foram removidas de lá, junto com "Alta"), então sem isto o
+  // operador só veria a especialidade desaparecer sem entender o motivo.
+  const pacSuspensoes = useMemo(() => {
+    const resultado: { esp: string; info: SuspensaoLinkInfo }[] = []
+    if (!pac) return resultado
+    const prefixo = `${pac}|||`
+    for (const chave of suspensaoSet) {
+      if (!chave.startsWith(prefixo)) continue
+      const info = suspensaoInfo.get(chave)
+      if (info) resultado.push({ esp: chave.slice(prefixo.length), info })
+    }
+    return resultado
+  }, [pac, suspensaoSet, suspensaoInfo])
 
   const sugestoes = useMemo(() => {
     if (!pac || estrategia !== "S1") return [] as Sugestao[]
@@ -3045,6 +3099,7 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
             sugestoes={sugestoes}
             pacGaps={pacGaps}
             pacAllEsp={pacAllEsp}
+            pacSuspensoes={pacSuspensoes}
             stOf={stOf}
             setSt={setSt}
             estrategia={estrategia}
