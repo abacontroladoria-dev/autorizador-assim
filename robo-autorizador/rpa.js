@@ -15,6 +15,12 @@
  * - A REJEIÇÃO da ASSIM deixou de ser tratada como erro. O recibo de recusa traz
  *   guia, data/hora e o motivo ("1013-CADASTRO DO BENEFICIARIO COM PROBLEMAS"):
  *   tudo isso é lido e gravado, e a tarefa termina em 'glosa'.
+ * - O modal de NASCIMENTO + CPF (#checkBday) passou a ser preenchido pelo robô,
+ *   com o dado que vem na tarefa. Ver preencherNascimentoCpf(). Antes era da
+ *   recepção inteira; o robô esperava e saía da frente.
+ * - O modal de TOKEN (#checkToken) é do USUÁRIO e o robô nunca o fecha — nem
+ *   direta nem indiretamente, pelo erro que faria o worker descartar a aba.
+ *   Ver aguardarConfirmacaoBeneficiario() e SessaoAssim.temTokenAberto().
  *
  * O que NÃO mudou, de propósito: o robô preenche e PARA. Quem clica em "enviar"
  * é a recepcionista. A decisão de autorizar continua humana.
@@ -41,6 +47,15 @@ const SEL_LOADER = '#loadModal'
 const SEL_MODAL_BENEFICIARIO = '#checkBday'
 const SEL_ALERTA_JQUERY = '.jconfirm-box'
 const SEL_ENVIO_BLOQUEADO = '#InformeOsDados'
+
+// O modal do token é do USUÁRIO, e é o único elemento desta página que o robô
+// trata como intocável. Ele mostra um token que a ASSIM mandou para o celular do
+// responsável, com contagem de ~60s. Fechar a aba enquanto ele está na tela
+// queima o token: a operadora só reenvia depois de espera, e quem paga é a
+// recepção com o beneficiário na frente. Por isso nenhum caminho automático de
+// fechamento passa por cima dele — ver o teto próprio na etapa 3 abaixo e
+// SessaoAssim.temTokenAberto() em assim.js.
+const SEL_MODAL_TOKEN = '#checkToken'
 
 // A tela de identificação do beneficiário, em qualquer das formas que a ASSIM
 // usa. Sempre por `:visible` do Playwright, que exige caixa de verdade — e
@@ -77,6 +92,41 @@ async function visivel(page, seletor) {
 }
 
 /**
+ * O modal do token está na tela?
+ *
+ * Exige o CAMPO, não só a caixa: um `#checkToken` que a ASSIM deixou no DOM
+ * inerte ainda pode responder `:visible`, e usá-lo como sinal suspenderia o
+ * prazo do robô à toa. Se o input está visível, há alguém digitando (ou por
+ * digitar) um token de verdade.
+ */
+async function tokenNaTela(page) {
+  return page.locator(`${SEL_MODAL_TOKEN}:visible input[type="text"], ` +
+                      `${SEL_MODAL_TOKEN}:visible input:not([type])`)
+    .first().isVisible().catch(() => false)
+}
+
+/**
+ * Os três campos da carteirinha, ou null se a página já não responde.
+ *
+ * Existe porque `limpa_carteira()` da ASSIM é o efeito colateral de fechar o
+ * modal no "x" E de errar o CPF/nascimento: nos dois casos os campos voltam
+ * vazios, e seguir em frente assim produz a recusa "Beneficiario nao
+ * confirmado" no envio. Lido em dois lugares (depois do preenchimento e no fim
+ * da confirmação), então mora aqui.
+ */
+async function lerCarteirinha(page) {
+  return page.evaluate(() => {
+    const f = document.forms.autorizador
+    if (!f) return null
+    return [f.associado1.value, f.associado2.value, f.associado3.value]
+  }).catch(() => null)
+}
+
+function carteirinhaVazia(cartao) {
+  return !cartao || cartao.some(v => !String(v || '').trim())
+}
+
+/**
  * Espera a tela parar de estar ocupada.
  *
  * Ganhou teto. Antes era `while (true)` sem prazo: um modal que não fechasse
@@ -103,6 +153,239 @@ async function aguardarTelaLivre(page, timeoutMs = 45000) {
   }
 
   return false
+}
+
+// =========================
+// NASCIMENTO + CPF (#checkBday)
+// =========================
+//
+// POR QUE ISTO EXISTE
+// Quando o credenciado não tem dispositivo Intelbras — o caso desta clínica — a
+// ASSIM cai em `abrirModal()` e pede NASCIMENTO + CPF em `#checkBday`. Até a
+// versão 1.1.6 isso era inteiramente da recepção: o robô esperava e saía da
+// frente. Agora ele preenche, porque os dois campos já vêm na tarefa
+// (robo_buscar_tarefa, migration 20260902130000) e são os mesmos que aparecem no
+// card do paciente na /solicitar.
+//
+// O QUE ESTA FUNÇÃO NÃO FAZ
+// Não opera o QR (#myModal), não digita token (#checkToken) e não responde aos
+// avisos com botão (.jconfirm-box). O gatilho é `#checkBday` e só ele: nos outros
+// caminhos ela sai por 'sem_modal' sem tocar em nada, e a etapa humana segue como
+// sempre foi.
+//
+// POR QUE ELA NUNCA LANÇA
+// Devolve veredito ('preenchido' | 'sem_dados' | 'sem_modal' | 'recusado') para
+// quem chama decidir. Um throw aqui dentro chegaria a worker.js:325 e fecharia a
+// aba — que é o certo para 'recusado', mas seria desastroso para 'sem_modal', o
+// caso mais comum de todos.
+//
+// A ARMADILHA QUE GOVERNA O DESENHO
+// Errar o CPF/nascimento faz o portal rodar `limpa_carteira()`, que apaga
+// associado1/2/3. Ou seja: um preenchimento errado não só falha, ele destrói o
+// estado do formulário. Daí três regras:
+//   - dado incompleto NÃO é digitado (meio CPF é pior que nenhum);
+//   - o que foi digitado é RELIDO antes de clicar em Confirmar;
+//   - recusa não é repetida — o dado do TiTa pode simplesmente divergir do
+//     cadastro da ASSIM, e insistir só gasta outra limpa_carteira().
+
+/**
+ * @returns {Promise<'preenchido'|'sem_dados'|'sem_modal'|'recusado'>}
+ */
+async function preencherNascimentoCpf(page, cfg, api, tarefa, alertas) {
+  const tetoModal = Number(cfg.modal_bday_ms) || 10000
+
+  // ---- 1. O modal é este mesmo? ----
+  // Prazo curto de propósito: este tempo é somado a TODA tarefa que não passa
+  // pelo #checkBday (biofacial, QR, token). Não é lugar de ser generoso.
+  const abriu = await page.locator(`${SEL_MODAL_BENEFICIARIO}:visible`)
+    .first().waitFor({ state: 'visible', timeout: tetoModal })
+    .then(() => true).catch(() => false)
+
+  if (!abriu) return 'sem_modal'
+
+  // ---- 2. Temos o dado? ----
+  // Normaliza primeiro, decide depois. A migration já entrega o CPF com 11
+  // dígitos, mas quem lê aqui não pode depender disso: o robô 1.1.7 pode estar
+  // falando com a RPC antiga, que não manda o campo nenhum.
+  const cpf = String(tarefa.cpf ?? '').replace(/\D/g, '')
+  const nasc = String(tarefa.data_nascimento ?? '').slice(0, 10)
+
+  const faltando = []
+  if (cpf.length !== 11) faltando.push('CPF')
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(nasc)) faltando.push('data de nascimento')
+
+  if (faltando.length) {
+    console.log(
+      `📋 Modal de nascimento + CPF na tela, mas o cadastro não tem ${faltando.join(' e ')} — ` +
+      'preenchimento fica para a recepção.'
+    )
+    await api.registrarLog(
+      tarefa.id,
+      `Sem ${faltando.join(' e ')} no cadastro: modal de identificacao deixado para a recepcao`
+    )
+    return 'sem_dados'
+  }
+
+  console.log('📋 Modal de nascimento + CPF — preenchendo com o cadastro do paciente')
+
+  const modal = page.locator(`${SEL_MODAL_BENEFICIARIO}:visible`).first()
+
+  // ---- 3. Achar os campos DENTRO do modal ----
+  // Por tipo e ordem, não por `name`: assim "a ASSIM renomeou um id" não vira
+  // "o robô digitou CPF no campo de data". O campo de data é o primeiro input
+  // que não seja de botão; o do CPF é reconhecido pelo placeholder da própria
+  // página ("digite apenas numeros"), com a ordem como reserva.
+  const campoData = modal.locator(
+    'input[type="date"], input[name*="nasc" i], input[id*="nasc" i]'
+  ).first()
+
+  const campoCpf = modal.locator(
+    'input[placeholder*="numero" i], input[name*="cpf" i], input[id*="cpf" i]'
+  ).first()
+
+  const temData = await campoData.count().then(n => n > 0).catch(() => false)
+  const temCpf = await campoCpf.count().then(n => n > 0).catch(() => false)
+
+  if (!temData || !temCpf) {
+    console.warn(
+      '⚠️  Não localizei os campos de nascimento/CPF dentro do #checkBday. ' +
+      'A ASSIM pode ter mudado o modal — deixando para a recepção.'
+    )
+    await api.registrarLog(
+      tarefa.id,
+      'Campos do modal de nascimento/CPF nao localizados: deixado para a recepcao'
+    )
+    return 'sem_dados'
+  }
+
+  // ---- 4. A data, no formato que o campo aceita ----
+  // Decidido em runtime, não pelo print: `input[type=date]` só aceita
+  // 'YYYY-MM-DD' via fill() (e digitar nele depende da ordem dos segmentos no
+  // locale do Chromium); qualquer outro tipo quer a ordem brasileira.
+  const tipoData = await campoData
+    .evaluate(el => (el.type || '').toLowerCase()).catch(() => '')
+
+  const [ano, mes, dia] = nasc.split('-')
+
+  if (tipoData === 'date') {
+    await campoData.fill(nasc)
+    // fill() já dispara input/change, mas os handlers do portal são atributos
+    // inline e re-disparar não custa nada — é o mesmo cinto do select de UF.
+    await campoData.evaluate(el => {
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+      el.dispatchEvent(new Event('change', { bubbles: true }))
+    }).catch(() => {})
+  } else {
+    // Sem barras: se o campo tiver máscara, ela as insere sozinha, e digitar as
+    // nossas produziria "12//2//2018".
+    await humanType(page, await seletorDe(campoData), `${dia}${mes}${ano}`)
+  }
+
+  // ---- 5. O CPF ----
+  await humanType(page, await seletorDe(campoCpf), cpf)
+
+  // ---- 6. Conferir ANTES de confirmar ----
+  // Data meio digitada enviada ao ConfirmBdayDate() é uma limpa_carteira() de
+  // graça. Reler é mais barato que a recusa.
+  const dataDigitada = String(await campoData.inputValue().catch(() => ''))
+  const cpfDigitado = String(await campoCpf.inputValue().catch(() => '')).replace(/\D/g, '')
+
+  const dataOk = tipoData === 'date'
+    ? dataDigitada === nasc
+    : dataDigitada.replace(/\D/g, '') === `${dia}${mes}${ano}`
+
+  if (!dataOk || cpfDigitado !== cpf) {
+    console.warn(
+      `⚠️  O que entrou nos campos não confere (data="${dataDigitada}", ` +
+      `cpf com ${cpfDigitado.length} dígitos) — não vou clicar em Confirmar.`
+    )
+    await api.registrarLog(
+      tarefa.id,
+      'Preenchimento do modal de nascimento/CPF nao confirmado na releitura: deixado para a recepcao'
+    )
+    return 'sem_dados'
+  }
+
+  // ---- 7. Confirmar ----
+  // Sem o clique nada é validado: é o ConfirmBdayDate() que troca
+  // #InformeOsDados por #EnviarDados. Preencher e não clicar não entregaria
+  // nada — e, pior, deixaria o robô sem sinal para distinguir dado certo de
+  // dado errado.
+  const marcaAlerta = alertas.length
+
+  await modal.locator('button, input[type="button"], input[type="submit"], a')
+    .filter({ hasText: /confirmar/i }).first().click({ timeout: 5000 })
+    .catch(async () => {
+      // Fallback: alguns botões do portal são <input value="Confirmar">, que o
+      // filtro por hasText não alcança.
+      await modal.locator('input[value*="onfirmar" i]').first()
+        .click({ timeout: 5000 }).catch(() => {})
+    })
+
+  console.log('   ✔️  Nascimento e CPF enviados; aguardando a ASSIM validar')
+
+  // ---- 8. O desfecho ----
+  // Lido no fonte real de `ConfirmBdayDate()` (custom/js/modal_confirm_ben.js,
+  // conferido em 2026-09-02), e NÃO por suposição — o que desfez duas crenças:
+  //
+  // 1. A recusa NÃO roda `limpa_carteira()`. As linhas que zeravam
+  //    associado1/2/3 estão COMENTADAS no portal; o que a recusa faz é limpar
+  //    só #bday e #cpf, chamar trocaElement("InformeOsDados","EnviarDados") e
+  //    alertar. O modal FICA ABERTO, esperando outra tentativa.
+  //    Por isso a recusa aqui não derruba mais a tarefa: a tela continua
+  //    perfeitamente utilizável e a recepção corrige à mão, como sempre fez.
+  // 2. NÃO há limite de tentativas — nenhum contador, nenhum bloqueio do
+  //    beneficiário. O risco de "trancar o paciente" não existe.
+  //
+  // A checagem da carteirinha continua aqui como rede: é barata e cobre o
+  // caminho de fechar o modal no "x", que É `limpa_carteira()` de verdade.
+  const limite = Date.now() + 15000
+  while (Date.now() < limite) {
+    const recusa = alertas.slice(marcaAlerta)
+      .find(t => /incorret/i.test(t) && /cpf|nascimento/i.test(t))
+
+    if (recusa) {
+      await api.registrarLog(tarefa.id, `ASSIM recusou o CPF/nascimento: ${recusa}`)
+      return 'recusado'
+    }
+
+    if (carteirinhaVazia(await lerCarteirinha(page))) {
+      await api.registrarLog(
+        tarefa.id,
+        'ASSIM limpou a carteirinha depois do CPF/nascimento (dado recusado)'
+      )
+      return 'recusado'
+    }
+
+    if (!await visivel(page, SEL_MODAL_BENEFICIARIO)) return 'preenchido'
+
+    await delay(500)
+  }
+
+  // Modal ainda de pé e nenhum alerta: não afirmar sucesso. A etapa humana
+  // assume daqui, que é o comportamento de 1.1.6.
+  console.warn('⚠️  A ASSIM não respondeu ao CPF/nascimento no prazo — seguindo com a recepção')
+  return 'sem_dados'
+}
+
+/**
+ * O seletor CSS de um locator, para poder usar `humanType`.
+ *
+ * `humanType` recebe seletor (page.focus + keyboard.type) porque foi extraído
+ * quando tudo aqui era seletor solto. Em vez de duplicar a digitação humana para
+ * aceitar locator, resolve-se o caminho do elemento uma vez.
+ */
+async function seletorDe(locator) {
+  const id = await locator.evaluate(el => el.id).catch(() => '')
+  if (id) return `#${id}`
+
+  const name = await locator.evaluate(el => el.name).catch(() => '')
+  if (name) return `${SEL_MODAL_BENEFICIARIO} [name="${name}"]`
+
+  // Sem id nem name: marca o elemento para poder endereçá-lo.
+  const marca = 'robo-campo-' + Math.random().toString(36).slice(2, 8)
+  await locator.evaluate((el, m) => el.setAttribute('data-robo', m), marca).catch(() => {})
+  return `[data-robo="${marca}"]`
 }
 
 // =========================
@@ -147,14 +430,26 @@ async function aguardarTelaLivre(page, timeoutMs = 45000) {
 //    "funcionando com parada do modal"). Isso trava o worker inteiro quando a
 //    recepção some. Aqui o prazo é largo — 15 min — mas existe.
 //
-// O robô NÃO preenche nascimento e CPF, nem opera o QR, nem clica em confirmar.
-// Esse é o controle de presença da operadora, feito com o beneficiário na frente
-// da recepção. O robô dispara a consulta, sai da frente e volta depois.
-async function aguardarConfirmacaoBeneficiario(page, cfg, api, filaId, alertas = []) {
+// O QUE É DO ROBÔ E O QUE É DO HUMANO, desde 1.1.7
+// O robô preenche o #checkBday (nascimento + CPF), porque tem esse dado no
+// cadastro — ver preencherNascimentoCpf(). Não opera o QR, não digita token e não
+// responde aos avisos com botão: isso continua sendo da recepção, com o
+// beneficiário na frente.
+//
+// E o modal do TOKEN tem tratamento próprio: enquanto ele está na tela o prazo
+// do robô fica SUSPENSO, e ao fim ele desiste sem fechar a aba. Quem fecha o
+// token é o usuário, só.
+async function aguardarConfirmacaoBeneficiario(page, cfg, api, tarefa, alertas = []) {
   const tetoConsulta = Number(cfg.beneficiario_consulta_ms) || 60000
   const tetoAparecer = Number(cfg.identificacao_aparecer_ms) || 90000
   const tetoHumano = Number(cfg.confirmacao_beneficiario_ms) || 900000
+  // Teto próprio do token, contado de quando ele aparece. Existe para a espera
+  // suspensa não virar espera infinita — a armadilha da geração anterior. Largo
+  // porque do outro lado há um pai procurando o SMS.
+  const tetoToken = Number(cfg.token_ms) || 1800000
   const SILENCIO_MS = 6000
+
+  const filaId = tarefa.id
 
   const marcaAlerta = alertas.length
   const prazoLegivel = tetoHumano >= 60000
@@ -240,6 +535,38 @@ async function aguardarConfirmacaoBeneficiario(page, cfg, api, filaId, alertas =
     )
   }
 
+  // ---- 2b. Se o caminho foi o #checkBday, o robô preenche ----
+  // Feito AQUI e não dentro do laço da etapa 3: ali seria re-disparado a cada
+  // volta. A função sai por 'sem_modal' de graça quando o caminho é outro.
+  const bday = await preencherNascimentoCpf(page, cfg, api, tarefa, alertas)
+
+  if (bday === 'recusado') {
+    // NÃO derruba a tarefa. Lendo o fonte de `ConfirmBdayDate()`, a recusa deixa
+    // a tela intacta: limpa só os dois campos do modal e o deixa aberto para
+    // outra tentativa (as linhas que zeravam a carteirinha estão comentadas no
+    // portal). Lançar aqui fecharia a aba — pelo worker — de uma tela que a
+    // recepção ainda pode usar, trocando um contratempo por uma tarefa perdida.
+    //
+    // Então o robô faz o que faria uma atendente: avisa e sai da frente. A etapa
+    // 3 assume, e é a recepção que digita o dado certo com o beneficiário na
+    // frente — exatamente o comportamento do 1.1.6.
+    const recusa = alertas.slice(marcaAlerta)
+      .find(t => /incorret/i.test(t) && /cpf|nascimento/i.test(t))
+
+    console.warn(
+      '⚠️  A ASSIM recusou o CPF/nascimento do cadastro' +
+      (recusa ? ` ("${recusa}")` : '') + '. A recepção assume a partir daqui.'
+    )
+    await api.registrarLog(
+      tarefa.id,
+      'Cadastro diverge do registro da ASSIM: identificacao devolvida para a recepcao'
+    )
+  }
+
+  // 'preenchido' NÃO pula a etapa 3: a ASSIM ainda pode subir o "Tudo certo!" ou
+  // encadear outra rodada de validarPresenca(). A etapa 3 já sabe concluir por
+  // autBiofacial ou silêncio — só que agora em segundos, não em minutos.
+
   // ---- 3. Esperar a recepção resolver ----
   console.log('🧍 IDENTIFICAÇÃO DO BENEFICIÁRIO NA TELA DA ASSIM — o robô está PARADO.')
   console.log('   Conclua na tela: QR Code no dispositivo, biometria facial, token ou nascimento + CPF.')
@@ -247,16 +574,51 @@ async function aguardarConfirmacaoBeneficiario(page, cfg, api, filaId, alertas =
   await api.registrarLog(filaId, 'Aguardando a recepcao identificar o beneficiario na tela da ASSIM')
 
   const inicio = Date.now()
-  const limite = inicio + tetoHumano
+  let limite = inicio + tetoHumano
   let silencioDesde = null
   let ultimoLog = Date.now()
   let concluiuIdentificacao = false
+  let tokenDesde = null
+  let avisouToken = false
 
   while (Date.now() < limite) {
     const ocupada = await contar(SEL_ASSIM_OCUPADA)
     if (ocupada === -1) {
       throw new Error('A janela da ASSIM foi fechada durante a identificação do beneficiário.')
     }
+
+    // O token é do usuário: enquanto está na tela, o relógio do robô fica
+    // SUSPENSO (empurrado a cada volta), não estendido por um delta fixo — senão
+    // quem está digitando o token correria contra um segundo cronômetro.
+    if (await tokenNaTela(page)) {
+      if (tokenDesde === null) tokenDesde = Date.now()
+      limite = Date.now() + tetoHumano
+
+      if (!avisouToken) {
+        avisouToken = true
+        console.log('🔑 TOKEN DO BENEFICIÁRIO NA TELA — o robô não fecha esta janela.')
+        console.log('   O prazo fica suspenso enquanto o modal estiver aberto.')
+        await api.registrarLog(
+          filaId, 'Modal de token aberto: robo aguardando sem prazo e sem fechar a aba'
+        )
+      }
+
+      // Mas suspensão não é eternidade. Um token de ~60s que está na tela há
+      // meia hora já morreu de qualquer forma.
+      if (Date.now() - tokenDesde >= tetoToken) {
+        console.warn(
+          `⚠️  O token está aberto há ${Math.round(tetoToken / 60000)} min. ` +
+          'Devolvendo a tarefa para a recepção — a aba fica aberta.'
+        )
+        return 'token_pendente'
+      }
+
+      silencioDesde = null
+      await delay(700)
+      continue
+    }
+
+    tokenDesde = null
 
     if (ocupada > 0) {
       silencioDesde = null
@@ -287,13 +649,7 @@ async function aguardarConfirmacaoBeneficiario(page, cfg, api, filaId, alertas =
   // Fechar o modal no "x", ou errar o CPF/nascimento, faz o portal rodar
   // `limpa_carteira()`. Seguir em frente nesse estado produz exatamente a recusa
   // "Beneficiario nao confirmado" no envio.
-  const cartao = await page.evaluate(() => {
-    const f = document.forms.autorizador
-    if (!f) return null
-    return [f.associado1.value, f.associado2.value, f.associado3.value]
-  }).catch(() => null)
-
-  if (!cartao || cartao.some(v => !String(v || '').trim())) {
+  if (carteirinhaVazia(await lerCarteirinha(page))) {
     throw new Error(
       'A identificação do beneficiário foi cancelada na tela da ASSIM — o portal ' +
       'limpou a carteirinha. Reabra a solicitação para tentar de novo.'
@@ -691,7 +1047,11 @@ function lerConfirmacao() {
  * @param {object}   opcoes.api       instância de Api
  * @param {Function} opcoes.cancelado () => Promise<boolean>
  * @param {string[]} opcoes.alertas   alertas que a ASSIM emitiu nesta aba
- * @returns {Promise<'sucesso'|'sem_guia'|'glosa'>}
+ * @returns {Promise<'sucesso'|'sem_guia'|'glosa'|'devolvida'>}
+ *
+ * 'devolvida' = o robô desistiu de esperar mas NÃO fechou nada: o modal de token
+ * ficou aberto e a tarefa voltou para a recepção. Volta por retorno, e não por
+ * throw, exatamente para o worker não descartar a aba.
  */
 async function executarRpa({ page, tarefa, cfg, api, cancelado, alertas = [] }) {
   if (!cancelado) cancelado = async () => false
@@ -730,7 +1090,28 @@ async function executarRpa({ page, tarefa, cfg, api, cancelado, alertas = [] }) 
     // desde a mudança do portal, a confirmação de presença. Nada pode ser
     // digitado por cima disso.
     await page.press('input[name="associado3"]', 'Tab')
-    await aguardarConfirmacaoBeneficiario(page, cfg, api, tarefa.id, alertas)
+
+    const identificacao = await aguardarConfirmacaoBeneficiario(page, cfg, api, tarefa, alertas)
+
+    // O token continua na tela e o robô desistiu de esperar. Encerra a tarefa
+    // AQUI, por retorno normal: nada é lançado, então o worker toma o ramo de
+    // sucesso e NÃO chama sessao.descartar() — a aba fica de pé com o token
+    // intacto, para o responsável concluir, e o robô volta a atender.
+    //
+    // Status 'erro' porque não houve guia: o card na /solicitar não pode ficar
+    // verde. A mensagem é a honesta, e diz que a aba continua aberta — senão a
+    // recepção procura uma janela que acha que o robô fechou.
+    if (identificacao === 'token_pendente') {
+      await api.concluirTarefa(tarefa.id, 'erro', {
+        erro: 'Token do beneficiario ficou aberto na tela sem ser concluido. ' +
+              'A tarefa voltou para a recepcao e a ABA NAO FOI FECHADA: conclua ' +
+              'o token na janela da ASSIM e solicite de novo.',
+      })
+      concluiu = true
+      console.log('🔑 RPA devolvido à recepção — aba preservada com o token aberto')
+      return 'devolvida'
+    }
+
     await aguardarTelaLivre(page)
 
     await humanType(page, 'input[name="findexec"]', String(cfg.executor))
@@ -890,4 +1271,6 @@ module.exports.pedirFormaValidacao = pedirFormaValidacao
 module.exports.lerConfirmacao = lerConfirmacao
 module.exports.aguardarTelaLivre = aguardarTelaLivre
 module.exports.aguardarConfirmacaoBeneficiario = aguardarConfirmacaoBeneficiario
+module.exports.preencherNascimentoCpf = preencherNascimentoCpf
+module.exports.SEL_MODAL_TOKEN = SEL_MODAL_TOKEN
 module.exports.aguardarResultadoEnvio = aguardarResultadoEnvio

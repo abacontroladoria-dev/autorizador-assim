@@ -391,37 +391,115 @@ class SessaoAssim {
    *
    * Fecha o CONTEXTO, não só a página — é o contexto que vaza hoje.
    */
+  /**
+   * A aba tem o modal de token aberto?
+   *
+   * POR QUE ISTO GOVERNA O FECHAMENTO DE ABA
+   * `#checkToken` mostra um token que a ASSIM mandou para o celular do
+   * responsável, com contagem de ~60s. Fechar o contexto enquanto ele está na
+   * tela queima o token: a operadora só reenvia depois de espera, e quem paga é
+   * a recepção com o beneficiário na frente. É o único elemento do portal que
+   * bloqueia o housekeeping.
+   *
+   * Exige o CAMPO visível, não só a caixa: um `#checkToken` que a ASSIM deixou
+   * inerte no DOM ainda responde `:visible`, e isso bloquearia a poda para
+   * sempre por causa de um modal que ninguém está usando.
+   *
+   * Falha (página morta, contexto já fechado) responde `false`: travar o
+   * housekeeping é pior do que deixar de proteger uma aba que já não existe.
+   */
+  async temTokenAberto(registro) {
+    if (!registro?.page || registro.page.isClosed()) return false
+
+    return registro.page.locator(
+      '#checkToken:visible input[type="text"], #checkToken:visible input:not([type])'
+    ).first().isVisible({ timeout: 1000 }).catch(() => false)
+  }
+
   async podar(cfg) {
     const teto = Math.max(1, Number(cfg.max_abas_abertas) || 3)
     const ttlMs = Math.max(1, Number(cfg.aba_ttl_minutos) || 30) * 60000
     const agora = Date.now()
+
+    // Prazo de graça para a aba com token aberto. Não é "nunca fechar": um token
+    // de ~60s que está na tela há 4x o TTL morreu de qualquer jeito, e a essa
+    // altura proteger a aba só vaza memória na máquina da recepção.
+    const gracaMs = ttlMs * 4
 
     const vencidas = this.abas.filter(a => agora - a.criadoEm > ttlMs)
     const excedentes = this.abas
       .filter(a => !vencidas.includes(a))
       .slice(0, Math.max(0, this.abas.length - vencidas.length - teto))
 
+    let fechadas = 0
+    let protegidas = 0
+
     for (const aba of [...vencidas, ...excedentes]) {
+      if (agora - aba.criadoEm <= gracaMs && await this.temTokenAberto(aba)) {
+        protegidas++
+        continue
+      }
+
       await aba.ctx.close().catch(() => {})
       this.abas = this.abas.filter(a => a !== aba)
+      fechadas++
     }
 
-    if (vencidas.length || excedentes.length) {
+    if (fechadas) {
       console.log(
-        `🧹 ${vencidas.length + excedentes.length} aba(s) fechada(s) ` +
-        `(${vencidas.length} por tempo, ${excedentes.length} por teto de ${teto}) — ` +
-        `restam ${this.abas.length}`
+        `🧹 ${fechadas} aba(s) fechada(s) ` +
+        `(vencidas: ${vencidas.length}, excedentes: ${excedentes.length}, ` +
+        `teto de ${teto}) — restam ${this.abas.length}`
+      )
+    }
+
+    // Logado sempre que acontece: proteção silenciosa viraria "por que o robô
+    // está com 9 abas abertas?" sem resposta.
+    if (protegidas) {
+      console.log(
+        `🔒 ${protegidas} aba(s) mantida(s): modal de token do beneficiário aberto. ` +
+        'Só o usuário fecha.'
       )
     }
   }
 
-  /** Descarta uma aba imediatamente (execução que deu errado, nada a imprimir). */
-  async descartar(registro) {
+  /**
+   * Descarta uma aba imediatamente (execução que deu errado, nada a imprimir).
+   *
+   * Com uma exceção, e ela é o motivo deste comentário: aba com o modal de token
+   * aberto NÃO é fechada. Uma execução que falhou realmente não tem nada para
+   * imprimir, mas se o token está na tela existe alguém do outro lado no meio de
+   * uma etapa que não se refaz de graça. A aba perde o vínculo com a tarefa e
+   * fica para o usuário; a poda a recolhe depois, com prazo de graça.
+   *
+   * `{ forcar: true }` ignora o guarda — para quem realmente precisa fechar
+   * (encerramento do processo, erro fatal).
+   */
+  async descartar(registro, { forcar = false } = {}) {
     if (!registro) return
+
+    if (!forcar && await this.temTokenAberto(registro)) {
+      console.warn(
+        '🔒 Aba mantida aberta: o modal de token do beneficiário está na tela. ' +
+        'Só o usuário fecha.'
+      )
+      registro.filaId = null
+      return
+    }
+
     await registro.ctx.close().catch(() => {})
     this.abas = this.abas.filter(a => a !== registro)
   }
 
+  /**
+   * Fecha tudo, inclusive aba com token aberto — de propósito.
+   *
+   * Só é chamada quando o processo está indo embora (restart pedido pelo painel,
+   * atualização aplicada, erro fatal). Ali, deixar contexto órfão do Chrome para
+   * trás é pior que perder um token: na próxima subida ninguém sabe que aquela
+   * janela existe, e ela fica consumindo memória sem dono. Por isso fecha o
+   * contexto direto, sem passar pelo guarda de `descartar()`.
+   */
   async fecharTudo() {
     await this.descartarReserva()
     for (const aba of this.abas) {

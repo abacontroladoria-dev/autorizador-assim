@@ -298,9 +298,14 @@ async function iniciarWorker() {
         })
 
         const DESCRICAO_DESFECHO = {
-          sucesso:  'Execução concluída',
-          sem_guia: 'Concluída sem guia capturada',
-          glosa:    'ASSIM recusou (glosa)',
+          sucesso:   'Execução concluída',
+          sem_guia:  'Concluída sem guia capturada',
+          glosa:     'ASSIM recusou (glosa)',
+          // Chega aqui, e não no catch, de propósito: é o desfecho em que o
+          // modal de token ficou aberto e a aba TEM de sobreviver. Um throw
+          // passaria por sessao.descartar() e fecharia a janela na cara de quem
+          // está digitando o token.
+          devolvida: 'Devolvida à recepção (token aberto, aba preservada)',
         }
 
         await api.registrarLog(
@@ -322,6 +327,13 @@ async function iniciarWorker() {
 
         // Execução que falhou não tem nada para imprimir: fecha a aba em vez de
         // deixar lixo na tela da recepcionista.
+        //
+        // COM UMA EXCEÇÃO, decidida dentro de `descartar()`: se o modal de token
+        // do beneficiário está na tela, a aba NÃO é fechada. Ali existe alguém
+        // do outro lado no meio de uma etapa que não se refaz de graça — o token
+        // vale ~60s e a operadora só reenvia depois de espera. O caminho normal
+        // do token nem chega aqui (volta como 'devolvida', sem throw); este é o
+        // cinto para qualquer outro erro que apareça com o modal aberto.
         await sessao.descartar(aba)
 
         if (erroExecucao.fatal) throw erroExecucao
