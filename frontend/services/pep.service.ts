@@ -42,6 +42,9 @@ export async function salvarPlanejamentoSemestral(input: {
   prestadorNome: string
   itemId: string
   competenciaPlanejada: string
+  // Data acordada no planejamento (PRD §2.6/§12.6) — competenciaPlanejada é
+  // sempre derivada dela pelo chamador; o serviço só persiste o que recebe.
+  dataPlanejada?: string | null
   origem?: PepPlanejamentoSemestral['origem']
   planejamentoAnteriorId?: string | null
   motivo?: string | null
@@ -65,6 +68,7 @@ export async function salvarPlanejamentoSemestral(input: {
       prestador_nome: input.prestadorNome,
       item_id: input.itemId,
       competencia_planejada: input.competenciaPlanejada,
+      data_planejada: input.dataPlanejada ?? null,
       origem: input.origem ?? 'inicial',
       planejamento_anterior_id: input.planejamentoAnteriorId ?? null,
       motivo: input.motivo ?? null,
@@ -160,6 +164,23 @@ export async function getRegistrosEntrega(
   return { data: data as PepRegistroEntrega[], error: null }
 }
 
+// Sem filtro de competência — as entregas semestrais (PRD §7.2) valem para o
+// ano inteiro, independente do mês selecionado na aba de mensais.
+export async function getRegistrosEntregaPorPrestador(
+  prestadorNome: string
+): Promise<{ data: PepRegistroEntrega[] | null; error: unknown }> {
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase
+    .from('pep_registros_entrega')
+    .select('*')
+    .eq('prestador_nome', prestadorNome)
+  if (error) {
+    console.error('Erro getRegistrosEntregaPorPrestador:', error)
+    return { data: null, error }
+  }
+  return { data: data as PepRegistroEntrega[], error: null }
+}
+
 // Marca um item como entregue/pendente (ou registra a quantidade entregue,
 // para recorrentes) para um paciente (ou geral, quando pacienteNome é null)
 // numa competência. Upsert por (paciente, item, competência) — ou
@@ -177,6 +198,9 @@ export async function upsertRegistroEntrega(input: {
   evidencias?: PepEvidencia[]
   observacao?: string | null
   motivo?: string | null
+  // Data própria do documento (PRD §2.2) — só as semestrais usam; o
+  // chamador já deriva `competencia` dela antes de chamar este serviço.
+  dataEntrega?: string | null
 }): Promise<{ data: PepRegistroEntrega | null; error: unknown }> {
   const supabase = getSupabaseClient()
   const { data: { user } } = await supabase.auth.getUser()
@@ -210,6 +234,7 @@ export async function upsertRegistroEntrega(input: {
       quantidade_entregue: input.quantidadeEntregue ?? null,
       evidencias: input.evidencias ?? [],
       observacao: input.observacao ?? null,
+      data_entrega: input.dataEntrega ?? null,
       entregue_em: input.status === 'entregue' ? new Date().toISOString() : null,
       registrado_por: user?.id ?? null,
       updated_at: new Date().toISOString(),

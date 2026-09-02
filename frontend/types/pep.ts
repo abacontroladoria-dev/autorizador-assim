@@ -31,6 +31,9 @@ export interface PepPlanejamentoSemestral {
   prestador_nome: string
   item_id: string
   competencia_planejada: string // 'YYYY-MM'
+  // Data acordada no Planejamento das periódicas (PRD §2.6/§12.6) — a
+  // competência acima é sempre derivada dela, nunca o contrário. Sem hora.
+  data_planejada: string | null // 'YYYY-MM-DD'
   origem: PepOrigemPlanejamento
   planejamento_anterior_id: string | null
   ativo: boolean
@@ -55,6 +58,11 @@ export interface PepRegistroEntrega {
   quantidade_entregue: number | null
   evidencias: PepEvidencia[]
   observacao: string | null
+  // Data própria do documento entregue (PRD §2.2 — "documentos de evidência
+  // podem ter data própria"). NÃO é registro de atividade/jornada (§2.1); a
+  // apuração continua por competência (§3), derivada desta data. Sem hora.
+  // Só usada nas semestrais — recorrentes seguem só por competência.
+  data_entrega: string | null // 'YYYY-MM-DD'
   entregue_em: string | null
   created_at: string
   updated_at: string
