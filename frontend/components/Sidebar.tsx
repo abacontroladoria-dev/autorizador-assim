@@ -63,8 +63,7 @@ import { useTheme } from "@/contexts/ThemeContext"
 import { useImpersonation } from "@/contexts/ImpersonationContext"
 import { ImpersonationSelector } from "@/components/admin/ImpersonationSelector"
 import { ROLE_LABELS } from "@/constants/roleLabels"
-import { codigosToRotas, hasRouteAccess } from "@/lib/permissions/routes"
-import { resolverPermissoes } from "@/lib/permissions/resolver"
+import { podeAcessarRota, resolverPermissoes } from "@/lib/permissions/resolver"
 import { getUsuarioPermissoes } from "@/services/permissoes.service"
 
 type Favorito = { label: string; path: string }
@@ -144,7 +143,10 @@ export default function Sidebar() {
   const [modalSenha, setModalSenha] = useState(false)
   const [modalErros, setModalErros] = useState(false)
   const [favoritos, setFavoritos] = useState<Favorito[]>([])
-  const [allowedPaths, setAllowedPaths] = useState<string[]>([])
+  // Guarda os CÓDIGOS, não as rotas já convertidas: `podeAcessarRota` (a mesma do
+  // proxy.ts) faz a conversão por dentro, e é o que mantém menu e navegação com
+  // uma implementação só.
+  const [codigos, setCodigos] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     try {
@@ -185,16 +187,12 @@ export default function Sidebar() {
 
   function canAccess(path: string) {
     if (!role) return false
-    // Admin acessa tudo — o mesmo retorno antecipado do proxy.ts (gate real das
-    // páginas). Sem isto o menu diverge da navegação justamente onde o código não
-    // está no roleDefaults do papel: `autorizacoes_avulsas` só é concedido a
-    // `admin` e `recepcao` por default, então o admin abria /autorizacoes-avulsas
-    // pelo link (o proxy libera antes de olhar código nenhum) e não via o item no
-    // menu. Item invisível que a navegação aceita é a mesma divergência que o
-    // comentário de loadRole() já apontava, na direção contrária.
-    if (role === "admin") return true
+    // `podeAcessarRota` é a MESMA função do proxy.ts, o gate real da navegação —
+    // inclusive o "admin acessa tudo". Enquanto eram duas implementações, o admin
+    // abria /autorizacoes-avulsas pelo link e não via o item no menu (o código só
+    // está no roleDefaults de `admin` e `recepcao`).
     const [barePath, query] = path.split("?")
-    return hasRouteAccess(barePath, query ? `?${query}` : "", allowedPaths)
+    return podeAcessarRota(role, codigos, barePath, query ? `?${query}` : "")
   }
 
   useEffect(() => {
@@ -227,15 +225,15 @@ export default function Sidebar() {
       setRole(targetRole)
 
       if (!targetRole) {
-        setAllowedPaths([])
+        setCodigos(new Set())
         setLoadingRole(false)
         return
       }
 
       // resolverPermissoes é a mesma função usada pelo proxy.ts (gate real das
-      // páginas) e pelas rotas de API. Esta era a terceira cópia da regra
-      // "defaults do papel + concessões − revogações, revogação vencendo": se o
-      // Sidebar divergir do proxy, o menu mostra item que a navegação recusa.
+      // páginas) e pelas rotas de API — regra "defaults do papel + concessões −
+      // revogações, revogação vencendo". A conversão para rotas e o "admin acessa
+      // tudo" agora também são compartilhados, dentro de `podeAcessarRota`.
       let overrides: { permissao_codigo: string; permitido: boolean }[] = []
       if (targetId) {
         try {
@@ -244,12 +242,9 @@ export default function Sidebar() {
           console.error("Erro ao carregar permissões do usuário:", error)
         }
       }
-      const codigos = resolverPermissoes(targetRole, overrides)
-
-      const rotas = codigosToRotas(codigos)
 
       if (isMounted) {
-        setAllowedPaths(rotas)
+        setCodigos(resolverPermissoes(targetRole, overrides))
         setLoadingRole(false)
       }
     }

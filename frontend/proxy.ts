@@ -2,8 +2,7 @@ import { createServerClient } from '@supabase/ssr'
 import { NextResponse } from 'next/server'
 import type { NextRequest } from 'next/server'
 import { checkRateLimit, getClientIp } from '@/lib/rate-limit'
-import { codigosToRotas, hasRouteAccess } from '@/lib/permissions/routes'
-import { resolverPermissoes } from '@/lib/permissions/resolver'
+import { isSuperRole, podeAcessarRota, resolverPermissoes } from '@/lib/permissions/resolver'
 
 export async function proxy(request: NextRequest) {
   let response = NextResponse.next()
@@ -104,8 +103,10 @@ export async function proxy(request: NextRequest) {
 
   const role = perfil?.role ?? ''
 
-  // Admin acessa tudo.
-  if (role === 'admin') {
+  // Admin acessa tudo — decidido dentro de `podeAcessarRota`, não aqui. Este
+  // retorno antecipado existia solto e o Sidebar não o tinha: era a divergência
+  // que escondia do admin o item cuja rota este mesmo gate liberava.
+  if (isSuperRole(role)) {
     return response
   }
 
@@ -122,11 +123,10 @@ export async function proxy(request: NextRequest) {
   // permissão por conta própria — e as duas checagens têm de sair da mesma regra.
   const codigos = resolverPermissoes(role, overrides ?? [])
 
-  const allowedRoutes = codigosToRotas(codigos)
-
-  // hasRouteAccess sabe comparar rota+querystring (não só pathname) — necessário
-  // pra permissões por aba, ex: /cronograma/indicadores?tab=previsao-receitas.
-  const hasAccess = hasRouteAccess(pathname, request.nextUrl.search, allowedRoutes)
+  // `podeAcessarRota` é a mesma função que o Sidebar usa para decidir se mostra o
+  // item — inclusive a comparação de rota+querystring, necessária para as
+  // permissões por aba (ex: /cronograma/indicadores?tab=previsao-receitas).
+  const hasAccess = podeAcessarRota(role, codigos, pathname, request.nextUrl.search)
 
   if (!hasAccess) {
     return NextResponse.redirect(new URL('/sem-permissao', request.url))
