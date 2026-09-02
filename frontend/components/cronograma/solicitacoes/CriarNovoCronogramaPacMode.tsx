@@ -26,7 +26,12 @@ import type { AceiteSessao, AceitePacBundle } from "@/types/acompanhamento"
 interface Props {
   cRows: CsvRow[]
   lRows: LaudoRow[]
+  /** `${pacienteNome}|||${especialidade}` com suspensão temporária vigente — ver suspensaoTemporaria.ts. */
+  suspensaoSet?: Set<string>
 }
+
+// Referência estável para quando `suspensaoSet` não é passado.
+const SUSPENSAO_SET_VAZIO = new Set<string>()
 
 // "Notificação Prévia" é o paciente-teste de homologação da integração TiTa —
 // mesma exceção de OcupPacMode.tsx (PACS_ADMIN_OCUP_PAC), pra permitir testar o
@@ -58,7 +63,7 @@ type SituacoesState =
   | { estado: "erro" }
   | { estado: "ok"; porId: Map<number, "Ativo" | "Inativo">; porNome: Map<string, "Ativo" | "Inativo"> }
 
-export function CriarNovoCronogramaPacMode({ cRows, lRows }: Props) {
+export function CriarNovoCronogramaPacMode({ cRows, lRows, suspensaoSet = SUSPENSAO_SET_VAZIO }: Props) {
   const { pacBundles, persistPacBundles } = useCronogramaData()
   const [paciente, setPaciente] = useState("")
   const [turno, setTurno] = useState<"manha" | "tarde">("manha")
@@ -122,12 +127,12 @@ export function CriarNovoCronogramaPacMode({ cRows, lRows }: Props) {
       const p = String(r["Paciente"] || "").trim()
       if (!p || PACS_ADMIN_NOVO.has(p)) continue
       const esp = String(r["Especialidade"] || "").trim()
-      if (!esp || isLaudoComAlta(r as Record<string, unknown>)) continue
+      if (!esp || isLaudoComAlta(r as Record<string, unknown>) || suspensaoSet.has(`${p}|||${esp}`)) continue
       const aut = parseFloat(String(r["Qtd autorizada"] || "0")) || 0
       if (aut > 0) comAutorizacao.add(p)
     }
     return [...comAutorizacao].filter(p => !agendPacs.has(p)).sort()
-  }, [lRows, agendPacs])
+  }, [lRows, agendPacs, suspensaoSet])
 
   // id_favorecido do laudo — única forma de resolver o paciente na TiTa quando
   // ele ainda não tem nenhuma linha Agendado (ver resolverIdFavorecido).
@@ -183,7 +188,7 @@ export function CriarNovoCronogramaPacMode({ cRows, lRows }: Props) {
       toast.error("❌ Este paciente está inativo na clínica. Reative o cadastro na TiTa antes de montar o cronograma.")
       return
     }
-    const r = buildSugestoesManual(paciente, unidades, turno, lRows, livreSlots)
+    const r = buildSugestoesManual(paciente, unidades, turno, lRows, livreSlots, suspensaoSet)
     setResult(r)
     // Limpa seleção anterior.
     setSelectedIds(new Set())

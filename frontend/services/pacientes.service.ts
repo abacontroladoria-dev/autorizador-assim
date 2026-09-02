@@ -131,6 +131,35 @@ export async function getPacientePorTitaId(
   return { data: (data ?? null) as Paciente | null, error: null }
 }
 
+/**
+ * Resolve vários `tita_paciente_id` de uma vez para `id_paciente` (a PK do
+ * Pulsar). Para cruzar uma grade inteira (centenas de linhas) com dado do
+ * Pulsar sem fazer uma chamada por paciente — mesmo motivo/uso de
+ * `getPacientePorTitaId`, só que em lote.
+ */
+export async function getPacientesPorTitaIds(
+  titaIds: number[]
+): Promise<Map<number, number>> {
+  const mapa = new Map<number, number>()
+  if (titaIds.length === 0) return mapa
+
+  const supabase = getSupabaseClient()
+  const { data, error } = await supabase
+    .from(TABLE)
+    .select("id_paciente, tita_paciente_id")
+    .in("tita_paciente_id", titaIds)
+
+  if (error) {
+    console.error("Erro ao resolver pacientes por tita_paciente_id:", error)
+    return mapa
+  }
+
+  for (const linha of (data ?? []) as { id_paciente: number; tita_paciente_id: number | null }[]) {
+    if (linha.tita_paciente_id != null) mapa.set(linha.tita_paciente_id, linha.id_paciente)
+  }
+  return mapa
+}
+
 /** Busca pela PK. É o que a tela de detalhe usa. */
 export async function getPacientePorId(
   idPaciente: number

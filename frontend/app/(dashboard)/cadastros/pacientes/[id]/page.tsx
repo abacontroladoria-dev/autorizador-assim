@@ -2,14 +2,23 @@
 
 import { useEffect } from "react"
 import Link from "next/link"
-import { useParams } from "next/navigation"
+import { useParams, useSearchParams } from "next/navigation"
 import { ChevronLeft } from "lucide-react"
 import { useHeader } from "@/contexts/HeaderContext"
 import { PacienteDetalhe } from "@/components/cadastros/pacientes/PacienteDetalhe"
 
 export default function PacienteDetalhePage() {
   const { id } = useParams<{ id: string }>()
+  const searchParams = useSearchParams()
   const { setHeader, setRightContent } = useHeader()
+
+  // Deep link vindo de Ocupação de Paciente ("suspensa temporariamente → ver
+  // na ficha do paciente"): ?aba=altas&suspensao=123 abre direto na aba e no
+  // registro que está causando o bloqueio, em vez de deixar o operador
+  // procurar entre Cadastro/Ficha médica/Laudo/Altas e Individualidades.
+  const abaInicial = searchParams.get("aba") === "altas" ? "altas" : undefined
+  const suspensaoIdParam = searchParams.get("suspensao")
+  const suspensaoIdInicial = suspensaoIdParam ? Number(suspensaoIdParam) : undefined
 
   useEffect(() => {
     setHeader("Detalhes do paciente", "Cadastro e ficha médica")
@@ -43,5 +52,11 @@ export default function PacienteDetalhePage() {
     )
   }
 
-  return <PacienteDetalhe idPaciente={idPaciente} />
+  return (
+    <PacienteDetalhe
+      idPaciente={idPaciente}
+      abaInicial={abaInicial}
+      suspensaoIdInicial={suspensaoIdInicial}
+    />
+  )
 }

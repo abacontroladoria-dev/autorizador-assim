@@ -16,7 +16,7 @@ import {
   avaliarPeriodo, calcularGaps, construirAgendaNovoProfissional, gapsParaMapa, limitarCandidatosPorGap, listarEspecialidades, montarPlanoRecomendado, ranquearUnidades,
   type CandidatoSlot, type PeriodoSimulado, type PeriodoAlvo, type SlotSimulado, type Turno,
 } from "@/lib/cronograma/simulacaoNovoPrestador"
-import { DIAS_UTIL, estiloUnidade, unidadeAbrev } from "@/lib/cronograma/constants"
+import { DIAS_UTIL, corTerapiaBadge, estiloUnidade, normTxt, unidadeAbrev } from "@/lib/cronograma/constants"
 import { diaCurto, filtrarCapacidadeLivreReservada, fmtH, fmtName, fmtReal, pm, turnoFromHora, turnoNome } from "@/lib/cronograma/helpers"
 import { useGradeAgendamentos } from "@/hooks/useGradeAgendamentos"
 import { useOcupacaoSalas } from "@/hooks/useOcupacaoSalas"
@@ -39,6 +39,7 @@ import { PacienteAgendaHipoteticaModal } from "./PacienteAgendaHipoteticaModal"
 import { ProjecaoFinanceiraDetalheModal } from "./ProjecaoFinanceiraDetalheModal"
 import { StatusPill } from "@/components/cronograma/ui/StatusPill"
 import { StatCard } from "@/components/cronograma/ui/StatCard"
+import { ICONE_TERAPIA } from "@/components/cronograma/indicadores/ComparativoSessoesShell"
 import { InlineNotice } from "@/components/cronograma/ui/InlineNotice"
 import { InfoTooltip } from "@/components/cronograma/ui/InfoTooltip"
 import { ScheduleModal } from "@/components/cronograma/ui/ScheduleModal"
@@ -87,6 +88,17 @@ function periodosEnriquecidosParaSimulado(periodos: SugestaoContratacao[]): Peri
  *  e por vagasLiquidasPorUnidade (as três unidades das barras): se cada um
  *  montasse a própria base, a barra e a projeção financeira podiam discordar —
  *  que é exatamente o defeito que vagasLiquidasPorUnidade existe pra fechar. */
+/** Luminância perceptual (WCAG) — decide se o hex da terapia é claro o
+ *  bastante pra precisar de texto escuro em cima, em vez de branco. */
+function corClaraPrecisaTextoEscuro(hex: string): boolean {
+  const limpo = hex.replace("#", "")
+  const r = parseInt(limpo.slice(0, 2), 16)
+  const g = parseInt(limpo.slice(2, 4), 16)
+  const b = parseInt(limpo.slice(4, 6), 16)
+  const luminancia = (0.2126 * r + 0.7152 * g + 0.0722 * b) / 255
+  return luminancia > 0.6
+}
+
 function periodosComoSugestoes(periodos: PeriodoSimulado[], especialidade: string): SugestaoContratacao[] {
   return periodos.map((p, i) => ({
     id: `periodo-${i}`,
@@ -2142,7 +2154,8 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
 
                   {/* Ocupação por dia — só 4 colunas compactas, não precisa da
                       largura generosa das outras duas seções ao lado. */}
-                  <div className="w-full min-w-0 xl:w-[320px] xl:shrink-0 rounded-xl bg-muted/40 p-4">
+                  <div className="flex w-full flex-col gap-2 min-w-0 xl:w-[320px] xl:shrink-0">
+                  <div className="rounded-xl bg-muted/40 p-4">
                     <div className="text-sm font-extrabold text-foreground">Ocupação por dia</div>
                     <div className="mb-3 text-[11px] text-muted-foreground">Novo profissional hipotético</div>
                     <table className="w-full table-fixed text-[13px]">
@@ -2175,6 +2188,25 @@ export function SimulacaoNovoPrestadorTab({ lRows }: Props) {
                       ))}
                     </tbody>
                     </table>
+                  </div>
+                  {/* Nome da especialidade sobre a própria cor da terapia —
+                      antes exigia print da agenda (pra ver a cor da barra de
+                      unidade/candidato) + print de outro lugar pra achar o
+                      nome; pedido do usuário pra tirar só 1 print
+                      (2026-09-02). */}
+                  <div
+                    className="flex items-center gap-2 rounded-xl px-4 py-2.5"
+                    style={{ background: corTerapiaBadge(especialidade) }}
+                  >
+                    {(() => {
+                      const Icone = ICONE_TERAPIA[normTxt(especialidade)]
+                      const textoEscuro = corClaraPrecisaTextoEscuro(corTerapiaBadge(especialidade))
+                      return Icone ? <Icone size={16} className={`shrink-0 ${textoEscuro ? "text-black/80" : "text-white"}`} /> : null
+                    })()}
+                    <span className={`truncate text-[13px] font-extrabold ${corClaraPrecisaTextoEscuro(corTerapiaBadge(especialidade)) ? "text-black/80" : "text-white"}`}>
+                      {especialidade}
+                    </span>
+                  </div>
                   </div>
                 </div>
 

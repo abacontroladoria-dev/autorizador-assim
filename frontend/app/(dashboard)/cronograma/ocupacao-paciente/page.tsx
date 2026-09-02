@@ -10,6 +10,7 @@ import { OrcamentoPacMode } from "@/components/cronograma/solicitacoes/Orcamento
 import { WorkspaceEmptyState } from "@/components/cronograma/ui/CronogramaWorkspace"
 import { buscarGradeComoCSVRows } from "@/lib/cronograma/gradeService"
 import { descartarLivresComprometidos } from "@/lib/cronograma/gradeTitaOcupacao"
+import { construirSuspensaoTemporaria, type SuspensaoLinkInfo } from "@/lib/cronograma/suspensaoTemporaria"
 import { getJanelaOcupacaoPaciente } from "@/lib/cronograma/helpers"
 import type { CsvRow } from "@/types/cronograma"
 
@@ -30,6 +31,8 @@ export default function OcupacaoPacientePage() {
   const { lRows, cfg, rec, inv, sRec, sInv } = useCronogramaData()
   const { setHeader } = useHeader()
   const [cRows, setCRows] = useState<CsvRow[]>([])
+  const [suspensaoSet, setSuspensaoSet] = useState<Set<string>>(new Set())
+  const [suspensaoInfo, setSuspensaoInfo] = useState<Map<string, SuspensaoLinkInfo>>(new Map())
   const [erro, setErro] = useState<string | null>(null)
   const fetchedRef = useRef(false)
   const [modo, setModo] = useState<ModoOcupacao>("aumentar")
@@ -48,9 +51,20 @@ export default function OcupacaoPacientePage() {
     // três modalidades sem alterar assinatura de nenhuma função do módulo — e
     // sem alcançar a Simulação de Novo Prestador, que lê o cRows do
     // CronogramaDataProvider, não este.
+    //
+    // O Set de suspensão temporária é montado do mesmo jeito, na mesma origem
+    // — uma consulta só, compartilhada por "Aumentar Cronograma" e "Criar Novo
+    // Cronograma" (ver suspensaoTemporaria.ts). "Orçamento" não recebe: usa
+    // paciente sintético ("Simulação"), sem id_paciente_pulsar real.
     buscarGradeComoCSVRows(janela.inicio, janela.fim)
       .then(rows => descartarLivresComprometidos(rows, janela.inicio))
-      .then(setCRows)
+      .then(rows => {
+        setCRows(rows)
+        void construirSuspensaoTemporaria(rows).then(({ set, info }) => {
+          setSuspensaoSet(set)
+          setSuspensaoInfo(info)
+        })
+      })
       .catch(e => {
         fetchedRef.current = false
         setErro(e instanceof Error ? e.message : "Erro ao carregar a grade.")
@@ -105,9 +119,11 @@ export default function OcupacaoPacientePage() {
       )}
 
       {laudosCarregados && modo === "aumentar" && (
-        <OcupPacMode cRows={cRows} lRows={lRows} cfg={cfg} rec={rec} inv={inv} sRec={sRec} sInv={sInv} />
+        <OcupPacMode cRows={cRows} lRows={lRows} cfg={cfg} rec={rec} inv={inv} sRec={sRec} sInv={sInv} suspensaoSet={suspensaoSet} suspensaoInfo={suspensaoInfo} />
       )}
-      {laudosCarregados && modo === "novo" && <CriarNovoCronogramaPacMode cRows={cRows} lRows={lRows} />}
+      {laudosCarregados && modo === "novo" && (
+        <CriarNovoCronogramaPacMode cRows={cRows} lRows={lRows} suspensaoSet={suspensaoSet} />
+      )}
       {laudosCarregados && modo === "orcamento" && <OrcamentoPacMode cRows={cRows} />}
     </>
   )

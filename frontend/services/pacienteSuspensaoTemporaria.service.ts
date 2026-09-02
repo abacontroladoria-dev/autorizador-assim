@@ -36,6 +36,54 @@ export async function getSuspensoesDoPaciente(
   return { data: data as PacienteSuspensaoTemporaria[], error: null }
 }
 
+export interface SuspensaoVigente {
+  idSuspensao: number
+  especialidade: string
+}
+
+/**
+ * Suspensões VIGENTES (ativa + dentro do prazo) de vários pacientes de uma
+ * vez — para ferramentas de cronograma decidirem o que não ofertar sem fazer
+ * uma consulta por paciente. Mesma regra de vigência que `vigente()` usa em
+ * AbaAltasIndividualidades.tsx: `ativo = true` E (`prazo_indefinido = true`
+ * OU `prazo_fim >= hoje`) — filtrada aqui na própria query, não depois em
+ * memória.
+ *
+ * Não importa como a linha chegou nesse estado (nova, reativada, prazo
+ * estendido): só o estado atual da linha conta. Traz `idSuspensao` (não só o
+ * nome da especialidade) para quem for construir um link de volta ao
+ * registro exato na ficha do paciente.
+ */
+export async function getSuspensoesVigentesPorPacientes(
+  pacienteIds: number[]
+): Promise<Map<number, SuspensaoVigente[]>> {
+  const mapa = new Map<number, SuspensaoVigente[]>()
+  if (pacienteIds.length === 0) return mapa
+
+  const supabase = getSupabaseClient()
+  const hoje = new Date().toISOString().slice(0, 10)
+
+  const { data, error } = await supabase
+    .from(TB_SUSPENSOES)
+    .select("id_suspensao, id_paciente_pulsar, especialidade_suspensao")
+    .in("id_paciente_pulsar", pacienteIds)
+    .eq("ativo", true)
+    .or(`prazo_indefinido.eq.true,prazo_fim.gte.${hoje}`)
+
+  if (error) {
+    console.error("Erro ao buscar suspensões vigentes em lote:", error)
+    return mapa
+  }
+
+  for (const linha of (data ?? []) as { id_suspensao: number; id_paciente_pulsar: number; especialidade_suspensao: string }[]) {
+    const item: SuspensaoVigente = { idSuspensao: linha.id_suspensao, especialidade: linha.especialidade_suspensao }
+    const lista = mapa.get(linha.id_paciente_pulsar)
+    if (lista) lista.push(item)
+    else mapa.set(linha.id_paciente_pulsar, [item])
+  }
+  return mapa
+}
+
 // ─── CRUD ─────────────────────────────────────────────────────────────────────
 
 export async function criarSuspensao(

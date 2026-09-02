@@ -174,7 +174,7 @@ function corDotComContraste(nome: string): string {
 }
 
 /** Ícone que remete ao nome da especialidade — só as que têm um símbolo óbvio (fala, escola, maçã...); o resto continua com a bolinha de cor pra não forçar um ícone genérico sem sentido. */
-const ICONE_TERAPIA: Record<string, LucideIcon> = {
+export const ICONE_TERAPIA: Record<string, LucideIcon> = {
   [normTxt("Aplicador ABA (AE)")]: Paintbrush,
   [normTxt("Aplicador ABA (AV)")]: Brain,
   [normTxt("Aplicador ABA (EF)")]: Dumbbell,
@@ -223,8 +223,8 @@ const ICONE_TERAPIA_DESLOCAMENTO: Record<string, number> = {
   [normTxt("Psicomotricidade")]: -3,
 }
 
-/** Ícone (quando existe um mapeado) ou bolinha de cor (fallback) representando a especialidade — usado na agenda e em "Por especialidade". */
-function IconeOuDotTerapia({ nome, size = 14 }: { nome: string; size?: number }) {
+/** Ícone (quando existe um mapeado) ou bolinha de cor (fallback) representando a especialidade — usado na agenda e em "Por especialidade". Exportado pra reuso em outras telas (ex.: card de cor da terapia na Simulação de Novo Prestador). */
+export function IconeOuDotTerapia({ nome, size = 14 }: { nome: string; size?: number }) {
   const Icone = ICONE_TERAPIA[normTxt(nome)]
   const cor = corDotComContraste(nome)
   if (Icone) {
