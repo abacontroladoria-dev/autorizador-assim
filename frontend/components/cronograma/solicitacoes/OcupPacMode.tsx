@@ -2136,7 +2136,11 @@ export function OcupPacMode({ cRows, lRows, cfg, rec: recGlobal = [], inv: invGl
       const resp = await fetch("/api/tita/confirmar-agendamento", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pac, sessoes }),
+        // `modalidade` alimenta o card de inclusão que avisa o cronograma (ver
+        // services/tita/inclusaoTerapia.ts). Explícita de propósito: o servidor
+        // conseguiria inferi-la, mas por um efeito colateral que mentiria calado
+        // se mudasse.
+        body: JSON.stringify({ pac, sessoes, modalidade: "aumentar" }),
       })
       const body = await resp.json().catch(() => null) as {
         ok: boolean

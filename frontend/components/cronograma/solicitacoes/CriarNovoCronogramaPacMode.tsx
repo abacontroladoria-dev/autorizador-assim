@@ -426,7 +426,9 @@ export function CriarNovoCronogramaPacMode({ cRows, lRows }: Props) {
       const resp = await fetch("/api/tita/confirmar-agendamento", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ pac: paciente, sessoes }),
+        // Ver o comentário gêmeo em OcupPacMode: alimenta o card de inclusão que
+        // avisa o cronograma.
+        body: JSON.stringify({ pac: paciente, sessoes, modalidade: "novo" }),
       })
       const body = await resp.json().catch(() => null) as {
         ok: boolean

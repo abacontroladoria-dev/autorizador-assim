@@ -9,6 +9,7 @@ import {
   mensagemResumoCriacao,
 } from "@/services/tita/confirmar"
 import { verificarDisponibilidade, criarAgendamento } from "@/services/tita/client"
+import { registrarInclusaoTerapia } from "@/services/tita/inclusaoTerapia"
 import type { AceiteSessao } from "@/types/acompanhamento"
 
 const LOG_TAG = "[tita:confirmar-agendamento]"
@@ -16,6 +17,16 @@ const LOG_TAG = "[tita:confirmar-agendamento]"
 interface RequestBody {
   pac?: string
   sessoes?: AceiteSessao[]
+  /**
+   * Qual tela originou a implantação: "aumentar" (Aumentar Cronograma) ou
+   * "novo" (Criar Novo Cronograma). Vai para o card de inclusão no ClickUp.
+   *
+   * Explícita, e não inferida de `idFavorecidoFallback`: aquele campo só aparece
+   * hoje na modalidade "novo" por consequência de outra regra (o paciente sem
+   * linha Agendado), então inferir dali passaria a mentir calado se a regra
+   * mudasse. Ausente = não informado, nunca um chute.
+   */
+  modalidade?: "aumentar" | "novo"
 }
 
 // Nunca inclui conteúdo bruto da TiTa (stack trace, caminhos internos) — apenas
@@ -208,6 +219,56 @@ export async function POST(request: NextRequest) {
       `criadas=${agregado.criadas} conflitos=${agregado.conflitos} rejeitadas=${agregado.rejeitadas} duracaoMs=${Date.now() - inicioCriacao}`,
   )
   if (!ok) console.error(`${LOG_TAG} falha na chamada de criação — auditar`, JSON.stringify(resultados.map(r => ({ csvGradeId: r.csvGradeId, codigoErro: r.codigoErro }))))
+
+  // A inclusão se anuncia ao cronograma.
+  //
+  // Antes disto, implantar uma terapia nova não avisava ninguém: o terapêutico
+  // tinha de lembrar de preencher um formulário no ClickUp que gera o card da
+  // lista PACIENTES, e é esse card que manda o setor de cronograma fazer os
+  // trâmites junto ao convênio. Em 09/2026 alguém esqueceu e a sessão glosou.
+  //
+  // Só entram as sessões que a TiTa ACEITOU (success/partial_success). Uma
+  // sessão que falhou não é terapia nova — gerar card para ela faria o
+  // cronograma trabalhar sobre algo que não existe.
+  //
+  // `await` e não fire-and-forget: em serverless a resposta pode encerrar o
+  // processo e matar a promessa pendente, e o depósito é uma escrita local e
+  // barata (nenhuma chamada ao ClickUp acontece aqui — quem faz rede é o cron).
+  // registrarInclusaoTerapia nunca lança: avisar não pode derrubar implantar.
+  //
+  // A grade sai de `preparos`, que a Fase 1 já leu — nenhuma consulta nova. Se
+  // por algum motivo ela não estiver lá, a sessão é PULADA em vez de derrubar a
+  // resposta: chegar aqui só é possível depois de a Fase 1 ter aprovado todas,
+  // mas depender disso com um `!` faria uma mudança futura naquela fase virar
+  // um 500 numa implantação que deu certo.
+  const gradePorId = new Map(
+    preparos
+      .filter(p => p.preparo.grade != null)
+      .map(p => [p.sessao.csvGradeId, p.preparo.grade!] as const),
+  )
+
+  const aceitas = criacoes
+    .filter(c => c.resumo.status === "success" || c.resumo.status === "partial_success")
+    .flatMap(c => {
+      const grade = gradePorId.get(c.sessao.csvGradeId)
+      if (!grade) return []
+      return [{ csvGradeId: c.sessao.csvGradeId, grade, resumo: c.resumo }]
+    })
+
+  if (aceitas.length > 0) {
+    await registrarInclusaoTerapia({
+      pacienteNome: body.pac,
+      entradas: aceitas,
+      // Conta SLOTS do bundle, não ocorrências da série. `agregado.conflitos`
+      // soma as ocorrências semanais de cada série até 31/12 — usá-lo aqui faria
+      // o card anunciar dezenas de "sessões não implantadas" onde o cronograma
+      // enxerga dois horários. A unidade do card é a mesma da tela: o slot.
+      naoCriadas: criacoes.length - aceitas.length,
+      userId: user.id,
+      userEmail: user.email ?? null,
+      modalidade: body.modalidade,
+    })
+  }
 
   console.log(`${LOG_TAG} fim pac=${body.pac} ok=${ok} duracaoTotalMs=${Date.now() - inicioTotal}`)
   return NextResponse.json({

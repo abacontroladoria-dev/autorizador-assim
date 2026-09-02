@@ -2,12 +2,25 @@ import "server-only"
 
 import { buscarGradePorId, resolverGradeTerapeuta, resolverIdFavorecido, terapiaExibicaoIdPorRegraFixa } from "./mappings"
 import { montarPayloadAgendamento } from "./payload"
-import type { AgendaFavorecidoTita, AgendamentoTitaPayload, DisponibilidadeResponse, TitaApiResult } from "./types"
+import type { AgendaFavorecidoTita, AgendamentoTitaPayload, DisponibilidadeResponse, GradeProfissionalRow, TitaApiResult } from "./types"
 
 export interface PreparacaoAgendamento {
   ok: boolean
   payload?: AgendamentoTitaPayload
   erro?: string
+  /**
+   * A linha de csv_grades_profissionais que originou o payload.
+   *
+   * Devolvida porque o aviso de inclusão ao cronograma (ver
+   * services/tita/inclusaoTerapia.ts) precisa de paciente, terapia,
+   * profissional, sala, unidade e CONVÊNIO — e todos já foram lidos aqui, por
+   * `select("*")`. Sem isto a rota teria de reler a mesma linha depois da
+   * criação, uma ida ao banco por sessão sem nada em troca.
+   *
+   * O convênio é o caso que justifica sozinho: na tela ele vem do CSV de laudos,
+   * que só existe no navegador — daqui o servidor não depende do cliente.
+   */
+  grade?: GradeProfissionalRow
 }
 
 /**
@@ -96,7 +109,7 @@ export async function prepararAgendamento(
     }
 
     const payload = montarPayloadAgendamento(grade, idFavorecido, { ...gradeTerapeuta, terapiaExibicaoId })
-    return { ok: true, payload }
+    return { ok: true, payload, grade }
   } catch (err) {
     const mensagem = err instanceof Error ? err.message : String(err)
     console.error("[tita:prepararAgendamento] erro inesperado", JSON.stringify({ csvGradeId, mensagem }))
