@@ -33,6 +33,7 @@ export function PacienteDetalhe({ idPaciente }: { idPaciente: number }) {
     form,
     set,
     setFicha,
+    setIndividualidade,
     camposSujos,
     dirtyCount,
     carregando,
@@ -217,7 +218,13 @@ export function PacienteDetalhe({ idPaciente }: { idPaciente: number }) {
         ) : aba === "laudo" ? (
           <AbaLaudo pacienteId={idPaciente} pacienteNome={paciente.nome} />
         ) : (
-          <AbaAltasIndividualidades pacienteId={idPaciente} pacienteNome={paciente.nome} />
+          <AbaAltasIndividualidades
+            pacienteId={idPaciente}
+            pacienteNome={paciente.nome}
+            individualidade={form.individualidade}
+            setIndividualidade={setIndividualidade}
+            disabled={!editando}
+          />
         )}
       </div>
 
@@ -225,8 +232,8 @@ export function PacienteDetalhe({ idPaciente }: { idPaciente: number }) {
       {verHistorico && (
         <HistoricoCadastrosModal
           titulo={`Histórico — ${paciente.nome}`}
-          subtitulo="Alterações no cadastro, responsáveis, ficha médica, laudos e altas/individualidades deste paciente."
-          entidades={["paciente", "responsavel", "ficha_medica", "laudo", "alta", "alta_individualidade"]}
+          subtitulo="Alterações no cadastro, responsáveis, ficha médica, laudos, altas/individualidades e suspensões temporárias deste paciente."
+          entidades={["paciente", "responsavel", "ficha_medica", "laudo", "alta", "alta_individualidade", "suspensao_temporaria"]}
           pacienteId={idPaciente}
           onClose={() => setVerHistorico(false)}
         />

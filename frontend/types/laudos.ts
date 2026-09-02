@@ -1,8 +1,10 @@
-// Tipos para laudos de pacientes e altas/individualidades.
+// Tipos para laudos de pacientes e altas/individualidades/suspensões.
 //
 // Tabelas: cadastros_pacientes_laudos, cadastros_pacientes_laudo_especialidades,
-// cadastros_pacientes_altas, cadastros_pacientes_altas_individualidades.
-// Ver supabase/migrations/20260826140000, 140100, 140200 e o rename em 140400.
+// cadastros_pacientes_altas, cadastros_pacientes_altas_individualidades,
+// cadastros_pacientes_suspensoes_temporarias.
+// Ver supabase/migrations/20260826140000, 140100, 140200, o rename em 140400
+// e a suspensão temporária em 20260902100000.
 //
 // Os nomes de coluna acompanham o banco de propósito: `id_laudo` em vez de
 // `id`, `id_paciente_pulsar` em vez de `paciente_id`. `paciente_id` era ambíguo
@@ -117,3 +119,40 @@ export type PacienteAlta = {
 }
 
 export type PacienteAltaForm = Omit<PacienteAlta, "id_alta" | "id_paciente_pulsar" | "ativo">
+
+// ─── SUSPENSÃO TEMPORÁRIA ───────────────────────────────────────────────────
+
+/** 1:N — uma suspensão por especialidade. Reversível, ao contrário da alta. */
+export type PacienteSuspensaoTemporaria = {
+  id_suspensao: number
+  id_paciente_pulsar: number
+  data_suspensao: string
+  especialidade_suspensao: string
+  /** true = sem data de retorno prevista. Nesse caso `prazo_fim` é null. */
+  prazo_indefinido: boolean
+  prazo_fim: string | null
+  arquivo_suspensao_path: string | null
+  observacoes: string | null
+  /**
+   * false = "excluída" pela tela. Suspensão nunca sai do banco — o DELETE é
+   * revogado na RLS (20260902100100). A aba lista apenas as ativas.
+   */
+  ativo: boolean
+  /**
+   * Quem criou, gravado na própria linha (20260902110000) — não depende da
+   * trilha de auditoria, que é best-effort (fire-and-forget).
+   */
+  criado_por_usuario_id: string | null
+  criado_por_usuario_nome: string | null
+  criado_em: string
+}
+
+export type PacienteSuspensaoTemporariaForm = Omit<
+  PacienteSuspensaoTemporaria,
+  | "id_suspensao"
+  | "id_paciente_pulsar"
+  | "ativo"
+  | "criado_por_usuario_id"
+  | "criado_por_usuario_nome"
+  | "criado_em"
+>

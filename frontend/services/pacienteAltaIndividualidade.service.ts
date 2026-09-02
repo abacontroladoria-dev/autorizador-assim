@@ -179,6 +179,39 @@ export async function excluirAlta(
   return { error: null }
 }
 
+/**
+ * Reverte a exclusão marcando ativo = true de novo. Não valida se já existe
+ * outra alta ativa na mesma especialidade — a mesma folga que já existe hoje
+ * entre altas ativas (o combobox de "nova alta" filtra pelo front, o banco
+ * não impede duas linhas ativas na mesma especialidade).
+ */
+export async function reativarAlta(
+  pacienteId: number,
+  pacienteNome: string,
+  alta: PacienteAlta
+): Promise<{ error: string | null }> {
+  const supabase = getSupabaseClient()
+
+  const { error } = await supabase
+    .from(TB_ALTAS)
+    .update({ ativo: true })
+    .eq("id_alta", alta.id_alta)
+
+  if (error) return { error: error.message }
+
+  void registrarAuditoria({
+    tabela: "alta",
+    registroId: alta.id_alta,
+    acao: "reativar",
+    pacienteId,
+    pacienteNome,
+    antes: { ...alta },
+    depois: { ...alta, ativo: true },
+  })
+
+  return { error: null }
+}
+
 // ─── UPLOAD ───────────────────────────────────────────────────────────────────
 
 /** Faz upload do anexo da alta e retorna o path no Storage. */
