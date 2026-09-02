@@ -51,6 +51,8 @@ type Props = {
   individualidade: AltaIndividualidadeForm
   setIndividualidade: (patch: Partial<AltaIndividualidadeForm>) => void
   disabled: boolean
+  /** Deep link (ex.: vindo de Ocupação de Paciente) — abre o detalhe desta suspensão ao carregar. */
+  suspensaoIdInicial?: number
 }
 
 function dataBR(isoStr: string) {
@@ -105,6 +107,7 @@ export function AbaAltasIndividualidades({
   individualidade,
   setIndividualidade,
   disabled,
+  suspensaoIdInicial,
 }: Props) {
   const [altas, setAltas] = useState<PacienteAlta[]>([])
   const [suspensoes, setSuspensoes] = useState<PacienteSuspensaoTemporaria[]>([])
@@ -157,6 +160,20 @@ export function AbaAltasIndividualidades({
   useEffect(() => {
     void carregar()
   }, [carregar])
+
+  // Abre o detalhe da suspensão que veio por deep link (ex.: "ver na ficha do
+  // paciente" em Ocupação de Paciente) assim que a lista carregar — só uma
+  // vez, senão reabriria a cada `carregar()` disparado por uma ação do
+  // próprio usuário (ex.: depois de estender o prazo).
+  const abriuDeepLinkRef = useRef(false)
+  useEffect(() => {
+    if (abriuDeepLinkRef.current || !suspensaoIdInicial || suspensoes.length === 0) return
+    const alvo = suspensoes.find(s => s.id_suspensao === suspensaoIdInicial)
+    if (alvo) {
+      setDetalheSuspensao(alvo)
+      abriuDeepLinkRef.current = true
+    }
+  }, [suspensaoIdInicial, suspensoes])
 
   /** Devolve se a exclusão realmente aconteceu — o modal de detalhe só fecha nesse caso. */
   async function confirmarExclusao(alta: PacienteAlta): Promise<boolean> {
