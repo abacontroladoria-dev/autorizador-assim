@@ -19,6 +19,7 @@ create table if not exists public.cronograma_paciente_observacoes (
 
 alter table public.cronograma_paciente_observacoes enable row level security;
 
+drop policy if exists "cronograma_paciente_observacoes_all" on public.cronograma_paciente_observacoes;
 create policy "cronograma_paciente_observacoes_all" on public.cronograma_paciente_observacoes
   for all to authenticated
   using (true)
@@ -43,10 +44,12 @@ create index if not exists idx_cronograma_paciente_observacoes_auditoria_criado_
 
 alter table public.cronograma_paciente_observacoes_auditoria enable row level security;
 
+drop policy if exists "cronograma_paciente_observacoes_auditoria_select" on public.cronograma_paciente_observacoes_auditoria;
 create policy "cronograma_paciente_observacoes_auditoria_select" on public.cronograma_paciente_observacoes_auditoria
   for select to authenticated using (true);
 
 -- Só INSERT — a trilha não pode ser editada nem apagada por ninguém, senão
 -- deixa de ser trilha de auditoria confiável.
+drop policy if exists "cronograma_paciente_observacoes_auditoria_insert" on public.cronograma_paciente_observacoes_auditoria;
 create policy "cronograma_paciente_observacoes_auditoria_insert" on public.cronograma_paciente_observacoes_auditoria
   for insert to authenticated with check (true);

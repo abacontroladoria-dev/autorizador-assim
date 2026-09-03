@@ -38,6 +38,7 @@ CREATE INDEX IF NOT EXISTS idx_pep_apuracao_prestador_competencia
 
 ALTER TABLE pep_apuracao_mensal ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "pep_apuracao_mensal_select" ON pep_apuracao_mensal;
 CREATE POLICY "pep_apuracao_mensal_select"
   ON pep_apuracao_mensal FOR SELECT
   TO authenticated
@@ -49,6 +50,7 @@ CREATE POLICY "pep_apuracao_mensal_select"
     )
   );
 
+DROP POLICY IF EXISTS "pep_apuracao_mensal_write" ON pep_apuracao_mensal;
 CREATE POLICY "pep_apuracao_mensal_write"
   ON pep_apuracao_mensal FOR ALL
   TO authenticated

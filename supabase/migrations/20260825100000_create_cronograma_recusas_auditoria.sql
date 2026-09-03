@@ -34,9 +34,11 @@ create index if not exists idx_cronograma_recusas_auditoria_criado_em on public.
 
 alter table public.cronograma_recusas_auditoria enable row level security;
 
+drop policy if exists "cronograma_recusas_auditoria select" on public.cronograma_recusas_auditoria;
 create policy "cronograma_recusas_auditoria select" on public.cronograma_recusas_auditoria
   for select to authenticated using (true);
 
+drop policy if exists "cronograma_recusas_auditoria insert" on public.cronograma_recusas_auditoria;
 create policy "cronograma_recusas_auditoria insert" on public.cronograma_recusas_auditoria
   for insert to authenticated with check (true);
 

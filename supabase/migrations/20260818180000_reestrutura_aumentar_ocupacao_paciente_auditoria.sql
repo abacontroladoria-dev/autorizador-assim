@@ -13,14 +13,27 @@
 -- `data`/`hora` como text (não date/time) pra bater exatamente com o formato
 -- já usado na consulta original (to_char(...,'DD/MM/YYYY') / 'HH24:MI:SS').
 
-alter table public.aumentar_ocupacao_paciente_auditoria
-  rename column pac to paciente;
-
-alter table public.aumentar_ocupacao_paciente_auditoria
-  rename column usuario_nome to usuario;
-
-alter table public.aumentar_ocupacao_paciente_auditoria
-  rename column texto_depois to texto;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'aumentar_ocupacao_paciente_auditoria' AND column_name = 'pac'
+  ) THEN
+    ALTER TABLE public.aumentar_ocupacao_paciente_auditoria RENAME COLUMN pac TO paciente;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'aumentar_ocupacao_paciente_auditoria' AND column_name = 'usuario_nome'
+  ) THEN
+    ALTER TABLE public.aumentar_ocupacao_paciente_auditoria RENAME COLUMN usuario_nome TO usuario;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'aumentar_ocupacao_paciente_auditoria' AND column_name = 'texto_depois'
+  ) THEN
+    ALTER TABLE public.aumentar_ocupacao_paciente_auditoria RENAME COLUMN texto_depois TO texto;
+  END IF;
+END $$;
 
 alter table public.aumentar_ocupacao_paciente_auditoria
   drop column if exists texto_antes;
@@ -44,10 +57,12 @@ alter table public.aumentar_ocupacao_paciente_auditoria
   alter column acao drop not null;
 
 -- Backfill do histórico de implantações (62 linhas, extraídas da consulta
--- original sobre acomp_pac_bundles em 2026-08-18) — one-off, não roda de novo.
+-- original sobre acomp_pac_bundles em 2026-08-18) — one-off. Guardado por uma
+-- linha-marcador: se a primeira linha do lote já está presente, o backfill já
+-- rodou e não insere de novo (idempotente mesmo sem chave única na tabela).
 insert into public.aumentar_ocupacao_paciente_auditoria
   (data, hora, usuario, email, paciente, terapia, profissional, dia_sessao, hora_sessao, status)
-values
+select v.* from (values
   ('18/08/2026','12:27:53','Juliana','julianagmrsmatos@gmail.com','Sara Ferreira Dias','Terapia Ocupacional','Danielle Galvão Nogueira','Terça-feira','15:40','confirmado'),
   ('18/08/2026','08:58:15','Juliana','julianagmrsmatos@gmail.com','Bianca Alves Candido','Aplicador ABA (EF)','Gabriel Rodrigues Miguel','Quinta-feira','10:40','confirmado'),
   ('17/08/2026','16:06:23','Juliana','julianagmrsmatos@gmail.com','Nathan Machado Grossi','Psicologia','Jéssica Santos Gonçalves','Quarta-feira','14:20','confirmado'),
@@ -108,4 +123,9 @@ values
   ('07/07/2026','14:09:21','(sem autoria — antes da auditoria)',null,'Clara Amorim David','Terapia Ocupacional','Bárbara Costa de Sá Barreto','Quinta-feira','14:20','confirmado'),
   ('07/07/2026','11:18:16','(sem autoria — antes da auditoria)',null,'Sophia Valentina Lopes Alvarado','Psicopedagogia','Brena Alves Soares de Barros','Quinta-feira','11:20','confirmado'),
   ('07/07/2026','11:18:16','(sem autoria — antes da auditoria)',null,'Sophia Valentina Lopes Alvarado','Aplicador ABA (PS)','Michele Sousa Freire de Faria','Terça-feira','11:20','confirmado'),
-  ('02/07/2026','09:09:23','(sem autoria — antes da auditoria)',null,'Carlos Haniel Correa Da Silva','Terapia Ocupacional','Bárbara Costa de Sá Barreto','Quinta-feira','15:00','removido_tita');
+  ('02/07/2026','09:09:23','(sem autoria — antes da auditoria)',null,'Carlos Haniel Correa Da Silva','Terapia Ocupacional','Bárbara Costa de Sá Barreto','Quinta-feira','15:00','removido_tita')
+) as v(data, hora, usuario, email, paciente, terapia, profissional, dia_sessao, hora_sessao, status)
+where not exists (
+  select 1 from public.aumentar_ocupacao_paciente_auditoria
+  where data = '18/08/2026' and hora = '12:27:53' and paciente = 'Sara Ferreira Dias' and terapia = 'Terapia Ocupacional'
+);

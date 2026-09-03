@@ -14,8 +14,21 @@ DROP POLICY IF EXISTS "pep_evidencias_write"  ON storage.objects;
 -- 'pep-evidencias' pelo Dashboard (Storage) ou pela Storage API depois de
 -- rodar esta migration; ele está vazio (nenhum objeto foi enviado).
 
-ALTER TABLE pep_registros_entrega RENAME COLUMN anexo_path TO evidencia_caminho;
-ALTER TABLE pep_registros_entrega RENAME COLUMN anexo_nome TO evidencia_nome;
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'pep_registros_entrega' AND column_name = 'anexo_path'
+  ) THEN
+    ALTER TABLE pep_registros_entrega RENAME COLUMN anexo_path TO evidencia_caminho;
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'pep_registros_entrega' AND column_name = 'anexo_nome'
+  ) THEN
+    ALTER TABLE pep_registros_entrega RENAME COLUMN anexo_nome TO evidencia_nome;
+  END IF;
+END $$;
 
 COMMENT ON COLUMN pep_registros_entrega.evidencia_caminho IS
   'Referência ao caminho do arquivo no diretório da clínica (SharePoint ou equivalente). Nunca um upload — PRD Seção 6/12.3.';
