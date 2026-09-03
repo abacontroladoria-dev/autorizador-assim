@@ -3,7 +3,7 @@
 import { memo, useCallback, useEffect, useMemo, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { useModalDialog } from '@/hooks/useModalDialog'
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, KeySquare, Loader2, RefreshCw, Search, X } from 'lucide-react'
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, ClipboardCheck, Copy, KeySquare, Loader2, RefreshCw, Search, X } from 'lucide-react'
 import { toast } from 'react-hot-toast'
 import { listarTokensMensal, marcarTokenConferido } from '@/services/auditoria-assim.service'
 import { LABEL_ERRO_FACIAL, erroReconhecimentoFacial } from './formaValidacao'
@@ -72,6 +72,54 @@ function formatarDataHora(data: string | null) {
 /** Sem acento e sem caixa: "joao" acha "João". */
 function normalizar(valor: string) {
   return valor.normalize('NFD').replace(/\p{Diacritic}/gu, '').toLowerCase()
+}
+
+/**
+ * O que a linha mostra, em texto, para colar no ClickUp.
+ *
+ * Segue exatamente a coluna visível: dia, hora, paciente, terapias, quem
+ * solicitou, guia e a identificação do papel (token, erro facial ou a ausência).
+ * O ClickUp renderiza markdown, então a lista vai como tabela — colar num campo
+ * de texto simples também continua legível porque as colunas são delimitadas.
+ */
+function identificacaoDoPapel(item: TokenMensalItem) {
+  if (item.token) return item.token
+  if (erroReconhecimentoFacial(item.forma_autorizacao)) return LABEL_ERRO_FACIAL
+  return 'SEM TOKEN'
+}
+
+function montarTextoConferencia(
+  itens: TokenMensalItem[],
+  contexto: { labelMes: string; aba: Aba; busca: string }
+) {
+  const rotuloAba =
+    contexto.aba === 'pendentes' ? 'Pendentes' : contexto.aba === 'conferidas' ? 'Conferidas' : 'Todas'
+
+  const cabecalho = [
+    `**Conferência de filipetas — ${contexto.labelMes}**`,
+    `${rotuloAba}: ${itens.length} registro(s)${contexto.busca.trim() ? ` — busca “${contexto.busca.trim()}”` : ''}`,
+  ]
+
+  const linhas = [
+    '| Dia | Hora | Paciente | Terapias | Solicitou | Guia | Token |',
+    '| --- | --- | --- | --- | --- | --- | --- |',
+    ...itens.map((i) => {
+      const celulas = [
+        formatarDia(i.data_atendimento),
+        i.hora_inicial?.slice(0, 5) ?? '—',
+        i.paciente_nome ?? '—',
+        i.terapias ?? '—',
+        i.criado_por ?? '—',
+        i.guia ?? '—',
+        identificacaoDoPapel(i),
+      ]
+        // A barra vertical dentro do dado quebraria a coluna da tabela.
+        .map((c) => String(c).replace(/\|/g, '/').trim())
+      return `| ${celulas.join(' | ')} |`
+    }),
+  ]
+
+  return [...cabecalho, '', ...linhas].join('\n')
 }
 
 /**
@@ -219,6 +267,7 @@ export default function ModalTokenMensal({ open, onClose }: Props) {
   const [aba, setAba] = useState<Aba>('pendentes')
   const [busca, setBusca] = useState('')
   const [conferindoBloco, setConferindoBloco] = useState<string | null>(null)
+  const [copiado, setCopiado] = useState(false)
   const [montado, setMontado] = useState(false)
 
   useEffect(() => setMontado(true), [])
@@ -301,6 +350,27 @@ export default function ModalTokenMensal({ open, onClose }: Props) {
   const pendentes = useMemo(() => base.filter((i) => !i.token_conferido), [base])
 
   const visiveis = aba === 'pendentes' ? pendentes : aba === 'conferidas' ? conferidas : base
+
+  // Copia exatamente o que a aba está mostrando, na mesma ordem da lista —
+  // inclusive já recortado pela busca.
+  async function copiarVisiveis() {
+    if (visiveis.length === 0) return
+    const texto = montarTextoConferencia(visiveis, {
+      labelMes: mesRef
+        .toLocaleDateString('pt-BR', { month: 'long', year: 'numeric' })
+        .replace(/^\w/, (c) => c.toUpperCase()),
+      aba,
+      busca,
+    })
+    try {
+      await navigator.clipboard.writeText(texto)
+      setCopiado(true)
+      toast.success(`${visiveis.length} registro(s) copiado(s)`)
+      setTimeout(() => setCopiado(false), 2000)
+    } catch {
+      toast.error('Não foi possível copiar. Verifique a permissão do navegador.')
+    }
+  }
 
   const total = base.length
   const totalMes = ordenados.length
@@ -444,6 +514,24 @@ export default function ModalTokenMensal({ open, onClose }: Props) {
                 )
               })}
             </div>
+
+            {/* Copiar o que está em tela. Fica ao lado da busca porque copia o
+                recorte que abas e busca produziram, não o mês inteiro. */}
+            <button
+              type="button"
+              onClick={copiarVisiveis}
+              disabled={visiveis.length === 0}
+              title={`Copiar ${visiveis.length} registro(s) desta aba para colar no ClickUp`}
+              className="inline-flex h-11 shrink-0 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-3.5 text-sm font-semibold text-slate-700 transition hover:border-brand hover:bg-brand-hover hover:text-brand-fg focus-visible:ring-2 focus-visible:ring-brand focus-visible:outline-none disabled:opacity-50 disabled:hover:border-slate-300 disabled:hover:bg-white disabled:hover:text-slate-700"
+            >
+              {copiado ? (
+                <ClipboardCheck size={14} className="text-emerald-600" />
+              ) : (
+                <Copy size={14} />
+              )}
+              {copiado ? 'Copiado' : 'Copiar'}
+              <span className="font-medium tabular-nums">{visiveis.length}</span>
+            </button>
 
             <div className="relative w-full shrink-0 sm:w-72">
               <Search size={14} className="pointer-events-none absolute top-1/2 left-3 -translate-y-1/2 text-slate-500" />
