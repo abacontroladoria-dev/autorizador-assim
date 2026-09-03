@@ -112,14 +112,27 @@ import {
 /**
  * Rótulo curto do que a ASSIM devolveu numa guia que não casou com sessão.
  *
- * Só para a guia que ninguém triou. "Outra semana" é afirmação sobre uma guia
- * que a tela não sabe explicar — e era exatamente o que aparecia numa guia
- * recém-vinculada, porque ela deixa a fila de órfãs sem entrar no pareamento do
- * banco. Os dois desfechos da triagem têm rótulo próprio e nunca chegam aqui.
+ * Só para a guia que ninguém triou. Os dois desfechos da triagem têm rótulo
+ * próprio e nunca chegam aqui.
+ *
+ * O ramo da liberada dizia "Outra semana" até 2026-09-03, e era afirmação sobre
+ * um fato que nenhum código deste caminho verifica. `fora-da-semana` é o `else`
+ * de `estadoDeUmaGuia` (useAnaliseReincidencia.ts) — "não está na fila de
+ * órfãs, ninguém a triou, e o número dela não aparece em nenhuma sessão
+ * CARREGADA". Semana nenhuma é comparada: `pareadas` é só
+ * `new Set(sessoes.map(s => s.guia))`, e a coluna do cartão vem de
+ * `data_execucao`, o que permitia um cartão na coluna de terça afirmar "outra
+ * semana". Das três causas que `DetalheCartao` já lista por extenso (pareada a
+ * uma sessão da semana vizinha, já triada, ou guia do próprio Pulsar) só a
+ * primeira tem a ver com semana.
+ *
+ * "Não identificada" é o que a tela de fato sabe: existe, está liberada, e o
+ * pareamento não a explica. A explicação por extenso continua na gaveta, onde
+ * cabe — este rótulo vive num contêiner de 144px.
  */
 function rotuloAutorizacao(status: string | null): string {
   if (autorizacaoCancelada(status)) return 'Cancelada'
-  if (autorizacaoLiberada(status)) return 'Outra semana'
+  if (autorizacaoLiberada(status)) return 'Não identificada'
   return 'Glosa'
 }
 
@@ -945,11 +958,11 @@ const CartaoAtendimento = memo(function CartaoAtendimento({
         ? 'Autorização extra'
         : rotuloAutorizacao(cartao.status)
   // Excedente que não está na fila SUBSTITUI o rótulo em vez de qualificá-lo:
-  // "Outra semana · além do agendado" se contradiz — "outra semana" afirma que a
-  // guia não encosta nesta semana, e "além do agendado" fala da cota desta
-  // semana. Os rótulos que afirmam algo sobre ESTA semana — a órfã e as duas
-  // triadas — convivem com o excedente: sabe-se o que a guia é E ela passou da
-  // cota.
+  // "Não identificada · além do agendado" diria as duas coisas ao contrário —
+  // "não identificada" afirma que o pareamento não explica a guia, e "além do
+  // agendado" já é uma explicação (ela passou da cota do dia). Os rótulos que
+  // afirmam algo VERIFICADO sobre a guia — a órfã e as duas triadas — convivem
+  // com o excedente: sabe-se o que ela é E que passou da cota.
   const frase = !cartao.excedente
     ? rotulo
     : semVinculo || vinculada || semSessao
