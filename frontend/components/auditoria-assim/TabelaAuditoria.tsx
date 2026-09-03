@@ -22,7 +22,7 @@ import { SituacaoBloco } from './SituacaoBadge'
 import { marcarTokenConferido } from '@/services/auditoria-assim.service'
 import { LABEL_ERRO_FACIAL, OBS_CONFIRMADA, erroReconhecimentoFacial } from './formaValidacao'
 import { semTrechoDeCobertura } from './observacaoVinculo'
-import { ehGlosa } from './situacoes'
+import { ehGlosa, temPapelParaConferir } from './situacoes'
 
 /**
  * Largura das colunas em um lugar só: o cabeçalho é a régua das linhas, e se as
@@ -129,10 +129,16 @@ export default function TabelaAuditoria({
           {!loading &&
             dados.map((item, idx) => {
               // Filipeta (token) e erro de reconhecimento facial são os dois
-              // casos em que existe papel para conferir na recepção — ambos
-              // recebem o mesmo botão.
+              // casos em que existe papel para conferir na recepção — mas só
+              // quando a autorização saiu. Ver `temPapelParaConferir`: sob glosa
+              // a ASSIM não liberou, não existe filipeta, e o botão pedia
+              // conferência de um papel inexistente.
+              //
+              // `erroFacial` continua servindo a legenda, que é outra pergunta:
+              // ali o fato relevante é COMO se tentou validar, e isso vale ser
+              // dito mesmo quando a tentativa terminou em recusa.
               const erroFacial = erroReconhecimentoFacial(item.forma_autorizacao)
-              const precisaConferir = Boolean(item.teve_token) || erroFacial
+              const precisaConferir = temPapelParaConferir(item)
               const detalhado = Boolean(item.motivo_glosa || item.observacao_manual)
 
               return (

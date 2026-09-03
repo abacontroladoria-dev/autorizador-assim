@@ -69,3 +69,57 @@ export function situacaoNoRecorte(situacao: string | null, recorte: string): boo
 export function ehGlosa(situacao: string | null): boolean {
   return situacao === 'GLOSA' || situacao === 'GLOSA_RESOLVIDA'
 }
+
+/**
+ * Existe papel para a recepção conferir nesta sessão?
+ *
+ * Filipeta e erro de reconhecimento facial são os dois casos que deixam papel
+ * — mas só quando a autorização SAIU. As duas fontes não têm a mesma autoridade
+ * sobre isso:
+ *
+ * - `teve_token` vem de `autorizacoes_assim`, o relatório da ASSIM. Existir
+ *   token ali já é prova de que a autorização saiu, então não precisa de gate.
+ * - `forma_autorizacao` guarda o que a RECEPÇÃO escolheu no modal do robô
+ *   (`OPCOES_VALIDACAO` em robo-autorizador/rpa.js) — intenção registrada ANTES
+ *   de a ASSIM responder. Diz "tentei validar por reconhecimento facial e deu
+ *   erro", não "a ASSIM liberou e saiu papel".
+ *
+ * Sob RECUSA as duas leituras divergem: houve a tentativa, não houve a
+ * liberação, e portanto não existe filipeta. Pedir conferência de um papel
+ * inexistente não tem resposta possível — o operador não pode marcar
+ * "conferida" nem deixar pendente, e a linha fica presa. Caso real: BERNARDO
+ * FREIRES PESSOA OTERIO, 31/08/2026 13:40, glosa 1013 (CADASTRO DO BENEFICIARIO
+ * COM PROBLEMAS), `teve_token: false`, forma 'Erro no Reconhecimento Facial'.
+ *
+ * O teste é RECUSA EXPLÍCITA, não ausência de liberação, e a diferença entre as
+ * duas não é sutil: `status_assim` nulo significa que a ASSIM não respondeu
+ * (RETORNO_NAO_CONFIRMADO), e ali o registro da recepção é a única evidência
+ * que existe — o papel provavelmente está lá. Medido em 2026-09-02: um gate por
+ * `status_assim IN ('Liberado','Liberado *')` derrubaria 19 linhas legítimas de
+ * julho/2026; este derruba exatamente a do Bernardo, 1 em 167.
+ *
+ * Por que `status_assim` e não `situacao`: `situacao` é a leitura OPERACIONAL do
+ * Pulsar (inclui RETORNO_NAO_CONFIRMADO, faltas, cancelamentos), enquanto a
+ * pergunta aqui é estritamente "a ASSIM recusou?". Um bloco pode estar
+ * GLOSA_RESOLVIDA — recusa no histórico, guia vinculada autorizando hoje — e o
+ * papel existe: é o caso que 20260828180000 corrigiu justamente para INCLUIR.
+ * `status_assim` responde pela guia que vale, e por isso é a coluna certa.
+ *
+ * Espelha o WHERE de `get_tokens_mensal` (migration 20260902110000), que
+ * decide o mesmo para o modal de Conferência de Filipetas, com a mesma forma
+ * (`<> ALL (ARRAY[...])`) que o CASE de `situacao` usa na RPC diária. As duas
+ * pontas precisam concordar: o botão da linha e a lista do modal falam do
+ * mesmo papel.
+ */
+const LIBERACOES = ['Liberado', 'Liberado *']
+
+export function temPapelParaConferir(item: {
+  teve_token?: boolean | null
+  forma_autorizacao?: string | null
+  status_assim?: string | null
+}): boolean {
+  if (item.teve_token) return true
+  if (!/reconhecimento\s+facial/i.test(item.forma_autorizacao ?? '')) return false
+  // Nulo = sem resposta = desconhecido, e desconhecido mantém o botão.
+  return item.status_assim == null || LIBERACOES.includes(item.status_assim)
+}
