@@ -1,7 +1,9 @@
 import { getSupabaseClient } from '@/lib/supabase/client'
 import type { PepAjusteLinha, PepApuracaoMensal } from '@/types/pep'
 import { getCatalogoItens, getPlanejamentoSemestral, getRegistrosEntrega } from '@/services/pep.service'
-import { getCalendarioCompetencia, SEMANAS_PADRAO } from '@/services/pepCalendario.service'
+import { getCalendarioCompetencia } from '@/services/pepCalendario.service'
+import { getFeriados } from '@/services/feriados.service'
+import { semanasEsperadas } from '@/lib/remuneracao/semanasCompetencia'
 import { registrarAuditoria } from '@/services/pepAuditoria.service'
 import {
   calcularPEPPaciente,
@@ -284,9 +286,15 @@ export async function apurarESalvarPEP(input: {
   const itensSemestrais = catalogo.filter(i => i.classe === 'semestral')
 
   // PRD Seção 9.11: só os itens semanais (Supervisão/Estudo) variam com o
-  // calendário parametrizado — mês de recesso espera 3 unidades em vez de 4.
-  const { data: calendario } = await getCalendarioCompetencia(input.competencia)
-  const semanasCalendario = calendario?.semanas_supervisao_estudo ?? SEMANAS_PADRAO
+  // calendário — mês de recesso espera 3 unidades em vez de 4. Um override
+  // publicado em pep_calendario_competencias (§13.8) tem prioridade; na
+  // ausência dele, calcula automaticamente a partir dos feriados cadastrados
+  // (mesma função que a tela usa — apuração e tela nunca podem divergir).
+  const [{ data: calendario }, { data: feriados }] = await Promise.all([
+    getCalendarioCompetencia(input.competencia),
+    getFeriados(),
+  ])
+  const semanasCalendario = calendario?.semanas_supervisao_estudo ?? semanasEsperadas(input.competencia, feriados)
 
   const registrosGerais = registros.filter(r => r.paciente_nome === null)
   const entregasGerais: EntregaRecorrente[] = itensRecorrentes

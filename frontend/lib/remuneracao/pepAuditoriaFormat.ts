@@ -39,9 +39,11 @@ const LABEL_POR_TABELA: Record<PepTrilhaTabela, Record<string, string>> = {
     quantidade_entregue: "Quantidade entregue",
     evidencias: "Evidências",
     observacao: "Observação",
+    data_entrega: "Data de entrega",
   },
   planejamento_semestral: {
     competencia_planejada: "Competência planejada",
+    data_planejada: "Data planejada",
     origem: "Origem",
     ativo: "Planejamento ativo",
     motivo: "Motivo do planejamento",
@@ -71,6 +73,10 @@ function formatarValor(campo: string, valor: unknown): string {
   if (campo === "estado") return ESTADO_LABEL[valor as string] ?? String(valor)
   if (campo === "ativo") return valor ? "Sim" : "Não"
   if (campo === "evidencias") return formatarEvidencias(valor)
+  if (campo === "data_planejada" || campo === "data_entrega") {
+    const [ano, mes, dia] = String(valor).split("-")
+    return dia && mes && ano ? `${dia}/${mes}/${ano}` : String(valor)
+  }
   return String(valor)
 }
 

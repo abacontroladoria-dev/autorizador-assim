@@ -16,6 +16,7 @@ import { HelpCircle, Download, Loader2 } from "lucide-react"
 
 import { useHeader } from "@/contexts/HeaderContext"
 import { useRemuneracaoRPContext } from "@/contexts/RemuneracaoRPContext"
+import { useProfissionaisReboot } from "@/hooks/useProfissionaisReboot"
 import { RemuneracaoGradeBadge, labelMes } from "./RemuneracaoGradeBadge"
 import { RemuneracaoRPDashboard } from "./RemuneracaoRPDashboard"
 import { EstadoGradeVazia } from "./EstadoGradeVazia"
@@ -25,6 +26,7 @@ import { calcularTotalPorEspecialidade } from "@/lib/remuneracao/dashboardRP"
 import { exportarRemuneracaoRPXlsx } from "@/lib/remuneracao/exportRemuneracaoRP"
 import { competenciaDeLinhas } from "@/lib/remuneracao/datas"
 import { B } from "@/lib/cronograma/constants"
+import { MultiSearchCombobox } from "@/components/cronograma/ui/MultiSearchCombobox"
 import CardRemunRP from "./CardRemunRP"
 import { ModalRemuneracaoRP } from "./ModalRemuneracaoRP"
 import type { ProfRemunReal } from "@/lib/remuneracao/calculo"
@@ -37,10 +39,22 @@ export function RemunRPTab() {
     resultado, evoRows, csvName, controlesGrade,
     peName,
     loading, error,
+    cadastroPrestadores,
   } = useRemuneracaoRPContext()
 
   const competenciaPep = useMemo(() => competenciaDeLinhas(evoRows), [evoRows])
   const { resumo: pepResumo } = usePepApuracaoResumo(competenciaPep)
+
+  // Especialidade geral cadastrada do profissional (reboot_profissionais) —
+  // fallback de contrato de banco de horas salvo sem `funcao` (ver dashboardRP.ts).
+  const { profissionais: profissionaisReboot } = useProfissionaisReboot()
+  const especialidadeGeralPorProf = useMemo(() => {
+    const mapa = new Map<string, string>()
+    profissionaisReboot.forEach(p => {
+      if (p.especialidade?.trim()) mapa.set(normKey(p.nome), p.especialidade.trim())
+    })
+    return mapa
+  }, [profissionaisReboot])
 
   // Uma pessoa aberta por vez, identificada pelo nome. O modal remonta por
   // `key`, então aba/página/detalhe nascem limpos a cada troca — nada de
@@ -48,7 +62,20 @@ export function RemunRPTab() {
   const [aberto, setAberto] = useState<string | null>(null)
   const [remBusca, setRemBusca] = useState("")
   const [apenasInconsistencia, setApenasInconsistencia] = useState(false)
-  const [especialidadeFiltro, setEspecialidadeFiltro] = useState<string | null>(null)
+  // Múltiplas especialidades ativas ao mesmo tempo (OR) — mesmo padrão do
+  // dropdown "Especialidades: Todas as especialidades" de
+  // ocupar-profissionais-disponiveis (MultiSearchCombobox: digita pra buscar
+  // + checkbox, fica aberto entre marcações).
+  const [especialidadesFiltro, setEspecialidadesFiltro] = useState<Set<string>>(new Set())
+  const toggleEspecialidade = useCallback((esp: string) => {
+    setEspecialidadesFiltro(prev => {
+      const next = new Set(prev)
+      if (next.has(esp)) next.delete(esp)
+      else next.add(esp)
+      return next
+    })
+  }, [])
+  const limparEspecialidades = useCallback(() => setEspecialidadesFiltro(new Set()), [])
   const { setHeader, setRightContent } = useHeader()
 
   const profissionaisComInconsistencia = useMemo(
@@ -56,12 +83,31 @@ export function RemunRPTab() {
     [resultado]
   )
 
+  // Mesmo cálculo do dashboard (barras) — reaproveitado aqui tanto para achar
+  // QUEM tem a especialidade escolhida quanto para listar as opções do
+  // dropdown de filtro, sem duplicar a regra de "quem conta em cada balde".
+  const { porEspecialidade } = useMemo(
+    () => calcularTotalPorEspecialidade(resultado ?? [], pepResumo, cadastroPrestadores, especialidadeGeralPorProf),
+    [resultado, pepResumo, cadastroPrestadores, especialidadeGeralPorProf]
+  )
+
+  const especialidadesDisponiveis = useMemo(
+    () => [...porEspecialidade]
+      .map(e => e.especialidade)
+      .sort((a, b) => a.localeCompare(b, "pt-BR"))
+      .map(nome => ({ id: nome, nome })),
+    [porEspecialidade]
+  )
+
+  // OR entre as especialidades marcadas: aparece quem tem qualquer uma delas.
   const profissionaisPorEspecialidade = useMemo(() => {
-    if (!especialidadeFiltro) return null
-    const { porEspecialidade } = calcularTotalPorEspecialidade(resultado ?? [], pepResumo)
-    const alvo = porEspecialidade.find(e => e.especialidade === especialidadeFiltro)
-    return new Set(alvo?.profissionais ?? [])
-  }, [resultado, especialidadeFiltro, pepResumo])
+    if (especialidadesFiltro.size === 0) return null
+    const nomes = new Set<string>()
+    porEspecialidade.forEach(e => {
+      if (especialidadesFiltro.has(e.especialidade)) e.profissionais.forEach(p => nomes.add(p))
+    })
+    return nomes
+  }, [porEspecialidade, especialidadesFiltro])
 
   // A busca escolhe QUEM aparece na lista: um profissional entra se alguma
   // sessão dele casa com o termo. Dentro do modal ela não vale — lá a mesma
@@ -112,9 +158,12 @@ export function RemunRPTab() {
       {temDado && (
         <RemuneracaoRPDashboard
           resultado={resultado}
-          especialidadeFiltro={especialidadeFiltro}
-          onFiltroEspecialidade={setEspecialidadeFiltro}
+          especialidadesFiltro={especialidadesFiltro}
+          onToggleEspecialidade={toggleEspecialidade}
+          onLimparEspecialidades={limparEspecialidades}
           pepResumo={pepResumo}
+          cadastroPrestadores={cadastroPrestadores}
+          especialidadeGeralPorProf={especialidadeGeralPorProf}
         />
       )}
 
@@ -139,6 +188,16 @@ export function RemunRPTab() {
             className="flex-1 rounded-lg border border-border bg-muted/50 px-3 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring"
             aria-label="Filtrar profissionais por sessão"
           />
+          <div className="w-56 shrink-0">
+            <MultiSearchCombobox
+              opcoes={especialidadesDisponiveis}
+              selecionados={especialidadesFiltro}
+              onToggle={toggleEspecialidade}
+              placeholder="Todas as especialidades"
+              nomePlural="especialidades"
+              ariaLabel="Especialidades"
+            />
+          </div>
           <button
             type="button"
             onClick={() => setApenasInconsistencia(v => !v)}
@@ -173,7 +232,7 @@ export function RemunRPTab() {
         </div>
       )}
 
-      {temDado && (buscaQ || apenasInconsistencia || especialidadeFiltro) && (
+      {temDado && (buscaQ || apenasInconsistencia || especialidadesFiltro.size > 0) && (
         <div className="flex items-center gap-2 flex-wrap text-xs">
           <span className="font-bold uppercase tracking-wide text-muted-foreground">Filtros ativos:</span>
           {buscaQ && (
@@ -188,15 +247,15 @@ export function RemunRPTab() {
               <button type="button" onClick={() => setApenasInconsistencia(false)} className="opacity-70 hover:opacity-100">×</button>
             </span>
           )}
-          {especialidadeFiltro && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 font-semibold text-foreground">
-              Especialidade: {especialidadeFiltro}
-              <button type="button" onClick={() => setEspecialidadeFiltro(null)} className="opacity-70 hover:opacity-100">×</button>
+          {[...especialidadesFiltro].map(esp => (
+            <span key={esp} className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 font-semibold text-foreground">
+              Especialidade: {esp}
+              <button type="button" onClick={() => toggleEspecialidade(esp)} className="opacity-70 hover:opacity-100">×</button>
             </span>
-          )}
+          ))}
           <button
             type="button"
-            onClick={() => { setRemBusca(""); setApenasInconsistencia(false); setEspecialidadeFiltro(null) }}
+            onClick={() => { setRemBusca(""); setApenasInconsistencia(false); limparEspecialidades() }}
             className="font-semibold text-foreground hover:opacity-70 transition-opacity"
           >
             limpar tudo
@@ -214,8 +273,8 @@ export function RemunRPTab() {
 
       {temDado && resultadoExibido && resultadoExibido.length === 0 && (
         <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
-          {especialidadeFiltro
-            ? `Nenhum profissional com remuneração em "${especialidadeFiltro}" nesta grade.`
+          {especialidadesFiltro.size > 0
+            ? `Nenhum profissional com remuneração em "${[...especialidadesFiltro].join(", ")}" nesta grade.`
             : buscaQ
               ? `Nenhuma sessão encontrada para "${remBusca}".`
               : "Nenhum profissional com inconsistência nesta grade."}

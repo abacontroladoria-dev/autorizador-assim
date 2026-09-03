@@ -74,6 +74,14 @@ export type ContratoAtualItem = {
    * calculo.ts.
    */
   valorPepMensal?: number | null
+  /**
+   * Terapias marcadas no checkbox de banco de horas quando um único contrato
+   * cobre mais de uma (ContratosCadastro.tsx). Null/undefined/[] = terapia
+   * única (comportamento de sempre). Metadado do cadastro só — o cálculo em
+   * lib/remuneracao/ continua lendo `funcao`, que já vem com o rótulo
+   * composto "Contrato único, especialidades múltiplas" quando são 2+.
+   */
+  especialidadesBancoHoras?: string[] | null
 }
 
 export type ContratoAtual = {

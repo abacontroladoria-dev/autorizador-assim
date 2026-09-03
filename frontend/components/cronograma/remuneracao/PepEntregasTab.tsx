@@ -1,42 +1,48 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
-import { Paperclip, Check, AlertTriangle, CalendarPlus, X, Trash2, History } from "lucide-react"
+import { Paperclip, Check, AlertTriangle, CalendarPlus, X, Trash2, History, Loader2 } from "lucide-react"
 import { useHeader } from "@/contexts/HeaderContext"
 import { useRemuneracaoRPContext } from "@/contexts/RemuneracaoRPContext"
 import { useParametrosGerais } from "@/hooks/useParametrosGerais"
 import { usePepEntregas } from "@/hooks/usePepEntregas"
 import { usePepApuracao } from "@/hooks/usePepApuracao"
 import { usePepCalendario } from "@/hooks/usePepCalendario"
-import { RemuneracaoUploadBadges } from "./RemuneracaoUploadBadges"
+import { periodoDoMes } from "@/hooks/useRemuneracao"
 import { SeletorMesPrevisao } from "@/components/cronograma/indicadores/SeletorMesPrevisao"
-import { SearchCombobox } from "@/components/cronograma/ui/SearchCombobox"
+import { DatePicker } from "@/components/ui/date-picker"
 import { PepHistoricoModal } from "./PepHistoricoModal"
 import { COMPETENCIA_TESTE_PEP } from "@/lib/remuneracao/calculoPEP"
 import type { PepCatalogoItem, PepEvidencia, PepPlanejamentoSemestral, PepRegistroEntrega } from "@/types/pep"
 
 const money = (v: number) => `R$ ${v.toFixed(2).replace(".", ",")}`
 
-// Rótulos do combobox de "Semanas no mês" — PRD Seção 9.11.
-const SEMANAS_LABEL: Record<number, string> = { 3: "3 (recesso)", 4: "4 (padrão)", 5: "5" }
-const SEMANAS_VALOR: Record<string, number> = { "3 (recesso)": 3, "4 (padrão)": 4, "5": 5 }
-const SEMANAS_OPCOES = Object.keys(SEMANAS_VALOR)
+/** 'YYYY-MM-DD' → 'DD/MM/AAAA'. Sem hora em nenhum lugar (PRD §2.2). */
+function formatarDataBR(iso: string | null | undefined): string {
+  if (!iso) return "—"
+  const [ano, mes, dia] = iso.split("-")
+  return dia && mes && ano ? `${dia}/${mes}/${ano}` : "—"
+}
 
-function competenciaAtual(): string {
-  const d = new Date()
+/** 'YYYY-MM-DD' → 'YYYY-MM'. A competência é sempre DERIVADA da data (PRD §2.2/§3/§6), nunca o contrário. */
+function competenciaDaData(iso: string): string {
+  return iso.slice(0, 7)
+}
+
+function competenciaDoMes(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
 }
 
 function addMeses(competencia: string, meses: number): string {
   const [y, m] = competencia.split("-").map(Number)
   const d = new Date(y, m - 1 + meses, 1)
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`
+  return competenciaDoMes(d)
 }
 
 // Quantidade esperada no mês para um item recorrente. PRD Seção 9.11: só os
-// itens SEMANAIS (Supervisão/Estudo) variam com o calendário parametrizado —
-// mês de recesso espera 3 unidades em vez de 4. TAP/Parental usam sempre a
-// referência fixa do catálogo, calendário nenhum os afeta (Seção 7.2).
+// itens SEMANAIS (Supervisão/Estudo) variam com o calendário — calculado
+// automaticamente a partir dos feriados (usePepCalendario). TAP/Parental usam
+// sempre a referência fixa do catálogo (Seção 7.2).
 function quantidadeEsperada(item: PepCatalogoItem, semanasCalendario: number): number {
   if (item.periodicidade === "semanal") return semanasCalendario
   return item.qtd_referencia_mes ?? 1
@@ -73,26 +79,50 @@ function useFecharAoClicarFora(onFechar: () => void) {
   }
 }
 
+function SecaoTitulo({ numero, children, nota }: { numero: number; children: React.ReactNode; nota?: string }) {
+  return (
+    <div className="flex items-baseline gap-2 px-1">
+      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#222847] text-[11px] font-bold text-white dark:bg-slate-600">
+        {numero}
+      </span>
+      <h2 className="text-sm font-bold text-foreground">{children}</h2>
+      {nota && <span className="text-xs text-muted-foreground">{nota}</span>}
+    </div>
+  )
+}
+
 export function PepEntregasTab() {
   const { resultado, controlesGrade } = useRemuneracaoRPContext()
   const { setHeader, setRightContent } = useHeader()
 
   const [prestador, setPrestador] = useState("")
-  const [competencia, setCompetencia] = useState(competenciaAtual())
   const [celulaAtiva, setCelulaAtiva] = useState<CelulaAtiva>(null)
   const [historicoAberto, setHistoricoAberto] = useState<"prestador" | "geral" | null>(null)
-  const { semanas: semanasCalendario, salvar: salvarSemanasCalendario } = usePepCalendario(competencia)
+
+  // Um único seletor de mês pra tela inteira — o de "Entregas mensais" abaixo.
+  // `controlesGrade.periodo` já é a mesma "competência que fechou" por
+  // padrão (mesFechadoAnterior em useRemuneracao.ts); não existe mais um
+  // segundo estado de mês no cabeçalho pra manter sincronizado.
+  const competencia = controlesGrade.periodo.de.slice(0, 7)
+  const { carregarGradeAuto, carregarGradeDoBanco, gradeLoading, gradeErroResumo } = controlesGrade
+  const { semanas: semanasCalendario, calculadoAutomaticamente, loading: calendarioCarregando } = usePepCalendario(competencia)
+
+  // Primeira carga da Grade — mesmo gatilho que RemuneracaoUploadBadges usava
+  // no cabeçalho; guardado por ref lá dentro, então é seguro chamar de novo.
+  useEffect(() => { carregarGradeAuto() }, [carregarGradeAuto])
 
   // A Grade carregada aqui alimenta o mesmo contexto compartilhado das abas
   // Rem. Mês - Total e Individual — não precisa reanexar ao trocar de aba.
+  // Sem seletor de mês no cabeçalho nesta tela: o mês é escolhido só em
+  // "Entregas mensais", que já recarrega a Grade junto (ver onChange abaixo).
   useEffect(() => {
     setHeader("Entregas PEP", "Relacionamento Prestador")
-    setRightContent(<RemuneracaoUploadBadges c={controlesGrade} hidePe hideStatusRow />)
+    setRightContent(null)
     return () => {
       setHeader("", "")
       setRightContent(null)
     }
-  }, [setHeader, setRightContent, controlesGrade])
+  }, [setHeader, setRightContent])
 
   const analistas = useMemo(
     () => Array.from(new Set(
@@ -114,7 +144,7 @@ export function PepEntregasTab() {
   const {
     itensRecorrentes, itensSemestrais,
     loading, error, salvando,
-    registroDe, planejamentoDe,
+    registroDe, registroSemestralDe, planejamentoDe,
     marcarEntrega, marcarQuantidade, cadastrarPlanejamento,
     excluirRegistro, excluirPlanejamento,
   } = usePepEntregas(prestador, competencia)
@@ -122,7 +152,7 @@ export function PepEntregasTab() {
   const { parametros } = useParametrosGerais()
   const valorMensalPorPaciente = parametros?.cc_pe_default ?? 0
   const pacientesApuracao = useMemo(() => pacientes.map(nome => ({ nome })), [pacientes])
-  const { resultadoDe, totalPrestador, recalcular: recalcularApuracao, liberado, liberar, reabrir } = usePepApuracao(
+  const { resultadoDe, totalPrestador, loading: apuracaoLoading, recalcular: recalcularApuracao, liberado, liberar, reabrir } = usePepApuracao(
     prestador, competencia, pacientesApuracao, valorMensalPorPaciente
   )
   const [confirmandoLiberar, setConfirmandoLiberar] = useState(false)
@@ -131,6 +161,8 @@ export function PepEntregasTab() {
 
   const itensGerais = itensRecorrentes.filter(i => i.tipo_registro === "GERAL")
   const itensPorPaciente = itensRecorrentes.filter(i => i.tipo_registro === "POR_PACIENTE")
+
+  const catalogoCompleto = useMemo(() => [...itensRecorrentes, ...itensSemestrais], [itensRecorrentes, itensSemestrais])
 
   if (!prestador) {
     return (
@@ -142,14 +174,15 @@ export function PepEntregasTab() {
             : "Selecione um Analista do Comportamento acima para registrar as entregas da PEP."}
         </div>
         {historicoAberto === "geral" && (
-          <PepHistoricoModal catalogo={[...itensRecorrentes, ...itensSemestrais]} onClose={() => setHistoricoAberto(null)} />
+          <PepHistoricoModal catalogo={catalogoCompleto} onClose={() => setHistoricoAberto(null)} />
         )}
       </div>
     )
   }
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-6">
+      <SecaoTitulo numero={1}>Analista do Comportamento</SecaoTitulo>
       <SeletorPrestador
         analistas={analistas}
         prestador={prestador}
@@ -158,195 +191,218 @@ export function PepEntregasTab() {
         onHistoricoPrestador={() => setHistoricoAberto("prestador")}
       />
 
-      <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-4">
-        <div className="flex items-center gap-3 flex-wrap">
-          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-            Competência
-          </span>
-          <SeletorMesPrevisao
-            ano={Number(competencia.split("-")[0])}
-            mes={Number(competencia.split("-")[1])}
-            onChange={(ano, mes) => setCompetencia(`${ano}-${String(mes).padStart(2, "0")}`)}
-          />
-          <div className="flex items-center gap-2 border-l border-border pl-3">
-            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider" title="PRD Seção 9.11 — calendário parametrizado. Só afeta Supervisão/Estudo.">
-              Semanas no mês (Sup./Estudo)
+      <SecaoTitulo numero={2}>Entregas mensais</SecaoTitulo>
+      <div className="space-y-5">
+        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-2">
+          <div className="flex items-center gap-3 flex-wrap">
+            <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Competência
             </span>
-            <div className="w-32">
-              <SearchCombobox
-                value={SEMANAS_LABEL[semanasCalendario] ?? String(semanasCalendario)}
-                onChange={rotulo => { const n = SEMANAS_VALOR[rotulo]; if (n) salvarSemanasCalendario(n) }}
-                opcoes={SEMANAS_OPCOES}
-                ariaLabel="Semanas no mês (Sup./Estudo)"
-                placeholder="Selecione..."
-              />
-            </div>
-          </div>
-          {salvando && <span className="text-xs text-muted-foreground">Salvando…</span>}
-        </div>
-        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
-      </div>
-
-      {competencia === COMPETENCIA_TESTE_PEP && (
-        <div className="rounded-2xl border border-amber-300 bg-amber-50 px-5 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
-          <span className="font-bold">Modo teste (PRD Seção 13.7):</span> {COMPETENCIA_TESTE_PEP} apura e demonstra os descontos, mas paga 100% do potencial — por isso "Alcançado" ainda não reflete pendências. Os ajustes passam a valer a partir do mês seguinte.
-        </div>
-      )}
-
-      {valorMensalPorPaciente > 0 && pacientes.length > 0 && (
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm flex items-center gap-6 flex-wrap">
-          <div>
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Potencial do mês</p>
-            <p className="text-lg font-bold text-foreground">{money(pacientes.length * valorMensalPorPaciente)}</p>
-          </div>
-          <div>
-            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">Alcançado (apurado)</p>
-            <p className="text-lg font-bold text-emerald-600 dark:text-emerald-400">{money(totalPrestador)}</p>
-          </div>
-          <div className="ml-auto flex items-center gap-3">
-            {liberado ? (
-              <>
-                <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
-                  <Check size={13} /> Faturamento liberado
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setConfirmandoReabrir(true)}
-                  className="px-3 py-1.5 rounded-lg text-xs font-bold border border-border text-foreground bg-background hover:bg-muted/50"
-                >
-                  Reabrir
-                </button>
-              </>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setConfirmandoLiberar(true)}
-                className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:opacity-90"
-              >
-                Liberar Faturamento
-              </button>
+            <SeletorMesPrevisao
+              ano={Number(competencia.split("-")[0])}
+              mes={Number(competencia.split("-")[1])}
+              onChange={(ano, mes) => carregarGradeDoBanco(periodoDoMes(ano, mes))}
+            />
+            {(salvando || gradeLoading || apuracaoLoading) && (
+              <span className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                <Loader2 size={12} className="animate-spin" />
+                {gradeLoading ? "Carregando grade…" : salvando ? "Salvando…" : "Atualizando valores apurados…"}
+              </span>
             )}
           </div>
-        </div>
-      )}
-
-      {confirmandoLiberar && (
-        <ConfirmModal
-          titulo="Liberar Faturamento"
-          mensagem={`Confirma a liberação do faturamento de ${prestador} para ${competencia}? Depois de liberado, os lançamentos desta competência ficam bloqueados para edição até uma reabertura.`}
-          pedirMotivo={false}
-          motivo=""
-          onMotivoChange={() => {}}
-          confirmLabel="Liberar"
-          onConfirmar={async () => {
-            await liberar()
-            setConfirmandoLiberar(false)
-          }}
-          onCancelar={() => setConfirmandoLiberar(false)}
-        />
-      )}
-
-      {confirmandoReabrir && (
-        <ConfirmModal
-          titulo="Reabrir Faturamento"
-          mensagem={`Reabrir permite editar novamente os lançamentos de ${prestador} em ${competencia}. Essa ação fica registrada na trilha de auditoria.`}
-          pedirMotivo
-          motivo={motivoReabrir}
-          onMotivoChange={setMotivoReabrir}
-          confirmLabel="Reabrir"
-          perigo
-          onConfirmar={async () => {
-            const ok = await reabrir(motivoReabrir)
-            if (ok) {
-              setConfirmandoReabrir(false)
-              setMotivoReabrir("")
-            }
-          }}
-          onCancelar={() => { setConfirmandoReabrir(false); setMotivoReabrir("") }}
-        />
-      )}
-
-      {itensGerais.length > 0 && (
-        <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-            Geral (sem paciente)
+          <p className="text-[11px] text-muted-foreground" title="PRD Seção 9.11/13.8 — calculado a partir do calendário de feriados. Só afeta Supervisão/Estudo Técnico.">
+            {calendarioCarregando
+              ? "Calculando semanas do mês…"
+              : `Semanas no mês (Sup./Estudo): ${semanasCalendario} — ${calculadoAutomaticamente ? "calculado automaticamente pelo calendário de feriados" : "ajuste publicado manualmente"}.`}
           </p>
-          <div className="flex flex-wrap gap-3">
-            {itensGerais.map(item => (
-              <CelulaRecorrente
-                key={item.id}
-                item={item}
-                semanasCalendario={semanasCalendario}
-                registro={registroDe(null, item.id)}
-                onClick={() => setCelulaAtiva({ pacienteNome: null, item })}
-                disabled={liberado}
-              />
-            ))}
-          </div>
+          {gradeErroResumo && <p className="text-sm text-red-600 dark:text-red-400">{gradeErroResumo}</p>}
+          {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
         </div>
-      )}
 
-      {loading ? (
-        <p className="text-sm text-muted-foreground">Carregando…</p>
-      ) : pacientes.length === 0 ? (
+        {competencia === COMPETENCIA_TESTE_PEP && (
+          <div className="rounded-2xl border border-amber-300 bg-amber-50 px-5 py-3 text-sm text-amber-800 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+            <span className="font-bold">Modo teste (PRD Seção 13.7):</span> {COMPETENCIA_TESTE_PEP} apura e demonstra os descontos, mas paga 100% do potencial — por isso "Alcançado" ainda não reflete pendências. Os ajustes passam a valer a partir do mês seguinte.
+          </div>
+        )}
+
+        {valorMensalPorPaciente > 0 && pacientes.length > 0 && (
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm flex items-center gap-6 flex-wrap">
+            <div>
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Potencial do mês
+                {apuracaoLoading && <Loader2 size={11} className="animate-spin" />}
+              </p>
+              <p className={`text-lg font-bold text-foreground transition-opacity ${apuracaoLoading ? "opacity-40" : ""}`}>
+                {money(pacientes.length * valorMensalPorPaciente)}
+              </p>
+            </div>
+            <div>
+              <p className="flex items-center gap-1.5 text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                Alcançado (apurado)
+                {apuracaoLoading && <Loader2 size={11} className="animate-spin" />}
+              </p>
+              <p className={`text-lg font-bold text-emerald-600 dark:text-emerald-400 transition-opacity ${apuracaoLoading ? "opacity-40" : ""}`}>
+                {money(totalPrestador)}
+              </p>
+            </div>
+            <div className="ml-auto flex items-center gap-3">
+              {liberado ? (
+                <>
+                  <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                    <Check size={13} /> Faturamento liberado
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmandoReabrir(true)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold border border-border text-foreground bg-background hover:bg-muted/50"
+                  >
+                    Reabrir
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  disabled={apuracaoLoading}
+                  title={apuracaoLoading ? "Aguarde a apuração terminar de calcular" : undefined}
+                  onClick={() => setConfirmandoLiberar(true)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-bold text-white bg-emerald-600 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:opacity-40"
+                >
+                  Liberar Faturamento
+                </button>
+              )}
+            </div>
+          </div>
+        )}
+
+        {confirmandoLiberar && (
+          <ConfirmModal
+            titulo="Liberar Faturamento"
+            mensagem={`Confirma a liberação do faturamento de ${prestador} para ${competencia}? Depois de liberado, os lançamentos desta competência ficam bloqueados para edição até uma reabertura.`}
+            pedirMotivo={false}
+            motivo=""
+            onMotivoChange={() => {}}
+            confirmLabel="Liberar"
+            onConfirmar={async () => {
+              await liberar()
+              setConfirmandoLiberar(false)
+            }}
+            onCancelar={() => setConfirmandoLiberar(false)}
+          />
+        )}
+
+        {confirmandoReabrir && (
+          <ConfirmModal
+            titulo="Reabrir Faturamento"
+            mensagem={`Reabrir permite editar novamente os lançamentos de ${prestador} em ${competencia}. Essa ação fica registrada na trilha de auditoria.`}
+            pedirMotivo
+            motivo={motivoReabrir}
+            onMotivoChange={setMotivoReabrir}
+            confirmLabel="Reabrir"
+            perigo
+            onConfirmar={async () => {
+              const ok = await reabrir(motivoReabrir)
+              if (ok) {
+                setConfirmandoReabrir(false)
+                setMotivoReabrir("")
+              }
+            }}
+            onCancelar={() => { setConfirmandoReabrir(false); setMotivoReabrir("") }}
+          />
+        )}
+
+        {itensGerais.length > 0 && (
+          <div className="rounded-2xl border border-border bg-card p-5 shadow-sm space-y-3">
+            <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Geral (sem paciente)
+            </p>
+            <div className="flex flex-wrap gap-3">
+              {itensGerais.map(item => (
+                <CelulaRecorrente
+                  key={item.id}
+                  item={item}
+                  semanasCalendario={semanasCalendario}
+                  registro={registroDe(null, item.id)}
+                  onClick={() => setCelulaAtiva({ pacienteNome: null, item })}
+                  disabled={liberado}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Carregando…</p>
+        ) : pacientes.length === 0 ? (
+          <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
+            Nenhum paciente encontrado para este Analista na Grade carregada.
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-border bg-card shadow-sm overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-border">
+                  <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Paciente</th>
+                  {itensPorPaciente.map(item => (
+                    <th key={item.id} className="px-3 py-3 font-semibold text-muted-foreground text-center" title={item.nome}>
+                      {item.sigla}
+                    </th>
+                  ))}
+                  <th className="px-3 py-3 font-semibold text-muted-foreground text-right">
+                    <span className="inline-flex items-center gap-1.5">
+                      PEP apurada
+                      {apuracaoLoading && <Loader2 size={11} className="animate-spin" />}
+                    </span>
+                  </th>
+                </tr>
+              </thead>
+              <tbody>
+                {pacientes.map(paciente => (
+                  <tr key={paciente} className="border-b border-border last:border-0">
+                    <td className="px-4 py-3 font-medium text-foreground">{paciente}</td>
+                    {itensPorPaciente.map(item => (
+                      <td key={item.id} className="px-3 py-3 text-center">
+                        <CelulaRecorrente
+                          item={item}
+                          semanasCalendario={semanasCalendario}
+                          registro={registroDe(paciente, item.id)}
+                          onClick={() => setCelulaAtiva({ pacienteNome: paciente, item })}
+                          disabled={liberado}
+                        />
+                      </td>
+                    ))}
+                    <td className={`px-3 py-3 text-right whitespace-nowrap transition-opacity ${apuracaoLoading ? "opacity-40" : ""}`}>
+                      {resultadoDe(paciente)
+                        ? <span className="font-semibold text-foreground">{money(resultadoDe(paciente)!.valor_liquido)}<span className="text-muted-foreground"> / {money(resultadoDe(paciente)!.valor_bruto)}</span></span>
+                        : <span className="text-muted-foreground">—</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      <SecaoTitulo numero={3} nota="independe do mês acima — vale para o ano inteiro (PRD §7.2)">
+        Entregas semestrais
+      </SecaoTitulo>
+      {pacientes.length === 0 ? (
         <div className="rounded-xl border border-border bg-card p-10 text-center text-sm text-muted-foreground">
           Nenhum paciente encontrado para este Analista na Grade carregada.
         </div>
       ) : (
-        <div className="rounded-2xl border border-border bg-card shadow-sm overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border">
-                <th className="text-left px-4 py-3 font-semibold text-muted-foreground">Paciente</th>
-                {itensPorPaciente.map(item => (
-                  <th key={item.id} className="px-3 py-3 font-semibold text-muted-foreground text-center" title={item.nome}>
-                    {item.sigla}
-                  </th>
-                ))}
-                {itensSemestrais.map(item => (
-                  <th key={item.id} className="px-3 py-3 font-semibold text-muted-foreground text-center" title={item.nome}>
-                    {item.sigla}
-                  </th>
-                ))}
-                <th className="px-3 py-3 font-semibold text-muted-foreground text-right">PEP apurada</th>
-              </tr>
-            </thead>
-            <tbody>
-              {pacientes.map(paciente => (
-                <tr key={paciente} className="border-b border-border last:border-0">
-                  <td className="px-4 py-3 font-medium text-foreground">{paciente}</td>
-                  {itensPorPaciente.map(item => (
-                    <td key={item.id} className="px-3 py-3 text-center">
-                      <CelulaRecorrente
-                        item={item}
-                        semanasCalendario={semanasCalendario}
-                        registro={registroDe(paciente, item.id)}
-                        onClick={() => setCelulaAtiva({ pacienteNome: paciente, item })}
-                        disabled={liberado}
-                      />
-                    </td>
-                  ))}
-                  {itensSemestrais.map(item => (
-                    <td key={item.id} className="px-3 py-3 text-center">
-                      <CelulaSemestral
-                        item={item}
-                        competencia={competencia}
-                        registro={registroDe(paciente, item.id)}
-                        planejamento={planejamentoDe(paciente, item.id)}
-                        onClick={() => setCelulaAtiva({ pacienteNome: paciente, item })}
-                        disabled={liberado}
-                      />
-                    </td>
-                  ))}
-                  <td className="px-3 py-3 text-right whitespace-nowrap">
-                    {resultadoDe(paciente)
-                      ? <span className="font-semibold text-foreground">{money(resultadoDe(paciente)!.valor_liquido)}<span className="text-muted-foreground"> / {money(resultadoDe(paciente)!.valor_bruto)}</span></span>
-                      : <span className="text-muted-foreground">—</span>}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <div className="space-y-4">
+          {pacientes.map(paciente => (
+            <TabelaSemestralPaciente
+              key={paciente}
+              paciente={paciente}
+              itensSemestrais={itensSemestrais}
+              planejamentoDe={planejamentoDe}
+              registroSemestralDe={registroSemestralDe}
+              onAbrirPainel={item => setCelulaAtiva({ pacienteNome: paciente, item })}
+              disabled={liberado}
+            />
+          ))}
         </div>
       )}
 
@@ -393,25 +449,26 @@ export function PepEntregasTab() {
         <PainelSemestral
           pacienteNome={celulaAtiva.pacienteNome}
           item={celulaAtiva.item}
-          competencia={competencia}
-          registro={registroDe(celulaAtiva.pacienteNome, celulaAtiva.item.id)}
+          registro={registroSemestralDe(celulaAtiva.pacienteNome ?? "", celulaAtiva.item.id)}
           planejamento={celulaAtiva.pacienteNome ? planejamentoDe(celulaAtiva.pacienteNome, celulaAtiva.item.id) : null}
           erro={error}
           onFechar={() => setCelulaAtiva(null)}
-          onSalvarPlanejamento={async (competenciaPlanejada) => {
+          onSalvarPlanejamento={async (dataPlanejada) => {
             if (!celulaAtiva.pacienteNome) return
             await cadastrarPlanejamento({
               pacienteNome: celulaAtiva.pacienteNome,
               itemId: celulaAtiva.item.id,
-              competenciaPlanejada,
+              competenciaPlanejada: competenciaDaData(dataPlanejada),
+              dataPlanejada,
             })
             await recalcularApuracao()
             // Mantém o painel aberto — o planejamento recém-criado já habilita
             // a próxima etapa (observação/evidência) sem forçar reabrir o modal.
           }}
-          onSalvarEntrega={async ({ status, evidencias, observacao, motivo }) => {
+          onSalvarEntrega={async ({ status, evidencias, observacao, motivo, dataEntrega }) => {
             const plano = celulaAtiva.pacienteNome ? planejamentoDe(celulaAtiva.pacienteNome, celulaAtiva.item.id) : null
-            const antecipada = plano && competencia < plano.competencia_planejada ? plano : null
+            const competenciaEntrega = competenciaDaData(dataEntrega)
+            const antecipada = plano && competenciaEntrega < plano.competencia_planejada ? plano : null
 
             await marcarEntrega({
               pacienteNome: celulaAtiva.pacienteNome,
@@ -420,16 +477,20 @@ export function PepEntregasTab() {
               observacao,
               evidencias,
               motivo,
+              competencia: competenciaEntrega,
+              dataEntrega,
             })
 
             // Regra: entrega semestral antecipada reprograma e recalcula a
             // próxima competência planejada (marco zero + 6 meses a partir da
             // competência em que foi de fato entregue).
             if (status === "entregue" && antecipada && celulaAtiva.pacienteNome) {
+              const proximaCompetencia = addMeses(competenciaEntrega, 6)
               await cadastrarPlanejamento({
                 pacienteNome: celulaAtiva.pacienteNome,
                 itemId: celulaAtiva.item.id,
-                competenciaPlanejada: addMeses(competencia, 6),
+                competenciaPlanejada: proximaCompetencia,
+                dataPlanejada: `${proximaCompetencia}-01`,
                 reprogramarDe: antecipada,
               })
             }
@@ -437,13 +498,14 @@ export function PepEntregasTab() {
             await recalcularApuracao()
             setCelulaAtiva(null)
           }}
-          onSalvarReprogramacaoImpedimento={async ({ competenciaPlanejada, motivo, evidencias }) => {
+          onSalvarReprogramacaoImpedimento={async ({ dataPlanejada, motivo, evidencias }) => {
             if (!celulaAtiva.pacienteNome) return
             const plano = planejamentoDe(celulaAtiva.pacienteNome, celulaAtiva.item.id)
             await cadastrarPlanejamento({
               pacienteNome: celulaAtiva.pacienteNome,
               itemId: celulaAtiva.item.id,
-              competenciaPlanejada,
+              competenciaPlanejada: competenciaDaData(dataPlanejada),
+              dataPlanejada,
               reprogramarDe: plano,
               origem: "reprogramacao_impedimento",
               motivo,
@@ -453,9 +515,9 @@ export function PepEntregasTab() {
             setCelulaAtiva(null)
           }}
           onExcluirEntrega={
-            registroDe(celulaAtiva.pacienteNome, celulaAtiva.item.id)
+            registroSemestralDe(celulaAtiva.pacienteNome ?? "", celulaAtiva.item.id)
               ? async (motivo) => {
-                  const registro = registroDe(celulaAtiva.pacienteNome, celulaAtiva.item.id)
+                  const registro = registroSemestralDe(celulaAtiva.pacienteNome ?? "", celulaAtiva.item.id)
                   if (!registro) return false
                   const r = await excluirRegistro({ id: registro.id, pacienteNome: celulaAtiva.pacienteNome, motivo })
                   if (r.ok) {
@@ -486,7 +548,7 @@ export function PepEntregasTab() {
       {historicoAberto && (
         <PepHistoricoModal
           prestadorNome={historicoAberto === "prestador" ? prestador : undefined}
-          catalogo={[...itensRecorrentes, ...itensSemestrais]}
+          catalogo={catalogoCompleto}
           onClose={() => setHistoricoAberto(null)}
         />
       )}
@@ -539,7 +601,7 @@ function SeletorPrestador({ analistas, prestador, onChange, onHistoricoGeral, on
   )
 }
 
-type RegistroResumo = Pick<PepRegistroEntrega, "status" | "quantidade_entregue" | "evidencias" | "observacao"> | null
+type RegistroResumo = Pick<PepRegistroEntrega, "status" | "quantidade_entregue" | "evidencias" | "observacao" | "data_entrega"> | null
 
 function temEvidencia(registro: RegistroResumo): boolean {
   return !!registro?.evidencias?.some(e => e.caminho)
@@ -575,86 +637,101 @@ function CelulaRecorrente({ item, semanasCalendario, registro, onClick, disabled
   )
 }
 
-function CelulaSemestral({ item, competencia, registro, planejamento, onClick, disabled }: {
-  item: PepCatalogoItem
-  competencia: string
-  registro: RegistroResumo
-  planejamento: PepPlanejamentoSemestral | null
-  onClick: () => void
+// PRD §7.2 — tabela por paciente das 3 entregas semestrais (OE/RT/PIC),
+// independente do mês selecionado na aba mensal. Substitui as colunas de
+// badge que existiam antes na tabela mensal.
+function TabelaSemestralPaciente({ paciente, itensSemestrais, planejamentoDe, registroSemestralDe, onAbrirPainel, disabled }: {
+  paciente: string
+  itensSemestrais: PepCatalogoItem[]
+  planejamentoDe: (pacienteNome: string, itemId: string) => PepPlanejamentoSemestral | null
+  registroSemestralDe: (pacienteNome: string, itemId: string) => RegistroResumo
+  onAbrirPainel: (item: PepCatalogoItem) => void
   disabled?: boolean
 }) {
-  if (!planejamento) {
-    return (
-      <button
-        type="button"
-        onClick={onClick}
-        disabled={disabled}
-        title={disabled ? "Faturamento liberado — reabra para editar" : `Planejar ${item.nome}`}
-        className="inline-flex items-center gap-1 rounded-lg border border-dashed border-border px-2 py-1.5 text-xs text-muted-foreground hover:bg-muted/50 disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        <CalendarPlus size={13} /> planejar
-      </button>
-    )
-  }
-
-  const entregue = registro?.status === "entregue"
-  const vencido = !entregue && competencia >= planejamento.competencia_planejada
-  const futuro = competencia < planejamento.competencia_planejada
-  const mesesAtraso = mesesEntre(planejamento.competencia_planejada, competencia)
-  // PRD 10.1: até 1 mês de atraso é "aceite postergado" normal (ajuste
-  // estorna se aceito). A partir de 2, é pendência reiterada — sinalização
-  // mais forte, risco de escalonamento contratual.
-  const reiterada = vencido && mesesAtraso >= 2
-
-  if (futuro) {
-    const reprogramado = planejamento.origem === "reprogramacao_impedimento"
-    return (
-      <span
-        className={`text-xs ${reprogramado ? "text-sky-600 dark:text-sky-400 font-medium" : "text-muted-foreground"}`}
-        title={reprogramado
-          ? `Reprogramação (REP-) vigente até ${planejamento.competencia_planejada} — sem ajuste enquanto vigente`
-          : `Planejado para ${planejamento.competencia_planejada}`}
-      >
-        {reprogramado ? "REP-" : "—"}
-      </span>
-    )
-  }
+  const hoje = competenciaDoMes(new Date())
 
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      disabled={disabled}
-      title={disabled
-        ? "Faturamento liberado — reabra para editar"
-        : reiterada
-          ? `${item.nome} — pendência reiterada há ${mesesAtraso} meses (PRD Seção 10.1: risco de inadimplemento de obrigação essencial)`
-          : `${item.nome} — planejado ${planejamento.competencia_planejada}`}
-      className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed
-        ${entregue
-          ? "border-emerald-300 bg-emerald-50 text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950 dark:text-emerald-300"
-          : reiterada
-            ? "border-rose-400 bg-rose-50 text-rose-700 dark:border-rose-800 dark:bg-rose-950 dark:text-rose-300"
-            : vencido
-              ? "border-amber-300 bg-amber-50 text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300"
-              : "border-border bg-background text-muted-foreground hover:bg-muted/50"}`}
-    >
-      {entregue ? <Check size={13} /> : vencido ? <AlertTriangle size={13} /> : null}
-      {item.sigla}
-      {temEvidencia(registro) && <Paperclip size={11} />}
-    </button>
+    <div className="rounded-2xl border border-border bg-card shadow-sm overflow-hidden">
+      <p className="px-4 py-3 text-sm font-bold text-foreground border-b border-border">{paciente}</p>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border text-left">
+            <th className="px-4 py-2 font-semibold text-muted-foreground">Documento</th>
+            <th className="px-3 py-2 font-semibold text-muted-foreground">Data planejada</th>
+            <th className="px-3 py-2 font-semibold text-muted-foreground">Data de entrega</th>
+            <th className="px-3 py-2 font-semibold text-muted-foreground">Status</th>
+            <th className="px-3 py-2 font-semibold text-muted-foreground">Link da evidência</th>
+          </tr>
+        </thead>
+        <tbody>
+          {itensSemestrais.map(item => {
+            const plano = planejamentoDe(paciente, item.id)
+            const registro = registroSemestralDe(paciente, item.id)
+            const entregue = registro?.status === "entregue"
+            const link = registro?.evidencias?.find(e => e.caminho)?.caminho ?? null
+
+            let statusLabel = "Sem planejamento"
+            let statusTone = "text-muted-foreground"
+            if (plano) {
+              if (entregue) {
+                const retroativo = !!(registro?.data_entrega && plano.data_planejada && registro.data_entrega > plano.data_planejada)
+                statusLabel = retroativo ? "Realizado (retroativo)" : "Realizado"
+                statusTone = "text-emerald-700 dark:text-emerald-400 font-medium"
+              } else {
+                const dataPlanejadaComp = plano.data_planejada ? competenciaDaData(plano.data_planejada) : plano.competencia_planejada
+                const vencido = dataPlanejadaComp <= hoje
+                const reiterada = vencido && mesesEntre(dataPlanejadaComp, hoje) >= 2
+                const reprogramado = plano.origem === "reprogramacao_impedimento" && !vencido
+                statusLabel = reprogramado ? "Reprogramado (REP-)" : reiterada ? "Pendência reiterada" : vencido ? "Vencido" : "Pendente"
+                statusTone = reprogramado
+                  ? "text-sky-600 dark:text-sky-400 font-medium"
+                  : reiterada
+                    ? "text-rose-600 dark:text-rose-400 font-bold"
+                    : vencido
+                      ? "text-amber-700 dark:text-amber-400 font-medium"
+                      : "text-muted-foreground"
+              }
+            }
+
+            return (
+              <tr
+                key={item.id}
+                onClick={() => !disabled && onAbrirPainel(item)}
+                className={`border-b border-border last:border-0 ${disabled ? "opacity-50" : "cursor-pointer hover:bg-muted/40"}`}
+                title={disabled ? "Faturamento liberado — reabra para editar" : item.nome}
+              >
+                <td className="px-4 py-2.5 font-medium text-foreground">
+                  {item.nome} <span className="text-muted-foreground">({item.sigla})</span>
+                </td>
+                <td className="px-3 py-2.5 text-foreground">{plano ? formatarDataBR(plano.data_planejada) : "—"}</td>
+                <td className="px-3 py-2.5 text-foreground">{entregue ? formatarDataBR(registro?.data_entrega) : "—"}</td>
+                <td className={`px-3 py-2.5 ${statusTone}`}>
+                  <span className="inline-flex items-center gap-1">
+                    {entregue ? <Check size={13} /> : plano && statusLabel !== "Pendente" ? <AlertTriangle size={13} /> : plano ? null : <CalendarPlus size={13} />}
+                    {plano ? statusLabel : "Planejar"}
+                  </span>
+                </td>
+                <td className="px-3 py-2.5 max-w-[240px] truncate text-muted-foreground" title={link ?? undefined}>
+                  {link ?? "—"}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
 function CabecalhoPainel({ item, pacienteNome, competencia, onFechar }: {
-  item: PepCatalogoItem; pacienteNome: string | null; competencia: string; onFechar: () => void
+  item: PepCatalogoItem; pacienteNome: string | null; competencia?: string; onFechar: () => void
 }) {
   return (
     <div className="flex items-start justify-between gap-3">
       <div>
         <p className="text-sm font-bold text-foreground">{item.nome}</p>
         <p className="text-xs text-muted-foreground">
-          {pacienteNome ?? "Geral (sem paciente)"} · Competência {competencia}
+          {pacienteNome ?? "Geral (sem paciente)"}{competencia ? ` · Competência ${competencia}` : ""}
         </p>
       </div>
       <button type="button" onClick={onFechar} className="text-muted-foreground hover:text-foreground">
@@ -733,6 +810,18 @@ function ConfirmModal({ titulo, mensagem, pedirMotivo, motivo, onMotivoChange, c
   onCancelar: () => void
 }) {
   const backdrop = useFecharAoClicarFora(onCancelar)
+  // Toda confirmação daqui dispara pelo menos um save + um recálculo de
+  // apuração — sem isso o botão parecia travado (clicável de novo, sem
+  // nenhum sinal) enquanto a promise corria por baixo.
+  const [processando, setProcessando] = useState(false)
+  async function confirmar() {
+    setProcessando(true)
+    try {
+      await onConfirmar()
+    } finally {
+      setProcessando(false)
+    }
+  }
   return (
     <div className="fixed inset-0 z-40 flex items-center justify-center bg-black/50 p-4" {...backdrop}>
       <div className="w-full max-w-xs rounded-2xl border border-border bg-card p-5 shadow-lg space-y-3" onClick={e => e.stopPropagation()}>
@@ -758,17 +847,19 @@ function ConfirmModal({ titulo, mensagem, pedirMotivo, motivo, onMotivoChange, c
           <button
             type="button"
             onClick={onCancelar}
-            className="px-3 py-1.5 rounded-lg text-xs font-bold border border-border text-foreground bg-background hover:bg-muted/50"
+            disabled={processando}
+            className="px-3 py-1.5 rounded-lg text-xs font-bold border border-border text-foreground bg-background hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed"
           >
             Cancelar
           </button>
           <button
             type="button"
-            disabled={confirmDisabled || (pedirMotivo && !motivo.trim())}
-            onClick={onConfirmar}
-            className={`px-3 py-1.5 rounded-lg text-xs font-bold text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed ${perigo ? "bg-rose-600" : "bg-emerald-600"}`}
+            disabled={confirmDisabled || processando || (pedirMotivo && !motivo.trim())}
+            onClick={confirmar}
+            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed ${perigo ? "bg-rose-600" : "bg-emerald-600"}`}
           >
-            {confirmLabel}
+            {processando && <Loader2 size={12} className="animate-spin" />}
+            {processando ? "Aguarde…" : confirmLabel}
           </button>
         </div>
       </div>
@@ -800,6 +891,7 @@ function PainelQuantidade({ pacienteNome, item, competencia, semanasCalendario, 
   const [observacao, setObservacao] = useState(registro?.observacao ?? "")
   const [confirmando, setConfirmando] = useState<"salvar" | "excluir" | null>(null)
   const [motivo, setMotivo] = useState("")
+  const [salvandoDireto, setSalvandoDireto] = useState(false)
   const jaExiste = !!registro
   const backdrop = useFecharAoClicarFora(onFechar)
 
@@ -807,6 +899,18 @@ function PainelQuantidade({ pacienteNome, item, competencia, semanasCalendario, 
     const clamped = Math.max(0, Math.min(esperado, nova))
     setQuantidade(clamped)
     setEvidencias(prev => normalizarEvidencias(prev, Math.max(1, clamped)))
+  }
+
+  // Sem confirmação prévia (registro novo) — o próprio botão precisa avisar
+  // que está em andamento, senão o clique parece não ter feito nada durante
+  // o save + recálculo de apuração por baixo.
+  async function salvarDireto() {
+    setSalvandoDireto(true)
+    try {
+      await onSalvar({ quantidadeEntregue: quantidade, evidencias: limparEvidencias(evidencias), observacao: observacao || null })
+    } finally {
+      setSalvandoDireto(false)
+    }
   }
 
   return (
@@ -859,11 +963,12 @@ function PainelQuantidade({ pacienteNome, item, competencia, semanasCalendario, 
         <div className="flex flex-wrap items-center gap-2 pt-2">
           <button
             type="button"
-            disabled={quantidade > 0 && !evidenciasCompletas(evidencias, quantidade)}
-            onClick={() => jaExiste ? setConfirmando("salvar") : onSalvar({ quantidadeEntregue: quantidade, evidencias: limparEvidencias(evidencias), observacao: observacao || null })}
+            disabled={salvandoDireto || (quantidade > 0 && !evidenciasCompletas(evidencias, quantidade))}
+            onClick={() => jaExiste ? setConfirmando("salvar") : salvarDireto()}
             className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white bg-emerald-600 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:opacity-40"
           >
-            <Check size={14} /> Salvar quantidade
+            {salvandoDireto ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+            {salvandoDireto ? "Salvando…" : "Salvar quantidade"}
           </button>
           {jaExiste && onExcluir && (
             <button
@@ -913,65 +1018,76 @@ function PainelQuantidade({ pacienteNome, item, competencia, semanasCalendario, 
   )
 }
 
-function PainelSemestral({ pacienteNome, item, competencia, registro, planejamento, erro, onFechar, onSalvarPlanejamento, onSalvarEntrega, onSalvarReprogramacaoImpedimento, onExcluirEntrega, onExcluirPlanejamento }: {
+function PainelSemestral({ pacienteNome, item, registro, planejamento, erro, onFechar, onSalvarPlanejamento, onSalvarEntrega, onSalvarReprogramacaoImpedimento, onExcluirEntrega, onExcluirPlanejamento }: {
   pacienteNome: string | null
   item: PepCatalogoItem
-  competencia: string
   registro: (RegistroResumo & { observacao?: string | null }) | null
   planejamento: PepPlanejamentoSemestral | null
   erro?: string | null
   onFechar: () => void
-  onSalvarPlanejamento: (competenciaPlanejada: string) => void | Promise<void>
+  onSalvarPlanejamento: (dataPlanejada: string) => void | Promise<void>
   onSalvarEntrega: (input: {
     status: "pendente" | "entregue"
     evidencias: PepEvidencia[]
     observacao: string | null
     motivo?: string | null
+    dataEntrega: string
   }) => void | Promise<void>
   onSalvarReprogramacaoImpedimento: (input: {
-    competenciaPlanejada: string
+    dataPlanejada: string
     motivo: string
     evidencias: PepEvidencia[]
   }) => void | Promise<void>
   onExcluirEntrega?: (motivo: string) => boolean | Promise<boolean>
   onExcluirPlanejamento?: (motivo: string) => boolean | Promise<boolean>
 }) {
+  const hojeISO = new Date().toISOString().slice(0, 10)
   const [evidencias, setEvidencias] = useState<PepEvidencia[]>(normalizarEvidencias(registro?.evidencias ?? [], 1))
   const [observacao, setObservacao] = useState(registro?.observacao ?? "")
-  const [competenciaPlanejada, setCompetenciaPlanejada] = useState(planejamento?.competencia_planejada ?? competencia)
+  const [dataPlanejadaInput, setDataPlanejadaInput] = useState(planejamento?.data_planejada ?? "")
+  const [dataEntregaInput, setDataEntregaInput] = useState(registro?.data_entrega ?? hojeISO)
   const [mostrarRep, setMostrarRep] = useState(false)
-  const [repCompetencia, setRepCompetencia] = useState(planejamento?.competencia_planejada ?? competencia)
+  const [repDataPlanejada, setRepDataPlanejada] = useState(planejamento?.data_planejada ?? "")
   const [repMotivo, setRepMotivo] = useState("")
   const [repEvidencias, setRepEvidencias] = useState<PepEvidencia[]>(normalizarEvidencias([], 1))
   const [confirmando, setConfirmando] = useState<"salvar" | "excluirEntrega" | "excluirPlanejamento" | null>(null)
   const [motivo, setMotivo] = useState("")
+  // Ações diretas (sem passar por ConfirmModal) que ainda assim disparam
+  // save + recálculo de apuração por baixo — sem isso o botão parecia
+  // travado durante essa espera.
+  const [salvandoDireto, setSalvandoDireto] = useState(false)
   const jaExiste = !!registro
   const backdrop = useFecharAoClicarFora(onFechar)
+
+  async function executarDireto(acao: () => void | Promise<void>) {
+    setSalvandoDireto(true)
+    try {
+      await acao()
+    } finally {
+      setSalvandoDireto(false)
+    }
+  }
 
   if (!planejamento) {
     return (
       <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" {...backdrop}>
         <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-lg space-y-4" onClick={e => e.stopPropagation()}>
-          <CabecalhoPainel item={item} pacienteNome={pacienteNome} competencia={competencia} onFechar={onFechar} />
+          <CabecalhoPainel item={item} pacienteNome={pacienteNome} onFechar={onFechar} />
           <div className="space-y-2 border-t border-border pt-3">
-            <label htmlFor="pep-plano-competencia" className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-              Competência planejada
+            <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Data planejada
             </label>
-            <input
-              id="pep-plano-competencia"
-              type="month"
-              value={competenciaPlanejada}
-              onChange={e => setCompetenciaPlanejada(e.target.value)}
-              className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm"
-            />
+            <DatePicker value={dataPlanejadaInput} onChange={setDataPlanejadaInput} />
           </div>
           <div className="flex flex-wrap gap-2 pt-2">
             <button
               type="button"
-              onClick={() => onSalvarPlanejamento(competenciaPlanejada)}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white bg-[#222847] dark:bg-slate-600 hover:opacity-90"
+              disabled={salvandoDireto || !dataPlanejadaInput}
+              onClick={() => executarDireto(() => onSalvarPlanejamento(dataPlanejadaInput))}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white bg-[#222847] dark:bg-slate-600 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
             >
-              <CalendarPlus size={14} /> Salvar planejamento
+              {salvandoDireto ? <Loader2 size={14} className="animate-spin" /> : <CalendarPlus size={14} />}
+              {salvandoDireto ? "Salvando…" : "Salvar planejamento"}
             </button>
           </div>
         </div>
@@ -982,10 +1098,10 @@ function PainelSemestral({ pacienteNome, item, competencia, registro, planejamen
   return (
     <div className="fixed inset-0 z-30 flex items-center justify-center bg-black/40 p-4" {...backdrop}>
       <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-5 shadow-lg space-y-4 max-h-[90vh] overflow-y-auto" onClick={e => e.stopPropagation()}>
-        <CabecalhoPainel item={item} pacienteNome={pacienteNome} competencia={competencia} onFechar={onFechar} />
+        <CabecalhoPainel item={item} pacienteNome={pacienteNome} onFechar={onFechar} />
         <div className="flex items-center justify-between gap-2 border-t border-border pt-3">
           <p className="text-xs text-muted-foreground">
-            Planejado para {planejamento.competencia_planejada}
+            Planejado para {formatarDataBR(planejamento.data_planejada)}
           </p>
           {onExcluirPlanejamento && (
             <button
@@ -998,6 +1114,15 @@ function PainelSemestral({ pacienteNome, item, competencia, registro, planejamen
             </button>
           )}
         </div>
+
+        {!jaExiste && (
+          <div className="space-y-1.5">
+            <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+              Data de entrega
+            </label>
+            <DatePicker value={dataEntregaInput} onChange={setDataEntregaInput} />
+          </div>
+        )}
 
         <CamposEvidencia evidencias={evidencias} onChange={setEvidencias} rotulo={() => "Referência da evidência"} />
 
@@ -1023,19 +1148,21 @@ function PainelSemestral({ pacienteNome, item, competencia, registro, planejamen
         <div className="flex flex-wrap items-center gap-2 pt-2">
           <button
             type="button"
-            disabled={!evidenciasCompletas(evidencias, 1)}
+            disabled={salvandoDireto || !evidenciasCompletas(evidencias, 1) || !dataEntregaInput}
             onClick={() => jaExiste
               ? setConfirmando("salvar")
-              : onSalvarEntrega({ status: "entregue", evidencias: limparEvidencias(evidencias), observacao: observacao || null })}
+              : executarDireto(() => onSalvarEntrega({ status: "entregue", evidencias: limparEvidencias(evidencias), observacao: observacao || null, dataEntrega: dataEntregaInput }))}
             className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white bg-emerald-600 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed disabled:hover:opacity-40"
           >
-            <Check size={14} /> Marcar entregue
+            {salvandoDireto ? <Loader2 size={14} className="animate-spin" /> : <Check size={14} />}
+            {salvandoDireto ? "Salvando…" : "Marcar entregue"}
           </button>
           {registro?.status === "entregue" && (
             <button
               type="button"
-              onClick={() => onSalvarEntrega({ status: "pendente", evidencias: [], observacao: observacao || null })}
-              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold border border-border text-foreground bg-background hover:bg-muted/50"
+              disabled={salvandoDireto}
+              onClick={() => executarDireto(() => onSalvarEntrega({ status: "pendente", evidencias: [], observacao: observacao || null, dataEntrega: dataEntregaInput }))}
+              className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold border border-border text-foreground bg-background hover:bg-muted/50 disabled:opacity-40 disabled:cursor-not-allowed"
             >
               Desfazer
             </button>
@@ -1064,19 +1191,13 @@ function PainelSemestral({ pacienteNome, item, competencia, registro, planejamen
             {mostrarRep && (
               <div className="space-y-3 rounded-xl border border-dashed border-border p-3">
                 <p className="text-[11px] text-muted-foreground">
-                  PRD Seção 9.7 — aceito o relatório de reprogramação, o ajuste fica suspenso até a nova competência planejada.
+                  PRD Seção 9.7 — aceito o relatório de reprogramação, o ajuste fica suspenso até a nova data planejada.
                 </p>
                 <div className="space-y-1.5">
-                  <label htmlFor="pep-rep-competencia" className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    Nova competência planejada
+                  <label className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider">
+                    Nova data planejada
                   </label>
-                  <input
-                    id="pep-rep-competencia"
-                    type="month"
-                    value={repCompetencia}
-                    onChange={e => setRepCompetencia(e.target.value)}
-                    className="w-full rounded-lg border border-border bg-background px-3 py-1.5 text-sm"
-                  />
+                  <DatePicker value={repDataPlanejada} onChange={setRepDataPlanejada} />
                 </div>
                 <div className="space-y-1.5">
                   <label htmlFor="pep-rep-motivo" className="block text-xs font-semibold text-muted-foreground uppercase tracking-wider">
@@ -1093,19 +1214,20 @@ function PainelSemestral({ pacienteNome, item, competencia, registro, planejamen
                 <CamposEvidencia
                   evidencias={repEvidencias}
                   onChange={setRepEvidencias}
-                  rotulo={() => `Referência do relatório (ex.: REP-${item.sigla}-PACIENTE-${repCompetencia.replace("-", "")})`}
+                  rotulo={() => `Referência do relatório (ex.: REP-${item.sigla}-PACIENTE-${repDataPlanejada.replace(/-/g, "").slice(2)})`}
                 />
                 <button
                   type="button"
-                  disabled={!repMotivo.trim() || !evidenciasCompletas(repEvidencias, 1)}
-                  onClick={() => onSalvarReprogramacaoImpedimento({
-                    competenciaPlanejada: repCompetencia,
+                  disabled={salvandoDireto || !repMotivo.trim() || !repDataPlanejada || !evidenciasCompletas(repEvidencias, 1)}
+                  onClick={() => executarDireto(() => onSalvarReprogramacaoImpedimento({
+                    dataPlanejada: repDataPlanejada,
                     motivo: repMotivo.trim(),
                     evidencias: limparEvidencias(repEvidencias),
-                  })}
+                  }))}
                   className="flex items-center gap-1.5 px-4 py-2 rounded-xl text-sm font-bold text-white bg-[#222847] dark:bg-slate-600 hover:opacity-90 disabled:opacity-40 disabled:cursor-not-allowed"
                 >
-                  <CalendarPlus size={14} /> Aceitar reprogramação
+                  {salvandoDireto ? <Loader2 size={14} className="animate-spin" /> : <CalendarPlus size={14} />}
+                  {salvandoDireto ? "Salvando…" : "Aceitar reprogramação"}
                 </button>
               </div>
             )}
@@ -1123,7 +1245,7 @@ function PainelSemestral({ pacienteNome, item, competencia, registro, planejamen
           confirmLabel="Salvar alterações"
           onCancelar={() => setConfirmando(null)}
           onConfirmar={async () => {
-            await onSalvarEntrega({ status: "entregue", evidencias: limparEvidencias(evidencias), observacao: observacao || null, motivo })
+            await onSalvarEntrega({ status: "entregue", evidencias: limparEvidencias(evidencias), observacao: observacao || null, motivo, dataEntrega: dataEntregaInput })
             setConfirmando(null)
           }}
         />

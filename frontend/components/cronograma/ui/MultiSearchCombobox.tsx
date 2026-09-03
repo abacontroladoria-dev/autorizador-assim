@@ -6,8 +6,16 @@
 // document "mousedown" já usado em OcupPacMode.tsx, aqui via ref.contains).
 // Diferente de SearchCombobox (seleção única, fecha ao escolher), este
 // permanece aberto entre marcações — só fecha por clique fora ou Escape.
+//
+// O painel é um portal pra document.body, posicionado por getBoundingClientRect
+// do gatilho: um `<select>` nativo escapa do layout da página inteira, mas um
+// `absolute` comum fica preso ao ancestral posicionado mais próximo — dentro de
+// um cartão com `overflow-hidden` (ex.: bloco de profissional em
+// ContratosCadastro.tsx), o painel era cortado na borda do cartão e a 2ª+
+// opção da lista sumia sem aviso nenhum.
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { createPortal } from "react-dom"
 import { ChevronDown } from "lucide-react"
 
 // `Id` é genérico (default number, como os ids numéricos de terapia/especialidade
@@ -45,12 +53,44 @@ export function MultiSearchCombobox<Id extends string | number = number>({ opcoe
   const [aberto, setAberto] = useState(false)
   const [texto, setTexto] = useState("")
   const wrapperRef = useRef<HTMLDivElement>(null)
+  const dropdownRef = useRef<HTMLDivElement>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const [pos, setPos] = useState<{ top: number; left: number; width: number } | null>(null)
+
+  // Recalcula em `position: fixed` (relativo à viewport, igual getBoundingClientRect)
+  // — evita ter que somar scroll de containers intermediários, que é o que
+  // `absolute` dentro de um ancestral com overflow exigiria pra funcionar certo.
+  const reposicionar = () => {
+    const r = wrapperRef.current?.getBoundingClientRect()
+    if (r) setPos({ top: r.bottom + 2, left: r.left, width: r.width })
+  }
+
+  useLayoutEffect(() => {
+    if (aberto) reposicionar()
+    else setPos(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aberto])
+
+  useEffect(() => {
+    if (!aberto) return
+    // `capture: true` pega scroll de QUALQUER container intermediário (a lista
+    // de contratos, o card do profissional), não só o da window.
+    window.addEventListener("scroll", reposicionar, true)
+    window.addEventListener("resize", reposicionar)
+    return () => {
+      window.removeEventListener("scroll", reposicionar, true)
+      window.removeEventListener("resize", reposicionar)
+    }
+  }, [aberto])
 
   useEffect(() => {
     if (!aberto) return
     const fechar = (e: MouseEvent) => {
-      if (wrapperRef.current?.contains(e.target as Node)) return
+      const alvo = e.target as Node
+      // O painel vive num portal: não é descendente de wrapperRef no DOM, por
+      // isso precisa do próprio contains — senão todo clique nele (inclusive
+      // marcar um checkbox) seria lido como "clique fora" e fecharia na hora.
+      if (wrapperRef.current?.contains(alvo) || dropdownRef.current?.contains(alvo)) return
       setAberto(false)
     }
     document.addEventListener("mousedown", fechar)
@@ -97,12 +137,14 @@ export function MultiSearchCombobox<Id extends string | number = number>({ opcoe
         <ChevronDown size={14} className={`shrink-0 transition-transform ${plano ? "opacity-60" : "text-muted-foreground"} ${aberto ? "rotate-180" : ""}`} />
       </button>
 
-      {aberto && (
+      {aberto && pos && createPortal(
         <div
+          ref={dropdownRef}
           role="listbox"
           aria-label={ariaLabel}
           aria-multiselectable="true"
-          className="absolute left-0 right-0 top-[calc(100%+2px)] z-[100] flex max-h-72 flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-lg"
+          style={{ position: "fixed", top: pos.top, left: pos.left, width: pos.width }}
+          className="z-[100] flex max-h-72 flex-col overflow-hidden rounded-lg border border-border bg-popover shadow-lg"
         >
           <input
             ref={inputRef}
@@ -133,7 +175,8 @@ export function MultiSearchCombobox<Id extends string | number = number>({ opcoe
               )
             })}
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   )
