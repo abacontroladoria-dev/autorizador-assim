@@ -39,7 +39,8 @@ export default function GeneratedPasswordReveal({
 
   async function handleCopyInfo() {
     const texto = [
-      'Acesso ao Sistema PULSAR',
+      '🔐 **Acesso ao Sistema PULSAR**',
+      '',
       `Link: ${SISTEMA_URL}`,
       `Usuário: ${username || email || '-'}`,
       `Senha: ${password}`,
