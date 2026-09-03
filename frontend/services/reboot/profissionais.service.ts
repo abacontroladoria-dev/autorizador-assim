@@ -1,8 +1,8 @@
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { getUsuarioAtual } from "@/lib/supabase/usuarioAtual"
-import type { Database } from "@/types/supabase"
+import type { RebootProfissionalRow } from "@/types/reboot"
 
-export type RebootProfissional = Database["public"]["Tables"]["reboot_profissionais"]["Row"]
+export type RebootProfissional = RebootProfissionalRow
 
 export type ProfissionalEdit = {
   id_profissional?: number

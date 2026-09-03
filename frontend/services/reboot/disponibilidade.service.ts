@@ -1,8 +1,8 @@
 import { getSupabaseClient } from "@/lib/supabase/client"
 import { getUsuarioAtual } from "@/lib/supabase/usuarioAtual"
-import type { Database } from "@/types/supabase"
+import type { RebootDisponibilidadeRow } from "@/types/reboot"
 
-export type RebootDisponibilidade = Database["public"]["Tables"]["reboot_disponibilidade_profissional"]["Row"]
+export type RebootDisponibilidade = RebootDisponibilidadeRow
 
 export type DisponibilidadeEdit = {
   dia_semana: number
