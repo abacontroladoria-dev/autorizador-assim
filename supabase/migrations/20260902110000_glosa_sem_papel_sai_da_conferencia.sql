@@ -94,9 +94,23 @@
 --   from public.get_tokens_mensal('2026-08-01')
 --   where bloco_id = '11548_2026-08-31_22070384_13:40:00';
 --
--- CONFERÊNCIA 2 — as 19 de julho sobrevivem (esperado: 19)
+-- CONFERÊNCIA 2 — as sem-resposta de julho sobrevivem (esperado: 49 no dia,
+-- das quais 19 são RETORNO_NAO_CONFIRMADO — estas são as que o gate errado
+-- mataria; as outras 30 são LIBERADA e nunca estiveram em risco).
+--
+-- Medido em produção 2026-09-03, depois de aplicar: 49 no dia, 19 + 30.
+-- Contar só o dia dá 49, NÃO 19 — 19 é o subconjunto sem resposta da ASSIM.
 --   select count(*) from public.get_tokens_mensal('2026-07-01')
 --   where data_atendimento = '2026-07-14';
+--
+-- Para isolar as 19 (o subconjunto que importa), cruze com a RPC diária:
+--   with c as (select * from public.get_tokens_mensal('2026-07-01')
+--              where data_atendimento = '2026-07-14')
+--   select a.situacao, count(*)
+--   from c join public.get_auditoria_assim_periodo('2026-07-14','2026-07-14') a
+--     on a.bloco_id = c.bloco_id
+--   group by a.situacao;
+--   -- esperado: RETORNO_NAO_CONFIRMADO 19, LIBERADA 30
 --
 -- CONTRAPROVA (esperado: diferença de exatamente 1 em agosto, medida na mesma
 -- sessão para o número não drifar entre as duas leituras)

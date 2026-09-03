@@ -476,16 +476,26 @@ async function sincronizarData(
         // `!= null` nas duas pontas: nunca troca plano bom por nulo. A ausência
         // do vínculo no payload é lacuna de leitura, não desligamento de plano —
         // mesma cautela que o CPF/nascimento acima já tomam.
-        const precisaConvNome = convNomeNovo != null && convNomeNovo !== existente.convenio_nome
-        const precisaConvId   = convIdNovo   != null && convIdNovo   !== existente.convenio_id
+        //
+        // ATOMICO, e isso é o ponto: nome e id descrevem UM fato (qual plano),
+        // então ou os dois entram ou nenhum entra. Avaliá-los de forma
+        // independente deixa a linha incoerente quando só um vem preenchido —
+        // foi o que aconteceu em 01/09/2026 com o Benício Calheiros (11542),
+        // onde a TiTa devolveu o payload SEM `vinc_fav_clinica`: 3 linhas
+        // gravaram `LEVE SAUDE` com `convenio_id` 930 (nome novo, id velho),
+        // um par que não existe no cadastro e que nenhuma tela sabe ler.
+        const convCompleto = convNomeNovo != null && convIdNovo != null
+        const precisaConvenio =
+          convCompleto &&
+          (convNomeNovo !== existente.convenio_nome || convIdNovo !== existente.convenio_id)
 
-        if (precisaCpf || precisaNasc || precisaConvNome || precisaConvId) {
+        if (precisaCpf || precisaNasc || precisaConvenio) {
           atualizarDemografia.push({
             id: existente.id,
             cpf: precisaCpf ? cpfNovo : undefined,
             data_nascimento: precisaNasc ? nascNovo : undefined,
-            convenio_id: precisaConvId ? convIdNovo : undefined,
-            convenio_nome: precisaConvNome ? convNomeNovo : undefined,
+            convenio_id: precisaConvenio ? convIdNovo : undefined,
+            convenio_nome: precisaConvenio ? convNomeNovo : undefined,
             raw_json: reg.raw_json,
           })
         }
