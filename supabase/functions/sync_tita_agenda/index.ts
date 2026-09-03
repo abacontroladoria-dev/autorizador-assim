@@ -400,7 +400,7 @@ async function sincronizarData(
   // Busca registros ativos existentes para esta data
   const { data: existentes, error: fetchError } = await supabase
     .from("agenda_tita")
-    .select("id, tita_agendamento_id, paciente_id, profissional_id, terapia_id, sala_id, hora_inicial, hora_final, cpf, data_nascimento, numero_carteirinha")
+    .select("id, tita_agendamento_id, paciente_id, profissional_id, terapia_id, sala_id, hora_inicial, hora_final, cpf, data_nascimento, numero_carteirinha, convenio_id, convenio_nome")
     .eq("data_atendimento", data)
     .eq("ativo", true)
 
@@ -418,6 +418,8 @@ async function sincronizarData(
     id: number
     cpf?: string | null
     data_nascimento?: string | null
+    convenio_id?: number | null
+    convenio_nome?: string | null
     raw_json: unknown
   }> = []
 
@@ -440,21 +442,50 @@ async function sincronizarData(
         inutilizarAlterado.push(existente.id)
         novos.push(reg)
       } else {
-        // Sem mudança estrutural: NÃO reinsere. Mas refresca a demografia se a
-        // TiTa trouxe valor não-nulo diferente do armazenado — o cadastro pode
-        // ter sido corrigido na origem depois da 1ª captura (CPF trocado,
-        // nascimento ajustado). Sem isso, linhas antigas ficam congeladas para
-        // sempre com o valor velho/nulo e o /solicitar mostra dado divergente.
+        // Sem mudança estrutural: NÃO reinsere. Mas refresca o cadastro se a
+        // TiTa trouxe valor não-nulo diferente do armazenado — ele pode ter sido
+        // corrigido na origem depois da 1ª captura (CPF trocado, nascimento
+        // ajustado, plano de saúde alterado). Sem isso, linhas antigas ficam
+        // congeladas para sempre com o valor velho/nulo e o /solicitar mostra
+        // dado divergente.
         const cpfNovo  = reg.cpf as string | null            // já normalizado (só dígitos)
         const nascNovo = reg.data_nascimento as string | null // ISO YYYY-MM-DD
         const precisaCpf  = cpfNovo  != null && cpfNovo  !== apenasDigitos(existente.cpf)
         const precisaNasc = nascNovo != null && nascNovo !== isoData(existente.data_nascimento)
 
-        if (precisaCpf || precisaNasc) {
+        // O convênio segue a MESMA regra, e pelo mesmo motivo: ele não entra no
+        // `mudou` acima (que só olha campos estruturais — paciente, profissional,
+        // terapia, sala, horário), então uma troca de plano no cadastro do TiTa
+        // não reinseria a linha e não era refrescada por ninguém. A linha ficava
+        // congelada com o plano antigo até ser reagendada por outro motivo.
+        //
+        // CASO REAL (2026-09-02): BENÍCIO CALHEIROS DE OLIVEIRA BRITO (11542)
+        // mudou de ASSIM Saúde para LEVE SAUDE a partir de setembro. O TiTa foi
+        // atualizado em 27/08 (o MESMO vínculo 19714 editado no lugar, plano 930
+        // -> 932, carteirinha inalterada), mas as 23 sessões de setembro já
+        // existentes seguiam "ASSIM Saúde" no Pulsar — só outubro, criado depois
+        // da troca, nasceu com LEVE. Medidos no mesmo dia: 4 pacientes e 36
+        // sessões com plano divergente nos 12 dias úteis seguintes.
+        //
+        // Por que isso é grave e não cosmético: `convenio_nome ILIKE '%assim%'`
+        // é o filtro de entrada da auditoria ASSIM e da fila de autorização.
+        // Plano velho = sessão de outro convênio entrando na régua da ASSIM,
+        // pedindo autorização que não existe e contando glosa que não é dela.
+        const convIdNovo   = reg.convenio_id   as number | null
+        const convNomeNovo = reg.convenio_nome as string | null
+        // `!= null` nas duas pontas: nunca troca plano bom por nulo. A ausência
+        // do vínculo no payload é lacuna de leitura, não desligamento de plano —
+        // mesma cautela que o CPF/nascimento acima já tomam.
+        const precisaConvNome = convNomeNovo != null && convNomeNovo !== existente.convenio_nome
+        const precisaConvId   = convIdNovo   != null && convIdNovo   !== existente.convenio_id
+
+        if (precisaCpf || precisaNasc || precisaConvNome || precisaConvId) {
           atualizarDemografia.push({
             id: existente.id,
             cpf: precisaCpf ? cpfNovo : undefined,
             data_nascimento: precisaNasc ? nascNovo : undefined,
+            convenio_id: precisaConvId ? convIdNovo : undefined,
+            convenio_nome: precisaConvNome ? convNomeNovo : undefined,
             raw_json: reg.raw_json,
           })
         }
@@ -547,23 +578,34 @@ async function sincronizarData(
     }
   }
 
-  // Refresca CPF/nascimento de linhas existentes cujo valor na TiTa mudou.
-  // Só grava o que realmente diferiu (nunca sobrescreve valor bom com nulo) e
-  // reatualiza o raw_json para o próximo diff ser fiel.
+  // Refresca CPF/nascimento/convênio de linhas existentes cujo valor na TiTa
+  // mudou. Só grava o que realmente diferiu (nunca sobrescreve valor bom com
+  // nulo) e reatualiza o raw_json para o próximo diff ser fiel.
+  let convenioRefrescado = 0
   for (const item of atualizarDemografia) {
     const upd: Record<string, unknown> = { updated_at: agora, raw_json: item.raw_json }
     if (item.cpf !== undefined)             upd.cpf = item.cpf
     if (item.data_nascimento !== undefined) upd.data_nascimento = item.data_nascimento
+    if (item.convenio_id !== undefined)     upd.convenio_id = item.convenio_id
+    if (item.convenio_nome !== undefined)   upd.convenio_nome = item.convenio_nome
     const { error } = await supabase
       .from("agenda_tita")
       .update(upd)
       .eq("id", item.id)
     if (error) {
       console.warn(`[sync_tita_agenda] Erro ao refrescar demografia ID ${item.id}:`, error)
+    } else if (item.convenio_nome !== undefined) {
+      // Troca de plano é evento de faturamento: fica no log com o valor novo,
+      // para o dia em que alguém perguntar quando a linha virou.
+      convenioRefrescado++
+      console.log(`[sync_tita_agenda] 🔁 Convênio atualizado (ID ${item.id}): -> ${item.convenio_nome}`)
     }
   }
   if (atualizarDemografia.length > 0) {
-    console.log(`[sync_tita_agenda] 🔄 Demografia atualizada: ${atualizarDemografia.length} linha(s) para ${data}`)
+    console.log(
+      `[sync_tita_agenda] 🔄 Demografia atualizada: ${atualizarDemografia.length} linha(s) para ${data}` +
+        (convenioRefrescado > 0 ? ` (${convenioRefrescado} com troca de convênio)` : ""),
+    )
   }
 
   return incoming.size
