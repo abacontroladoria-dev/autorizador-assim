@@ -370,6 +370,215 @@ function montarMencoes(usuarios: unknown, textoAntigo: string | null): string | 
   return textoAntigo?.trim() || null;
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// O CAMINHO DO ZAPIER: publicar como ClickBot
+// ─────────────────────────────────────────────────────────────────────────────
+// Pelo caminho direto (abaixo) o autor da mensagem é a PESSOA dona do
+// CLICKUP_TOKEN — a API de Chat v3 não tem campo de autor. Quem lê o canal
+// responde a essa pessoa, que não escreveu nada.
+//
+// O conector oficial do ClickUp no Zapier resolve: a action `createChatMessage`
+// aceita `send_as_bot`, e com ele a mensagem sai como **ClickBot**. Comprovado
+// em 2026-09-03 por HTTP puro, sem SDK.
+//
+// TRÊS COISAS QUE CUSTARAM CARO PARA DESCOBRIR E NÃO ESTÃO EM DOCUMENTAÇÃO
+// NENHUMA (o caminho completo está em supabase/snippets/zapier-clickbot-*.mjs):
+//
+// 1. A URL. O `ACTION_RUNS_PATH` do SDK — "/zapier/api/actions/v1/runs" — NÃO é
+//    uma URL: é uma chave de roteamento. O SDK remove o prefixo "/zapier",
+//    troca por "/api/v0/sdk/zapier" e manda para o subdomínio `sdkapi`. Postar
+//    na concatenação ingênua (zapier.com + o path) dá 405 — é o site
+//    institucional respondendo, não a API.
+//
+// 2. `audience: "zapier.com"` é obrigatório na troca de client credentials, e
+//    não aparece em nenhum exemplo publicado.
+//
+// 3. O header depende do FORMATO do token, não do `token_type` da resposta: se
+//    tiver três segmentos base64url é `JWT `, senão `Bearer `. Hoje volta
+//    opaco (Bearer), mas o SDK decide por inspeção e nós fazemos igual — se um
+//    dia virar JWT, isto continua funcionando.
+//
+// E o principal: `send_as_bot` NÃO ESTÁ no schema público da action. Ele chega
+// ao conector porque `inputs` é repassado cru, sem validação. Some sem aviso se
+// o Zapier apertar isso um dia — daí o fallback.
+
+const ZAPIER_TOKEN_URL = "https://zapier.com/oauth/token/";
+const ZAPIER_RUNS_URL =
+  "https://sdkapi.zapier.com/api/v0/sdk/zapier/api/actions/v1/runs";
+
+const ZAPIER_CLIENT_ID = Deno.env.get("ZAPIER_CLIENT_ID");
+const ZAPIER_CLIENT_SECRET = Deno.env.get("ZAPIER_CLIENT_SECRET");
+
+/**
+ * Teto do polling por aviso. O SDK usa 180s; aqui é menor de propósito: são até
+ * 20 avisos por rodada e o cron roda a cada 5 min, então esperar 3 min por um
+ * único aviso deixaria a fila parada.
+ *
+ * MAS O FALLBACK AQUI NÃO É DE GRAÇA, e isso custou uma duplicata no canal para
+ * ficar claro (03/09/2026, teste com a linha 4741): o run já tinha CRIADO a
+ * mensagem quando o polling desistiu, e o fallback publicou a segunda. Ou seja,
+ * timeout curto não significa "aviso não entregue" — significa "não sei se foi",
+ * e reenviar por via das dúvidas duplica.
+ *
+ * Daí 60s: o run observado leva ~1-2s, então 60s só é atingido quando algo está
+ * de fato quebrado, e não quando o Zapier está apenas lento. Não elimina a
+ * corrida (nada elimina, sem um id de dedup que a action não devolve), mas a
+ * torna rara o suficiente para o fallback continuar valendo a pena.
+ */
+const ZAPIER_POLL_TIMEOUT_MS = 60_000;
+const ZAPIER_POLL_INTERVAL_MS = 1_000;
+
+/**
+ * Token em memória, reaproveitado entre avisos da mesma execução (e entre
+ * execuções, enquanto a instância estiver quente). Vale 10h; renovamos com 5 min
+ * de folga para não usar um token que expira no meio do polling.
+ */
+let zapierTokenCache: { token: string; expiraEm: number } | null = null;
+
+/** Mesmo critério do SDK (getAuthorizationHeader). */
+function ehJwt(token: string): boolean {
+  const partes = token.split(".");
+  return partes.length === 3 &&
+    partes.every((p) => p.length > 0 && /^[A-Za-z0-9_-]+$/.test(p));
+}
+
+async function obterTokenZapier(): Promise<string> {
+  const agora = Date.now();
+  if (zapierTokenCache && zapierTokenCache.expiraEm > agora) {
+    return zapierTokenCache.token;
+  }
+
+  const res = await fetch(ZAPIER_TOKEN_URL, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/x-www-form-urlencoded",
+      Accept: "application/json",
+    },
+    body: new URLSearchParams({
+      grant_type: "client_credentials",
+      client_id: ZAPIER_CLIENT_ID!,
+      client_secret: ZAPIER_CLIENT_SECRET!,
+      scope: "external",
+      audience: "zapier.com",
+    }),
+  });
+
+  if (!res.ok) {
+    throw new Error(`Zapier token ${res.status}: ${(await res.text()).slice(0, 300)}`);
+  }
+
+  const corpo = await res.json();
+  if (!corpo?.access_token) throw new Error("Zapier token: resposta sem access_token");
+
+  const validadeSegundos = Number(corpo.expires_in ?? 3600);
+  zapierTokenCache = {
+    token: corpo.access_token,
+    expiraEm: agora + Math.max(0, validadeSegundos - 300) * 1000,
+  };
+
+  return zapierTokenCache.token;
+}
+
+function headersZapier(token: string) {
+  return {
+    Authorization: `${ehJwt(token) ? "JWT" : "Bearer"} ${token}`,
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    // Identifica esta chamada nos logs do Zapier em vez de ela aparecer como
+    // cliente anônimo.
+    "zapier-sdk-version": "0.107.0",
+  };
+}
+
+type ConfigZapier = {
+  workspaceId: string;
+  channelId: string;
+  connectionId: string;
+  selectedApi: string;
+};
+
+/**
+ * Publica via Zapier. Assíncrono: cria o run (202 + id) e faz polling até o
+ * status sair de "waiting".
+ *
+ * ARMADILHA: `errors` não-vazio significa falha DA ACTION mesmo com HTTP 200 —
+ * é assim que "View not found" aparece. Tratar 200 como sucesso publicaria um
+ * "enviado" para uma mensagem que nunca existiu.
+ */
+async function enviarViaZapier(cfg: ConfigZapier, conteudo: string) {
+  const token = await obterTokenZapier();
+
+  const criacao = await fetch(ZAPIER_RUNS_URL, {
+    method: "POST",
+    headers: headersZapier(token),
+    body: JSON.stringify({
+      data: {
+        selected_api: cfg.selectedApi,
+        action_key: "createChatMessage",
+        action_type: "write",
+        authentication_id: cfg.connectionId,
+        inputs: {
+          // O Zapier chama de team_id/view_id os mesmos ids que a API v3 chama
+          // de workspace/channel.
+          team_id: Number(cfg.workspaceId),
+          view_id: cfg.channelId,
+          comment_type: "message",
+          comment_text: conteudo,
+          // `markdown: true` é o equivalente ao content_format text/md do
+          // caminho direto — sem ele o negrito e a citação chegam como texto
+          // cru, com os asteriscos à mostra.
+          markdown: true,
+          send_as_bot: true,
+        },
+      },
+    }),
+  });
+
+  if (!criacao.ok) {
+    throw new Error(`Zapier run ${criacao.status}: ${(await criacao.text()).slice(0, 300)}`);
+  }
+
+  const runId = (await criacao.json())?.data?.id;
+  if (!runId) throw new Error("Zapier run: resposta sem data.id");
+
+  const limite = Date.now() + ZAPIER_POLL_TIMEOUT_MS;
+  const urlRun = `${ZAPIER_RUNS_URL}/${encodeURIComponent(runId)}`;
+
+  while (Date.now() < limite) {
+    await new Promise((r) => setTimeout(r, ZAPIER_POLL_INTERVAL_MS));
+
+    const res = await fetch(urlRun, { method: "GET", headers: headersZapier(token) });
+    if (!res.ok) {
+      throw new Error(`Zapier poll ${res.status}: ${(await res.text()).slice(0, 300)}`);
+    }
+
+    const dados = (await res.json())?.data ?? {};
+    if (res.status === 202 || dados.status === "waiting") continue;
+
+    const erros = dados.errors ?? [];
+    if (erros.length > 0) {
+      const detalhe = erros
+        .map((e: { detail?: string; title?: string }) => e.detail ?? e.title ?? "erro sem texto")
+        .join("; ");
+      throw new Error(`Zapier action falhou: ${detalhe}`);
+    }
+
+    return; // status terminal sem erros: a mensagem existe no canal.
+  }
+
+  // Timeout NÃO é "falhou": é "não sei". O run pode já ter publicado a mensagem
+  // — foi exatamente o que aconteceu no teste de 03/09/2026, e o fallback gerou
+  // uma duplicata no canal. Por isso este erro é marcado, e `entregar()` o trata
+  // como entregue em vez de reenviar: entre duplicar um aviso e arriscar um
+  // atraso de 5 min (o aviso volta na rodada seguinte se de fato não saiu), a
+  // duplicata é o pior dos dois — ela chega a três pessoas marcadas.
+  const incerto = new Error(
+    `Zapier poll: timeout de ${ZAPIER_POLL_TIMEOUT_MS}ms no run ${runId} — a mensagem PODE ter sido publicada`,
+  );
+  (incerto as Error & { entregaIncerta?: boolean }).entregaIncerta = true;
+  throw incerto;
+}
+
 /**
  * Chat do ClickUp (API v3). O token pessoal vai CRU no Authorization, sem
  * "Bearer" — é assim para token pessoal, diferente do OAuth.
@@ -460,14 +669,87 @@ serve(async () => {
     // Uma vez por execução: quem é citado não muda entre um aviso e outro.
     const mencoes = montarMencoes(cfg.mencionar_usuarios, cfg.mencionar);
 
+    // ── Como publicar ─────────────────────────────────────────────────────────
+    // Via Zapier a mensagem sai como ClickBot; direto, sai como a pessoa dona do
+    // CLICKUP_TOKEN. O Zapier só entra se estiver LIGADO em config E com os dois
+    // secrets presentes — sem eles, cada aviso tentaria e cairia no fallback,
+    // trocando uma entrega que funciona por uma ida inútil à rede.
+    const zapierConfigurado = Boolean(
+      cfg.zapier_ativo && ZAPIER_CLIENT_ID && ZAPIER_CLIENT_SECRET && cfg.zapier_connection_id,
+    );
+
+    if (cfg.zapier_ativo && !zapierConfigurado) {
+      // Ligado em config mas sem credencial é erro de operação, não estado
+      // normal: registrar, porque o sintoma (autor errado) é silencioso.
+      console.warn(
+        "⚠️ zapier_ativo=true mas falta ZAPIER_CLIENT_ID/SECRET ou zapier_connection_id — usando envio direto",
+      );
+    }
+
+    resumo.via = zapierConfigurado ? "zapier (ClickBot)" : "direto (conta pessoal)";
+
     let enviados = 0;
+    let porFallback = 0;
     const falhas: string[] = [];
+
+    /**
+     * Entrega um aviso, com o fallback embutido.
+     *
+     * A regra: uma glosa não pode deixar de ser avisada porque o Zapier está
+     * fora. Autor errado é um defeito cosmético; aviso que não chega é uma
+     * contestação perdida. Por isso a falha do Zapier NÃO propaga — ela cai para
+     * o envio direto e fica registrada no resumo.
+     */
+    async function entregar(conteudo: string): Promise<"zapier" | "direto"> {
+      if (zapierConfigurado) {
+        try {
+          await enviarViaZapier(
+            {
+              workspaceId: cfg.clickup_workspace_id,
+              channelId: cfg.clickup_channel_id,
+              connectionId: cfg.zapier_connection_id,
+              selectedApi: cfg.zapier_selected_api ?? "ClickUpCLIAPI@2.1.63",
+            },
+            conteudo,
+          );
+          return "zapier";
+        } catch (e) {
+          // Um token vencido no cache derrubaria todos os avisos da rodada;
+          // descartá-lo faz o próximo tentar de novo com token novo.
+          zapierTokenCache = null;
+          const msg = e instanceof Error ? e.message : String(e);
+
+          // Entrega incerta (timeout do polling): NÃO reenviar. A mensagem
+          // provavelmente já está no canal, e o fallback faria dela uma
+          // duplicata marcando três pessoas.
+          //
+          // A ESCOLHA, EXPLÍCITA: tratar como entregue MARCA a linha como
+          // enviada, então se a mensagem realmente não saiu, este aviso está
+          // perdido — não volta na rodada seguinte. É deliberado, e vale para
+          // ESTE aviso: ele também está no sino do Pulsar (alerta assim_glosa),
+          // que é o canal com push de verdade. O ClickUp aqui é redundância.
+          // Para um aviso sem essa rede, a escolha certa seria a inversa.
+          // `zapier_incerto` no resumo é o que permite descobrir se aconteceu.
+          if ((e as { entregaIncerta?: boolean })?.entregaIncerta) {
+            resumo.zapier_incerto = msg.slice(0, 300);
+            console.warn(`⚠️ ${msg}`);
+            return "zapier";
+          }
+          console.warn(`⚠️ Zapier falhou, caindo para envio direto: ${msg}`);
+          // O motivo também vai para a RESPOSTA, não só para o console: sem
+          // isto, descobrir por que o autor saiu errado exige acesso aos logs
+          // da plataforma — e o sintoma é silencioso, ninguém vai procurar.
+          if (!resumo.zapier_erro) resumo.zapier_erro = msg.slice(0, 300);
+        }
+      }
+
+      await enviarClickUp(cfg.clickup_workspace_id, cfg.clickup_channel_id, conteudo);
+      return "direto";
+    }
 
     for (const aviso of avisos as Aviso[]) {
       try {
-        await enviarClickUp(
-          cfg.clickup_workspace_id,
-          cfg.clickup_channel_id,
+        const rota = await entregar(
           // A menção vai no FIM, depois do dossiê: ela chama as pessoas, não
           // informa nada. Quem lê quer saber quem foi recusado antes de ver
           // quem foi chamado.
@@ -491,6 +773,7 @@ serve(async () => {
         }
 
         enviados++;
+        if (rota === "direto" && zapierConfigurado) porFallback++;
       } catch (e) {
         const msg = e instanceof Error ? e.message : String(e);
         falhas.push(`${aviso.fila_id}: ${msg}`);
@@ -503,6 +786,10 @@ serve(async () => {
     }
 
     resumo.enviados = enviados;
+    // Fallback usado é o sinal de que o Zapier está quebrado: os avisos
+    // chegaram, mas assinados pela pessoa errada. Sem esta contagem o defeito
+    // seria invisível — o resumo diria "enviado" e ninguém olharia o canal.
+    if (porFallback > 0) resumo.fallback_direto = porFallback;
     resumo.falhas = falhas.length ? falhas : undefined;
     resumo.clickup = falhas.length ? "parcial" : "enviado";
 
