@@ -234,8 +234,17 @@ type CampoConfig = {
   field_id?: string;
   /** Para dropdown de valor fixo (Origem da Solicitação, Motivo). */
   valor?: string;
-  /** Para dropdown que depende do dado (Convênio, Unidade, Tipo de Autorização). */
+  /** Para dropdown que depende do dado (Convênio, Tipo de Autorização). */
   opcoes?: Record<string, string>;
+  /**
+   * Para dropdown casado por PREFIXO em vez de igualdade — hoje só a Unidade.
+   *
+   * ACHADO DE 2026-09-02, medido em 53.692 linhas: `unidade_nome` da grade tem UM
+   * único valor, "CLÍNICA UNIVERSO ABA", em 100% das linhas. Quem distingue
+   * unidade é `sala_nome`, no padrão "Unid. <Unidade> - <resto>". Casar por
+   * igualdade contra unidade_nome falharia SEMPRE.
+   */
+  prefixos?: Record<string, string>;
 };
 
 class DeParaAusente extends Error {}
@@ -267,6 +276,59 @@ function opcaoObrigatoria(campo: CampoConfig | undefined, valor: string | null, 
     throw new DeParaAusente(`"${valor}" não tem opção correspondente em "${rotulo}" (de-para desatualizado?)`);
   }
   return achado;
+}
+
+/**
+ * Resolve a Unidade pelo PREFIXO de `sala_nome` das sessões — ver o comentário de
+ * `prefixos` em CampoConfig para o motivo de não vir de `unidade_nome`.
+ *
+ * Devolve null quando nenhuma sala casa, e aqui isso NÃO é erro: as salas sem
+ * prefixo "Unid." que sobram na grade são FUNÇÃO, não lugar ("Apoio
+ * Operacional", "Especialista Técnico de Área" — 1.699 linhas em 30 dias). Não
+ * existe unidade a declarar, então o campo fica vazio em vez de travar a linha.
+ * Um prefixo novo e genuinamente desconhecido também cai aqui: o card sai sem
+ * unidade, visível, em vez de não sair.
+ *
+ * Usa a PRIMEIRA sala que casa. Um bundle é de um paciente num ato só; sessões em
+ * unidades diferentes seriam anomalia, e escolher a primeira é melhor que somar
+ * duas unidades num dropdown de valor único.
+ */
+function unidadePorSala(campo: CampoConfig | undefined, sessoes: SessaoIncluida[]): string | null {
+  const prefixos = campo?.prefixos;
+  if (!campo?.field_id || !prefixos) return null;
+
+  for (const s of sessoes) {
+    const sala = (s.sala_nome ?? "").trim();
+    if (!sala) continue;
+    for (const [prefixo, uuid] of Object.entries(prefixos)) {
+      if (sala.toLowerCase().startsWith(prefixo.trim().toLowerCase())) return uuid;
+    }
+  }
+  return null;
+}
+
+/**
+ * A sala pede que esta inclusão NÃO gere card?
+ *
+ * Decisão do usuário (2026-09-02) para "Sala Teste": implantação de teste não
+ * pode mandar o cronograma abrir trâmite junto ao convênio para algo irreal.
+ * Casado por prefixo, como a unidade. Basta UMA sessão em sala de teste para o
+ * bundle inteiro ser dispensado — um bundle misto é sinal de teste, não de
+ * inclusão real.
+ */
+function salaDispensaCard(campos: Record<string, unknown>, sessoes: SessaoIncluida[]): string | null {
+  const lista = campos["salas_sem_card"];
+  if (!Array.isArray(lista) || lista.length === 0) return null;
+
+  for (const s of sessoes) {
+    const sala = (s.sala_nome ?? "").trim().toLowerCase();
+    if (!sala) continue;
+    for (const bruto of lista) {
+      const prefixo = String(bruto).trim().toLowerCase();
+      if (prefixo && sala.startsWith(prefixo)) return String(bruto);
+    }
+  }
+  return null;
 }
 
 /**
@@ -360,15 +422,60 @@ function montarCustomFields(
 
   obrigatorio("origem_solicitacao", null, "Origem da Solicitação");
   obrigatorio("motivo", null, "Motivo");
-  obrigatorio("convenio", inc.convenio_nome, "Convênio");
-  obrigatorio("unidade", inc.unidade_nome, "Unidade");
+  // ── Convênio: obrigatório, EXCETO nos valores que significam "ainda não se
+  // sabe". `convenios_sem_campo` é a lista desses valores, e existe porque
+  // `opcaoObrigatoria` não consegue distinguir "não sei traduzir isto" (erro
+  // real, que deve travar) de "isto deve ficar vazio de propósito" (decisão).
+  //
+  // São "Ainda não selecionado" (10.056 linhas) e "Administrativo" (8.016) —
+  // 18 mil linhas que não existem no dropdown do ClickUp. Mapeá-las para
+  // "Particular" mentiria: indefinido não é particular, e é o cronograma que
+  // age sobre essa informação. Convênio genuinamente novo continua travando.
+  const semConvenio = campos["convenios_sem_campo"] as unknown;
+  const dispensaConvenio = Array.isArray(semConvenio) &&
+    semConvenio.some((v) =>
+      String(v).trim().toLowerCase() === (inc.convenio_nome ?? "").trim().toLowerCase()
+    );
+  if (!dispensaConvenio) {
+    obrigatorio("convenio", inc.convenio_nome, "Convênio");
+  }
+
+  // ── Unidade: derivada do PREFIXO de sala_nome, não de unidade_nome (que tem
+  // valor único). Vazia quando a sala é função e não lugar — ver unidadePorSala.
+  const campoUnidade = campos["unidade_por_sala"];
+  const uuidUnidade = unidadePorSala(campoUnidade, inc.sessoes);
+  if (uuidUnidade) out.push({ id: campoUnidade!.field_id!, value: uuidUnidade });
+
   obrigatorio("tipo_autorizacao", tipoAutorizacao(origemJudicial, inc.convenio_nome), "Tipo de Autorização");
 
+  // ── Especialidade (labels): MULTIVALORADO.
+  // `terapia_nome` traz listas separadas por vírgula ("Aplicador ABA (AE),
+  // Aplicador ABA (HS), Psicopedagogia" — 202 linhas em 30 dias), e o campo do
+  // ClickUp aceita vários. Quebra por vírgula e mapeia cada parte; parte sem
+  // correspondência é OMITIDA, nunca inventada — errar a especialidade manda o
+  // cronograma pedir autorização da terapia errada.
+  const campoEspec = campos["especialidade"];
+  if (campoEspec?.field_id && campoEspec.opcoes) {
+    const opcoes = campoEspec.opcoes;
+    const uuids = new Set<string>();
+    for (const s of inc.sessoes) {
+      for (const parte of String(s.terapia_nome ?? "").split(",")) {
+        const nome = parte.trim();
+        if (!nome) continue;
+        const uuid = opcoes[nome] ??
+          Object.entries(opcoes).find(([k]) => k.trim().toLowerCase() === nome.toLowerCase())?.[1];
+        if (uuid) uuids.add(uuid);
+        else console.warn(`especialidade sem de-para (omitida): "${nome}"`);
+      }
+    }
+    if (uuids.size > 0) out.push({ id: campoEspec.field_id, value: [...uuids] });
+  }
+
   // Os não-obrigatórios: ausentes simplesmente não entram.
-  push("paciente", inc.paciente_nome);
+  push("nome_paciente", inc.paciente_nome);
   push("solicitante", inc.implantado_por_nome ?? inc.implantado_por_email);
-  push("descricao", montarDescricao(inc));
-  push("vigencia", dataParaMs(inc.data_inicial));
+  push("observacoes", montarDescricao(inc));
+  push("data_inicio_vigencia", dataParaMs(inc.data_inicial));
 
   return out;
 }
@@ -455,6 +562,7 @@ serve(async () => {
 
     let enviados = 0;
     let expirados = 0;
+    let dispensados = 0;
     const falhas: string[] = [];
 
     for (const inc of pendentes as Array<Inclusao & { criado_em: string }>) {
@@ -472,6 +580,23 @@ serve(async () => {
             })
             .eq("id", inc.id);
           expirados++;
+          continue;
+        }
+
+        // Sala de teste não vira card (decisão do usuário, 2026-09-02). Marcada
+        // como enviada, não deixada pendente: pendente para sempre acumularia
+        // ruído na outbox e mascararia falha real. O motivo fica em ultimo_erro
+        // para que a linha conte a própria história.
+        const salaTeste = salaDispensaCard(campos, inc.sessoes);
+        if (salaTeste) {
+          await supabase
+            .from("inclusoes_terapia")
+            .update({
+              enviado_em: new Date().toISOString(),
+              ultimo_erro: `dispensado: sessão em "${salaTeste}" (sala de teste, não gera card)`,
+            })
+            .eq("id", inc.id);
+          dispensados++;
           continue;
         }
 
@@ -532,6 +657,7 @@ serve(async () => {
 
     resumo.enviados = enviados;
     if (expirados) resumo.expirados = expirados;
+    if (dispensados) resumo.dispensados = dispensados;
     resumo.falhas = falhas.length ? falhas : undefined;
     resumo.clickup = falhas.length ? "parcial" : "enviado";
 
