@@ -234,7 +234,9 @@ export function RemunRPTab() {
 
       {temDado && (buscaQ || apenasInconsistencia || especialidadesFiltro.size > 0) && (
         <div className="flex items-center gap-2 flex-wrap text-xs">
-          <span className="font-bold uppercase tracking-wide text-muted-foreground">Filtros ativos:</span>
+          <span className="font-bold uppercase tracking-wide text-muted-foreground">
+            Filtros ativos ({resultadoExibido?.length ?? 0} {resultadoExibido?.length === 1 ? "profissional" : "profissionais"}):
+          </span>
           {buscaQ && (
             <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-1 font-semibold text-foreground">
               Busca: {remBusca}
