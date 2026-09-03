@@ -17,7 +17,7 @@
 // mas contratos já cadastrados continuam vazios), cai no fallback da
 // especialidade geral do profissional (reboot_profissionais.especialidade)
 // antes de virar "Sem especialidade".
-import { buscarCadastroContratual, contratosAtuaisDoCadastro, FUNCAO_AC, type CadastroContratual, type ProfRemunReal } from "./calculo"
+import { buscarCadastroContratual, contratosAtuaisDoCadastro, FUNCAO_AC, FUNCAO_PS, FUNCAO_PS_LABEL, type CadastroContratual, type ProfRemunReal } from "./calculo"
 import { normKey } from "./constants"
 
 export type EspecialidadeTotal = {
@@ -77,9 +77,14 @@ export function calcularTotalPorEspecialidade(
       // especialidade e valor, então soma direto na barra dela. Se o contrato
       // foi cadastrado sem `funcao` (formulário antigo), cai na especialidade
       // geral do profissional antes de virar "Sem especialidade".
-      p.bancoHorasDetalhe.forEach(bh =>
-        add(bh.funcao || especialidadeGeralPorProf?.get(normKey(p.prof)), bh.valorTotal, p.prof)
-      )
+      p.bancoHorasDetalhe.forEach(bh => {
+        // `bh.funcao` já vem normalizado (normalizarFuncaoContrato em
+        // calculo.ts) — "PS" é o balde interno de Aplicador ABA, mas quem
+        // vem de sessão usa o nome cheio. Mesmo rótulo aqui evita abrir uma
+        // barra "PS" separada de "Aplicador ABA (PS)" no dashboard/filtro.
+        const esp = bh.funcao === FUNCAO_PS ? FUNCAO_PS_LABEL : bh.funcao
+        add(esp || especialidadeGeralPorProf?.get(normKey(p.prof)), bh.valorTotal, p.prof)
+      })
     }
     // PA por sessão: valorPA só é preenchido nas sessões que efetivamente entram
     // no acumulado (evolução própria ou substituição realizada) — ver calculo.ts.

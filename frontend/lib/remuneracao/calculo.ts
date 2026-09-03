@@ -22,7 +22,11 @@ import type { OcupacaoAgregada } from "@/types/ocupacaoProf"
 // ─── Especialidades / contrato (App.jsx linhas 34-46, 153-252) ───────────────
 
 export const FUNCAO_AC = "AC"
-const FUNCAO_PS = "PS"
+export const FUNCAO_PS = "PS"
+/** Rótulo de exibição de FUNCAO_PS — o mesmo texto usado na especialidade da
+ *  agenda, para não abrir um balde "PS" separado de "Aplicador ABA (PS)"
+ *  nos totais/filtro por especialidade (dashboardRP.ts). */
+export const FUNCAO_PS_LABEL = "Aplicador ABA (PS)"
 const PA_TRATADO_OUTRO_CONTRATO = "Tratado em outro contrato"
 /** `valorPATexto` das sessões zeradas por banco de horas — quem lê a sessão
  *  (documento de faturamento, export) distingue por este valor, não por texto solto. */
