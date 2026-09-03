@@ -223,6 +223,23 @@ function formatarData(iso: string | null): string | null {
 function montarMensagem(a: Aviso, codigos: Map<string, string>): string {
   const linhas: string[] = [];
 
+  // ── A origem ──────────────────────────────────────────────────────────────
+  // Carimbo de identidade. O autor da mensagem no ClickUp é a conta pessoal cujo
+  // token está em CLICKUP_TOKEN — hoje, uma pessoa real —, e a API de Chat v3 não
+  // permite trocar isso: não há campo de autor no request. A investigação de
+  // 2026-09-03 confirmou que nem pelo conector do Zapier (`send_as_bot`) o nome é
+  // escolhível: ele força a identidade genérica "ClickBot" do próprio ClickUp, e
+  // o pedido de bot nomeado segue aberto no feedback deles.
+  //
+  // Então a origem é declarada no CORPO, que é o único lugar sob nosso controle.
+  // Sem isto, um aviso automático chega assinado por alguém que não o escreveu —
+  // e quem lê o canal responde à pessoa errada.
+  //
+  // Fica em itálico, sem negrito, de propósito: é metadado, não o fato. O negrito
+  // pertence à linha seguinte, que é o que precisa ser lido primeiro.
+  linhas.push("_🤖 Robô de Avisos_");
+  linhas.push("");
+
   // ── O fato ────────────────────────────────────────────────────────────────
   const paciente = a.paciente_nome ?? "(nome não registrado)";
   linhas.push(`🚨 **BENEFÍCIO REJEITADO** · ${paciente}`);
