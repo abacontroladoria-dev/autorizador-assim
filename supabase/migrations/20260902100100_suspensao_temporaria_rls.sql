@@ -13,6 +13,8 @@
 alter table public.cadastros_pacientes_suspensoes_temporarias enable row level security;
 alter table public.cadastros_pacientes_suspensoes_temporarias force row level security;
 
+drop policy if exists cadastros_pacientes_suspensoes_temporarias_select
+  on public.cadastros_pacientes_suspensoes_temporarias;
 create policy cadastros_pacientes_suspensoes_temporarias_select
   on public.cadastros_pacientes_suspensoes_temporarias
   for select to authenticated
@@ -21,6 +23,8 @@ create policy cadastros_pacientes_suspensoes_temporarias_select
     or public.remuneracao_has_role(array['admin','diretoria','cronograma'])
   );
 
+drop policy if exists cadastros_pacientes_suspensoes_temporarias_insert
+  on public.cadastros_pacientes_suspensoes_temporarias;
 create policy cadastros_pacientes_suspensoes_temporarias_insert
   on public.cadastros_pacientes_suspensoes_temporarias
   for insert to authenticated
@@ -29,6 +33,8 @@ create policy cadastros_pacientes_suspensoes_temporarias_insert
     or public.remuneracao_has_role(array['admin','diretoria','cronograma'])
   );
 
+drop policy if exists cadastros_pacientes_suspensoes_temporarias_update
+  on public.cadastros_pacientes_suspensoes_temporarias;
 create policy cadastros_pacientes_suspensoes_temporarias_update
   on public.cadastros_pacientes_suspensoes_temporarias
   for update to authenticated
