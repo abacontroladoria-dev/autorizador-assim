@@ -53,9 +53,11 @@ alter table public.cronograma_salas_terapias_exclusivas enable row level securit
 -- Mesmo padrão de acesso de cronograma_salas (20260731120000): leitura pra
 -- quem tem a tela liberada (admin/diretoria/cronograma/terapeutico),
 -- escrita restrita a admin/diretoria.
+drop policy if exists "cronograma_salas_terapias_exclusivas_select" on public.cronograma_salas_terapias_exclusivas;
 create policy "cronograma_salas_terapias_exclusivas_select" on public.cronograma_salas_terapias_exclusivas
   for select to authenticated using (public.remuneracao_has_role(array['admin','diretoria','cronograma','terapeutico']));
 
+drop policy if exists "cronograma_salas_terapias_exclusivas_write" on public.cronograma_salas_terapias_exclusivas;
 create policy "cronograma_salas_terapias_exclusivas_write" on public.cronograma_salas_terapias_exclusivas
   for all to authenticated
   using (public.remuneracao_has_role(array['admin','diretoria']))

@@ -222,7 +222,7 @@ export function RemunRPTab() {
           )}
           <button
             type="button"
-            onClick={() => resultado && exportarRemuneracaoRPXlsx({ resultado, evoRows, csvName })}
+            onClick={() => resultado && exportarRemuneracaoRPXlsx({ resultado, evoRows, csvName, pepResumo })}
             className="shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold text-white shadow-sm hover:opacity-90 active:scale-95 transition-all"
             style={{ background: B.green }}
           >
@@ -286,7 +286,7 @@ export function RemunRPTab() {
       {resultadoExibido && resultadoExibido.length > 0 && (
         <div>
           {resultadoExibido.map(p => (
-            <CardRemunRP key={p.prof} p={p} onAbrir={setAberto} />
+            <CardRemunRP key={p.prof} p={p} onAbrir={setAberto} pepInfo={pepResumo.get(p.prof)} />
           ))}
         </div>
       )}

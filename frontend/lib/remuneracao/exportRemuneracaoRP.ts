@@ -3,6 +3,7 @@
 
 import * as XLSX from "xlsx"
 import { formatDateBR } from "./datas"
+import { composicaoRP, corrigirTotalComPEP } from "./composicaoRP"
 import type { ModalidadeAnalise, ProfRemunReal } from "./calculo"
 import type { SessaoReal } from "./relatorio"
 
@@ -16,10 +17,12 @@ export type ExportarRemuneracaoRPOpts = {
   resultado: ProfRemunReal[]
   evoRows: SessaoReal[]
   csvName?: string | null
+  /** PEP apurada por prestador na competência (pep_apuracao_mensal). */
+  pepResumo: Map<string, { potencial: number; alcancado: number }>
 }
 
 export function exportarRemuneracaoRPXlsx(opts: ExportarRemuneracaoRPOpts): void {
-  const { resultado, evoRows, csvName } = opts
+  const { resultado, evoRows, csvName, pepResumo } = opts
   if (!evoRows.length || !resultado.length) {
     alert("Importe primeiro o relatório csv_grade_profissionais.")
     return
@@ -27,28 +30,34 @@ export function exportarRemuneracaoRPXlsx(opts: ExportarRemuneracaoRPOpts): void
 
   const wb = XLSX.utils.book_new()
 
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resultado.map(p => ({
-    Profissional: p.prof, Contrato: p.contrato,
-    Sessoes_Agendadas: p.agendadas, Evolucoes_Proprias: p.evoluidasProprias,
-    Substituicoes_Realizadas: p.substituicoesRealizadas,
-    Total_Sessoes_Remuneraveis: p.evoluidasProprias + p.substituicoesRealizadas,
-    Substituido_por_Outro: p.substituidoPorOutro, Registros_Nao_Realizados: p.pendentes + p.naoEvoluidas,
-    Canceladas: p.canceladas, Inconsistencias: p.inconsistencias,
-    Pacientes_Unicos: p.pacientesQtd, Pacientes_CC: p.pacientesCCQtd,
-    // A PEP (Analista do Comportamento) é apurada e exportável na aba
-    // "PEP - Histórico" — não entra mais nesta planilha de PA/PPD/ETA.
-    Contrato_Antigo_Salario: p.salAntigo,
-    Tem_Contrato_Antigo: p.temAntigo ? "Sim" : "Não",
-    Remuneracao_Confirmada: p.valorConfirmado,
-    Potencial_Apos_Regularizacao: p.valorPotencial,
-    // Modelo de faturamento do contrato vigente. Remuneracao_Confirmada continua
-    // sendo só a apuração variável (PA/PPD/ETA) — quem soma a folha usa
-    // Total_A_Pagar, que é a coluna que inclui o valor fixo do banco de horas.
-    Modalidade: MODALIDADE_LABEL[p.modalidade],
-    Contratos_Banco_Horas: p.numerosBancoHoras.join(" / "),
-    Banco_Horas_Valor_Fixo: p.valorFixoBancoHoras,
-    Total_A_Pagar: p.valorTotalAPagar,
-  }))), "Resumo por profissional")
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(resultado.map(p => {
+    const isCC = p.sessoes.some(s => s.especialidade === "Coordenador de Caso")
+    const pep = corrigirTotalComPEP(composicaoRP(p), isCC, pepResumo.get(p.prof))
+    return {
+      Profissional: p.prof, Contrato: p.contrato,
+      Sessoes_Agendadas: p.agendadas, Evolucoes_Proprias: p.evoluidasProprias,
+      Substituicoes_Realizadas: p.substituicoesRealizadas,
+      Total_Sessoes_Remuneraveis: p.evoluidasProprias + p.substituicoesRealizadas,
+      Substituido_por_Outro: p.substituidoPorOutro, Registros_Nao_Realizados: p.pendentes + p.naoEvoluidas,
+      Canceladas: p.canceladas, Inconsistencias: p.inconsistencias,
+      Pacientes_Unicos: p.pacientesQtd, Pacientes_CC: p.pacientesCCQtd,
+      Contrato_Antigo_Salario: p.salAntigo,
+      Tem_Contrato_Antigo: p.temAntigo ? "Sim" : "Não",
+      Remuneracao_Confirmada: p.valorConfirmado,
+      Potencial_Apos_Regularizacao: p.valorPotencial,
+      Modalidade: MODALIDADE_LABEL[p.modalidade],
+      Contratos_Banco_Horas: p.numerosBancoHoras.join(" / "),
+      Banco_Horas_Valor_Fixo: p.valorFixoBancoHoras,
+      // Único lugar que soma tudo: PA/PPD/ETA + PEP real (pep_apuracao_mensal,
+      // igual ao PDF de fatura por prestador) + fixo de banco de horas. Antes
+      // a PEP ficava de fora daqui de propósito, redirecionando quem fecha a
+      // folha pra aba "PEP - Histórico" — decisão revertida: o valor real
+      // precisa estar no total que se paga, não numa segunda planilha à parte.
+      PEP_Apurada: isCC ? (pep.pepApurada ? "Sim" : "Não") : "N/A",
+      PEP_Valor: pep.pepValor,
+      Total_A_Pagar: pep.valorTotalAPagar,
+    }
+  })), "Resumo por profissional")
 
   const sessoesRecebe = resultado.flatMap(p => p.sessoes
     .filter(s => s.papel === "Substituição realizada" || (s.papel === "Agenda" && s.classificacao === "Evolução normal"))

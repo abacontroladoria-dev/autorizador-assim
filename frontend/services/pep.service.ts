@@ -17,14 +17,21 @@ export async function getCatalogoItens(): Promise<{ data: PepCatalogoItem[] | nu
   return { data: data as PepCatalogoItem[], error: null }
 }
 
+// Escopado pelos PACIENTES atuais do Analista, não por prestador_nome
+// gravado na linha: se um paciente troca de Analista do Comportamento no
+// meio do ciclo, o planejamento continua existindo sob o nome do analista
+// antigo — filtrar por prestador_nome faria o novo analista nunca ver a
+// pendência (e a apuração financeira pularia o item em silêncio).
+// prestador_nome continua gravado na linha só como trilha histórica.
 export async function getPlanejamentoSemestral(
-  prestadorNome: string
+  pacientesNomes: string[]
 ): Promise<{ data: PepPlanejamentoSemestral[] | null; error: unknown }> {
+  if (pacientesNomes.length === 0) return { data: [], error: null }
   const supabase = getSupabaseClient()
   const { data, error } = await supabase
     .from('pep_planejamento_semestral')
     .select('*')
-    .eq('prestador_nome', prestadorNome)
+    .in('paciente_nome', pacientesNomes)
     .eq('ativo', true)
   if (error) {
     console.error('Erro getPlanejamentoSemestral:', error)
@@ -165,17 +172,23 @@ export async function getRegistrosEntrega(
 }
 
 // Sem filtro de competência — as entregas semestrais (PRD §7.2) valem para o
-// ano inteiro, independente do mês selecionado na aba de mensais.
-export async function getRegistrosEntregaPorPrestador(
-  prestadorNome: string
+// ano inteiro, independente do mês selecionado na aba de mensais. Escopado
+// pelos PACIENTES atuais, não por prestador_nome — mesmo raciocínio de
+// getPlanejamentoSemestral: um item semestral (sempre POR_PACIENTE, nunca
+// GERAL) tem que seguir o paciente quando ele troca de Analista. Usado
+// também pelo motor de cálculo (pepApuracao.service.ts) para checar entrega
+// semestral pelo histórico completo, não só pelo mês sendo apurado.
+export async function getRegistrosSemestraisPorPacientes(
+  pacientesNomes: string[]
 ): Promise<{ data: PepRegistroEntrega[] | null; error: unknown }> {
+  if (pacientesNomes.length === 0) return { data: [], error: null }
   const supabase = getSupabaseClient()
   const { data, error } = await supabase
     .from('pep_registros_entrega')
     .select('*')
-    .eq('prestador_nome', prestadorNome)
+    .in('paciente_nome', pacientesNomes)
   if (error) {
-    console.error('Erro getRegistrosEntregaPorPrestador:', error)
+    console.error('Erro getRegistrosSemestraisPorPacientes:', error)
     return { data: null, error }
   }
   return { data: data as PepRegistroEntrega[], error: null }

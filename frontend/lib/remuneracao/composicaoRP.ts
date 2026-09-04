@@ -220,3 +220,47 @@ export function composicaoRP(p: ProfRemunReal): ComposicaoRP {
     todas: [...p.sessoes].sort(porDataHora),
   }
 }
+
+/**
+ * "PE proporcional" (`c.pe`) é um mecanismo legado: só produz valor se
+ * alguém subir manualmente um CSV separado ("relatório de PE"), upload que
+ * saiu do fluxo normal desde que a PEP passou a ser apurada por entrega na
+ * aba Entregas PEP. Na prática `c.pe` é sempre 0. Esta função corrige o
+ * total exibido/exportado pra refletir a PEP real (`pep_apuracao_mensal`),
+ * sem tocar em `composicaoRP()` — mantém o módulo puro e testável sozinho.
+ *
+ * `isCC` é o mesmo critério já usado em CardRemunRP.tsx/documento.ts:
+ * `p.sessoes.some(s => s.especialidade === "Coordenador de Caso")` — a
+ * mesma população que aparece como Analista do Comportamento na tela PEP.
+ *
+ * `pepApurada: false` só acontece quando `isCC` e não existe nenhuma linha
+ * em pep_apuracao_mensal pra esse prestador/competência ainda — sinal pra
+ * quem chama mostrar aviso em vez de tratar como R$0,00 silencioso.
+ */
+export type CorrecaoPEP = {
+  /** O que mostrar no lugar do card "PE proporcional" — já é a PEP real. */
+  pepValor: number
+  /** false = ninguém abriu a aba Entregas PEP pra este prestador/mês ainda. */
+  pepApurada: boolean
+  /** Substitui `c.valorConfirmado` na equação (PA+PPD+ETA+PEP). */
+  valorConfirmado: number
+  /** Substitui `c.valorTotalAPagar` — o número real a pagar. */
+  valorTotalAPagar: number
+}
+
+export function corrigirTotalComPEP(
+  c: ComposicaoRP,
+  isCC: boolean,
+  pepInfo: { potencial: number; alcancado: number } | undefined
+): CorrecaoPEP {
+  if (!isCC) {
+    return { pepValor: c.pe, pepApurada: true, valorConfirmado: c.valorConfirmado, valorTotalAPagar: c.valorTotalAPagar }
+  }
+  const pepValor = pepInfo?.alcancado ?? 0
+  return {
+    pepValor,
+    pepApurada: !!pepInfo,
+    valorConfirmado: c.valorConfirmado - c.pe + pepValor,
+    valorTotalAPagar: c.valorTotalAPagar - c.pe + pepValor,
+  }
+}
