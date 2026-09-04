@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import toast from "react-hot-toast"
-import { AlertCircle, User, MapPin, Users, HeartPulse, Stethoscope, ShieldPlus, FileText, Trophy } from "lucide-react"
+import { AlertCircle, User, MapPin, Users, HeartPulse, Stethoscope, ShieldPlus, FileText, Trophy, GraduationCap } from "lucide-react"
 import { SegmentedTabs } from "@/components/cronograma/ui/SegmentedTabs"
 import { useUnsavedChangesGuard } from "@/contexts/UnsavedChangesContext"
 import { usePacienteDetalhe } from "@/hooks/usePacienteDetalhe"
@@ -19,9 +19,10 @@ import { Doencas } from "./secoes/Doencas"
 import { PlanoSaude } from "./secoes/PlanoSaude"
 import { AbaLaudo } from "./secoes/AbaLaudo"
 import { AbaAltasIndividualidades } from "./secoes/AbaAltasIndividualidades"
+import { AbaEscola } from "./secoes/AbaEscola"
 import { foco } from "./ui/campos"
 
-type Aba = "cadastro" | "ficha" | "laudo" | "altas"
+type Aba = "cadastro" | "ficha" | "laudo" | "altas" | "escola"
 type SecaoCadastro = "dados" | "endereco" | "filiacao" | "plano"
 type SecaoFicha = "basica" | "doencas"
 
@@ -172,6 +173,7 @@ export function PacienteDetalhe({
             { value: "ficha", label: "Ficha médica" },
             { value: "laudo", label: "Laudo" },
             { value: "altas", label: "Altas e Individualidades" },
+            { value: "escola", label: "Escola" },
           ]}
         />
       </div>
@@ -227,6 +229,11 @@ export function PacienteDetalhe({
           </>
         ) : aba === "laudo" ? (
           <AbaLaudo pacienteId={idPaciente} pacienteNome={paciente.nome} />
+        ) : aba === "escola" ? (
+          // Fora do fluxo de editar/salvar do cadastro de propósito: o conteúdo é
+          // declaração do responsável, e a equipe lê sem editar. Por isso não
+          // recebe `disabled={!editando}` nem participa de `dirtyCount`.
+          <AbaEscola pacienteId={idPaciente} />
         ) : (
           <AbaAltasIndividualidades
             pacienteId={idPaciente}

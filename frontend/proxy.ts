@@ -43,7 +43,12 @@ export async function proxy(request: NextRequest) {
   } = await supabase.auth.getUser()
 
   // Rotas públicas
-  const publicRoutes = ['/login', '/definir-senha', '/auth/callback', '/disponibilidade-terapeuta/login', '/disponibilidade-terapeuta', '/sem-permissao', '/tv']
+  // `/ficha-escolar` é o formulário que o responsável preenche pelo link do
+  // WhatsApp — sem conta e sem token por paciente. Ele não lê nem escreve pelo
+  // client Supabase: fala com /api/ficha-escolar/*, que valida do lado do
+  // servidor (busca com piso de 3 letras e teto de 5 resultados, envio conferido
+  // pela data de nascimento). Ver os comentários naqueles handlers.
+  const publicRoutes = ['/login', '/definir-senha', '/auth/callback', '/disponibilidade-terapeuta/login', '/disponibilidade-terapeuta', '/sem-permissao', '/tv', '/ficha-escolar']
 
   const isPublicRoute = publicRoutes.some(
     (route) => pathname === route || pathname.startsWith(route + '/')
