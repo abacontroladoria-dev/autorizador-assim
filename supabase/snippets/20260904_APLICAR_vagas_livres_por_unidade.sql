@@ -10,19 +10,36 @@
 -- sala_nome ('Unid. Realengo - Sala 20'), e eram separadas por regex em
 -- TypeScript DEPOIS de o banco responder.
 --
--- Isso tinha duas consequências:
+-- Isso tinha duas consequências, e ambas foram MEDIDAS EM PRODUÇÃO em
+-- 04/09/2026 — nenhuma era risco futuro:
 --
 --   1. O filtro por unidade acontecia sobre as no máximo 500 linhas que a RPC
 --      devolvia, ordenadas por (data, hora, profissional). Como 500 é o teto da
---      própria RPC, era um filtro com limite que não se podia aumentar: basta a
---      grade crescer para que nenhuma vaga de Padre Miguel caia nas 500
---      primeiras e a resposta vire "não temos vaga em Padre Miguel" — falso
---      negativo silencioso.
+--      própria RPC, era um filtro com limite que não se podia aumentar.
 --
---   2. As salas que não são endereço da clínica ('AT Externo Escola', 'AT
---      Externo Casa', 'Consulta 4/6 - Nutrição', 'Especialista Técnico de Área')
---      eram OFERECIDAS quando não havia filtro de unidade. Só 'Sala Teste' era
---      oculta, e por igualdade exata em lowercase — 'Sala Teste 2' passaria.
+--        Realengo      3.085 vagas na janela de 30 dias, 273 alcançáveis
+--        Fazendinha    1.392 vagas,                       99 alcançáveis
+--        Padre Miguel  1.286 vagas,                      100 alcançáveis
+--        ------------------------------------------------------------------
+--        5.763 ofertáveis, 472 alcançáveis — 91,8% INVISÍVEIS, nas TRÊS.
+--
+--      E o corte é por DATA, porque o order by começa por `data`: 4 dias
+--      visíveis de 21 que existiam (04/09 a 09/09, grade até 02/10). A partir
+--      do 5º dia a IA respondia "não temos vaga" para uma agenda cheia — quem
+--      pedia "essa semana" era atendido, quem pedia "semana que vem" recebia
+--      negativa falsa. Era isso que fazia o defeito parecer intermitente.
+--
+--   2. As salas que não são endereço da clínica eram OFERECIDAS quando não havia
+--      filtro de unidade. Só 'Sala Teste' era oculta, e por igualdade exata em
+--      lowercase — 'Sala Teste 2' passaria. Em produção são 854 vagas livres em
+--      3 salas: 'AT Externo Escola', 'Especialista Técnico de Área' e
+--      'Sala Teste'. A primeira é atendimento na escola do paciente, oferecida
+--      como se fosse a clínica.
+--
+-- O de-para foi conferido contra o vocabulário real: 58 salas físicas, todas
+-- casando com os três prefixos, incluindo 'Sala 09' junto de 'Sala 1',
+-- '(Coordenação de Caso)' junto de '(coordenação de caso)', e os papéis
+-- 'Aplicador Suporte' e 'Visita Guiada'. Nenhuma grafia inesperada.
 --
 -- Nota importante sobre a causa do incidente: o system_prompt em produção
 -- mandava o modelo IGNORAR o parâmetro `unidade` e filtrar de cabeça olhando
@@ -53,12 +70,13 @@
 -- e o agente param de listar vaga. Aplicar fora do horário de atendimento, com
 -- o deploy pronto para subir.
 --
--- ANTES DE APLICAR
--- Rodar 20260904_diagnostico_reservas_em_sala_nao_fisica.sql (só leitura). Se
--- `total_reservas_nao_fisicas > 0`, alguém já reservou em sala não-física pela
--- Central, e appointment.service.ts:137 precisa parar de usar listarVagas para
--- resolver metadados de slot — senão o operador verá "essa vaga já foi
--- reservada" sobre uma vaga livre.
+-- ANTES DE APLICAR — JÁ FEITO em 04/09/2026, resultado abaixo
+-- 20260904_diagnostico_reservas_em_sala_nao_fisica.sql devolveu
+-- `total_reservas_nao_fisicas = 0`: ninguém nunca reservou em sala não-física
+-- pela Central. Isso descarta o único risco que bloqueava esta aplicação —
+-- appointment.service.ts:137 pode continuar usando listarVagas para resolver
+-- metadados de slot. Rodar de novo só se este arquivo demorar semanas para ser
+-- aplicado (o número muda se alguém reservar um AT externo pela Central).
 --
 -- DEPOIS DE APLICAR
 -- Rodar 20260904_contraprova_vagas_livres_por_unidade.sql (7 blocos, cada um

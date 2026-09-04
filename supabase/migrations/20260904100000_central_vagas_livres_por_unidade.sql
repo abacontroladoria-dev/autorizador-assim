@@ -18,11 +18,26 @@
 --
 -- E não é só o agente. Enquanto a unidade só existia em TypeScript, o filtro
 -- acontecia DEPOIS de a RPC devolver no máximo 500 linhas ordenadas por
--- (data, hora, profissional). Basta a grade crescer para que as 500 primeiras
--- não contenham nenhuma vaga de uma das unidades — e a resposta vire "não temos
--- vaga em Padre Miguel" quando tem. Falso negativo silencioso, pior que o erro
--- visível. Com a unidade sendo coluna, o teto passa a valer POR UNIDADE, que é
--- o que ele sempre deveria ter significado.
+-- (data, hora, profissional). Com a unidade sendo coluna, o teto passa a valer
+-- POR UNIDADE, que é o que ele sempre deveria ter significado.
+--
+-- MEDIDO EM PRODUÇÃO, 04/09/2026 — o defeito não era latente, era corrente:
+--
+--   Realengo      3.085 vagas na janela de 30 dias, 273 visíveis (91,2% cegas)
+--   Fazendinha    1.392 vagas,                       99 visíveis (92,9% cegas)
+--   Padre Miguel  1.286 vagas,                      100 visíveis (92,2% cegas)
+--   ------------------------------------------------------------------------
+--   5.763 vagas ofertáveis, 472 alcançáveis — 91,8% invisíveis, nas TRÊS.
+--
+-- E o corte não é uniforme, é por DATA, porque a ordenação começa por `data`:
+--
+--   dias visíveis:    4  (04/09 → 09/09)
+--   dias que existem: 21 (04/09 → 02/10)
+--
+-- Ou seja: a partir do 5º dia a resposta era "não temos vaga" para uma agenda
+-- cheia. Quem pedia "essa semana" era atendido; quem pedia "semana que vem" ou
+-- "dia 15" recebia uma negativa falsa. Isso fazia o sintoma parecer falha
+-- intermitente da IA quando era um horizonte de 4 dias.
 --
 -- POR QUE DE-PARA POR PREFIXO, E NÃO REGEX DE CAPTURA
 --
@@ -56,12 +71,36 @@
 -- TypeScript: ele casava 'sala teste' por igualdade exata em lowercase
 -- (unidade.ts:50), então 'Sala Teste 2' passaria.
 --
--- MUDANÇA DE COMPORTAMENTO A DECLARAR: hoje 'AT Externo Escola' e 'Consulta 4/6
--- - Nutrição' SÃO devolvidas pela RPC quando não há filtro de unidade (só
--- 'Sala Teste' era oculta). Depois desta view, deixam de ser. Ver o diagnóstico
--- em snippets/20260904_diagnostico_reservas_em_sala_nao_fisica.sql, que mede se
--- alguém já reservou nessas salas pela Central — se sim, agendarVaga precisa
--- parar de usar listarVagas para resolver metadados de slot.
+-- MEDIDO EM PRODUÇÃO, 04/09/2026 — o vocabulário real de sala_nome nas vagas
+-- livres, e é limpo:
+--
+--   Realengo      7.350 vagas, 34 salas distintas
+--   Fazendinha    3.191 vagas, 13 salas (inclui 'Aplicador Suporte')
+--   Padre Miguel  2.775 vagas, 11 salas (inclui 'Visita Guiada')
+--   FORA do de-para  854 vagas,  3 salas:
+--                    'AT Externo Escola', 'Especialista Técnico de Área',
+--                    'Sala Teste'
+--
+-- Nenhuma grafia inesperada, nenhuma unidade nova. Os casos que este de-para
+-- cobre de propósito aparecem todos: 'Sala 09' junto de 'Sala 1', '(Coordenação
+-- de Caso)' junto de '(coordenação de caso)', e os dois papéis com prefixo.
+--
+-- MUDANÇA DE COMPORTAMENTO A DECLARAR: as 854 vagas acima SÃO oferecidas hoje
+-- quando não há filtro de unidade (só 'Sala Teste' era oculta, e por igualdade
+-- exata). Depois desta view, deixam de ser — e é o ponto: 'AT Externo Escola' é
+-- atendimento na escola do paciente, e oferecê-lo como se fosse a clínica erra
+-- o endereço na cara do responsável.
+--
+-- O RISCO QUE ISSO ABRIA ESTÁ MEDIDO E DESCARTADO: appointment.service.ts:137
+-- usa listarVagas para copiar os metadados do slot, então uma vaga aprovada por
+-- vaga_esta_disponivel (que lê vw_grade_base, com as não-físicas) e ausente daqui
+-- viraria SlotAlreadyBookedError — "essa vaga já foi reservada" sobre uma vaga
+-- livre, na tela HUMANA. Contado em produção em 04/09/2026:
+-- ZERO reservas em sala não-física em central.appointments, desde sempre.
+-- Ninguém reserva atendimento externo pela Central, então a chamada pode
+-- continuar como está. Se isso mudar, o conserto está descrito no comentário de
+-- appointment.service.ts. Refazer a contagem com
+-- snippets/20260904_diagnostico_reservas_em_sala_nao_fisica.sql.
 --
 -- O QUE ENTRA MESMO NÃO SENDO SALA NUMERADA
 --

@@ -146,13 +146,23 @@ export class AppointmentService {
     //
     // Ou seja: uma vaga em sala não-física é APROVADA pelo diagnóstico e não
     // aparece aqui, e o `!vaga` abaixo a reporta como SlotAlreadyBookedError —
-    // "essa vaga já foi reservada" sobre uma vaga livre. Mensagem enganosa.
+    // "essa vaga já foi reservada" sobre uma vaga livre. Mensagem enganosa, e na
+    // tela humana de Agendamentos, não só no agente.
     //
-    // Isso é aceito por medição, não por descuido: o snippet
-    // 20260904_diagnostico_reservas_em_sala_nao_fisica.sql conta as reservas
-    // existentes nessas salas. Se ele voltar a dar > 0, esta chamada precisa
-    // sair de listarVagas e resolver os metadados por uma via própria (uma RPC
-    // central.dados_da_vaga, lendo vw_grade_base direto).
+    // ISSO É ACEITO POR MEDIÇÃO, NÃO POR DESCUIDO. Contado em produção em
+    // 04/09/2026: ZERO reservas em sala não-física em central.appointments,
+    // desde sempre — ninguém reserva atendimento externo pela Central. Com zero
+    // ocorrências, desacoplar seria código para um caso que não existe.
+    //
+    // Se algum dia der > 0, o conserto é esta chamada parar de usar listarVagas
+    // e resolver os metadados por uma via própria (uma RPC
+    // central.dados_da_vaga lendo vw_grade_base direto) — porque "resolver os
+    // dados deste slot" e "listar o que posso oferecer" são perguntas
+    // diferentes que só dividem esta chamada por herança. Evite um flag
+    // `incluirNaoFisicas`: reintroduz parâmetro que só um chamador usa.
+    //
+    // Para refazer a contagem:
+    //   supabase/snippets/20260904_diagnostico_reservas_em_sala_nao_fisica.sql
     const vagas = await this.availability.listarVagas({
       dataInicio:     input.data,
       dataFim:        input.data,

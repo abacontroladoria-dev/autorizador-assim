@@ -184,8 +184,55 @@ begin
       '  → O teto global escondia % vaga(s). Elas existiam e o agente nunca as veria. É o defeito que esta mudança conserta.',
       v_soma - v_total;
   else
+    -- Em PRODUÇÃO isto não acontece: medido em 04/09/2026, eram 5.763 vagas
+    -- ofertáveis e 472 alcançáveis (91,8% invisíveis, nas três unidades). Cair
+    -- aqui significa base pequena — tipicamente uma stack local com dump
+    -- antigo, onde o total inteiro cabe nas 500. Não é sinal de que o defeito
+    -- não existe.
     raise notice
-      '  → Nenhuma vaga escondida hoje (o total cabia nas 500). O conserto é preventivo: o teto agora é por unidade e não regride quando a grade crescer.';
+      '  → O total cabe nas 500 nesta base, então aqui não há vaga escondida. NÃO conclua que o defeito é hipotético: em produção (04/09/2026) eram 472 de 5.763 alcançáveis. Base pequena não reproduz o teto.';
+  end if;
+end $$;
+
+-- ----------------------------------------------------------------------------
+-- 6b. O corte por DATA — o efeito mais grave, e o que o bloco 6 não mostra
+--
+-- O `order by` começa por `data`, então as linhas que cabem no teto são todas
+-- dos primeiros dias da janela. O bloco 6 conta vagas; este conta DIAS, que é o
+-- que o responsável percebe: "não temos vaga" para tudo depois do N-ésimo dia.
+--
+-- Medido em produção antes da mudança: 4 dias visíveis de 21 existentes.
+-- Depois da mudança, cada unidade tem seu próprio teto, então o horizonte
+-- visível se estende — e p_data_inicio/p_data_fim passam a alcançar o resto.
+-- ----------------------------------------------------------------------------
+do $$
+declare
+  v_dias_vis  int;
+  v_dias_tot  int;
+  v_ate_vis   date;
+  v_ate_tot   date;
+begin
+  with ordenadas as (
+    select row_number() over (order by data, hora_inicial, profissional_nome) as pos, data
+      from central.vw_vagas_livres
+     where data >= (now() at time zone 'America/Sao_Paulo')::date
+       and data <= (now() at time zone 'America/Sao_Paulo')::date + 30
+  )
+  select
+    count(distinct data) filter (where pos <= 500),
+    count(distinct data),
+    max(data) filter (where pos <= 500),
+    max(data)
+  into v_dias_vis, v_dias_tot, v_ate_vis, v_ate_tot
+  from ordenadas;
+
+  raise notice 'BLOCO 6b — com teto GLOBAL de 500: % de % dias visíveis (até % de %)',
+    v_dias_vis, v_dias_tot, v_ate_vis, v_ate_tot;
+
+  if v_dias_tot > 0 and v_dias_vis < v_dias_tot then
+    raise notice
+      '  → A partir de % a resposta era "não temos vaga" com agenda cheia. Quem pedia "essa semana" era atendido; quem pedia "semana que vem", não.',
+      v_ate_vis + 1;
   end if;
 end $$;
 

@@ -11,14 +11,29 @@
 -- devolvida. Isso obrigava o executor a pedir 500 vagas SEMPRE que houvesse
 -- unidade e cortar depois — porque as N primeiras podiam ser todas de outra
 -- unidade. E 500 é o teto da própria RPC, então o filtro em memória tinha um
--- limite que não se podia aumentar: basta a grade crescer para que as 500
--- primeiras linhas, ordenadas por (data, hora, profissional), não contenham
--- nenhuma vaga de Padre Miguel — e o agente responda "não temos vaga em Padre
--- Miguel" quando tem.
+-- limite que não se podia aumentar.
 --
--- Falso negativo silencioso é pior que o erro visível que este trabalho começou
--- consertando. Com o filtro aqui, o teto de 500 vale POR UNIDADE, que é o que
--- ele sempre deveria ter significado.
+-- MEDIDO EM PRODUÇÃO, 04/09/2026 — não era risco futuro, era o estado corrente:
+--
+--   Realengo      3.085 vagas na janela, 273 alcançáveis
+--   Fazendinha    1.392 vagas,            99 alcançáveis
+--   Padre Miguel  1.286 vagas,           100 alcançáveis
+--   -----------------------------------------------------
+--   5.763 ofertáveis, 472 alcançáveis — 91,8% invisíveis, nas TRÊS unidades.
+--
+-- E como o `order by` começa por `data`, as 500 linhas visíveis eram todas dos
+-- primeiros dias: 4 dias visíveis de 21 que existiam (04/09 a 09/09, quando a
+-- grade ia até 02/10). A partir do 5º dia a resposta era "não temos vaga" para
+-- uma agenda cheia — então quem pedia "essa semana" era atendido e quem pedia
+-- "semana que vem" recebia negativa falsa. Era isso que fazia o defeito parecer
+-- falha intermitente da IA.
+--
+-- Com o filtro aqui, o teto de 500 vale POR UNIDADE, que é o que ele sempre
+-- deveria ter significado. Note que ele continua sendo um teto: 500 por unidade
+-- não cobre as 3.085 de Realengo, e não deve — é proteção de pool. O que muda é
+-- que o recorte deixa de ser enviesado por unidade e por data. Se o horizonte
+-- precisar de mais alcance, o caminho é p_data_inicio/p_data_fim (que o agente
+-- já sabe passar quando o responsável indica período), não aumentar o teto.
 --
 -- POR QUE p_unidade text E NÃO p_unidade_id bigint
 --
