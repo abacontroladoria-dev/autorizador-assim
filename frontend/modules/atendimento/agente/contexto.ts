@@ -46,18 +46,37 @@ export const LIMITE_HISTORICO = 20
 // própria ferramenta — foi isso que mostrou que a regra precisava de um lugar
 // que a tela não alcança.
 //
-// A regra de "não deduzir ausência" entrou em 04/09/2026 pelo mesmo caminho, e
-// o caso está registrado no rastro de tool calls. Perguntado "não tem nada na
-// terça?", o modelo chamou consultar_horarios_disponiveis com dataInicio null e
-// limite 3, recebeu sexta/segunda/quarta — as três primeiras da agenda — e
-// respondeu que terça não tinha vaga. Ele nunca consultou terça: deduziu
-// ausência de uma amostra de 3, sobre uma unidade com milhares de vagas.
+// A regra de "não deduzir ausência" entrou em 04/09/2026, e o rastro de tool
+// calls mostrou que ela tem DUAS faces — o modelo errou de dois jeitos
+// diferentes na mesma conversa:
 //
-// A description do parâmetro `dataInicio` já pedia para passá-lo "quando o
-// responsável indicar preferência de data", e foi ignorada — description de
-// parâmetro pesa menos que regra de system prompt. Daí a regra subir para cá,
-// onde nenhuma edição de tela a alcança e o modelo a lê como restrição, não
-// como dica de preenchimento.
+//   "não tem nada na terça?"  → dataInicio: null,       terapiaId: 2259, limite: 3
+//   "e na segunda dia 14?"    → dataInicio: 2026-09-14, terapiaId: NULL, limite: 20
+//
+// Na primeira ele não consultou o dia: leu a pergunta como filtro das 3 vagas
+// que acabara de oferecer, não viu terça, e negou. (Ali a resposta calhou de
+// estar certa — psicologia em Realengo é segunda/quarta/sexta. Raciocínio
+// errado com resultado certo é o pior tipo de acerto: passa como
+// funcionamento.)
+//
+// Na segunda ele acertou a data e PERDEU A ESPECIALIDADE. Consultou "o que tem
+// em Realengo dia 14" em vez de "tem psicologia dia 14", e o dia tinha 78 vagas
+// de várias terapias. A única de psicologia estava na POSIÇÃO 76, porque é às
+// 17:00 e a ordenação é por hora. Ele viu 20, não achou, e negou. A vaga
+// existia — esta negativa foi falsa.
+//
+// O que os dois casos têm em comum não é "esquecer de passar um parâmetro": é
+// tratar uma lista PARCIAL como se fosse a agenda inteira. Por isso o conserto
+// não é só de prompt. `consultar_horarios_disponiveis` passou a pedir uma vaga
+// a mais que o limite e devolver `listaCompleta: false` + um aviso quando
+// trunca — o modelo estava raciocinando sobre um recorte que tinha motivo para
+// achar completo, e nenhuma instrução conserta uma premissa falsa.
+//
+// A description de `dataInicio` já pedia para passá-la "quando o responsável
+// indicar preferência de data", e o caso da data explícita já funcionava. O que
+// precisa ser regra de system prompt é o que se pode AFIRMAR a partir de uma
+// lista — description de parâmetro é lida como dica de preenchimento, não como
+// restrição sobre conclusões.
 const INSTRUCAO_BASE = [
   'Você é a atendente virtual de uma clínica de terapias infantis e conversa por WhatsApp com o responsável pelo paciente.',
   '',
@@ -65,7 +84,7 @@ const INSTRUCAO_BASE = [
   '- Escreva em português do Brasil, com frases curtas, como se estivesse no WhatsApp. Nada de listas longas nem de formatação markdown.',
   '- NUNCA invente horário, data, nome de profissional ou especialidade. Use apenas o que as ferramentas devolverem.',
   '- A clínica tem três unidades (Realengo, Fazendinha, Padre Miguel). Nunca ofereça um horário sem dizer de qual unidade ele é, e nunca troque a unidade que o responsável pediu sem avisar. Quando a ferramenta aceitar a unidade como parâmetro, passe-a — não filtre a lista por conta própria.',
-  '- NUNCA diga que um dia ou período não tem vaga sem ter consultado ESSE dia. Quando o responsável mencionar um dia, uma data ou um período, consulte de novo passando esse período à ferramenta. A lista que ela devolve é um recorte, não a agenda inteira: um horário não estar nela não significa que não exista.',
+  '- NUNCA diga que não há vaga com base numa lista que você não consultou para aquele caso exato. Quando o responsável mencionar um dia, uma data ou um período, consulte de novo passando esse período — e mantenha a especialidade que a conversa já estabeleceu em toda consulta seguinte. A lista devolvida é um recorte limitado, não a agenda inteira: se ela vier marcada como incompleta, ou se o que você procura simplesmente não aparece, refine a busca e consulte outra vez antes de dizer que não tem.',
   '- Se não houver ferramenta disponível para o que foi pedido, diga que vai encaminhar para a equipe. Não prometa o que não pode confirmar.',
   '- Confirme os dados (dia, horário, especialidade) antes de agendar.',
   '- Se o responsável pedir para falar com uma pessoa, ou demonstrar irritação, diga que vai chamar alguém da equipe.',

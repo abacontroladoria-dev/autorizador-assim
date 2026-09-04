@@ -118,6 +118,11 @@ export const DEFINICOES_FERRAMENTAS = [
         'a agenda da clínica só é populada algumas semanas à frente, e horários fora dela não existem. ' +
         'Se o responsável já disse em qual unidade quer ser atendido, passe esse valor em `unidade` — ' +
         'não filtre por conta própria olhando o campo `sala`, e não ofereça horário de outra unidade sem avisar. ' +
+        'O mesmo vale para a especialidade: se a conversa já estabeleceu qual terapia é, passe `terapiaId` em TODA ' +
+        'consulta seguinte, inclusive quando o responsável perguntar por outro dia. Sem ele a busca traz todas as ' +
+        'especialidades e a que interessa pode ficar de fora do recorte. ' +
+        'O resultado traz `listaCompleta`: quando for false, você está vendo só uma parte — nunca conclua ausência ' +
+        'a partir de uma lista parcial. ' +
         'Ofereça no máximo 3 opções por mensagem para não sobrecarregar o responsável.',
       strict: true,
       parameters: {
@@ -333,13 +338,30 @@ export class FerramentasAgente {
     // era preciso pedir 500 e cortar depois — e como 500 é o teto da RPC, uma
     // unidade sem vaga nas 500 primeiras linhas virava "não tem vaga" falso.
     // Agora o teto vale por unidade. Não volte a filtrar aqui.
-    const vagas = await this.agendamentos.listarVagas({
+    //
+    // Pedimos UMA A MAIS que o limite para saber se a lista foi truncada. Sem
+    // isso a ferramenta devolve N itens e o modelo não tem como distinguir "a
+    // agenda tem exatamente N" de "a agenda tem muito mais e você viu os N
+    // primeiros" — e ele trata os dois como a mesma coisa.
+    //
+    // O caso que motivou isto (04/09/2026, no rastro): perguntada por psicologia
+    // em Realengo no dia 14, a IA consultou o dia certo mas sem terapiaId, com
+    // limite 20. O dia tinha 78 vagas de várias especialidades e a única de
+    // psicologia estava na POSIÇÃO 76 — porque é às 17:00, e a ordenação é por
+    // hora. Ela viu 20, não achou psicologia, e respondeu que não havia. A vaga
+    // existia.
+    //
+    // Nenhuma instrução de prompt conserta isso sozinha: o modelo estava
+    // raciocinando sobre uma lista que ele tinha motivo para achar completa.
+    const comFolga = await this.agendamentos.listarVagas({
       terapiaId:  toInt(args.terapiaId),
       unidade,
       dataInicio: args.dataInicio ?? null,
       dataFim:    args.dataFim ?? null,
-      limite,
+      limite:     limite + 1,
     })
+    const truncado = comFolga.length > limite
+    const vagas    = comFolga.slice(0, limite)
 
     if (vagas.length === 0) {
       // Distinguir os dois casos muda a resposta ao responsável: "não temos
@@ -397,6 +419,25 @@ export class FerramentasAgente {
         // unidades parecerem uma só, e não é ele que vai aqui.
         unidade:      v.unidade,
       })),
+      // A lista está completa, ou é só o começo?
+      //
+      // Esta é a informação cuja AUSÊNCIA fez a IA negar uma vaga que existia:
+      // ela recebeu 20 de 78 e raciocinou como se fossem 78. `listaCompleta:
+      // false` é o que a impede de tratar um recorte como a agenda inteira.
+      //
+      // O aviso vem em português e diz o que fazer, não só o que houve: o modelo
+      // age sobre instrução muito mais do que sobre um booleano.
+      listaCompleta: !truncado,
+      ...(truncado ? {
+        aviso:
+          `Esta lista é PARCIAL: há mais horários além destes ${limite}. ` +
+          (toInt(args.terapiaId) == null
+            ? 'Ela cobre TODAS as especialidades, então a que o responsável quer pode não estar aqui — ' +
+              'chame de novo passando `terapiaId` para ver só a dela. '
+            : '') +
+          'NÃO conclua que não há vaga para uma especialidade, um dia ou um horário só porque não aparece nesta lista — ' +
+          'refine a busca (terapiaId, dataInicio/dataFim) e consulte de novo antes de responder.',
+      } : {}),
     }
   }
 

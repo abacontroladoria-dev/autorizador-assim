@@ -207,6 +207,52 @@ try {
   checar(typeof terapia?.vagas === 'number' && terapia.vagas > 0,
     'especialidade traz a contagem de vagas', terapia?.vagas)
 
+  console.log('\n2d. lista parcial se anuncia como parcial')
+
+  // O defeito que isto trava (04/09/2026, capturado no rastro de tool calls):
+  // perguntada por psicologia em Realengo no dia 14, a IA consultou o dia certo
+  // mas sem terapiaId, com limite 20. O dia tinha 78 vagas e a única de
+  // psicologia estava na POSIÇÃO 76 — é às 17:00, e a ordenação é por hora. Ela
+  // viu 20, não achou, e respondeu que não havia vaga. A vaga existia.
+  //
+  // A causa não é o parâmetro esquecido: é a lista de 20 ser indistinguível de
+  // uma agenda que tem exatamente 20. Nenhuma instrução de prompt conserta uma
+  // premissa falsa, então a ferramenta passou a dizer quando truncou.
+  const parcial: any = await ferramentas.executar('consultar_horarios_disponiveis', { limite: 1 })
+  if (parcial.ok) {
+    checar(parcial.horarios.length === 1, 'limite 1 devolve 1 horário', parcial.horarios?.length)
+    checar(parcial.listaCompleta === false,
+      'com mais vagas que o limite, listaCompleta é false', parcial.listaCompleta)
+    checar(typeof parcial.aviso === 'string' && parcial.aviso.includes('PARCIAL'),
+      'o aviso diz ao modelo que a lista é parcial', parcial.aviso)
+    checar(parcial.aviso.includes('terapiaId'),
+      'sem terapiaId, o aviso manda refinar por especialidade — foi o caso real',
+      parcial.aviso)
+  }
+
+  // Sem truncamento, nenhum aviso: um "aviso" sempre presente vira ruído que o
+  // modelo aprende a ignorar, e aí ele não serve quando importa.
+  const completa: any = await ferramentas.executar('consultar_horarios_disponiveis', { limite: 50 })
+  if (completa.ok && completa.horarios.length < 50) {
+    checar(completa.listaCompleta === true,
+      'lista que coube inteira é marcada como completa', completa.listaCompleta)
+    checar(completa.aviso === undefined,
+      'lista completa não carrega aviso (aviso sempre presente vira ruído)', completa.aviso)
+  }
+
+  // Com terapiaId, o aviso não deve mandar passar terapiaId — o modelo já
+  // passou, e instrução redundante o faz repetir a mesma chamada (o que o
+  // orquestrador detecta como laço e escala).
+  const comTerapia: any = await ferramentas.executar('consultar_horarios_disponiveis', {
+    terapiaId: terapia.terapiaId,
+    limite:    1,
+  })
+  if (comTerapia.ok && comTerapia.listaCompleta === false) {
+    checar(!comTerapia.aviso.includes('passando `terapiaId`'),
+      'com terapiaId já passado, o aviso não manda passá-lo de novo',
+      comTerapia.aviso)
+  }
+
   console.log('\n3. agendar_sessao na vaga oferecida')
   const ag: any = await ferramentas.executar('agendar_sessao', {
     profissionalId: vaga.profissionalId,
