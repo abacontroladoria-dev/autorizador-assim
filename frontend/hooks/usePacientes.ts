@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from "react"
 import { getPacientes } from "@/services/pacientes.service"
+import { getResumoEscolarPorPaciente } from "@/services/pacienteDadosEscolares.service"
+import type { ResumoEscolar } from "@/services/pacienteDadosEscolares.service"
 import { getTelefonesDosResponsaveis } from "@/services/responsaveis.service"
 import type { Paciente } from "@/types/paciente"
 
@@ -13,6 +15,17 @@ type PacientesState = {
    * segunda rodada de carregamento faria o telefone piscar depois do nome.
    */
   telefonesResponsaveis: Map<number, string>
+  /**
+   * `id_paciente` -> último envio da ficha escolar. AUSÊNCIA da chave = a
+   * família ainda não respondeu; é assim que o dado existe (não há flag em
+   * `pacientes`, só linha em `pacientes_dados_escolares`).
+   */
+  fichasEscolares: Map<number, ResumoEscolar>
+  /**
+   * A leitura das fichas falhou. Sem isto, um Map vazio por erro de rede seria
+   * lido como "nenhuma família respondeu" e a tela acusaria todas elas.
+   */
+  fichasEscolaresIndisponivel: boolean
   loading: boolean
   error: string | null
 }
@@ -20,6 +33,8 @@ type PacientesState = {
 const INITIAL_STATE: PacientesState = {
   pacientes: [],
   telefonesResponsaveis: new Map(),
+  fichasEscolares: new Map(),
+  fichasEscolaresIndisponivel: false,
   loading: true,
   error: null,
 }
@@ -39,22 +54,33 @@ function fetchPacientes(): Promise<void> {
   // (PacientesCadastro) decide o que mostrar com o filtro de Situação. Buscar
   // tudo uma vez é mais barato que refazer a requisição a cada combinação do
   // filtro.
-  // As duas consultas são independentes — em paralelo, e o telefone não pode
-  // derrubar a listagem: sem responsável cadastrado o cartão só perde uma linha,
-  // enquanto sem paciente não há tela. Por isso o erro do telefone é registrado
-  // no console, não propagado para `error`.
+  // As três consultas são independentes — em paralelo, e nem telefone nem ficha
+  // escolar podem derrubar a listagem: sem responsável cadastrado o cartão só
+  // perde uma linha, enquanto sem paciente não há tela. Por isso o erro dessas
+  // duas é registrado no console, não propagado para `error`.
+  //
+  // A ficha escolar usa `allSettled` em vez de engolir o erro com um `.catch`
+  // que devolve Map vazio: Map vazio é indistinguível de "ninguém respondeu", e
+  // a tela acusaria TODA família de não ter preenchido por causa de uma falha de
+  // rede. `fichasEscolaresIndisponivel` deixa a tela dizer "não deu para saber".
   inflightFetch = Promise.all([
     getPacientes({ incluirFicticios: true, incluirInativos: true }),
     getTelefonesDosResponsaveis(),
+    Promise.allSettled([getResumoEscolarPorPaciente()]),
   ])
-    .then(([{ data, error }, telefones]) =>
+    .then(([{ data, error }, telefones, [escolar]]) => {
+      if (escolar.status === "rejected") {
+        console.error("Falha ao ler as fichas escolares:", escolar.reason)
+      }
       notify({
         pacientes: data,
         telefonesResponsaveis: telefones.data,
+        fichasEscolares: escolar.status === "fulfilled" ? escolar.value : new Map(),
+        fichasEscolaresIndisponivel: escolar.status === "rejected",
         loading: false,
         error,
       })
-    )
+    })
     .finally(() => {
       inflightFetch = null
     })
@@ -68,6 +94,8 @@ export function refetchPacientes(): Promise<void> {
   notify({
     pacientes: cachedState?.pacientes ?? [],
     telefonesResponsaveis: cachedState?.telefonesResponsaveis ?? new Map(),
+    fichasEscolares: cachedState?.fichasEscolares ?? new Map(),
+    fichasEscolaresIndisponivel: false,
     loading: true,
     error: null,
   })

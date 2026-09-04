@@ -16,7 +16,14 @@ export default function PacienteDetalhePage() {
   // na ficha do paciente"): ?aba=altas&suspensao=123 abre direto na aba e no
   // registro que está causando o bloqueio, em vez de deixar o operador
   // procurar entre Cadastro/Ficha médica/Laudo/Altas e Individualidades.
-  const abaInicial = searchParams.get("aba") === "altas" ? "altas" : undefined
+  //
+  // `?aba=escola` vem da listagem de pacientes: o selo de escola no cartão abre
+  // direto na aba, para conferir o que a família declarou sem passar por
+  // Cadastro. Lista fechada de propósito — `aba` cru viria de URL e o valor
+  // precisa casar com o type `Aba`.
+  const abaParam = searchParams.get("aba")
+  const abaInicial =
+    abaParam === "altas" ? "altas" : abaParam === "escola" ? "escola" : undefined
   const suspensaoIdParam = searchParams.get("suspensao")
   const suspensaoIdInicial = suspensaoIdParam ? Number(suspensaoIdParam) : undefined
 
