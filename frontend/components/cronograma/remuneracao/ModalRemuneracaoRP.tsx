@@ -16,9 +16,10 @@
 // compartilhado ainda. Quando a terceira tela pedir o mesmo, é hora de extrair.
 
 import { Fragment, useMemo, useState } from "react"
+import Link from "next/link"
 import {
   Banknote, CalendarDays, CalendarX2, CheckCircle2, ChevronDown, ChevronLeft, ChevronRight,
-  ClipboardList, Clock, HelpCircle, ListFilter, Repeat2, Search, Sparkles, Sun, UserRoundMinus,
+  ClipboardList, Clock, ExternalLink, HelpCircle, ListFilter, Repeat2, Search, Sparkles, Sun, UserRoundMinus,
   Wallet, X,
 } from "lucide-react"
 
@@ -28,7 +29,7 @@ import { useToneColor, type Tone } from "@/hooks/useToneColor"
 import { fmt, isSim } from "@/lib/remuneracao/formatacao"
 import { isCancelado } from "@/lib/remuneracao/rotulosExecucao"
 import { formatDateBR } from "@/lib/remuneracao/datas"
-import { bucketDaSessao, composicaoRP } from "@/lib/remuneracao/composicaoRP"
+import { bucketDaSessao, composicaoRP, corrigirTotalComPEP } from "@/lib/remuneracao/composicaoRP"
 import type { ProfRemunReal, SessaoComPapel } from "@/lib/remuneracao/calculo"
 
 const POR_PAGINA = 15
@@ -271,6 +272,9 @@ export function ModalRemuneracaoRP({ p, periodo, pepResumo, onClose }: Props) {
 
   if (!p || !c) return null
 
+  const isCC = p.sessoes.some(s => s.especialidade === "Coordenador de Caso")
+  const pep = corrigirTotalComPEP(c, isCC, pepResumo ?? undefined)
+
   const corPct = toneColor(c.baseRemuneravel === 0 ? "gray" : c.pct >= 80 ? "green" : c.pct >= 50 ? "amber" : "red")
   const larguraBarra = Math.max(0, Math.min(100, c.pct))
   const semBase = c.baseRemuneravel === 0
@@ -351,8 +355,8 @@ export function ModalRemuneracaoRP({ p, periodo, pepResumo, onClose }: Props) {
 
             <div className="shrink-0 border-border sm:border-l sm:pl-6">
               <div className="text-[11px] font-semibold text-muted-foreground">A pagar</div>
-              <div className="text-3xl font-black tabular-nums leading-none" style={{ color: toneColor(tomDoValor(c.valorTotalAPagar, "green")) }}>
-                {fmt(c.valorTotalAPagar)}
+              <div className="text-3xl font-black tabular-nums leading-none" style={{ color: toneColor(tomDoValor(pep.valorTotalAPagar, "green")) }}>
+                {fmt(pep.valorTotalAPagar)}
               </div>
             </div>
           </div>
@@ -438,10 +442,10 @@ export function ModalRemuneracaoRP({ p, periodo, pepResumo, onClose }: Props) {
 
               <p className="sr-only">
                 {c.soFixo
-                  ? `Valor fixo de banco de horas de ${fmt(c.valorFixoBancoHoras)}, total a pagar ${fmt(c.valorTotalAPagar)}.`
-                  : `PA de ${fmt(c.valorPA)} mais PPD de ${fmt(c.ppd)} mais bônus ETA de ${fmt(c.bonusEta)} mais PE de ${fmt(c.pe)} resultam em ${fmt(c.valorConfirmado)} confirmados${
+                  ? `Valor fixo de banco de horas de ${fmt(c.valorFixoBancoHoras)}, total a pagar ${fmt(pep.valorTotalAPagar)}.`
+                  : `PA de ${fmt(c.valorPA)} mais PPD de ${fmt(c.ppd)} mais bônus ETA de ${fmt(c.bonusEta)} mais PEP de ${isCC && !pep.pepApurada ? "ainda não apurada" : fmt(pep.pepValor)} resultam em ${fmt(pep.valorConfirmado)} confirmados${
                       c.valorFixoBancoHoras > 0 ? `; somados ao valor fixo de ${fmt(c.valorFixoBancoHoras)}` : ""
-                    }, total a pagar ${fmt(c.valorTotalAPagar)}.`}
+                    }, total a pagar ${fmt(pep.valorTotalAPagar)}.`}
               </p>
 
               <div className="flex flex-col items-stretch gap-1.5 sm:flex-row sm:flex-wrap" aria-hidden>
@@ -473,16 +477,23 @@ export function ModalRemuneracaoRP({ p, periodo, pepResumo, onClose }: Props) {
                       </>
                     )}
                     <Conector sinal="+" />
-                    <PassoConta moeda tone={tomDoValor(c.pe, "purple")} icon={<ClipboardList size={16} />} valor={fmt(c.pe)} titulo="PE proporcional" />
+                    <PassoConta
+                      moeda
+                      tone={isCC && !pep.pepApurada ? "amber" : tomDoValor(pep.pepValor, "purple")}
+                      icon={<ClipboardList size={16} />}
+                      valor={isCC && !pep.pepApurada ? "—" : fmt(pep.pepValor)}
+                      titulo="PEP"
+                      alerta={isCC && !pep.pepApurada ? "ainda não apurada" : undefined}
+                    />
                     <Conector sinal="=" />
                     {/* Sem valor fixo, "Confirmado" e "Total a pagar" são o MESMO
                         número — então usa-se o nome do cabeçalho, e não dois
                         rótulos para uma quantidade só (§3.2). */}
                     <PassoConta
                       moeda destaque
-                      tone={tomDoValor(c.valorConfirmado, "green")}
+                      tone={tomDoValor(pep.valorConfirmado, "green")}
                       icon={<Wallet size={16} />}
-                      valor={fmt(c.valorConfirmado)}
+                      valor={fmt(pep.valorConfirmado)}
                       titulo={c.valorFixoBancoHoras > 0 ? "Confirmado" : "Total a pagar"}
                     />
                   </>
@@ -500,7 +511,7 @@ export function ModalRemuneracaoRP({ p, periodo, pepResumo, onClose }: Props) {
                       alerta={c.fixoNaoCadastrado ? "sem valor cadastrado" : undefined}
                     />
                     <Conector sinal="=" />
-                    <PassoConta moeda destaque tone={tomDoValor(c.valorTotalAPagar, "green")} icon={<Banknote size={16} />} valor={fmt(c.valorTotalAPagar)} titulo="Total a pagar" />
+                    <PassoConta moeda destaque tone={tomDoValor(pep.valorTotalAPagar, "green")} icon={<Banknote size={16} />} valor={fmt(pep.valorTotalAPagar)} titulo="Total a pagar" />
                   </>
                 )}
               </div>
@@ -518,11 +529,19 @@ export function ModalRemuneracaoRP({ p, periodo, pepResumo, onClose }: Props) {
                   {`O contrato ${p.numerosBancoHoras.join(" / ") || "vigente"} está marcado como banco de horas, mas sem valor total em Cadastros › Contratos. O PA por sessão foi zerado e não há valor fixo para pagar no lugar — é pendência de cadastro, não R$ 0.`}
                 </p>
               )}
-              {pepResumo && (
-                <p className="mt-3 text-xs text-muted-foreground">
-                  PEP apurada na aba Entregas PEP: <span className={`font-semibold ${TONE_CHIP.purple.text}`}>{fmt(pepResumo.alcancado)}</span>{" "}
-                  de {fmt(pepResumo.potencial)} de potencial. É uma apuração à parte — não entra nas parcelas acima.
-                </p>
+              {isCC && periodo && (
+                <div className="mt-3">
+                  <Link
+                    href={`/relacionamento-prestador/pep/?competencia=${periodo.de.slice(0, 7)}&prestador=${encodeURIComponent(p.prof)}`}
+                    target="_blank"
+                    rel="noreferrer"
+                    className={`inline-flex items-center gap-1.5 rounded-lg border border-border px-2.5 py-1.5 text-xs font-medium ${TONE_CHIP.purple.text} hover:bg-muted/50`}
+                  >
+                    <ExternalLink size={12} aria-hidden />
+                    Abrir Entregas PEP
+                    <span className="sr-only">(abre em outra aba, já na competência e no Analista deste modal)</span>
+                  </Link>
+                </div>
               )}
             </section>
 
