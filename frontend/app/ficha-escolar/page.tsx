@@ -2,7 +2,7 @@
 'use client'
 
 import { useEffect, useRef, useState } from 'react'
-import { GraduationCap, Check, Search, Loader2 } from 'lucide-react'
+import { GraduationCap, Check, Search, Loader2, ChevronDown } from 'lucide-react'
 import { PARENTESCOS } from '@/types/responsavel'
 
 // Formulário que o RESPONSÁVEL preenche pelo link do WhatsApp — sem conta, num
@@ -33,6 +33,32 @@ type PacienteEncontrado = { id: number; nome: string }
 
 type Passo = 'buscar' | 'preencher' | 'enviado'
 
+// Os três campos que o servidor recusa por conta própria. O resto é opcional ou
+// já é barrado pelo `required` do navegador antes do POST sair.
+type CampoErro = 'nascimento' | 'escola' | 'porNome'
+
+/**
+ * De qual campo o servidor está reclamando.
+ *
+ * Casa por trecho, não por igualdade: as mensagens de tamanho carregam o limite
+ * interpolado (`passou de 120 caracteres`), então comparar a string inteira
+ * erraria justamente nelas. Os trechos abaixo são os que ../enviar/route.ts
+ * escreve — mudar o texto lá pede mudar aqui.
+ *
+ * Sem correspondência devolve `null`, e aí o alerta aparece sozinho, como antes.
+ * É o comportamento certo para "Serviço indisponível" e afins, que não são de
+ * campo nenhum.
+ */
+function campoDoErro(mensagem: string): CampoErro | null {
+  if (mensagem.includes('data de nascimento')) return 'nascimento'
+  if (mensagem.includes('nome da escola')) return 'escola'
+  if (mensagem.includes('quem está preenchendo') || mensagem.includes('quem preencheu')) {
+    return 'porNome'
+  }
+
+  return null
+}
+
 export default function FichaEscolarPage() {
   const [passo, setPasso] = useState<Passo>('buscar')
 
@@ -58,9 +84,50 @@ export default function FichaEscolarPage() {
   const [enviando, setEnviando] = useState(false)
   const [erro, setErro] = useState('')
 
+  // Qual campo o servidor recusou. Move o foco e marca o controle — sem isto o
+  // recado aparecia no rodapé de um formulário rolado, a centenas de pixels do
+  // campo errado, e quem digitou a data errada via só o botão "não fazer nada".
+  const [campoComErro, setCampoComErro] = useState<CampoErro | null>(null)
+
+  const refNascimento = useRef<HTMLInputElement>(null)
+  const refEscolaNome = useRef<HTMLInputElement>(null)
+  const refPorNome = useRef<HTMLInputElement>(null)
+  const refConfirmacao = useRef<HTMLHeadingElement>(null)
+
   // Guarda a busca mais recente: respostas fora de ordem (a de "ana" chegando
   // depois da de "ana clara") sobrescreveriam a lista certa pela antiga.
   const buscaAtual = useRef(0)
+
+  // Esta tela é clara, sempre, para todo mundo — ver ROTAS_SEMPRE_CLARAS.
+  //
+  // Quem garante isso na CARGA DIRETA (o caso normal: o link do WhatsApp) é o
+  // script pré-hidratação do app/layout.tsx, que decide antes da primeira
+  // pintura. Este efeito cobre só o outro caminho — chegar aqui por navegação
+  // client-side, quando aquele script não roda de novo.
+  //
+  // Uma versão anterior deixava a correção SÓ aqui, e não bastava: o efeito roda
+  // depois da hidratação, então o cartão ficava quase preto por ~1,3s antes de
+  // clarear. Ter a regra nos dois lugares é o que fecha os dois caminhos.
+  //
+  // Não mexe no localStorage: só tira a classe enquanto esta página está
+  // montada, e devolve na saída para não sequestrar o tema do resto do app.
+  useEffect(() => {
+    const raiz = document.documentElement
+    const estavaEscuro = raiz.classList.contains('dark')
+
+    if (estavaEscuro) raiz.classList.remove('dark')
+
+    return () => {
+      if (estavaEscuro) raiz.classList.add('dark')
+    }
+  }, [])
+
+  // Ao trocar o formulário pela confirmação, a árvore inteira sai de cena e o
+  // foco cai no <body>: quem navega por teclado ou leitor de tela fica sem
+  // saber que deu certo. Levar o foco ao título faz a tela nova se anunciar.
+  useEffect(() => {
+    if (passo === 'enviado') refConfirmacao.current?.focus()
+  }, [passo])
 
   useEffect(() => {
     const alvo = termo.trim()
@@ -108,12 +175,41 @@ export default function FichaEscolarPage() {
     setErro('')
   }
 
+  /**
+   * Leva foco e rolagem ao campo recusado.
+   *
+   * O `setTimeout(0)` espera o React pintar o `aria-invalid` e o alerta antes de
+   * rolar — sem ele a rolagem calcula a posição do layout velho e para alguns
+   * pixels fora. `block: 'center'` em vez do topo porque o campo tem rótulo e
+   * dica acima, e encostar no topo da viewport esconde os dois.
+   */
+  function focarCampo(campo: CampoErro) {
+    const alvo =
+      campo === 'nascimento'
+        ? refNascimento.current
+        : campo === 'escola'
+          ? refEscolaNome.current
+          : refPorNome.current
+
+    setTimeout(() => {
+      alvo?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      alvo?.focus({ preventScroll: true })
+    }, 0)
+  }
+
   async function enviar(e: React.FormEvent) {
     e.preventDefault()
 
     if (!selecionado) return
 
+    // Reentrada: `enviando` desabilita o botão, mas dois toques rápidos no mesmo
+    // quadro entram os dois antes do estado repintar, e o insert em
+    // pacientes_dados_escolares não tem unicidade — seriam duas linhas para a
+    // mesma família. O limite de 5 por 10 min não pega isso.
+    if (enviando) return
+
     setErro('')
+    setCampoComErro(null)
     setEnviando(true)
 
     try {
@@ -139,8 +235,15 @@ export default function FichaEscolarPage() {
       const dados = await resposta.json().catch(() => null)
 
       if (!resposta.ok) {
-        setErro(dados?.error ?? 'Não foi possível enviar. Tente novamente.')
+        const mensagem = dados?.error ?? 'Não foi possível enviar. Tente novamente.'
+        const campo = campoDoErro(mensagem)
+
+        setErro(mensagem)
+        setCampoComErro(campo)
         setEnviando(false)
+
+        if (campo) focarCampo(campo)
+
         return
       }
 
@@ -156,7 +259,7 @@ export default function FichaEscolarPage() {
     return (
       <main
         className="min-h-screen flex flex-col items-center justify-center px-5 py-12"
-        style={{ background: BG }}
+        style={{ background: BG, colorScheme: 'light' }}
       >
         <div
           className="w-full max-w-sm bg-white text-center px-8 py-12"
@@ -168,7 +271,15 @@ export default function FichaEscolarPage() {
           >
             <Check size={40} strokeWidth={2.5} style={{ color: '#15803d' }} />
           </div>
-          <h1 className="font-bold tracking-tight mb-3" style={{ fontSize: '26px', color: '#192755' }}>
+          {/* `tabIndex={-1}` torna o título focável por script sem entrar na
+              ordem de tabulação. `outline-none` porque o foco aqui é para
+              anunciar a tela, não para marcar onde o teclado está. */}
+          <h1
+            ref={refConfirmacao}
+            tabIndex={-1}
+            className="font-bold tracking-tight mb-3 focus:outline-none"
+            style={{ fontSize: '26px', color: '#192755' }}
+          >
             Recebemos, obrigado!
           </h1>
           <p className="text-[15px] leading-relaxed" style={{ color: '#64748b' }}>
@@ -181,7 +292,7 @@ export default function FichaEscolarPage() {
   }
 
   return (
-    <main className="min-h-screen px-5 py-10" style={{ background: BG }}>
+    <main className="min-h-screen px-5 py-10" style={{ background: BG, colorScheme: 'light' }}>
       <div className="w-full max-w-md mx-auto">
 
         {/* ── Cabeçalho ── */}
@@ -199,6 +310,8 @@ export default function FichaEscolarPage() {
             <img
               src="/logo-universo-aba.png"
               alt="Universo ABA"
+              width={112}
+              height={112}
               className="w-full h-full object-contain"
             />
           </div>
@@ -206,7 +319,7 @@ export default function FichaEscolarPage() {
             <h1 className="text-[21px] font-bold text-white tracking-tight leading-tight">
               Clínica Universo ABA
             </h1>
-            <p className="text-[15px] font-medium mt-1" style={{ color: 'rgba(255,255,255,0.72)' }}>
+            <p className="text-[15px] font-medium mt-1" style={{ color: 'rgba(255,255,255,0.88)' }}>
               Informações Escolares
             </p>
           </div>
@@ -239,8 +352,8 @@ export default function FichaEscolarPage() {
               <div>
                 <label
                   htmlFor="busca-paciente"
-                  className="block font-bold uppercase tracking-widest mb-2"
-                  style={{ fontSize: '11px', color: '#64748b' }}
+                  className="block text-[13px] font-semibold mb-2"
+                  style={{ color: '#475569' }}
                 >
                   Nome do paciente
                 </label>
@@ -249,7 +362,7 @@ export default function FichaEscolarPage() {
                     size={18}
                     strokeWidth={2}
                     className="absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none"
-                    style={{ color: '#94a3b8' }}
+                    style={{ color: '#64748b' }}
                     aria-hidden="true"
                   />
                   <input
@@ -259,28 +372,42 @@ export default function FichaEscolarPage() {
                     onChange={(e) => setTermo(e.target.value)}
                     placeholder="Digite o nome da criança"
                     autoComplete="off"
-                    className="w-full rounded-2xl pl-11 pr-11 py-4 text-[15px] focus:outline-none focus:border-[#1a4fc4] placeholder:text-slate-400"
-                    style={{
-                      background: '#eef3fc',
-                      color: '#1e293b',
-                      border: '1.5px solid transparent',
-                    }}
+                    className="w-full rounded-2xl pl-11 pr-11 py-4 text-[16px] border-[1.5px] border-transparent focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1a4fc4] focus-visible:border-[#1a4fc4] placeholder:text-slate-600"
+                    style={{ background: '#eef3fc', color: '#1e293b' }}
                   />
                   {buscando && (
                     <Loader2
                       size={18}
-                      className="absolute right-4 top-1/2 -translate-y-1/2 animate-spin"
+                      className="absolute right-4 top-1/2 -translate-y-1/2 animate-spin motion-reduce:animate-none"
                       style={{ color: '#1a4fc4' }}
                       aria-hidden="true"
                     />
                   )}
                 </div>
-                <p className="text-[13px] mt-2" style={{ color: '#94a3b8' }}>
+                <p className="text-[13px] mt-2" style={{ color: '#64748b' }}>
                   Digite pelo menos {MINIMO_BUSCA} letras do nome.
                 </p>
               </div>
 
-              <div aria-live="polite">
+              {/* A região viva carrega só o RESUMO, não a lista. Envolvendo o
+                  <ul>, cada tecla a partir da 3ª reanunciava todos os nomes por
+                  inteiro — verboso, repetitivo, e sem nunca dizer quantos são.
+                  A lista fica fora e é navegada normalmente. */}
+              <p className="sr-only" role="status" aria-live="polite">
+                {buscando
+                  ? 'Buscando pacientes.'
+                  : termo.trim().length < MINIMO_BUSCA
+                    ? ''
+                    : resultados.length === 0
+                      ? 'Nenhum paciente encontrado.'
+                      : `${resultados.length} ${
+                          resultados.length === 1
+                            ? 'paciente encontrado'
+                            : 'pacientes encontrados'
+                        }. Escolha um na lista.`}
+              </p>
+
+              <div className="min-h-[76px]">
                 {resultados.length > 0 && (
                   <ul className="space-y-2">
                     {resultados.map((paciente) => (
@@ -318,20 +445,22 @@ export default function FichaEscolarPage() {
                 style={{ background: '#eef3fc' }}
               >
                 <div className="min-w-0">
-                  <p
-                    className="font-bold uppercase tracking-widest"
-                    style={{ fontSize: '10px', color: '#64748b' }}
-                  >
+                  <p className="text-[12px] font-medium" style={{ color: '#475569' }}>
                     Paciente
                   </p>
                   <p className="text-[15px] font-semibold truncate" style={{ color: '#192755' }}>
                     {selecionado.nome}
                   </p>
                 </div>
+                {/* O `-mr-2` puxa o padding para fora da caixa visível: a área
+                    de toque chega aos 44px do sistema (DESIGN.md §1) sem que o
+                    link pareça maior nem empurre o nome do paciente. É a única
+                    saída desta tela para quem escolheu a criança errada, então
+                    errar o toque custa recarregar e digitar tudo de novo. */}
                 <button
                   type="button"
                   onClick={voltarParaBusca}
-                  className="text-[13px] font-semibold shrink-0 underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1a4fc4] rounded"
+                  className="text-[13px] font-semibold shrink-0 underline focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1a4fc4] rounded-lg min-h-[44px] px-3 -mr-2 inline-flex items-center"
                   style={{ color: '#1a4fc4' }}
                 >
                   Trocar
@@ -345,27 +474,41 @@ export default function FichaEscolarPage() {
                 rotulo="Data de nascimento do paciente"
                 obrigatorio
                 dica="Para confirmar que é a criança certa."
+                erro={campoComErro === 'nascimento' ? erro : undefined}
               >
                 <input
                   id="data-nascimento"
+                  ref={refNascimento}
                   type="date"
                   required
                   value={dataNascimento}
                   onChange={(e) => setDataNascimento(e.target.value)}
+                  aria-invalid={campoComErro === 'nascimento'}
+                  aria-describedby={
+                    campoComErro === 'nascimento' ? 'erro-envio' : 'data-nascimento-dica'
+                  }
                   className={ENTRADA}
                   style={ESTILO_ENTRADA}
                 />
               </Campo>
 
               <Secao titulo="Escola">
-                <Campo id="escola-nome" rotulo="Nome da escola" obrigatorio>
+                <Campo
+                  id="escola-nome"
+                  rotulo="Nome da escola"
+                  obrigatorio
+                  erro={campoComErro === 'escola' ? erro : undefined}
+                >
                   <input
                     id="escola-nome"
+                    ref={refEscolaNome}
                     type="text"
                     required
                     maxLength={120}
                     value={escolaNome}
                     onChange={(e) => setEscolaNome(e.target.value)}
+                    aria-invalid={campoComErro === 'escola'}
+                    aria-describedby={campoComErro === 'escola' ? 'erro-envio' : undefined}
                     className={ENTRADA}
                     style={ESTILO_ENTRADA}
                   />
@@ -441,48 +584,46 @@ export default function FichaEscolarPage() {
                 </Campo>
 
                 <Campo id="turno" rotulo="Turno">
-                  <select
-                    id="turno"
-                    value={turno}
-                    onChange={(e) => setTurno(e.target.value)}
-                    className={ENTRADA}
-                    style={ESTILO_ENTRADA}
-                  >
-                    <option value="">Selecione</option>
-                    {TURNOS.map((t) => (
-                      <option key={t} value={t}>{t}</option>
-                    ))}
-                  </select>
+                  <Selecao id="turno" valor={turno} aoMudar={setTurno} opcoes={TURNOS} />
                 </Campo>
               </Secao>
 
               <Secao titulo="Quem está preenchendo">
-                <Campo id="por-nome" rotulo="Seu nome" obrigatorio>
+                <Campo
+                  id="por-nome"
+                  rotulo="Seu nome"
+                  obrigatorio
+                  erro={campoComErro === 'porNome' ? erro : undefined}
+                >
+                  {/* `autocomplete` nos campos que são dados DO RESPONSÁVEL: é
+                      ele preenchendo sobre si mesmo, no teclado do celular, e o
+                      preenchimento automático poupa exatamente a digitação que
+                      custa envios. Os campos da escola não levam token porque
+                      não são dados pessoais de quem preenche — `organization`
+                      faria o navegador sugerir o empregador do responsável. */}
                   <input
                     id="por-nome"
+                    ref={refPorNome}
                     type="text"
                     required
+                    autoComplete="name"
                     maxLength={120}
                     value={porNome}
                     onChange={(e) => setPorNome(e.target.value)}
+                    aria-invalid={campoComErro === 'porNome'}
+                    aria-describedby={campoComErro === 'porNome' ? 'erro-envio' : undefined}
                     className={ENTRADA}
                     style={ESTILO_ENTRADA}
                   />
                 </Campo>
 
                 <Campo id="por-parentesco" rotulo="Parentesco com o paciente">
-                  <select
+                  <Selecao
                     id="por-parentesco"
-                    value={porParentesco}
-                    onChange={(e) => setPorParentesco(e.target.value)}
-                    className={ENTRADA}
-                    style={ESTILO_ENTRADA}
-                  >
-                    <option value="">Selecione</option>
-                    {PARENTESCOS.map((p) => (
-                      <option key={p} value={p}>{p}</option>
-                    ))}
-                  </select>
+                    valor={porParentesco}
+                    aoMudar={setPorParentesco}
+                    opcoes={PARENTESCOS}
+                  />
                 </Campo>
 
                 <Campo id="por-telefone" rotulo="Seu telefone (WhatsApp)">
@@ -490,6 +631,7 @@ export default function FichaEscolarPage() {
                     id="por-telefone"
                     type="tel"
                     inputMode="tel"
+                    autoComplete="tel"
                     maxLength={120}
                     value={porTelefone}
                     onChange={(e) => setPorTelefone(e.target.value)}
@@ -500,8 +642,18 @@ export default function FichaEscolarPage() {
                 </Campo>
               </Secao>
 
+              {/* "Enviando..." no rótulo do botão é uma mudança de texto DENTRO
+                  de um controle, que os leitores de tela não anunciam de forma
+                  confiável — e o envio é justamente a espera em que se quer
+                  saber se algo está acontecendo. Esta região existe só para
+                  dizer isso em voz alta. */}
+              <p className="sr-only" role="status" aria-live="polite">
+                {enviando ? 'Enviando informações. Aguarde.' : ''}
+              </p>
+
               {erro && (
                 <div
+                  id="erro-envio"
                   role="alert"
                   className="text-sm px-4 py-3 rounded-2xl"
                   style={{ background: '#fef2f2', border: '1px solid #fecaca', color: '#b91c1c' }}
@@ -513,7 +665,7 @@ export default function FichaEscolarPage() {
               <button
                 type="submit"
                 disabled={enviando}
-                className="w-full font-bold text-white transition-all duration-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1a4fc4] focus-visible:ring-offset-2 disabled:opacity-50 bg-[#1a3275] hover:bg-[#152a68] active:bg-[#111f52] active:scale-[0.97]"
+                className="w-full font-bold text-white transition-all duration-100 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1a4fc4] focus-visible:ring-offset-2 disabled:opacity-70 bg-[#1a3275] hover:bg-[#152a68] active:bg-[#111f52] active:scale-[0.97] motion-reduce:transition-none motion-reduce:active:scale-100"
                 style={{ height: '56px', borderRadius: '16px', fontSize: '16px' }}
               >
                 {enviando ? 'Enviando...' : 'Enviar informações'}
@@ -524,7 +676,7 @@ export default function FichaEscolarPage() {
 
         <p
           className="text-[13px] leading-snug text-center mt-6 px-4"
-          style={{ color: 'rgba(255,255,255,0.6)' }}
+          style={{ color: 'rgba(255,255,255,0.85)' }}
         >
           As informações são usadas apenas pela equipe terapêutica da clínica.
         </p>
@@ -538,21 +690,81 @@ export default function FichaEscolarPage() {
 // projeto monta markup Tailwind à mão. Extrair para components/ só quando
 // existir uma segunda tela pública precisando do mesmo.
 
+// A borda vive nas classes, NÃO no objeto de estilo. Estilo inline vence
+// qualquer regra de folha de estilo, então um `border` ali fazia
+// `focus:border-*` nunca aplicar — enquanto `focus:outline-none` aplicava. O
+// resultado era focar um campo e ficar sem indicador nenhum: o anel nativo saía
+// e nada entrava no lugar.
+//
+// O anel steel é o tratamento de foco do sistema (DESIGN.md §5), e é o mesmo que
+// os botões desta tela já usavam — agora os treze controles combinam.
 const ENTRADA =
-  'w-full rounded-2xl px-4 py-3.5 text-[15px] focus:outline-none focus:border-[#1a4fc4] placeholder:text-slate-400'
+  'w-full rounded-2xl px-4 py-3.5 text-[16px] border-[1.5px] border-transparent ' +
+  'focus:outline-none focus-visible:ring-2 focus-visible:ring-[#1a4fc4] focus-visible:border-[#1a4fc4] ' +
+  'aria-[invalid=true]:border-[#b91c1c] placeholder:text-slate-600'
 
 const ESTILO_ENTRADA: React.CSSProperties = {
   background: '#eef3fc',
   color: '#1e293b',
-  border: '1.5px solid transparent',
+}
+
+/**
+ * `<select>` com a seta do sistema trocada pela do resto da tela.
+ *
+ * Sem o `appearance-none` os dois dropdowns ficavam com o controle nativo do
+ * SO ao lado de dez campos de aparência própria — mesma altura e mesmo fundo,
+ * mas visivelmente de outra família. A seta é decorativa (`aria-hidden`): quem
+ * usa leitor de tela já recebe "caixa de combinação" do próprio elemento.
+ *
+ * `pr-11` abre espaço para a seta não encostar no texto da opção mais longa.
+ */
+function Selecao({
+  id,
+  valor,
+  aoMudar,
+  opcoes,
+}: {
+  id: string
+  valor: string
+  aoMudar: (valor: string) => void
+  opcoes: readonly string[]
+}) {
+  return (
+    <div className="relative">
+      <select
+        id={id}
+        value={valor}
+        onChange={(e) => aoMudar(e.target.value)}
+        className={`${ENTRADA} appearance-none pr-11`}
+        style={ESTILO_ENTRADA}
+      >
+        <option value="">Selecione</option>
+        {opcoes.map((opcao) => (
+          <option key={opcao} value={opcao}>{opcao}</option>
+        ))}
+      </select>
+      <ChevronDown
+        size={18}
+        strokeWidth={2}
+        className="absolute right-4 top-1/2 -translate-y-1/2 pointer-events-none"
+        style={{ color: '#475569' }}
+        aria-hidden="true"
+      />
+    </div>
+  )
 }
 
 function Secao({ titulo, children }: { titulo: string; children: React.ReactNode }) {
   return (
     <fieldset className="space-y-4">
+      {/* O <legend> é o único lugar da tela que ainda usa a caixa alta espaçada,
+          e aqui ela é estrutural: separa as três seções do formulário dos treze
+          rótulos de campo. Nos rótulos a mesma fórmula era ruído — caixa alta a
+          11px tira a forma da palavra, que é a pista de leitura mais útil
+          justamente para quem preenche isto uma vez na vida. */}
       <legend
-        className="font-bold uppercase tracking-widest pb-1"
-        style={{ fontSize: '11px', color: '#1a4fc4' }}
+        className="text-[12px] font-bold uppercase tracking-wider pb-1"
+        style={{ color: '#1a4fc4' }}
       >
         {titulo}
       </legend>
@@ -566,29 +778,47 @@ function Campo({
   rotulo,
   obrigatorio,
   dica,
+  erro,
   children,
 }: {
   id: string
   rotulo: string
   obrigatorio?: boolean
   dica?: string
+  /** Recado do servidor sobre ESTE campo, repetido junto dele. */
+  erro?: string
   children: React.ReactNode
 }) {
   return (
     <div>
       <label
         htmlFor={id}
-        className="block font-bold uppercase tracking-widest mb-2"
-        style={{ fontSize: '11px', color: '#64748b' }}
+        className="block text-[13px] font-semibold mb-2"
+        style={{ color: '#475569' }}
       >
         {rotulo}
+        {/* O asterisco é decorativo: quem usa leitor de tela recebe a
+            obrigatoriedade pelo `required` do próprio controle. Lido em voz alta
+            ele viraria "nome da escola asterisco". */}
         {obrigatorio && <span style={{ color: '#b91c1c' }} aria-hidden="true"> *</span>}
       </label>
       {children}
-      {dica && (
-        <p className="text-[13px] mt-1.5" style={{ color: '#94a3b8' }}>
-          {dica}
+      {/* O recado do servidor aparece DUAS vezes de propósito: aqui, colado no
+          campo para onde o foco acabou de ir, e no alerta ao pé do formulário.
+          Sem esta cópia, quem erra a data é levado ao topo enquanto a
+          explicação fica centenas de pixels abaixo, fora da tela. O `aria-hidden`
+          evita a leitura em dobro — o alerta com role="alert" já anuncia, e é
+          para ele que o aria-describedby do campo aponta. */}
+      {erro ? (
+        <p className="text-[13px] mt-1.5 font-medium" style={{ color: '#b91c1c' }} aria-hidden="true">
+          {erro}
         </p>
+      ) : (
+        dica && (
+          <p id={`${id}-dica`} className="text-[13px] mt-1.5" style={{ color: '#64748b' }}>
+            {dica}
+          </p>
+        )
       )}
     </div>
   )

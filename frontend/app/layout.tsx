@@ -43,7 +43,21 @@ export default function RootLayout({
   return (
     <html lang="pt-BR" className={cn("font-sans", geist.variable)} suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: `try{var t=localStorage.getItem('theme');if(t==='dark')document.documentElement.classList.add('dark');}catch(e){}` }} />
+        {/*
+          Aplica o tema salvo ANTES da primeira pintura, para a página não
+          aparecer clara e piscar para escura.
+
+          `ROTAS_SEMPRE_CLARAS` é a exceção: telas públicas que qualquer pessoa
+          abre por link, sem conta. Elas não têm variante escura — pintam cores
+          fixas em estilo inline, que o shim de `.dark` do globals.css não
+          alcança. Sem esta checagem o cartão vinha quase preto com o texto
+          continuando escuro em cima, ilegível, até a hidratação corrigir mais de
+          um segundo depois. Corrigir aqui, e não num efeito da página, é o que
+          elimina a piscada: quem decide é o mesmo script que a causava.
+
+          Manter em sincronia com `ROTAS_SEMPRE_CLARAS` em lib/tema.ts.
+        */}
+        <script dangerouslySetInnerHTML={{ __html: `try{var t=localStorage.getItem('theme');var c=/^\\/(ficha-escolar)(\\/|$)/.test(location.pathname);if(t==='dark'&&!c)document.documentElement.classList.add('dark');}catch(e){}` }} />
       </head>
       <body>
         <ServiceWorkerRegistration />
