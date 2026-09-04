@@ -253,6 +253,45 @@ try {
       comTerapia.aviso)
   }
 
+  console.log('\n2e. terapiaId inexistente é recusa, não "não temos vaga"')
+
+  // O defeito (04/09/2026, no rastro): perguntada por psicologia a partir do dia
+  // 14, a IA passou `terapiaId: 1`. Psicologia é 2259 — ela tinha acabado de
+  // usar o id certo um minuto antes. Não perdeu o parâmetro: INVENTOU o valor.
+  //
+  // Sem validação, um id inexistente filtra por nada, devolve zero vagas, e a
+  // ferramenta responde `sem_vaga` — indistinguível de "essa terapia não tem
+  // horário nesse período". O modelo então nega ao responsável um atendimento
+  // que a clínica oferece, e nada na conversa denuncia a causa.
+  //
+  // `unidade` já tinha duas camadas de validação (enum no schema + LANÇA no
+  // banco); `terapiaId` não tinha nenhuma. Era ponto cego, não decisão.
+  const idInventado: any = await ferramentas.executar('consultar_horarios_disponiveis', {
+    terapiaId: 1,
+    unidade:   'Realengo',
+  })
+  checar(idInventado.ok === false,
+    'terapiaId inexistente é recusado, não vira lista vazia', idInventado)
+  checar(idInventado.motivo === MOTIVO.ERRO_INTERNO,
+    'a recusa é erro_interno, NÃO sem_vaga (a agenda não é o problema)',
+    idInventado.motivo)
+  checar(String(idInventado.mensagem).includes('id está errado'),
+    'a mensagem impede o modelo de dizer que não há horário', idInventado.mensagem)
+  checar(/\d+ = /.test(String(idInventado.mensagem)),
+    'a recusa lista os ids válidos — sem eles o modelo chuta de novo, e chute ' +
+    'diferente não é detectado como laço pelo orquestrador',
+    idInventado.mensagem)
+
+  // O id legítimo continua passando: a validação não pode ser tão estrita que
+  // recuse o que a própria ferramenta acabou de oferecer.
+  const idValido: any = await ferramentas.executar('consultar_horarios_disponiveis', {
+    terapiaId: terapia.terapiaId,
+    limite:    3,
+  })
+  checar(idValido.ok === true || idValido.motivo === MOTIVO.SEM_VAGA,
+    'terapiaId válido não é barrado pela validação',
+    idValido)
+
   console.log('\n3. agendar_sessao na vaga oferecida')
   const ag: any = await ferramentas.executar('agendar_sessao', {
     profissionalId: vaga.profissionalId,

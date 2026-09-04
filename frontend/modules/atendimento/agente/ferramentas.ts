@@ -128,7 +128,14 @@ export const DEFINICOES_FERRAMENTAS = [
       parameters: {
         type: 'object',
         properties: {
-          terapiaId:  { type: ['integer', 'null'], description: 'Id da terapia, obtido em consultar_especialidades_disponiveis. null para todas.' },
+          terapiaId: {
+            type: ['integer', 'null'],
+            description:
+              'Id da terapia. Use SOMENTE um id que veio de consultar_especialidades_disponiveis ou de uma ' +
+              'consulta anterior nesta mesma conversa — nunca invente, nunca chute um número pequeno como 1 ou 2, ' +
+              'e nunca reescreva um id que já funcionou. Se não tiver certeza de qual é, chame ' +
+              'consultar_especialidades_disponiveis de novo em vez de adivinhar. null para buscar em todas.',
+          },
           unidade: {
             type: ['string', 'null'],
             // Derivado de UNIDADES, não repetido: o mesmo vocabulário é
@@ -331,6 +338,45 @@ export class FerramentasAgente {
         `Unidade '${args.unidade}' não existe. As unidades são: ${UNIDADES.join(', ')}. ` +
         'Pergunte ao responsável em qual delas ele quer ser atendido.',
       )
+    }
+
+    // terapiaId que não existe é RECUSA, não lista vazia.
+    //
+    // Sem esta guarda um id inventado filtra por algo inexistente, devolve zero
+    // vagas, e a ferramenta responde `sem_vaga` — indistinguível de "essa
+    // terapia realmente não tem vaga nesse período". O modelo então diz ao
+    // responsável que a clínica não tem horário, quando a verdade é que ELE
+    // errou o id.
+    //
+    // Caso real (04/09/2026, no rastro): perguntada por psicologia a partir do
+    // dia 14, a IA passou `terapiaId: 1`. Psicologia é 2259 — ela tinha acabado
+    // de usar o id certo na consulta anterior, um minuto antes. Não perdeu o
+    // parâmetro (o conserto anterior pegou nisso): inventou o valor. A resposta
+    // foi "não encontrei horários", e nada na conversa denunciava a causa.
+    //
+    // `unidade` já tinha duas camadas (enum no schema + validação que LANÇA no
+    // banco) e `terapiaId` não tinha nenhuma. Era ponto cego, não decisão.
+    const terapiaId = toInt(args.terapiaId)
+    if (terapiaId != null) {
+      const conhecidas = await this.agendamentos.listarTerapiasComVaga(
+        args.dataInicio ?? null,
+        args.dataFim ?? null,
+      )
+      if (!conhecidas.some(t => t.terapiaId === terapiaId)) {
+        // A lista de válidas vai junto: sem ela o modelo tende a tentar outro
+        // palpite, e uma segunda chamada com argumentos diferentes não é
+        // detectada como laço pelo orquestrador — ele giraria até o teto.
+        const validas = conhecidas
+          .slice(0, 25)
+          .map(t => `${t.terapiaId} = ${t.terapiaNome}`)
+          .join('; ')
+        return recusa(
+          MOTIVO.ERRO_INTERNO,
+          `Não existe terapia com id ${terapiaId} entre as que têm vaga no período. ` +
+          'NÃO diga ao responsável que não há horário: o id está errado, não a agenda. ' +
+          `Use um destes: ${validas}`,
+        )
+      }
     }
 
     // O filtro por unidade acontece NO BANCO (p_unidade, 20260904100100), e é
