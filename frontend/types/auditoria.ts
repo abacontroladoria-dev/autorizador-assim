@@ -22,6 +22,10 @@ export type EntidadeAuditada =
   // que é a única chave daquele relatório que sobrevive à troca de importação do
   // robô. Ver 20260828150000/150100.
   | "laudo_acompanhamento"
+  // Controle de Prazos do PDI (tela /terapeutico/prazos-pdi, plano em
+  // serene-seeking-toast.md). `registro_id` é o `paciente_id` — a PK de
+  // public.pdi_controle_prazos. Ver 20260904120000/120100.
+  | "pdi_controle_prazos"
 
 export type AcaoAuditada = "criar" | "editar" | "excluir" | "inativar" | "reativar"
 
@@ -73,6 +77,7 @@ export const ENTIDADE_LABEL: Record<EntidadeAuditada, string> = {
   alta_individualidade: "Individualidades",
   suspensao_temporaria: "Suspensão temporária",
   laudo_acompanhamento: "Acompanhamento de laudo",
+  pdi_controle_prazos: "Controle de Prazos PDI",
 }
 
 export const ACAO_LABEL: Record<AcaoAuditada, string> = {

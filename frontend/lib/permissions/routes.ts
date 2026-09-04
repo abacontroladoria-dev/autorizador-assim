@@ -28,6 +28,7 @@ export const roleDefaults: Record<string, string[]> = {
     'cadastros_pacientes', 'cadastros_profissionais',
     'cronograma_por_paciente', 'cronograma_por_profissional',
     'insumos',
+    'terapeutico_pdi',
   ],
   diretoria: [
     'dashboard', 'atendimentos', 'gestao',
@@ -49,6 +50,7 @@ export const roleDefaults: Record<string, string[]> = {
     'cadastros_pacientes', 'cadastros_profissionais',
     'cronograma_por_paciente', 'cronograma_por_profissional',
     'insumos',
+    'terapeutico_pdi',
   ],
   recepcao: [
     'dashboard', 'atendimentos', 'autorizacoes_avulsas', 'gestao', 'auditoria_assim',
@@ -174,6 +176,12 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   // setor — faturamento, admin e diretoria. Granularizar depois, se aparecer o
   // caso de quem cota mas não aprova.
   insumos: ['/insumos'],
+  // Controle de Prazos do PDI (tela /terapeutico/prazos-pdi) — Amanda/Gracielle
+  // recebem por concessão individual em /admin (fora deste código), não pelo
+  // roleDefaults de um setor genérico; admin/diretoria têm o código aqui.
+  // "PDI - Painel por Analista" (/terapeutico/pdi-painel-analista) — mesma
+  // audiência do Controle de Prazos acima, mesmo código de permissão.
+  terapeutico_pdi: ['/terapeutico/prazos-pdi', '/terapeutico/pdi-painel-analista'],
 }
 
 // Converte um conjunto de códigos de permissão em rotas permitidas,

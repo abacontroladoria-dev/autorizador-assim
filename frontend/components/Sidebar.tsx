@@ -47,6 +47,8 @@ import {
   Zap,
   Package,
   FileClock,
+  CalendarClock,
+  Gauge,
 } from "lucide-react"
 import { useEffect, useRef, useState } from "react"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
@@ -76,6 +78,8 @@ const pathIconMap: Record<string, any> = {
   "/central-terapeutas": UserRound,
   "/cadastros/pacientes": UserRound,
   "/acompanhamento/laudos": FileClock,
+  "/terapeutico/prazos-pdi": CalendarClock,
+  "/terapeutico/pdi-painel-analista": Gauge,
   "/auditoria-assim": ClipboardList,
   "/auditoria-assim?tab=auditoria": ClipboardList,
   "/auditoria-assim?tab=reconciliacao": Link2,
@@ -540,17 +544,23 @@ export default function Sidebar() {
           )}
 
           {/* Terapêutico */}
-          {(canAccess("/central-terapeutas") || canAccess("/analise-tratativas")) && (
+          {(canAccess("/central-terapeutas") || canAccess("/analise-tratativas") || canAccess("/terapeutico/prazos-pdi") || canAccess("/terapeutico/pdi-painel-analista")) && (
             <SidebarGroup
               title="Terapêutico"
               icon={Stethoscope}
-              defaultOpen={["/central-terapeutas", "/analise-tratativas"].some(p => pathname === p)}
+              defaultOpen={["/central-terapeutas", "/analise-tratativas", "/terapeutico/prazos-pdi", "/terapeutico/pdi-painel-analista"].some(p => pathname === p)}
             >
               {canAccess("/central-terapeutas") && (
                 <MenuItem label="Gestão" icon={UserRound} path="/central-terapeutas" />
               )}
               {canAccess("/analise-tratativas") && (
                 <MenuItem label="Análise de Evolução" icon={ClipboardCheck} path="/analise-tratativas" />
+              )}
+              {canAccess("/terapeutico/prazos-pdi") && (
+                <MenuItem label="PDI - Controle" icon={CalendarClock} path="/terapeutico/prazos-pdi" />
+              )}
+              {canAccess("/terapeutico/pdi-painel-analista") && (
+                <MenuItem label="PDI - Painel" icon={Gauge} path="/terapeutico/pdi-painel-analista" />
               )}
             </SidebarGroup>
           )}
