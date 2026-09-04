@@ -28,7 +28,7 @@ export const roleDefaults: Record<string, string[]> = {
     'cadastros_pacientes', 'cadastros_profissionais',
     'cronograma_por_paciente', 'cronograma_por_profissional',
     'insumos',
-    'terapeutico_pdi',
+    'terapeutico_pdi', 'terapeutico_pdi_painel',
   ],
   diretoria: [
     'dashboard', 'atendimentos', 'gestao',
@@ -50,7 +50,7 @@ export const roleDefaults: Record<string, string[]> = {
     'cadastros_pacientes', 'cadastros_profissionais',
     'cronograma_por_paciente', 'cronograma_por_profissional',
     'insumos',
-    'terapeutico_pdi',
+    'terapeutico_pdi', 'terapeutico_pdi_painel',
   ],
   recepcao: [
     'dashboard', 'atendimentos', 'autorizacoes_avulsas', 'gestao', 'auditoria_assim',
@@ -179,9 +179,17 @@ export const CODIGO_PARA_ROTAS: Record<string, string[]> = {
   // Controle de Prazos do PDI (tela /terapeutico/prazos-pdi) — Amanda/Gracielle
   // recebem por concessão individual em /admin (fora deste código), não pelo
   // roleDefaults de um setor genérico; admin/diretoria têm o código aqui.
-  // "PDI - Painel por Analista" (/terapeutico/pdi-painel-analista) — mesma
-  // audiência do Controle de Prazos acima, mesmo código de permissão.
-  terapeutico_pdi: ['/terapeutico/prazos-pdi', '/terapeutico/pdi-painel-analista'],
+  terapeutico_pdi: ['/terapeutico/prazos-pdi'],
+  // "PDI - Painel por Analista" (/terapeutico/pdi-painel-analista) — CÓDIGO
+  // PRÓPRIO, separado do Controle de Prazos acima (pedido do usuário,
+  // 05/09/2026: dá pra conceder as duas telas independentemente uma da
+  // outra, em vez de uma única linha em /admin/permissoes cobrindo as duas).
+  // A RLS de escrita em `pdi_controle_prazos` continua exigindo só
+  // `terapeutico_pdi` (20260904120000/120100) — o Painel é somente leitura
+  // por natureza; quem só tem este código consegue ABRIR o modal de edição
+  // pelo drill-down (PainelAnalistaShell.tsx), mas o SALVAR falha por RLS se
+  // a pessoa não tiver `terapeutico_pdi` também.
+  terapeutico_pdi_painel: ['/terapeutico/pdi-painel-analista'],
 }
 
 // Converte um conjunto de códigos de permissão em rotas permitidas,
