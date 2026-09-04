@@ -20,6 +20,7 @@ CREATE TABLE IF NOT EXISTS pep_calendario_competencias (
 
 ALTER TABLE pep_calendario_competencias ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS "pep_calendario_competencias_select" ON pep_calendario_competencias;
 CREATE POLICY "pep_calendario_competencias_select"
   ON pep_calendario_competencias FOR SELECT
   TO authenticated
@@ -31,6 +32,7 @@ CREATE POLICY "pep_calendario_competencias_select"
     )
   );
 
+DROP POLICY IF EXISTS "pep_calendario_competencias_write" ON pep_calendario_competencias;
 CREATE POLICY "pep_calendario_competencias_write"
   ON pep_calendario_competencias FOR ALL
   TO authenticated

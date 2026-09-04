@@ -1,6 +1,6 @@
 import { getSupabaseClient } from '@/lib/supabase/client'
 import type { PepAjusteLinha, PepApuracaoMensal } from '@/types/pep'
-import { getCatalogoItens, getPlanejamentoSemestral, getRegistrosEntrega } from '@/services/pep.service'
+import { getCatalogoItens, getPlanejamentoSemestral, getRegistrosEntrega, getRegistrosSemestraisPorPacientes } from '@/services/pep.service'
 import { getCalendarioCompetencia } from '@/services/pepCalendario.service'
 import { getFeriados } from '@/services/feriados.service'
 import { semanasEsperadas } from '@/lib/remuneracao/semanasCompetencia'
@@ -270,15 +270,26 @@ export async function apurarESalvarPEP(input: {
   pacientes: Array<{ nome: string; cpf?: string | null }>
   valorMensalPorPaciente: number
 }): Promise<{ resultados: ResultadoApuracaoPaciente[]; totalPrestador: number; error?: unknown }> {
-  const [{ data: catalogo, error: errCatalogo }, { data: registros, error: errRegistros }, { data: planejamento, error: errPlano }] =
-    await Promise.all([
-      getCatalogoItens(),
-      getRegistrosEntrega(input.prestadorNome, input.competencia),
-      getPlanejamentoSemestral(input.prestadorNome),
-    ])
+  const pacientesNomes = input.pacientes.map(p => p.nome)
+  const [
+    { data: catalogo, error: errCatalogo },
+    { data: registros, error: errRegistros },
+    { data: planejamento, error: errPlano },
+    { data: registrosSemestrais, error: errRegSemestrais },
+  ] = await Promise.all([
+    getCatalogoItens(),
+    getRegistrosEntrega(input.prestadorNome, input.competencia),
+    getPlanejamentoSemestral(pacientesNomes),
+    // Histórico COMPLETO (sem escopo de mês nem de prestador) — checar se um
+    // item semestral já foi entregue não pode olhar só a competência sendo
+    // apurada agora, senão uma entrega no prazo/atrasada (que não dispara
+    // reprogramação automática) faria o ajuste ser reaplicado todo mês para
+    // sempre, mesmo já entregue.
+    getRegistrosSemestraisPorPacientes(pacientesNomes),
+  ])
 
-  const erro = errCatalogo || errRegistros || errPlano
-  if (erro || !catalogo || !registros || !planejamento) {
+  const erro = errCatalogo || errRegistros || errPlano || errRegSemestrais
+  if (erro || !catalogo || !registros || !planejamento || !registrosSemestrais) {
     return { resultados: [], totalPrestador: 0, error: erro ?? new Error('Falha ao carregar dados da PEP') }
   }
 
@@ -329,6 +340,7 @@ export async function apurarESalvarPEP(input: {
     }
 
     const registrosPaciente = registros.filter(r => r.paciente_nome === paciente.nome)
+    const registrosSemestraisPaciente = registrosSemestrais.filter(r => r.paciente_nome === paciente.nome)
 
     const entregasPorPaciente: EntregaRecorrente[] = itensRecorrentes
       .filter(i => i.tipo_registro === 'POR_PACIENTE')
@@ -347,7 +359,14 @@ export async function apurarESalvarPEP(input: {
     for (const item of itensSemestrais) {
       const plano = planejamento.find(p => p.paciente_nome === paciente.nome && p.item_id === item.id)
       if (!plano) continue
-      const registro = registrosPaciente.find(r => r.item_id === item.id)
+      // Um paciente pode acumular mais de um registro histórico do mesmo item
+      // semestral (um por ciclo de 6 meses, quando a entrega antecipada
+      // reprograma automaticamente o próximo ciclo) — pega sempre o mais
+      // recente por competência, mesmo critério de registroSemestralDe em
+      // usePepEntregas.ts, para o motor de cálculo nunca divergir da tela.
+      const registro = registrosSemestraisPaciente
+        .filter(r => r.item_id === item.id)
+        .sort((a, b) => b.competencia.localeCompare(a.competencia))[0]
       const entregue = registro?.status === 'entregue'
       // Seção 9.6 (aceite normal) e 11.4-iii (aceite de REP-) — ambos podem
       // estornar ajustes já aplicados em competências anteriores. Idempotente:

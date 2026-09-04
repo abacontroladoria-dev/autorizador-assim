@@ -39,7 +39,7 @@
 -- auto_win: mover um deal para este estágio fecha-o como 'won' automaticamente.
 -- auto_lose: mover um deal para este estágio fecha-o como 'lost' automaticamente.
 -- ============================================================================
-create table crm.pipeline_stages (
+create table if not exists crm.pipeline_stages (
   id              uuid        primary key default gen_random_uuid(),
   organization_id uuid        not null references central.organizations(id) on delete cascade,
   title           text        not null,
@@ -96,7 +96,7 @@ create trigger set_updated_at
 --   source_campaign = nome da campanha de marketing (ex: "Campanha Julho 2026")
 --   source_ref = dados brutos (utm_source, ad_id, referral_code)
 -- ============================================================================
-create table crm.deals (
+create table if not exists crm.deals (
   id                  uuid    primary key default gen_random_uuid(),
   organization_id     uuid    not null references central.organizations(id) on delete cascade,
 
@@ -154,7 +154,7 @@ create trigger set_updated_at
 --   Permite múltiplos deals do mesmo contato com status='lost','won', etc.
 --   Permite reabertura: status='lost' → 'open' funciona (libera espaço).
 -- ============================================================================
-create unique index uq_open_deal_per_contact
+create unique index if not exists uq_open_deal_per_contact
   on crm.deals(organization_id, contact_id)
   where status = 'open';
 
@@ -178,7 +178,7 @@ create unique index uq_open_deal_per_contact
 --   atividades de sistema/IA: created_by=NULL, created_by_ai=true.
 --   atividades de operador:   created_by=user_id, created_by_ai=false.
 -- ============================================================================
-create table crm.deal_activities (
+create table if not exists crm.deal_activities (
   id              uuid    primary key default gen_random_uuid(),
   organization_id uuid    not null references central.organizations(id) on delete cascade,
   deal_id         uuid    not null references crm.deals(id) on delete cascade,
@@ -211,7 +211,7 @@ create trigger set_updated_at
 -- Lookup table multi-tenant: cada org define suas próprias funções.
 -- Seed padrão em 20260701020400: SDR, Closer, CS, Suporte Técnico, Marketing.
 -- ============================================================================
-create table crm.team_functions (
+create table if not exists crm.team_functions (
   id              uuid        primary key default gen_random_uuid(),
   organization_id uuid        not null references central.organizations(id) on delete cascade,
   name            text        not null,
@@ -239,7 +239,7 @@ create trigger set_updated_at
 -- Um operador pode ser membro de um crm.team e de um central.team
 -- simultaneamente — os dois vínculos são independentes.
 -- ============================================================================
-create table crm.teams (
+create table if not exists crm.teams (
   id              uuid        primary key default gen_random_uuid(),
   organization_id uuid        not null references central.organizations(id) on delete cascade,
   name            text        not null,
@@ -272,7 +272,7 @@ create trigger set_updated_at
 --   Permite membros placeholder (user_id NULL) para deals externos ou futuros.
 --   Previne duplicatas de membros reais no mesmo time.
 -- ============================================================================
-create table crm.team_members (
+create table if not exists crm.team_members (
   id              uuid    primary key default gen_random_uuid(),
   organization_id uuid    not null references central.organizations(id) on delete cascade,
   team_id         uuid    not null references crm.teams(id) on delete cascade,
@@ -286,7 +286,7 @@ create table crm.team_members (
   updated_at      timestamptz default now()
 );
 
-create unique index uq_crm_team_member
+create unique index if not exists uq_crm_team_member
   on crm.team_members(team_id, user_id)
   where user_id is not null;
 

@@ -3,7 +3,7 @@ import {
   getCatalogoItens,
   getPlanejamentoSemestral,
   getRegistrosEntrega,
-  getRegistrosEntregaPorPrestador,
+  getRegistrosSemestraisPorPacientes,
   salvarPlanejamentoSemestral,
   upsertRegistroEntrega,
   excluirRegistroEntrega,
@@ -21,7 +21,13 @@ import type { PepCatalogoItem, PepEvidencia, PepPlanejamentoSemestral, PepRegist
 // tem esse filtro: as entregas SEMESTRAIS (OE, RT, PIC) valem para o ano
 // inteiro (PRD §7.2), independente do mês selecionado na tela — ver
 // `registroSemestralDe`.
-export function usePepEntregas(prestadorNome: string, competencia: string) {
+//
+// `planejamento`/`registrosTodasCompetencias` são buscados por
+// `pacientesNomes`, não por `prestadorNome`: um item semestral é sempre
+// POR_PACIENTE, então tem que seguir o paciente quando ele troca de Analista
+// do Comportamento no meio do ciclo — filtrar por prestador deixaria o
+// planejamento antigo órfão e invisível para quem assumiu o caso.
+export function usePepEntregas(prestadorNome: string, competencia: string, pacientesNomes: string[]) {
   const [catalogo, setCatalogo] = useState<PepCatalogoItem[]>([])
   const [planejamento, setPlanejamento] = useState<PepPlanejamentoSemestral[]>([])
   const [registros, setRegistros] = useState<PepRegistroEntrega[]>([])
@@ -45,16 +51,16 @@ export function usePepEntregas(prestadorNome: string, competencia: string) {
     setLoading(true)
     setError(null)
     const [plan, reg, regTodas] = await Promise.all([
-      getPlanejamentoSemestral(prestadorNome),
+      getPlanejamentoSemestral(pacientesNomes),
       getRegistrosEntrega(prestadorNome, competencia),
-      getRegistrosEntregaPorPrestador(prestadorNome),
+      getRegistrosSemestraisPorPacientes(pacientesNomes),
     ])
     if (plan.error || reg.error || regTodas.error) setError("Não foi possível carregar o planejamento/registros da PEP.")
     setPlanejamento(plan.data ?? [])
     setRegistros(reg.data ?? [])
     setRegistrosTodasCompetencias(regTodas.data ?? [])
     setLoading(false)
-  }, [prestadorNome, competencia])
+  }, [prestadorNome, competencia, pacientesNomes])
 
   useEffect(() => { recarregar() }, [recarregar])
 

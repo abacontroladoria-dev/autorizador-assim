@@ -41,6 +41,7 @@ alter table crm.team_members      enable row level security;
 -- director : somente leitura (mover deals entre estágios não requer alterar stages)
 -- ============================================================================
 
+drop policy if exists pipeline_stages_select on crm.pipeline_stages;
 create policy pipeline_stages_select
   on crm.pipeline_stages
   for select
@@ -50,6 +51,7 @@ create policy pipeline_stages_select
     and central.ca_current_role() in ('admin', 'director')
   );
 
+drop policy if exists pipeline_stages_insert_admin on crm.pipeline_stages;
 create policy pipeline_stages_insert_admin
   on crm.pipeline_stages
   for insert
@@ -59,6 +61,7 @@ create policy pipeline_stages_insert_admin
     and central.ca_current_role() = 'admin'
   );
 
+drop policy if exists pipeline_stages_update_admin on crm.pipeline_stages;
 create policy pipeline_stages_update_admin
   on crm.pipeline_stages
   for update
@@ -72,6 +75,7 @@ create policy pipeline_stages_update_admin
     and central.ca_current_role() = 'admin'
   );
 
+drop policy if exists pipeline_stages_delete_admin on crm.pipeline_stages;
 create policy pipeline_stages_delete_admin
   on crm.pipeline_stages
   for delete
@@ -88,6 +92,7 @@ create policy pipeline_stages_delete_admin
 -- DELETE           : admin apenas (deals deletados perdem histórico de atividades)
 -- ============================================================================
 
+drop policy if exists deals_select on crm.deals;
 create policy deals_select
   on crm.deals
   for select
@@ -97,6 +102,7 @@ create policy deals_select
     and central.ca_current_role() in ('admin', 'director')
   );
 
+drop policy if exists deals_insert on crm.deals;
 create policy deals_insert
   on crm.deals
   for insert
@@ -106,6 +112,7 @@ create policy deals_insert
     and central.ca_current_role() in ('admin', 'director')
   );
 
+drop policy if exists deals_update on crm.deals;
 create policy deals_update
   on crm.deals
   for update
@@ -119,6 +126,7 @@ create policy deals_update
     and central.ca_current_role() in ('admin', 'director')
   );
 
+drop policy if exists deals_delete_admin on crm.deals;
 create policy deals_delete_admin
   on crm.deals
   for delete
@@ -137,6 +145,7 @@ create policy deals_delete_admin
 -- DELETE: admin apenas (log de atividades não deve ser apagado por operadores).
 -- ============================================================================
 
+drop policy if exists deal_activities_select on crm.deal_activities;
 create policy deal_activities_select
   on crm.deal_activities
   for select
@@ -146,6 +155,7 @@ create policy deal_activities_select
     and central.ca_current_role() in ('admin', 'director')
   );
 
+drop policy if exists deal_activities_insert on crm.deal_activities;
 create policy deal_activities_insert
   on crm.deal_activities
   for insert
@@ -155,6 +165,7 @@ create policy deal_activities_insert
     and central.ca_current_role() in ('admin', 'director')
   );
 
+drop policy if exists deal_activities_update on crm.deal_activities;
 create policy deal_activities_update
   on crm.deal_activities
   for update
@@ -168,6 +179,7 @@ create policy deal_activities_update
     and central.ca_current_role() in ('admin', 'director')
   );
 
+drop policy if exists deal_activities_delete_admin on crm.deal_activities;
 create policy deal_activities_delete_admin
   on crm.deal_activities
   for delete
@@ -184,6 +196,7 @@ create policy deal_activities_delete_admin
 -- director : somente leitura (ver funções ao consultar times)
 -- ============================================================================
 
+drop policy if exists team_functions_select on crm.team_functions;
 create policy team_functions_select
   on crm.team_functions
   for select
@@ -193,6 +206,7 @@ create policy team_functions_select
     and central.ca_current_role() in ('admin', 'director')
   );
 
+drop policy if exists team_functions_insert_admin on crm.team_functions;
 create policy team_functions_insert_admin
   on crm.team_functions
   for insert
@@ -202,6 +216,7 @@ create policy team_functions_insert_admin
     and central.ca_current_role() = 'admin'
   );
 
+drop policy if exists team_functions_update_admin on crm.team_functions;
 create policy team_functions_update_admin
   on crm.team_functions
   for update
@@ -215,6 +230,7 @@ create policy team_functions_update_admin
     and central.ca_current_role() = 'admin'
   );
 
+drop policy if exists team_functions_delete_admin on crm.team_functions;
 create policy team_functions_delete_admin
   on crm.team_functions
   for delete
@@ -231,6 +247,7 @@ create policy team_functions_delete_admin
 -- director : somente leitura (ver estrutura de times ao distribuir deals)
 -- ============================================================================
 
+drop policy if exists crm_teams_select on crm.teams;
 create policy crm_teams_select
   on crm.teams
   for select
@@ -240,6 +257,7 @@ create policy crm_teams_select
     and central.ca_current_role() in ('admin', 'director')
   );
 
+drop policy if exists crm_teams_insert_admin on crm.teams;
 create policy crm_teams_insert_admin
   on crm.teams
   for insert
@@ -249,6 +267,7 @@ create policy crm_teams_insert_admin
     and central.ca_current_role() = 'admin'
   );
 
+drop policy if exists crm_teams_update_admin on crm.teams;
 create policy crm_teams_update_admin
   on crm.teams
   for update
@@ -262,6 +281,7 @@ create policy crm_teams_update_admin
     and central.ca_current_role() = 'admin'
   );
 
+drop policy if exists crm_teams_delete_admin on crm.teams;
 create policy crm_teams_delete_admin
   on crm.teams
   for delete
@@ -280,6 +300,7 @@ create policy crm_teams_delete_admin
 -- DELETE   : admin apenas
 -- ============================================================================
 
+drop policy if exists team_members_select on crm.team_members;
 create policy team_members_select
   on crm.team_members
   for select
@@ -289,6 +310,7 @@ create policy team_members_select
     and central.ca_current_role() in ('admin', 'director')
   );
 
+drop policy if exists team_members_insert on crm.team_members;
 create policy team_members_insert
   on crm.team_members
   for insert
@@ -298,6 +320,7 @@ create policy team_members_insert
     and central.ca_current_role() in ('admin', 'director')
   );
 
+drop policy if exists team_members_update on crm.team_members;
 create policy team_members_update
   on crm.team_members
   for update
@@ -311,6 +334,7 @@ create policy team_members_update
     and central.ca_current_role() in ('admin', 'director')
   );
 
+drop policy if exists team_members_delete_admin on crm.team_members;
 create policy team_members_delete_admin
   on crm.team_members
   for delete

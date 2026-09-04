@@ -15,7 +15,7 @@ import { CheckCircle2, ChevronRight, Clock, HelpCircle, Repeat2, Wallet } from "
 
 import { useToneColor, type Tone } from "@/hooks/useToneColor"
 import { TONE_CHIP, StatusChip } from "@/components/ui/tones"
-import { composicaoRP } from "@/lib/remuneracao/composicaoRP"
+import { composicaoRP, corrigirTotalComPEP } from "@/lib/remuneracao/composicaoRP"
 import { fmt } from "@/lib/remuneracao/formatacao"
 import type { ProfRemunReal } from "@/lib/remuneracao/calculo"
 
@@ -44,12 +44,15 @@ function MetricMini({ icon, label, value, tone }: {
 interface CardRemunRPProps {
   p: ProfRemunReal
   onAbrir: (prof: string) => void
+  /** PEP apurada pra este prestador na competência — vem de pep_apuracao_mensal. */
+  pepInfo?: { potencial: number; alcancado: number }
 }
 
-export default function CardRemunRP({ p, onAbrir }: CardRemunRPProps) {
+export default function CardRemunRP({ p, onAbrir, pepInfo }: CardRemunRPProps) {
   const toneColor = useToneColor()
   const c = useMemo(() => composicaoRP(p), [p])
   const isCC = useMemo(() => p.sessoes.some(s => s.especialidade === "Coordenador de Caso"), [p.sessoes])
+  const pep = useMemo(() => corrigirTotalComPEP(c, isCC, pepInfo), [c, isCC, pepInfo])
 
   // Dois sinais diferentes, de propósito (§3.6):
   //  • statusTone (bloco numérico) = o que mais urge nesta pessoa — inconsistência,
@@ -70,7 +73,7 @@ export default function CardRemunRP({ p, onAbrir }: CardRemunRPProps) {
       type="button"
       onClick={() => onAbrir(p.prof)}
       aria-haspopup="dialog"
-      aria-label={`Detalhar remuneração de ${p.prof} — ${fmt(c.valorTotalAPagar)}`}
+      aria-label={`Detalhar remuneração de ${p.prof} — ${fmt(pep.valorTotalAPagar)}`}
       className="mb-3 flex w-full flex-col gap-4 rounded-xl bg-card px-5 py-4 text-left shadow-sm transition-colors hover:bg-muted/40 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none xl:flex-row xl:items-center xl:gap-6"
     >
       {/* Identificação — basis dá o piso de 288px e o grow absorve a sobra, para
@@ -109,9 +112,14 @@ export default function CardRemunRP({ p, onAbrir }: CardRemunRPProps) {
         {/* Zero não tem cor (§3.5): "R$ 0,00" em verde diz "pago, tudo certo"
             justamente sobre quem não recebe nada — o caso do contrato de banco
             de horas sem valor cadastrado. */}
-        <div className="text-2xl font-black tabular-nums leading-none" style={{ color: toneColor(c.valorTotalAPagar > 0 ? "green" : "gray") }}>
-          {fmt(c.valorTotalAPagar)}
+        <div className="text-2xl font-black tabular-nums leading-none" style={{ color: toneColor(pep.valorTotalAPagar > 0 ? "green" : "gray") }}>
+          {fmt(pep.valorTotalAPagar)}
         </div>
+        {isCC && !pep.pepApurada && (
+          <div className="mt-0.5">
+            <StatusChip tone="amber" dense>PEP não apurada</StatusChip>
+          </div>
+        )}
         <div className="mt-2 flex items-center gap-2.5">
           {/* flex-1 + min-w-0 em vez de w-full: assim o percentual (shrink-0) é
               medido primeiro e a barra fica com a sobra até o teto de 200px —

@@ -24,18 +24,22 @@ alter table public.cronograma_capacidade_profissional_dia enable row level secur
 -- Mesmo padrão de cronograma_salas_alocacoes (20260716180000): leitura e
 -- escrita livres para autenticado, gate de acesso à tela fica na permissão
 -- de rota (ocupacao_profissionais), não na RLS.
+drop policy if exists "cronograma_capacidade_profissional_dia_select" on public.cronograma_capacidade_profissional_dia;
 create policy "cronograma_capacidade_profissional_dia_select"
   on public.cronograma_capacidade_profissional_dia for select
   to authenticated using (true);
 
+drop policy if exists "cronograma_capacidade_profissional_dia_insert" on public.cronograma_capacidade_profissional_dia;
 create policy "cronograma_capacidade_profissional_dia_insert"
   on public.cronograma_capacidade_profissional_dia for insert
   to authenticated with check (true);
 
+drop policy if exists "cronograma_capacidade_profissional_dia_update" on public.cronograma_capacidade_profissional_dia;
 create policy "cronograma_capacidade_profissional_dia_update"
   on public.cronograma_capacidade_profissional_dia for update
   to authenticated using (true) with check (true);
 
+drop policy if exists "cronograma_capacidade_profissional_dia_delete" on public.cronograma_capacidade_profissional_dia;
 create policy "cronograma_capacidade_profissional_dia_delete"
   on public.cronograma_capacidade_profissional_dia for delete
   to authenticated using (true);
