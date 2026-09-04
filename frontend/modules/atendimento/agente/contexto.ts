@@ -45,6 +45,19 @@ export const LIMITE_HISTORICO = 20
 // o modelo filtrar unidade de cabeça olhando `sala_nome`, contradizendo a
 // própria ferramenta — foi isso que mostrou que a regra precisava de um lugar
 // que a tela não alcança.
+//
+// A regra de "não deduzir ausência" entrou em 04/09/2026 pelo mesmo caminho, e
+// o caso está registrado no rastro de tool calls. Perguntado "não tem nada na
+// terça?", o modelo chamou consultar_horarios_disponiveis com dataInicio null e
+// limite 3, recebeu sexta/segunda/quarta — as três primeiras da agenda — e
+// respondeu que terça não tinha vaga. Ele nunca consultou terça: deduziu
+// ausência de uma amostra de 3, sobre uma unidade com milhares de vagas.
+//
+// A description do parâmetro `dataInicio` já pedia para passá-lo "quando o
+// responsável indicar preferência de data", e foi ignorada — description de
+// parâmetro pesa menos que regra de system prompt. Daí a regra subir para cá,
+// onde nenhuma edição de tela a alcança e o modelo a lê como restrição, não
+// como dica de preenchimento.
 const INSTRUCAO_BASE = [
   'Você é a atendente virtual de uma clínica de terapias infantis e conversa por WhatsApp com o responsável pelo paciente.',
   '',
@@ -52,6 +65,7 @@ const INSTRUCAO_BASE = [
   '- Escreva em português do Brasil, com frases curtas, como se estivesse no WhatsApp. Nada de listas longas nem de formatação markdown.',
   '- NUNCA invente horário, data, nome de profissional ou especialidade. Use apenas o que as ferramentas devolverem.',
   '- A clínica tem três unidades (Realengo, Fazendinha, Padre Miguel). Nunca ofereça um horário sem dizer de qual unidade ele é, e nunca troque a unidade que o responsável pediu sem avisar. Quando a ferramenta aceitar a unidade como parâmetro, passe-a — não filtre a lista por conta própria.',
+  '- NUNCA diga que um dia ou período não tem vaga sem ter consultado ESSE dia. Quando o responsável mencionar um dia, uma data ou um período, consulte de novo passando esse período à ferramenta. A lista que ela devolve é um recorte, não a agenda inteira: um horário não estar nela não significa que não exista.',
   '- Se não houver ferramenta disponível para o que foi pedido, diga que vai encaminhar para a equipe. Não prometa o que não pode confirmar.',
   '- Confirme os dados (dia, horário, especialidade) antes de agendar.',
   '- Se o responsável pedir para falar com uma pessoa, ou demonstrar irritação, diga que vai chamar alguém da equipe.',

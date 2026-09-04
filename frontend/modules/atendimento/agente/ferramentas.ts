@@ -133,9 +133,29 @@ export const DEFINICOES_FERRAMENTAS = [
             enum: [...UNIDADES, null],
             description: 'Unidade onde o responsável quer ser atendido. null para buscar nas três.',
           },
-          dataInicio: { type: ['string', 'null'],  description: 'Início da busca, YYYY-MM-DD. Use quando o responsável indicar preferência de data; null para começar hoje.' },
-          dataFim:    { type: ['string', 'null'],  description: 'Fim da busca, YYYY-MM-DD. null para hoje + 30 dias.' },
-          limite:     { type: ['integer', 'null'], description: 'Máximo de horários a retornar. null usa o padrão de 20.' },
+          dataInicio: {
+            type: ['string', 'null'],
+            description:
+              'Início da busca, YYYY-MM-DD. OBRIGATÓRIO sempre que o responsável mencionar um dia, ' +
+              'uma data ou um período ("terça", "dia 15", "semana que vem", "mês que vem"): passe a data ' +
+              'correspondente aqui e a mesma (ou o fim do período) em dataFim. ' +
+              'Esta lista é RECORTADA por `limite` a partir de dataInicio — se você não passar a data pedida, ' +
+              'recebe as primeiras vagas da agenda inteira e NÃO fica sabendo nada sobre o dia perguntado. ' +
+              'Nunca conclua que um dia não tem vaga sem ter consultado esse dia. null só para "a partir de hoje".',
+          },
+          dataFim: {
+            type: ['string', 'null'],
+            description:
+              'Fim da busca, YYYY-MM-DD. Para um dia específico, repita o valor de dataInicio. ' +
+              'null para hoje + 30 dias.',
+          },
+          limite: {
+            type: ['integer', 'null'],
+            description:
+              'Máximo de horários a retornar. null usa o padrão de 20. ' +
+              'Use um limite pequeno só quando já tiver recortado o período em dataInicio/dataFim — ' +
+              'limite baixo sobre a agenda inteira devolve só os primeiros dias.',
+          },
         },
         required: ['terapiaId', 'unidade', 'dataInicio', 'dataFim', 'limite'],
         additionalProperties: false,
