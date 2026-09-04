@@ -172,6 +172,12 @@ const LABEL_POR_ENTIDADE: Record<EntidadeAuditada, Record<string, string>> = {
     snap_situacao: "Situação do laudo",
     snap_autorizado_em: "Autorizado em",
   },
+  pdi_controle_prazos: {
+    especialista_tita_id: "Especialista",
+    data_avaliacao: "Data da avaliação",
+    data_validade: "Data de validade",
+    observacoes: "Observações",
+  },
 }
 
 const VALOR_LEGIVEL: Record<string, Record<string, string>> = {
