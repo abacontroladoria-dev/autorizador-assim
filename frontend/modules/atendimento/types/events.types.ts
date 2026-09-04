@@ -49,6 +49,20 @@ export type ConversationEventType =
   // Configuração do agente. Payload lista quais campos mudaram e sinaliza
   // troca de credencial — nunca o valor da credencial.
   | 'agent_settings.updated'
+  // Rastro de uma chamada de ferramenta do agente. performed_by = null (é o
+  // agente, não um operador).
+  //
+  // Payload: { iteracao, nome, argumentos, ok, motivo, qtdItens, duracaoMs }.
+  // `argumentos` passa por uma ALLOWLIST em orquestrador.ts — só chaves e
+  // parâmetros de recorte (terapiaId, unidade, datas, limite). Nunca o
+  // conteúdo do resultado, nunca texto livre digitado pelo responsável.
+  //
+  // Existe para que "a IA ofereceu horário da unidade errada" seja respondível
+  // por SQL. Sem ele as tool calls morriam no array local do orquestrador, e
+  // "passou unidade: null e filtrou de cabeça" (defeito de prompt) era
+  // indistinguível de "passou a unidade certa e o banco devolveu vazio"
+  // (defeito de dados) — consertos em lugares completamente diferentes.
+  | 'ai.tool_call'
   // Infra
   | 'webhook.received'
   | 'webhook.failed'

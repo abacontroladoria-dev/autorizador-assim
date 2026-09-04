@@ -2,6 +2,7 @@ import type {
   Appointment,
   AppointmentStatus,
   AppointmentType,
+  Unidade,
   VagaDisponivel,
 } from '@/modules/atendimento/types/central.types'
 
@@ -101,7 +102,9 @@ export interface ListarVagasParams {
   dataFim?:        string
   terapiaId?:      number
   profissionalId?: number
-  unidadeId?:      number
+  // Nome da unidade, não id: unidade_id é 280 em toda a grade e nunca filtrou
+  // nada. Filtrado no banco desde 20260904100100.
+  unidade?:        Unidade
   limite?:         number
 }
 
@@ -113,7 +116,9 @@ export async function listarVagas(params: ListarVagasParams = {}): Promise<VagaD
   if (params.dataFim)        q.set('dataFim', params.dataFim)
   if (params.terapiaId)      q.set('terapiaId', String(params.terapiaId))
   if (params.profissionalId) q.set('profissionalId', String(params.profissionalId))
-  if (params.unidadeId)      q.set('unidadeId', String(params.unidadeId))
+  // `!= null`, não truthiness: string vazia também é falsy, e um dia alguém
+  // passa '' esperando "sem filtro" — que é o que acontece, mas por acidente.
+  if (params.unidade != null)  q.set('unidade', params.unidade)
   q.set('limite', String(params.limite ?? 500))
 
   return request<VagaDisponivel[]>(`${BASE}availability/?${q}`)
@@ -123,6 +128,10 @@ export interface TerapiaComVaga {
   terapiaId:   number
   terapiaNome: string | null
   vagas:       number
+  // Em quais unidades essa terapia tem vaga. A rota sempre devolveu este campo;
+  // faltava aqui. Sem ele a tela não sabe distinguir "temos psicomotricidade"
+  // de "temos, mas não na unidade que você quer".
+  unidades:    Unidade[]
 }
 
 // Resumo por especialidade — responde "o que vocês têm disponível?" sem

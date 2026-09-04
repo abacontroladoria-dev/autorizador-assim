@@ -6,6 +6,7 @@ import { createSystemServices, createAppointmentSystemService } from '../service
 import { ContactRepository } from '../repositories/contact.repository'
 import { MessageRepository } from '../repositories/message.repository'
 import { AppointmentRepository } from '../repositories/appointment.repository'
+import { AuditRepository } from '../repositories/audit.repository'
 import { normalizarMensagemMeta } from '../providers/meta-waba.normalizar'
 import { montarContexto, LIMITE_HISTORICO } from '../agente/contexto'
 import { executarTurno } from '../agente/orquestrador'
@@ -257,6 +258,16 @@ async function processarContato(
   )
 
   // 7. O turno.
+  //
+  // O rastro de tool calls é fornecido AQUI, e não montado dentro do
+  // orquestrador, porque o laço não pode depender de banco — é isso que o mantém
+  // testável sem stack. O worker é quem já tem o cliente service role.
+  //
+  // `insert` do AuditRepository é fire-and-forget e nunca rejeita, então não há
+  // await: esperar o insert de auditoria atrasaria a resposta ao responsável
+  // por algo que não muda a resposta.
+  const auditoria = new AuditRepository(supabase)
+
   const resultado = await executarTurno(
     { orgId, conversationId: conversation.id, contactId: contato.id, textosDoUsuario: textos },
     {
@@ -264,6 +275,15 @@ async function processarContato(
       ferramentas,
       contexto,
       agendamentoHabilitado: settings.ai_scheduling_enabled,
+      aoChamarFerramenta: (registro) => {
+        void auditoria.insert({
+          organization_id: orgId,
+          conversation_id: conversation.id,
+          event_type:      'ai.tool_call',
+          // performed_by ausente: quem chamou foi o agente, não um operador.
+          payload:         { ...registro },
+        })
+      },
     },
   )
 

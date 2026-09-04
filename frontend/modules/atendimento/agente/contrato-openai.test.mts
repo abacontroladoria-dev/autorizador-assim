@@ -18,6 +18,7 @@
 // asserção falha.
 
 import { DEFINICOES_FERRAMENTAS, FerramentasAgente } from './ferramentas.js'
+import { UNIDADES } from './unidade.js'
 import type { AppointmentService } from '../services/appointment.service.js'
 import type { AppointmentRepository } from '../repositories/appointment.repository.js'
 
@@ -174,6 +175,39 @@ const comNulos = await ferramentas.executar('agendar_sessao', {
 checar(comNulos.ok === true, 'tipo e observacao nulos não quebram', comNulos)
 checar(chamadas[0]?.input.tipo === 'other', "tipo null vira 'other'", chamadas[0]?.input.tipo)
 checar(chamadas[0]?.input.descricao === null, 'observacao null vira descricao null')
+
+// ----------------------------------------------------------------------------
+console.log('\n4. o enum de unidade é o mesmo vocabulário que o banco valida')
+
+// Desde 20260904100100 o `p_unidade` da RPC LANÇA (22023) em valor
+// desconhecido. Se o enum daqui divergir dos três literais de UNIDADES, o
+// modelo passa um valor que o banco recusa — e o sintoma chega como erro de
+// servidor numa conversa de WhatsApp, longe da causa. O enum é declarado como
+// [...UNIDADES, null] exatamente para não poder divergir; este check é o que
+// prova que ninguém voltou a escrever os literais à mão.
+const horariosFn = DEFINICOES_FERRAMENTAS
+  .find(d => d.function.name === 'consultar_horarios_disponiveis')?.function
+
+const unidadeSchema = (horariosFn?.parameters as {
+  properties?: Record<string, { enum?: unknown[] }>
+} | undefined)?.properties?.unidade
+
+checar(unidadeSchema !== undefined, 'consultar_horarios_disponiveis declara `unidade`')
+checar(
+  JSON.stringify(unidadeSchema?.enum) === JSON.stringify([...UNIDADES, null]),
+  'o enum de unidade é exatamente [...UNIDADES, null]',
+  { schema: unidadeSchema?.enum, esperado: [...UNIDADES, null] },
+)
+
+// O null tem que estar DENTRO do array de enum: em strict mode com tipo
+// anulável é assim que "buscar nas três" fica representável. Sem ele o modelo
+// não tem como dizer "sem preferência de unidade" e passa uma unidade
+// arbitrária.
+checar(
+  unidadeSchema?.enum?.includes(null) === true,
+  'null está dentro do enum (é como o modelo diz "sem preferência")',
+  unidadeSchema?.enum,
+)
 
 // ----------------------------------------------------------------------------
 if (falhas > 0) {

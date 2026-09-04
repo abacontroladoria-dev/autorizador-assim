@@ -11,6 +11,19 @@
 //
 // Não usa framework de teste para não acoplar o módulo a um runner: é um script
 // que sai com código 1 se qualquer asserção falhar.
+//
+// PRÉ-REQUISITO DE DADOS
+//
+// O teste precisa de vaga LIVRE E FUTURA na grade local. Um dump antigo de
+// csv_grades_profissionais tem a grade toda no passado, e aí `sem_vaga` é a
+// resposta CORRETA de todas as consultas — não há o que testar. Antes disso
+// virava um TypeError cru em `terapia.terapiaId`, que parecia bug do código.
+// Agora o script diz o que falta e sai com 0: dado ausente não é falha de
+// código, e um verde falso seria pior.
+//
+// Para checar antes de rodar:
+//   select count(*) from central.vw_vagas_livres
+//    where data >= (now() at time zone 'America/Sao_Paulo')::date;
 
 import { createClient } from '@supabase/supabase-js'
 import { AppointmentRepository } from '../repositories/appointment.repository.js'
@@ -18,6 +31,7 @@ import { AvailabilityRepository } from '../repositories/availability.repository.
 import { AuditRepository } from '../repositories/audit.repository.js'
 import { AppointmentService } from '../services/appointment.service.js'
 import { FerramentasAgente, MOTIVO } from './ferramentas.js'
+import { UNIDADES } from './unidade.js'
 
 const URL = process.env.SUPABASE_URL ?? 'http://127.0.0.1:54321'
 const KEY = process.env.SUPABASE_SERVICE_ROLE_KEY
@@ -62,6 +76,23 @@ const criados: string[] = []
 try {
   console.log('\n1. consultar_especialidades_disponiveis')
   const esp: any = await ferramentas.executar('consultar_especialidades_disponiveis', {})
+
+  // Grade local sem vaga futura: 'sem_vaga' é a resposta CORRETA, e seguir
+  // daqui só produziria TypeError em `terapia.terapiaId`. Sair com 0 e dizer o
+  // que falta é o honesto — o que falta é dado, não código.
+  if (esp.ok === false && esp.motivo === MOTIVO.SEM_VAGA) {
+    const { count } = await (supabase as any)
+      .schema('central').from('vw_vagas_livres')
+      .select('*', { count: 'exact', head: true })
+
+    console.log('\n  PULADO — a grade local não tem vaga LIVRE e FUTURA.')
+    console.log(`  A view central.vw_vagas_livres tem ${count ?? '?'} linha(s), todas no passado.`)
+    console.log('  Isto NÃO é falha de código: sem vaga futura, "sem_vaga" é a resposta certa')
+    console.log('  de toda consulta, e não há caminho de agendamento para exercitar.')
+    console.log('  Para rodar de verdade, semeie csv_grades_profissionais com datas futuras.\n')
+    process.exit(0)
+  }
+
   checar(esp.ok === true, 'retorna ok', esp)
   checar(Array.isArray(esp.especialidades) && esp.especialidades.length > 0, 'lista ao menos uma especialidade')
   const terapia = esp.especialidades?.[0]
@@ -78,6 +109,103 @@ try {
   const vaga = hor.horarios?.[0]
   checar(/^\d{2}:\d{2}$/.test(vaga?.hora ?? ''), 'hora vem como HH:MM, sem segundos', vaga?.hora)
   checar(!!vaga?.profissional, 'horário identifica o profissional', vaga)
+
+  // A unidade vem RESOLVIDA do banco (central.vw_vagas_livres), não derivada
+  // aqui. Antes de 04/09/2026 ela era extraída de sala_nome por regex depois de
+  // a RPC responder — e o filtro por unidade acontecia sobre as 500 primeiras
+  // linhas, então uma unidade sem vaga nesse recorte virava "não temos vaga"
+  // falso.
+  checar(
+    UNIDADES.includes(vaga?.unidade),
+    'horário traz a unidade física resolvida pelo banco',
+    { unidade: vaga?.unidade, sala: vaga?.sala },
+  )
+  checar(
+    typeof vaga?.sala === 'string' && vaga.sala.startsWith(`Unid. ${vaga.unidade} - `),
+    'a unidade devolvida concorda com o prefixo de sala_nome',
+    { unidade: vaga?.unidade, sala: vaga?.sala },
+  )
+
+  console.log('\n2b. filtro por unidade — só vem da unidade pedida')
+
+  // Este é o bloco que o módulo não tinha: antes desta data nenhum dos três
+  // testes do agente passava `unidade`, então normalizarUnidade, o limite 500
+  // condicional e o ramo de recusa "há vaga em outras unidades" não tinham
+  // nenhuma asserção — e o filtro de unidade era o mecanismo mais delicado
+  // daqui.
+  for (const u of UNIDADES) {
+    const porUnidade: any = await ferramentas.executar('consultar_horarios_disponiveis', {
+      unidade: u,
+      limite:  20,
+    })
+
+    if (porUnidade.ok) {
+      const forasteiras = porUnidade.horarios.filter((h: any) => h.unidade !== u)
+      checar(forasteiras.length === 0,
+        `unidade '${u}': nenhum horário de outra unidade vazou`,
+        forasteiras.slice(0, 3))
+      checar(
+        porUnidade.horarios.every((h: any) => String(h.sala).startsWith(`Unid. ${u} - `)),
+        `unidade '${u}': toda sala tem o prefixo da unidade pedida`,
+        porUnidade.horarios.slice(0, 3).map((h: any) => h.sala),
+      )
+    } else {
+      // Sem vaga na unidade é resultado legítimo (a grade local pode não ter).
+      // O que importa é o motivo ser 'sem_vaga' e não um erro.
+      checar(porUnidade.motivo === 'sem_vaga',
+        `unidade '${u}': sem vaga é recusa 'sem_vaga', não erro`,
+        porUnidade)
+    }
+  }
+
+  // Nenhuma sala que não seja endereço da clínica pode ser oferecida, nem
+  // quando não há filtro de unidade. Antes da view isso acontecia: só 'Sala
+  // Teste' era oculta, e por igualdade exata em lowercase — 'AT Externo Escola'
+  // e 'Consulta 4/6 - Nutrição' passavam, e a IA oferecia atendimento na escola
+  // do paciente como se fosse na clínica.
+  const semFiltro: any = await ferramentas.executar('consultar_horarios_disponiveis', { limite: 50 })
+  if (semFiltro.ok) {
+    const naoFisicas = semFiltro.horarios.filter((h: any) => !String(h.sala).startsWith('Unid. '))
+    checar(naoFisicas.length === 0,
+      'sem filtro de unidade, nenhuma sala não-física é oferecida',
+      naoFisicas.slice(0, 5).map((h: any) => h.sala))
+    checar(semFiltro.horarios.every((h: any) => UNIDADES.includes(h.unidade)),
+      'todo horário oferecido tem uma das três unidades',
+      semFiltro.horarios.filter((h: any) => !UNIDADES.includes(h.unidade)).slice(0, 3))
+  }
+
+  // Unidade fora do enum: recusa amigável, não exceção do banco. O p_unidade da
+  // RPC LANÇA 22023 em valor desconhecido (de propósito, para não filtrar em
+  // silêncio), e normalizarUnidade + a guarda em consultarHorarios são o que
+  // transformam isso numa pergunta ao responsável em vez de erro de servidor.
+  const unidadeInvalida: any = await ferramentas.executar('consultar_horarios_disponiveis', {
+    unidade: 'Realango',
+    limite:  5,
+  })
+  checar(unidadeInvalida.ok === false,
+    "unidade inexistente é recusada, não consultada", unidadeInvalida)
+  checar(
+    typeof unidadeInvalida.mensagem === 'string' &&
+      UNIDADES.every(u => unidadeInvalida.mensagem.includes(u)),
+    'a recusa lista as três unidades para o modelo perguntar',
+    unidadeInvalida.mensagem,
+  )
+
+  console.log('\n2c. especialidades trazem em quais unidades há vaga')
+
+  // A agregação passou a ser do banco (contar_vagas_por_terapia_e_unidade). Era
+  // feita sobre as 500 primeiras linhas, e uma terapia com vaga em Padre Miguel
+  // só a partir da linha 501 aparecia como unidades: ['Realengo'] — o agente
+  // então dizia "temos fono, mas só em Realengo", falso.
+  checar(Array.isArray(terapia?.unidades),
+    'especialidade traz o array de unidades', terapia)
+  checar(
+    (terapia?.unidades ?? []).every((u: any) => UNIDADES.includes(u)),
+    'as unidades da especialidade são as três conhecidas',
+    terapia?.unidades,
+  )
+  checar(typeof terapia?.vagas === 'number' && terapia.vagas > 0,
+    'especialidade traz a contagem de vagas', terapia?.vagas)
 
   console.log('\n3. agendar_sessao na vaga oferecida')
   const ag: any = await ferramentas.executar('agendar_sessao', {
@@ -109,10 +237,19 @@ try {
   checar(dupla.motivo === MOTIVO.VAGA_TOMADA, `motivo é ${MOTIVO.VAGA_TOMADA}`, dupla)
 
   console.log('\n6. horário que não existe na grade é recusado')
+
+  // 03:17 de madrugada nunca é vaga de grade — é exatamente o que o input de
+  // horário livre do componente antigo permitia gravar.
+  //
+  // A data precisa ser FUTURA, não a da vaga oferecida. Se a vaga é de hoje,
+  // 03:17 dela já passou e `vaga_no_passado` vence `vaga_inexistente` na ordem
+  // de checagem do service (a ordem está certa: "no passado" é a recusa mais
+  // informativa das três). Com a data da vaga, este check passava de manhã cedo
+  // e falhava depois das 03:17 — sensível à hora em que se roda, que é a pior
+  // espécie de teste intermitente.
+  const amanha = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
   const inexistente: any = await ferramentas.executar('agendar_sessao', {
-    // 03:17 de madrugada nunca é vaga de grade — é exatamente o que o input de
-    // horário livre do componente antigo permitia gravar.
-    profissionalId: vaga.profissionalId, data: vaga.data, hora: '03:17',
+    profissionalId: vaga.profissionalId, data: amanha, hora: '03:17',
   })
   checar(inexistente.ok === false, 'recusa horário fora da grade', inexistente)
   checar(inexistente.motivo === MOTIVO.VAGA_INEXISTENTE, `motivo é ${MOTIVO.VAGA_INEXISTENTE}`, inexistente)

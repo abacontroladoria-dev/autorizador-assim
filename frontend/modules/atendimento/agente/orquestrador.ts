@@ -67,6 +67,36 @@ export interface DepsTurno {
   // conversa mas não recebe ferramenta nenhuma, logo não pode escrever na
   // agenda. É o botão de pânico da entrega.
   agendamentoHabilitado: boolean
+  // Rastro opcional das chamadas de ferramenta.
+  //
+  // Existe porque "a IA ofereceu horário da unidade errada" era
+  // indiagnosticável: as tool calls viviam só no array `mensagens` deste laço e
+  // morriam no return. Não havia como responder, por SQL, se o modelo passou
+  // `unidade: 'Padre Miguel'` e o banco devolveu vazio (defeito de dados) ou se
+  // ele passou `unidade: null` e filtrou de cabeça (defeito de prompt) — que
+  // são consertos em lugares completamente diferentes.
+  //
+  // Opcional DE PROPÓSITO: este laço não pode depender de banco, é isso que o
+  // mantém testável sem stack (orquestrador.test.mts roda em memória). Quem
+  // fornece o callback é o worker, que já tem o cliente service role.
+  //
+  // Nunca lança para este laço — falha de rastro não derruba o turno.
+  aoChamarFerramenta?: (registro: RegistroChamadaFerramenta) => void
+}
+
+// O que se grava de uma chamada de ferramenta. Deliberadamente magro: ver a
+// allowlist de campos em `argumentosLogaveis`.
+export interface RegistroChamadaFerramenta {
+  iteracao:   number
+  nome:       string
+  // Argumentos JÁ FILTRADOS pela allowlist — só chaves e parâmetros de recorte.
+  argumentos: Record<string, unknown>
+  ok:         boolean
+  motivo:     string | null
+  // Quantos itens o resultado trouxe. É o número que responde "ele consultou
+  // Padre Miguel e voltou vazio?" sem gravar os horários em si.
+  qtdItens:   number | null
+  duracaoMs:  number
 }
 
 export type ResultadoTurno =
@@ -97,6 +127,56 @@ const ARGUMENTOS_INVALIDOS = JSON.stringify({
 // terça, depois quarta); a mesma com os mesmos argumentos é o modelo travado.
 function assinatura(c: LlmChamadaFerramenta): string {
   return `${c.nome}::${c.argumentosJson}`
+}
+
+// Os únicos argumentos que vão para o rastro.
+//
+// ALLOWLIST, jamais denylist: uma ferramenta nova ganha um parâmetro e um
+// denylist o vaza por omissão — e o parâmetro novo pode ser texto livre digitado
+// pelo responsável. Precedente da mesma decisão em ferramentas.ts, no guard de
+// contexto: "O valor NÃO é logado: pode conter dado de paciente".
+//
+// Todos os campos aqui são chave ou parâmetro de RECORTE. Ficam fora, de
+// propósito: `observacao` e `motivo` (texto livre do responsável),
+// `agendamentoId`, e o conteúdo do resultado.
+//
+// Isso é magro e é suficiente: para responder "por que ofereceu Realengo?", o
+// que se precisa saber é `{unidade: null}` — e isso já é a resposta inteira.
+const ARGUMENTOS_LOGAVEIS = new Set([
+  'terapiaId', 'unidade', 'dataInicio', 'dataFim', 'limite', 'profissionalId', 'tipo',
+])
+
+function argumentosLogaveis(args: Record<string, unknown>): Record<string, unknown> {
+  const saida: Record<string, unknown> = {}
+  for (const [chave, valor] of Object.entries(args)) {
+    if (ARGUMENTOS_LOGAVEIS.has(chave)) saida[chave] = valor
+  }
+  return saida
+}
+
+// Quantos itens o resultado trouxe, sem saber o formato de cada ferramenta:
+// procura o primeiro array no objeto (`horarios`, `especialidades`,
+// `agendamentos`). Devolve null quando não há array — uma recusa ou uma
+// confirmação de agendamento não têm contagem, e forçar 0 ali faria "recusou"
+// e "achou zero" parecerem a mesma coisa no rastro.
+function contarItens(resultado: unknown): number | null {
+  if (resultado === null || typeof resultado !== 'object') return null
+  for (const valor of Object.values(resultado as Record<string, unknown>)) {
+    if (Array.isArray(valor)) return valor.length
+  }
+  return null
+}
+
+// Entrega o registro ao callback, se houver. Engole qualquer falha: um rastro
+// que derruba o turno é pior que rastro nenhum — o paciente ficaria sem
+// resposta no WhatsApp por causa de um insert de auditoria.
+function registrar(deps: DepsTurno, registro: RegistroChamadaFerramenta): void {
+  if (!deps.aoChamarFerramenta) return
+  try {
+    deps.aoChamarFerramenta(registro)
+  } catch (err) {
+    console.warn('[executarTurno] rastro de tool call falhou (turno segue):', err)
+  }
 }
 
 /**
@@ -196,9 +276,33 @@ export async function executarTurno(
     const resultados = await Promise.all(
       resposta.chamadas.map(async (chamada) => {
         const args = parsearArgumentos(chamada.argumentosJson)
-        if (args === null) return { chamada, conteudo: ARGUMENTOS_INVALIDOS }
+        if (args === null) {
+          registrar(deps, {
+            iteracao,
+            nome:       chamada.nome,
+            argumentos: {},
+            ok:         false,
+            motivo:     'argumentos_invalidos',
+            qtdItens:   null,
+            duracaoMs:  0,
+          })
+          return { chamada, conteudo: ARGUMENTOS_INVALIDOS }
+        }
 
+        const comecou = Date.now()
         const resultado = await deps.ferramentas.executar(chamada.nome, args)
+        const r = resultado as { ok?: unknown; motivo?: unknown }
+
+        registrar(deps, {
+          iteracao,
+          nome:       chamada.nome,
+          argumentos: argumentosLogaveis(args),
+          ok:         r.ok === true,
+          motivo:     typeof r.motivo === 'string' ? r.motivo : null,
+          qtdItens:   contarItens(resultado),
+          duracaoMs:  Date.now() - comecou,
+        })
+
         return { chamada, conteudo: JSON.stringify(resultado) }
       }),
     )

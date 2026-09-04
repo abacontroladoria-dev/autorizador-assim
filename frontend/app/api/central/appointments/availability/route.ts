@@ -12,6 +12,10 @@ import { createAppointmentService }   from '@/modules/atendimento/services'
 // central.appointments, menos o passado. A subtração acontece em
 // central.listar_vagas_disponiveis — ver 20260810100100 para o porquê.
 //
+// `unidade` (Realengo | Fazendinha | Padre Miguel) filtra NO BANCO, e é nome,
+// não id: unidade_id é 280 em toda a grade e nunca filtrou nada. Valor
+// desconhecido é 400, não filtro ignorado — ver 20260904100100.
+//
 // Sem filtro de data a janela é hoje..hoje+30 (default da própria RPC). Pedir
 // mais que isso não devolve mais vaga: a grade só é populada algumas semanas à
 // frente.
@@ -25,7 +29,7 @@ export async function GET(request: NextRequest) {
     const parsed = parseListAvailabilityQuery(request.nextUrl.searchParams)
     if (!parsed.ok) return badRequest(parsed.errors.join('; '))
 
-    const { dataInicio, dataFim, terapiaId, profissionalId, unidadeId, limite, agrupar } = parsed.data
+    const { dataInicio, dataFim, terapiaId, profissionalId, unidade, limite, agrupar } = parsed.data
 
     const service = createAppointmentService(supabase)
 
@@ -35,7 +39,7 @@ export async function GET(request: NextRequest) {
     }
 
     const vagas = await service.listarVagas({
-      dataInicio, dataFim, terapiaId, profissionalId, unidadeId, limite,
+      dataInicio, dataFim, terapiaId, profissionalId, unidade, limite,
     })
 
     return ok(vagas, { limit: limite, hasMore: vagas.length === limite })

@@ -134,6 +134,25 @@ export class AppointmentService {
 
     // Busca a vaga na grade para copiar os dados que descrevem o slot.
     // Filtra por profissional e pela data exata, e casa a hora no resultado.
+    //
+    // Note que esta consulta responde uma pergunta DIFERENTE da que o agente
+    // faz: aqui não se quer "o que posso oferecer", e sim "quais são os dados
+    // desta vaga específica, que o diagnóstico acima já aprovou". As duas
+    // dividem a mesma chamada por herança, e isso tem uma consequência a
+    // conhecer: `listarVagas` lê central.vw_vagas_livres, que exclui as salas
+    // sem prefixo 'Unid. ' ('AT Externo Escola', 'AT Externo Casa', 'Sala
+    // Teste'), enquanto `vaga_esta_disponivel` lê public.vw_grade_base, que as
+    // contém.
+    //
+    // Ou seja: uma vaga em sala não-física é APROVADA pelo diagnóstico e não
+    // aparece aqui, e o `!vaga` abaixo a reporta como SlotAlreadyBookedError —
+    // "essa vaga já foi reservada" sobre uma vaga livre. Mensagem enganosa.
+    //
+    // Isso é aceito por medição, não por descuido: o snippet
+    // 20260904_diagnostico_reservas_em_sala_nao_fisica.sql conta as reservas
+    // existentes nessas salas. Se ele voltar a dar > 0, esta chamada precisa
+    // sair de listarVagas e resolver os metadados por uma via própria (uma RPC
+    // central.dados_da_vaga, lendo vw_grade_base direto).
     const vagas = await this.availability.listarVagas({
       dataInicio:     input.data,
       dataFim:        input.data,

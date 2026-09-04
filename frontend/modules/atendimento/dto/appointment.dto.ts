@@ -1,4 +1,4 @@
-import type { AppointmentStatus, AppointmentType } from '../types/central.types'
+import { UNIDADES, type AppointmentStatus, type AppointmentType, type Unidade } from '../types/central.types'
 
 type ParseResult<T> = { ok: true; data: T } | { ok: false; errors: string[] }
 
@@ -261,7 +261,10 @@ export interface ListAvailabilityQuery {
   dataFim?:        string
   terapiaId?:      number
   profissionalId?: number
-  unidadeId?:      number
+  // Nome da unidade, não id: unidade_id é 280 em toda a grade e não filtra nada
+  // (ver central.vw_vagas_livres, 20260904100000). O parâmetro anterior,
+  // `unidadeId`, era decorativo.
+  unidade?:        Unidade
   limite:          number
   // agrupar=terapia devolve o resumo por especialidade em vez da lista de horários
   agrupar?:        'terapia'
@@ -278,7 +281,19 @@ export function parseListAvailabilityQuery(p: URLSearchParams): ParseResult<List
 
   const terapiaId      = parseOptionalInt(p.get('terapiaId'),      'terapiaId',      errors)
   const profissionalId = parseOptionalInt(p.get('profissionalId'), 'profissionalId', errors)
-  const unidadeId      = parseOptionalInt(p.get('unidadeId'),      'unidadeId',      errors)
+
+  // Unidade desconhecida é ERRO, não filtro ignorado. Silenciar aqui devolveria
+  // as três unidades misturadas para quem pediu uma — que é exatamente o
+  // defeito que a coluna `unidade` existe para eliminar. O banco também valida
+  // e lança 22023; esta camada transforma o mesmo caso em 400 com mensagem
+  // acionável, antes de gastar uma ida ao banco.
+  const unidadeRaw = p.get('unidade') ?? undefined
+  let unidade: Unidade | undefined
+  if (unidadeRaw !== undefined) {
+    const casada = UNIDADES.find(u => u === unidadeRaw)
+    if (!casada) errors.push(`unidade aceita apenas: ${UNIDADES.join(', ')}`)
+    else unidade = casada
+  }
 
   const agruparRaw = p.get('agrupar') ?? undefined
   if (agruparRaw !== undefined && agruparRaw !== 'terapia') {
@@ -292,7 +307,7 @@ export function parseListAvailabilityQuery(p: URLSearchParams): ParseResult<List
   return {
     ok: true,
     data: {
-      dataInicio, dataFim, terapiaId, profissionalId, unidadeId, limite,
+      dataInicio, dataFim, terapiaId, profissionalId, unidade, limite,
       agrupar: agruparRaw as 'terapia' | undefined,
     },
   }

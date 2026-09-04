@@ -1,23 +1,31 @@
 import type { SupabaseClient } from '@supabase/supabase-js'
 import type { DiagnosticoVaga, VagaDisponivel } from '../types/central.types'
-import { unidadeDaSala, salaOculta, type Unidade } from '../agente/unidade'
+import type { Unidade } from '../agente/unidade'
 
 // ============================================================================
 // AvailabilityRepository
 //
 // Disponibilidade NÃO é uma tabela. É a subtração:
-//   public.vw_grade_base (status_agendamento = 'Livre')
+//   central.vw_vagas_livres (grade com status 'Livre', unidade física derivada)
 //     menos central.appointments com status que ocupa vaga
 //     menos o passado
 //
-// Essa subtração vive em central.listar_vagas_disponiveis (20260810100100),
-// não aqui, por dois motivos:
+// Essa subtração vive em central.listar_vagas_disponiveis (20260810100100,
+// reescrita em 20260904100100), não aqui, por dois motivos:
 //   1. PostgREST não faz join entre schemas — no cliente seriam duas
 //      requisições e a subtração em memória.
 //   2. O agente de WhatsApp precisa da mesma regra. Duplicá-la em TypeScript
 //      é como as duas superfícies passam a oferecer horários diferentes.
 //
-// Este repository é só o adaptador de chamada da RPC.
+// O FILTRO DE UNIDADE TAMBÉM É DO BANCO (mudou em 04/09/2026)
+//
+// Ele era feito aqui e em ferramentas.ts, sobre a lista já devolvida. Como a
+// RPC tem teto de 500 linhas ordenadas por (data, hora, profissional), filtrar
+// depois significava que uma unidade sem vaga nas 500 primeiras virava "não
+// temos vaga" falso. Agora `p_unidade` filtra no banco e o teto vale POR
+// unidade. Não reintroduza o filtro em memória.
+//
+// Este repository é só o adaptador de chamada das RPCs.
 // ============================================================================
 
 export interface ListarVagasInput {
@@ -26,7 +34,9 @@ export interface ListarVagasInput {
   dataFim?:        string | null
   terapiaId?:      number | null
   profissionalId?: number | null
-  unidadeId?:      number | null
+  // Um dos três literais de UNIDADES. O banco valida e LANÇA (22023) em valor
+  // desconhecido, em vez de não filtrar — passe por normalizarUnidade() antes.
+  unidade?:        Unidade | null
   limite?:         number | null
 }
 
@@ -41,7 +51,7 @@ export class AvailabilityRepository {
         p_data_fim:        input.dataFim        ?? null,
         p_terapia_id:      input.terapiaId      ?? null,
         p_profissional_id: input.profissionalId ?? null,
-        p_unidade_id:      input.unidadeId      ?? null,
+        p_unidade:         input.unidade        ?? null,
         p_limite:          input.limite         ?? null,
       })
 
@@ -52,6 +62,10 @@ export class AvailabilityRepository {
   // Diagnóstico de uma vaga específica no instante da reserva.
   // Separa os três motivos de recusa (não existe / já reservada / passado)
   // porque a resposta ao paciente é diferente em cada caso.
+  //
+  // Nota: esta RPC lê public.vw_grade_base direto, não central.vw_vagas_livres —
+  // decisão registrada em 20260904100100. Ela aprova vagas em sala não-física
+  // ('AT Externo Escola'), que listarVagas não oferece.
   async diagnosticarVaga(
     profissionalId: number,
     data: string,
@@ -77,33 +91,59 @@ export class AvailabilityRepository {
     return row as DiagnosticoVaga
   }
 
-  // Terapias que têm ao menos uma vaga ofertável na janela.
-  // É o que o agente usa para responder "quais especialidades vocês têm
-  // disponíveis?" sem despejar 500 horários.
+  // Terapias que têm ao menos uma vaga ofertável na janela, com as unidades em
+  // que cada uma tem vaga. É o que o agente usa para responder "quais
+  // especialidades vocês têm disponíveis?" sem despejar 500 horários.
+  //
+  // A agregação é do BANCO (central.contar_vagas_por_terapia_e_unidade,
+  // 20260904100200), não em memória. Antes ela era feita sobre as 500 primeiras
+  // linhas da janela, e o efeito era pior que uma contagem imprecisa: uma
+  // terapia que só tem vaga em Padre Miguel a partir da linha 501 aparecia com
+  // unidades = ['Realengo'], e o agente afirmava "temos fono, mas só em
+  // Realengo" — falso, com a confiança de quem consultou o sistema. Um
+  // `group by` não precisa de teto de linhas.
   async listarTerapiasComVaga(
     dataInicio?: string | null,
     dataFim?: string | null,
   ): Promise<{ terapiaId: number; terapiaNome: string | null; vagas: number; unidades: Unidade[] }[]> {
-    // Limite alto de propósito: aqui queremos o agregado da janela inteira,
-    // não uma página. O teto de 500 da RPC continua valendo como proteção.
-    const vagas = await this.listarVagas({ dataInicio, dataFim, limite: 500 })
+    const { data, error } = await (this.supabase as any)
+      .schema('central')
+      .rpc('contar_vagas_por_terapia_e_unidade', {
+        p_data_inicio: dataInicio ?? null,
+        p_data_fim:    dataFim    ?? null,
+      })
 
-    const porTerapia = new Map<number, { terapiaNome: string | null; vagas: number; unidades: Set<Unidade> }>()
-    for (const vaga of vagas) {
-      if (vaga.terapia_id == null) continue
-      if (salaOculta(vaga.sala_nome)) continue
+    if (error) throw error
 
-      const atual = porTerapia.get(vaga.terapia_id)
-        ?? { terapiaNome: vaga.terapia_nome, vagas: 0, unidades: new Set<Unidade>() }
-      atual.vagas += 1
+    type Linha = {
+      terapia_id:   number
+      terapia_nome: string | null
+      unidade:      Unidade
+      vagas:        number
+    }
+    const linhas = (data ?? []) as Linha[]
+
+    // A RPC devolve uma linha por (terapia, unidade). O agente precisa de uma
+    // entrada por terapia, com o conjunto de unidades — a dobra acontece aqui
+    // porque é formato de apresentação, não regra de negócio.
+    const porTerapia = new Map<number, { terapiaNome: string | null; vagas: number; unidades: Unidade[] }>()
+    for (const linha of linhas) {
+      if (linha.terapia_id == null) continue
+
+      const atual = porTerapia.get(linha.terapia_id)
+        ?? { terapiaNome: linha.terapia_nome, vagas: 0, unidades: [] as Unidade[] }
+
+      // `vagas` é a soma das três unidades: o total ofertável da terapia.
+      atual.vagas += Number(linha.vagas) || 0
 
       // Em QUAIS unidades essa terapia tem vaga. Sem isso o agente responde
       // "sim, temos psicomotricidade" para quem já disse que só pode ir a Padre
       // Miguel, e só descobre que não tem lá no passo seguinte.
-      const u = unidadeDaSala(vaga.sala_nome)
-      if (u) atual.unidades.add(u)
+      if (linha.unidade && !atual.unidades.includes(linha.unidade)) {
+        atual.unidades.push(linha.unidade)
+      }
 
-      porTerapia.set(vaga.terapia_id, atual)
+      porTerapia.set(linha.terapia_id, atual)
     }
 
     return [...porTerapia.entries()]
@@ -111,7 +151,7 @@ export class AvailabilityRepository {
         terapiaId,
         terapiaNome: v.terapiaNome,
         vagas:       v.vagas,
-        unidades:    [...v.unidades],
+        unidades:    v.unidades,
       }))
       .sort((a, b) => b.vagas - a.vagas)
   }

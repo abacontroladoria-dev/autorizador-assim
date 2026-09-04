@@ -22,7 +22,7 @@
 //
 // Sem framework, como os outros testes do módulo.
 
-import { executarTurno, __MAX_ITERACOES, type DepsTurno } from './orquestrador.js'
+import { executarTurno, __MAX_ITERACOES, type DepsTurno, type RegistroChamadaFerramenta } from './orquestrador.js'
 import type { FerramentasAgente, ResultadoFerramenta } from './ferramentas.js'
 import {
   LlmRateLimitError,
@@ -340,6 +340,134 @@ console.log('\n8. interruptor de agendamento')
   checar(requisicoes[0]?.ferramentas === undefined,
     'desligado: ferramentas undefined — o modelo NEM SABE que poderia agendar (botão de pânico)',
     requisicoes[0]?.ferramentas)
+}
+
+// ----------------------------------------------------------------------------
+console.log('\n9. rastro das tool calls')
+
+// O rastro existe porque "a IA ofereceu horário da unidade errada" era
+// indiagnosticável: as tool calls morriam no array local deste laço. O que se
+// precisa saber para consertar é O ARGUMENTO que o modelo passou — `unidade:
+// null` é defeito de prompt, `unidade: 'Padre Miguel'` com resultado vazio é
+// defeito de dados, e são consertos em lugares diferentes.
+
+{
+  const { provider } = providerDe([
+    resposta({
+      motivoParada: 'tool_calls',
+      chamadas: [{
+        id: 'c1',
+        nome: 'consultar_horarios_disponiveis',
+        // `observacao` é texto livre: entra aqui de propósito para provar que
+        // NÃO chega ao rastro.
+        argumentosJson: '{"terapiaId":3,"unidade":"Padre Miguel","limite":20,"observacao":"filho do Marcos, TEA nivel 2"}',
+      }],
+    }),
+    resposta({ conteudo: 'Tenho terça às 9h em Padre Miguel.' }),
+  ])
+  const { ferramentas } = ferramentasDe({ ok: true, horarios: [{ data: '2026-09-01' }, { data: '2026-09-02' }] })
+
+  const registros: RegistroChamadaFerramenta[] = []
+  const r = await executarTurno(ENTRADA, deps({
+    provider,
+    ferramentas,
+    aoChamarFerramenta: (reg) => registros.push(reg),
+  }))
+
+  checar(r.tipo === 'responder', 'o turno segue normalmente com rastro ligado', r)
+  checar(registros.length === 1, 'uma chamada, um registro', registros.length)
+
+  const reg = registros[0]!
+  checar(reg.nome === 'consultar_horarios_disponiveis', 'grava o nome da ferramenta', reg.nome)
+  checar(reg.iteracao === 1, 'grava a iteração', reg.iteracao)
+  checar(reg.ok === true, 'grava o ok', reg.ok)
+  checar(reg.motivo === null, 'sem motivo quando ok', reg.motivo)
+  checar(reg.qtdItens === 2, 'conta os itens do resultado (2 horários)', reg.qtdItens)
+  checar(typeof reg.duracaoMs === 'number', 'grava a duração', reg.duracaoMs)
+
+  // O campo que responde a pergunta que motivou tudo isso.
+  checar(reg.argumentos.unidade === 'Padre Miguel',
+    'grava a unidade pedida — é o campo que distingue defeito de prompt de defeito de dados',
+    reg.argumentos)
+  checar(reg.argumentos.terapiaId === 3, 'grava terapiaId', reg.argumentos)
+  checar(reg.argumentos.limite === 20, 'grava limite', reg.argumentos)
+
+  // A allowlist. Texto livre digitado pelo responsável não pode ir para uma
+  // tabela de auditoria append-only sem retenção.
+  checar(!('observacao' in reg.argumentos),
+    'observacao NÃO é gravada (allowlist: texto livre pode ter dado de paciente)',
+    reg.argumentos)
+}
+
+{
+  // Recusa: o rastro precisa mostrar o motivo, senão "não achou" e "recusou"
+  // ficam indistinguíveis.
+  const { provider } = providerDe([
+    resposta({
+      motivoParada: 'tool_calls',
+      chamadas: [{ id: 'c1', nome: 'consultar_horarios_disponiveis', argumentosJson: '{"unidade":"Realengo"}' }],
+    }),
+    resposta({ conteudo: 'Não temos vaga em Realengo.' }),
+  ])
+  const { ferramentas } = ferramentasDe({ ok: false, motivo: 'sem_vaga', mensagem: 'Nada livre.' })
+
+  const registros: RegistroChamadaFerramenta[] = []
+  await executarTurno(ENTRADA, deps({ provider, ferramentas, aoChamarFerramenta: (r) => registros.push(r) }))
+
+  checar(registros[0]?.ok === false, 'recusa grava ok false', registros[0])
+  checar(registros[0]?.motivo === 'sem_vaga', 'recusa grava o motivo', registros[0]?.motivo)
+  // Sem array no resultado: null, não 0. Forçar 0 faria "recusou" parecer
+  // "achou zero", que é justamente a distinção que se quer no diagnóstico.
+  checar(registros[0]?.qtdItens === null, 'recusa não inventa contagem (null, não 0)', registros[0]?.qtdItens)
+}
+
+{
+  // Falha no rastro NÃO derruba o turno. O paciente não pode ficar sem
+  // resposta no WhatsApp por causa de um insert de auditoria.
+  const { provider } = providerDe([
+    resposta({
+      motivoParada: 'tool_calls',
+      chamadas: [{ id: 'c1', nome: 'consultar_horarios_disponiveis', argumentosJson: '{}' }],
+    }),
+    resposta({ conteudo: 'Tenho terça às 9h.' }),
+  ])
+  const { ferramentas } = ferramentasDe({ ok: true, horarios: [] })
+
+  const r = await executarTurno(ENTRADA, deps({
+    provider,
+    ferramentas,
+    aoChamarFerramenta: () => { throw new Error('banco fora do ar') },
+  }))
+
+  checar(r.tipo === 'responder' && r.texto === 'Tenho terça às 9h.',
+    'callback que lança não derruba o turno', r)
+}
+
+{
+  // Argumentos inválidos também deixam rastro: é o caso em que o modelo mandou
+  // JSON quebrado, e sem registro ele fica invisível no diagnóstico.
+  const { provider } = providerDe([
+    resposta({
+      motivoParada: 'tool_calls',
+      chamadas: [{ id: 'c1', nome: 'consultar_horarios_disponiveis', argumentosJson: '{quebrado' }],
+    }),
+    resposta({ conteudo: 'Deixa eu verificar.' }),
+  ])
+
+  const registros: RegistroChamadaFerramenta[] = []
+  await executarTurno(ENTRADA, deps({ provider, aoChamarFerramenta: (r) => registros.push(r) }))
+
+  checar(registros[0]?.motivo === 'argumentos_invalidos',
+    'JSON inválido é registrado como tal', registros[0])
+  checar(registros[0]?.ok === false, 'JSON inválido grava ok false', registros[0]?.ok)
+}
+
+{
+  // Sem callback, nada muda: é o caminho de todo teste existente e de qualquer
+  // chamador que não queira rastro.
+  const { provider } = providerDe([resposta({ conteudo: 'oi' })])
+  const r = await executarTurno(ENTRADA, deps({ provider }))
+  checar(r.tipo === 'responder', 'sem callback o turno funciona igual', r)
 }
 
 // ----------------------------------------------------------------------------

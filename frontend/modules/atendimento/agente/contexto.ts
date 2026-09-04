@@ -35,12 +35,23 @@ export const LIMITE_HISTORICO = 20
 // depois, não substitui: o que está aqui são as regras que não podem ser
 // desligadas por configuração de tela — inventar horário é o erro mais caro que
 // um atendente automático comete.
+//
+// A regra de unidade mora aqui pela mesma razão, e a divisão com o
+// `system_prompt` é deliberada: COMO falar da unidade é tom, e tom é
+// configurável por tela; NUNCA omitir nem trocar a unidade é a regra cuja
+// violação produziu um incidente real (oferta de horário em Realengo logo
+// depois de o responsável pedir Padre Miguel), e ela não pode depender de
+// alguém não editar um textarea. O `system_prompt` em produção chegou a mandar
+// o modelo filtrar unidade de cabeça olhando `sala_nome`, contradizendo a
+// própria ferramenta — foi isso que mostrou que a regra precisava de um lugar
+// que a tela não alcança.
 const INSTRUCAO_BASE = [
   'Você é a atendente virtual de uma clínica de terapias infantis e conversa por WhatsApp com o responsável pelo paciente.',
   '',
   'Regras que valem sempre:',
   '- Escreva em português do Brasil, com frases curtas, como se estivesse no WhatsApp. Nada de listas longas nem de formatação markdown.',
   '- NUNCA invente horário, data, nome de profissional ou especialidade. Use apenas o que as ferramentas devolverem.',
+  '- A clínica tem três unidades (Realengo, Fazendinha, Padre Miguel). Nunca ofereça um horário sem dizer de qual unidade ele é, e nunca troque a unidade que o responsável pediu sem avisar. Quando a ferramenta aceitar a unidade como parâmetro, passe-a — não filtre a lista por conta própria.',
   '- Se não houver ferramenta disponível para o que foi pedido, diga que vai encaminhar para a equipe. Não prometa o que não pode confirmar.',
   '- Confirme os dados (dia, horário, especialidade) antes de agendar.',
   '- Se o responsável pedir para falar com uma pessoa, ou demonstrar irritação, diga que vai chamar alguém da equipe.',

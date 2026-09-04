@@ -18,6 +18,22 @@
 // Enums — espelham central.*_type e central.*_status do PostgreSQL
 // ----------------------------------------------------------------------------
 
+// As três unidades físicas da clínica.
+//
+// Não é enum do Postgres: a unidade não existe como dado na grade do TiTa
+// (unidade_id é 280 e unidade_nome é 'CLÍNICA UNIVERSO ABA' em toda linha). Ela
+// é DERIVADA do prefixo de sala_nome pela view central.vw_vagas_livres
+// (20260904100000), e `central.listar_vagas_disponiveis` valida `p_unidade`
+// contra exatamente estes três literais — passar outro LANÇA 22023.
+//
+// Mora aqui, e não em agente/unidade.ts, porque três superfícies precisam
+// concordar com o banco: o enum do schema de function calling, a validação de
+// query da rota HTTP e o tipo VagaDisponivel. A camada de tipos não pode
+// depender da camada do agente. `agente/unidade.ts` reexporta e acrescenta as
+// funções de normalização.
+export const UNIDADES = ['Realengo', 'Fazendinha', 'Padre Miguel'] as const
+export type Unidade = typeof UNIDADES[number]
+
 export type ConversationStatus =
   | 'open'
   | 'assigned'
@@ -360,9 +376,22 @@ export interface VagaDisponivel {
   profissional_nome: string | null
   terapia_id:        number | null
   terapia_nome:      string | null
+  // Estes dois NÃO distinguem endereço: unidade_id é 280 e unidade_nome é
+  // 'CLÍNICA UNIVERSO ABA' em toda linha da grade. Ficam porque a RPC os
+  // devolve; para saber a unidade, use `unidade`.
   unidade_id:        number | null
   unidade_nome:      string | null
   sala_nome:         string | null
+  // A unidade física, derivada do prefixo de sala_nome pela view
+  // central.vw_vagas_livres (20260904100000). É o único campo que separa
+  // Realengo de Fazendinha de Padre Miguel. Null não deveria ocorrer aqui — a
+  // view só devolve linhas com uma das três — mas o tipo admite porque a coluna
+  // é derivada e não tem NOT NULL.
+  unidade:           Unidade | null
+  // Sala física numerada ('Unid. Realengo - Sala 20') vs. papel na unidade
+  // ('Unid. Fazendinha - Aplicador Suporte', 'Unid. Padre Miguel - Visita
+  // Guiada'). Ambos são ofertáveis; a distinção existe para quem precisar dela.
+  e_sala_numerada:   boolean
 }
 
 // Retorno de central.vaga_esta_disponivel — os três motivos de recusa separados.

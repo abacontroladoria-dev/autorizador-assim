@@ -7,7 +7,7 @@ import {
   AppointmentNotFoundError,
 } from '../types/errors.types'
 import { horaCurta } from './formato'
-import { unidadeDaSala, normalizarUnidade, salaOculta, type Unidade } from './unidade'
+import { UNIDADES, unidadeDaSala, normalizarUnidade, type Unidade } from './unidade'
 
 // ============================================================================
 // Ferramentas do agente de atendimento
@@ -126,7 +126,11 @@ export const DEFINICOES_FERRAMENTAS = [
           terapiaId:  { type: ['integer', 'null'], description: 'Id da terapia, obtido em consultar_especialidades_disponiveis. null para todas.' },
           unidade: {
             type: ['string', 'null'],
-            enum: ['Realengo', 'Fazendinha', 'Padre Miguel', null],
+            // Derivado de UNIDADES, não repetido: o mesmo vocabulário é
+            // validado no banco (p_unidade, que LANÇA em valor desconhecido) e
+            // na rota HTTP. Três literais copiados em três lugares divergem no
+            // dia em que um deles é editado.
+            enum: [...UNIDADES, null],
             description: 'Unidade onde o responsável quer ser atendido. null para buscar nas três.',
           },
           dataInicio: { type: ['string', 'null'],  description: 'Início da busca, YYYY-MM-DD. Use quando o responsável indicar preferência de data; null para começar hoje.' },
@@ -290,41 +294,61 @@ export class FerramentasAgente {
     const limite  = clampInt(args.limite, 1, 50, 20)
     const unidade = normalizarUnidade(args.unidade)
 
-    // O filtro por unidade acontece AQUI, não no banco: `unidade_id` é o mesmo
-    // valor (280) em todas as vagas, e a unidade real só existe como texto
-    // dentro de `sala_nome`. Ver modules/atendimento/agente/unidade.ts.
-    //
-    // Consequência: `limite` não pode ir para a RPC quando há filtro, senão as
-    // primeiras N vagas podem ser todas de outra unidade e a resposta vira um
-    // "não tem vaga" falso — exatamente o erro que se quer evitar. Buscamos
-    // largo e cortamos depois.
-    const vagasBrutas = await this.agendamentos.listarVagas({
+    // Unidade pedida mas não reconhecida: recusa amigável, não exceção de SQL.
+    // O enum do schema já restringe, mas essa é a primeira camada — `strict`
+    // pode ser desligado e outro provedor pode não honrar o enum. Sem esta
+    // guarda, um 'Realango' viraria erro 22023 do banco (o parâmetro é validado
+    // lá de propósito), e o turno vira mensagem de erro em vez de pergunta.
+    // Mesmo princípio de semChavesDeContexto(): não confiar no formato.
+    if (args.unidade != null && unidade == null) {
+      return recusa(
+        MOTIVO.ERRO_INTERNO,
+        `Unidade '${args.unidade}' não existe. As unidades são: ${UNIDADES.join(', ')}. ` +
+        'Pergunte ao responsável em qual delas ele quer ser atendido.',
+      )
+    }
+
+    // O filtro por unidade acontece NO BANCO (p_unidade, 20260904100100), e é
+    // isso que faz o `limite` poder ir junto: antes, com o filtro em memória,
+    // era preciso pedir 500 e cortar depois — e como 500 é o teto da RPC, uma
+    // unidade sem vaga nas 500 primeiras linhas virava "não tem vaga" falso.
+    // Agora o teto vale por unidade. Não volte a filtrar aqui.
+    const vagas = await this.agendamentos.listarVagas({
       terapiaId:  toInt(args.terapiaId),
+      unidade,
       dataInicio: args.dataInicio ?? null,
       dataFim:    args.dataFim ?? null,
-      limite:     unidade ? 500 : limite,
+      limite,
     })
-
-    const vagas = vagasBrutas
-      // 'Sala Teste' vive na grade de produção e não é lugar de atender ninguém.
-      .filter(v => !salaOculta(v.sala_nome))
-      .filter(v => (unidade ? unidadeDaSala(v.sala_nome) === unidade : true))
-      .slice(0, limite)
 
     if (vagas.length === 0) {
       // Distinguir os dois casos muda a resposta ao responsável: "não temos
       // essa terapia" é diferente de "temos, mas não nessa unidade". Sem essa
       // distinção o agente descarta a especialidade inteira.
-      if (unidade && vagasBrutas.some(v => !salaOculta(v.sala_nome))) {
-        const outras = [...new Set(
-          vagasBrutas.map(v => unidadeDaSala(v.sala_nome)).filter((u): u is Unidade => u != null),
-        )]
+      //
+      // Isso exige saber onde a terapia TEM vaga, e o filtro no banco tirou
+      // essa informação da primeira consulta. A segunda ida acontece só neste
+      // ramo — vazio E com unidade — que é raro e já é o caminho lento. O
+      // preço é uma consulta; o de não fazê-la é o agente dizer "não temos"
+      // quando tem, na unidade ao lado.
+      if (unidade) {
+        const emOutras = await this.agendamentos.listarVagas({
+          terapiaId:  toInt(args.terapiaId),
+          dataInicio: args.dataInicio ?? null,
+          dataFim:    args.dataFim ?? null,
+          limite:     20,
+        })
+        const outras = [...new Set(emOutras.map(v => v.unidade).filter((u): u is Unidade => u != null))]
+        if (outras.length > 0) {
+          return recusa(
+            MOTIVO.SEM_VAGA,
+            `Não há horário livre para essa especialidade na unidade ${unidade}. ` +
+            `Há vaga em: ${outras.join(', ')}. Diga isso ao responsável e pergunte se ele aceita outra unidade ou outra especialidade em ${unidade}.`,
+          )
+        }
         return recusa(
           MOTIVO.SEM_VAGA,
-          outras.length > 0
-            ? `Não há horário livre para essa especialidade na unidade ${unidade}. ` +
-              `Há vaga em: ${outras.join(', ')}. Diga isso ao responsável e pergunte se ele aceita outra unidade ou outra especialidade em ${unidade}.`
-            : `Não há horário livre para essa especialidade na unidade ${unidade}.`,
+          `Não há horário livre para essa especialidade na unidade ${unidade}.`,
         )
       }
       return recusa(
@@ -347,10 +371,11 @@ export class FerramentasAgente {
         profissional: v.profissional_nome,
         terapia:      v.terapia_nome,
         sala:         v.sala_nome,
-        // A unidade real, extraída de sala_nome. `v.unidade_nome` é
-        // 'CLÍNICA UNIVERSO ABA' em toda vaga e não distingue endereço nenhum —
-        // mandá-lo para o modelo fazia as três unidades parecerem uma só.
-        unidade:      unidadeDaSala(v.sala_nome),
+        // A unidade real, agora resolvida no banco (central.vw_vagas_livres).
+        // `v.unidade_nome` é 'CLÍNICA UNIVERSO ABA' em toda vaga e não
+        // distingue endereço nenhum — mandá-lo para o modelo fazia as três
+        // unidades parecerem uma só, e não é ele que vai aqui.
+        unidade:      v.unidade,
       })),
     }
   }
